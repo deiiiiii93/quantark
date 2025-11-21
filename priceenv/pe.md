@@ -1,0 +1,5 @@
+mc config (seed, path_num, time_steps, qmc, variace_control, qe/euler)
+pde config (grid_size, time_steps, adaptive_grid, cfl_control)
+quad config (grid_size, time_steps)
+date config (bus_days_in_year)
+bump_size (eps for using fdm method to calculate greeks)

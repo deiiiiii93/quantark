@@ -1,0 +1,286 @@
+"""
+Unit tests for European vanilla option pricing and Greeks.
+"""
+
+import sys
+from pathlib import Path
+import math
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from asset.equity.product.option import EuropeanVanillaOption
+from asset.equity.engine.analytical import BlackScholesEngine
+from asset.equity.riskmeasures import GreeksCalculator
+from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from priceenv import PricingEnvironment
+from util.enum import OptionType
+from util.exceptions import ValidationError, NumericalError
+
+
+def test_call_option_pricing():
+    """Test European call option pricing."""
+    # Market data
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+    )
+
+    # Create call option
+    call = EuropeanVanillaOption(
+        strike=100.0, maturity=1.0, option_type=OptionType.CALL
+    )
+
+    # Price the option
+    engine = BlackScholesEngine()
+    price = engine.price(call, pricing_env)
+
+    # Expected price (pre-calculated)
+    expected_price = 9.227006
+
+    assert (
+        abs(price - expected_price) < 0.0001
+    ), f"Call price mismatch: {price} vs {expected_price}"
+    print(f"✓ Call option pricing test passed: ${price:.6f}")
+
+
+def test_put_option_pricing():
+    """Test European put option pricing."""
+    # Market data
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+    )
+
+    # Create put option
+    put = EuropeanVanillaOption(strike=100.0, maturity=1.0, option_type=OptionType.PUT)
+
+    # Price the option
+    engine = BlackScholesEngine()
+    price = engine.price(put, pricing_env)
+
+    # Expected price (pre-calculated)
+    expected_price = 6.330081
+
+    assert (
+        abs(price - expected_price) < 0.0001
+    ), f"Put price mismatch: {price} vs {expected_price}"
+    print(f"✓ Put option pricing test passed: ${price:.6f}")
+
+
+def test_put_call_parity():
+    """Test put-call parity relationship."""
+    # Market data
+    S = 100.0
+    K = 100.0
+    T = 1.0
+    r = 0.05
+    q = 0.02
+
+    spot = SpotQuote(spot=S)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=r)
+    div = ContinuousDividendYield(div_yield=q)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+    )
+
+    # Create call and put
+    call = EuropeanVanillaOption(K, T, OptionType.CALL)
+    put = EuropeanVanillaOption(K, T, OptionType.PUT)
+
+    # Price both
+    engine = BlackScholesEngine()
+    call_price = engine.price(call, pricing_env)
+    put_price = engine.price(put, pricing_env)
+
+    # Put-Call Parity: C - P = S*e^(-qT) - K*e^(-rT)
+    lhs = call_price - put_price
+    rhs = S * math.exp(-q * T) - K * math.exp(-r * T)
+
+    assert abs(lhs - rhs) < 1e-6, f"Put-call parity violated: {lhs} vs {rhs}"
+    print(f"✓ Put-call parity test passed: difference = {abs(lhs - rhs):.10f}")
+
+
+def test_greeks_call():
+    """Test Greeks calculation for call option."""
+    # Market data
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+    )
+
+    call = EuropeanVanillaOption(100.0, 1.0, OptionType.CALL)
+
+    engine = BlackScholesEngine()
+    price = engine.price(call, pricing_env)
+
+    # Calculate analytical Greeks
+    greeks_calc = GreeksCalculator()
+    greeks = greeks_calc.calculate_analytical_greeks(call, pricing_env, price)
+
+    # Verify Greeks are in reasonable ranges
+    assert 0 < greeks["delta"] < 1, f"Call delta out of range: {greeks['delta']}"
+    assert greeks["gamma"] > 0, f"Gamma should be positive: {greeks['gamma']}"
+    assert greeks["vega"] > 0, f"Vega should be positive: {greeks['vega']}"
+    assert greeks["theta"] < 0, f"Long call theta should be negative: {greeks['theta']}"
+
+    print(f"✓ Call Greeks test passed")
+    print(f"  Delta: {greeks['delta']:.6f}")
+    print(f"  Gamma: {greeks['gamma']:.6f}")
+    print(f"  Vega:  {greeks['vega']:.6f}")
+    print(f"  Theta: {greeks['theta']:.6f}")
+    print(f"  Rho:   {greeks['rho']:.6f}")
+
+
+def test_greeks_put():
+    """Test Greeks calculation for put option."""
+    # Market data
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+    )
+
+    put = EuropeanVanillaOption(100.0, 1.0, OptionType.PUT)
+
+    engine = BlackScholesEngine()
+    price = engine.price(put, pricing_env)
+
+    # Calculate analytical Greeks
+    greeks_calc = GreeksCalculator()
+    greeks = greeks_calc.calculate_analytical_greeks(put, pricing_env, price)
+
+    # Verify Greeks are in reasonable ranges
+    assert -1 < greeks["delta"] < 0, f"Put delta out of range: {greeks['delta']}"
+    assert greeks["gamma"] > 0, f"Gamma should be positive: {greeks['gamma']}"
+    assert greeks["vega"] > 0, f"Vega should be positive: {greeks['vega']}"
+    assert greeks["theta"] < 0, f"Long put theta should be negative: {greeks['theta']}"
+
+    print(f"✓ Put Greeks test passed")
+    print(f"  Delta: {greeks['delta']:.6f}")
+    print(f"  Gamma: {greeks['gamma']:.6f}")
+    print(f"  Vega:  {greeks['vega']:.6f}")
+    print(f"  Theta: {greeks['theta']:.6f}")
+    print(f"  Rho:   {greeks['rho']:.6f}")
+
+
+def test_validation_errors():
+    """Test that validation errors are raised for invalid inputs."""
+    # Test negative spot
+    try:
+        spot = SpotQuote(spot=-100.0)
+        assert False, "Should have raised ValidationError for negative spot"
+    except ValidationError:
+        print("✓ Negative spot validation test passed")
+
+    # Test negative volatility
+    try:
+        vol = FlatVolSurface(volatility=-0.20)
+        assert False, "Should have raised ValidationError for negative vol"
+    except ValidationError:
+        print("✓ Negative volatility validation test passed")
+
+    # Test negative strike
+    try:
+        option = EuropeanVanillaOption(
+            strike=-100.0, maturity=1.0, option_type=OptionType.CALL
+        )
+        assert False, "Should have raised ValidationError for negative strike"
+    except ValidationError:
+        print("✓ Negative strike validation test passed")
+
+    # Test negative maturity
+    try:
+        option = EuropeanVanillaOption(
+            strike=100.0, maturity=-1.0, option_type=OptionType.CALL
+        )
+        assert False, "Should have raised ValidationError for negative maturity"
+    except ValidationError:
+        print("✓ Negative maturity validation test passed")
+
+
+def test_itm_otm_options():
+    """Test in-the-money and out-of-the-money options."""
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+    )
+
+    engine = BlackScholesEngine()
+
+    # Deep ITM call (strike = 80)
+    itm_call = EuropeanVanillaOption(80.0, 1.0, OptionType.CALL)
+    itm_call_price = engine.price(itm_call, pricing_env)
+    assert itm_call_price > 20.0, "Deep ITM call should have high value"
+    print(f"✓ Deep ITM call test passed: ${itm_call_price:.6f}")
+
+    # Deep OTM call (strike = 120)
+    otm_call = EuropeanVanillaOption(120.0, 1.0, OptionType.CALL)
+    otm_call_price = engine.price(otm_call, pricing_env)
+    assert otm_call_price < 5.0, "Deep OTM call should have low value"
+    print(f"✓ Deep OTM call test passed: ${otm_call_price:.6f}")
+
+
+def run_all_tests():
+    """Run all unit tests."""
+    print("\n" + "=" * 70)
+    print("Running QuantArk Unit Tests")
+    print("=" * 70 + "\n")
+
+    tests = [
+        ("Call Option Pricing", test_call_option_pricing),
+        ("Put Option Pricing", test_put_option_pricing),
+        ("Put-Call Parity", test_put_call_parity),
+        ("Call Greeks", test_greeks_call),
+        ("Put Greeks", test_greeks_put),
+        ("Validation Errors", test_validation_errors),
+        ("ITM/OTM Options", test_itm_otm_options),
+    ]
+
+    passed = 0
+    failed = 0
+
+    for test_name, test_func in tests:
+        try:
+            print(f"\nTest: {test_name}")
+            print("-" * 70)
+            test_func()
+            passed += 1
+        except Exception as e:
+            print(f"✗ Test failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+            failed += 1
+
+    print("\n" + "=" * 70)
+    print(f"Test Results: {passed} passed, {failed} failed")
+    print("=" * 70 + "\n")
+
+    return failed == 0
+
+
+if __name__ == "__main__":
+    success = run_all_tests()
+    sys.exit(0 if success else 1)
