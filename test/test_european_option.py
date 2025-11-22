@@ -5,6 +5,7 @@ Unit tests for European vanilla option pricing and Greeks.
 import sys
 from pathlib import Path
 import math
+from datetime import datetime, timedelta
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -16,6 +17,7 @@ from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYi
 from priceenv import PricingEnvironment
 from util.enum import OptionType
 from util.exceptions import ValidationError, NumericalError
+from util.calendar import DayCountConvention
 
 
 def test_call_option_pricing():
@@ -27,12 +29,16 @@ def test_call_option_pricing():
     div = ContinuousDividendYield(div_yield=0.02)
 
     pricing_env = PricingEnvironment(
-        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=datetime(2024, 1, 1),
     )
 
     # Create call option
     call = EuropeanVanillaOption(
-        strike=100.0, maturity=1.0, option_type=OptionType.CALL
+        strike=100.0, option_type=OptionType.CALL, maturity=1.0
     )
 
     # Price the option
@@ -57,11 +63,15 @@ def test_put_option_pricing():
     div = ContinuousDividendYield(div_yield=0.02)
 
     pricing_env = PricingEnvironment(
-        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=datetime(2024, 1, 1),
     )
 
     # Create put option
-    put = EuropeanVanillaOption(strike=100.0, maturity=1.0, option_type=OptionType.PUT)
+    put = EuropeanVanillaOption(strike=100.0, option_type=OptionType.PUT, maturity=1.0)
 
     # Price the option
     engine = BlackScholesEngine()
@@ -91,12 +101,16 @@ def test_put_call_parity():
     div = ContinuousDividendYield(div_yield=q)
 
     pricing_env = PricingEnvironment(
-        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=datetime(2024, 1, 1),
     )
 
     # Create call and put
-    call = EuropeanVanillaOption(K, T, OptionType.CALL)
-    put = EuropeanVanillaOption(K, T, OptionType.PUT)
+    call = EuropeanVanillaOption(K, OptionType.CALL, maturity=T)
+    put = EuropeanVanillaOption(K, OptionType.PUT, maturity=T)
 
     # Price both
     engine = BlackScholesEngine()
@@ -120,10 +134,14 @@ def test_greeks_call():
     div = ContinuousDividendYield(div_yield=0.02)
 
     pricing_env = PricingEnvironment(
-        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=datetime(2024, 1, 1),
     )
 
-    call = EuropeanVanillaOption(100.0, 1.0, OptionType.CALL)
+    call = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
 
     engine = BlackScholesEngine()
     price = engine.price(call, pricing_env)
@@ -155,10 +173,14 @@ def test_greeks_put():
     div = ContinuousDividendYield(div_yield=0.02)
 
     pricing_env = PricingEnvironment(
-        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=datetime(2024, 1, 1),
     )
 
-    put = EuropeanVanillaOption(100.0, 1.0, OptionType.PUT)
+    put = EuropeanVanillaOption(100.0, OptionType.PUT, maturity=1.0)
 
     engine = BlackScholesEngine()
     price = engine.price(put, pricing_env)
@@ -200,7 +222,7 @@ def test_validation_errors():
     # Test negative strike
     try:
         option = EuropeanVanillaOption(
-            strike=-100.0, maturity=1.0, option_type=OptionType.CALL
+            strike=-100.0, option_type=OptionType.CALL, maturity=1.0
         )
         assert False, "Should have raised ValidationError for negative strike"
     except ValidationError:
@@ -209,7 +231,7 @@ def test_validation_errors():
     # Test negative maturity
     try:
         option = EuropeanVanillaOption(
-            strike=100.0, maturity=-1.0, option_type=OptionType.CALL
+            strike=100.0, option_type=OptionType.CALL, maturity=-1.0
         )
         assert False, "Should have raised ValidationError for negative maturity"
     except ValidationError:
@@ -224,22 +246,168 @@ def test_itm_otm_options():
     div = ContinuousDividendYield(div_yield=0.02)
 
     pricing_env = PricingEnvironment(
-        spot_quote=spot, vol_surface=vol, rate_curve=rate, div_yield=div
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=datetime(2024, 1, 1),
     )
 
     engine = BlackScholesEngine()
 
     # Deep ITM call (strike = 80)
-    itm_call = EuropeanVanillaOption(80.0, 1.0, OptionType.CALL)
+    itm_call = EuropeanVanillaOption(80.0, OptionType.CALL, maturity=1.0)
     itm_call_price = engine.price(itm_call, pricing_env)
     assert itm_call_price > 20.0, "Deep ITM call should have high value"
     print(f"✓ Deep ITM call test passed: ${itm_call_price:.6f}")
 
     # Deep OTM call (strike = 120)
-    otm_call = EuropeanVanillaOption(120.0, 1.0, OptionType.CALL)
+    otm_call = EuropeanVanillaOption(120.0, OptionType.CALL, maturity=1.0)
     otm_call_price = engine.price(otm_call, pricing_env)
     assert otm_call_price < 5.0, "Deep OTM call should have low value"
     print(f"✓ Deep OTM call test passed: ${otm_call_price:.6f}")
+
+
+def test_date_based_option_calendar_days():
+    """Test date-based option with calendar day convention."""
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    valuation_date = datetime(2024, 1, 1)
+    exercise_date = datetime(2025, 1, 1)  # Exactly 1 year (366 days - leap year)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=valuation_date,
+        day_count_convention=DayCountConvention.CALENDAR_DAYS,
+    )
+
+    # Create call option with dates
+    call_dates = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, exercise_date=exercise_date
+    )
+
+    # Create call option with maturity
+    call_maturity = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, maturity=366.0 / 365.0
+    )
+
+    engine = BlackScholesEngine()
+    price_dates = engine.price(call_dates, pricing_env)
+    price_maturity = engine.price(call_maturity, pricing_env)
+
+    # Prices should be very close
+    assert abs(price_dates - price_maturity) < 0.01, (
+        f"Date-based and maturity-based prices should match: "
+        f"{price_dates:.6f} vs {price_maturity:.6f}"
+    )
+    print(
+        f"✓ Date-based option (calendar days) test passed: ${price_dates:.6f} vs ${price_maturity:.6f}"
+    )
+
+
+def test_date_based_option_business_days():
+    """Test date-based option with business day convention."""
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    valuation_date = datetime(2024, 1, 1)
+    exercise_date = datetime(2024, 7, 1)  # 6 months
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=valuation_date,
+        day_count_convention=DayCountConvention.BUSINESS_DAYS,
+        bus_days_in_year=252,
+    )
+
+    # Create call option with dates
+    call = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, exercise_date=exercise_date
+    )
+
+    engine = BlackScholesEngine()
+    price = engine.price(call, pricing_env)
+
+    # Verify maturity calculation
+    maturity = call.get_maturity(pricing_env)
+    assert maturity > 0, f"Maturity should be positive: {maturity}"
+    print(
+        f"✓ Date-based option (business days) test passed: ${price:.6f}, maturity={maturity:.4f}"
+    )
+
+
+def test_date_based_settlement_date():
+    """Test date-based option with settlement date."""
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+    div = ContinuousDividendYield(div_yield=0.02)
+
+    valuation_date = datetime(2024, 1, 1)
+    exercise_date = datetime(2025, 1, 1)
+    settlement_date = datetime(2025, 1, 3)  # T+2 settlement
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        div_yield=div,
+        valuation_date=valuation_date,
+    )
+
+    # Create call option with both dates
+    call = EuropeanVanillaOption(
+        strike=100.0,
+        option_type=OptionType.CALL,
+        exercise_date=exercise_date,
+        settlement_date=settlement_date,
+    )
+
+    engine = BlackScholesEngine()
+    price = engine.price(call, pricing_env)
+
+    assert price > 0, f"Price should be positive: {price}"
+    print(f"✓ Date-based option with settlement date test passed: ${price:.6f}")
+
+
+def test_date_validation():
+    """Test date validation errors."""
+    valuation_date = datetime(2024, 1, 1)
+    exercise_date = datetime(2023, 12, 31)  # Before valuation date
+
+    spot = SpotQuote(spot=100.0)
+    vol = FlatVolSurface(volatility=0.20)
+    rate = FlatRateCurve(rate=0.05)
+
+    pricing_env = PricingEnvironment(
+        spot_quote=spot,
+        vol_surface=vol,
+        rate_curve=rate,
+        valuation_date=valuation_date,
+    )
+
+    # Create option with invalid dates
+    call = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, exercise_date=exercise_date
+    )
+
+    engine = BlackScholesEngine()
+    try:
+        price = engine.price(call, pricing_env)
+        assert False, "Should have raised ValidationError for exercise date before valuation date"
+    except ValidationError:
+        print("✓ Date validation test passed (exercise date before valuation date)")
 
 
 def run_all_tests():
@@ -256,6 +424,10 @@ def run_all_tests():
         ("Put Greeks", test_greeks_put),
         ("Validation Errors", test_validation_errors),
         ("ITM/OTM Options", test_itm_otm_options),
+        ("Date-Based Option (Calendar Days)", test_date_based_option_calendar_days),
+        ("Date-Based Option (Business Days)", test_date_based_option_business_days),
+        ("Date-Based Settlement Date", test_date_based_settlement_date),
+        ("Date Validation", test_date_validation),
     ]
 
     passed = 0

@@ -59,7 +59,7 @@ class BlackScholesEngine(BaseEngine):
         # Extract parameters
         S = pricing_env.spot
         K = product.strike
-        T = product.maturity
+        T = product.get_maturity(pricing_env)
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)

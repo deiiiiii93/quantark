@@ -11,6 +11,7 @@ This script demonstrates:
 
 import sys
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # Add parent directory to path to import QuantArk modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -22,6 +23,7 @@ from asset.equity.param import EngineParams
 from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from priceenv import PricingEnvironment
 from util.enum import OptionType
+from util.calendar import DayCountConvention
 
 
 def print_section(title: str):
@@ -95,6 +97,7 @@ def demo_european_call():
         vol_surface=vol_surface,
         rate_curve=rate_curve,
         div_yield=div_yield,
+        valuation_date=datetime(2024, 1, 1),
     )
 
     print_market_data(pricing_env)
@@ -103,7 +106,7 @@ def demo_european_call():
     print("\n2. Option Specification")
     print("-" * 40)
     call_option = EuropeanVanillaOption(
-        strike=100.0, maturity=1.0, option_type=OptionType.CALL  # 1 year
+        strike=100.0, option_type=OptionType.CALL, maturity=1.0  # 1 year
     )
 
     print_option_details(call_option)
@@ -157,6 +160,7 @@ def demo_european_put():
         vol_surface=vol_surface,
         rate_curve=rate_curve,
         div_yield=div_yield,
+        valuation_date=datetime(2024, 1, 1),
     )
 
     print_market_data(pricing_env)
@@ -165,7 +169,7 @@ def demo_european_put():
     print("\n2. Option Specification")
     print("-" * 40)
     put_option = EuropeanVanillaOption(
-        strike=100.0, maturity=1.0, option_type=OptionType.PUT
+        strike=100.0, option_type=OptionType.PUT, maturity=1.0
     )
 
     print_option_details(put_option)
@@ -215,13 +219,14 @@ def demo_put_call_parity():
         vol_surface=vol_surface,
         rate_curve=rate_curve,
         div_yield=div_yield,
+        valuation_date=datetime(2024, 1, 1),
     )
 
     # Create call and put with same strike and maturity
     K = 100.0
     T = 1.0
-    call = EuropeanVanillaOption(K, T, OptionType.CALL)
-    put = EuropeanVanillaOption(K, T, OptionType.PUT)
+    call = EuropeanVanillaOption(K, OptionType.CALL, maturity=T)
+    put = EuropeanVanillaOption(K, OptionType.PUT, maturity=T)
 
     # Price both options
     engine = BlackScholesEngine()
@@ -259,6 +264,104 @@ def demo_put_call_parity():
         print("\n  ✗ Put-Call Parity violated!")
 
 
+def demo_date_based_options():
+    """Demonstrate date-based option pricing with different day count conventions."""
+    print_section("DATE-BASED OPTION PRICING")
+
+    # Market data
+    spot_quote = SpotQuote(spot=100.0, asset_name="AAPL")
+    vol_surface = FlatVolSurface(volatility=0.20)
+    rate_curve = FlatRateCurve(rate=0.05)
+    div_yield = ContinuousDividendYield(div_yield=0.02)
+
+    # Calendar day convention
+    print("\n1. Calendar Day Convention")
+    print("-" * 40)
+    valuation_date = datetime(2024, 1, 1)
+    exercise_date = datetime(2025, 1, 1)  # 1 year (366 days - leap year)
+
+    pricing_env_calendar = PricingEnvironment(
+        spot_quote=spot_quote,
+        vol_surface=vol_surface,
+        rate_curve=rate_curve,
+        div_yield=div_yield,
+        valuation_date=valuation_date,
+        day_count_convention=DayCountConvention.CALENDAR_DAYS,
+    )
+
+    call_calendar = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, exercise_date=exercise_date
+    )
+
+    engine = BlackScholesEngine()
+    price_calendar = engine.price(call_calendar, pricing_env_calendar)
+    maturity_calendar = call_calendar.get_maturity(pricing_env_calendar)
+
+    print(f"Valuation Date: {valuation_date.date()}")
+    print(f"Exercise Date:  {exercise_date.date()}")
+    print(f"Year Fraction:  {maturity_calendar:.6f} years")
+    print(f"Option Price:   ${price_calendar:.6f}")
+
+    # Business day convention
+    print("\n2. Business Day Convention")
+    print("-" * 40)
+    pricing_env_business = PricingEnvironment(
+        spot_quote=spot_quote,
+        vol_surface=vol_surface,
+        rate_curve=rate_curve,
+        div_yield=div_yield,
+        valuation_date=valuation_date,
+        day_count_convention=DayCountConvention.BUSINESS_DAYS,
+        bus_days_in_year=252,
+    )
+
+    call_business = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, exercise_date=exercise_date
+    )
+
+    price_business = engine.price(call_business, pricing_env_business)
+    maturity_business = call_business.get_maturity(pricing_env_business)
+
+    print(f"Valuation Date: {valuation_date.date()}")
+    print(f"Exercise Date:  {exercise_date.date()}")
+    print(f"Year Fraction:  {maturity_business:.6f} years")
+    print(f"Option Price:   ${price_business:.6f}")
+
+    # Comparison with maturity-based
+    print("\n3. Comparison with Maturity-Based Option")
+    print("-" * 40)
+    call_maturity = EuropeanVanillaOption(
+        strike=100.0, option_type=OptionType.CALL, maturity=1.0
+    )
+    price_maturity = engine.price(call_maturity, pricing_env_calendar)
+
+    print(f"Date-based (calendar): ${price_calendar:.6f}")
+    print(f"Date-based (business): ${price_business:.6f}")
+    print(f"Maturity-based (T=1):  ${price_maturity:.6f}")
+    print(
+        f"\nDifference (calendar vs maturity): ${abs(price_calendar - price_maturity):.6f}"
+    )
+
+    # Settlement date example
+    print("\n4. Option with Settlement Date (T+2)")
+    print("-" * 40)
+    settlement_date = exercise_date + timedelta(days=2)
+
+    call_settlement = EuropeanVanillaOption(
+        strike=100.0,
+        option_type=OptionType.CALL,
+        exercise_date=exercise_date,
+        settlement_date=settlement_date,
+    )
+
+    price_settlement = engine.price(call_settlement, pricing_env_calendar)
+
+    print(f"Exercise Date:   {exercise_date.date()}")
+    print(f"Settlement Date: {settlement_date.date()}")
+    print(f"Option Price:    ${price_settlement:.6f}")
+    print("\n(Note: Settlement date is stored but pricing uses exercise date)")
+
+
 def main():
     """Run all demonstrations."""
     print("\n")
@@ -282,11 +385,15 @@ def main():
         # Demo 3: Put-Call Parity
         demo_put_call_parity()
 
+        # Demo 4: Date-Based Options
+        demo_date_based_options()
+
         print_section("DEMONSTRATION COMPLETED SUCCESSFULLY")
         print("\nAll calculations completed without errors.")
         print(
             "The Greeks show good agreement between analytical and numerical methods."
         )
+        print("Date-based options support both calendar and business day conventions.")
 
     except Exception as e:
         print(f"\n\nERROR: {e}")

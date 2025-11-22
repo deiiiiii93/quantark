@@ -3,6 +3,8 @@ European vanilla option implementation.
 """
 
 from dataclasses import dataclass
+from typing import Optional
+from datetime import datetime
 from .base_equity_option import BaseEquityOption
 from util.enum import OptionType, ExerciseType
 from util.exceptions import ValidationError
@@ -21,20 +23,40 @@ class EuropeanVanillaOption(BaseEquityOption):
         option_type: CALL or PUT
     """
 
-    def __init__(self, strike: float, maturity: float, option_type: OptionType):
+    def __init__(
+        self,
+        strike: float,
+        option_type: OptionType,
+        maturity: Optional[float] = None,
+        exercise_date: Optional[datetime] = None,
+        settlement_date: Optional[datetime] = None,
+    ):
         """
         Initialize European vanilla option.
 
         Args:
             strike: Strike price
-            maturity: Time to maturity in years
             option_type: CALL or PUT
+            maturity: Time to maturity in years (optional if exercise_date provided)
+            exercise_date: Date when option can be exercised (optional if maturity provided)
+            settlement_date: Date when settlement occurs (optional, defaults to exercise_date)
+            
+        Note:
+            Either maturity OR exercise_date must be provided (not both).
         """
+        # Default maturity to 0 if not provided (will be validated)
+        if maturity is None and exercise_date is None:
+            maturity = 0.0  # Will trigger validation error
+        elif maturity is None:
+            maturity = 0.0  # Placeholder when using dates
+            
         super().__init__(
             strike=strike,
             maturity=maturity,
             option_type=option_type,
             exercise_type=ExerciseType.EUROPEAN,
+            exercise_date=exercise_date,
+            settlement_date=settlement_date,
         )
 
     def get_payoff(self, spot: float) -> float:

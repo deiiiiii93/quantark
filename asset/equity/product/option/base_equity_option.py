@@ -4,6 +4,8 @@ Base class for equity options.
 
 from abc import abstractmethod
 from dataclasses import dataclass
+from typing import Optional
+from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
 from util.enum import OptionType, ExerciseType
 from util.exceptions import ValidationError
@@ -16,15 +18,19 @@ class BaseEquityOption(BaseEquityProduct):
 
     Attributes:
         strike: Strike price
-        maturity: Time to maturity in years
+        maturity: Time to maturity in years (used if dates not provided)
         option_type: CALL or PUT
         exercise_type: EUROPEAN, AMERICAN, or BERMUDAN
+        exercise_date: Date when option can be exercised (optional)
+        settlement_date: Date when settlement occurs (optional)
     """
 
     strike: float
     maturity: float
     option_type: OptionType
     exercise_type: ExerciseType
+    exercise_date: Optional[datetime] = None
+    settlement_date: Optional[datetime] = None
 
     def __post_init__(self):
         """Validate option parameters."""
@@ -39,21 +45,70 @@ class BaseEquityOption(BaseEquityProduct):
         """
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
-        if self.maturity <= 0:
+        
+        # Validate that either maturity or dates are provided (not both)
+        has_dates = self.exercise_date is not None
+        has_maturity = self.maturity is not None and self.maturity > 0
+        
+        if not has_dates and not has_maturity:
+            raise ValidationError("Either maturity or exercise_date must be provided")
+        
+        if has_dates and has_maturity:
+            raise ValidationError("Cannot provide both maturity and exercise_date")
+        
+        if has_maturity and self.maturity <= 0:
             raise ValidationError(f"Maturity must be positive, got {self.maturity}")
+        
+        # Validate dates if provided
+        if self.exercise_date is not None:
+            if self.settlement_date is not None and self.settlement_date < self.exercise_date:
+                raise ValidationError(
+                    f"Settlement date ({self.settlement_date}) must be >= exercise date ({self.exercise_date})"
+                )
+        
         if not isinstance(self.option_type, OptionType):
             raise ValidationError(f"Invalid option type: {self.option_type}")
         if not isinstance(self.exercise_type, ExerciseType):
             raise ValidationError(f"Invalid exercise type: {self.exercise_type}")
 
-    def get_maturity(self) -> float:
+    def get_maturity(self, pricing_env=None) -> float:
         """
         Get time to maturity in years.
+        
+        If exercise_date is provided, calculates maturity from pricing_env.valuation_date
+        to exercise_date using the day count convention. Otherwise returns the maturity float.
+
+        Args:
+            pricing_env: Pricing environment (required if using date-based calculation)
 
         Returns:
-            Time to maturity
+            Time to maturity in years
+            
+        Raises:
+            ValidationError: If date-based but no pricing_env provided
         """
-        return self.maturity
+        if self.exercise_date is not None:
+            if pricing_env is None:
+                raise ValidationError(
+                    "PricingEnvironment required for date-based maturity calculation"
+                )
+            from util.calendar import calculate_year_fraction
+            
+            # Validate valuation date is before exercise date
+            if pricing_env.valuation_date >= self.exercise_date:
+                raise ValidationError(
+                    f"Valuation date ({pricing_env.valuation_date}) must be before "
+                    f"exercise date ({self.exercise_date})"
+                )
+            
+            return calculate_year_fraction(
+                pricing_env.valuation_date,
+                self.exercise_date,
+                pricing_env.day_count_convention,
+                pricing_env.bus_days_in_year
+            )
+        else:
+            return self.maturity
 
     @abstractmethod
     def get_payoff(self, spot: float) -> float:

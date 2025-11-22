@@ -6,6 +6,7 @@ from typing import Optional
 from datetime import datetime
 from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield
 from util.exceptions import MarketDataError
+from util.calendar import DayCountConvention
 
 
 @dataclass
@@ -21,13 +22,17 @@ class PricingEnvironment:
         vol_surface: Volatility surface
         rate_curve: Risk-free rate curve
         div_yield: Dividend yield (optional, defaults to zero)
-        valuation_date: Date of valuation (optional)
+        valuation_date: Date of valuation (required)
+        day_count_convention: Convention for calculating year fractions (default: CALENDAR_DAYS)
+        bus_days_in_year: Number of business days per year for business day convention (default: 252)
     """
     spot_quote: SpotQuote
     vol_surface: VolatilitySurface
     rate_curve: RateCurve
     div_yield: Optional[DividendYield] = None
-    valuation_date: Optional[datetime] = None
+    valuation_date: datetime = None
+    day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS
+    bus_days_in_year: int = 252
     
     def __post_init__(self):
         """Validate pricing environment."""
@@ -37,6 +42,10 @@ class PricingEnvironment:
             raise MarketDataError("Volatility surface is required")
         if self.rate_curve is None:
             raise MarketDataError("Rate curve is required")
+        if self.valuation_date is None:
+            raise MarketDataError("Valuation date is required")
+        if self.bus_days_in_year <= 0:
+            raise MarketDataError(f"Business days per year must be positive, got {self.bus_days_in_year}")
     
     @property
     def spot(self) -> float:

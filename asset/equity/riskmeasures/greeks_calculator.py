@@ -62,7 +62,7 @@ class GreeksCalculator:
         # Extract parameters
         S = pricing_env.spot
         K = product.strike
-        T = product.maturity
+        T = product.get_maturity(pricing_env)
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
@@ -179,7 +179,8 @@ class GreeksCalculator:
         
         # Vega: bump volatility (1% absolute)
         env_up_vol = deepcopy(pricing_env)
-        current_vol = pricing_env.get_vol(product.strike, product.maturity)
+        T = product.get_maturity(pricing_env)
+        current_vol = pricing_env.get_vol(product.strike, T)
         # For flat vol surface, we need to create a new surface
         from param.vol import FlatVolSurface
         env_up_vol.vol_surface = FlatVolSurface(current_vol + 0.01)
@@ -191,8 +192,20 @@ class GreeksCalculator:
         # Theta: bump time (1 day = 1/365 year)
         product_theta = deepcopy(product)
         time_bump = 1 / 365
-        if product_theta.maturity > time_bump:
-            product_theta.maturity -= time_bump
+        current_maturity = product.get_maturity(pricing_env)
+        if current_maturity > time_bump:
+            # For maturity-based products, reduce maturity
+            if product_theta.exercise_date is None:
+                product_theta.maturity -= time_bump
+            else:
+                # For date-based products, advance valuation date
+                from datetime import timedelta
+                env_theta = deepcopy(pricing_env)
+                env_theta.valuation_date = env_theta.valuation_date + timedelta(days=1)
+                price_theta = engine.price(product_theta, env_theta)
+                theta = price_theta - base_price
+                greeks['theta'] = theta
+                return greeks
             price_theta = engine.price(product_theta, pricing_env)
             theta = price_theta - base_price  # Price change as time passes (negative for long options)
         else:
@@ -203,7 +216,8 @@ class GreeksCalculator:
         # Rho: bump risk-free rate (1% = 0.01)
         env_up_rate = deepcopy(pricing_env)
         from param.rrf import FlatRateCurve
-        current_rate = pricing_env.get_rate(product.maturity)
+        T = product.get_maturity(pricing_env)
+        current_rate = pricing_env.get_rate(T)
         env_up_rate.rate_curve = FlatRateCurve(current_rate + 0.01)
         price_up_rate = engine.price(product, env_up_rate)
         
