@@ -1,6 +1,7 @@
 """
 Greeks calculation for equity derivatives.
 """
+
 import math
 from typing import Dict, Optional
 from scipy import stats
@@ -16,40 +17,40 @@ from util.exceptions import ValidationError, NumericalError
 class GreeksCalculator:
     """
     Calculator for option Greeks using both analytical and numerical methods.
-    
+
     Supports:
     - Analytical Greeks: Using closed-form Black-Scholes formulas
     - Numerical Greeks: Using finite difference method (FDM)
     """
-    
+
     def __init__(self, params: Optional[EngineParams] = None):
         """
         Initialize Greeks calculator.
-        
+
         Args:
             params: Engine parameters (for bump size in FDM)
         """
         self.params = params if params is not None else EngineParams()
-    
+
     def calculate_analytical_greeks(
         self,
         product: BaseEquityProduct,
         pricing_env: PricingEnvironment,
-        price: Optional[float] = None
+        price: Optional[float] = None,
     ) -> Dict[str, float]:
         """
         Calculate Greeks using analytical Black-Scholes formulas.
-        
+
         Only works for European vanilla options under Black-Scholes model.
-        
+
         Args:
             product: European vanilla option
             pricing_env: Pricing environment
             price: Pre-calculated price (optional, will calculate if not provided)
-            
+
         Returns:
             Dictionary of Greeks: delta, gamma, vega, theta, rho
-            
+
         Raises:
             ValidationError: If product is not a European vanilla option
         """
@@ -58,7 +59,7 @@ class GreeksCalculator:
                 f"Analytical Greeks only support EuropeanVanillaOption, "
                 f"got {type(product).__name__}"
             )
-        
+
         # Extract parameters
         S = pricing_env.spot
         K = product.strike
@@ -66,50 +67,52 @@ class GreeksCalculator:
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
-        
+
         # Handle edge case: option at expiry
         if T < 1e-10:
             return self._greeks_at_expiry(product, S)
-        
+
         # Calculate d1 and d2
         sqrt_T = math.sqrt(T)
-        d1 = (math.log(S / K) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * sqrt_T)
+        d1 = (math.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * sqrt_T)
         d2 = d1 - sigma * sqrt_T
-        
+
         # Calculate discount factors
         discount_div = math.exp(-q * T)
         discount_rf = math.exp(-r * T)
-        
+
         # Standard normal PDF and CDF
         n_d1 = stats.norm.pdf(d1)  # phi(d1)
         N_d1 = stats.norm.cdf(d1)  # Phi(d1)
         N_d2 = stats.norm.cdf(d2)  # Phi(d2)
-        
+
         greeks = {}
-        
+
         # Calculate price if not provided
         if price is None:
             if product.is_call():
                 price = S * discount_div * N_d1 - K * discount_rf * N_d2
             else:
-                price = K * discount_rf * stats.norm.cdf(-d2) - S * discount_div * stats.norm.cdf(-d1)
-        greeks['price'] = price
-        
+                price = K * discount_rf * stats.norm.cdf(
+                    -d2
+                ) - S * discount_div * stats.norm.cdf(-d1)
+        greeks["price"] = price
+
         # Delta: ∂V/∂S
         if product.is_call():
             delta = discount_div * N_d1
         else:
             delta = -discount_div * stats.norm.cdf(-d1)
-        greeks['delta'] = delta
-        
+        greeks["delta"] = delta
+
         # Gamma: ∂²V/∂S²
         gamma = discount_div * n_d1 / (S * sigma * sqrt_T)
-        greeks['gamma'] = gamma
-        
+        greeks["gamma"] = gamma
+
         # Vega: ∂V/∂σ (divided by 100 for 1% change)
         vega = S * discount_div * n_d1 * sqrt_T / 100
-        greeks['vega'] = vega
-        
+        greeks["vega"] = vega
+
         # Theta: ∂V/∂t (per day, divided by 365)
         term1 = -S * discount_div * n_d1 * sigma / (2 * sqrt_T)
         if product.is_call():
@@ -120,75 +123,84 @@ class GreeksCalculator:
             term2 = r * K * discount_rf * stats.norm.cdf(-d2)
             term3 = -q * S * discount_div * stats.norm.cdf(-d1)
             theta = (term1 + term2 + term3) / 365
-        greeks['theta'] = theta
-        
+        greeks["theta"] = theta
+
         # Rho: ∂V/∂r (divided by 100 for 1% change)
         if product.is_call():
             rho = K * T * discount_rf * N_d2 / 100
         else:
             rho = -K * T * discount_rf * stats.norm.cdf(-d2) / 100
-        greeks['rho'] = rho
-        
+        greeks["rho"] = rho
+
         return greeks
-    
+
     def calculate_numerical_greeks(
         self,
         product: BaseEquityProduct,
         pricing_env: PricingEnvironment,
         engine: BaseEngine,
-        base_price: Optional[float] = None
+        base_price: Optional[float] = None,
     ) -> Dict[str, float]:
         """
         Calculate Greeks using finite difference method (FDM).
-        
+
         Uses central differences for better accuracy.
         Works for any product and engine combination.
-        
+
         Args:
             product: The derivative product
             pricing_env: Pricing environment
             engine: Pricing engine to use
             base_price: Pre-calculated base price (optional)
-            
+
         Returns:
             Dictionary of Greeks: delta, gamma, vega, theta, rho
         """
         # Calculate base price if not provided
         if base_price is None:
             base_price = engine.price(product, pricing_env)
-        
-        greeks = {'price': base_price}
-        
+
+        greeks = {"price": base_price}
+
+        # Check if this is a delta-one product (SpotInstrument, Futures)
+        # Delta-one products have trivial Greeks
+        if self._is_deltaone_product(product):
+            return self._greeks_for_deltaone(product, base_price)
+
         bump = self.params.bump_size
-        
+
         # Delta and Gamma: bump spot
         env_up = deepcopy(pricing_env)
-        env_up.spot_quote.spot *= (1 + bump)
+        env_up.spot_quote.spot *= 1 + bump
         price_up_spot = engine.price(product, env_up)
-        
+
         env_down = deepcopy(pricing_env)
-        env_down.spot_quote.spot *= (1 - bump)
+        env_down.spot_quote.spot *= 1 - bump
         price_down_spot = engine.price(product, env_down)
-        
+
         delta = (price_up_spot - price_down_spot) / (2 * pricing_env.spot * bump)
-        gamma = (price_up_spot - 2 * base_price + price_down_spot) / \
-                (pricing_env.spot * bump) ** 2
-        
-        greeks['delta'] = delta
-        greeks['gamma'] = gamma
-        
+        gamma = (price_up_spot - 2 * base_price + price_down_spot) / (
+            pricing_env.spot * bump
+        ) ** 2
+
+        greeks["delta"] = delta
+        greeks["gamma"] = gamma
+
         # Vega: bump volatility (1% absolute)
         env_up_vol = deepcopy(pricing_env)
         T = product.get_maturity(pricing_env)
-        current_vol = pricing_env.get_vol(product.strike, T)
+        # For options, use strike; for other products, use spot
+        strike = getattr(product, "strike", pricing_env.spot)
+        current_vol = pricing_env.get_vol(strike, T)
         # For flat vol surface, we need to create a new surface
         from param.vol import FlatVolSurface
+
         env_up_vol.vol_surface = FlatVolSurface(current_vol + 0.01)
         price_up_vol = engine.price(product, env_up_vol)
-        
+
         vega = price_up_vol - base_price  # Already per 1% change
-        greeks['vega'] = vega
-        
+        greeks["vega"] = vega
+
         # Theta: bump time (1 day = 1/365 year)
         product_theta = deepcopy(product)
         time_bump = 1 / 365
@@ -200,77 +212,123 @@ class GreeksCalculator:
             else:
                 # For date-based products, advance valuation date
                 from datetime import timedelta
+
                 env_theta = deepcopy(pricing_env)
                 env_theta.valuation_date = env_theta.valuation_date + timedelta(days=1)
                 price_theta = engine.price(product_theta, env_theta)
                 theta = price_theta - base_price
-                greeks['theta'] = theta
+                greeks["theta"] = theta
                 return greeks
             price_theta = engine.price(product_theta, pricing_env)
-            theta = price_theta - base_price  # Price change as time passes (negative for long options)
+            theta = (
+                price_theta - base_price
+            )  # Price change as time passes (negative for long options)
         else:
             # Near expiry, theta is approximately -intrinsic_value_change
             theta = 0.0  # Simplified
-        greeks['theta'] = theta
-        
+        greeks["theta"] = theta
+
         # Rho: bump risk-free rate (1% = 0.01)
         env_up_rate = deepcopy(pricing_env)
         from param.rrf import FlatRateCurve
+
         T = product.get_maturity(pricing_env)
         current_rate = pricing_env.get_rate(T)
         env_up_rate.rate_curve = FlatRateCurve(current_rate + 0.01)
         price_up_rate = engine.price(product, env_up_rate)
-        
+
         rho = price_up_rate - base_price  # Already per 1% change
-        greeks['rho'] = rho
-        
+        greeks["rho"] = rho
+
         return greeks
-    
-    def _greeks_at_expiry(self, product: EuropeanVanillaOption, spot: float) -> Dict[str, float]:
+
+    def _is_deltaone_product(self, product: BaseEquityProduct) -> bool:
+        """
+        Check if product is a delta-one product (no optionality).
+
+        Delta-one products include SpotInstrument and Futures.
+
+        Args:
+            product: Product to check
+
+        Returns:
+            True if delta-one product
+        """
+        # Check by class name to avoid circular imports
+        product_class_name = product.__class__.__name__
+        return product_class_name in ["SpotInstrument", "Futures"]
+
+    def _greeks_for_deltaone(
+        self, product: BaseEquityProduct, price: float
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for delta-one products.
+
+        Delta-one products have trivial Greeks:
+        - Delta = 1.0 (always)
+        - Gamma, Vega, Theta, Rho = 0.0 (no optionality)
+
+        Args:
+            product: Delta-one product
+            price: Current price
+
+        Returns:
+            Dictionary of Greeks
+        """
+        return {
+            "price": price,
+            "delta": 1.0,
+            "gamma": 0.0,
+            "vega": 0.0,
+            "theta": 0.0,
+            "rho": 0.0,
+        }
+
+    def _greeks_at_expiry(
+        self, product: EuropeanVanillaOption, spot: float
+    ) -> Dict[str, float]:
         """
         Calculate Greeks at expiry.
-        
+
         At expiry:
         - Price = intrinsic value
         - Delta = 1 (ITM call), -1 (ITM put), 0 (OTM)
         - Gamma, Vega, Theta, Rho = 0
-        
+
         Args:
             product: European vanilla option
             spot: Current spot price
-            
+
         Returns:
             Dictionary of Greeks
         """
         price = product.get_payoff(spot)
-        
+
         # Delta at expiry
         if product.is_call():
             delta = 1.0 if spot > product.strike else 0.0
         else:
             delta = -1.0 if spot < product.strike else 0.0
-        
+
         return {
-            'price': price,
-            'delta': delta,
-            'gamma': 0.0,
-            'vega': 0.0,
-            'theta': 0.0,
-            'rho': 0.0
+            "price": price,
+            "delta": delta,
+            "gamma": 0.0,
+            "vega": 0.0,
+            "theta": 0.0,
+            "rho": 0.0,
         }
-    
+
     def compare_greeks(
-        self,
-        analytical: Dict[str, float],
-        numerical: Dict[str, float]
+        self, analytical: Dict[str, float], numerical: Dict[str, float]
     ) -> Dict[str, Dict[str, float]]:
         """
         Compare analytical and numerical Greeks.
-        
+
         Args:
             analytical: Analytical Greeks
             numerical: Numerical Greeks
-            
+
         Returns:
             Dictionary with 'analytical', 'numerical', and 'difference' sub-dictionaries
         """
@@ -279,14 +337,10 @@ class GreeksCalculator:
             if key in numerical:
                 diff = analytical[key] - numerical[key]
                 rel_diff = diff / analytical[key] if abs(analytical[key]) > 1e-10 else 0
-                difference[key] = {
-                    'absolute': diff,
-                    'relative': rel_diff
-                }
-        
-        return {
-            'analytical': analytical,
-            'numerical': numerical,
-            'difference': difference
-        }
+                difference[key] = {"absolute": diff, "relative": rel_diff}
 
+        return {
+            "analytical": analytical,
+            "numerical": numerical,
+            "difference": difference,
+        }
