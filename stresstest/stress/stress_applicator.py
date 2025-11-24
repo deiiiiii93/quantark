@@ -2,14 +2,16 @@
 Stress application logic for modifying pricing environments.
 """
 
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, TYPE_CHECKING
 from copy import deepcopy
 from priceenv import PricingEnvironment
 from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield, FlatVolSurface
 from portfolio import Portfolio, Position
-from stresstest.scenario.scenario import Scenario, Stress
 from stresstest.stress.stress_types import StressType, StressLevel
 from util.exceptions import ValidationError
+
+if TYPE_CHECKING:
+    from stresstest.scenario.scenario import Scenario, Stress
 
 
 class StressApplicator:
@@ -28,7 +30,7 @@ class StressApplicator:
     @staticmethod
     def apply_scenario_to_portfolio(
         portfolio: Portfolio,
-        scenario: Scenario
+        scenario: "Scenario"
     ) -> Dict[str, PricingEnvironment]:
         """
         Apply a scenario to portfolio and return stressed pricing environments.
@@ -109,7 +111,7 @@ class StressApplicator:
         )
     
     @staticmethod
-    def _apply_stress_to_env(env: PricingEnvironment, stress: Stress) -> None:
+    def _apply_stress_to_env(env: PricingEnvironment, stress: "Stress") -> None:
         """
         Apply a single stress to a pricing environment (in-place).
         
@@ -134,7 +136,7 @@ class StressApplicator:
             raise ValidationError(f"Unknown parameter to stress: {stress.parameter}")
     
     @staticmethod
-    def _stress_spot(env: PricingEnvironment, stress: Stress) -> None:
+    def _stress_spot(env: PricingEnvironment, stress: "Stress") -> None:
         """Stress spot price."""
         if env.spot_quote is None:
             raise ValidationError("Cannot stress spot: no spot quote in environment")
@@ -156,7 +158,7 @@ class StressApplicator:
         )
     
     @staticmethod
-    def _stress_volatility(env: PricingEnvironment, stress: Stress) -> None:
+    def _stress_volatility(env: PricingEnvironment, stress: "Stress") -> None:
         """Stress volatility surface."""
         if env.vol_surface is None:
             raise ValidationError("Cannot stress volatility: no vol surface in environment")
@@ -181,7 +183,7 @@ class StressApplicator:
             )
     
     @staticmethod
-    def _stress_rate(env: PricingEnvironment, stress: Stress) -> None:
+    def _stress_rate(env: PricingEnvironment, stress: "Stress") -> None:
         """Stress interest rate curve."""
         if env.rate_curve is None:
             raise ValidationError("Cannot stress rate: no rate curve in environment")
@@ -208,7 +210,7 @@ class StressApplicator:
             )
     
     @staticmethod
-    def _stress_dividend(env: PricingEnvironment, stress: Stress) -> None:
+    def _stress_dividend(env: PricingEnvironment, stress: "Stress") -> None:
         """Stress dividend yield."""
         # If no dividend yield, create one with zero base
         from param.div.dividend_yield import ContinuousDividendYield

@@ -1,0 +1,113 @@
+{
+  "version": "1.0",
+  "scenarios": [
+    {
+      "name": "Tech Sector Sell-Off",
+      "description": "15% drop in tech stocks with volatility spike",
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.15,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.4,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "metadata": {},
+      "created_at": "2025-11-24T23:09:14.658812",
+      "scenario_id": null
+    },
+    {
+      "name": "Fed Rate Hike",
+      "description": "200bps rate increase with moderate equity pressure",
+      "stresses": [
+        {
+          "parameter": "rate",
+          "stress_type": "absolute",
+          "stress_value": 0.02,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.05,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.15,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "metadata": {},
+      "created_at": "2025-11-24T23:09:14.658822",
+      "scenario_id": null
+    },
+    {
+      "name": "AAPL Specific Risk",
+      "description": "AAPL drops 20% while GOOGL unaffected",
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.2,
+          "level": "underlying",
+          "target": "AAPL",
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.5,
+          "level": "underlying",
+          "target": "AAPL",
+          "description": null
+        }
+      ],
+      "metadata": {},
+      "created_at": "2025-11-24T23:09:14.658826",
+      "scenario_id": null
+    },
+    {
+      "name": "Calm Recovery",
+      "description": "Modest gains with volatility compression",
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": 0.1,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": -0.25,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "metadata": {},
+      "created_at": "2025-11-24T23:09:14.658831",
+      "scenario_id": null
+    }
+  ]
+}

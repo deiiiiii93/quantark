@@ -1,0 +1,978 @@
+{
+  "metadata": {
+    "execution_timestamp": "2025-11-24T23:09:14.680830",
+    "total_execution_time": 0.01764702796936035,
+    "num_scenarios": 8
+  },
+  "config": {
+    "calculate_greeks": true,
+    "greeks_method": "analytical",
+    "export_formats": [
+      "parquet",
+      "csv",
+      "json"
+    ],
+    "output_dir": "./stress_results",
+    "save_detailed_results": true,
+    "parallel_execution": false,
+    "metadata": {}
+  },
+  "baseline": {
+    "portfolio_value": 11954.540384409913,
+    "greeks": {
+      "market_value": 11954.540384409913,
+      "delta": 97.34345484261915,
+      "gamma": 0.872112252404048,
+      "vega": 417.1041125636309,
+      "theta": -42.42607967244069,
+      "rho": 355.96790653555513
+    }
+  },
+  "scenarios": [
+    {
+      "name": "Tech Sector Sell-Off",
+      "description": "15% drop in tech stocks with volatility spike",
+      "portfolio_value": 6231.817516229918,
+      "portfolio_pnl": -5722.722868179995,
+      "portfolio_pnl_pct": -47.87070589215692,
+      "greeks": {
+        "market_value": 6231.817516229918,
+        "delta": 77.13216914971834,
+        "gamma": 0.5416908426220403,
+        "vega": 318.4918994254005,
+        "theta": -41.184124798468176,
+        "rho": 203.1315472646241
+      },
+      "execution_time": 0.002329111099243164,
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.15,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.4,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 588.9469754009632,
+          "pnl": -606.2615039943759,
+          "pnl_pct": -50.724330896739126,
+          "greeks": {
+            "market_value": 588.9469754009632,
+            "delta": 32.39674643884456,
+            "gamma": 1.1357632235591397,
+            "vega": 32.31068908022072,
+            "theta": -3.470274454454203,
+            "rho": 17.70819097775859
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -918.7541226593175,
+          "pnl": -670.9982164200436,
+          "pnl_pct": 270.8303614655374,
+          "greeks": {
+            "market_value": -918.7541226593175,
+            "delta": 28.298674474440638,
+            "gamma": -0.6196126998808068,
+            "vega": -17.62701316676539,
+            "theta": 1.168998670915549,
+            "rho": 22.634175590752495
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 6561.624663488272,
+          "pnl": -4445.463147765577,
+          "pnl_pct": -40.38727794304006,
+          "greeks": {
+            "market_value": 6561.624663488272,
+            "delta": 16.43674823643314,
+            "gamma": 0.02554031894370733,
+            "vega": 303.8082235119452,
+            "theta": -38.88284901492952,
+            "rho": 162.78918069611302
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": -329.80714725835435,
+          "greeks": {
+            "market_value": -329.80714725835435,
+            "delta": 60.6954209132852,
+            "gamma": 0.5161505236783329,
+            "vega": 14.683675913455328,
+            "theta": -2.301275783538654,
+            "rho": 40.34236656851108
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 6561.624663488272,
+          "greeks": {
+            "market_value": 6561.624663488272,
+            "delta": 16.43674823643314,
+            "gamma": 0.02554031894370733,
+            "vega": 303.8082235119452,
+            "theta": -38.88284901492952,
+            "rho": 162.78918069611302
+          }
+        }
+      }
+    },
+    {
+      "name": "Fed Rate Hike",
+      "description": "200bps rate increase with moderate equity pressure",
+      "portfolio_value": 10486.913657462506,
+      "portfolio_pnl": -1467.6267269474065,
+      "portfolio_pnl_pct": -12.276730679343888,
+      "greeks": {
+        "market_value": 10486.913657462506,
+        "delta": 90.92519514741466,
+        "gamma": 0.753296987126973,
+        "vega": 393.5214468184835,
+        "theta": -47.32625598872447,
+        "rho": 301.51992404678504
+      },
+      "execution_time": 0.003329038619995117,
+      "stresses": [
+        {
+          "parameter": "rate",
+          "stress_type": "absolute",
+          "stress_value": 0.02,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.05,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.15,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 1014.0790316664607,
+          "pnl": -181.1294477288784,
+          "pnl_pct": -15.154632087325263,
+          "greeks": {
+            "market_value": 1014.0790316664607,
+            "delta": 49.62775964228225,
+            "gamma": 1.3702468032686355,
+            "vega": 39.997825339005985,
+            "theta": -4.11854600334598,
+            "rho": 30.289383586793793
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -410.8068921969405,
+          "pnl": -163.05098595766657,
+          "pnl_pct": 65.81113985641886,
+          "greeks": {
+            "market_value": -410.8068921969405,
+            "delta": 18.324621936785665,
+            "gamma": -0.647462778157932,
+            "vega": -18.899590243518666,
+            "theta": 0.980633478048927,
+            "rho": 15.11032759094449
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 9883.641517992986,
+          "pnl": -1123.4462932608621,
+          "pnl_pct": -10.206571552125078,
+          "greeks": {
+            "market_value": 9883.641517992986,
+            "delta": 22.97281356834674,
+            "gamma": 0.030512962016269518,
+            "vega": 372.4232117229962,
+            "theta": -44.188343463427415,
+            "rho": 256.1202128690467
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": 603.2721394695202,
+          "greeks": {
+            "market_value": 603.2721394695202,
+            "delta": 67.95238157906792,
+            "gamma": 0.7227840251107035,
+            "vega": 21.09823509548732,
+            "theta": -3.137912525297053,
+            "rho": 45.39971117773828
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 9883.641517992986,
+          "greeks": {
+            "market_value": 9883.641517992986,
+            "delta": 22.97281356834674,
+            "gamma": 0.030512962016269518,
+            "vega": 372.4232117229962,
+            "theta": -44.188343463427415,
+            "rho": 256.1202128690467
+          }
+        }
+      }
+    },
+    {
+      "name": "AAPL Specific Risk",
+      "description": "AAPL drops 20% while GOOGL unaffected",
+      "portfolio_value": 10264.46919641593,
+      "portfolio_pnl": -1690.0711879939827,
+      "portfolio_pnl_pct": -14.137483614159091,
+      "greeks": {
+        "market_value": 10264.46919641593,
+        "delta": 84.17155571559464,
+        "gamma": 0.4723796233202913,
+        "vega": 405.36785042359486,
+        "theta": -41.85137912387902,
+        "rho": 345.79360119547187
+      },
+      "execution_time": 0.002089977264404297,
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.2,
+          "level": "underlying",
+          "target": "AAPL",
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.5,
+          "level": "underlying",
+          "target": "AAPL",
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 444.7555609901954,
+          "pnl": -750.4529184051437,
+          "pnl_pct": -62.78845334035791,
+          "greeks": {
+            "market_value": 444.7555609901954,
+            "delta": 26.18844308726033,
+            "gamma": 1.0206800221490278,
+            "vega": 27.55836059802375,
+            "theta": -3.114808962178713,
+            "rho": 13.489288047405223
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -1187.3741758281135,
+          "pnl": -939.6182695888396,
+          "pnl_pct": 379.25161254536926,
+          "greeks": {
+            "market_value": -1187.3741758281135,
+            "delta": 32.11646981130485,
+            "gamma": -0.5817627358775685,
+            "vega": -15.707593868694353,
+            "theta": 1.0287863183297785,
+            "rho": 25.20675276592348
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 11007.087811253848,
+          "pnl": 0.0,
+          "pnl_pct": 0.0,
+          "greeks": {
+            "market_value": 11007.087811253848,
+            "delta": 25.866642817029454,
+            "gamma": 0.03346233704883209,
+            "vega": 393.51708369426547,
+            "theta": -39.765356480030086,
+            "rho": 307.0975603821432
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": -742.6186148379181,
+          "greeks": {
+            "market_value": -742.6186148379181,
+            "delta": 58.304912898565185,
+            "gamma": 0.4389172862714592,
+            "vega": 11.850766729329397,
+            "theta": -2.086022643848935,
+            "rho": 38.6960408133287
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 11007.087811253848,
+          "greeks": {
+            "market_value": 11007.087811253848,
+            "delta": 25.866642817029454,
+            "gamma": 0.03346233704883209,
+            "vega": 393.51708369426547,
+            "theta": -39.765356480030086,
+            "rho": 307.0975603821432
+          }
+        }
+      }
+    },
+    {
+      "name": "Calm Recovery",
+      "description": "Modest gains with volatility compression",
+      "portfolio_value": 18652.713393943166,
+      "portfolio_pnl": 6698.173009533253,
+      "portfolio_pnl_pct": 56.030368329914516,
+      "greeks": {
+        "market_value": 18652.713393943166,
+        "delta": 121.9269991994669,
+        "gamma": 0.8906672843246901,
+        "vega": 383.9390672586983,
+        "theta": -36.179499486731785,
+        "rho": 534.765302134458
+      },
+      "execution_time": 0.001750946044921875,
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": 0.1,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": -0.25,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 2005.8312824969307,
+          "pnl": 810.6228031015917,
+          "pnl_pct": 67.82271185958196,
+          "greeks": {
+            "market_value": 2005.8312824969307,
+            "delta": 82.12507572464969,
+            "gamma": 1.1709016201347986,
+            "vega": 29.88543432015928,
+            "theta": -2.7454406278378847,
+            "rho": 57.72403106035136
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -37.13770519132042,
+          "pnl": 210.6182010479535,
+          "pnl_pct": -85.01036534101668,
+          "greeks": {
+            "market_value": -37.13770519132042,
+            "delta": 3.6139924446550586,
+            "gamma": -0.3141609958690974,
+            "vega": -8.018468543002667,
+            "theta": 0.34147136927948096,
+            "rho": 3.167232292797026
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 16684.019816637556,
+          "pnl": 5676.932005383707,
+          "pnl_pct": 51.57524045169794,
+          "greeks": {
+            "market_value": 16684.019816637556,
+            "delta": 36.18793103016217,
+            "gamma": 0.03392666005898892,
+            "vega": 362.07210148154167,
+            "theta": -33.77553022817338,
+            "rho": 473.87403878130965
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": 1968.6935773056102,
+          "greeks": {
+            "market_value": 1968.6935773056102,
+            "delta": 85.73906816930474,
+            "gamma": 0.8567406242657012,
+            "vega": 21.866965777156615,
+            "theta": -2.4039692585584036,
+            "rho": 60.89126335314838
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 16684.019816637556,
+          "greeks": {
+            "market_value": 16684.019816637556,
+            "delta": 36.18793103016217,
+            "gamma": 0.03392666005898892,
+            "vega": 362.07210148154167,
+            "theta": -33.77553022817338,
+            "rho": 473.87403878130965
+          }
+        }
+      }
+    },
+    {
+      "name": "Market Crash",
+      "description": "Equity drops -20% with volatility spike +50%",
+      "portfolio_value": 4548.415179704269,
+      "portfolio_pnl": -7406.125204705644,
+      "portfolio_pnl_pct": -61.9524044133397,
+      "greeks": {
+        "market_value": 4548.415179704269,
+        "delta": 72.2883853381164,
+        "gamma": 0.46248733384600066,
+        "vega": 277.9471758268723,
+        "theta": -38.02936714129848,
+        "rho": 168.85576316359138
+      },
+      "execution_time": 0.0024099349975585938,
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.2,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.5,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 444.7555609901954,
+          "pnl": -750.4529184051437,
+          "pnl_pct": -62.78845334035791,
+          "greeks": {
+            "market_value": 444.7555609901954,
+            "delta": 26.18844308726033,
+            "gamma": 1.0206800221490278,
+            "vega": 27.55836059802375,
+            "theta": -3.114808962178713,
+            "rho": 13.489288047405223
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -1187.3741758281135,
+          "pnl": -939.6182695888396,
+          "pnl_pct": 379.25161254536926,
+          "greeks": {
+            "market_value": -1187.3741758281135,
+            "delta": 32.11646981130485,
+            "gamma": -0.5817627358775685,
+            "vega": -15.707593868694353,
+            "theta": 1.0287863183297785,
+            "rho": 25.20675276592348
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 5291.033794542187,
+          "pnl": -5716.0540167116615,
+          "pnl_pct": -51.93066608288037,
+          "greeks": {
+            "market_value": 5291.033794542187,
+            "delta": 13.983472439551218,
+            "gamma": 0.02357004757454143,
+            "vega": 266.0964090975429,
+            "theta": -35.943344497449544,
+            "rho": 130.15972235026268
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": -742.6186148379181,
+          "greeks": {
+            "market_value": -742.6186148379181,
+            "delta": 58.304912898565185,
+            "gamma": 0.4389172862714592,
+            "vega": 11.850766729329397,
+            "theta": -2.086022643848935,
+            "rho": 38.6960408133287
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 5291.033794542187,
+          "greeks": {
+            "market_value": 5291.033794542187,
+            "delta": 13.983472439551218,
+            "gamma": 0.02357004757454143,
+            "vega": 266.0964090975429,
+            "theta": -35.943344497449544,
+            "rho": 130.15972235026268
+          }
+        }
+      }
+    },
+    {
+      "name": "Market Rally",
+      "description": "Equity rises +15% with volatility compression -30%",
+      "portfolio_value": 24220.03023837997,
+      "portfolio_pnl": 12265.489853970059,
+      "portfolio_pnl_pct": 102.60109932763002,
+      "greeks": {
+        "market_value": 24220.03023837997,
+        "delta": 133.23259670717476,
+        "gamma": 0.6217254411988473,
+        "vega": 309.2897813795082,
+        "theta": -32.384902759416505,
+        "rho": 620.0188181214804
+      },
+      "execution_time": 0.0016262531280517578,
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": 0.15,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": -0.3,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 2625.1791593245853,
+          "pnl": 1429.9706799292462,
+          "pnl_pct": 119.64194570077635,
+          "greeks": {
+            "market_value": 2625.1791593245853,
+            "delta": 90.74146931268055,
+            "gamma": 0.7446429176930178,
+            "vega": 19.388058217152505,
+            "theta": -2.285337531757357,
+            "rho": 65.13862148556406
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -11.935336697255838,
+          "pnl": 235.8205695420181,
+          "pnl_pct": -95.18262273605332,
+          "greeks": {
+            "market_value": -11.935336697255838,
+            "delta": 1.3947628561222951,
+            "gamma": -0.14990467284429979,
+            "vega": -3.9030258061577965,
+            "theta": 0.15912964675521862,
+            "rho": 1.262659646891759
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 21606.786415752642,
+          "pnl": 10599.698604498793,
+          "pnl_pct": 96.2988465819403,
+          "greeks": {
+            "market_value": 21606.786415752642,
+            "delta": 41.09636453837192,
+            "gamma": 0.026987196350129198,
+            "vega": 293.8047489685135,
+            "theta": -30.258694874414367,
+            "rho": 553.6175369890246
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": 2613.2438226273293,
+          "greeks": {
+            "market_value": 2613.2438226273293,
+            "delta": 92.13623216880285,
+            "gamma": 0.5947382448487181,
+            "vega": 15.485032410994709,
+            "theta": -2.126207885002138,
+            "rho": 66.40128113245582
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 21606.786415752642,
+          "greeks": {
+            "market_value": 21606.786415752642,
+            "delta": 41.09636453837192,
+            "gamma": 0.026987196350129198,
+            "vega": 293.8047489685135,
+            "theta": -30.258694874414367,
+            "rho": 553.6175369890246
+          }
+        }
+      }
+    },
+    {
+      "name": "Volatility Spike",
+      "description": "Volatility increases +80%",
+      "portfolio_value": 21804.415250880975,
+      "portfolio_pnl": 9849.874866471062,
+      "portfolio_pnl_pct": 82.3944254629515,
+      "greeks": {
+        "market_value": 21804.415250880975,
+        "delta": 102.99469031958094,
+        "gamma": 0.45214148693553013,
+        "vega": 411.0226034064421,
+        "theta": -68.20109599026263,
+        "rho": 340.1144238339564
+      },
+      "execution_time": 0.0016179084777832031,
+      "stresses": [
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 0.8,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 2019.4275018902972,
+          "pnl": 824.2190224949582,
+          "pnl_pct": 68.96027234612106,
+          "greeks": {
+            "market_value": 2019.4275018902972,
+            "delta": 58.48929613400684,
+            "gamma": 0.8114326309064761,
+            "vega": 41.078776939640356,
+            "theta": -5.749340723269429,
+            "rho": 33.76983459105364
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -620.2371255683893,
+          "pnl": -372.48121932911533,
+          "pnl_pct": 150.3420140343238,
+          "greeks": {
+            "market_value": -620.2371255683893,
+            "delta": 16.43818797057971,
+            "gamma": -0.377670935049635,
+            "vega": -19.119591086887773,
+            "theta": 2.0020290816658957,
+            "rho": 15.429826605776729
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 20405.224874559066,
+          "pnl": 9398.137063305217,
+          "pnl_pct": 85.38259369291475,
+          "greeks": {
+            "market_value": 20405.224874559066,
+            "delta": 28.067206214994382,
+            "gamma": 0.018379791078689034,
+            "vega": 389.06341755368953,
+            "theta": -64.4537843486591,
+            "rho": 290.91476263712605
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": 1399.190376321908,
+          "greeks": {
+            "market_value": 1399.190376321908,
+            "delta": 74.92748410458655,
+            "gamma": 0.4337616958568411,
+            "vega": 21.959185852752583,
+            "theta": -3.7473116416035337,
+            "rho": 49.19966119683036
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 20405.224874559066,
+          "greeks": {
+            "market_value": 20405.224874559066,
+            "delta": 28.067206214994382,
+            "gamma": 0.018379791078689034,
+            "vega": 389.06341755368953,
+            "theta": -64.4537843486591,
+            "rho": 290.91476263712605
+          }
+        }
+      }
+    },
+    {
+      "name": "Black Monday 1987",
+      "description": "Historical: Oct 19, 1987 - 22.6% drop",
+      "portfolio_value": 11962.587077864231,
+      "portfolio_pnl": 8.046693454318302,
+      "portfolio_pnl_pct": 0.06731077227203239,
+      "greeks": {
+        "market_value": 11962.587077864231,
+        "delta": 85.67009272765317,
+        "gamma": 0.37130708031386345,
+        "vega": 311.0734447123117,
+        "theta": -67.99320833532454,
+        "rho": 196.8329806553545
+      },
+      "execution_time": 0.0016789436340332031,
+      "stresses": [
+        {
+          "parameter": "spot",
+          "stress_type": "percentage",
+          "stress_value": -0.226,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        },
+        {
+          "parameter": "volatility",
+          "stress_type": "percentage",
+          "stress_value": 1.5,
+          "level": "portfolio",
+          "target": null,
+          "description": null
+        }
+      ],
+      "position_results": [
+        {
+          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "original_value": 1195.208479395339,
+          "stressed_value": 1063.013156127834,
+          "pnl": -132.19532326750505,
+          "pnl_pct": -11.060440546270488,
+          "greeks": {
+            "market_value": 1063.013156127834,
+            "delta": 37.50888157764388,
+            "gamma": 0.7365568661561277,
+            "vega": 31.02563961206356,
+            "theta": -5.644227572586736,
+            "rho": 16.458839975183107
+          }
+        },
+        {
+          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": -50,
+          "original_value": -247.75590623927394,
+          "stressed_value": -1704.0691045997391,
+          "pnl": -1456.3131983604653,
+          "pnl_pct": 587.8016070196161,
+          "greeks": {
+            "market_value": -1704.0691045997391,
+            "delta": 27.985263881102558,
+            "gamma": -0.3820637346922184,
+            "vega": -16.093491604064678,
+            "theta": 2.1662361768773017,
+            "rho": 24.765791205978733
+          }
+        },
+        {
+          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "underlying": "GOOGL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "original_value": 11007.087811253848,
+          "stressed_value": 12603.643026336136,
+          "pnl": 1596.5552150822878,
+          "pnl_pct": 14.504792207162556,
+          "greeks": {
+            "market_value": 12603.643026336136,
+            "delta": 20.17594726890673,
+            "gamma": 0.01681394884995414,
+            "vega": 296.1412967043128,
+            "theta": -64.5152169396151,
+            "rho": 155.60834947419266
+          }
+        }
+      ],
+      "underlying_results": {
+        "AAPL": {
+          "num_positions": 2,
+          "total_value": -641.0559484719051,
+          "greeks": {
+            "market_value": -641.0559484719051,
+            "delta": 65.49414545874644,
+            "gamma": 0.3544931314639093,
+            "vega": 14.932148007998883,
+            "theta": -3.4779913957094344,
+            "rho": 41.22463118116184
+          }
+        },
+        "GOOGL": {
+          "num_positions": 1,
+          "total_value": 12603.643026336136,
+          "greeks": {
+            "market_value": 12603.643026336136,
+            "delta": 20.17594726890673,
+            "gamma": 0.01681394884995414,
+            "vega": 296.1412967043128,
+            "theta": -64.5152169396151,
+            "rho": 155.60834947419266
+          }
+        }
+      }
+    }
+  ],
+  "risk_summary": {
+    "baseline_value": 11954.540384409913,
+    "num_scenarios": 8,
+    "worst_pnl": -7406.125204705644,
+    "worst_pnl_pct": -61.9524044133397,
+    "worst_scenario": "Market Crash",
+    "best_pnl": 12265.489853970059,
+    "best_pnl_pct": 102.60109932763002,
+    "best_scenario": "Market Rally",
+    "avg_pnl": 1566.879804450208,
+    "median_pnl": -729.7900167465441,
+    "std_pnl": 6757.38004415403,
+    "avg_pnl_pct": 13.10698491172106,
+    "median_pnl_pct": -6.104709953535928,
+    "max_drawdown_pct": -61.9524044133397,
+    "max_upside_pct": 102.60109932763002
+  }
+}
