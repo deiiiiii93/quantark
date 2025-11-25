@@ -1,0 +1,515 @@
+{
+  "path_name": "V-Shaped Recovery",
+  "baseline_value": 1442.9643856346129,
+  "final_value": 1262.0759800749797,
+  "total_pnl": -180.88840555963316,
+  "total_pnl_pct": -12.535888436364893,
+  "total_transaction_costs": 0.0,
+  "net_pnl": -180.88840555963316,
+  "total_hedges": 0,
+  "num_days": 7,
+  "execution_timestamp": "2025-11-26T00:10:42.557741",
+  "total_execution_time": 0.005908012390136719,
+  "config_summary": {
+    "calculate_greeks": true,
+    "greeks_method": "analytical",
+    "export_formats": [
+      "parquet"
+    ],
+    "output_dir": "./dynamic_results",
+    "save_detailed_results": true,
+    "save_intermediate_states": true,
+    "generate_report": true,
+    "include_charts": true,
+    "metadata": {}
+  },
+  "day_results": [
+    {
+      "day_index": 0,
+      "date": "2024-06-01T00:00:00",
+      "label": "Decline Day 1",
+      "portfolio_value": 1996.530023397073,
+      "daily_pnl": 553.56563776246,
+      "cumulative_pnl": 553.56563776246,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": 553.56563776246,
+      "greeks": {
+        "market_value": 1996.530023397073,
+        "delta": 34.68060269080898,
+        "gamma": 1.5162631647731952,
+        "vega": 59.77393694879332,
+        "theta": -6.418749671278322,
+        "rho": 15.160786833851141
+      },
+      "positions": [
+        {
+          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "market_value": 1433.541135523307,
+          "entry_price": 8.5,
+          "pnl": 583.541135523307,
+          "greeks": {
+            "market_value": 1433.541135523307,
+            "delta": 52.92905216798061,
+            "gamma": 1.029103693023087,
+            "vega": 40.569197148394515,
+            "theta": -4.812757092775113,
+            "rho": 31.205857144169403
+          }
+        },
+        {
+          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "market_value": 562.988887873766,
+          "entry_price": 3.2,
+          "pnl": 402.98888787376603,
+          "greeks": {
+            "market_value": 562.988887873766,
+            "delta": -18.24844947717163,
+            "gamma": 0.4871594717501082,
+            "vega": 19.2047398003988,
+            "theta": -1.6059925785032088,
+            "rho": -16.045070310318263
+          }
+        }
+      ],
+      "trades": [],
+      "market_state": {
+        "spot": {
+          "AAPL": 145.0
+        },
+        "volatility": {
+          "AAPL": 0.375
+        },
+        "rate": 0.05,
+        "div_yield": {
+          "AAPL": 0.01
+        }
+      },
+      "metadata": {}
+    },
+    {
+      "day_index": 1,
+      "date": "2024-06-02T00:00:00",
+      "label": "Decline Day 2",
+      "portfolio_value": 1664.0791114969006,
+      "daily_pnl": -332.4509119001723,
+      "cumulative_pnl": 221.11472586228774,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": 221.11472586228774,
+      "greeks": {
+        "market_value": 1664.0791114969006,
+        "delta": 26.00827258325197,
+        "gamma": 1.7318272313979775,
+        "vega": 58.4799195162948,
+        "theta": -5.679076692459966,
+        "rho": 9.907068811277917
+      },
+      "positions": [
+        {
+          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "market_value": 1067.1852314495013,
+          "entry_price": 8.5,
+          "pnl": 217.18523144950126,
+          "greeks": {
+            "market_value": 1067.1852314495013,
+            "delta": 46.77105884023828,
+            "gamma": 1.1618241378890652,
+            "vega": 39.23219409189877,
+            "theta": -4.267060676440586,
+            "rho": 27.442790913286153
+          }
+        },
+        {
+          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "market_value": 596.8938800473993,
+          "entry_price": 3.2,
+          "pnl": 436.8938800473993,
+          "greeks": {
+            "market_value": 596.8938800473993,
+            "delta": -20.762786256986313,
+            "gamma": 0.5700030935089122,
+            "vega": 19.24772542439603,
+            "theta": -1.41201601601938,
+            "rho": -17.535722102008236
+          }
+        }
+      ],
+      "trades": [],
+      "market_state": {
+        "spot": {
+          "AAPL": 140.16666666666666
+        },
+        "volatility": {
+          "AAPL": 0.34375
+        },
+        "rate": 0.05,
+        "div_yield": {
+          "AAPL": 0.01
+        }
+      },
+      "metadata": {}
+    },
+    {
+      "day_index": 2,
+      "date": "2024-06-03T00:00:00",
+      "label": "Decline Day 3",
+      "portfolio_value": 1401.3139145450523,
+      "daily_pnl": -262.76519695184834,
+      "cumulative_pnl": -41.6504710895606,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": -41.6504710895606,
+      "greeks": {
+        "market_value": 1401.3139145450523,
+        "delta": 15.92875431845404,
+        "gamma": 1.9291561937999377,
+        "vega": 55.8000411381091,
+        "theta": -4.861773038998752,
+        "rho": 3.7847190126296155
+      },
+      "positions": [
+        {
+          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "market_value": 755.4366482419127,
+          "entry_price": 8.5,
+          "pnl": -94.56335175808732,
+          "greeks": {
+            "market_value": 755.4366482419127,
+            "delta": 39.72578721620837,
+            "gamma": 1.2726989936980486,
+            "vega": 36.81228945225879,
+            "theta": -3.6643936587442507,
+            "rho": 23.135934103682267
+          }
+        },
+        {
+          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "market_value": 645.8772663031397,
+          "entry_price": 3.2,
+          "pnl": 485.8772663031397,
+          "greeks": {
+            "market_value": 645.8772663031397,
+            "delta": -23.797032897754328,
+            "gamma": 0.6564572001018892,
+            "vega": 18.987751685850313,
+            "theta": -1.1973793802545014,
+            "rho": -19.35121509105265
+          }
+        }
+      ],
+      "trades": [],
+      "market_state": {
+        "spot": {
+          "AAPL": 135.49444444444444
+        },
+        "volatility": {
+          "AAPL": 0.31510416666666663
+        },
+        "rate": 0.05,
+        "div_yield": {
+          "AAPL": 0.01
+        }
+      },
+      "metadata": {}
+    },
+    {
+      "day_index": 3,
+      "date": "2024-06-04T00:00:00",
+      "label": "Recovery Day 1",
+      "portfolio_value": 1314.7404751429488,
+      "daily_pnl": -86.57343940210353,
+      "cumulative_pnl": -128.22391049166413,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": -128.22391049166413,
+      "greeks": {
+        "market_value": 1314.7404751429488,
+        "delta": 21.062663341306774,
+        "gamma": 2.0683645871412457,
+        "vega": 57.617364730781645,
+        "theta": -4.700064047230721,
+        "rho": 8.052401197532731
+      },
+      "positions": [
+        {
+          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "market_value": 796.2551611150261,
+          "entry_price": 8.5,
+          "pnl": -53.744838884973944,
+          "greeks": {
+            "market_value": 796.2551611150261,
+            "delta": 42.76053928444818,
+            "gamma": 1.3776490123990062,
+            "vega": 38.37645747363308,
+            "theta": -3.578685834130899,
+            "rho": 25.712028706191997
+          }
+        },
+        {
+          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "market_value": 518.4853140279226,
+          "entry_price": 3.2,
+          "pnl": 358.4853140279227,
+          "greeks": {
+            "market_value": 518.4853140279226,
+            "delta": -21.697875943141405,
+            "gamma": 0.6907155747422398,
+            "vega": 19.240907257148567,
+            "theta": -1.1213782130998216,
+            "rho": -17.659627508659266
+          }
+        }
+      ],
+      "trades": [],
+      "market_state": {
+        "spot": {
+          "AAPL": 138.88180555555553
+        },
+        "volatility": {
+          "AAPL": 0.28884548611111105
+        },
+        "rate": 0.05,
+        "div_yield": {
+          "AAPL": 0.01
+        }
+      },
+      "metadata": {}
+    },
+    {
+      "day_index": 4,
+      "date": "2024-06-05T00:00:00",
+      "label": "Recovery Day 2",
+      "portfolio_value": 1258.124027177741,
+      "daily_pnl": -56.616447965207726,
+      "cumulative_pnl": -184.84035845687185,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": -184.84035845687185,
+      "greeks": {
+        "market_value": 1258.124027177741,
+        "delta": 27.40863980958885,
+        "gamma": 2.1988776418192955,
+        "vega": 58.991104913350824,
+        "theta": -4.534520456010668,
+        "rho": 13.21800696007138
+      },
+      "positions": [
+        {
+          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "market_value": 857.0478853058098,
+          "entry_price": 8.5,
+          "pnl": 7.047885305809842,
+          "greeks": {
+            "market_value": 857.0478853058098,
+            "delta": 46.617479446284335,
+            "gamma": 1.484744472409255,
+            "vega": 39.83246510658277,
+            "theta": -3.4993395183674996,
+            "rho": 28.89564911770941
+          }
+        },
+        {
+          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "market_value": 401.0761418719312,
+          "entry_price": 3.2,
+          "pnl": 241.0761418719312,
+          "greeks": {
+            "market_value": 401.0761418719312,
+            "delta": -19.208839636695487,
+            "gamma": 0.7141331694100405,
+            "vega": 19.15863980676806,
+            "theta": -1.0351809376431689,
+            "rho": -15.677642157638031
+          }
+        }
+      ],
+      "trades": [],
+      "market_state": {
+        "spot": {
+          "AAPL": 142.35385069444442
+        },
+        "volatility": {
+          "AAPL": 0.2647750289351851
+        },
+        "rate": 0.05,
+        "div_yield": {
+          "AAPL": 0.01
+        }
+      },
+      "metadata": {}
+    },
+    {
+      "day_index": 5,
+      "date": "2024-06-06T00:00:00",
+      "label": "Recovery Day 3",
+      "portfolio_value": 1238.0081322916233,
+      "daily_pnl": -20.115894886117758,
+      "cumulative_pnl": -204.9562533429896,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": -204.9562533429896,
+      "greeks": {
+        "market_value": 1238.0081322916233,
+        "delta": 35.0370435451829,
+        "gamma": 2.3021810172601316,
+        "vega": 59.481800461120514,
+        "theta": -4.345969833546606,
+        "rho": 19.371706924771168
+      },
+      "positions": [
+        {
+          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "market_value": 942.0297572766799,
+          "entry_price": 8.5,
+          "pnl": 92.0297572766799,
+          "greeks": {
+            "market_value": 942.0297572766799,
+            "delta": 51.39240891660217,
+            "gamma": 1.5838001263093802,
+            "vega": 40.92088431671192,
+            "theta": -3.4138172835549776,
+            "rho": 32.783876155543425
+          }
+        },
+        {
+          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "market_value": 295.97837501494337,
+          "entry_price": 3.2,
+          "pnl": 135.9783750149434,
+          "greeks": {
+            "market_value": 295.97837501494337,
+            "delta": -16.35536537141927,
+            "gamma": 0.7183808909507515,
+            "vega": 18.560916144408594,
+            "theta": -0.9321525499916282,
+            "rho": -13.412169230772255
+          }
+        }
+      ],
+      "trades": [],
+      "market_state": {
+        "spot": {
+          "AAPL": 145.91269696180552
+        },
+        "volatility": {
+          "AAPL": 0.24271044319058635
+        },
+        "rate": 0.05,
+        "div_yield": {
+          "AAPL": 0.01
+        }
+      },
+      "metadata": {}
+    },
+    {
+      "day_index": 6,
+      "date": "2024-06-07T00:00:00",
+      "label": "Recovery Day 4",
+      "portfolio_value": 1262.0759800749797,
+      "daily_pnl": 24.067847783356456,
+      "cumulative_pnl": -180.88840555963316,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": -180.88840555963316,
+      "greeks": {
+        "market_value": 1262.0759800749797,
+        "delta": 43.914279370059226,
+        "gamma": 2.3513799801824464,
+        "vega": 58.509531862183124,
+        "theta": -4.113306055597998,
+        "rho": 26.528831156975137
+      },
+      "positions": [
+        {
+          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 100,
+          "market_value": 1056.461149125937,
+          "entry_price": 8.5,
+          "pnl": 206.46114912593703,
+          "greeks": {
+            "market_value": 1056.461149125937,
+            "delta": 57.135989386895105,
+            "gamma": 1.6577998342837803,
+            "vega": 41.25113467097845,
+            "theta": -3.3061988192954908,
+            "rho": 37.44413406761299
+          }
+        },
+        {
+          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "underlying": "AAPL",
+          "product_type": "EuropeanVanillaOption",
+          "quantity": 50,
+          "market_value": 205.6148309490428,
+          "entry_price": 3.2,
+          "pnl": 45.61483094904282,
+          "greeks": {
+            "market_value": 205.6148309490428,
+            "delta": -13.22171001683588,
+            "gamma": 0.6935801458986662,
+            "vega": 17.25839719120467,
+            "theta": -0.8071072363025072,
+            "rho": -10.915302910637855
+          }
+        }
+      ],
+      "trades": [],
+      "market_state": {
+        "spot": {
+          "AAPL": 149.56051438585064
+        },
+        "volatility": {
+          "AAPL": 0.22248457292470414
+        },
+        "rate": 0.05,
+        "div_yield": {
+          "AAPL": 0.01
+        }
+      },
+      "metadata": {}
+    }
+  ],
+  "metadata": {
+    "path_description": "10% decline over 3 days, then recovery over 4 days",
+    "hedge_strategy": "DeltaHedge_100"
+  }
+}
