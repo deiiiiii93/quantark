@@ -11,6 +11,7 @@ from .bond_enums import (
     CompoundingType,
     BondType,
     BondDerivativeType,
+    ResetConvention,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "CompoundingType",
     "BondType",
     "BondDerivativeType",
+    "ResetConvention",
 ]

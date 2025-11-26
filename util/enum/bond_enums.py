@@ -5,6 +5,18 @@ Enumerations for bond products.
 from enum import Enum
 
 
+class ResetConvention(Enum):
+    """
+    Rate reset convention for floating rate instruments.
+
+    - IN_ADVANCE: Rate is fixed at the start of the accrual period
+    - IN_ARREARS: Rate is fixed at the end of the accrual period
+    """
+
+    IN_ADVANCE = "in_advance"
+    IN_ARREARS = "in_arrears"
+
+
 class PaymentFrequency(Enum):
     """
     Payment frequency for coupon bonds.
