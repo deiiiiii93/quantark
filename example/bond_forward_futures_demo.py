@@ -374,7 +374,9 @@ def example_5_detailed_basis_analysis():
     # Get basis analysis
     analyses = engine.analyze_basis(futures, valuation_date)
 
-    print(f"Futures: Delivery {delivery_date.date()}, Price ${futures.futures_price:.4f}")
+    print(
+        f"Futures: Delivery {delivery_date.date()}, Price ${futures.futures_price:.4f}"
+    )
     print(f"Valuation Date: {valuation_date.date()}")
     print(f"\nBasis Analysis (sorted by implied repo - highest = CTD):")
     print("-" * 100)
@@ -406,11 +408,11 @@ def example_6_conversion_factors():
 
     # Create bonds with different coupons and maturities
     test_cases = [
-        (0.02, 7),   # 2% coupon, 7 years
-        (0.04, 7),   # 4% coupon, 7 years
-        (0.06, 7),   # 6% coupon (notional), 7 years
-        (0.08, 7),   # 8% coupon, 7 years
-        (0.06, 5),   # 6% coupon, 5 years
+        (0.02, 7),  # 2% coupon, 7 years
+        (0.04, 7),  # 4% coupon, 7 years
+        (0.06, 7),  # 6% coupon (notional), 7 years
+        (0.08, 7),  # 8% coupon, 7 years
+        (0.06, 5),  # 6% coupon, 5 years
         (0.06, 10),  # 6% coupon, 10 years
         (0.06, 15),  # 6% coupon, 15 years
     ]
@@ -422,8 +424,10 @@ def example_6_conversion_factors():
     print("-" * 60)
 
     for coupon, years in test_cases:
-        maturity = datetime(delivery_date.year + years, delivery_date.month, delivery_date.day)
-        
+        maturity = datetime(
+            delivery_date.year + years, delivery_date.month, delivery_date.day
+        )
+
         bond = create_simple_fixed_bond(
             issue_date=datetime(2020, 3, 15),
             maturity_date=maturity,
@@ -493,7 +497,7 @@ def example_7_hedge_ratio():
     # Calculate target bond DV01
     bond_engine = BondDiscountEngine(pricing_env)
     target_dv01 = bond_engine.dv01(target_bond)
-    
+
     # Scale to position size
     position_dv01 = target_dv01 * position_notional / 100.0
 
@@ -581,7 +585,9 @@ def example_8_delivery_option_value():
     print("Delivery Option Analysis:")
     print("-" * 50)
     print(f"CTD Theoretical Price: ${option_analysis['ctd_theoretical_price']:.4f}")
-    print(f"Average Theoretical Price: ${option_analysis['average_theoretical_price']:.4f}")
+    print(
+        f"Average Theoretical Price: ${option_analysis['average_theoretical_price']:.4f}"
+    )
     print(f"Max Theoretical Price: ${option_analysis['max_theoretical_price']:.4f}")
     print("-" * 50)
     print(f"Delivery Option Value: ${option_analysis['delivery_option_value']:.4f}")
@@ -633,7 +639,9 @@ def example_9_rate_sensitivity():
     print(f"Delivery: {delivery_date.date()}")
     print(f"\nRate Sensitivity Comparison:")
     print("-" * 80)
-    print(f"{'Rate':<10} {'Forward Clean':<15} {'Fwd DV01':<12} {'Futures':<15} {'Fut DV01':<12}")
+    print(
+        f"{'Rate':<10} {'Forward Clean':<15} {'Fwd DV01':<12} {'Futures':<15} {'Fut DV01':<12}"
+    )
     print("-" * 80)
 
     for rate in [0.03, 0.04, 0.05, 0.06, 0.07]:
@@ -686,4 +694,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
