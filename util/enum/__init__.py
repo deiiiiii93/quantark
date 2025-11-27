@@ -2,7 +2,15 @@
 Enumeration types used throughout the QuantArk library.
 """
 
-from .option_enums import OptionType, ExerciseType
+from .option_enums import (
+    OptionType,
+    ExerciseType,
+    BarrierType,
+    DoubleBarrierType,
+    BarrierDirection,
+    ObservationType,
+    TouchType,
+)
 from .engine_enums import EngineType
 from .deltaone_enums import DeltaOneType
 from .bond_enums import (
@@ -15,10 +23,19 @@ from .bond_enums import (
 )
 
 __all__ = [
+    # Option enums
     "OptionType",
     "ExerciseType",
+    "BarrierType",
+    "DoubleBarrierType",
+    "BarrierDirection",
+    "ObservationType",
+    "TouchType",
+    # Engine enums
     "EngineType",
+    # Delta-one enums
     "DeltaOneType",
+    # Bond enums
     "PaymentFrequency",
     "StubType",
     "CompoundingType",

@@ -1,0 +1,213 @@
+"""
+Barrier option implementation.
+
+Barrier options have a payoff that depends on whether the underlying
+price crosses a barrier level during the option's life.
+"""
+
+from dataclasses import dataclass, field
+from typing import Optional, List
+from datetime import datetime
+from .base_equity_option import BaseEquityOption
+from util.enum import OptionType, ExerciseType, BarrierType, ObservationType
+from util.exceptions import ValidationError
+
+
+@dataclass
+class BarrierOption(BaseEquityOption):
+    """
+    Single barrier option (knock-in or knock-out).
+
+    Barrier options are path-dependent options whose existence or payoff
+    depends on whether the underlying asset price reaches a specified barrier.
+
+    Types:
+        - UP_IN: Activates (knocks in) when price goes UP above barrier
+        - UP_OUT: Deactivates (knocks out) when price goes UP above barrier
+        - DOWN_IN: Activates when price goes DOWN below barrier
+        - DOWN_OUT: Deactivates when price goes DOWN below barrier
+
+    Attributes:
+        strike: Strike price
+        maturity: Time to maturity in years
+        option_type: CALL or PUT
+        barrier: Barrier price level
+        barrier_type: UP_IN, UP_OUT, DOWN_IN, or DOWN_OUT
+        rebate: Amount paid if knocked out (or not knocked in at expiry)
+        observation_type: CONTINUOUS or DISCRETE monitoring
+        observation_dates: For discrete monitoring, list of observation times (year fractions)
+    """
+
+    barrier: float = 0.0
+    barrier_type: BarrierType = BarrierType.DOWN_OUT
+    rebate: float = 0.0
+    observation_type: ObservationType = ObservationType.CONTINUOUS
+    observation_dates: Optional[List[float]] = None
+
+    def __init__(
+        self,
+        strike: float,
+        option_type: OptionType,
+        barrier: float,
+        barrier_type: BarrierType,
+        maturity: Optional[float] = None,
+        exercise_date: Optional[datetime] = None,
+        settlement_date: Optional[datetime] = None,
+        rebate: float = 0.0,
+        observation_type: ObservationType = ObservationType.CONTINUOUS,
+        observation_dates: Optional[List[float]] = None,
+    ):
+        """
+        Initialize barrier option.
+
+        Args:
+            strike: Strike price
+            option_type: CALL or PUT
+            barrier: Barrier price level
+            barrier_type: UP_IN, UP_OUT, DOWN_IN, or DOWN_OUT
+            maturity: Time to maturity in years (optional if exercise_date provided)
+            exercise_date: Expiration date (optional if maturity provided)
+            settlement_date: Settlement date (optional)
+            rebate: Rebate amount (default: 0)
+            observation_type: CONTINUOUS or DISCRETE (default: CONTINUOUS)
+            observation_dates: For discrete, list of observation times in year fractions
+
+        Raises:
+            ValidationError: If parameters are invalid
+        """
+        # Default maturity handling
+        if maturity is None and exercise_date is None:
+            maturity = 0.0
+        elif maturity is None:
+            maturity = 0.0
+
+        # Store barrier parameters before calling super().__init__
+        self.barrier = barrier
+        self.barrier_type = barrier_type
+        self.rebate = rebate
+        self.observation_type = observation_type
+        self.observation_dates = observation_dates
+
+        super().__init__(
+            strike=strike,
+            maturity=maturity,
+            option_type=option_type,
+            exercise_type=ExerciseType.EUROPEAN,  # Barrier options are typically European
+            exercise_date=exercise_date,
+            settlement_date=settlement_date,
+        )
+
+    def validate(self) -> None:
+        """
+        Validate barrier option parameters.
+
+        Raises:
+            ValidationError: If parameters are invalid
+        """
+        super().validate()
+
+        if self.barrier <= 0:
+            raise ValidationError(f"Barrier must be positive, got {self.barrier}")
+
+        if self.rebate < 0:
+            raise ValidationError(f"Rebate must be non-negative, got {self.rebate}")
+
+        if not isinstance(self.barrier_type, BarrierType):
+            raise ValidationError(f"Invalid barrier type: {self.barrier_type}")
+
+        if not isinstance(self.observation_type, ObservationType):
+            raise ValidationError(f"Invalid observation type: {self.observation_type}")
+
+        # For discrete observation, must have observation dates
+        if (
+            self.observation_type == ObservationType.DISCRETE
+            and (self.observation_dates is None or len(self.observation_dates) == 0)
+        ):
+            raise ValidationError(
+                "Observation dates required for discrete barrier monitoring"
+            )
+
+        # Validate observation dates if provided
+        if self.observation_dates is not None:
+            for t in self.observation_dates:
+                if t < 0:
+                    raise ValidationError(
+                        f"Observation dates must be non-negative, got {t}"
+                    )
+
+    def get_payoff(self, spot: float) -> float:
+        """
+        Calculate the option payoff at maturity (assuming barrier not hit for knock-out
+        or barrier hit for knock-in).
+
+        Note: This returns the vanilla payoff. The actual payoff depends on
+        whether the barrier was hit during the option's life.
+
+        Args:
+            spot: Spot price at maturity
+
+        Returns:
+            Option payoff (call or put style)
+        """
+        if spot < 0:
+            raise ValidationError(f"Spot price must be non-negative, got {spot}")
+
+        if self.is_call():
+            return max(spot - self.strike, 0.0)
+        else:
+            return max(self.strike - spot, 0.0)
+
+    def intrinsic_value(self, spot: float) -> float:
+        """
+        Calculate intrinsic value.
+
+        Args:
+            spot: Current spot price
+
+        Returns:
+            Intrinsic value
+        """
+        return self.get_payoff(spot)
+
+    @property
+    def is_knock_in(self) -> bool:
+        """Check if this is a knock-in barrier."""
+        return self.barrier_type.is_knock_in
+
+    @property
+    def is_knock_out(self) -> bool:
+        """Check if this is a knock-out barrier."""
+        return self.barrier_type.is_knock_out
+
+    @property
+    def is_up_barrier(self) -> bool:
+        """Check if barrier is above spot."""
+        return self.barrier_type.is_up
+
+    @property
+    def is_down_barrier(self) -> bool:
+        """Check if barrier is below spot."""
+        return self.barrier_type.is_down
+
+    def is_barrier_hit(self, spot: float) -> bool:
+        """
+        Check if the barrier would be hit at a given spot price.
+
+        Args:
+            spot: Spot price to check
+
+        Returns:
+            True if barrier is hit
+        """
+        if self.is_up_barrier:
+            return spot >= self.barrier
+        else:  # down barrier
+            return spot <= self.barrier
+
+    def __repr__(self):
+        return (
+            f"BarrierOption("
+            f"{self.option_type}, K={self.strike:.2f}, "
+            f"B={self.barrier:.2f}, {self.barrier_type}, T={self.maturity:.4f})"
+        )
+
