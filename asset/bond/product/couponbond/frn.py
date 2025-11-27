@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 from dateutil.relativedelta import relativedelta
 
 from asset.bond.product.base_bond_product import BaseBondProduct
-from asset.bond.schedule.cashflow import CashFlow
+from asset.bond.schedule.cashflow import CashFlow, FloatingCashFlow
 from param.index import RateIndex, IndexFixingStore
 from param.rrf import RateCurve
 from util.enum import ResetConvention
@@ -25,102 +25,6 @@ from util.calendar import (
 )
 from util.enum import PaymentFrequency, StubType
 from util.exceptions import ValidationError
-
-
-@dataclass
-class FloatingCashFlow:
-    """
-    Represents a single cash flow for a floating rate bond.
-
-    Extends the basic CashFlow concept with floating rate specific fields.
-
-    Attributes:
-        payment_date: Date when payment is made
-        accrual_start_date: Start of accrual period
-        accrual_end_date: End of accrual period
-        fixing_date: Date when the rate is fixed
-        notional: Notional amount for this period
-        spread: Spread over the index rate (annual, e.g., 0.01 for 100bp)
-        day_count_fraction: Year fraction for this period
-        index_fixing: Actual fixing if known (None if projected)
-        forward_rate: Projected rate if fixing is unknown
-        is_projected: Whether the rate is projected (vs known fixing)
-        rate_cap: Optional rate cap
-        rate_floor: Optional rate floor
-    """
-
-    payment_date: datetime
-    accrual_start_date: datetime
-    accrual_end_date: datetime
-    fixing_date: datetime
-    notional: float
-    spread: float
-    day_count_fraction: float
-    index_fixing: Optional[float] = None
-    forward_rate: Optional[float] = None
-    is_projected: bool = True
-    rate_cap: Optional[float] = None
-    rate_floor: Optional[float] = None
-
-    @property
-    def effective_rate(self) -> float:
-        """
-        Get the effective coupon rate (index + spread), applying cap/floor.
-
-        Returns:
-            Effective rate for this period
-        """
-        if self.index_fixing is not None:
-            base_rate = self.index_fixing
-        elif self.forward_rate is not None:
-            base_rate = self.forward_rate
-        else:
-            base_rate = 0.0
-
-        total_rate = base_rate + self.spread
-
-        # Apply cap and floor
-        if self.rate_cap is not None:
-            total_rate = min(total_rate, self.rate_cap)
-        if self.rate_floor is not None:
-            total_rate = max(total_rate, self.rate_floor)
-
-        return total_rate
-
-    @property
-    def amount(self) -> float:
-        """
-        Calculate the cash flow amount.
-
-        Returns:
-            Coupon payment amount
-        """
-        return self.notional * self.effective_rate * self.day_count_fraction
-
-    def to_cashflow(self) -> CashFlow:
-        """
-        Convert to standard CashFlow object.
-
-        Returns:
-            CashFlow instance
-        """
-        return CashFlow(
-            payment_date=self.payment_date,
-            accrual_start_date=self.accrual_start_date,
-            accrual_end_date=self.accrual_end_date,
-            notional=self.notional,
-            rate=self.effective_rate,
-            day_count_fraction=self.day_count_fraction,
-            amount=self.amount,
-        )
-
-    def __repr__(self):
-        rate_type = "Fixed" if not self.is_projected else "Projected"
-        return (
-            f"FloatingCashFlow(payment={self.payment_date.date()}, "
-            f"{rate_type}, rate={self.effective_rate:.4%}, "
-            f"amount={self.amount:.2f})"
-        )
 
 
 @dataclass
