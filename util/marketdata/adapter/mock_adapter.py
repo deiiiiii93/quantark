@@ -63,6 +63,15 @@ class MockMarketDataAdapter(BaseMarketDataAdapter):
             'drift': 0.0,
             'vol_of_vol': 0.2,
             'jump_intensity': 0.5,
+        },
+        'fixed_income': {
+            'initial_spot': 100.0,  # Bond price (par)
+            'initial_vol': 0.01,    # Low vol for bonds
+            'initial_rate': 0.04,   # 4% initial rate
+            'initial_div_yield': 0.0,
+            'drift': 0.0,           # Rates mean-revert
+            'vol_of_vol': 0.15,     # Rate volatility
+            'jump_intensity': 0.5,  # Rare rate jumps
         }
     }
     
@@ -105,6 +114,8 @@ class MockMarketDataAdapter(BaseMarketDataAdapter):
             return self.DEFAULT_CONFIGS['fx']
         elif any(x in asset_lower for x in ['oil', 'gold', 'silver', 'commodity']):
             return self.DEFAULT_CONFIGS['commodity']
+        elif any(x in asset_lower for x in ['bond', 'ust', 'treasury', 'fi', 'fixed_income', 'bund', 'gilt']):
+            return self.DEFAULT_CONFIGS['fixed_income']
         else:
             # Default to equity
             return self.DEFAULT_CONFIGS['equity']

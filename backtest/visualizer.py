@@ -627,6 +627,349 @@ class StaticVisualizer:
 
         return fig
 
+    # =========================================================================
+    # Fixed Income Specific Plots
+    # =========================================================================
+
+    def plot_dv01_tracking(
+        self,
+        figsize: Tuple[int, int] = (14, 6),
+        save: bool = False,
+        filename: str = "dv01_tracking.png",
+    ) -> plt.Figure:
+        """
+        Plot DV01 tracking for Fixed Income backtests.
+
+        Shows portfolio DV01 over time with hedge threshold bands.
+
+        Args:
+            figsize: Figure size
+            save: Whether to save the plot
+            filename: Filename if saving
+
+        Returns:
+            Matplotlib figure
+        """
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Try to get DV01 series (FI results)
+        states_df = self.results.states_df
+        dv01_col = None
+        for col in ["risk_dv01", "dv01", "greek_delta"]:
+            if col in states_df.columns:
+                dv01_col = col
+                break
+
+        if dv01_col is None:
+            ax.text(
+                0.5,
+                0.5,
+                "DV01 data not available",
+                ha="center",
+                va="center",
+                fontsize=14,
+            )
+            return fig
+
+        dv01_series = states_df[dv01_col]
+
+        # Plot DV01
+        ax.plot(
+            dv01_series.index,
+            dv01_series.values,
+            linewidth=2,
+            color="steelblue",
+            label="Portfolio DV01",
+        )
+
+        # Add threshold lines if available
+        if hasattr(self.results.config.strategy, "dv01_threshold"):
+            threshold = self.results.config.strategy.dv01_threshold
+            ax.axhline(
+                y=threshold,
+                color="red",
+                linestyle="--",
+                alpha=0.7,
+                label=f"Upper Threshold (${threshold:,.0f})",
+            )
+            ax.axhline(
+                y=-threshold,
+                color="red",
+                linestyle="--",
+                alpha=0.7,
+                label=f"Lower Threshold (-${threshold:,.0f})",
+            )
+            ax.fill_between(
+                dv01_series.index,
+                -threshold,
+                threshold,
+                alpha=0.1,
+                color="green",
+                label="Target Band",
+            )
+
+        # Add target line
+        target = getattr(self.results.config.strategy, "target_dv01", 0.0)
+        ax.axhline(
+            y=target,
+            color="green",
+            linestyle="-",
+            alpha=0.5,
+            label=f"Target DV01 (${target:,.0f})",
+        )
+
+        ax.set_xlabel("Date")
+        ax.set_ylabel("DV01 ($)")
+        ax.set_title(
+            f"DV01 Tracking - {self.results.config.underlying}",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.legend(loc="upper right")
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        if save and self.save_dir:
+            fig.savefig(self.save_dir / filename, dpi=300, bbox_inches="tight")
+
+        return fig
+
+    def plot_duration_convexity(
+        self,
+        figsize: Tuple[int, int] = (14, 8),
+        save: bool = False,
+        filename: str = "duration_convexity.png",
+    ) -> plt.Figure:
+        """
+        Plot duration and convexity evolution for Fixed Income backtests.
+
+        Args:
+            figsize: Figure size
+            save: Whether to save the plot
+            filename: Filename if saving
+
+        Returns:
+            Matplotlib figure
+        """
+        fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+
+        states_df = self.results.states_df
+
+        # Plot Duration
+        duration_col = None
+        for col in ["risk_modified_duration", "modified_duration", "duration"]:
+            if col in states_df.columns:
+                duration_col = col
+                break
+
+        if duration_col:
+            duration_series = states_df[duration_col]
+            axes[0].plot(
+                duration_series.index,
+                duration_series.values,
+                linewidth=2,
+                color="purple",
+                label="Modified Duration",
+            )
+            axes[0].set_ylabel("Modified Duration (years)")
+            axes[0].set_title("Portfolio Duration Over Time", fontweight="bold")
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+        else:
+            axes[0].text(
+                0.5, 0.5, "Duration data not available", ha="center", va="center"
+            )
+
+        # Plot Convexity
+        convexity_col = None
+        for col in ["risk_convexity", "convexity"]:
+            if col in states_df.columns:
+                convexity_col = col
+                break
+
+        if convexity_col:
+            convexity_series = states_df[convexity_col]
+            axes[1].plot(
+                convexity_series.index,
+                convexity_series.values,
+                linewidth=2,
+                color="orange",
+                label="Convexity",
+            )
+            axes[1].set_ylabel("Convexity")
+            axes[1].set_xlabel("Date")
+            axes[1].set_title("Portfolio Convexity Over Time", fontweight="bold")
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+        else:
+            axes[1].text(
+                0.5, 0.5, "Convexity data not available", ha="center", va="center"
+            )
+
+        fig.suptitle(
+            f"Fixed Income Risk Measures - {self.results.config.underlying}",
+            fontsize=14,
+            fontweight="bold",
+        )
+
+        plt.tight_layout()
+
+        if save and self.save_dir:
+            fig.savefig(self.save_dir / filename, dpi=300, bbox_inches="tight")
+
+        return fig
+
+    def plot_fi_summary_dashboard(
+        self,
+        figsize: Tuple[int, int] = (16, 12),
+        save: bool = False,
+        filename: str = "fi_summary_dashboard.png",
+    ) -> plt.Figure:
+        """
+        Create a comprehensive FI backtest dashboard.
+
+        Args:
+            figsize: Figure size
+            save: Whether to save the plot
+            filename: Filename if saving
+
+        Returns:
+            Matplotlib figure
+        """
+        fig = plt.figure(figsize=figsize)
+        gs = fig.add_gridspec(3, 2, hspace=0.3, wspace=0.2)
+
+        states_df = self.results.states_df
+
+        # 1. P&L over time
+        ax1 = fig.add_subplot(gs[0, 0])
+        pnl_series = self.results.get_pnl_series()
+        ax1.plot(pnl_series.index, pnl_series.values, linewidth=2, color="steelblue")
+        ax1.axhline(y=0, color="black", linestyle="--", alpha=0.3)
+        ax1.fill_between(
+            pnl_series.index,
+            0,
+            pnl_series.values,
+            where=(pnl_series.values >= 0),
+            alpha=0.3,
+            color="green",
+        )
+        ax1.fill_between(
+            pnl_series.index,
+            0,
+            pnl_series.values,
+            where=(pnl_series.values < 0),
+            alpha=0.3,
+            color="red",
+        )
+        ax1.set_ylabel("P&L ($)")
+        ax1.set_title("P&L Over Time", fontweight="bold")
+        ax1.grid(True, alpha=0.3)
+
+        # 2. DV01 tracking
+        ax2 = fig.add_subplot(gs[0, 1])
+        dv01_col = None
+        for col in ["risk_dv01", "dv01"]:
+            if col in states_df.columns:
+                dv01_col = col
+                break
+        if dv01_col:
+            dv01_series = states_df[dv01_col]
+            ax2.plot(
+                dv01_series.index, dv01_series.values, linewidth=2, color="crimson"
+            )
+            ax2.axhline(y=0, color="green", linestyle="-", alpha=0.5)
+            ax2.set_ylabel("DV01 ($)")
+            ax2.set_title("DV01 Tracking", fontweight="bold")
+            ax2.grid(True, alpha=0.3)
+
+        # 3. Portfolio Value
+        ax3 = fig.add_subplot(gs[1, 0])
+        value_series = self.results.get_value_series()
+        ax3.plot(
+            value_series.index, value_series.values, linewidth=2, color="darkgreen"
+        )
+        ax3.set_ylabel("Portfolio Value ($)")
+        ax3.set_title("Portfolio Value", fontweight="bold")
+        ax3.grid(True, alpha=0.3)
+
+        # 4. Drawdown
+        ax4 = fig.add_subplot(gs[1, 1])
+        cumulative_max = value_series.expanding().max()
+        drawdown = (value_series - cumulative_max) / cumulative_max * 100
+        ax4.fill_between(drawdown.index, 0, drawdown.values, alpha=0.5, color="red")
+        ax4.set_ylabel("Drawdown (%)")
+        ax4.set_title("Drawdown", fontweight="bold")
+        ax4.grid(True, alpha=0.3)
+
+        # 5. Hedge Activity
+        ax5 = fig.add_subplot(gs[2, 0])
+        trades_df = self.results.trades_df
+        if len(trades_df) > 0 and "quantity" in trades_df.columns:
+            quantities = trades_df["quantity"].abs()
+            ax5.bar(
+                range(len(quantities)), quantities.values, color="steelblue", alpha=0.7
+            )
+            ax5.set_xlabel("Trade Number")
+            ax5.set_ylabel("Contracts")
+            ax5.set_title("Hedge Trade Sizes", fontweight="bold")
+            ax5.grid(True, alpha=0.3)
+        else:
+            ax5.text(0.5, 0.5, "No hedge trades", ha="center", va="center")
+
+        # 6. Key Metrics Table
+        ax6 = fig.add_subplot(gs[2, 1])
+        ax6.axis("off")
+
+        # Get metrics - handle both equity and FI results
+        metrics_data = [
+            ["Total Return", f"{self.results.get_total_return():.2%}"],
+            ["Total P&L", f"${self.results.get_total_pnl():,.0f}"],
+            ["Num Hedges", f"{self.results.num_hedges}"],
+            ["Transaction Costs", f"${self.results.total_transaction_costs:,.0f}"],
+        ]
+
+        # Add FI-specific metrics if available
+        if hasattr(self.results, "metrics"):
+            try:
+                metrics_data.append(
+                    ["Sharpe Ratio", f"{self.results.metrics.sharpe_ratio():.2f}"]
+                )
+                metrics_data.append(
+                    ["Max Drawdown", f"{self.results.metrics.max_drawdown():.2%}"]
+                )
+                if hasattr(self.results.metrics, "dv01_tracking_error"):
+                    metrics_data.append(
+                        [
+                            "DV01 Track Error",
+                            f"${self.results.metrics.dv01_tracking_error():,.0f}",
+                        ]
+                    )
+            except Exception:
+                pass
+
+        table = ax6.table(
+            cellText=metrics_data,
+            cellLoc="left",
+            bbox=[0, 0, 1, 1],
+            colWidths=[0.6, 0.4],
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        ax6.set_title("Key Metrics", fontweight="bold", pad=20)
+
+        fig.suptitle(
+            f"Fixed Income Backtest Summary - {self.results.config.underlying}",
+            fontsize=16,
+            fontweight="bold",
+        )
+
+        if save and self.save_dir:
+            fig.savefig(self.save_dir / filename, dpi=300, bbox_inches="tight")
+
+        return fig
+
     def generate_all_plots(self, save: bool = True) -> Dict[str, plt.Figure]:
         """
         Generate all available plots.
@@ -647,6 +990,28 @@ class StaticVisualizer:
         plots["drawdown"] = self.plot_drawdown(save=save)
         plots["returns"] = self.plot_returns_distribution(save=save)
         plots["dashboard"] = self.create_summary_dashboard(save=save)
+
+        return plots
+
+    def generate_fi_plots(self, save: bool = True) -> Dict[str, plt.Figure]:
+        """
+        Generate Fixed Income specific plots.
+
+        Args:
+            save: Whether to save all plots
+
+        Returns:
+            Dictionary of plot name to figure
+        """
+        plots = {}
+
+        plots["pnl"] = self.plot_pnl_over_time(save=save)
+        plots["value"] = self.plot_portfolio_value(save=save)
+        plots["dv01_tracking"] = self.plot_dv01_tracking(save=save)
+        plots["duration_convexity"] = self.plot_duration_convexity(save=save)
+        plots["hedge_frequency"] = self.plot_hedge_frequency(save=save)
+        plots["drawdown"] = self.plot_drawdown(save=save)
+        plots["fi_dashboard"] = self.plot_fi_summary_dashboard(save=save)
 
         return plots
 

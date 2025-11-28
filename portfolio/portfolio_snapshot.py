@@ -4,7 +4,7 @@ Portfolio snapshot for recording portfolio state at a specific point in time.
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-from .portfolio import Portfolio
+from .equity.portfolio import Portfolio
 from asset.equity.riskmeasures import GreeksCalculator
 from util.exceptions import ValidationError
 

@@ -1,26 +1,25 @@
 """
-Portfolio class for managing multiple positions.
+Fixed Income portfolio class for managing bond and bond derivative positions.
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
-from .position import Position
+
+from .position import FIPosition
+from asset.bond.product.base_bond_product import BaseBondProduct
 from priceenv import PricingEnvironment
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.riskmeasures import GreeksCalculator
 from util.exceptions import ValidationError
 
 
 @dataclass
-class Portfolio:
+class FIPortfolio:
     """
-    Portfolio container for managing multiple positions.
+    Portfolio container for managing Fixed Income positions.
     
-    A portfolio tracks positions across multiple underlyings, each with its
-    own pricing environment. It provides position management, valuation,
-    and risk aggregation capabilities.
+    A portfolio tracks bond positions across multiple issuers/underlyings,
+    each with its own pricing environment. Provides FI-specific risk
+    aggregation (DV01, duration, convexity).
     
     Attributes:
         portfolio_name: Name identifier for the portfolio
@@ -31,7 +30,7 @@ class Portfolio:
     portfolio_name: str
     pricing_environments: Dict[str, PricingEnvironment]
     creation_date: datetime = field(default_factory=datetime.now)
-    positions: Dict[str, Position] = field(default_factory=dict)
+    positions: Dict[str, FIPosition] = field(default_factory=dict)
     
     def __post_init__(self):
         """Validate portfolio parameters."""
@@ -42,26 +41,28 @@ class Portfolio:
     
     def add_position(
         self,
-        product: BaseEquityProduct,
+        product: BaseBondProduct,
         quantity: float,
         entry_price: float,
         underlying: str,
-        engine: BaseEngine,
-        entry_timestamp: Optional[datetime] = None
-    ) -> Position:
+        engine: Any,
+        entry_timestamp: Optional[datetime] = None,
+        notional_per_unit: float = 100.0
+    ) -> FIPosition:
         """
-        Add a new position to the portfolio.
+        Add a new Fixed Income position to the portfolio.
         
         Args:
-            product: The derivative product
-            quantity: Number of contracts (positive=long, negative=short)
-            entry_price: Entry price for the position
-            underlying: Underlying asset identifier
+            product: The bond product
+            quantity: Number of bonds/contracts (positive=long, negative=short)
+            entry_price: Entry clean price for the position
+            underlying: Underlying identifier (issuer or bond identifier)
             engine: Pricing engine for this position
             entry_timestamp: Entry time (defaults to now)
+            notional_per_unit: Notional per unit (default: 100)
             
         Returns:
-            The created Position object
+            The created FIPosition object
             
         Raises:
             ValidationError: If underlying not in pricing_environments
@@ -75,19 +76,20 @@ class Portfolio:
         if entry_timestamp is None:
             entry_timestamp = datetime.now()
         
-        position = Position(
+        position = FIPosition(
             product=product,
             quantity=quantity,
             entry_price=entry_price,
             underlying=underlying,
             engine=engine,
-            entry_timestamp=entry_timestamp
+            entry_timestamp=entry_timestamp,
+            notional_per_unit=notional_per_unit
         )
         
         self.positions[position.position_id] = position
         return position
     
-    def remove_position(self, position_id: str) -> Optional[Position]:
+    def remove_position(self, position_id: str) -> Optional[FIPosition]:
         """
         Remove a position from the portfolio.
         
@@ -95,7 +97,7 @@ class Portfolio:
             position_id: ID of the position to remove
             
         Returns:
-            The removed Position object, or None if not found
+            The removed FIPosition object, or None if not found
         """
         return self.positions.pop(position_id, None)
     
@@ -104,7 +106,7 @@ class Portfolio:
         position_id: str,
         quantity: Optional[float] = None,
         entry_price: Optional[float] = None
-    ) -> Position:
+    ) -> FIPosition:
         """
         Update an existing position.
         
@@ -114,7 +116,7 @@ class Portfolio:
             entry_price: New entry price (optional)
             
         Returns:
-            The updated Position object
+            The updated FIPosition object
             
         Raises:
             KeyError: If position_id not found
@@ -137,7 +139,7 @@ class Portfolio:
         
         return position
     
-    def get_position(self, position_id: str) -> Optional[Position]:
+    def get_position(self, position_id: str) -> Optional[FIPosition]:
         """
         Get a position by ID.
         
@@ -145,16 +147,16 @@ class Portfolio:
             position_id: Position identifier
             
         Returns:
-            Position object or None if not found
+            FIPosition object or None if not found
         """
         return self.positions.get(position_id)
     
-    def get_positions_by_underlying(self, underlying: str) -> List[Position]:
+    def get_positions_by_underlying(self, underlying: str) -> List[FIPosition]:
         """
         Get all positions for a specific underlying.
         
         Args:
-            underlying: Underlying asset identifier
+            underlying: Underlying identifier
             
         Returns:
             List of positions for the underlying
@@ -168,11 +170,8 @@ class Portfolio:
         """
         Calculate total portfolio market value.
         
-        Sums market values across all positions using their respective
-        pricing environments and engines.
-        
         Args:
-            as_of_date: Valuation date (currently not used, for future enhancement)
+            as_of_date: Valuation date (currently not used)
             
         Returns:
             Total portfolio market value
@@ -189,8 +188,6 @@ class Portfolio:
         """
         Calculate total portfolio unrealized P&L.
         
-        Sums P&L across all positions.
-        
         Returns:
             Total unrealized profit/loss
         """
@@ -202,70 +199,115 @@ class Portfolio:
         
         return total_pnl
     
-    def get_portfolio_greeks(
-        self,
-        greeks_calculator: GreeksCalculator,
-        use_analytical: bool = True
-    ) -> Dict[str, float]:
+    def get_portfolio_dv01(self) -> float:
         """
-        Calculate aggregated Greeks across all positions.
+        Calculate total portfolio DV01.
         
-        Each position uses its own engine for pricing and Greeks calculation.
-        
-        Args:
-            greeks_calculator: Greeks calculator instance
-            use_analytical: Whether to use analytical Greeks when possible
-            
         Returns:
-            Dictionary of aggregated Greeks
+            Total portfolio DV01
         """
-        aggregated = {
-            'market_value': 0.0,
-            'delta': 0.0,
-            'gamma': 0.0,
-            'vega': 0.0,
-            'theta': 0.0,
-            'rho': 0.0
-        }
+        total_dv01 = 0.0
         
         for position in self.positions.values():
             pricing_env = self.pricing_environments[position.underlying]
-            position_greeks = position.get_greeks(
-                pricing_env,
-                greeks_calculator,
-                use_analytical
-            )
-            
-            for key in aggregated:
-                if key in position_greeks:
-                    aggregated[key] += position_greeks[key]
+            total_dv01 += position.get_dv01(pricing_env)
         
-        return aggregated
+        return total_dv01
     
-    def get_greeks_by_underlying(
-        self,
-        underlying: str,
-        greeks_calculator: GreeksCalculator,
-        use_analytical: bool = True
-    ) -> Dict[str, float]:
+    def get_portfolio_convexity(self) -> float:
         """
-        Calculate aggregated Greeks for a specific underlying.
+        Calculate total portfolio convexity.
+        
+        Returns:
+            Total portfolio convexity
+        """
+        total_convexity = 0.0
+        
+        for position in self.positions.values():
+            pricing_env = self.pricing_environments[position.underlying]
+            total_convexity += position.get_convexity(pricing_env)
+        
+        return total_convexity
+    
+    def get_portfolio_duration(self) -> float:
+        """
+        Calculate portfolio weighted-average modified duration.
+        
+        Returns:
+            Portfolio modified duration (market-value weighted)
+        """
+        total_value = self.get_portfolio_value()
+        if total_value == 0:
+            return 0.0
+        
+        weighted_duration = 0.0
+        
+        for position in self.positions.values():
+            pricing_env = self.pricing_environments[position.underlying]
+            mv = position.get_market_value(pricing_env)
+            duration = position.get_modified_duration(pricing_env)
+            weighted_duration += mv * duration
+        
+        return weighted_duration / total_value
+    
+    def get_portfolio_risk_measures(self, **kwargs) -> Dict[str, float]:
+        """
+        Calculate aggregated risk measures across all positions.
+        
+        Returns FI-specific measures: dv01, convexity, modified_duration.
         
         Args:
-            underlying: Underlying asset identifier
-            greeks_calculator: Greeks calculator instance
-            use_analytical: Whether to use analytical Greeks when possible
+            **kwargs: Additional parameters
             
         Returns:
-            Dictionary of aggregated Greeks for the underlying
+            Dictionary of aggregated risk measures
         """
         aggregated = {
             'market_value': 0.0,
-            'delta': 0.0,
-            'gamma': 0.0,
-            'vega': 0.0,
-            'theta': 0.0,
-            'rho': 0.0
+            'dv01': 0.0,
+            'convexity': 0.0,
+            'modified_duration': 0.0,
+        }
+        
+        total_value = 0.0
+        weighted_duration = 0.0
+        
+        for position in self.positions.values():
+            pricing_env = self.pricing_environments[position.underlying]
+            risk_measures = position.get_risk_measures(pricing_env)
+            
+            mv = risk_measures.get('market_value', 0.0)
+            total_value += mv
+            weighted_duration += mv * risk_measures.get('modified_duration', 0.0)
+            
+            aggregated['dv01'] += risk_measures.get('dv01', 0.0)
+            aggregated['convexity'] += risk_measures.get('convexity', 0.0)
+        
+        aggregated['market_value'] = total_value
+        
+        if total_value > 0:
+            aggregated['modified_duration'] = weighted_duration / total_value
+        
+        return aggregated
+    
+    def get_risk_by_underlying(
+        self,
+        underlying: str
+    ) -> Dict[str, float]:
+        """
+        Calculate aggregated risk measures for a specific underlying.
+        
+        Args:
+            underlying: Underlying identifier
+            
+        Returns:
+            Dictionary of aggregated risk measures for the underlying
+        """
+        aggregated = {
+            'market_value': 0.0,
+            'dv01': 0.0,
+            'convexity': 0.0,
+            'modified_duration': 0.0,
         }
         
         positions = self.get_positions_by_underlying(underlying)
@@ -274,16 +316,23 @@ class Portfolio:
         if pricing_env is None:
             return aggregated
         
+        total_value = 0.0
+        weighted_duration = 0.0
+        
         for position in positions:
-            position_greeks = position.get_greeks(
-                pricing_env,
-                greeks_calculator,
-                use_analytical
-            )
+            risk_measures = position.get_risk_measures(pricing_env)
             
-            for key in aggregated:
-                if key in position_greeks:
-                    aggregated[key] += position_greeks[key]
+            mv = risk_measures.get('market_value', 0.0)
+            total_value += mv
+            weighted_duration += mv * risk_measures.get('modified_duration', 0.0)
+            
+            aggregated['dv01'] += risk_measures.get('dv01', 0.0)
+            aggregated['convexity'] += risk_measures.get('convexity', 0.0)
+        
+        aggregated['market_value'] = total_value
+        
+        if total_value > 0:
+            aggregated['modified_duration'] = weighted_duration / total_value
         
         return aggregated
     
@@ -303,8 +352,11 @@ class Portfolio:
             
             row = position.to_dict()
             row['current_price'] = position.get_current_price(pricing_env)
+            row['dirty_price'] = position.get_dirty_price(pricing_env)
             row['market_value'] = position.get_market_value(pricing_env)
             row['pnl'] = position.get_pnl(pricing_env)
+            row['dv01'] = position.get_dv01(pricing_env)
+            row['modified_duration'] = position.get_modified_duration(pricing_env)
             
             rows.append(row)
         
@@ -325,12 +377,17 @@ class Portfolio:
                 'num_underlyings': len(self.pricing_environments),
                 'total_value': 0.0,
                 'total_pnl': 0.0,
+                'total_dv01': 0.0,
+                'portfolio_duration': 0.0,
                 'long_positions': 0,
                 'short_positions': 0,
+                'asset_class': 'fixed_income',
             }
         
         total_value = self.get_portfolio_value()
         total_pnl = self.get_portfolio_pnl()
+        total_dv01 = self.get_portfolio_dv01()
+        portfolio_duration = self.get_portfolio_duration()
         
         long_positions = sum(1 for pos in self.positions.values() if pos.is_long())
         short_positions = sum(1 for pos in self.positions.values() if pos.is_short())
@@ -346,9 +403,12 @@ class Portfolio:
             'underlyings': sorted(underlyings_used),
             'total_value': total_value,
             'total_pnl': total_pnl,
+            'total_dv01': total_dv01,
+            'portfolio_duration': portfolio_duration,
             'long_positions': long_positions,
             'short_positions': short_positions,
-            'pnl_percentage': (total_pnl / (total_value - total_pnl) * 100) if (total_value - total_pnl) != 0 else 0.0
+            'pnl_percentage': (total_pnl / (total_value - total_pnl) * 100) if (total_value - total_pnl) != 0 else 0.0,
+            'asset_class': 'fixed_income',
         }
     
     def __len__(self):
@@ -357,7 +417,7 @@ class Portfolio:
     
     def __repr__(self):
         return (
-            f"Portfolio(name={self.portfolio_name}, "
+            f"FIPortfolio(name={self.portfolio_name}, "
             f"positions={len(self.positions)}, "
             f"underlyings={len(self.pricing_environments)})"
         )

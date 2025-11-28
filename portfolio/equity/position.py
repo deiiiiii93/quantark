@@ -1,5 +1,5 @@
 """
-Position class for tracking individual positions in a portfolio.
+Equity position class for tracking individual equity derivative positions.
 """
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
@@ -13,9 +13,9 @@ from util.exceptions import ValidationError
 
 
 @dataclass
-class Position:
+class EquityPosition:
     """
-    Represents a single position in a portfolio.
+    Represents a single equity derivative position in a portfolio.
     
     A position tracks a product (e.g., option) with quantity, entry details,
     and its own pricing engine.
@@ -154,6 +154,29 @@ class Position:
         
         return scaled_greeks
     
+    def get_risk_measures(
+        self,
+        pricing_env: PricingEnvironment,
+        greeks_calculator: Optional[GreeksCalculator] = None,
+        use_analytical: bool = True
+    ) -> Dict[str, float]:
+        """
+        Calculate risk measures for this position.
+        
+        For equity positions, this returns Greeks (delta, gamma, vega, theta, rho).
+        
+        Args:
+            pricing_env: Pricing environment for the underlying
+            greeks_calculator: Greeks calculator instance (optional)
+            use_analytical: If True, use analytical Greeks when possible
+            
+        Returns:
+            Dictionary of risk measures
+        """
+        if greeks_calculator is None:
+            greeks_calculator = GreeksCalculator()
+        return self.get_greeks(pricing_env, greeks_calculator, use_analytical)
+    
     def is_long(self) -> bool:
         """Check if position is long."""
         return self.quantity > 0
@@ -179,13 +202,18 @@ class Position:
             'entry_timestamp': self.entry_timestamp.isoformat(),
             'engine_type': self.engine.__class__.__name__,
             'direction': 'LONG' if self.is_long() else 'SHORT',
+            'asset_class': 'equity',
         }
     
     def __repr__(self):
         direction = "LONG" if self.is_long() else "SHORT"
         return (
-            f"Position(id={self.position_id[:8]}..., "
+            f"EquityPosition(id={self.position_id[:8]}..., "
             f"{direction} {abs(self.quantity)} x {self.product.__class__.__name__}, "
             f"entry=${self.entry_price:.2f}, underlying={self.underlying})"
         )
+
+
+# Backward compatibility alias
+Position = EquityPosition
 

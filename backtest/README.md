@@ -1,14 +1,21 @@
 # QuantArk Backtest Module
 
-A comprehensive backtesting framework for delta-neutral hedging strategies with advanced features including transaction cost modeling, comprehensive logging, and rich visualizations.
+A comprehensive backtesting framework for hedging strategies across multiple asset classes, with advanced features including transaction cost modeling, comprehensive logging, and rich visualizations.
 
 ## Overview
 
 The backtest module allows you to simulate hedging strategies over historical or synthetic market data, providing detailed analytics on strategy performance, hedging effectiveness, and risk metrics.
 
+### Supported Asset Classes
+
+- **Equity**: Delta-neutral hedging with spot/futures instruments
+- **Fixed Income**: DV01/convexity-neutral hedging with bond futures
+
 ### Key Features
 
-- **Delta-Neutral Strategy**: Automated delta hedging with configurable parameters
+- **Multi-Asset Support**: Equity derivatives and Fixed Income bonds
+- **Delta-Neutral Strategy** (Equity): Automated delta hedging with configurable parameters
+- **DV01-Neutral Strategy** (FI): Automated DV01 hedging with bond futures
 - **Transaction Cost Modeling**: Multiple cost models (fixed, proportional, slippage, bid-ask spread)
 - **Comprehensive Logging**: Multi-level logging for trades, state, events, and performance
 - **Rich Visualizations**: Both static (matplotlib) and interactive (plotly) visualizations
@@ -18,24 +25,35 @@ The backtest module allows you to simulate hedging strategies over historical or
 
 ## Architecture
 
-The module follows a modular design with the following components:
+The module follows a modular design with asset-specific implementations:
 
 ```
 backtest/
-├── engine.py                   # Main backtest orchestrator
-├── config.py                   # Configuration management
-├── state.py                    # State tracking and history
-├── hedge_executor.py           # Hedge execution logic
-├── transaction_costs.py        # Cost modeling
-├── logger.py                   # Logging infrastructure
-├── results.py                  # Results container
-├── metrics.py                  # Performance metrics
-├── visualizer.py               # Static visualizations
-├── dashboard.py                # Interactive dashboard
-├── report_generator.py         # Report generation
-└── strategy/
-    ├── base_strategy.py        # Abstract strategy base
-    └── delta_neutral_strategy.py  # Delta-neutral implementation
+├── base.py                     # Base protocols for all backtests
+├── transaction_costs.py        # Cost modeling (shared)
+├── logger.py                   # Logging infrastructure (shared)
+├── visualizer.py               # Static visualizations (shared)
+├── dashboard.py                # Interactive dashboard (shared)
+├── report_generator.py         # Report generation (shared)
+├── strategy/
+│   ├── base_strategy.py        # Abstract strategy base
+│   ├── delta_neutral_strategy.py  # Equity: Delta-neutral
+│   ├── dv01_neutral_strategy.py   # FI: DV01-neutral
+│   └── convexity_neutral_strategy.py  # FI: Convexity-neutral
+├── equity/                     # Equity-specific implementation
+│   ├── engine.py              # Equity backtest engine
+│   ├── config.py              # Equity configuration
+│   ├── state.py               # Equity state tracking
+│   ├── hedge_executor.py      # Spot/futures hedging
+│   ├── results.py             # Equity results
+│   └── metrics.py             # Equity metrics
+└── fi/                        # Fixed Income implementation
+    ├── engine.py              # FI backtest engine
+    ├── config.py              # FI configuration
+    ├── state.py               # FI state tracking (DV01, convexity)
+    ├── hedge_executor.py      # Bond futures hedging
+    ├── results.py             # FI results
+    └── metrics.py             # FI metrics (DV01 tracking)
 ```
 
 ## Quick Start
@@ -369,15 +387,76 @@ adapter.set_asset_config(
 
 See the `backtest/examples/` directory for complete examples:
 
-- `basic_delta_hedge.py`: Simple delta-neutral hedging
+### Equity Examples
+- `basic_delta_hedge.py`: Simple delta-neutral hedging for equity derivatives
 - `advanced_backtest.py`: Advanced features with transaction costs
+
+### Fixed Income Examples
+- `fi_dv01_hedge.py`: DV01-neutral hedging for bond portfolios with bond futures
 
 Run examples:
 
 ```bash
+# Equity backtest
 python backtest/examples/basic_delta_hedge.py
 python backtest/examples/advanced_backtest.py
+
+# Fixed Income backtest
+python backtest/examples/fi_dv01_hedge.py
 ```
+
+## Fixed Income Backtest
+
+### DV01-Neutral Strategy
+
+The `DV01NeutralStrategy` monitors portfolio DV01 and hedges using bond futures:
+
+```python
+from backtest.fi import FIBacktestEngine, FIBacktestConfig
+from backtest.strategy import DV01NeutralStrategy
+from portfolio.fi import FIPosition
+
+# Configure DV01-neutral strategy
+strategy = DV01NeutralStrategy(
+    name="DV01_Neutral",
+    dv01_threshold=50000.0,   # Hedge when |DV01| > $50,000
+    rebalance_frequency='daily',
+    hedge_instrument='bond_futures',
+    hedge_ratio=1.0,
+    target_dv01=0.0,
+    futures_dv01=1000.0,      # $1,000 DV01 per futures contract
+)
+
+# Configure FI backtest
+config = FIBacktestConfig(
+    strategy=strategy,
+    start_date=start_date,
+    end_date=end_date,
+    underlying="UST_10Y",
+    initial_positions=[bond_position],
+    market_data_adapter=adapter,
+    transaction_cost_model=cost_model,
+)
+
+# Run FI backtest
+engine = FIBacktestEngine(config)
+results = engine.run()
+
+# Access FI-specific metrics
+dv01_series = results.get_dv01_series()
+duration_series = results.get_duration_series()
+print(f"DV01 Tracking Error: ${results.metrics.dv01_tracking_error():,.0f}")
+```
+
+### FI Metrics
+
+FI-specific metrics include:
+
+- `dv01_tracking_error()`: RMSE of DV01 vs target
+- `average_absolute_dv01()`: Mean absolute DV01 exposure
+- `max_dv01_exposure()`: Maximum absolute DV01
+- `dv01_hedge_effectiveness()`: Hedge effectiveness ratio (0-1)
+- `average_duration()`: Portfolio weighted-average duration
 
 ## Testing
 

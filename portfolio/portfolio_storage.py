@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import json
-from .portfolio import Portfolio
+from .equity.portfolio import Portfolio
 from .portfolio_snapshot import PortfolioSnapshot
 from asset.equity.riskmeasures import GreeksCalculator
 from util.exceptions import ValidationError
