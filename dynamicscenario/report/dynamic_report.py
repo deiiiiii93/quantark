@@ -10,11 +10,17 @@ from io import BytesIO
 
 from dynamicscenario.results.dynamic_results import DynamicScenarioResults
 
+# Type hint for FI results
+try:
+    from dynamicscenario.fi.results import FIDynamicScenarioResults
+except ImportError:
+    FIDynamicScenarioResults = None
+
 
 class DynamicReportGenerator:
     """
     Generates comprehensive HTML reports for dynamic scenario results.
-    
+
     Creates a standalone HTML file with:
     - Executive summary
     - Day-by-day evolution table
@@ -22,26 +28,26 @@ class DynamicReportGenerator:
     - Greeks evolution chart
     - Position changes
     - Market path visualization
-    
+
     Example:
         >>> generator = DynamicReportGenerator()
         >>> generator.generate_report(results, "output/report.html")
     """
-    
+
     def __init__(self):
         """Initialize report generator."""
         pass
-    
+
     def generate_report(
         self,
         results: DynamicScenarioResults,
         output_path: Union[str, Path],
         title: Optional[str] = None,
-        include_charts: bool = True
+        include_charts: bool = True,
     ) -> None:
         """
         Generate comprehensive HTML report.
-        
+
         Args:
             results: Dynamic scenario results
             output_path: Path for output HTML file
@@ -50,27 +56,24 @@ class DynamicReportGenerator:
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         if title is None:
             title = f"Dynamic Scenario Report - {results.path_name}"
-        
+
         # Generate HTML content
         html = self._generate_html(results, title, include_charts)
-        
+
         # Write to file
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             f.write(html)
-        
+
         print(f"Generated HTML report: {output_path}")
-    
+
     def _generate_html(
-        self,
-        results: DynamicScenarioResults,
-        title: str,
-        include_charts: bool
+        self, results: DynamicScenarioResults, title: str, include_charts: bool
     ) -> str:
         """Generate complete HTML content."""
-        
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -103,9 +106,9 @@ class DynamicReportGenerator:
     {self._generate_chart_scripts(results) if include_charts else ''}
 </body>
 </html>"""
-        
+
         return html
-    
+
     def _get_css(self) -> str:
         """Get CSS styles for report."""
         return """
@@ -319,12 +322,12 @@ class DynamicReportGenerator:
             font-size: 0.9em;
         }
         """
-    
+
     def _generate_executive_summary(self, results: DynamicScenarioResults) -> str:
         """Generate executive summary section."""
-        pnl_class = 'positive' if results.total_pnl >= 0 else 'negative'
-        net_pnl_class = 'positive' if results.net_pnl >= 0 else 'negative'
-        
+        pnl_class = "positive" if results.total_pnl >= 0 else "negative"
+        net_pnl_class = "positive" if results.net_pnl >= 0 else "negative"
+
         html = f"""
         <section class="executive-summary">
             <h2>Executive Summary</h2>
@@ -359,13 +362,13 @@ class DynamicReportGenerator:
         </section>
         """
         return html
-    
+
     def _generate_performance_metrics(self, results: DynamicScenarioResults) -> str:
         """Generate performance metrics section."""
         best = results.get_best_day()
         worst = results.get_worst_day()
         dd_amt, dd_pct, peak_day, trough_day = results.get_max_drawdown()
-        
+
         html = f"""
         <section class="performance-metrics">
             <h2>Performance Metrics</h2>
@@ -394,7 +397,7 @@ class DynamicReportGenerator:
         </section>
         """
         return html
-    
+
     def _generate_charts_section(self, results: DynamicScenarioResults) -> str:
         """Generate charts section with placeholders for Chart.js."""
         html = """
@@ -425,7 +428,7 @@ class DynamicReportGenerator:
         </section>
         """
         return html
-    
+
     def _generate_day_by_day_table(self, results: DynamicScenarioResults) -> str:
         """Generate day-by-day results table."""
         html = """
@@ -449,13 +452,13 @@ class DynamicReportGenerator:
                 </thead>
                 <tbody>
         """
-        
+
         for day in results.day_results:
-            pnl_class = 'positive' if day.daily_pnl >= 0 else 'negative'
-            cum_pnl_class = 'positive' if day.cumulative_pnl >= 0 else 'negative'
-            date_str = day.date.strftime('%Y-%m-%d') if day.date else '-'
-            label = day.label or '-'
-            
+            pnl_class = "positive" if day.daily_pnl >= 0 else "negative"
+            cum_pnl_class = "positive" if day.cumulative_pnl >= 0 else "negative"
+            date_str = day.date.strftime("%Y-%m-%d") if day.date else "-"
+            label = day.label or "-"
+
             html += f"""
                     <tr>
                         <td><strong>{day.day_index}</strong></td>
@@ -470,7 +473,7 @@ class DynamicReportGenerator:
                         <td>{day.num_trades}</td>
                     </tr>
             """
-        
+
         html += """
                 </tbody>
             </table>
@@ -478,14 +481,14 @@ class DynamicReportGenerator:
         </section>
         """
         return html
-    
+
     def _generate_trades_section(self, results: DynamicScenarioResults) -> str:
         """Generate trades section."""
         all_trades = []
         for day in results.day_results:
             for trade in day.trades:
                 all_trades.append((day.day_index, day.date, trade))
-        
+
         if not all_trades:
             return """
             <section class="trades-section">
@@ -493,7 +496,7 @@ class DynamicReportGenerator:
                 <div class="no-trades">No trades executed during this scenario</div>
             </section>
             """
-        
+
         html = """
         <section class="trades-section">
             <h2>Trade History</h2>
@@ -513,9 +516,9 @@ class DynamicReportGenerator:
                 </thead>
                 <tbody>
         """
-        
+
         for day_idx, date, trade in all_trades:
-            date_str = date.strftime('%Y-%m-%d') if date else '-'
+            date_str = date.strftime("%Y-%m-%d") if date else "-"
             html += f"""
                     <tr>
                         <td>{day_idx}</td>
@@ -529,14 +532,14 @@ class DynamicReportGenerator:
                         <td>{trade.reason}</td>
                     </tr>
             """
-        
+
         html += """
                 </tbody>
             </table>
         </section>
         """
         return html
-    
+
     def _generate_chart_scripts(self, results: DynamicScenarioResults) -> str:
         """Generate Chart.js scripts for charts."""
         # Prepare data
@@ -544,14 +547,16 @@ class DynamicReportGenerator:
         portfolio_values = [d.portfolio_value for d in results.day_results]
         daily_pnl = [d.daily_pnl for d in results.day_results]
         cumulative_pnl = [d.cumulative_pnl for d in results.day_results]
-        transaction_costs = [d.cumulative_transaction_costs for d in results.day_results]
+        transaction_costs = [
+            d.cumulative_transaction_costs for d in results.day_results
+        ]
         net_pnl = [d.net_pnl for d in results.day_results]
-        
+
         # Greeks
         deltas = [d.delta for d in results.day_results]
         gammas = [d.gamma * 1000 for d in results.day_results]  # Scale for visibility
         vegas = [d.vega for d in results.day_results]
-        
+
         # Market data (first underlying)
         spots = []
         vols = []
@@ -564,7 +569,7 @@ class DynamicReportGenerator:
             else:
                 spots.append(0)
                 vols.append(0)
-        
+
         script = f"""
 <script>
     // P&L Chart
@@ -715,3 +720,456 @@ class DynamicReportGenerator:
 """
         return script
 
+    # =========================================================================
+    # FI-SPECIFIC REPORT GENERATION
+    # =========================================================================
+
+    def generate_fi_report(
+        self,
+        results: "FIDynamicScenarioResults",
+        output_path: Union[str, Path],
+        title: Optional[str] = None,
+        include_charts: bool = True,
+    ) -> None:
+        """
+        Generate comprehensive HTML report for FI dynamic scenario.
+
+        Args:
+            results: FI Dynamic scenario results
+            output_path: Path for output HTML file
+            title: Optional custom title
+            include_charts: Whether to include embedded charts
+        """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if title is None:
+            title = f"FI Dynamic Scenario Report - {results.path_name}"
+
+        # Generate HTML content
+        html = self._generate_fi_html(results, title, include_charts)
+
+        # Write to file
+        with open(output_path, "w") as f:
+            f.write(html)
+
+        print(f"Generated FI HTML report: {output_path}")
+
+    def _generate_fi_html(
+        self, results: "FIDynamicScenarioResults", title: str, include_charts: bool
+    ) -> str:
+        """Generate complete FI HTML content."""
+
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        {self._get_css()}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>{title}</h1>
+            <p class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        </header>
+        
+        {self._generate_fi_executive_summary(results)}
+        {self._generate_fi_risk_metrics(results)}
+        {self._generate_fi_charts_section(results) if include_charts else ''}
+        {self._generate_fi_day_by_day_table(results)}
+        {self._generate_fi_trades_section(results)}
+        
+        <footer>
+            <p>Generated by QuantArk FI Dynamic Scenario Analysis Module</p>
+        </footer>
+    </div>
+    
+    {self._generate_fi_chart_scripts(results) if include_charts else ''}
+</body>
+</html>"""
+
+        return html
+
+    def _generate_fi_executive_summary(
+        self, results: "FIDynamicScenarioResults"
+    ) -> str:
+        """Generate FI executive summary section."""
+        pnl_class = "positive" if results.total_pnl >= 0 else "negative"
+        net_pnl_class = "positive" if results.net_pnl >= 0 else "negative"
+
+        html = f"""
+        <section class="executive-summary">
+            <h2>Executive Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <h3>Scenario Path</h3>
+                    <div class="value">{results.path_name}</div>
+                    <p style="font-size: 0.85em; color: #7f8c8d; margin-top: 5px;">{results.num_days} days</p>
+                </div>
+                <div class="summary-card">
+                    <h3>Initial Value</h3>
+                    <div class="value">${results.baseline_value:,.2f}</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Final Value</h3>
+                    <div class="value">${results.final_value:,.2f}</div>
+                </div>
+                <div class="summary-card {pnl_class}">
+                    <h3>Total P&L</h3>
+                    <div class="value {pnl_class}">${results.total_pnl:+,.2f}</div>
+                    <p style="font-size: 0.85em; margin-top: 5px;">{results.total_pnl_pct:+.2f}%</p>
+                </div>
+                <div class="summary-card">
+                    <h3>Initial DV01</h3>
+                    <div class="value">${results.baseline_dv01:,.2f}</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Final DV01</h3>
+                    <div class="value">${results.final_dv01:,.2f}</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Initial Duration</h3>
+                    <div class="value">{results.baseline_duration:.2f} yrs</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Final Duration</h3>
+                    <div class="value">{results.final_duration:.2f} yrs</div>
+                </div>
+            </div>
+        </section>
+        """
+        return html
+
+    def _generate_fi_risk_metrics(self, results: "FIDynamicScenarioResults") -> str:
+        """Generate FI risk metrics section."""
+        best = results.get_best_day()
+        worst = results.get_worst_day()
+        dd_amt, dd_pct, peak_day, trough_day = results.get_max_drawdown()
+        effectiveness = results.get_hedge_effectiveness()
+
+        html = f"""
+        <section class="performance-metrics">
+            <h2>Performance & Risk Metrics</h2>
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <h4>Best Day</h4>
+                    <p><strong>Day {best.day_index if best else 'N/A'}</strong></p>
+                    <p class="positive">P&L: ${best.daily_pnl if best else 0:+,.2f}</p>
+                </div>
+                <div class="metric-box">
+                    <h4>Worst Day</h4>
+                    <p><strong>Day {worst.day_index if worst else 'N/A'}</strong></p>
+                    <p class="negative">P&L: ${worst.daily_pnl if worst else 0:+,.2f}</p>
+                </div>
+                <div class="metric-box">
+                    <h4>Maximum Drawdown</h4>
+                    <p class="negative"><strong>${dd_amt:,.2f}</strong> ({dd_pct:.2f}%)</p>
+                    <p style="font-size: 0.85em; color: #7f8c8d;">Peak: Day {peak_day}, Trough: Day {trough_day}</p>
+                </div>
+                <div class="metric-box">
+                    <h4>Hedge Trades</h4>
+                    <p><strong>{results.total_hedges}</strong> trades executed</p>
+                    <p style="font-size: 0.85em; color: #7f8c8d;">Hedge freq: {effectiveness.get('hedge_frequency', 0):.1%}</p>
+                </div>
+                <div class="metric-box">
+                    <h4>DV01 Mean (Post-Hedge)</h4>
+                    <p><strong>${effectiveness.get('dv01_mean', 0):,.2f}</strong></p>
+                    <p style="font-size: 0.85em; color: #7f8c8d;">Tracking error: ${effectiveness.get('dv01_tracking_error', 0):,.2f}</p>
+                </div>
+                <div class="metric-box">
+                    <h4>Transaction Costs</h4>
+                    <p><strong>${results.total_transaction_costs:,.2f}</strong></p>
+                    <p style="font-size: 0.85em; color: #7f8c8d;">Net P&L: ${results.net_pnl:+,.2f}</p>
+                </div>
+            </div>
+        </section>
+        """
+        return html
+
+    def _generate_fi_charts_section(self, results: "FIDynamicScenarioResults") -> str:
+        """Generate FI charts section."""
+        html = """
+        <section class="charts">
+            <h2>Evolution Charts</h2>
+            
+            <div class="chart-row">
+                <div class="chart-container">
+                    <h3>Portfolio Value & P&L</h3>
+                    <canvas id="pnlChart" height="300"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>DV01 Evolution</h3>
+                    <canvas id="dv01Chart" height="300"></canvas>
+                </div>
+            </div>
+            
+            <div class="chart-row">
+                <div class="chart-container">
+                    <h3>Duration & Convexity</h3>
+                    <canvas id="durationChart" height="300"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Rate Evolution</h3>
+                    <canvas id="rateChart" height="300"></canvas>
+                </div>
+            </div>
+        </section>
+        """
+        return html
+
+    def _generate_fi_day_by_day_table(self, results: "FIDynamicScenarioResults") -> str:
+        """Generate FI day-by-day results table."""
+        html = """
+        <section class="day-by-day">
+            <h2>Day-by-Day Evolution</h2>
+            <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Day</th>
+                        <th>Label</th>
+                        <th>Portfolio Value</th>
+                        <th>Daily P&L</th>
+                        <th>DV01 (Pre)</th>
+                        <th>DV01 (Post)</th>
+                        <th>Duration</th>
+                        <th>Convexity</th>
+                        <th>Rate (%)</th>
+                        <th>Trades</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+
+        for day in results.day_results:
+            pnl_class = "positive" if day.daily_pnl >= 0 else "negative"
+            label = day.label or "-"
+            rate = day.market_state.rate * 100 if day.market_state else 0
+
+            html += f"""
+                    <tr>
+                        <td><strong>{day.day_index}</strong></td>
+                        <td>{label}</td>
+                        <td>${day.portfolio_value:,.2f}</td>
+                        <td class="{pnl_class}">${day.daily_pnl:+,.2f}</td>
+                        <td>${day.dv01_pre_hedge:,.2f}</td>
+                        <td>${day.dv01_post_hedge:,.2f}</td>
+                        <td>{day.modified_duration:.2f}</td>
+                        <td>{day.convexity:,.4f}</td>
+                        <td>{rate:.3f}</td>
+                        <td>{day.num_trades}</td>
+                    </tr>
+            """
+
+        html += """
+                </tbody>
+            </table>
+            </div>
+        </section>
+        """
+        return html
+
+    def _generate_fi_trades_section(self, results: "FIDynamicScenarioResults") -> str:
+        """Generate FI trades section."""
+        all_trades = []
+        for day in results.day_results:
+            for trade in day.trades:
+                all_trades.append((day.day_index, day.date, trade))
+
+        if not all_trades:
+            return """
+            <section class="trades-section">
+                <h2>Hedge Trade History</h2>
+                <div class="no-trades">No hedge trades executed during this scenario</div>
+            </section>
+            """
+
+        html = """
+        <section class="trades-section">
+            <h2>Hedge Trade History</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Day</th>
+                        <th>Type</th>
+                        <th>Instrument</th>
+                        <th>Contracts</th>
+                        <th>Price</th>
+                        <th>DV01 Impact</th>
+                        <th>Cost</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+
+        for day_idx, date, trade in all_trades:
+            html += f"""
+                    <tr>
+                        <td>{day_idx}</td>
+                        <td>{trade.trade_type}</td>
+                        <td>{trade.instrument}</td>
+                        <td>{trade.contracts:+,.0f}</td>
+                        <td>${trade.price:,.2f}</td>
+                        <td>${trade.dv01_impact:+,.2f}</td>
+                        <td>${trade.transaction_cost:,.2f}</td>
+                        <td>{trade.reason}</td>
+                    </tr>
+            """
+
+        html += """
+                </tbody>
+            </table>
+        </section>
+        """
+        return html
+
+    def _generate_fi_chart_scripts(self, results: "FIDynamicScenarioResults") -> str:
+        """Generate Chart.js scripts for FI charts."""
+        days = [d.day_index for d in results.day_results]
+        portfolio_values = [d.portfolio_value for d in results.day_results]
+        cumulative_pnl = [d.cumulative_pnl for d in results.day_results]
+        dv01_pre = [d.dv01_pre_hedge for d in results.day_results]
+        dv01_post = [d.dv01_post_hedge for d in results.day_results]
+        durations = [d.modified_duration for d in results.day_results]
+        convexities = [d.convexity for d in results.day_results]
+
+        rates = []
+        for d in results.day_results:
+            if d.market_state:
+                rates.append(d.market_state.rate * 100)
+            else:
+                rates.append(0)
+
+        script = f"""
+<script>
+    // P&L Chart
+    new Chart(document.getElementById('pnlChart'), {{
+        type: 'line',
+        data: {{
+            labels: {days},
+            datasets: [
+                {{
+                    label: 'Portfolio Value',
+                    data: {portfolio_values},
+                    borderColor: '#1a5f7a',
+                    backgroundColor: 'rgba(26, 95, 122, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    yAxisID: 'y'
+                }},
+                {{
+                    label: 'Cumulative P&L',
+                    data: {cumulative_pnl},
+                    borderColor: '#27ae60',
+                    borderDash: [5, 5],
+                    tension: 0.3,
+                    yAxisID: 'y1'
+                }}
+            ]
+        }},
+        options: {{
+            responsive: true,
+            interaction: {{ intersect: false, mode: 'index' }},
+            scales: {{
+                y: {{ type: 'linear', position: 'left', title: {{ display: true, text: 'Portfolio Value ($)' }} }},
+                y1: {{ type: 'linear', position: 'right', title: {{ display: true, text: 'P&L ($)' }}, grid: {{ drawOnChartArea: false }} }}
+            }}
+        }}
+    }});
+    
+    // DV01 Chart
+    new Chart(document.getElementById('dv01Chart'), {{
+        type: 'line',
+        data: {{
+            labels: {days},
+            datasets: [
+                {{
+                    label: 'DV01 Pre-Hedge',
+                    data: {dv01_pre},
+                    borderColor: '#1a5f7a',
+                    tension: 0.3
+                }},
+                {{
+                    label: 'DV01 Post-Hedge',
+                    data: {dv01_post},
+                    borderColor: '#27ae60',
+                    borderDash: [5, 5],
+                    tension: 0.3
+                }}
+            ]
+        }},
+        options: {{
+            responsive: true,
+            interaction: {{ intersect: false, mode: 'index' }},
+            scales: {{
+                y: {{ title: {{ display: true, text: 'DV01 ($)' }} }}
+            }}
+        }}
+    }});
+    
+    // Duration Chart
+    new Chart(document.getElementById('durationChart'), {{
+        type: 'line',
+        data: {{
+            labels: {days},
+            datasets: [
+                {{
+                    label: 'Modified Duration',
+                    data: {durations},
+                    borderColor: '#9b59b6',
+                    backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    yAxisID: 'y'
+                }},
+                {{
+                    label: 'Convexity',
+                    data: {convexities},
+                    borderColor: '#f39c12',
+                    tension: 0.3,
+                    yAxisID: 'y1'
+                }}
+            ]
+        }},
+        options: {{
+            responsive: true,
+            interaction: {{ intersect: false, mode: 'index' }},
+            scales: {{
+                y: {{ type: 'linear', position: 'left', title: {{ display: true, text: 'Duration (years)' }} }},
+                y1: {{ type: 'linear', position: 'right', title: {{ display: true, text: 'Convexity' }}, grid: {{ drawOnChartArea: false }} }}
+            }}
+        }}
+    }});
+    
+    // Rate Chart
+    new Chart(document.getElementById('rateChart'), {{
+        type: 'line',
+        data: {{
+            labels: {days},
+            datasets: [
+                {{
+                    label: 'Rate (%)',
+                    data: {rates},
+                    borderColor: '#e74c3c',
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }}
+            ]
+        }},
+        options: {{
+            responsive: true,
+            scales: {{
+                y: {{ title: {{ display: true, text: 'Rate (%)' }} }}
+            }}
+        }}
+    }});
+</script>
+"""
+        return script

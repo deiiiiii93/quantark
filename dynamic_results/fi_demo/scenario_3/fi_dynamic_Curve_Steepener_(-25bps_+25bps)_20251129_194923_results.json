@@ -1,0 +1,210 @@
+{
+  "path_name": "Curve Steepener (-25bps/+25bps)",
+  "baseline_value": 173178221.7842213,
+  "final_value": 173285008.39288062,
+  "total_pnl": 106786.60865932703,
+  "total_pnl_pct": 0.061662839333448245,
+  "total_transaction_costs": 0.0,
+  "net_pnl": 106786.60865932703,
+  "total_hedges": 0,
+  "num_days": 5,
+  "execution_timestamp": "2025-11-29T19:49:18.303119",
+  "total_execution_time": 0.0011320114135742188,
+  "config_summary": {
+    "calculate_dv01": true,
+    "calculate_convexity": true,
+    "calculate_duration": true,
+    "calculate_key_rate_dv01": false,
+    "key_rate_tenors": [
+      1,
+      2,
+      5,
+      10,
+      30
+    ],
+    "dv01_alert_threshold": 100000.0,
+    "hedge_enabled": false,
+    "hedge_dv01_threshold": 50000.0,
+    "futures_dv01_per_contract": 80.0,
+    "export_formats": [
+      "parquet"
+    ],
+    "output_dir": "./dynamic_results/fi_demo",
+    "save_detailed_results": true,
+    "save_intermediate_states": true,
+    "generate_report": true,
+    "include_charts": true,
+    "metadata": {}
+  },
+  "day_results": [
+    {
+      "day_index": 0,
+      "date": "2025-11-29T19:49:18.301620",
+      "label": "Short -5bps, Long +5bps",
+      "portfolio_value": 173199573.8400889,
+      "daily_pnl": 21352.055867612362,
+      "cumulative_pnl": 21352.055867612362,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": 21352.055867612362,
+      "risk_metrics": {
+        "dv01": 61945.7597464749,
+        "convexity": 3341352722.740421,
+        "modified_duration": 3.5765538201420726
+      },
+      "metadata": {},
+      "dv01_pre_hedge": 61945.7597464749,
+      "dv01_post_hedge": 61945.7597464749,
+      "dv01": 61945.7597464749,
+      "convexity": 3341352722.740421,
+      "modified_duration": 3.5765538201420726,
+      "key_rate_dv01": {},
+      "market_state": {
+        "rate": 0.045,
+        "rate_curve": {},
+        "short_rate": 0.045,
+        "long_rate": 0.045,
+        "spread": 0.001
+      },
+      "hedge_positions": {},
+      "trades": []
+    },
+    {
+      "day_index": 1,
+      "date": "2025-11-30T19:49:18.301620",
+      "label": "Short -10bps, Long +10bps",
+      "portfolio_value": 173220928.52856404,
+      "daily_pnl": 21354.68847513199,
+      "cumulative_pnl": 42706.74434274435,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": 42706.74434274435,
+      "risk_metrics": {
+        "dv01": 61905.93957710129,
+        "convexity": 3338371289.2398643,
+        "modified_duration": 3.5738140941146757
+      },
+      "metadata": {},
+      "dv01_pre_hedge": 61905.93957710129,
+      "dv01_post_hedge": 61905.93957710129,
+      "dv01": 61905.93957710129,
+      "convexity": 3338371289.2398643,
+      "modified_duration": 3.5738140941146757,
+      "key_rate_dv01": {},
+      "market_state": {
+        "rate": 0.045,
+        "rate_curve": {},
+        "short_rate": 0.045,
+        "long_rate": 0.045,
+        "spread": 0.002
+      },
+      "hedge_positions": {},
+      "trades": []
+    },
+    {
+      "day_index": 2,
+      "date": "2025-12-01T19:49:18.301620",
+      "label": "Short -15bps, Long +15bps",
+      "portfolio_value": 173242285.8499713,
+      "daily_pnl": 21357.32140725851,
+      "cumulative_pnl": 64064.06575000286,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": 64064.06575000286,
+      "risk_metrics": {
+        "dv01": 61866.108646768174,
+        "convexity": 3335391670.499075,
+        "modified_duration": 3.5710743680872783
+      },
+      "metadata": {},
+      "dv01_pre_hedge": 61866.108646768174,
+      "dv01_post_hedge": 61866.108646768174,
+      "dv01": 61866.108646768174,
+      "convexity": 3335391670.499075,
+      "modified_duration": 3.5710743680872783,
+      "key_rate_dv01": {},
+      "market_state": {
+        "rate": 0.045,
+        "rate_curve": {},
+        "short_rate": 0.045,
+        "long_rate": 0.045,
+        "spread": 0.003
+      },
+      "hedge_positions": {},
+      "trades": []
+    },
+    {
+      "day_index": 3,
+      "date": "2025-12-02T19:49:18.301620",
+      "label": "Short -20bps, Long +20bps",
+      "portfolio_value": 173263645.80463523,
+      "daily_pnl": 21359.954663932323,
+      "cumulative_pnl": 85424.02041393518,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": 85424.02041393518,
+      "risk_metrics": {
+        "dv01": 61826.26695342731,
+        "convexity": 3332413867.331538,
+        "modified_duration": 3.5683346420598814
+      },
+      "metadata": {},
+      "dv01_pre_hedge": 61826.26695342731,
+      "dv01_post_hedge": 61826.26695342731,
+      "dv01": 61826.26695342731,
+      "convexity": 3332413867.331538,
+      "modified_duration": 3.5683346420598814,
+      "key_rate_dv01": {},
+      "market_state": {
+        "rate": 0.045,
+        "rate_curve": {},
+        "short_rate": 0.045,
+        "long_rate": 0.045,
+        "spread": 0.004
+      },
+      "hedge_positions": {},
+      "trades": []
+    },
+    {
+      "day_index": 4,
+      "date": "2025-12-03T19:49:18.301620",
+      "label": "Short -25bps, Long +25bps",
+      "portfolio_value": 173285008.39288062,
+      "daily_pnl": 21362.588245391846,
+      "cumulative_pnl": 106786.60865932703,
+      "transaction_costs_today": 0.0,
+      "cumulative_transaction_costs": 0.0,
+      "net_pnl": 106786.60865932703,
+      "risk_metrics": {
+        "dv01": 61786.41449503015,
+        "convexity": 3329437880.550953,
+        "modified_duration": 3.5655949160324836
+      },
+      "metadata": {},
+      "dv01_pre_hedge": 61786.41449503015,
+      "dv01_post_hedge": 61786.41449503015,
+      "dv01": 61786.41449503015,
+      "convexity": 3329437880.550953,
+      "modified_duration": 3.5655949160324836,
+      "key_rate_dv01": {},
+      "market_state": {
+        "rate": 0.045,
+        "rate_curve": {},
+        "short_rate": 0.045,
+        "long_rate": 0.045,
+        "spread": 0.005
+      },
+      "hedge_positions": {},
+      "trades": []
+    }
+  ],
+  "metadata": {
+    "path_description": "Curve steepening: short -25bps, long +25bps over 5 days",
+    "hedge_enabled": false
+  },
+  "asset_class": "fixed_income",
+  "baseline_dv01": 61985.56915693685,
+  "baseline_duration": 3.57929354616947,
+  "final_dv01": 61786.41449503015,
+  "final_duration": 3.5655949160324836
+}

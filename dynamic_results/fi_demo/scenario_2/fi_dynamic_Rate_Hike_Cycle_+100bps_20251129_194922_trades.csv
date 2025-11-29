@@ -1,0 +1,11 @@
+day_index,date,trade_type,instrument,contracts,price,notional,dv01_impact,transaction_cost,reason
+0,2025-11-29 19:49:18.297268,open,bond_futures,-766,100.0,76600000.0,-61280.0,0.0,dv01_hedge
+1,2025-11-30 19:49:18.297268,adjust,bond_futures,-757,100.0,75700000.0,-60560.0,0.0,dv01_hedge
+2,2025-12-01 19:49:18.297268,adjust,bond_futures,-749,100.0,74900000.0,-59920.0,0.0,dv01_hedge
+3,2025-12-02 19:49:18.297268,adjust,bond_futures,-740,100.0,74000000.0,-59200.0,0.0,dv01_hedge
+4,2025-12-03 19:49:18.297268,adjust,bond_futures,-732,100.0,73200000.0,-58560.0,0.0,dv01_hedge
+5,2025-12-04 19:49:18.297268,adjust,bond_futures,-724,100.0,72400000.0,-57920.0,0.0,dv01_hedge
+6,2025-12-05 19:49:18.297268,adjust,bond_futures,-716,100.0,71600000.0,-57280.0,0.0,dv01_hedge
+7,2025-12-06 19:49:18.297268,adjust,bond_futures,-708,100.0,70800000.0,-56640.0,0.0,dv01_hedge
+8,2025-12-07 19:49:18.297268,adjust,bond_futures,-700,100.0,70000000.0,-56000.0,0.0,dv01_hedge
+9,2025-12-08 19:49:18.297268,adjust,bond_futures,-693,100.0,69300000.0,-55440.0,0.0,dv01_hedge
