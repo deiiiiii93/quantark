@@ -2,7 +2,7 @@
 Fixed Income position class for tracking bond and bond derivative positions.
 """
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Callable, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
@@ -38,10 +38,18 @@ class FIPosition:
     entry_timestamp: datetime
     position_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     notional_per_unit: float = 100.0
+    engine_factory: Optional[Callable[[PricingEnvironment], Any]] = None
     
     def __post_init__(self):
         """Validate position parameters."""
         self.validate()
+        if self.engine_factory is None:
+            engine_cls = self.engine.__class__
+
+            def _factory(env: PricingEnvironment, cls=engine_cls):
+                return cls(env)
+
+            self.engine_factory = _factory
     
     def validate(self) -> None:
         """
@@ -61,6 +69,11 @@ class FIPosition:
         if self.engine is None:
             raise ValidationError("Engine is required")
     
+    def _engine_for_env(self, pricing_env: PricingEnvironment) -> Any:
+        if self.engine_factory is not None:
+            return self.engine_factory(pricing_env)
+        return self.engine
+
     def get_current_price(self, pricing_env: PricingEnvironment) -> float:
         """
         Get current clean price of the bond.
@@ -72,7 +85,8 @@ class FIPosition:
             Current clean price
         """
         valuation_date = pricing_env.valuation_date
-        return self.engine.clean_price(self.product, valuation_date, valuation_date)
+        engine = self._engine_for_env(pricing_env)
+        return engine.clean_price(self.product, valuation_date, valuation_date)
     
     def get_dirty_price(self, pricing_env: PricingEnvironment) -> float:
         """
@@ -85,7 +99,8 @@ class FIPosition:
             Current dirty price
         """
         valuation_date = pricing_env.valuation_date
-        return self.engine.dirty_price(self.product, valuation_date, valuation_date)
+        engine = self._engine_for_env(pricing_env)
+        return engine.dirty_price(self.product, valuation_date, valuation_date)
     
     def get_market_value(self, pricing_env: PricingEnvironment) -> float:
         """
@@ -130,7 +145,8 @@ class FIPosition:
             Position DV01
         """
         valuation_date = pricing_env.valuation_date
-        per_unit_dv01 = self.engine.dv01(self.product, valuation_date, valuation_date)
+        engine = self._engine_for_env(pricing_env)
+        per_unit_dv01 = engine.dv01(self.product, valuation_date, valuation_date)
         return per_unit_dv01 * self.quantity * self.notional_per_unit / 100.0
     
     def get_modified_duration(self, pricing_env: PricingEnvironment) -> float:
@@ -144,7 +160,8 @@ class FIPosition:
             Modified duration
         """
         valuation_date = pricing_env.valuation_date
-        return self.engine.modified_duration(self.product, valuation_date, valuation_date)
+        engine = self._engine_for_env(pricing_env)
+        return engine.modified_duration(self.product, valuation_date, valuation_date)
     
     def get_convexity(self, pricing_env: PricingEnvironment) -> float:
         """
@@ -159,7 +176,8 @@ class FIPosition:
             Position convexity
         """
         valuation_date = pricing_env.valuation_date
-        per_unit_convexity = self.engine.convexity(self.product, valuation_date, valuation_date)
+        engine = self._engine_for_env(pricing_env)
+        per_unit_convexity = engine.convexity(self.product, valuation_date, valuation_date)
         market_value = self.get_market_value(pricing_env)
         return per_unit_convexity * market_value
     
@@ -192,7 +210,8 @@ class FIPosition:
         # Add yield if available
         try:
             current_price = self.get_current_price(pricing_env)
-            ytm = self.engine.yield_to_maturity(
+            engine = self._engine_for_env(pricing_env)
+            ytm = engine.yield_to_maturity(
                 self.product, valuation_date, current_price
             )
             risk_measures['yield'] = ytm

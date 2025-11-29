@@ -8,12 +8,22 @@ from pathlib import Path
 import tempfile
 import shutil
 
+try:
+    import yaml  # noqa: F401
+except ImportError:
+    yaml = None
+
 from portfolio import Portfolio
+from portfolio.fi import FIPortfolio
 from priceenv import PricingEnvironment
 from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from asset.equity.product import EuropeanVanillaOption
 from asset.equity.engine import BlackScholesEngine
-from util.enum import OptionType
+from asset.bond.product.couponbond.fixed_bond import FixedBond
+from asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
+from util.enum import OptionType, PaymentFrequency
+from util.calendar import DayCountConvention
+from param.rrf.rate_curve import LinearRateCurve
 
 from stresstest import (
     StressTestEngine,
@@ -24,6 +34,7 @@ from stresstest import (
     Scenario,
     Stress,
 )
+from stresstest.fi import FIStressConfig, FIStressEngine
 from stresstest.scenario.scenario_library import ScenarioLibrary
 from stresstest.scenario.scenario_storage import ScenarioStorage
 from stresstest.stress.stress_applicator import StressApplicator
@@ -135,6 +146,31 @@ class TestScenarioBuilder(unittest.TestCase):
         self.assertEqual(scenario.stresses[0].level, StressLevel.UNDERLYING)
         self.assertEqual(scenario.stresses[0].target, "AAPL")
 
+    def test_key_rate_helper(self):
+        """Ensure key-rate helper annotates metadata."""
+        scenario = (
+            ScenarioBuilder()
+            .name("Key Rate")
+            .key_rate_stress(0.01, tenor_bucket="5Y", curve="UST")
+            .build()
+        )
+        stress = scenario.stresses[0]
+        self.assertEqual(stress.parameter, "key_rate")
+        self.assertEqual(stress.metadata.get("tenor_bucket"), "5Y")
+        self.assertEqual(stress.metadata.get("curve"), "UST")
+
+    def test_spread_helper(self):
+        """Ensure spread helper encodes metadata."""
+        scenario = (
+            ScenarioBuilder()
+            .name("Spread Shock")
+            .spread_stress(0.0025, spread_curve="IG")
+            .build()
+        )
+        stress = scenario.stresses[0]
+        self.assertEqual(stress.parameter, "spread")
+        self.assertEqual(stress.metadata.get("spread_curve"), "IG")
+
 
 class TestScenarioLibrary(unittest.TestCase):
     """Test predefined scenarios."""
@@ -162,12 +198,26 @@ class TestScenarioLibrary(unittest.TestCase):
         names = [s.name for s in scenarios]
         self.assertIn("Black Monday 1987", names)
 
+    def test_fi_parallel_shift(self):
+        """FI scenario should emit key-rate stresses."""
+        scenario = ScenarioLibrary.fi_parallel_shift()
+        params = {stress.parameter for stress in scenario.stresses}
+        self.assertIn("key_rate", params)
+
+    def test_fi_spread_shock(self):
+        """FI spread scenario should encode metadata."""
+        scenario = ScenarioLibrary.fi_spread_shock(spread_bps=0.003)
+        self.assertEqual(scenario.stresses[0].parameter, "spread")
+        self.assertEqual(scenario.stresses[0].metadata.get("spread_curve"), "IG")
+
 
 class TestScenarioStorage(unittest.TestCase):
     """Test scenario storage."""
     
     def setUp(self):
         """Create temporary directory for tests."""
+        if yaml is None:
+            self.skipTest("PyYAML not installed")
         self.temp_dir = Path(tempfile.mkdtemp())
     
     def tearDown(self):
@@ -255,9 +305,10 @@ class TestStressTestEngine(unittest.TestCase):
         )
         
         # Add a position
+        time_to_maturity = (self.maturity_date - self.valuation_date).days / 365.0
         option = EuropeanVanillaOption(
             strike=100.0,
-            maturity=self.maturity_date,
+            maturity=time_to_maturity,
             option_type=OptionType.CALL
         )
         engine = BlackScholesEngine()
@@ -314,6 +365,58 @@ class TestStressTestEngine(unittest.TestCase):
         # Best should be Up10
         best = results.get_best_scenario()
         self.assertEqual(best.scenario.name, "Up10")
+
+
+class TestFIStressEngine(unittest.TestCase):
+    """Test FI-specific stress engine."""
+
+    def setUp(self):
+        valuation_date = datetime(2025, 1, 2)
+        self.portfolio = FIPortfolio(
+            portfolio_name="FI Test",
+            pricing_environments={
+                "UST_10Y": PricingEnvironment(
+                    rate_curve=LinearRateCurve([(2, 0.03), (5, 0.032), (10, 0.035), (30, 0.04)]),
+                    valuation_date=valuation_date,
+                ),
+                "UST_30Y": PricingEnvironment(
+                    rate_curve=LinearRateCurve([(2, 0.03), (5, 0.032), (10, 0.035), (30, 0.04)]),
+                    valuation_date=valuation_date,
+                ),
+            },
+            creation_date=valuation_date,
+        )
+        engine = BondDiscountEngine(self.portfolio.pricing_environments["UST_10Y"])
+        ten_year = FixedBond(
+            issue_date=datetime(2019, 1, 1),
+            maturity_date=datetime(2029, 1, 1),
+            notional=100.0,
+            coupon_rate=0.04,
+            payment_frequency=PaymentFrequency.SEMI_ANNUAL,
+            day_count_convention=DayCountConvention.ACT_365,
+        )
+        self.portfolio.add_position(
+            product=ten_year,
+            quantity=25,
+            entry_price=100.0,
+            underlying="UST_10Y",
+            engine=engine,
+            entry_timestamp=valuation_date,
+        )
+
+    def test_fi_engine_results(self):
+        engine = FIStressEngine(FIStressConfig(save_detailed_results=False))
+        scenario = ScenarioLibrary.fi_parallel_shift(0.01)
+        results = engine.run_static_scenarios(self.portfolio, [scenario])
+
+        self.assertTrue(hasattr(results, "get_dv01_series"))
+        dv01_df = results.get_dv01_series()
+        self.assertFalse(dv01_df.empty)
+        self.assertIn("fi", results.extra_metrics)
+        self.assertNotAlmostEqual(
+            results.scenario_results[0].portfolio_value,
+            results.baseline_value,
+        )
 
 
 class TestResultAggregator(unittest.TestCase):

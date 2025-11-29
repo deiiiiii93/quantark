@@ -1,0 +1,5 @@
+scenario_name,scenario_description,portfolio_value,portfolio_pnl,portfolio_pnl_pct
+Baseline,Unstressed (current market),8731.143443288092,0.0,0.0
+FI Parallel Shift,UST curve shift of 100 bps,8061.505249658587,-669.6381936295056,-7.669536046212571
+FI Steepener,"UST 2Y +1.50%, 30Y -0.50%",8790.988171463809,59.84472817571623,0.6854168479126381
+FI Spread Shock,IG spread move of +0.25%,8555.644857770134,-175.49858551795842,-2.0100298048919325

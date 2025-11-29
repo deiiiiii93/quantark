@@ -5,8 +5,9 @@ This module provides common market stress scenarios that can be used
 directly or customized for specific needs.
 """
 
-from typing import Optional
+from typing import Optional, Sequence
 from stresstest.scenario.scenario import Scenario, Stress
+from stresstest.scenario.scenario_builder import ScenarioBuilder
 from stresstest.stress.stress_types import StressType, StressLevel
 
 
@@ -260,6 +261,59 @@ class ScenarioLibrary:
             ],
             metadata={"category": "combined", "severity": "high"}
         )
+
+    @staticmethod
+    def fi_parallel_shift(
+        shift_bps: float = 0.01,
+        curve_name: str = "UST",
+        buckets: Optional[Sequence[str]] = None,
+    ) -> Scenario:
+        """Parallel shift for a fixed income curve."""
+        if buckets is None:
+            buckets = ["2Y", "5Y", "10Y", "30Y"]
+
+        builder = (
+            ScenarioBuilder()
+            .name("FI Parallel Shift")
+            .description(f"{curve_name} curve shift of {shift_bps*10000:.0f} bps")
+        )
+        for bucket in buckets:
+            builder.key_rate_stress(shift_bps, tenor_bucket=bucket, curve=curve_name)
+        return builder.build()
+
+    @staticmethod
+    def fi_steepener(
+        front_end_bps: float = 0.01,
+        long_end_bps: float = -0.005,
+        curve_name: str = "UST",
+        front_bucket: str = "2Y",
+        long_bucket: str = "30Y",
+    ) -> Scenario:
+        """Bear steepener scenario."""
+        builder = (
+            ScenarioBuilder()
+            .name("FI Steepener")
+            .description(
+                f"{curve_name} {front_bucket} {front_end_bps:+.2%}, {long_bucket} {long_end_bps:+.2%}"
+            )
+        )
+        builder.key_rate_stress(front_end_bps, tenor_bucket=front_bucket, curve=curve_name)
+        builder.key_rate_stress(long_end_bps, tenor_bucket=long_bucket, curve=curve_name)
+        return builder.build()
+
+    @staticmethod
+    def fi_spread_shock(
+        spread_bps: float = 0.002,
+        curve_name: str = "IG",
+    ) -> Scenario:
+        """Credit spread shock scenario."""
+        builder = (
+            ScenarioBuilder()
+            .name("FI Spread Shock")
+            .description(f"{curve_name} spread move of {spread_bps:+.2%}")
+        )
+        builder.spread_stress(spread_bps, spread_curve=curve_name)
+        return builder.build()
     
     @staticmethod
     def black_monday_1987() -> Scenario:
@@ -352,6 +406,9 @@ class ScenarioLibrary:
             ScenarioLibrary.rate_cut(),
             ScenarioLibrary.severe_downturn(),
             ScenarioLibrary.inflation_shock(),
+            ScenarioLibrary.fi_parallel_shift(),
+            ScenarioLibrary.fi_steepener(),
+            ScenarioLibrary.fi_spread_shock(),
         ]
     
     @staticmethod

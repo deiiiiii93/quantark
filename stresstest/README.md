@@ -127,6 +127,8 @@ scenario = (ScenarioBuilder()
     .spot_stress(-0.15)                                    # Percentage
     .vol_stress(0.05, stress_type=StressType.ABSOLUTE)   # Absolute
     .rate_stress(0.02, stress_type=StressType.ABSOLUTE)   # +200bps
+    .key_rate_stress(0.01, tenor_bucket="5Y")              # Key-rate bump
+    .spread_stress(0.0025, spread_curve="CDX HY")          # Spread shock
     .build()
 )
 
@@ -374,7 +376,27 @@ visualizer.create_all_plots(
 
 ### Custom Stress Applicators
 
-For complex stressing logic, you can extend the stress applicator:
+Parameter mutations now flow through adapter hooks so asset-specific engines can
+override how a stress updates the pricing environment. Register a handler once
+and it will be invoked for every matching stress:
+
+```python
+from stresstest.stress.stress_applicator import StressApplicator
+
+def apply_key_rate(env, stress):
+    bucket = stress.metadata.get("tenor_bucket", "10Y")
+    shift = stress.stress_type.apply(env.rate_curve.get_rate(bucket), stress.stress_value)
+    # custom FI logic here
+
+StressApplicator.register_adapter("key_rate", apply_key_rate)
+```
+
+Scenario builder helpers `key_rate_stress()` and `spread_stress()` make it easy to
+declare tenor buckets or spread curves. Metadata is validated so scenarios fail
+fast if required tags (e.g., `tenor_bucket`, `spread_curve`) are missing.
+
+Existing equity behavior continues to work because spot/vol/rate/dividend adapters
+are registered by default.
 
 ```python
 from stresstest.stress.stress_applicator import StressApplicator
@@ -423,6 +445,16 @@ Run the demo:
 ```bash
 python example/stress_test_demo.py
 ```
+
+### Fixed Income Quick Start
+
+```bash
+python example/stresstest_fi_rate_shocks.py
+```
+
+The FI example builds a small bond portfolio, applies the predefined FI scenarios
+(`fi_parallel_shift`, `fi_steepener`, `fi_spread_shock`), and outputs DV01 series
+along with CSV exports suitable for downstream analysis.
 
 ## API Reference
 

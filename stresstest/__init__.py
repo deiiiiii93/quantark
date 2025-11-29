@@ -41,6 +41,7 @@ Example:
 
 from stresstest.config import StressTestConfig
 from stresstest.engine import StressTestEngine
+from stresstest.fi import FIStressConfig, FIStressEngine
 from stresstest.scenario.scenario import Scenario, Stress
 from stresstest.scenario.scenario_builder import ScenarioBuilder
 from stresstest.stress.stress_types import StressType, StressLevel
@@ -50,6 +51,8 @@ __version__ = "0.1.0"
 __all__ = [
     "StressTestConfig",
     "StressTestEngine",
+    "FIStressConfig",
+    "FIStressEngine",
     "Scenario",
     "Stress",
     "ScenarioBuilder",
