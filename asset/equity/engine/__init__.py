@@ -3,6 +3,7 @@ Pricing engines for equity derivatives.
 """
 from .base_engine import BaseEngine
 from .analytical import BlackScholesEngine
+from .pde_engine import PDEEngine
 from .pde import (
     BasePDESolver,
     EuropeanPDESolver,
@@ -20,6 +21,8 @@ __all__ = [
     'BaseEngine',
     # Analytical
     'BlackScholesEngine',
+    # Unified PDE Engine
+    'PDEEngine',
     # PDE Solvers
     'BasePDESolver',
     'EuropeanPDESolver',
@@ -32,4 +35,3 @@ __all__ = [
     'TimeGrid',
     'SpatialGrid',
 ]
-

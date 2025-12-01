@@ -27,6 +27,17 @@ class MonteCarloMethod(Enum):
         return self.value
 
 
+class PDEMethod(Enum):
+    """PDE finite difference methods for pricing."""
+
+    CRANK_NICOLSON = "crank_nicolson"
+    EXPLICIT_EULER = "explicit_euler"
+    IMPLICIT_EULER = "implicit_euler"
+
+    def __str__(self):
+        return self.value
+
+
 class EngineType(Enum):
     """Type of pricing engine."""
 
