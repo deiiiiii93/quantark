@@ -3,8 +3,6 @@ Base class for equity derivative products.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
-from datetime import datetime
 
 
 class BaseEquityProduct(ABC):

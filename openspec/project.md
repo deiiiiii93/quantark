@@ -6,8 +6,9 @@ QuantArk is a professional-grade Python library for pricing and risk management 
 ## Tech Stack
 - **Language**: Python 3.10+
 - **Numerical Computing**: NumPy, SciPy, Pandas
-- **Visualization**: Matplotlib, Seaborn, Plotly
+- **Visualization**: Matplotlib, Seaborn, Plotly (+ `kaleido` for static export)
 - **Data Storage**: Parquet (via PyArrow), Excel (via openpyxl)
+- **Configuration**: PyYAML for scenario definitions
 - **Testing**: pytest
 
 ## Project Conventions
@@ -39,9 +40,7 @@ QuantArk is a professional-grade Python library for pricing and risk management 
 asset/
 ├── equity/           # Equity derivatives
 ├── bond/             # Fixed income instruments
-├── rate/             # Interest rate derivatives
-├── credit/           # Credit derivatives
-└── currency/         # FX derivatives
+└── rate/             # Interest rate derivatives
 ```
 
 Each asset class follows the same internal structure:
@@ -49,6 +48,18 @@ Each asset class follows the same internal structure:
 - `engine/`: Pricing engines (analytical/, mc/, pde/, quad/)
 - `process/`: Stochastic processes
 - `riskmeasures/`: Risk calculations
+
+### Additional Project Modules
+- `backtest/`: Backtest engine and strategy framework (equity, FI); includes `engine.py`, `metrics.py`, `transaction_costs.py`, reporting and visualization
+- `dynamicscenario/`: Dynamic scenario generation and execution (FI, equity); includes path libraries and reporting
+- `stresstest/`: Stress testing framework and report generation; scenarios under `stresstest/scenario/`
+- `portfolio/`: Portfolios and positions (equity, FI); includes storage and snapshots
+- `param/`: Common parameter modules (quotes, curves, vol surfaces, etc.)
+- `priceenv/`: Unified pricing environment defined in `pricing_environment.py`
+- `util/`: Utilities including calendar, enums, market data, exceptions
+- `example/`: Example scripts (pricing, portfolio, backtest, stress test)
+- `logs/` and `reports/`: Event/trade/state logs and static HTML/TXT reports
+- `stress_scenarios/`: JSON/YAML custom stress scenarios
 
 ### Testing Strategy
 - **Framework**: pytest
@@ -84,7 +95,9 @@ This is a **quantitative finance** library. Key concepts:
 - **NumPy/SciPy**: Core numerical computations
 - **Pandas**: Time series data and DataFrames for results
 - **Matplotlib/Plotly**: Visualization of results and reports
+- **Kaleido**: Static image export for Plotly figures
 - **PyArrow**: Parquet file I/O for results storage
+- **PyYAML**: Scenario and configuration files
 
 ## Exception Hierarchy
 ```
