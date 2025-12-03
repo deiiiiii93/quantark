@@ -18,12 +18,21 @@ QuantArk is designed with a clean, modular architecture that separates concerns 
 ### Current Implementation
 
 - **European Vanilla Options**: Full support for calls and puts
+- **American Options**: Analytical and numerical methods (Barone-Adesi-Whaley, Longstaff-Schwartz)
 - **Black-Scholes-Merton Model**: With continuous dividend yield
 - **Analytical Pricing**: Closed-form Black-Scholes formula
+- **Monte Carlo Engine**: Path-dependent pricing with variance reduction techniques
+- **PDE Engine**: Finite difference methods for American options
+- **Portfolio Value-at-Risk (VaR)**: Three calculation methods
+  - Historical VaR (full revaluation under historical scenarios)
+  - Parametric VaR (variance-covariance with Greeks/DV01)
+  - Monte Carlo VaR (simulation-based with stress testing)
+- **Bond Pricing**: Fixed rate bonds, FRNs, and bond options
+- **Interest Rate Swaps**: Pricing and risk metrics (DV01)
 - **Greeks Calculation**:
   - Analytical Greeks using closed-form formulas
   - Numerical Greeks using finite difference method (FDM)
-  - Delta, Gamma, Vega, Theta, Rho
+  - Delta, Gamma, Vega, Theta, Rho, DV01
 - **Robust Error Handling**: Professional exception hierarchy
 - **Numerical Stability**: Careful boundary checking and validation
 
@@ -92,6 +101,48 @@ print(f"Gamma: {analytical_greeks['gamma']:.6f}")
 print(f"Vega:  {analytical_greeks['vega']:.6f}")
 print(f"Theta: {analytical_greeks['theta']:.6f} (per day)")
 print(f"Rho:   {analytical_greeks['rho']:.6f}")
+
+# Calculate portfolio VaR
+from var import (
+    ParametricVaREngine,
+    HistoricalVaREngine,
+    VaRConfig,
+    EquityRiskFactorConfig,
+)
+from portfolio.equity.portfolio import EquityPortfolio
+
+# Create a portfolio
+portfolio = EquityPortfolio(
+    positions={
+        "AAPL": {"quantity": 100, "cost_basis": 150.0},
+        "MSFT": {"quantity": 50, "cost_basis": 300.0}
+    }
+)
+
+# Configure VaR calculation
+var_config = VaRConfig(
+    confidence_level=0.99,
+    holding_period=1,
+    equity_factors=EquityRiskFactorConfig(
+        include_spot=True,
+        include_vol=True,
+        include_rate=True
+    )
+)
+
+# Calculate parametric VaR
+parametric_engine = ParametricVaREngine(config=var_config)
+parametric_result = parametric_engine.calculate_var(portfolio, historical_data)
+
+print(f"\nParametric VaR (99%): ${parametric_result.var:.2f}")
+print(f"CVaR: ${parametric_result.cvar:.2f}")
+
+# Calculate historical VaR
+historical_engine = HistoricalVaREngine(config=var_config)
+historical_result = historical_engine.calculate_var(portfolio, historical_data)
+
+print(f"Historical VaR (99%): ${historical_result.var:.2f}")
+print(f"CVaR: ${historical_result.cvar:.2f}")
 ```
 
 ## Running the Demo
@@ -113,27 +164,53 @@ The demo showcases:
 ```
 QuantArk/
 ├── asset/              # Asset classes
-│   └── equity/
-│       ├── engine/     # Pricing engines
-│       │   ├── analytical/
-│       │   ├── mc/
-│       │   ├── pde/
-│       │   └── quad/
-│       ├── param/      # Engine parameters
-│       ├── process/    # Stochastic processes
-│       │   ├── bsm/
-│       │   ├── heston/
-│       │   ├── localvol/
-│       │   └── slv/
-│       ├── product/    # Derivative products
-│       │   └── option/
-│       └── riskmeasures/  # Greeks calculation
+│   ├── equity/
+│   │   ├── engine/     # Pricing engines
+│   │   │   ├── analytical/
+│   │   │   ├── mc/
+│   │   │   ├── pde/
+│   │   │   └── quad/
+│   │   ├── param/      # Engine parameters
+│   │   ├── process/    # Stochastic processes
+│   │   │   ├── bsm/
+│   │   │   ├── heston/
+│   │   │   ├── localvol/
+│   │   │   └── slv/
+│   │   ├── product/    # Derivative products
+│   │   │   └── option/
+│   │   └── riskmeasures/  # Greeks calculation
+│   ├── bond/          # Fixed income instruments
+│   │   ├── engine/    # Bond pricing engines
+│   │   ├── product/   # Bond products
+│   │   └── riskmeasures/  # Bond risk measures
+│   └── rate/          # Interest rate derivatives
+│       ├── engine/    # IR pricing engines
+│       ├── product/   # IR products
+│       └── riskmeasures/  # IR risk measures
 ├── param/              # Market data parameters
 │   ├── div/           # Dividend yields
 │   ├── quote/         # Spot quotes
 │   ├── rrf/           # Risk-free rates
 │   └── vol/           # Volatility surfaces
 ├── priceenv/          # Pricing environment
+├── var/               # Value-at-Risk (VaR) calculations
+│   ├── engines/       # VaR calculation engines
+│   │   ├── historical.py  # Historical VaR
+│   │   ├── parametric.py  # Parametric VaR
+│   │   └── monte_carlo.py # Monte Carlo VaR
+│   ├── risk_factors/  # Risk factor models
+│   │   ├── base.py
+│   │   ├── equity_factors.py
+│   │   └── fi_factors.py
+│   ├── backtest/      # VaR backtesting framework
+│   ├── base.py        # VaR base classes
+│   └── config.py      # VaR configuration
+├── portfolio/         # Portfolio management
+│   ├── equity/        # Equity portfolios
+│   └── fi/            # Fixed income portfolios
+├── backtest/          # Hedging strategy backtesting
+├── dynamicscenario/   # Multi-day scenario simulation
+├── stresstest/        # Stress testing framework
 ├── util/              # Utilities
 │   ├── enum/          # Enumerations
 │   └── exceptions.py  # Exception hierarchy
@@ -164,25 +241,29 @@ The Black-Scholes engine includes extensive checks for numerical stability:
 ## Roadmap
 
 ### Short-term
-- [ ] American options (binomial tree, finite difference)
+- [x] American options (analytical and numerical methods)
 - [ ] Asian options
 - [ ] Barrier options
-- [ ] Monte Carlo engine implementation
-- [ ] PDE engine implementation
+- [x] Monte Carlo engine implementation
+- [x] PDE engine implementation
+- [x] Portfolio VaR calculations
+- [x] Fixed income instruments (bonds, swaps)
 
 ### Medium-term
 - [ ] Heston stochastic volatility model
 - [ ] Local volatility model
-- [ ] Interest rate derivatives
 - [ ] Credit derivatives
 - [ ] Calibration framework
-
-### Long-term
+- [ ] XVA calculations
 - [ ] Multi-asset derivatives
 - [ ] Hybrid models
-- [ ] XVA calculations
-- [ ] Portfolio risk metrics
+
+### Long-term
 - [ ] Performance optimization (Cython, GPU)
+- [ ] Real-time risk metrics
+- [ ] Portfolio optimization
+- [ ] Market data integration
+- [ ] Cloud deployment support
 
 ## Contributing
 
