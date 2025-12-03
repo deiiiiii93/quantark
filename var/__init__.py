@@ -17,6 +17,7 @@ from var.engines import (
 )
 from var.results import IncrementalVaRResult, VaRResult
 from var.results.var_report import VaRReportGenerator
+from var.attribution import ComponentVaRCalculator, MarginalVaRCalculator, VaRAttributor
 
 __all__ = [
     "VaREngine",
@@ -32,4 +33,7 @@ __all__ = [
     "VaRBacktester",
     "VaRBacktestResult",
     "VaRReportGenerator",
+    "ComponentVaRCalculator",
+    "MarginalVaRCalculator",
+    "VaRAttributor",
 ]

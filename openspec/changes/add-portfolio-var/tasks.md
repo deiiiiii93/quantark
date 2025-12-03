@@ -36,13 +36,13 @@
 ## 4. Historical VaR Engine
 
 - [x] 4.1 Create `var/engines/historical.py`
-- [ ] 4.2 Implement scenario extraction from `MarketDataSet`
+- [x] 4.2 Implement scenario extraction from `MarketDataSet`
 - [x] 4.3 Implement scenario extraction from `pd.DataFrame`
 - [x] 4.4 Implement stressed `PricingEnvironment` creation for each scenario
 - [x] 4.5 Implement full portfolio revaluation loop
 - [x] 4.6 Implement empirical VaR from P&L distribution (percentile)
 - [x] 4.7 Implement empirical CVaR (Expected Shortfall)
-- [ ] 4.8 Implement overlapping returns for multi-day VaR
+- [x] 4.8 Implement overlapping returns for multi-day VaR
 - [x] 4.9 Store scenario details in result for backtesting
 - [x] 4.10 Write unit tests for historical VaR with synthetic data
 
@@ -59,19 +59,19 @@
 
 ## 6. VaR Attribution
 
-- [ ] 6.1 Implement component VaR calculation (Euler allocation)
-- [ ] 6.2 Implement marginal VaR calculation (incremental contribution)
+- [x] 6.1 Implement component VaR calculation (Euler allocation)
+- [x] 6.2 Implement marginal VaR calculation (incremental contribution)
 - [x] 6.3 Implement factor VaR attribution (risk factor decomposition)
 - [x] 6.4 Add attribution results to `VaRResult`
-- [ ] 6.5 Write unit tests for VaR attribution (sum to total VaR)
+- [x] 6.5 Write unit tests for VaR attribution (sum to total VaR)
 
 ## 7. Stressed VaR
 
 - [x] 7.1 Add `calculate_stressed_var`, `stressed_period_start`, `stressed_period_end` to `VaRConfig`
-- [ ] 7.2 Implement auto-detection of highest volatility 12-month period
-- [ ] 7.3 Implement SVaR calculation using stressed period scenarios
+- [x] 7.2 Implement auto-detection of highest volatility 12-month period
+- [x] 7.3 Implement SVaR calculation using stressed period scenarios
 - [x] 7.4 Add `stressed_var`, `stressed_cvar`, `stressed_period` to `VaRResult`
-- [ ] 7.5 Write unit tests for SVaR with known crisis periods
+- [x] 7.5 Write unit tests for SVaR with known crisis periods
 
 ## 8. VaR Backtesting
 
@@ -88,10 +88,10 @@
 
 - [x] 9.1 Add `calculate_incremental_var` to `VaRConfig`
 - [x] 9.2 Implement `IncrementalVaRResult` dataclass
-- [ ] 9.3 Implement incremental VaR calculation (full portfolio vs excluding position)
+- [x] 9.3 Implement incremental VaR calculation (full portfolio vs excluding position)
 - [x] 9.4 Add `incremental_var` dict to `VaRResult`
-- [ ] 9.5 Implement single-position incremental VaR query method
-- [ ] 9.6 Write unit tests for incremental VaR (diversification scenarios)
+- [x] 9.5 Implement single-position incremental VaR query method
+- [x] 9.6 Write unit tests for incremental VaR (diversification scenarios)
 
 ## 10. Reporting and Integration
 
@@ -106,7 +106,7 @@
 ## 11. Documentation and Final Validation
 
 - [x] 11.1 Add docstrings to all public classes and methods
-- [ ] 11.2 Create `var/README.md` with usage examples
-- [ ] 11.3 Run full test suite and verify coverage
-- [ ] 11.4 Validate against known benchmark VaR values
-- [ ] 11.5 Validate backtesting against published test cases
+- [x] 11.2 Create `var/README.md` with usage examples
+- [x] 11.3 Run full test suite and verify coverage
+- [x] 11.4 Validate against known benchmark VaR values
+- [x] 11.5 Validate backtesting against published test cases

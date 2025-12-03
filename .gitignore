@@ -137,5 +137,5 @@ Thumbs.db
 *.pkl
 *.dat
 data/
-results/
+result/
 
