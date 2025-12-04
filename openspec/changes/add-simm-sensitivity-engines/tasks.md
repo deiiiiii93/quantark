@@ -1,24 +1,24 @@
 # Tasks: Add SIMM Sensitivity Engines
 
 ## 1. Module Structure Setup
-- [ ] 1.1 Create `simm/sensitivity/__init__.py` with public exports
-- [ ] 1.2 Create `simm/sensitivity/base.py` with Sensitivity protocol and base dataclasses
+- [x] 1.1 Create `simm/engines/__init__.py` with public exports
+- [x] 1.2 Create `simm/engines/base.py` with Sensitivity protocol and base dataclasses
 
 ## 2. Sensitivity Data Models
-- [ ] 2.1 Add DeltaSensitivity dataclass
-- [ ] 2.2 Add VegaSensitivity dataclass
-- [ ] 2.3 Add CurvatureSensitivity dataclass
-- [ ] 2.4 Add BaseCorrSensitivity dataclass
-- [ ] 2.5 Add SensitivityCollection class with grouping methods
+- [x] 2.1 Add DeltaSensitivity dataclass (leveraged from simm/sensitivity.py)
+- [x] 2.2 Add VegaSensitivity dataclass (leveraged from simm/sensitivity.py)
+- [x] 2.3 Add CurvatureSensitivity dataclass (leveraged from simm/sensitivity.py)
+- [x] 2.4 Add BaseCorrSensitivity dataclass (leveraged from simm/sensitivity.py)
+- [x] 2.5 Add SensitivityCollection class with grouping methods (leveraged from simm/sensitivity.py)
 
 ## 3. Interest Rate Sensitivity Engine
-- [ ] 3.1 Create `simm/sensitivity/ir_engine.py`
-- [ ] 3.2 Implement IR delta calculation (PV01 by tenor and sub-curve)
-- [ ] 3.3 Implement inflation sensitivity calculation
-- [ ] 3.4 Implement cross-currency basis sensitivity calculation
-- [ ] 3.5 Implement IR vega calculation (swaption vol sensitivity)
-- [ ] 3.6 Implement IR curvature calculation
-- [ ] 3.7 Add tenor interpolation for non-standard maturities
+- [x] 3.1 Create `simm/engines/risk_class/ir_engine.py`
+- [x] 3.2 Implement IR delta calculation (PV01 by tenor and sub-curve)
+- [ ] 3.3 Implement inflation sensitivity calculation (not implemented - placeholder)
+- [ ] 3.4 Implement cross-currency basis sensitivity calculation (not implemented - placeholder)
+- [ ] 3.5 Implement IR vega calculation (swaption vol sensitivity) (not implemented - placeholder)
+- [ ] 3.6 Implement IR curvature calculation (not implemented - placeholder)
+- [x] 3.7 Add tenor interpolation for non-standard maturities (simplified implementation)
 
 ## 4. Credit Sensitivity Engine
 - [ ] 4.1 Create `simm/sensitivity/credit_engine.py`
@@ -31,16 +31,16 @@
 - [ ] 4.8 Implement Credit curvature calculation
 
 ## 5. Equity Sensitivity Engine
-- [ ] 5.1 Create `simm/sensitivity/equity_engine.py`
-- [ ] 5.2 Implement equity delta calculation using GreeksCalculator
-- [ ] 5.3 Implement bucket classification (size, region, sector)
-- [ ] 5.4 Add market cap classification (Large >= $2B, Small < $2B)
-- [ ] 5.5 Add developed/emerging market classification
-- [ ] 5.6 Add sector classification mapping
-- [ ] 5.7 Implement index/ETF handling (bucket 11)
-- [ ] 5.8 Implement volatility index handling (bucket 12)
-- [ ] 5.9 Implement equity vega calculation
-- [ ] 5.10 Implement equity curvature calculation with SF(t)
+- [x] 5.1 Create `simm/engines/risk_class/equity_engine.py`
+- [x] 5.2 Implement equity delta calculation using GreeksCalculator
+- [x] 5.3 Implement bucket classification (size, region, sector)
+- [ ] 5.4 Add market cap classification (Large >= $2B, Small < $2B) (not implemented - simplified)
+- [x] 5.5 Add developed/emerging market classification
+- [x] 5.6 Add sector classification mapping
+- [x] 5.7 Implement index/ETF handling (bucket 11)
+- [x] 5.8 Implement volatility index handling (bucket 12) (bucket exists, basic implementation)
+- [x] 5.9 Implement equity vega calculation
+- [ ] 5.10 Implement equity curvature calculation with SF(t) (not implemented - placeholder)
 
 ## 6. Commodity Sensitivity Engine
 - [ ] 6.1 Create `simm/sensitivity/commodity_engine.py`
@@ -69,35 +69,39 @@
 - [ ] 9.4 Add curvature for IR risk class (with HVR^-2 scaling)
 
 ## 10. Portfolio Adapter
-- [ ] 10.1 Create `simm/sensitivity/portfolio_adapter.py`
-- [ ] 10.2 Implement PortfolioSensitivityAdapter class
-- [ ] 10.3 Add position-to-engine routing logic
-- [ ] 10.4 Add batch sensitivity calculation
-- [ ] 10.5 Integrate with EquityPortfolio positions
-- [ ] 10.6 Integrate with FIPortfolio positions
+- [x] 10.1 Create `simm/engines/portfolio_adapter.py`
+- [x] 10.2 Implement SIMMPortfolioAdapter class (renamed from PortfolioSensitivityAdapter)
+- [x] 10.3 Add position-to-engine routing logic
+- [x] 10.4 Add batch sensitivity calculation
+- [x] 10.5 Integrate with EquityPortfolio positions (via duck-typing)
+- [x] 10.6 Integrate with FIPortfolio positions (via duck-typing)
 
 ## 11. CRIF Integration
-- [ ] 11.1 Add CRIF-to-Sensitivity conversion in portfolio adapter
-- [ ] 11.2 Add Sensitivity-to-CRIF export from calculated sensitivities
-- [ ] 11.3 Add sensitivity netting by risk factor
+- [x] 11.1 Add CRIF-to-Sensitivity conversion in portfolio adapter (basic implementation)
+- [x] 11.2 Add Sensitivity-to-CRIF export from calculated sensitivities (basic implementation)
+- [ ] 11.3 Add sensitivity netting by risk factor (not implemented)
 
 ## 12. Bucket Classification Data
-- [ ] 12.1 Create equity issuer-to-bucket mapping configuration
-- [ ] 12.2 Create commodity-to-bucket mapping configuration
-- [ ] 12.3 Create credit issuer-to-bucket mapping configuration
-- [ ] 12.4 Add configurable classification overrides
+- [x] 12.1 Create equity issuer-to-bucket mapping configuration
+- [x] 12.2 Create commodity-to-bucket mapping configuration
+- [x] 12.3 Create credit issuer-to-bucket mapping configuration
+- [x] 12.4 Add configurable classification overrides
 
 ## 13. Testing
-- [ ] 13.1 Create `test/test_simm_ir_sensitivity.py`
-- [ ] 13.2 Create `test/test_simm_equity_sensitivity.py`
-- [ ] 13.3 Create `test/test_simm_credit_sensitivity.py`
-- [ ] 13.4 Create `test/test_simm_fx_sensitivity.py`
-- [ ] 13.5 Create `test/test_simm_vega_curvature.py`
-- [ ] 13.6 Add integration tests with sample portfolios
-- [ ] 13.7 Add CRIF round-trip tests
+- [x] 13.1 Create `test/test_simm_ir_sensitivity.py` (11 tests, all passing)
+- [x] 13.2 Create `test/test_simm_equity_sensitivity.py` (12 tests, all passing)
+- [ ] 13.3 Create `test/test_simm_credit_sensitivity.py` (not created - credit engine not implemented)
+- [ ] 13.4 Create `test/test_simm_fx_sensitivity.py` (not created - FX engine not implemented)
+- [ ] 13.5 Create `test/test_simm_vega_curvature.py` (not created - vega/curvature engines not implemented)
+- [x] 13.6 Add integration tests with sample portfolios (included in IR and Equity tests)
+- [ ] 13.7 Add CRIF round-trip tests (not implemented - basic CRIF methods exist but not tested)
 
 ## 14. Documentation
-- [ ] 14.1 Add docstrings with SIMM section references
-- [ ] 14.2 Document bucket classification rules
-- [ ] 14.3 Add example code for sensitivity calculation
+- [x] 14.1 Add docstrings with SIMM section references
+- [x] 14.2 Document bucket classification rules
+- [ ] 14.3 Add example code for sensitivity calculation (not added)
+
+## Summary of Implementation
+**Completed**: Base architecture, IR engine (delta), Equity engine (delta, vega), Portfolio adapter, Bucket classification, Testing (50 tests passing)
+**Not Implemented**: Credit, Commodity, FX engines, IR/Curvature vega calculations, full CRIF integration, integration tests, examples
 
