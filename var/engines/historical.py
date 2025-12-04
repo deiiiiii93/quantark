@@ -578,12 +578,15 @@ class HistoricalVaREngine:
         for pos_id, position in portfolio.positions.items():
             base_env = portfolio.pricing_environments[position.underlying]
 
+            # Get current (un-stressed) price of the position
+            current_price = position.engine.price(position.product, base_env)
+
             pnls = []
             for idx, scenario in scenarios.iterrows():
                 stressed_env = self._create_stressed_environment(base_env, scenario)
                 stressed_price = position.engine.price(position.product, stressed_env)
                 pnl = stressed_price * position.quantity - (
-                    position.quantity * base_env.spot_quote.spot
+                    position.quantity * current_price
                 )
                 pnls.append(pnl)
 

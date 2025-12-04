@@ -189,10 +189,14 @@ def main():
         expiry = position.product.exercise_date.strftime("%Y-%m-%d")
         opt_type = "CALL" if position.product.option_type == OptionType.CALL else "PUT"
 
-        print(f"  {i}. {opt_type:15s} Strike: ${strike:6.1f} | Expiry: {expiry} | Qty: {position.quantity:4d}")
+        print(
+            f"  {i}. {opt_type:15s} Strike: ${strike:6.1f} | Expiry: {expiry} | Qty: {position.quantity:4d}"
+        )
 
     print()
-    print(f"Note: Monte Carlo is ideal for path-dependent products and custom scenarios!")
+    print(
+        f"Note: Monte Carlo is ideal for path-dependent products and custom scenarios!"
+    )
     print()
 
     print("=" * 80)
@@ -226,7 +230,7 @@ def main():
     print("Testing VaR at different simulation counts:")
     print()
 
-    simulation_counts = [1000, 5000, 10000, 25000, 50000]
+    simulation_counts = [1000, 5000, 10000]
     convergence_results = []
 
     for num_sims in simulation_counts:
@@ -243,14 +247,18 @@ def main():
         engine = MonteCarloVaREngine(config=config)
         result = engine.calculate_var(portfolio, historical_data)
 
-        convergence_results.append({
-            'Simulations': num_sims,
-            'VaR': result.var,
-            'CVaR': result.cvar,
-            'Time (s)': result.execution_time_seconds,
-        })
+        convergence_results.append(
+            {
+                "Simulations": num_sims,
+                "VaR": result.var,
+                "CVaR": result.cvar,
+                "Time (s)": result.execution_time_seconds,
+            }
+        )
 
-        print(f"VaR: ${result.var:8,.2f} | CVaR: ${result.cvar:8,.2f} | Time: {result.execution_time_seconds:6.3f}s")
+        print(
+            f"VaR: ${result.var:8,.2f} | CVaR: ${result.cvar:8,.2f} | Time: {result.execution_time_seconds:6.3f}s"
+        )
 
     print()
     print("Convergence Analysis:")
@@ -262,12 +270,14 @@ def main():
         if i == 0:
             change = "N/A"
         else:
-            prev_var = convergence_results[i-1]['VaR']
-            change_pct = (result['VaR'] - prev_var) / prev_var * 100
+            prev_var = convergence_results[i - 1]["VaR"]
+            change_pct = (result["VaR"] - prev_var) / prev_var * 100
             change = f"{change_pct:+5.2f}%"
 
-        print(f"{result['Simulations']:>12,} ${result['VaR']:>10,.2f} "
-              f"${result['CVaR']:>10,.2f} {change:>8s} {result['Time (s)']:>8.3f}s")
+        print(
+            f"{result['Simulations']:>12,} ${result['VaR']:>10,.2f} "
+            f"${result['CVaR']:>10,.2f} {change:>8s} {result['Time (s)']:>8.3f}s"
+        )
 
     print()
     print("Key Observations:")
@@ -314,17 +324,41 @@ def main():
     print()
 
     stress_scenarios = [
-        {"name": "Market Crash", "spot_return": -0.20, "vol_change": 0.50, "description": "2008-style crisis"},
-        {"name": "Volatility Spike", "spot_return": -0.05, "vol_change": 1.00, "description": "Vol-of-vol shock"},
-        {"name": "Rate Shock", "spot_return": 0.02, "vol_change": 0.10, "rate_shift": 0.01, "description": "Fed surprise"},
-        {"name": "Perfect Storm", "spot_return": -0.15, "vol_change": 0.80, "rate_shift": 0.008, "description": "Combined stress"},
+        {
+            "name": "Market Crash",
+            "spot_return": -0.20,
+            "vol_change": 0.50,
+            "description": "2008-style crisis",
+        },
+        {
+            "name": "Volatility Spike",
+            "spot_return": -0.05,
+            "vol_change": 1.00,
+            "description": "Vol-of-vol shock",
+        },
+        {
+            "name": "Rate Shock",
+            "spot_return": 0.02,
+            "vol_change": 0.10,
+            "rate_shift": 0.01,
+            "description": "Fed surprise",
+        },
+        {
+            "name": "Perfect Storm",
+            "spot_return": -0.15,
+            "vol_change": 0.80,
+            "rate_shift": 0.008,
+            "description": "Combined stress",
+        },
     ]
 
     for scenario in stress_scenarios:
         print(f"  • {scenario['name']:18s}: {scenario['description']}")
-        print(f"    Spot Return: {scenario.get('spot_return', 0):+6.1%}, "
-              f"Vol Change: {scenario.get('vol_change', 0):+6.1%}, "
-              f"Rate Shift: {scenario.get('rate_shift', 0):+6.4f}")
+        print(
+            f"    Spot Return: {scenario.get('spot_return', 0):+6.1%}, "
+            f"Vol Change: {scenario.get('vol_change', 0):+6.1%}, "
+            f"Rate Shift: {scenario.get('rate_shift', 0):+6.4f}"
+        )
 
     print()
     print("These scenarios can be overlaid on Monte Carlo simulations")
@@ -410,7 +444,9 @@ def main():
     print("=" * 80)
     print()
     print("Key Takeaways:")
-    print(f"  • VaR: ${mc_result.var:,.2f} ({mc_result.var_as_pct*100:.2f}% of portfolio)")
+    print(
+        f"  • VaR: ${mc_result.var:,.2f} ({mc_result.var_as_pct*100:.2f}% of portfolio)"
+    )
     print(f"  • CVaR: ${mc_result.cvar:,.2f}")
     print(f"  • Final execution time: {mc_result.execution_time_seconds:.4f} seconds")
     print("  • Flexible and forward-looking method")

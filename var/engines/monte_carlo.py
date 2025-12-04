@@ -174,6 +174,10 @@ class MonteCarloVaREngine:
             portfolio, simulated_scenarios, base_value
         )
 
+        # Create scenarios DataFrame with both risk factors and P&L
+        simulated_scenarios_with_pnl = simulated_scenarios.copy()
+        simulated_scenarios_with_pnl['pnl'] = pnl_scenarios
+
         var_percentile = (1 - self.config.confidence_level) * 100
         var = -np.percentile(pnl_scenarios, var_percentile)
 
@@ -200,7 +204,7 @@ class MonteCarloVaREngine:
 
         # Calculate factor attribution from simulated scenarios
         if self.config.calculate_factor_var:
-            result.factor_var = self._calculate_factor_attribution(simulated_scenarios)
+            result.factor_var = self._calculate_factor_attribution(simulated_scenarios_with_pnl)
 
         # Calculate component VaR if enabled
         if self.config.calculate_component_var:
@@ -468,26 +472,50 @@ class MonteCarloVaREngine:
         """
         Calculate VaR attribution by risk factor from simulated scenarios.
 
+        Uses correlation-based approach:
+        Factor VaR_i = |Correlation(Factor_i, P&L)| × Portfolio VaR
+
+        This approach is more stable than covariance-based decomposition
+        when factors are in different units (returns vs dollars).
+
         Args:
-            scenarios: DataFrame of simulated scenarios
+            scenarios: DataFrame of simulated scenarios with 'pnl' column
 
         Returns:
             Dictionary mapping factor name to VaR contribution
         """
-        # Calculate variance contribution of each risk factor
-        factor_var = {}
-        for factor in scenarios.columns:
-            if factor in scenarios.columns:
-                factor_vol = scenarios[factor].std()
-                # Simplified: attribute VaR proportional to factor volatility
-                factor_var[factor] = abs(factor_vol) * 1000.0  # Scale factor
+        if 'pnl' not in scenarios.columns:
+            # P&L not available in scenarios
+            return {}
 
-        # Normalize to match total VaR
-        if factor_var:
-            total_attributed = sum(factor_var.values())
-            if total_attributed > 0:
-                # This is a simplified approach
-                pass
+        pnl = scenarios['pnl'].values
+
+        # Calculate VaR
+        var_percentile = (1 - self.config.confidence_level) * 100
+        portfolio_var_result = -np.percentile(pnl, var_percentile)
+
+        # Calculate VaR contribution for each risk factor
+        factor_var = {}
+
+        # Only consider risk factor columns (skip P&L column)
+        for factor in scenarios.columns:
+            if factor == 'pnl' or factor == 'scenario_idx':
+                continue
+
+            factor_values = scenarios[factor].values
+
+            # Calculate correlation between factor and P&L
+            if len(pnl) > 1:
+                # Use correlation (unitless) which is more stable
+                correlation = np.corrcoef(factor_values, pnl)[0, 1]
+
+                # Factor VaR = |correlation| × Portfolio VaR
+                # Take absolute value because VaR is a loss measure
+                factor_var_result = abs(correlation) * portfolio_var_result
+            else:
+                factor_var_result = 0.0
+
+            factor_var[factor] = factor_var_result
 
         return factor_var
 
@@ -518,11 +546,14 @@ class MonteCarloVaREngine:
             position_pnls = []
             base_env = portfolio.pricing_environments[position.underlying]
 
+            # Get current (un-stressed) price of the position
+            current_price = position.engine.price(position.product, base_env)
+
             for idx, scenario in scenarios.iterrows():
                 stressed_env = self._create_stressed_environment(base_env, scenario)
                 stressed_price = position.engine.price(position.product, stressed_env)
                 pnl = stressed_price * position.quantity - (
-                    position.quantity * base_env.spot_quote.spot
+                    position.quantity * current_price
                 )
                 position_pnls.append(pnl)
 
