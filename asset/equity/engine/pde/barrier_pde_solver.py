@@ -76,6 +76,12 @@ class BarrierPDESolver(BasePDESolver):
                 f"got {type(product).__name__}"
             )
 
+        if getattr(product, "observation_type", None) == ObservationType.EXPIRY:
+            raise PricingError(
+                "BarrierPDESolver does not support EXPIRY observation_type. "
+                "Use BarrierAnalyticalEngine for expiry-only monitoring."
+            )
+
         # Check if barrier is already hit
         spot = pricing_env.spot
         if product.is_barrier_hit(spot):
@@ -234,7 +240,6 @@ class BarrierPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         K = product.strike
-        barrier = product.barrier
         rebate = product.rebate
 
         r = pricing_env.get_rate(tau) if tau > 0 else 0.0

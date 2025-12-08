@@ -48,6 +48,8 @@ class BarrierOption(BaseEquityOption):
     barrier: float = 0.0
     barrier_type: BarrierType = BarrierType.DOWN_OUT
     rebate: float = 0.0
+    participation_rate: float = 1.0
+    pay_at_hit: bool = False
     observation_type: ObservationType = ObservationType.CONTINUOUS
     observation_dates: Optional[List[float]] = None
     observation_schedule: Optional[ObservationSchedule] = None
@@ -62,6 +64,8 @@ class BarrierOption(BaseEquityOption):
         exercise_date: Optional[datetime] = None,
         settlement_date: Optional[datetime] = None,
         rebate: float = 0.0,
+        participation_rate: float = 1.0,
+        pay_at_hit: bool = False,
         observation_type: ObservationType = ObservationType.CONTINUOUS,
         observation_dates: Optional[List[float]] = None,
         observation_schedule: Optional[ObservationSchedule] = None,
@@ -94,6 +98,8 @@ class BarrierOption(BaseEquityOption):
         self.barrier = barrier
         self.barrier_type = barrier_type
         self.rebate = rebate
+        self.participation_rate = participation_rate
+        self.pay_at_hit = pay_at_hit
         self.observation_type = observation_type
         self.observation_dates = observation_dates
         self.observation_schedule = observation_schedule
@@ -121,6 +127,12 @@ class BarrierOption(BaseEquityOption):
 
         if self.rebate < 0:
             raise ValidationError(f"Rebate must be non-negative, got {self.rebate}")
+        if not isinstance(self.pay_at_hit, bool):
+            raise ValidationError(f"pay_at_hit must be boolean, got {self.pay_at_hit}")
+        if self.participation_rate <= 0:
+            raise ValidationError(
+                f"Participation rate must be positive, got {self.participation_rate}"
+            )
 
         if not isinstance(self.barrier_type, BarrierType):
             raise ValidationError(f"Invalid barrier type: {self.barrier_type}")
@@ -148,7 +160,10 @@ class BarrierOption(BaseEquityOption):
 
         # Normalize observation schedule (preferred) or legacy dates for discrete monitoring
         if self.observation_schedule is not None:
-            if self.observation_type == ObservationType.CONTINUOUS:
+            if self.observation_type in (
+                ObservationType.CONTINUOUS,
+                ObservationType.EXPIRY,
+            ):
                 raise ValidationError(
                     "ObservationSchedule requires DISCRETE observation_type."
                 )
@@ -181,6 +196,10 @@ class BarrierOption(BaseEquityOption):
                 aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
             )
             self.observation_dates = self.observation_schedule.times
+        else:
+            # EXPIRY monitoring does not use schedules or legacy dates
+            self.observation_schedule = None
+            self.observation_dates = self.observation_dates or []
 
     def get_payoff(self, spot: float) -> float:
         """
@@ -251,9 +270,16 @@ class BarrierOption(BaseEquityOption):
         else:  # down barrier
             return spot <= self.barrier
 
+    @property
+    def pay_at_expiry(self) -> bool:
+        """Rebate paid at expiry if True (i.e., not at hit)."""
+        return not self.pay_at_hit
+
     def __repr__(self):
         return (
             f"BarrierOption("
             f"{self.option_type}, K={self.strike:.2f}, "
-            f"B={self.barrier:.2f}, {self.barrier_type}, T={self.maturity:.4f})"
+            f"B={self.barrier:.2f}, {self.barrier_type}, T={self.maturity:.4f}, "
+            f"rebate={self.rebate:.2f}, pay_at_hit={self.pay_at_hit}, "
+            f"participation={self.participation_rate:.4f})"
         )

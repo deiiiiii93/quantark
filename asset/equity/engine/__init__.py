@@ -1,8 +1,13 @@
 """
 Pricing engines for equity derivatives.
 """
+
 from .base_engine import BaseEngine
-from .analytical import BlackScholesEngine
+from .analytical import (
+    BlackScholesEngine,
+    BarrierAnalyticalEngine,
+    OneTouchAnalyticalEngine,
+)
 from .pde_engine import PDEEngine
 from .pde import (
     BasePDESolver,
@@ -18,20 +23,22 @@ from .pde import (
 
 __all__ = [
     # Base
-    'BaseEngine',
+    "BaseEngine",
     # Analytical
-    'BlackScholesEngine',
+    "BlackScholesEngine",
+    "BarrierAnalyticalEngine",
+    "OneTouchAnalyticalEngine",
     # Unified PDE Engine
-    'PDEEngine',
+    "PDEEngine",
     # PDE Solvers
-    'BasePDESolver',
-    'EuropeanPDESolver',
-    'AmericanPDESolver',
-    'BarrierPDESolver',
-    'DoubleBarrierPDESolver',
-    'OneTouchPDESolver',
-    'DoubleOneTouchPDESolver',
+    "BasePDESolver",
+    "EuropeanPDESolver",
+    "AmericanPDESolver",
+    "BarrierPDESolver",
+    "DoubleBarrierPDESolver",
+    "OneTouchPDESolver",
+    "DoubleOneTouchPDESolver",
     # Grid utilities
-    'TimeGrid',
-    'SpatialGrid',
+    "TimeGrid",
+    "SpatialGrid",
 ]

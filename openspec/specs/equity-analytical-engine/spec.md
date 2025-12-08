@@ -207,3 +207,84 @@ The engine SHALL handle edge cases and maintain numerical stability across all p
 - **AND** SHALL handle edge cases: |ρ| < 1e-10 → N(x)*N(y), ρ ≈ 1 → min(N(x), N(y))
 - **AND** SHALL handle ρ ≈ -1 → max(N(x) + N(y) - 1, 0)
 
+### Requirement: Cash digital option analytical pricing
+The system SHALL provide closed-form Black-Scholes pricing for European cash-or-nothing digital call and put options.
+
+#### Scenario: Price digital call with BSM
+- **WHEN** pricing a European cash digital call with payout P, maturity T > 0, spot S, strike K, rate r, dividend yield q, and volatility σ
+- **THEN** the price SHALL be P * exp(-r*T) * N(d₂) where d₂ = [ln(S/K) + (r - q - 0.5σ²)T] / (σ√T)
+- **AND** the engine SHALL source S, r, q, and σ from the `PricingEnvironment`
+
+#### Scenario: Price digital put with BSM
+- **WHEN** pricing a European cash digital put with payout P, maturity T > 0, spot S, strike K, rate r, dividend yield q, and volatility σ
+- **THEN** the price SHALL be P * exp(-r*T) * N(-d₂) using the same d₂ definition
+- **AND** the engine SHALL source market inputs from the `PricingEnvironment`
+
+#### Scenario: Handle near-expiry payoff
+- **WHEN** time to maturity is less than 1e-10
+- **THEN** the engine SHALL return the product payoff evaluated at the current spot without further computation
+
+#### Scenario: Input validation and product type checks
+- **WHEN** spot ≤ 0, strike ≤ 0, volatility ≤ 0, or payout ≤ 0
+- **THEN** the engine SHALL raise `ValidationError`
+- **WHEN** a non-digital product is passed to the digital pricing engine
+- **THEN** the engine SHALL raise `PricingError`
+
+### Requirement: Barrier Option Analytical Pricing
+The system SHALL provide a closed-form analytical engine for single-barrier options supporting knock-in/knock-out, up/down barriers, continuous monitoring, discrete monitoring with barrier shift, and expiry-only monitoring via decomposition.
+
+#### Scenario: Continuous monitoring pricing
+- **WHEN** pricing a `BarrierOption` with `observation_type=CONTINUOUS`
+- **THEN** the engine SHALL use closed-form barrier formulas for knock-out with optional rebate
+- **AND** SHALL price knock-in via parity against vanilla minus knock-out
+
+#### Scenario: Discrete monitoring with barrier shift
+- **WHEN** pricing a discretely observed barrier with a regular observation interval and fixed per-record payoff
+- **THEN** the engine SHALL apply the beta-based barrier shift (β=0.5825971579) using `dt=frequency` to adjust the barrier before using continuous formulas
+- **AND** SHALL raise `ValidationError` if the schedule is irregular or payoffs are inconsistent for analytical shift
+
+#### Scenario: Expiry-only monitoring decomposition
+- **WHEN** `observation_type=EXPIRY`
+- **THEN** the engine SHALL decompose the barrier payoff into combinations of European vanillas and cash digitals without tenor/365 scaling
+- **AND** SHALL honor rebates by adding a digital-style rebate term when the barrier condition is not met
+
+#### Scenario: Method selection and integration
+- **WHEN** the barrier analytical engine is instantiated
+- **THEN** it SHALL inherit from `BaseEngine`, source market data from `PricingEnvironment`, and raise `PricingError` for unsupported product types
+
+#### Scenario: Input validation and stability
+- **WHEN** inputs are invalid (non-positive spot/strike/barrier, negative volatility, non-regular discrete schedule)
+- **THEN** the engine SHALL raise `ValidationError`
+- **AND** SHALL return intrinsic value when maturity is effectively zero
+
+### Requirement: One-touch and no-touch analytical pricing
+The system SHALL provide a closed-form analytical engine for one-touch and no-touch options supporting continuous, discrete (shifted), and expiry-only monitoring, with pay-at-hit vs pay-at-expiry handling for one-touch.
+
+#### Scenario: Continuous monitoring payout
+- **WHEN** pricing a `OneTouchOption` with `observation_type=CONTINUOUS`
+- **THEN** the engine SHALL use the closed-form one-touch formula from `onetouch_analytical_engine.md` without tenor/365 scaling
+- **AND** SHALL pay immediately when `payment_at_hit=True` (no discounting) or discount to expiry when `payment_at_hit=False`
+
+#### Scenario: Discrete monitoring with barrier shift
+- **WHEN** `observation_type=DISCRETE` with a regular observation schedule and fixed rebate across observations
+- **THEN** the engine SHALL apply the beta barrier shift (β=0.5825971579) via `apply_barrier_shift(dt=freq)` before using the continuous formula
+- **AND** SHALL raise `ValidationError` for irregular schedules or varying payoffs
+
+#### Scenario: Expiry-only monitoring fallback
+- **WHEN** `observation_type=EXPIRY`
+- **THEN** the engine SHALL price using digital-style probabilities (one-touch pays rebate * exp(-rT) * P(hit), no-touch pays rebate * exp(-rT) * P(not hit))
+- **AND** SHALL ignore `payment_at_hit` for expiry monitoring
+
+#### Scenario: Ignore payment_at_hit for no-touch
+- **WHEN** pricing a NO_TOUCH option with any observation type
+- **THEN** the engine SHALL ignore `payment_at_hit` and only pay at expiry if the barrier has not been hit (continuous/discrete) or the terminal condition is not breached (expiry)
+
+#### Scenario: Input validation and maturity edge
+- **WHEN** spot, barrier, or volatility are non-positive, or maturity is negative
+- **THEN** the engine SHALL raise `ValidationError`
+- **AND** WHEN maturity is effectively zero, it SHALL return the immediate payoff based on whether the barrier is already hit for continuous/discrete monitoring
+
+#### Scenario: Product type enforcement
+- **WHEN** a non-`OneTouchOption` product is passed
+- **THEN** the engine SHALL raise `PricingError`
+
