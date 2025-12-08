@@ -5,14 +5,14 @@ Implements the finite difference method for digital barrier options
 with two barriers (upper and lower).
 """
 
-from typing import Optional, List, Set
+from typing import Dict, Optional, List, Set
 import numpy as np
 
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option.double_one_touch_option import DoubleOneTouchOption
 from asset.equity.param import PDEParams
 from priceenv import PricingEnvironment
-from util.enum import ObservationType, TouchType
+from util.enum import ObservationType, ObservationAggregation, TouchType
 from util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
@@ -45,6 +45,10 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         """
         super().__init__(params)
         self._observation_indices: Set[int] = set()
+        self._schedule_records: Dict[int, List] = {}
+        self._schedule_aggregation: ObservationAggregation = (
+            ObservationAggregation.STOP_FIRST_HIT
+        )
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -202,11 +206,39 @@ class DoubleOneTouchPDESolver(BasePDESolver):
             if t_idx not in self._observation_indices:
                 return
 
+        schedule_records = self._schedule_records.get(t_idx)
         upper = product.upper_barrier
         lower = product.lower_barrier
         rebate = product.rebate
         r = pricing_env.get_rate(tau) if tau > 0 else 0.0
         df = np.exp(-r * tau) if tau > 0 else 1.0
+
+        if schedule_records:
+            for rec in schedule_records:
+                upper = (
+                    rec.upper_barrier
+                    if rec.upper_barrier is not None
+                    else product.upper_barrier
+                )
+                lower = (
+                    rec.lower_barrier
+                    if rec.lower_barrier is not None
+                    else product.lower_barrier
+                )
+                payoff = rec.payoff
+                if product.is_double_one_touch:
+                    barrier_value = payoff if product.payment_at_hit else payoff * df
+                else:
+                    barrier_value = 0.0
+                at_or_above_upper = s_vec >= upper
+                at_or_below_lower = s_vec <= lower
+                outside_corridor = at_or_above_upper | at_or_below_lower
+                if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
+                    grid[outside_corridor, t_idx] += barrier_value
+                else:
+                    grid[outside_corridor, t_idx] = barrier_value
+                    return
+            return
 
         if product.is_double_one_touch:
             if product.payment_at_hit:
@@ -221,6 +253,18 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         at_or_below_lower = s_vec <= lower
         outside_corridor = at_or_above_upper | at_or_below_lower
         grid[outside_corridor, t_idx] = barrier_value
+
+    def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
+        """Include schedule-specific barriers when building spatial bounds."""
+        barriers = super()._get_barriers(product)
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            for rec in schedule.records:
+                if rec.lower_barrier is not None:
+                    barriers.append(rec.lower_barrier)
+                if rec.upper_barrier is not None:
+                    barriers.append(rec.upper_barrier)
+        return barriers
 
     def _build_grids(
         self,
@@ -281,7 +325,31 @@ class DoubleOneTouchPDESolver(BasePDESolver):
 
         # Setup observation indices for discrete monitoring
         self._observation_indices.clear()
-        if (
+        self._schedule_records.clear()
+        self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            resolved_records = schedule.resolve(
+                pricing_env=pricing_env,
+                default_upper=product.upper_barrier,
+                default_lower=product.lower_barrier,
+                default_payoff=product.rebate,
+                require_double=True,
+            )
+            self._schedule_aggregation = schedule.aggregation_mode
+            if self._schedule_aggregation in (
+                ObservationAggregation.BEST,
+                ObservationAggregation.WORST,
+            ):
+                raise PricingError(
+                    f"PDE solver does not support aggregation mode {self._schedule_aggregation.value}"
+                )
+            for rec in resolved_records:
+                if 0 < rec.observation_time < tau:
+                    idx = np.argmin(np.abs(t_vec - rec.observation_time))
+                    self._observation_indices.add(idx)
+                    self._schedule_records.setdefault(idx, []).append(rec)
+        elif (
             product.observation_type == ObservationType.DISCRETE
             and product.observation_dates is not None
         ):
@@ -307,7 +375,17 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         Returns:
             List containing both barriers
         """
-        return [product.lower_barrier, product.upper_barrier]
+        points = [product.lower_barrier, product.upper_barrier]
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            for rec in schedule.records:
+                if rec.lower_barrier is not None:
+                    points.append(rec.lower_barrier)
+                if rec.upper_barrier is not None:
+                    points.append(rec.upper_barrier)
+        # sort and make unique before return
+        points = sorted(set(points))
+        return points
 
     def __repr__(self):
         return "DoubleOneTouchPDESolver()"

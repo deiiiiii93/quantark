@@ -8,6 +8,7 @@ from .barrier_option import BarrierOption
 from .double_barrier_option import DoubleBarrierOption
 from .one_touch_option import OneTouchOption
 from .double_one_touch_option import DoubleOneTouchOption
+from .observation_schedule import ObservationRecord, ObservationSchedule, ResolvedObservationRecord
 
 __all__ = [
     'BaseEquityOption',
@@ -17,5 +18,8 @@ __all__ = [
     'DoubleBarrierOption',
     'OneTouchOption',
     'DoubleOneTouchOption',
+    'ObservationRecord',
+    'ObservationSchedule',
+    'ResolvedObservationRecord',
 ]
 

@@ -10,6 +10,9 @@ for ISDA SIMM v2.6 calculations, including:
 - Sensitivity data models and protocols
 - CRIF (Common Risk Interchange Format) parsing and export
 - SIMM configuration
+- SIMM result structures and attribution
+- SIMM report generation (HTML and Excel)
+- SIMM what-if analysis
 
 This is the foundation module. Additional modules provide:
 - Calibration data (risk weights, correlations)
@@ -80,6 +83,9 @@ from .taxonomy import (
     FXBucket,
     IRBucket,
 )
+# Import results and reporting modules
+from . import results
+from . import report
 
 __all__ = [
     # Config
@@ -143,4 +149,7 @@ __all__ = [
     "EquityBucket",
     "FXBucket",
     "IRBucket",
+    # Results and reporting modules
+    "results",
+    "report",
 ]

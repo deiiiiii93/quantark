@@ -5,14 +5,14 @@ Implements the finite difference method for digital barrier options
 that pay a fixed rebate on touching (or not touching) a barrier.
 """
 
-from typing import Optional, List, Set
+from typing import Dict, Optional, List, Set
 import numpy as np
 
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option.one_touch_option import OneTouchOption
 from asset.equity.param import PDEParams
 from priceenv import PricingEnvironment
-from util.enum import ObservationType, TouchType
+from util.enum import ObservationType, ObservationAggregation, TouchType
 from util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
@@ -49,6 +49,10 @@ class OneTouchPDESolver(BasePDESolver):
         """
         super().__init__(params)
         self._observation_indices: Set[int] = set()
+        self._schedule_records: Dict[int, List] = {}
+        self._schedule_aggregation: ObservationAggregation = (
+            ObservationAggregation.STOP_FIRST_HIT
+        )
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -227,6 +231,28 @@ class OneTouchPDESolver(BasePDESolver):
         r = pricing_env.get_rate(tau) if tau > 0 else 0.0
         df = np.exp(-r * tau) if tau > 0 else 1.0
 
+        schedule_records = self._schedule_records.get(t_idx)
+        if schedule_records:
+            for rec in schedule_records:
+                barrier = rec.barrier if rec.barrier is not None else product.barrier
+                payoff = rec.payoff
+                if product.is_one_touch:
+                    barrier_value = payoff if product.payment_at_hit else payoff * df
+                else:
+                    barrier_value = 0.0
+                if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
+                    if product.is_up_barrier:
+                        grid[s_vec >= barrier, t_idx] += barrier_value
+                    else:
+                        grid[s_vec <= barrier, t_idx] += barrier_value
+                else:
+                    if product.is_up_barrier:
+                        grid[s_vec >= barrier, t_idx] = barrier_value
+                    else:
+                        grid[s_vec <= barrier, t_idx] = barrier_value
+                    return
+            return
+
         if product.is_one_touch:
             if product.payment_at_hit:
                 barrier_value = rebate
@@ -306,7 +332,30 @@ class OneTouchPDESolver(BasePDESolver):
 
         # Setup observation indices for discrete monitoring
         self._observation_indices.clear()
-        if (
+        self._schedule_records.clear()
+        self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            resolved_records = schedule.resolve(
+                pricing_env=pricing_env,
+                default_barrier=product.barrier,
+                default_payoff=product.rebate,
+                require_single=True,
+            )
+            self._schedule_aggregation = schedule.aggregation_mode
+            if self._schedule_aggregation in (
+                ObservationAggregation.BEST,
+                ObservationAggregation.WORST,
+            ):
+                raise PricingError(
+                    f"PDE solver does not support aggregation mode {self._schedule_aggregation.value}"
+                )
+            for rec in resolved_records:
+                if 0 < rec.observation_time < tau:
+                    idx = np.argmin(np.abs(t_vec - rec.observation_time))
+                    self._observation_indices.add(idx)
+                    self._schedule_records.setdefault(idx, []).append(rec)
+        elif (
             product.observation_type == ObservationType.DISCRETE
             and product.observation_dates is not None
         ):
@@ -332,7 +381,15 @@ class OneTouchPDESolver(BasePDESolver):
         Returns:
             List containing the barrier
         """
-        return [product.barrier]
+        points = [product.barrier]
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            for rec in schedule.records:
+                if rec.barrier is not None:
+                    points.append(rec.barrier)
+        # sort and make unique before return
+        points = sorted(set(points))
+        return points
 
     def __repr__(self):
         return "OneTouchPDESolver()"

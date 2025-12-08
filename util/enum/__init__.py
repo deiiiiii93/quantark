@@ -9,6 +9,7 @@ from .option_enums import (
     DoubleBarrierType,
     BarrierDirection,
     ObservationType,
+    ObservationAggregation,
     TouchType,
 )
 from .engine_enums import EngineType
@@ -30,6 +31,7 @@ __all__ = [
     "DoubleBarrierType",
     "BarrierDirection",
     "ObservationType",
+    "ObservationAggregation",
     "TouchType",
     # Engine enums
     "EngineType",

@@ -81,6 +81,17 @@ class ObservationType(Enum):
         return self.name.capitalize()
 
 
+class ObservationAggregation(Enum):
+    """Aggregation mode for discrete barrier observations."""
+    STOP_FIRST_HIT = "stop-first-hit"
+    ACCUMULATE = "accumulate"
+    BEST = "best"
+    WORST = "worst"
+
+    def __str__(self):
+        return self.value
+
+
 class TouchType(Enum):
     """Type of touch option."""
     ONE_TOUCH = auto()      # Pays if barrier is touched

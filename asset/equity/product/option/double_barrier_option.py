@@ -9,7 +9,14 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
-from util.enum import OptionType, ExerciseType, DoubleBarrierType, ObservationType
+from .observation_schedule import ObservationRecord, ObservationSchedule
+from util.enum import (
+    OptionType,
+    ExerciseType,
+    DoubleBarrierType,
+    ObservationType,
+    ObservationAggregation,
+)
 from util.exceptions import ValidationError
 
 
@@ -43,6 +50,7 @@ class DoubleBarrierOption(BaseEquityOption):
     rebate: float = 0.0
     observation_type: ObservationType = ObservationType.CONTINUOUS
     observation_dates: Optional[List[float]] = None
+    observation_schedule: Optional[ObservationSchedule] = None
 
     def __init__(
         self,
@@ -57,6 +65,7 @@ class DoubleBarrierOption(BaseEquityOption):
         rebate: float = 0.0,
         observation_type: ObservationType = ObservationType.CONTINUOUS,
         observation_dates: Optional[List[float]] = None,
+        observation_schedule: Optional[ObservationSchedule] = None,
     ):
         """
         Initialize double barrier option.
@@ -90,6 +99,7 @@ class DoubleBarrierOption(BaseEquityOption):
         self.rebate = rebate
         self.observation_type = observation_type
         self.observation_dates = observation_dates
+        self.observation_schedule = observation_schedule
 
         super().__init__(
             strike=strike,
@@ -140,14 +150,50 @@ class DoubleBarrierOption(BaseEquityOption):
                 # This is a warning, not an error - could be intentional
                 pass
 
-        # For discrete observation, must have observation dates
+        # For discrete observation, must have observation dates unless schedule supplied
         if (
             self.observation_type == ObservationType.DISCRETE
+            and self.observation_schedule is None
             and (self.observation_dates is None or len(self.observation_dates) == 0)
         ):
             raise ValidationError(
                 "Observation dates required for discrete barrier monitoring"
             )
+
+        # Normalize observation schedule (preferred) or legacy dates for discrete monitoring
+        if self.observation_schedule is not None:
+            if self.observation_type == ObservationType.CONTINUOUS:
+                raise ValidationError("ObservationSchedule requires DISCRETE observation_type.")
+            normalized_schedule = ObservationSchedule(
+                records=[
+                    ObservationRecord(
+                        observation_time=rec.observation_time,
+                        observation_date=rec.observation_date,
+                        upper_barrier=rec.upper_barrier if rec.upper_barrier is not None else self.upper_barrier,
+                        lower_barrier=rec.lower_barrier if rec.lower_barrier is not None else self.lower_barrier,
+                        payoff=rec.payoff if rec.payoff is not None else self.rebate,
+                        return_rate=rec.return_rate,
+                    )
+                    for rec in self.observation_schedule.records
+                ],
+                aggregation_mode=self.observation_schedule.aggregation_mode,
+                frequency=self.observation_schedule.frequency,
+            )
+            normalized_schedule.validate(require_double=True)
+            self.observation_schedule = normalized_schedule
+            if self.observation_schedule.times:
+                self.observation_dates = self.observation_schedule.times
+            self.observation_type = ObservationType.DISCRETE
+        elif self.observation_type == ObservationType.DISCRETE:
+            self.observation_schedule = ObservationSchedule.from_legacy(
+                observation_dates=self.observation_dates or [],
+                default_barrier=None,
+                default_payoff=self.rebate,
+                aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
+                upper_barrier=self.upper_barrier,
+                lower_barrier=self.lower_barrier,
+            )
+            self.observation_dates = self.observation_schedule.times
 
     def get_payoff(self, spot: float) -> float:
         """

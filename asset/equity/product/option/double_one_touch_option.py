@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
-from util.enum import ObservationType, TouchType
+from .observation_schedule import ObservationRecord, ObservationSchedule
+from util.enum import (
+    ObservationType,
+    ObservationAggregation,
+    TouchType,
+)
 from util.exceptions import ValidationError
 
 
@@ -44,6 +49,7 @@ class DoubleOneTouchOption(BaseEquityProduct):
     touch_type: TouchType = TouchType.DOUBLE_ONE_TOUCH
     observation_type: ObservationType = ObservationType.CONTINUOUS
     observation_dates: Optional[List[float]] = None
+    observation_schedule: Optional[ObservationSchedule] = None
     exercise_date: Optional[datetime] = None
     settlement_date: Optional[datetime] = None
 
@@ -59,6 +65,7 @@ class DoubleOneTouchOption(BaseEquityProduct):
         touch_type: TouchType = TouchType.DOUBLE_ONE_TOUCH,
         observation_type: ObservationType = ObservationType.CONTINUOUS,
         observation_dates: Optional[List[float]] = None,
+        observation_schedule: Optional[ObservationSchedule] = None,
     ):
         """
         Initialize double one-touch option.
@@ -92,6 +99,7 @@ class DoubleOneTouchOption(BaseEquityProduct):
         self.touch_type = touch_type
         self.observation_type = observation_type
         self.observation_dates = observation_dates
+        self.observation_schedule = observation_schedule
         self.exercise_date = exercise_date
         self.settlement_date = settlement_date
 
@@ -139,11 +147,47 @@ class DoubleOneTouchOption(BaseEquityProduct):
         # For discrete observation, must have observation dates
         if (
             self.observation_type == ObservationType.DISCRETE
+            and self.observation_schedule is None
             and (self.observation_dates is None or len(self.observation_dates) == 0)
         ):
             raise ValidationError(
                 "Observation dates required for discrete barrier monitoring"
             )
+
+        # Normalize observation schedule (preferred) or legacy dates for discrete monitoring
+        if self.observation_schedule is not None:
+            if self.observation_type == ObservationType.CONTINUOUS:
+                raise ValidationError("ObservationSchedule requires DISCRETE observation_type.")
+            normalized_schedule = ObservationSchedule(
+                records=[
+                    ObservationRecord(
+                        observation_time=rec.observation_time,
+                        observation_date=rec.observation_date,
+                        upper_barrier=rec.upper_barrier if rec.upper_barrier is not None else self.upper_barrier,
+                        lower_barrier=rec.lower_barrier if rec.lower_barrier is not None else self.lower_barrier,
+                        payoff=rec.payoff if rec.payoff is not None else self.rebate,
+                        return_rate=rec.return_rate,
+                    )
+                    for rec in self.observation_schedule.records
+                ],
+                aggregation_mode=self.observation_schedule.aggregation_mode,
+                frequency=self.observation_schedule.frequency,
+            )
+            normalized_schedule.validate(require_double=True)
+            self.observation_schedule = normalized_schedule
+            if self.observation_schedule.times:
+                self.observation_dates = self.observation_schedule.times
+            self.observation_type = ObservationType.DISCRETE
+        elif self.observation_type == ObservationType.DISCRETE:
+            self.observation_schedule = ObservationSchedule.from_legacy(
+                observation_dates=self.observation_dates or [],
+                default_barrier=None,
+                default_payoff=self.rebate,
+                aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
+                upper_barrier=self.upper_barrier,
+                lower_barrier=self.lower_barrier,
+            )
+            self.observation_dates = self.observation_schedule.times
 
     def get_maturity(self, pricing_env=None) -> float:
         """
