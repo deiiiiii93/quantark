@@ -1,119 +1,695 @@
 """
 Base class for equity options.
+
+This module provides the abstract base class for all equity option products,
+defining common attributes and methods for date handling, notional/quantity
+management, maturity/tenor calculations, and option type checks.
 """
 
 from abc import abstractmethod
-from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 from datetime import datetime
+
+from util.calendar import DayCountConvention, calculate_year_fraction
 from ..base_equity_product import BaseEquityProduct
-from util.enum import OptionType, ExerciseType
+from util.enum import OptionType, ExerciseType, TenorEnd
 from util.exceptions import ValidationError
 
 
-@dataclass
 class BaseEquityOption(BaseEquityProduct):
     """
     Abstract base class for equity options.
 
+    This class provides fundamental attributes and methods for equity option
+    products including:
+    - Date fields (initial, exercise, settlement, maturity dates)
+    - Type fields (option type, exercise type)
+    - Notional and quantity management
+    - Tenor/maturity calculation methods
+    - Moneyness utilities
+
     Attributes:
-        strike: Strike price
-        maturity: Time to maturity in years (used if dates not provided)
-        option_type: CALL or PUT
-        exercise_type: EUROPEAN, AMERICAN, or BERMUDAN
+        initial_date: Product start/issue date (optional)
         exercise_date: Date when option can be exercised (optional)
         settlement_date: Date when settlement occurs (optional)
+        maturity_date: Explicit maturity date, may differ from exercise_date (optional)
+        tenor: Contract tenor in years from issue to expiry (optional)
+        maturity: Time to maturity in years from valuation (optional)
+        tenor_end: Determines which date to use for tenor calculations
+        annualization_day_count: Day count convention for year fraction calculations
+        option_type: CALL or PUT
+        exercise_type: EUROPEAN, AMERICAN, or BERMUDAN
+        initial_price: Reference/initial underlying price for payoff calculations
+        strike: Strike price
+        notional: Notional principal amount (optional)
+        quantity: Number of option contracts (default: 1.0)
     """
 
-    strike: float
-    maturity: float
-    option_type: OptionType
-    exercise_type: ExerciseType
+    # ==========================================================================
+    # Date parameters
+    # ==========================================================================
+    initial_date: Optional[datetime] = None
     exercise_date: Optional[datetime] = None
     settlement_date: Optional[datetime] = None
+    maturity_date: Optional[datetime] = None
+    tenor: Optional[float] = None
+    maturity: Optional[float] = None
+    tenor_end: TenorEnd = TenorEnd.EXERCISE
+    annualization_day_count: DayCountConvention = DayCountConvention.ACT_365
+
+    # ==========================================================================
+    # Type parameters
+    # ==========================================================================
+    option_type: OptionType
+    exercise_type: ExerciseType
+
+    # ==========================================================================
+    # Price parameters
+    # ==========================================================================
+    initial_price: float = 0.0
+    strike: float = 0.0
+
+    # ==========================================================================
+    # Notional parameters
+    # ==========================================================================
+    notional: Optional[float] = None
+    quantity: float = 1.0
+
+    def __init__(
+        self,
+        strike: float = 0.0,
+        option_type: OptionType = None,
+        exercise_type: ExerciseType = ExerciseType.EUROPEAN,
+        maturity: Optional[float] = None,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        exercise_date: Optional[datetime] = None,
+        settlement_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        initial_price: float = 0.0,
+        notional: Optional[float] = None,
+        quantity: float = 1.0,
+    ):
+        """
+        Initialize base equity option.
+
+        Args:
+            strike: Strike price
+            option_type: CALL or PUT
+            exercise_type: EUROPEAN, AMERICAN, or BERMUDAN
+            maturity: Time to maturity in years from valuation (optional)
+            tenor: Contract tenor in years from issue to expiry (optional)
+            initial_date: Product start/issue date (optional)
+            exercise_date: Date when option can be exercised (optional)
+            settlement_date: Date when settlement occurs (optional)
+            maturity_date: Explicit maturity date (optional)
+            tenor_end: Determines which date to use for tenor calculations
+            annualization_day_count: Day count convention for year fractions
+            initial_price: Reference/initial underlying price (optional)
+            notional: Notional principal amount (optional)
+            quantity: Number of option contracts (default: 1.0)
+        """
+        self.strike = strike
+        self.option_type = option_type
+        self.exercise_type = exercise_type
+        self.maturity = maturity
+        self.tenor = tenor
+        self.initial_date = initial_date
+        self.exercise_date = exercise_date
+        self.settlement_date = settlement_date
+        self.maturity_date = maturity_date
+        self.tenor_end = tenor_end
+        self.annualization_day_count = annualization_day_count
+        self.initial_price = initial_price
+        self.notional = notional
+        self.quantity = quantity
+
+        self.validate()
 
     def __post_init__(self):
-        """Validate option parameters."""
+        """Validate option parameters after dataclass initialization."""
         self.validate()
+
+    # ==========================================================================
+    # Validation
+    # ==========================================================================
 
     def validate(self) -> None:
         """
         Validate option parameters.
 
+        Performs comprehensive validation including:
+        - Strike price positivity
+        - Maturity/exercise_date mutual exclusivity
+        - Date ordering consistency
+        - Type enum validation
+        - Tenor end configuration validity
+
         Raises:
-            ValidationError: If parameters are invalid
+            ValidationError: If any parameter is invalid
         """
+        self._validate_strike()
+        self._validate_maturity_dates()
+        self._validate_date_ordering()
+        self._validate_types()
+        self._validate_tenor_end()
+        self._validate_notional_quantity()
+
+    def _validate_strike(self) -> None:
+        """Validate strike price is positive."""
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
-        
-        # Validate that either maturity or dates are provided (not both)
+
+    def _validate_maturity_dates(self) -> None:
+        """Validate maturity and date parameters are properly specified."""
         has_dates = self.exercise_date is not None
         has_maturity = self.maturity is not None and self.maturity > 0
-        
+
         if not has_dates and not has_maturity:
             raise ValidationError("Either maturity or exercise_date must be provided")
-        
+
         if has_dates and has_maturity:
             raise ValidationError("Cannot provide both maturity and exercise_date")
-        
+
         if has_maturity and self.maturity <= 0:
             raise ValidationError(f"Maturity must be positive, got {self.maturity}")
-        
-        # Validate dates if provided
-        if self.exercise_date is not None:
-            if self.settlement_date is not None and self.settlement_date < self.exercise_date:
-                raise ValidationError(
-                    f"Settlement date ({self.settlement_date}) must be >= exercise date ({self.exercise_date})"
-                )
-        
+
+        if self.tenor is not None and self.tenor <= 0:
+            raise ValidationError(f"Tenor must be positive, got {self.tenor}")
+
+    def _validate_date_ordering(self) -> None:
+        """Validate that dates are in proper chronological order."""
+        # initial_date should be before exercise_date
+        if (
+            self.initial_date is not None
+            and self.exercise_date is not None
+            and self.initial_date >= self.exercise_date
+        ):
+            raise ValidationError(
+                f"Initial date ({self.initial_date}) must be before "
+                f"exercise date ({self.exercise_date})"
+            )
+
+        # settlement_date should be >= exercise_date
+        if (
+            self.settlement_date is not None
+            and self.exercise_date is not None
+            and self.settlement_date < self.exercise_date
+        ):
+            raise ValidationError(
+                f"Settlement date ({self.settlement_date}) must be >= "
+                f"exercise date ({self.exercise_date})"
+            )
+
+        # maturity_date should be >= exercise_date if both provided
+        if (
+            self.maturity_date is not None
+            and self.exercise_date is not None
+            and self.maturity_date < self.exercise_date
+        ):
+            raise ValidationError(
+                f"Maturity date ({self.maturity_date}) must be >= "
+                f"exercise date ({self.exercise_date})"
+            )
+
+    def _validate_types(self) -> None:
+        """Validate enum types."""
         if not isinstance(self.option_type, OptionType):
             raise ValidationError(f"Invalid option type: {self.option_type}")
         if not isinstance(self.exercise_type, ExerciseType):
             raise ValidationError(f"Invalid exercise type: {self.exercise_type}")
+        if not isinstance(self.tenor_end, TenorEnd):
+            raise ValidationError(f"Invalid tenor_end: {self.tenor_end}")
+        if not isinstance(self.annualization_day_count, DayCountConvention):
+            raise ValidationError(
+                f"Invalid annualization_day_count: {self.annualization_day_count}"
+            )
+
+    def _validate_tenor_end(self) -> None:
+        """Validate tenor_end configuration is consistent with available dates."""
+        if self.tenor_end == TenorEnd.SETTLEMENT and self.settlement_date is None:
+            # Only raise if using date-based calculation
+            if self.exercise_date is not None:
+                raise ValidationError(
+                    "settlement_date required when tenor_end is SETTLEMENT"
+                )
+
+        if self.tenor_end == TenorEnd.MATURITY:
+            if (
+                self.maturity_date is None
+                and self.exercise_date is None
+                and self.maturity is None
+            ):
+                raise ValidationError(
+                    "maturity_date, exercise_date, or maturity required "
+                    "when tenor_end is MATURITY"
+                )
+
+    def _validate_notional_quantity(self) -> None:
+        """Validate notional and quantity parameters."""
+        if self.notional is not None and self.notional < 0:
+            raise ValidationError(f"Notional must be non-negative, got {self.notional}")
+        if self.quantity is not None and self.quantity < 0:
+            raise ValidationError(f"Quantity must be non-negative, got {self.quantity}")
+
+    # ==========================================================================
+    # Quantity and Notional
+    # ==========================================================================
+
+    def get_quantity(self) -> float:
+        """
+        Get the quantity (number of contracts) of the option.
+
+        If quantity is directly set, returns it. Otherwise, derives quantity
+        from notional and initial_price.
+
+        Returns:
+            Quantity of the option
+
+        Raises:
+            ValidationError: If quantity cannot be determined
+        """
+        if self.quantity is not None and self.quantity > 0:
+            return self.quantity
+        if self.notional is not None and self.initial_price is not None:
+            if self.initial_price <= 0:
+                raise ValidationError(
+                    f"Initial price must be positive to derive quantity, "
+                    f"got {self.initial_price}"
+                )
+            return self.notional / self.initial_price
+        raise ValidationError(
+            "Quantity cannot be determined: set quantity or notional with initial_price"
+        )
+
+    def set_quantity(self, quantity: float) -> None:
+        """
+        Set the quantity of the option.
+
+        Args:
+            quantity: Number of option contracts
+
+        Raises:
+            ValidationError: If quantity is negative
+        """
+        if quantity < 0:
+            raise ValidationError(f"Quantity must be non-negative, got {quantity}")
+        self.quantity = quantity
+
+    def get_notional(self) -> float:
+        """
+        Get the notional principal amount.
+
+        If notional is directly set, returns it. Otherwise, derives notional
+        from quantity and initial_price.
+
+        Returns:
+            Notional amount
+
+        Raises:
+            ValidationError: If notional cannot be determined
+        """
+        if self.notional is not None:
+            return self.notional
+        if self.quantity is not None and self.initial_price is not None:
+            if self.initial_price <= 0:
+                raise ValidationError(
+                    f"Initial price must be positive to derive notional, "
+                    f"got {self.initial_price}"
+                )
+            return self.quantity * self.initial_price
+        raise ValidationError(
+            "Notional cannot be determined: set notional or quantity with initial_price"
+        )
+
+    def set_notional(self, notional: float) -> None:
+        """
+        Set the notional principal amount.
+
+        Args:
+            notional: Notional principal amount
+
+        Raises:
+            ValidationError: If notional is negative
+        """
+        if notional < 0:
+            raise ValidationError(f"Notional must be non-negative, got {notional}")
+        self.notional = notional
+
+    # ==========================================================================
+    # Maturity and Tenor Calculations
+    # ==========================================================================
 
     def get_maturity(self, pricing_env=None) -> float:
         """
-        Get time to maturity in years.
-        
+        Get time to maturity in years from valuation date.
+
         If exercise_date is provided, calculates maturity from pricing_env.valuation_date
-        to exercise_date using the day count convention. Otherwise returns the maturity float.
+        to exercise_date using the day count convention. Otherwise returns the
+        pre-specified maturity float.
 
         Args:
-            pricing_env: Pricing environment (required if using date-based calculation)
+            pricing_env: Pricing environment with valuation_date and day_count_convention
+                        (required if using date-based calculation)
 
         Returns:
             Time to maturity in years
-            
+
         Raises:
-            ValidationError: If date-based but no pricing_env provided
+            ValidationError: If date-based but no pricing_env provided, or if
+                           valuation date is on or after exercise date
         """
         if self.exercise_date is not None:
             if pricing_env is None:
                 raise ValidationError(
                     "PricingEnvironment required for date-based maturity calculation"
                 )
-            from util.calendar import calculate_year_fraction
-            
+
             # Validate valuation date is before exercise date
             if pricing_env.valuation_date >= self.exercise_date:
                 raise ValidationError(
                     f"Valuation date ({pricing_env.valuation_date}) must be before "
                     f"exercise date ({self.exercise_date})"
                 )
-            
+
             return calculate_year_fraction(
                 pricing_env.valuation_date,
                 self.exercise_date,
                 pricing_env.day_count_convention,
-                pricing_env.bus_days_in_year
+                pricing_env.bus_days_in_year,
             )
         else:
+            if self.maturity is None:
+                raise ValidationError("Maturity is not set")
             return self.maturity
+
+    def get_tenor(self, pricing_env=None) -> float:
+        """
+        Get the contract tenor in years.
+
+        The tenor represents the full contract duration from initial_date to the
+        tenor end date (determined by tenor_end setting). This differs from
+        maturity which is the remaining time from valuation date.
+
+        Resolution order:
+        1. If tenor is directly set, return it
+        2. If initial_date is available, calculate from initial_date to tenor end date
+        3. Fall back to maturity as an approximation
+
+        Args:
+            pricing_env: Pricing environment for date-based calculations (optional)
+
+        Returns:
+            Contract tenor in years
+
+        Raises:
+            ValidationError: If tenor cannot be determined
+        """
+        # If tenor is directly specified, use it
+        if self.tenor is not None:
+            return self.tenor
+
+        # Calculate from dates if available
+        if self.initial_date is not None:
+            end_date = self.get_tenor_end_date()
+            if end_date is not None:
+                return calculate_year_fraction(
+                    self.initial_date,
+                    end_date,
+                    self.annualization_day_count,
+                )
+
+        # Fall back to maturity if no other information available
+        if self.maturity is not None:
+            return self.maturity
+
+        # Cannot determine tenor
+        raise ValidationError(
+            "Tenor cannot be determined: set tenor, or provide initial_date with "
+            "exercise_date/settlement_date/maturity_date"
+        )
+
+    def get_tenor_end_date(self) -> Optional[datetime]:
+        """
+        Get the tenor end date based on the tenor_end setting.
+
+        Returns:
+            The appropriate end date for tenor calculations, or None if not available
+
+        The date returned depends on tenor_end:
+        - EXERCISE: Returns exercise_date
+        - SETTLEMENT: Returns settlement_date (falls back to exercise_date)
+        - MATURITY: Returns maturity_date (falls back to exercise_date)
+        """
+        if self.tenor_end == TenorEnd.EXERCISE:
+            return self.exercise_date
+        elif self.tenor_end == TenorEnd.SETTLEMENT:
+            return self.settlement_date or self.exercise_date
+        elif self.tenor_end == TenorEnd.MATURITY:
+            return self.maturity_date or self.exercise_date
+        return self.exercise_date
+
+    def get_time_to_date(
+        self, target_date: datetime, pricing_env=None
+    ) -> float:
+        """
+        Calculate time in years from valuation date to a target date.
+
+        Args:
+            target_date: Target date to calculate time to
+            pricing_env: Pricing environment with valuation_date (required)
+
+        Returns:
+            Time in years from valuation date to target date
+
+        Raises:
+            ValidationError: If pricing_env is not provided or target_date is invalid
+        """
+        if pricing_env is None:
+            raise ValidationError(
+                "PricingEnvironment required for date-based calculation"
+            )
+
+        if target_date is None:
+            raise ValidationError("Target date cannot be None")
+
+        if pricing_env.valuation_date >= target_date:
+            raise ValidationError(
+                f"Valuation date ({pricing_env.valuation_date}) must be before "
+                f"target date ({target_date})"
+            )
+
+        return calculate_year_fraction(
+            pricing_env.valuation_date,
+            target_date,
+            pricing_env.day_count_convention,
+            getattr(pricing_env, "bus_days_in_year", 252),
+        )
+
+    # ==========================================================================
+    # Option Type Checks
+    # ==========================================================================
+
+    def is_call(self) -> bool:
+        """
+        Check if option is a call.
+
+        Returns:
+            True if option type is CALL, False otherwise
+
+        Raises:
+            ValidationError: If option_type is not set
+        """
+        if not hasattr(self, 'option_type') or self.option_type is None:
+            raise ValidationError(
+                "option_type is not set. This method is only available for "
+                "vanilla options with a defined option type."
+            )
+        return self.option_type == OptionType.CALL
+
+    def is_put(self) -> bool:
+        """
+        Check if option is a put.
+
+        Returns:
+            True if option type is PUT, False otherwise
+
+        Raises:
+            ValidationError: If option_type is not set
+        """
+        if not hasattr(self, 'option_type') or self.option_type is None:
+            raise ValidationError(
+                "option_type is not set. This method is only available for "
+                "vanilla options with a defined option type."
+            )
+        return self.option_type == OptionType.PUT
+
+    def is_european(self) -> bool:
+        """
+        Check if option has European exercise style.
+
+        Returns:
+            True if exercise type is EUROPEAN, False otherwise
+        """
+        if not hasattr(self, 'exercise_type') or self.exercise_type is None:
+            return False
+        return self.exercise_type == ExerciseType.EUROPEAN
+
+    def is_american(self) -> bool:
+        """
+        Check if option has American exercise style.
+
+        Returns:
+            True if exercise type is AMERICAN, False otherwise
+        """
+        if not hasattr(self, 'exercise_type') or self.exercise_type is None:
+            return False
+        return self.exercise_type == ExerciseType.AMERICAN
+
+    def is_bermudan(self) -> bool:
+        """
+        Check if option has Bermudan exercise style.
+
+        Returns:
+            True if exercise type is BERMUDAN, False otherwise
+        """
+        if not hasattr(self, 'exercise_type') or self.exercise_type is None:
+            return False
+        return self.exercise_type == ExerciseType.BERMUDAN
+
+    # ==========================================================================
+    # Moneyness Utilities
+    # ==========================================================================
+
+    def moneyness(self, spot: float) -> float:
+        """
+        Calculate simple moneyness ratio (spot / strike).
+
+        Args:
+            spot: Current spot price
+
+        Returns:
+            Moneyness ratio S/K
+
+        Raises:
+            ValidationError: If spot is non-positive
+        """
+        if spot <= 0:
+            raise ValidationError(f"Spot must be positive, got {spot}")
+        return spot / self.strike
+
+    def log_moneyness(self, spot: float) -> float:
+        """
+        Calculate log moneyness ln(spot / strike).
+
+        Args:
+            spot: Current spot price
+
+        Returns:
+            Log moneyness ln(S/K)
+
+        Raises:
+            ValidationError: If spot is non-positive
+        """
+        import math
+
+        if spot <= 0:
+            raise ValidationError(f"Spot must be positive, got {spot}")
+        return math.log(spot / self.strike)
+
+    def is_in_the_money(self, spot: float) -> bool:
+        """
+        Check if option is in the money.
+
+        For calls: spot > strike
+        For puts: spot < strike
+
+        Args:
+            spot: Current spot price
+
+        Returns:
+            True if option is in the money
+        """
+        if self.is_call():
+            return spot > self.strike
+        else:
+            return spot < self.strike
+
+    def is_out_of_the_money(self, spot: float) -> bool:
+        """
+        Check if option is out of the money.
+
+        For calls: spot < strike
+        For puts: spot > strike
+
+        Args:
+            spot: Current spot price
+
+        Returns:
+            True if option is out of the money
+        """
+        if self.is_call():
+            return spot < self.strike
+        else:
+            return spot > self.strike
+
+    def is_at_the_money(self, spot: float, tolerance: float = 0.001) -> bool:
+        """
+        Check if option is at the money within a tolerance.
+
+        Args:
+            spot: Current spot price
+            tolerance: Relative tolerance for ATM check (default: 0.1%)
+
+        Returns:
+            True if |spot/strike - 1| <= tolerance
+        """
+        return abs(spot / self.strike - 1.0) <= tolerance
+
+    def intrinsic_value(self, spot: float) -> float:
+        """
+        Calculate intrinsic value of the option.
+
+        For calls: max(spot - strike, 0)
+        For puts: max(strike - spot, 0)
+
+        Args:
+            spot: Current spot price
+
+        Returns:
+            Intrinsic value (non-negative)
+
+        Raises:
+            ValidationError: If spot is negative or option_type not set
+        """
+        if spot < 0:
+            raise ValidationError(f"Spot must be non-negative, got {spot}")
+
+        # Check if option_type is available
+        if not hasattr(self, 'option_type') or self.option_type is None:
+            raise ValidationError(
+                "option_type is not set. Cannot calculate intrinsic value for "
+                "structured products. Use get_payoff() instead."
+            )
+
+        if self.is_call():
+            return max(spot - self.strike, 0.0)
+        else:
+            return max(self.strike - spot, 0.0)
+
+    # ==========================================================================
+    # Abstract Methods
+    # ==========================================================================
 
     @abstractmethod
     def get_payoff(self, spot: float) -> float:
         """
         Calculate the option payoff at maturity.
+
+        This method must be implemented by subclasses to define the specific
+        payoff structure of the option.
 
         Args:
             spot: Spot price at maturity
@@ -123,16 +699,22 @@ class BaseEquityOption(BaseEquityProduct):
         """
         pass
 
-    def is_call(self) -> bool:
-        """Check if option is a call."""
-        return self.option_type == OptionType.CALL
+    # ==========================================================================
+    # String Representation
+    # ==========================================================================
 
-    def is_put(self) -> bool:
-        """Check if option is a put."""
-        return self.option_type == OptionType.PUT
+    def __repr__(self) -> str:
+        """
+        Return string representation of the option.
 
-    def __repr__(self):
+        Handles both maturity-based and date-based options safely.
+        """
+        maturity_str = (
+            f"T={self.maturity:.4f}"
+            if self.maturity is not None
+            else f"exp={self.exercise_date}"
+        )
         return (
             f"{self.__class__.__name__}("
-            f"{self.option_type}, K={self.strike:.2f}, T={self.maturity:.2f})"
+            f"{self.option_type}, K={self.strike:.2f}, {maturity_str})"
         )

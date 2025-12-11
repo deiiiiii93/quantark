@@ -15,6 +15,8 @@ from .observation_schedule import (
     ObservationSchedule,
     ResolvedObservationRecord,
 )
+from .snowball_option import SnowballOption
+from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig
 
 __all__ = [
     "BaseEquityOption",
@@ -28,4 +30,8 @@ __all__ = [
     "ObservationRecord",
     "ObservationSchedule",
     "ResolvedObservationRecord",
+    "SnowballOption",
+    "BarrierConfig",
+    "PayoffConfig",
+    "AccrualConfig",
 ]

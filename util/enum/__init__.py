@@ -11,6 +11,10 @@ from .option_enums import (
     ObservationType,
     ObservationAggregation,
     TouchType,
+    CouponPayType,
+    ProtectionType,
+    TenorEnd,
+    ObservationFrequency,
 )
 from .engine_enums import EngineType
 from .deltaone_enums import DeltaOneType
@@ -33,6 +37,10 @@ __all__ = [
     "ObservationType",
     "ObservationAggregation",
     "TouchType",
+    "CouponPayType",
+    "ProtectionType",
+    "TenorEnd",
+    "ObservationFrequency",
     # Engine enums
     "EngineType",
     # Delta-one enums

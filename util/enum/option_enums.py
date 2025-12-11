@@ -111,3 +111,81 @@ class TouchType(Enum):
 
     def __str__(self):
         return self.name.replace("_", " ").title()
+
+
+class CouponPayType(Enum):
+    """Coupon payment timing for autocallable products."""
+
+    INSTANT = auto()  # Pay at knock-out date
+    EXPIRY = auto()  # Discount to final maturity
+
+    def __str__(self):
+        return self.name.capitalize()
+
+
+class ProtectionType(Enum):
+    """Protection type for downside in autocallable products."""
+
+    NONE = auto()  # No protection
+    PARTIAL = auto()  # Floor at (1 - protection_rate) × N
+    FULL = auto()  # Floor at principal (or zero if principal excluded)
+
+    def __str__(self):
+        return self.name.capitalize()
+
+
+class TenorEnd(Enum):
+    """Tenor end-point selection for product-level accruals."""
+
+    EXERCISE = auto()  # Use exercise_date as tenor end
+    SETTLEMENT = auto()  # Use settlement_date as tenor end
+    MATURITY = auto()  # Use maturity_date as tenor end
+
+    def __str__(self):
+        return self.name.capitalize()
+
+
+class ObservationFrequency(Enum):
+    """Frequency of observations for barrier monitoring."""
+
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    SEMI_ANNUALLY = "semi_annually"
+    ANNUALLY = "annually"
+    CUSTOM = "custom"
+
+    def __str__(self):
+        return self.value.replace("_", " ").title()
+
+    def to_year_fraction(self, use_business_days: bool = False, days_in_year: float = 365.0) -> float:
+        """
+        Converts the observation frequency to a year fraction (dt).
+
+        Args:
+            use_business_days: If True, uses 252-day year (trading days).
+                             If False, uses 365-day year (calendar days).
+            days_in_year: Number of days in a year (default: 365.0).
+
+        Raises:
+            ValueError: If the frequency is CUSTOM, as it implies irregular spacing.
+        """
+        if self == ObservationFrequency.DAILY:
+            return 1.0 / days_in_year
+        elif self == ObservationFrequency.WEEKLY:
+            days_per_week = 5.0 if use_business_days else 7.0
+            return days_per_week / days_in_year
+        elif self == ObservationFrequency.MONTHLY:
+            return 1.0 / 12.0
+        elif self == ObservationFrequency.QUARTERLY:
+            return 1.0 / 4.0
+        elif self == ObservationFrequency.SEMI_ANNUALLY:
+            return 1.0 / 2.0
+        elif self == ObservationFrequency.ANNUALLY:
+            return 1.0
+        elif self == ObservationFrequency.CUSTOM:
+            raise ValueError(
+                "Cannot convert CUSTOM observation frequency to year fraction, as it implies irregular spacing."
+            )
+        raise ValueError(f"Unknown ObservationFrequency: {self}")
