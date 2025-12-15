@@ -1003,6 +1003,16 @@ class SnowballOption(BaseEquityOption):
         """
         Convenience helper returning KI observation attributes for engine consumption.
         """
+        if self.barrier_config.ki_continuous:
+            # For continuous KI, the engine generates its own time grid.
+            # We return the base KI barrier as a scalar (in a list for consistency)
+            # and empty lists for other attributes.
+            return {
+                "observation_times": [],
+                "barriers": [self.barrier_config.ki_barrier],
+                "payoffs": [],
+                "settlement_times": [],
+            }
         records = self.resolve_ki_observations(pricing_env)
         return {
             "observation_times": [rec.observation_time for rec in records],

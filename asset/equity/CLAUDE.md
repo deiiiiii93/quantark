@@ -82,7 +82,9 @@ asset/equity/
 │   │   ├── double_barrier_option.py
 │   │   ├── one_touch_option.py
 │   │   ├── double_one_touch_option.py
-│   │   └── observation_schedule.py # Barrier observation scheduling
+│   │   ├── snowball_option.py       # Snowball (autocallable) options
+│   │   ├── snowball_config.py       # Snowball configuration classes
+│   │   └── observation_schedule.py  # Barrier observation scheduling
 │   └── deltaone/                  # Delta-one products
 │       ├── __init__.py
 │       ├── base_deltaone_product.py
@@ -100,7 +102,8 @@ asset/equity/
 │   │   └── ameopt_analytical_engine.md
 │   ├── mc/                        # Monte Carlo engines
 │   │   ├── __init__.py
-│   │   └── euro_mc_engine.py
+│   │   ├── euro_mc_engine.py
+│   │   └── snowball_mc_engine.py  # Snowball (autocallable) MC pricing
 │   ├── pde/                       # PDE solvers
 │   │   ├── __init__.py
 │   │   ├── pde_engine.py          # Unified PDE engine
@@ -475,6 +478,69 @@ params = MCParams(
     variance_reduction=True  # Enable VR techniques
 )
 ```
+
+#### 2. **SnowballMCEngine**
+Monte Carlo pricing for Snowball (autocallable) options.
+
+```python
+from asset.equity.engine.mc import SnowballMCEngine
+from asset.equity.product.option import SnowballOption
+from asset.equity.product.option.snowball_config import BarrierConfig
+from asset.equity.param import MCParams
+from util.enum.engine_enums import EngineType, MonteCarloMethod
+
+# Create snowball option
+barrier_config = BarrierConfig(
+    ko_barrier=103.0,
+    ko_rate=0.15,
+    ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+    ki_barrier=75.0,
+    ki_continuous=True,
+    disable_ko_after_ki=False,
+)
+snowball = SnowballOption(
+    initial_price=100.0,
+    strike=100.0,
+    barrier_config=barrier_config,
+    notional=1_000_000.0,
+    maturity=1.0,
+)
+
+# Preferred: Two-level enum pattern
+engine = SnowballMCEngine(
+    params=MCParams(num_paths=100000, seed=42),
+    method=EngineType.MONTE_CARLO(MonteCarloMethod.QUASI)
+)
+
+# With optional Dask parallelization
+engine = SnowballMCEngine(
+    params=MCParams(num_paths=100000),
+    use_dask=True,
+    num_batches=8
+)
+
+price = engine.price(snowball, pricing_env)
+result = engine.get_last_result()
+print(f"KO probability: {result.ko_probability:.2%}")
+```
+
+**Features:**
+- Standard and reverse snowball structures
+- Discrete KO observations with time-varying barriers
+- Discrete or continuous KI monitoring
+- INSTANT or EXPIRY coupon payment timing
+- `disable_ko_after_ki` logic (KO ignored after KI)
+- Vectorized NumPy operations for efficiency
+- Optional Dask parallelization for batch processing
+- Three Monte Carlo methods (PSEUDO, QUASI, RQMC)
+
+**Result Statistics:**
+- `price`: Option price
+- `std_error`: Standard error of the estimate
+- `ko_probability`: Probability of knock-out
+- `v0_probability`: Probability of V0 (no KO, no KI)
+- `v1_probability`: Probability of V1 (no KO, KI happened)
+- `avg_ko_time`: Average time to knock-out
 
 ### PDE Solvers (`engine/pde/`)
 
@@ -877,6 +943,7 @@ python -m pytest test/test_european_option.py::test_put_call_parity -v
    - ✅ Double barrier options
    - ✅ One-touch options
    - ✅ Double one-touch options
+   - ✅ Snowball (autocallable) options
    - ✅ Observation schedules
    - ✅ Spot instruments (stock, index, ETF)
    - ✅ Futures contracts
@@ -886,6 +953,7 @@ python -m pytest test/test_european_option.py::test_put_call_parity -v
    - ✅ American analytical (BS93, BS02, BAW)
    - ✅ DeltaOne analytical
    - ✅ European Monte Carlo (Pseudo, Quasi, RQMC)
+   - ✅ Snowball Monte Carlo (Pseudo, Quasi, RQMC)
    - ✅ PDE solvers (European, American, Barrier, One-touch)
    - ✅ QMC path generation
    - ✅ Variance reduction
@@ -1341,14 +1409,14 @@ Include:
 
 ---
 
-**Module Version**: 2.0.0 (as of 2024)
-**Last Updated**: 2024-12-08
+**Module Version**: 2.1.0 (as of 2024)
+**Last Updated**: 2024-12-15
 **Maintainer**: QuantArk Development Team
 
 ## Summary Statistics
 
-- **Products**: 8 option types, 2 delta-one types
-- **Engines**: 4 analytical, 1 Monte Carlo, 6 PDE solvers
+- **Products**: 9 option types (including snowball), 2 delta-one types
+- **Engines**: 4 analytical, 2 Monte Carlo, 6 PDE solvers
 - **Lines of Code**: ~15,000 (including 3,247 for PDE)
 - **Test Coverage**: ~80% (European, American, Barrier, DeltaOne)
 - **Key Features**: 3 pricing methods, QMC variance reduction, American exercise

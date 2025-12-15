@@ -380,75 +380,40 @@ class ObservationSchedule:
         """Return observation_time values when present."""
         return [rec.observation_time for rec in self.records if rec.observation_time is not None]
 
-        @classmethod
-
-        def from_legacy(
-
-            cls,
-
-            observation_dates: List[float],
-
-            default_barrier: Optional[float],
-
-            default_payoff: float,
-
-            aggregation_mode: ObservationAggregation = ObservationAggregation.STOP_FIRST_HIT,
-
-            frequency: ObservationFrequency = ObservationFrequency.CUSTOM,
-
-            upper_barrier: Optional[float] = None,
-
-            lower_barrier: Optional[float] = None,
-
-        ) -> "ObservationSchedule":
-
-            """Create a schedule from legacy observation_dates and uniform barrier/payoff."""
-
-            if observation_dates is None or len(observation_dates) == 0:
-
-                raise ValidationError("observation_dates required to build ObservationSchedule from legacy fields.")
-
-            records = [
-
-                ObservationRecord(
-
-                    observation_time=t,
-
-                    barrier=default_barrier,
-
-                    upper_barrier=upper_barrier,
-
-                    lower_barrier=lower_barrier,
-
-                    payoff=default_payoff,
-
-                )
-
-                for t in observation_dates
-
-            ]
-
-            schedule = cls(
-
-                records=records,
-
-                aggregation_mode=aggregation_mode,
-
-                frequency=frequency,
-
+    @classmethod
+    def from_legacy(
+        cls,
+        observation_dates: List[float],
+        default_barrier: Optional[float],
+        default_payoff: float,
+        aggregation_mode: ObservationAggregation = ObservationAggregation.STOP_FIRST_HIT,
+        frequency: ObservationFrequency = ObservationFrequency.CUSTOM,
+        upper_barrier: Optional[float] = None,
+        lower_barrier: Optional[float] = None,
+    ) -> "ObservationSchedule":
+        """Create a schedule from legacy observation_dates and uniform barrier/payoff."""
+        if observation_dates is None or len(observation_dates) == 0:
+            raise ValidationError("observation_dates required to build ObservationSchedule from legacy fields.")
+        records = [
+            ObservationRecord(
+                observation_time=t,
+                barrier=default_barrier,
+                upper_barrier=upper_barrier,
+                lower_barrier=lower_barrier,
+                payoff=default_payoff,
             )
+            for t in observation_dates
+        ]
+        schedule = cls(
+            records=records,
+            aggregation_mode=aggregation_mode,
+            frequency=frequency,
+        )
+        schedule.validate(require_single=upper_barrier is None and lower_barrier is None, require_double=upper_barrier is not None or lower_barrier is not None)
+        return schedule
 
-            schedule.validate(require_single=upper_barrier is None and lower_barrier is None, require_double=upper_barrier is not None or lower_barrier is not None)
-
-            return schedule
-
-    
-
-        @staticmethod
-
-        def _is_sorted(values: List[float]) -> bool:
-
-            """Check if list is non-decreasing."""
-
-            return all(values[i] <= values[i + 1] for i in range(len(values) - 1))
+    @staticmethod
+    def _is_sorted(values: List[float]) -> bool:
+        """Check if list is non-decreasing."""
+        return all(values[i] <= values[i + 1] for i in range(len(values) - 1))
 

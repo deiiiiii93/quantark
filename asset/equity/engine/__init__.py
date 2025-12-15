@@ -9,6 +9,7 @@ from .analytical import (
     OneTouchAnalyticalEngine,
 )
 from .pde_engine import PDEEngine
+from .mc import EuropeanMCEngine, SnowballMCEngine
 from .pde import (
     BasePDESolver,
     EuropeanPDESolver,
@@ -28,6 +29,9 @@ __all__ = [
     "BlackScholesEngine",
     "BarrierAnalyticalEngine",
     "OneTouchAnalyticalEngine",
+    # Monte Carlo
+    "EuropeanMCEngine",
+    "SnowballMCEngine",
     # Unified PDE Engine
     "PDEEngine",
     # PDE Solvers
