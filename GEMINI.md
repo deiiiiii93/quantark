@@ -29,7 +29,7 @@ The codebase follows a modular structure where core financial logic is separated
 *   **`simm/`**: Standard Initial Margin Model (ISDA SIMM) implementation.
 *   **`stresstest/`**: Framework for stress testing portfolios under extreme scenarios.
 *   **`dynamicscenario/`**: Multi-day market path simulation.
-*   **`util/`**: Shared utilities, enumerations (`OptionType`, `EngineType`), and exception hierarchy.
+*   **`util/`**: Shared utilities, enumerations (`OptionType`, `EngineType`), exception hierarchy, and **numerical utilities**.
 *   **`example/`**: comprehensive demo scripts for all major features.
 *   **`test/`**: Unit and integration tests using `pytest`.
 
@@ -42,6 +42,30 @@ The codebase follows a modular structure where core financial logic is separated
     *   **Process:** "How" the underlying moves (e.g., Geometric Brownian Motion).
 *   **Type Safety:** Extensive use of Python `dataclasses` and type hints.
 *   **Error Handling:** Custom exception hierarchy rooted in `QuantArkException`.
+*   **Numerical Operations:** Always use `util/numerical/` for float comparisons, safe math, and formatting.
+
+## Numerical Utilities (IMPORTANT)
+
+**Always use `util/numerical/` for numerical operations.** Do NOT use raw float comparisons or hardcoded tolerances.
+
+| Need | Module | Functions |
+|------|--------|-----------|
+| Float comparison | `comparison` | `is_zero()`, `is_close()`, `almost_equal()` |
+| Safe math | `safe_math` | `safe_log()`, `safe_exp()`, `safe_sqrt()`, `safe_divide()` |
+| Formatting | `formatting` | `format_currency()`, `format_percentage()`, `format_basis_points()` |
+| Validation | `validation` | `validate_positive()`, `validate_probability()`, `is_valid_number()` |
+| Constants | `constants` | `Tolerance.ZERO`, `Tolerance.PRECISION`, `FinancialConstants` |
+
+**Example:**
+```python
+from util.numerical import is_zero, safe_log, format_currency, validate_positive
+
+if is_zero(time_to_expiry):          # NOT: if T < 1e-10
+    return intrinsic_value
+log_m = safe_log(spot / strike)       # NOT: math.log(spot / strike)
+print(format_currency(price))         # NOT: f"${price:.2f}"
+vol = validate_positive(vol, "vol")   # Raises ValidationError if invalid
+```
 
 ## Setup & Usage
 

@@ -2,6 +2,31 @@
 
 This file provides guidance to Qoder (qoder.com) when working with code in this repository.
 
+## Quick Commands
+
+### Testing
+```bash
+# Run all tests
+python -m pytest
+
+# Run specific test file
+python -m pytest test/test_european_option.py
+
+# Run with verbose output
+python -m pytest -v
+
+# Run tests matching a keyword
+python -m pytest -k "test_name_pattern"
+```
+
+### Dependencies
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# The project uses a virtual environment named 'quantark'
+```
+
 <!-- OPENSPEC:START -->
 # OpenSpec Instructions
 
@@ -56,6 +81,44 @@ pip install -r requirements.txt
 
 # The project uses a virtual environment named 'quantark'
 ```
+
+## Code Style Guidelines
+
+### Imports & Dependencies
+- **Order**: Standard library → Third-party → Local imports
+- **Local imports**: Use relative imports for modules within same package
+- **No wildcard imports**: Explicitly import required classes/functions
+- **Dependencies**: Core libraries are scipy>=1.10.0, numpy>=1.24.0, pandas>=2.0.0
+
+### Naming Conventions
+- **Classes**: PascalCase (`EuropeanVanillaOption`, `BaseEquityProduct`)
+- **Methods/Functions**: snake_case (`get_payoff`, `get_maturity`)
+- **Variables**: snake_case (`spot_price`, `strike_price`)
+- **Constants**: UPPER_SNAKE_CASE (`MAX_ITERATIONS`)
+- **Private methods**: Leading underscore (`_validate_inputs`)
+
+### Type Hints & Documentation
+- **Type hints**: Always use for function parameters and return values
+- **Optional types**: Use `Optional[Type]` and `Union[Type1, Type2]` 
+- **Docstrings**: Google-style with Args, Returns, Raises sections
+- **Complex types**: Use `from typing import Optional, Union, List, Dict`
+
+### Error Handling
+- **Exception hierarchy**: `QuantArkException` → `ValidationError`, `NumericalError`, `MarketDataError`, `PricingError`
+- **Input validation**: Validate at construction time with descriptive messages
+- **Numerical stability**: Check for overflow/underflow, division by zero
+- **Market data**: Validate missing/inconsistent data with `MarketDataError`
+
+### Code Organization
+- **Data structures**: Use `@dataclass` for simple data holders
+- **Abstract classes**: Use `ABC` and `@abstractmethod` for interfaces
+- **Engine pattern**: Two-level enum pattern for engine methods (`EngineType.ANALYTICAL(method)`)
+- **Module structure**: Clear separation with `__init__.py` and `__all__` exports
+
+### Testing
+- **Test files**: `test/test_<module>.py` naming convention
+- **Test methods**: `test_<functionality>` naming
+- **Coverage**: Test both positive and negative cases, edge conditions
 
 ## Architecture Overview
 
@@ -177,6 +240,41 @@ IMPORTANT: Always follow this two-level enum pattern (EngineType.ANALYTICAL(meth
 - `enum/`: OptionType, ExerciseStyle, BarrierType, engine enums (AmericanAnalyticalMethod, etc.)
 - `calendar/`: Day count conventions
 - `marketdata/`: Market data utilities
+- `numerical/`: Numerical utilities (see below)
+
+### Numerical Utilities (IMPORTANT - Always Use These)
+
+The `util/numerical/` module provides standardized utilities for all numerical operations. **Always use these instead of raw float comparisons or hardcoded tolerances.**
+
+**Module Structure:**
+- `constants.py`: `Tolerance` (ZERO=1e-10, PRECISION=1e-6, etc.), `FinancialConstants`
+- `comparison.py`: `is_zero()`, `is_close()`, `almost_equal()`, `is_positive()`, etc.
+- `safe_math.py`: `safe_log()`, `safe_exp()`, `safe_sqrt()`, `safe_divide()`
+- `formatting.py`: `format_currency()`, `format_percentage()`, `format_basis_points()`, `format_greeks()`
+- `validation.py`: `validate_positive()`, `validate_probability()`, `is_valid_number()`
+
+**Usage Examples:**
+```python
+from util.numerical import (
+    is_zero, is_close, Tolerance,           # Comparison
+    safe_log, safe_exp, safe_sqrt,          # Safe math
+    format_currency, format_percentage,      # Formatting
+    validate_positive, is_valid_number       # Validation
+)
+
+# Float comparison (NOT: if T < 1e-10)
+if is_zero(time_to_expiry):
+    return intrinsic_value
+
+# Safe math (NOT: math.log(x) which can fail)
+log_moneyness = safe_log(spot / strike)
+
+# Formatting (NOT: f"${value:.2f}")
+print(format_currency(option_price))  # $12.50
+
+# Validation
+vol = validate_positive(volatility, "volatility")
+```
 
 ### PricingEnvironment Structure
 

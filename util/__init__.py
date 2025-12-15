@@ -8,12 +8,16 @@ from .exceptions import (
     MarketDataError,
     PricingError
 )
+from . import numerical
 
 __all__ = [
+    # Exceptions
     'QuantArkException',
     'ValidationError',
     'NumericalError',
     'MarketDataError',
-    'PricingError'
+    'PricingError',
+    # Numerical utilities module
+    'numerical',
 ]
 

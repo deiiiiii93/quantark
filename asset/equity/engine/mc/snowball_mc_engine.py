@@ -42,6 +42,7 @@ from asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionCon
 # Optional Dask import
 try:
     from dask import delayed, compute
+
     DASK_AVAILABLE = True
 except ImportError:
     DASK_AVAILABLE = False
@@ -95,7 +96,6 @@ class SnowballMCEngine(BaseEngine):
     """
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
-    DEFAULT_KI_STEPS_PER_YEAR = 252  # Daily monitoring for continuous KI
 
     def __init__(
         self,
@@ -279,7 +279,7 @@ class SnowballMCEngine(BaseEngine):
         if product.has_ki_barrier:
             if ki_continuous:
                 # Generate fine grid for continuous monitoring
-                num_ki_steps = int(T * self.DEFAULT_KI_STEPS_PER_YEAR) + 1
+                num_ki_steps = int(pricing_env.bus_days_in_year * T) + 1
                 ki_times = list(np.linspace(0, T, num_ki_steps + 1)[1:])
             else:
                 ki_profile = product.get_ki_observation_profile(pricing_env)
@@ -440,7 +440,9 @@ class SnowballMCEngine(BaseEngine):
 
         # If ki_barriers has a single value (i.e., scalar or [scalar]), broadcast it
         if ki_barriers_effective.shape == () or ki_barriers_effective.shape == (1,):
-            ki_barriers_aligned = np.full(num_ki_obs_times, ki_barriers_effective.item())
+            ki_barriers_aligned = np.full(
+                num_ki_obs_times, ki_barriers_effective.item()
+            )
         else:
             # If it's an array with multiple values, it must match the number of observation times
             if ki_barriers_effective.shape[0] != num_ki_obs_times:
@@ -566,19 +568,23 @@ class SnowballMCEngine(BaseEngine):
         # V0 payoffs (never KO, never KI)
         if is_v0.any():
             terminal_spots = paths[is_v0, -1]
-            v0_payoffs = np.array([
-                product.get_maturity_payoff_v0(spot, pricing_env)
-                for spot in terminal_spots
-            ])
+            v0_payoffs = np.array(
+                [
+                    product.get_maturity_payoff_v0(spot, pricing_env)
+                    for spot in terminal_spots
+                ]
+            )
             payoffs[is_v0] = v0_payoffs
 
         # V1 payoffs (never KO, KI happened)
         if is_v1.any():
             terminal_spots = paths[is_v1, -1]
-            v1_payoffs = np.array([
-                product.get_maturity_payoff_v1(spot, pricing_env)
-                for spot in terminal_spots
-            ])
+            v1_payoffs = np.array(
+                [
+                    product.get_maturity_payoff_v1(spot, pricing_env)
+                    for spot in terminal_spots
+                ]
+            )
             payoffs[is_v1] = v1_payoffs
 
         # Compute statistics

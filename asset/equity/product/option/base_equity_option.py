@@ -14,6 +14,7 @@ from util.calendar import DayCountConvention, calculate_year_fraction
 from ..base_equity_product import BaseEquityProduct
 from util.enum import OptionType, ExerciseType, TenorEnd
 from util.exceptions import ValidationError
+from util.numerical.comparison import is_close
 
 
 class BaseEquityOption(BaseEquityProduct):
@@ -253,6 +254,15 @@ class BaseEquityOption(BaseEquityProduct):
             raise ValidationError(f"Notional must be non-negative, got {self.notional}")
         if self.quantity is not None and self.quantity < 0:
             raise ValidationError(f"Quantity must be non-negative, got {self.quantity}")
+        if (
+            self.notional is not None
+            and self.initial_price is not None
+            and not is_close(self.notional, self.quantity * self.initial_price)
+        ):
+            self.quantity = self.notional / self.initial_price
+            print(
+                f"WARNING: Notional ({self.notional}) is not equal to quantity ({self.quantity}) * initial_price ({self.initial_price}), setting quantity to {self.quantity}"
+            )
 
     # ==========================================================================
     # Quantity and Notional
@@ -451,9 +461,7 @@ class BaseEquityOption(BaseEquityProduct):
             return self.maturity_date or self.exercise_date
         return self.exercise_date
 
-    def get_time_to_date(
-        self, target_date: datetime, pricing_env=None
-    ) -> float:
+    def get_time_to_date(self, target_date: datetime, pricing_env=None) -> float:
         """
         Calculate time in years from valuation date to a target date.
 
@@ -502,7 +510,7 @@ class BaseEquityOption(BaseEquityProduct):
         Raises:
             ValidationError: If option_type is not set
         """
-        if not hasattr(self, 'option_type') or self.option_type is None:
+        if not hasattr(self, "option_type") or self.option_type is None:
             raise ValidationError(
                 "option_type is not set. This method is only available for "
                 "vanilla options with a defined option type."
@@ -519,7 +527,7 @@ class BaseEquityOption(BaseEquityProduct):
         Raises:
             ValidationError: If option_type is not set
         """
-        if not hasattr(self, 'option_type') or self.option_type is None:
+        if not hasattr(self, "option_type") or self.option_type is None:
             raise ValidationError(
                 "option_type is not set. This method is only available for "
                 "vanilla options with a defined option type."
@@ -533,7 +541,7 @@ class BaseEquityOption(BaseEquityProduct):
         Returns:
             True if exercise type is EUROPEAN, False otherwise
         """
-        if not hasattr(self, 'exercise_type') or self.exercise_type is None:
+        if not hasattr(self, "exercise_type") or self.exercise_type is None:
             return False
         return self.exercise_type == ExerciseType.EUROPEAN
 
@@ -544,7 +552,7 @@ class BaseEquityOption(BaseEquityProduct):
         Returns:
             True if exercise type is AMERICAN, False otherwise
         """
-        if not hasattr(self, 'exercise_type') or self.exercise_type is None:
+        if not hasattr(self, "exercise_type") or self.exercise_type is None:
             return False
         return self.exercise_type == ExerciseType.AMERICAN
 
@@ -555,7 +563,7 @@ class BaseEquityOption(BaseEquityProduct):
         Returns:
             True if exercise type is BERMUDAN, False otherwise
         """
-        if not hasattr(self, 'exercise_type') or self.exercise_type is None:
+        if not hasattr(self, "exercise_type") or self.exercise_type is None:
             return False
         return self.exercise_type == ExerciseType.BERMUDAN
 
@@ -668,7 +676,7 @@ class BaseEquityOption(BaseEquityProduct):
             raise ValidationError(f"Spot must be non-negative, got {spot}")
 
         # Check if option_type is available
-        if not hasattr(self, 'option_type') or self.option_type is None:
+        if not hasattr(self, "option_type") or self.option_type is None:
             raise ValidationError(
                 "option_type is not set. Cannot calculate intrinsic value for "
                 "structured products. Use get_payoff() instead."

@@ -214,6 +214,7 @@ class SnowballOption(BaseEquityOption):
         Raises:
             ValidationError: If parameters are invalid
         """
+        super().validate()
         self._validate_core_parameters()
         self._validate_maturity_parameters()
         self._validate_barrier_parameters()
@@ -698,7 +699,12 @@ class SnowballOption(BaseEquityOption):
         else:
             raw_diff = spot - self.strike
 
-        downside = self.payoff_config.participation_rate * min(raw_diff, 0.0)
+        downside = (
+            self.payoff_config.participation_rate
+            * min(raw_diff, 0.0)
+            * self.notional
+            / self.initial_price
+        )
         if self.accrual_config.is_annualized_ki:
             contract_tenor = self.get_contract_tenor(pricing_env)
             downside *= contract_tenor

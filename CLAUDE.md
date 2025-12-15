@@ -229,6 +229,57 @@ Skip proposal for:
 - **Input Validation**: Validate at every level
 - **Numerical Stability**: Handle edge cases (near-expiry, deep ITM/OTM)
 
+### Numerical Operations (IMPORTANT)
+Always use `util/numerical/` utilities for numerical operations. **Do NOT** use raw float comparisons or hardcoded tolerances.
+
+**Float Comparison** - Use `util.numerical.comparison`:
+```python
+from util.numerical import is_zero, is_close, almost_equal, Tolerance
+
+# CORRECT: Use is_zero for expiry checks
+if is_zero(time_to_expiry):  # Uses Tolerance.ZERO (1e-10)
+    return intrinsic_value
+
+# WRONG: Hardcoded tolerance
+if time_to_expiry < 1e-10:  # Don't do this
+    return intrinsic_value
+```
+
+**Safe Math** - Use `util.numerical.safe_math`:
+```python
+from util.numerical import safe_log, safe_exp, safe_sqrt, safe_divide
+
+# CORRECT: Protected math operations
+log_moneyness = safe_log(spot / strike)  # Prevents log(0)
+discount = safe_exp(-r * T)               # Prevents overflow
+sigma_sqrt_t = safe_sqrt(variance)        # Prevents sqrt(negative)
+
+# WRONG: Unprotected operations
+log_moneyness = math.log(spot / strike)  # Can fail with log(0)
+```
+
+**Number Formatting** - Use `util.numerical.formatting`:
+```python
+from util.numerical import format_currency, format_percentage, format_basis_points
+
+# CORRECT: Standardized formatting
+print(format_currency(price))        # $1,234.56
+print(format_percentage(0.05))       # 5.00%
+print(format_basis_points(0.0025))   # 25.0bp
+
+# WRONG: Inconsistent formatting
+print(f"${price:.2f}")  # Don't hardcode format strings
+```
+
+**Validation** - Use `util.numerical.validation`:
+```python
+from util.numerical import validate_positive, validate_probability, is_valid_number
+
+# CORRECT: Standardized validation
+strike = validate_positive(strike, "strike")
+confidence = validate_probability(confidence_level, "confidence_level")
+```
+
 ### Testing
 - **Framework**: pytest
 - **Location**: `test/` directory

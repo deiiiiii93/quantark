@@ -70,10 +70,22 @@ def demo_basic_pricing():
         ki_continuous=True,
     )
 
+    payoff_config = PayoffConfig(
+        rebate_rate=0.15,
+        call_rebate_enabled=False,
+        call_strike=None,
+        call_participation_rate=1.0,
+        include_principal=False,
+        participation_rate=1.0,
+        protection_type=ProtectionType.NONE,
+        protection_rate=0.0,
+    )
+
     snowball = SnowballOption(
         initial_price=100.0,
         strike=100.0,
         barrier_config=barrier_config,
+        payoff_config=payoff_config,
         notional=1_000_000.0,
         maturity=1.0,
         is_reverse=False,
@@ -140,7 +152,9 @@ def demo_mc_methods():
         )
         price = engine.price(snowball, env)
         result = engine.get_last_result()
-        print(f"{method.name:15s}: Price={price:12,.2f}, StdErr={result.std_error:8.2f}")
+        print(
+            f"{method.name:15s}: Price={price:12,.2f}, StdErr={result.std_error:8.2f}"
+        )
 
     # RQMC with smaller batch size
     engine = SnowballMCEngine(
@@ -149,7 +163,9 @@ def demo_mc_methods():
     )
     price = engine.price(snowball, env)
     result = engine.get_last_result()
-    print(f"{'RANDOMIZED_QUASI':15s}: Price={price:12,.2f}, StdErr={result.std_error:8.2f}, Batches={result.batches_used}")
+    print(
+        f"{'RANDOMIZED_QUASI':15s}: Price={price:12,.2f}, StdErr={result.std_error:8.2f}, Batches={result.batches_used}"
+    )
 
 
 def demo_convergence():
@@ -196,7 +212,9 @@ def demo_convergence():
             ratio = prev_std_err / result.std_error
             ratio_str = f"{ratio:.2f}x"
 
-        print(f"{num_paths:12,d} {price:12,.2f} {result.std_error:10.2f} {ratio_str:>12s}")
+        print(
+            f"{num_paths:12,d} {price:12,.2f} {result.std_error:10.2f} {ratio_str:>12s}"
+        )
         prev_std_err = result.std_error
 
     print("\nNote: Standard error should decrease roughly as 1/sqrt(N)")
@@ -323,10 +341,12 @@ def demo_disable_ko_after_ki():
         price = engine.price(snowball, env)
         result = engine.get_last_result()
 
-        print(f"disable_ko_after_ki={str(disable_ko):5s}: "
-              f"KO={result.ko_probability:5.2%}, "
-              f"V0={result.v0_probability:5.2%}, "
-              f"V1={result.v1_probability:5.2%}")
+        print(
+            f"disable_ko_after_ki={str(disable_ko):5s}: "
+            f"KO={result.ko_probability:5.2%}, "
+            f"V0={result.v0_probability:5.2%}, "
+            f"V1={result.v1_probability:5.2%}"
+        )
 
     print("\nWhen disable_ko_after_ki=True, KO events after KI are ignored")
 
