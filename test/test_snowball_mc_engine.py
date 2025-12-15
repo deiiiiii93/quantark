@@ -23,7 +23,7 @@ from typing import List
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine, SnowballMCResult
+from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from asset.equity.product.option.snowball_option import SnowballOption
 from asset.equity.product.option.snowball_config import (
     BarrierConfig,
@@ -36,7 +36,6 @@ from priceenv import PricingEnvironment
 from util.enum import (
     ObservationType,
     CouponPayType,
-    ProtectionType,
 )
 from util.enum.engine_enums import MonteCarloMethod, EngineType
 from util.exceptions import ValidationError, PricingError
@@ -82,7 +81,9 @@ def create_basic_barrier_config(
         ko_observation_type=ObservationType.DISCRETE,
         ko_observation_dates=ko_observation_dates,
         ki_barrier=ki_barrier,
-        ki_observation_type=ObservationType.CONTINUOUS if ki_continuous else ObservationType.DISCRETE,
+        ki_observation_type=(
+            ObservationType.CONTINUOUS if ki_continuous else ObservationType.DISCRETE
+        ),
         ki_observation_dates=ki_observation_dates,
         ki_continuous=ki_continuous,
         disable_ko_after_ki=disable_ko_after_ki,
@@ -177,9 +178,7 @@ class TestSnowballMCEngineCreation:
 
     def test_method_two_level_enum(self):
         """Test method selection with two-level enum pattern."""
-        engine = SnowballMCEngine(
-            method=EngineType.MONTE_CARLO(MonteCarloMethod.QUASI)
-        )
+        engine = SnowballMCEngine(method=EngineType.MONTE_CARLO(MonteCarloMethod.QUASI))
         assert engine.method == MonteCarloMethod.QUASI
 
     def test_method_string_selection(self):
@@ -245,7 +244,9 @@ class TestBasicPricing:
         assert 0 <= result.v0_probability <= 1
         assert 0 <= result.v1_probability <= 1
         # Probabilities should sum to 1
-        total_prob = result.ko_probability + result.v0_probability + result.v1_probability
+        total_prob = (
+            result.ko_probability + result.v0_probability + result.v1_probability
+        )
         assert abs(total_prob - 1.0) < 1e-6
 
 
@@ -470,8 +471,6 @@ class TestTimeVaryingBarriers:
         price = engine.price(snowball, env)
         assert price > 0
 
-
-
     def test_time_varying_ki_barriers(self):
         """Test pricing with different KI barrier levels at each observation."""
         ko_observation_dates = [0.25, 0.5, 0.75, 1.0]
@@ -616,7 +615,9 @@ class TestDisableKOAfterKI:
             ki_continuous=True,
             disable_ko_after_ki=False,
         )
-        snowball_enabled = create_standard_snowball(barrier_config=barrier_config_enabled)
+        snowball_enabled = create_standard_snowball(
+            barrier_config=barrier_config_enabled
+        )
         engine = SnowballMCEngine(params=MCParams(num_paths=10000, seed=42))
         engine.price(snowball_enabled, env)
         result_enabled = engine.get_last_result()
@@ -640,6 +641,75 @@ class TestRepr:
         """Test __repr__ for QUASI method."""
         engine = SnowballMCEngine(method=MonteCarloMethod.QUASI)
         assert "QUASI" in repr(engine)
+
+
+class TestDaskParallel:
+    """Tests for Dask parallel path (if Dask is installed)."""
+
+    def test_dask_parallel_preserves_num_paths_and_probabilities(self):
+        """Dask path should use exactly params.num_paths and keep prob invariants."""
+        pytest.importorskip("dask")
+
+        snowball = create_standard_snowball()
+        env = create_pricing_env()
+        params = MCParams(num_paths=4000, seed=42)
+        engine = SnowballMCEngine(
+            params=params,
+            method=MonteCarloMethod.PSEUDO,
+            use_dask=True,
+            num_batches=4,
+        )
+
+        engine.price(snowball, env)
+        result = engine.get_last_result()
+
+        assert result is not None
+        assert result.num_paths == params.num_paths
+        assert 0.0 <= result.ko_probability <= 1.0
+        assert 0.0 <= result.v0_probability <= 1.0
+        assert 0.0 <= result.v1_probability <= 1.0
+        assert (
+            abs(
+                result.ko_probability
+                + result.v0_probability
+                + result.v1_probability
+                - 1.0
+            )
+            < 1e-6
+        )
+        assert result.std_error is not None
+        assert result.std_error >= 0.0
+
+    def test_dask_parallel_price_close_to_serial(self):
+        """Parallel and serial should be statistically close (within noise)."""
+        pytest.importorskip("dask")
+
+        snowball = create_standard_snowball()
+        env = create_pricing_env()
+        params = MCParams(num_paths=20000, seed=123)
+
+        engine_serial = SnowballMCEngine(
+            params=params,
+            method=MonteCarloMethod.PSEUDO,
+            use_dask=False,
+        )
+        price_serial = engine_serial.price(snowball, env)
+        se_serial = engine_serial.get_last_std_error()
+        assert se_serial is not None
+
+        engine_parallel = SnowballMCEngine(
+            params=params,
+            method=MonteCarloMethod.PSEUDO,
+            use_dask=True,
+            num_batches=4,
+        )
+        price_parallel = engine_parallel.price(snowball, env)
+        se_parallel = engine_parallel.get_last_std_error()
+        assert se_parallel is not None
+
+        # Use combined standard error as a stability-aware tolerance.
+        combined_se = float(np.sqrt(se_serial * se_serial + se_parallel * se_parallel))
+        assert abs(price_parallel - price_serial) <= 8.0 * combined_se
 
 
 # =============================================================================

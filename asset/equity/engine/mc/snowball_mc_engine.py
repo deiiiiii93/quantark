@@ -13,7 +13,7 @@ This engine prices snowball options using Monte Carlo simulation with support fo
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 
@@ -25,7 +25,6 @@ from priceenv import PricingEnvironment
 from util.enum import (
     ObservationType,
     CouponPayType,
-    BarrierType,
 )
 from util.enum.engine_enums import MonteCarloMethod, EngineType
 from util.exceptions import ValidationError, PricingError
@@ -36,7 +35,6 @@ from asset.equity.process.bsm.qmc_sobol import (
     SobolNormalGenerator,
 )
 from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
-from asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 
 
 # Optional Dask import
@@ -314,6 +312,7 @@ class SnowballMCEngine(BaseEngine):
         T: float,
         dt_array: np.ndarray,
         batch_id: Optional[int] = None,
+        num_paths: Optional[int] = None,
     ) -> GBMPathGenerator:
         """
         Create a GBMPathGenerator configured for the observation grid.
@@ -331,6 +330,11 @@ class SnowballMCEngine(BaseEngine):
             Configured GBMPathGenerator
         """
         params = self.params
+        effective_num_paths = params.num_paths if num_paths is None else int(num_paths)
+        if effective_num_paths <= 0:
+            raise ValidationError(
+                f"num_paths must be positive, got {effective_num_paths}"
+            )
 
         if self.method == MonteCarloMethod.PSEUDO:
             seed = params.seed + (batch_id or 0) * 1000
@@ -352,7 +356,7 @@ class SnowballMCEngine(BaseEngine):
             div=q,
             maturity=T,
             time_steps=len(dt_array),
-            num_paths=params.num_paths,
+            num_paths=effective_num_paths,
             model="bsm",
             random_stream=random_stream,
             use_brownian_bridge=False,
@@ -588,17 +592,28 @@ class SnowballMCEngine(BaseEngine):
             payoffs[is_v1] = v1_payoffs
 
         # Compute statistics
+        ko_count = int(is_ko.sum())
+        v0_count = int(is_v0.sum())
+        v1_count = int(is_v1.sum())
+
         stats = {
             "ko_probability": float(is_ko.mean()),
             "v0_probability": float(is_v0.mean()),
             "v1_probability": float(is_v1.mean()),
+            "ko_count": ko_count,
+            "v0_count": v0_count,
+            "v1_count": v1_count,
         }
 
         if is_ko.any():
-            avg_ko_time = float(ko_times[first_ko_idx[is_ko]].mean())
-            stats["avg_ko_time"] = avg_ko_time
+            ko_times_hit = ko_times[first_ko_idx[is_ko]]
+            stats["avg_ko_time"] = float(ko_times_hit.mean())
+            stats["ko_time_sum"] = float(ko_times_hit.sum())
+            stats["ko_time_count"] = ko_count
         else:
             stats["avg_ko_time"] = None
+            stats["ko_time_sum"] = 0.0
+            stats["ko_time_count"] = 0
 
         return payoffs, settlement_times, stats
 
@@ -653,6 +668,7 @@ class SnowballMCEngine(BaseEngine):
     def _price_single_batch(
         self,
         batch_id: int,
+        batch_num_paths: int,
         product: SnowballOption,
         pricing_env: PricingEnvironment,
         S: float,
@@ -664,13 +680,13 @@ class SnowballMCEngine(BaseEngine):
         dt_array: np.ndarray,
         ko_indices: np.ndarray,
         ki_indices: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
+    ) -> Dict[str, float]:
         """
         Price a single batch of paths for parallel processing.
         """
         # Create path generator for this batch
         generator = self._create_path_generator(
-            S, r, q, sigma, T, dt_array, batch_id=batch_id
+            S, r, q, sigma, T, dt_array, batch_id=batch_id, num_paths=batch_num_paths
         )
 
         # Generate paths
@@ -685,7 +701,21 @@ class SnowballMCEngine(BaseEngine):
         discount_factors = np.exp(-r * settlement_times)
         discounted_payoffs = payoffs * discount_factors
 
-        return discounted_payoffs, stats
+        discounted_payoffs = np.asarray(discounted_payoffs, dtype=float)
+        n = int(discounted_payoffs.size)
+        sum_x = float(discounted_payoffs.sum())
+        sum_x2 = float(np.square(discounted_payoffs).sum())
+
+        return {
+            "n": n,
+            "sum_x": sum_x,
+            "sum_x2": sum_x2,
+            "ko_count": int(stats.get("ko_count", 0)),
+            "v0_count": int(stats.get("v0_count", 0)),
+            "v1_count": int(stats.get("v1_count", 0)),
+            "ko_time_sum": float(stats.get("ko_time_sum", 0.0)),
+            "ko_time_count": int(stats.get("ko_time_count", 0)),
+        }
 
     def _price_parallel(
         self,
@@ -705,53 +735,99 @@ class SnowballMCEngine(BaseEngine):
             product, pricing_env, T
         )
 
-        # Create delayed tasks for each batch
-        batch_results = [
-            delayed(self._price_single_batch)(
-                batch_id=i,
-                product=product,
-                pricing_env=pricing_env,
-                S=S,
-                T=T,
-                r=r,
-                q=q,
-                sigma=sigma,
-                all_times=all_times,
-                dt_array=dt_array,
-                ko_indices=ko_indices,
-                ki_indices=ki_indices,
+        if self.num_batches <= 0:
+            raise ValidationError(
+                f"num_batches must be positive, got {self.num_batches}"
             )
-            for i in range(self.num_batches)
+
+        # Split total paths across batches so parallel mode matches serial mode
+        total_paths_target = int(self.params.num_paths)
+        base = total_paths_target // self.num_batches
+        remainder = total_paths_target % self.num_batches
+        batch_sizes = [
+            (base + 1 if i < remainder else base) for i in range(self.num_batches)
         ]
+
+        # Create delayed tasks for non-empty batches
+        batch_results = []
+        batches_used = 0
+        for batch_id, batch_num_paths in enumerate(batch_sizes):
+            if batch_num_paths <= 0:
+                continue
+            batches_used += 1
+            batch_results.append(
+                delayed(self._price_single_batch)(
+                    batch_id=batch_id,
+                    batch_num_paths=batch_num_paths,
+                    product=product,
+                    pricing_env=pricing_env,
+                    S=S,
+                    T=T,
+                    r=r,
+                    q=q,
+                    sigma=sigma,
+                    all_times=all_times,
+                    dt_array=dt_array,
+                    ko_indices=ko_indices,
+                    ki_indices=ki_indices,
+                )
+            )
 
         # Compute all batches in parallel
         results = compute(*batch_results)
 
-        # Aggregate results
-        all_payoffs = []
-        all_stats = {"ko_probability": [], "v0_probability": [], "v1_probability": []}
+        total_n = 0
+        total_sum_x = 0.0
+        total_sum_x2 = 0.0
+        total_ko_count = 0
+        total_v0_count = 0
+        total_v1_count = 0
+        total_ko_time_sum = 0.0
+        total_ko_time_count = 0
 
-        for discounted_payoffs, stats in results:
-            all_payoffs.append(discounted_payoffs)
-            all_stats["ko_probability"].append(stats["ko_probability"])
-            all_stats["v0_probability"].append(stats["v0_probability"])
-            all_stats["v1_probability"].append(stats["v1_probability"])
+        for res in results:
+            total_n += int(res["n"])
+            total_sum_x += float(res["sum_x"])
+            total_sum_x2 += float(res["sum_x2"])
+            total_ko_count += int(res.get("ko_count", 0))
+            total_v0_count += int(res.get("v0_count", 0))
+            total_v1_count += int(res.get("v1_count", 0))
+            total_ko_time_sum += float(res.get("ko_time_sum", 0.0))
+            total_ko_time_count += int(res.get("ko_time_count", 0))
 
-        combined_payoffs = np.concatenate(all_payoffs)
-        total_paths = len(combined_payoffs)
+        if total_n <= 0:
+            raise PricingError("Dask parallel pricing produced zero simulated paths")
 
-        price = float(combined_payoffs.mean())
-        std_payoff = float(combined_payoffs.std(ddof=1))
-        std_error = std_payoff / math.sqrt(total_paths)
+        price = total_sum_x / total_n
+
+        if total_n > 1:
+            sample_var = (total_sum_x2 - (total_sum_x * total_sum_x) / total_n) / (
+                total_n - 1
+            )
+            sample_var = max(sample_var, 0.0)
+            std_error = math.sqrt(sample_var) / math.sqrt(total_n)
+        else:
+            std_error = 0.0
+
+        ko_probability = float(total_ko_count / total_n)
+        v0_probability = float(total_v0_count / total_n)
+        v1_probability = float(total_v1_count / total_n)
+
+        avg_ko_time: Optional[float]
+        if total_ko_time_count > 0:
+            avg_ko_time = float(total_ko_time_sum / total_ko_time_count)
+        else:
+            avg_ko_time = None
 
         return SnowballMCResult(
-            price=price,
-            std_error=std_error,
-            num_paths=total_paths,
-            ko_probability=float(np.mean(all_stats["ko_probability"])),
-            v0_probability=float(np.mean(all_stats["v0_probability"])),
-            v1_probability=float(np.mean(all_stats["v1_probability"])),
-            batches_used=self.num_batches,
+            price=float(price),
+            std_error=float(std_error),
+            num_paths=int(total_n),
+            ko_probability=ko_probability,
+            v0_probability=v0_probability,
+            v1_probability=v1_probability,
+            avg_ko_time=avg_ko_time,
+            batches_used=batches_used,
         )
 
     def _price_rqmc(
