@@ -4,6 +4,8 @@ Unified facade engine for convertible bond pricing.
 This module provides ConvertibleBondEngine that dispatches to appropriate
 underlying engines based on method selection.
 """
+import math
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Dict, Optional, Union
 
@@ -19,6 +21,7 @@ from asset.bond.engine.pde.convertible import (
     ConvertibleBondTFEngine,
 )
 from priceenv import PricingEnvironment
+from param.rrf import FlatRateCurve
 from util.enum.engine_enums import EngineType, ConvertibleBondMethod, PDEMethod
 from util.exceptions import ValidationError
 
@@ -38,6 +41,15 @@ class ConvertibleBondResult:
         bond_component: Bond-like component of value (COCB for TF model)
         default_probability: Probability of default (trinomial model only)
         method: Method used for pricing
+        floor_bond_price: Straight bond price without conversion/options
+        floor_bond_dv01: Floor bond DV01 (price change per bp rate move)
+        floor_bond_cs01: Floor bond CS01 (price change per bp spread move)
+        floor_bond_duration: Floor bond modified duration
+        floor_bond_convexity: Floor bond convexity
+        dv01: Convertible DV01 (price change per bp rate move)
+        cs01: Convertible CS01 (price change per bp spread move)
+        modified_duration: Convertible modified duration
+        convexity: Convertible convexity
     """
 
     price: float
@@ -49,6 +61,17 @@ class ConvertibleBondResult:
     bond_component: float = 0.0
     default_probability: float = 0.0
     method: str = ""
+    # Floor bond metrics
+    floor_bond_price: float = 0.0
+    floor_bond_dv01: float = 0.0
+    floor_bond_cs01: float = 0.0
+    floor_bond_duration: float = 0.0
+    floor_bond_convexity: float = 0.0
+    # Convertible risk metrics
+    dv01: float = 0.0
+    cs01: float = 0.0
+    modified_duration: float = 0.0
+    convexity: float = 0.0
 
 
 class ConvertibleBondEngine:
@@ -260,7 +283,9 @@ class ConvertibleBondEngine:
         """
         return self._engine.price(bond)
 
-    def price_with_details(self, bond: ConvertibleBond) -> ConvertibleBondResult:
+    def price_with_details(
+        self, bond: ConvertibleBond, include_risk_metrics: bool = True
+    ) -> ConvertibleBondResult:
         """
         Calculate price with detailed results.
 
@@ -269,6 +294,8 @@ class ConvertibleBondEngine:
 
         Args:
             bond: Convertible bond to price
+            include_risk_metrics: Whether to compute risk metrics (DV01, CS01,
+                duration, convexity). Set to False to skip for performance.
 
         Returns:
             ConvertibleBondResult with full pricing details
@@ -296,6 +323,21 @@ class ConvertibleBondEngine:
 
         if hasattr(raw_result, "default_probability"):
             result.default_probability = raw_result.default_probability
+
+        # Compute risk metrics if requested
+        if include_risk_metrics:
+            # Floor bond metrics (analytical, fast)
+            result.floor_bond_price = self.floor_bond_price(bond)
+            result.floor_bond_duration = self.floor_bond_duration(bond)
+            result.floor_bond_convexity = self.floor_bond_convexity(bond)
+            result.floor_bond_dv01 = self.floor_bond_dv01(bond)
+            result.floor_bond_cs01 = self.floor_bond_cs01(bond)
+
+            # Convertible risk metrics (numerical, slower)
+            result.dv01 = self.dv01(bond)
+            result.cs01 = self.cs01(bond)
+            result.modified_duration = self.modified_duration(bond)
+            result.convexity = self.convexity(bond)
 
         return result
 
@@ -347,6 +389,369 @@ class ConvertibleBondEngine:
                 "COCB is only available with the TF model"
             )
         return self._engine.get_cocb(bond)
+
+    # =========================================================================
+    # Floor Bond Methods
+    # =========================================================================
+
+    def floor_bond_price(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate the floor bond (straight bond) price.
+
+        The floor bond is the value of the convertible assuming no conversion
+        and no exercise of call/put options. It represents the investment
+        value floor of the convertible bond.
+
+        Cashflows are discounted at the risky rate (risk-free + credit spread).
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Floor bond dirty price
+        """
+        valuation_date = self.pricing_env.valuation_date
+
+        # Check if bond has matured
+        if bond.is_expired(valuation_date):
+            return 0.0
+
+        # Get future cashflows
+        cashflows = bond.get_cashflows(valuation_date)
+
+        if not cashflows:
+            return 0.0
+
+        # Get credit spread from bond
+        credit_spread = bond.credit_spread if bond.credit_spread else 0.0
+
+        # Discount each cashflow at risky rate
+        pv = 0.0
+        for cf in cashflows:
+            time_to_payment = (cf.payment_date - valuation_date).days / 365.0
+
+            if time_to_payment < 0:
+                continue
+
+            # Get risk-free rate and add credit spread
+            risk_free_rate = self.pricing_env.get_rate(time_to_payment)
+            risky_rate = risk_free_rate + credit_spread
+
+            # Discount factor at risky rate
+            discount_factor = math.exp(-risky_rate * time_to_payment)
+            pv += cf.amount * discount_factor
+
+        return pv
+
+    def floor_bond_dv01(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate DV01 of the floor bond.
+
+        DV01 is the price change for a 1 basis point increase in rates.
+        For the floor bond, this can be computed analytically.
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Floor bond DV01 (positive value, price decreases when rates rise)
+        """
+        duration = self.floor_bond_duration(bond)
+        price = self.floor_bond_price(bond)
+        return duration * price * 0.0001
+
+    def floor_bond_cs01(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate CS01 of the floor bond.
+
+        CS01 is the price change for a 1 basis point increase in credit spread.
+        For the floor bond, CS01 equals DV01 since both rate and spread
+        affect discounting identically (discount at r + s).
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Floor bond CS01 (equals DV01)
+        """
+        # For floor bond, CS01 = DV01 since both enter the discount factor
+        return self.floor_bond_dv01(bond)
+
+    def floor_bond_duration(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate modified duration of the floor bond.
+
+        Modified duration is the weighted average time to cashflows,
+        weighted by present value.
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Floor bond modified duration
+        """
+        valuation_date = self.pricing_env.valuation_date
+
+        if bond.is_expired(valuation_date):
+            return 0.0
+
+        cashflows = bond.get_cashflows(valuation_date)
+
+        if not cashflows:
+            return 0.0
+
+        credit_spread = bond.credit_spread if bond.credit_spread else 0.0
+
+        # Calculate price and weighted time
+        price = 0.0
+        weighted_time = 0.0
+
+        for cf in cashflows:
+            time_to_payment = (cf.payment_date - valuation_date).days / 365.0
+
+            if time_to_payment < 0:
+                continue
+
+            risk_free_rate = self.pricing_env.get_rate(time_to_payment)
+            risky_rate = risk_free_rate + credit_spread
+            discount_factor = math.exp(-risky_rate * time_to_payment)
+
+            pv = cf.amount * discount_factor
+            price += pv
+            weighted_time += pv * time_to_payment
+
+        if price == 0:
+            return 0.0
+
+        return weighted_time / price
+
+    def floor_bond_convexity(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate convexity of the floor bond.
+
+        Convexity measures the curvature of the price-yield relationship.
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Floor bond convexity
+        """
+        valuation_date = self.pricing_env.valuation_date
+
+        if bond.is_expired(valuation_date):
+            return 0.0
+
+        cashflows = bond.get_cashflows(valuation_date)
+
+        if not cashflows:
+            return 0.0
+
+        credit_spread = bond.credit_spread if bond.credit_spread else 0.0
+
+        # Calculate price and weighted time squared
+        price = 0.0
+        weighted_time_sq = 0.0
+
+        for cf in cashflows:
+            time_to_payment = (cf.payment_date - valuation_date).days / 365.0
+
+            if time_to_payment < 0:
+                continue
+
+            risk_free_rate = self.pricing_env.get_rate(time_to_payment)
+            risky_rate = risk_free_rate + credit_spread
+            discount_factor = math.exp(-risky_rate * time_to_payment)
+
+            pv = cf.amount * discount_factor
+            price += pv
+            weighted_time_sq += pv * time_to_payment * time_to_payment
+
+        if price == 0:
+            return 0.0
+
+        return weighted_time_sq / price
+
+    # =========================================================================
+    # Convertible Bond Risk Metrics (Numerical)
+    # =========================================================================
+
+    def dv01(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate DV01 of the convertible bond.
+
+        Uses numerical rate bumping since the convertible has embedded options.
+        Only the risk-free rate is bumped, isolating interest rate risk.
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Convertible DV01 (positive value, price decreases when rates rise)
+        """
+        rate_bump = 0.0001  # 1 basis point
+
+        # Get base rate
+        base_rate = self.pricing_env.get_rate(1.0)
+
+        # Price with rate bumped up
+        env_up = deepcopy(self.pricing_env)
+        env_up.rate_curve = FlatRateCurve(rate=base_rate + rate_bump)
+        engine_up = self._create_bumped_engine(env_up)
+        price_up = engine_up.price(bond)
+
+        # Price with rate bumped down
+        env_down = deepcopy(self.pricing_env)
+        env_down.rate_curve = FlatRateCurve(rate=base_rate - rate_bump)
+        engine_down = self._create_bumped_engine(env_down)
+        price_down = engine_down.price(bond)
+
+        # DV01 = (price_down - price_up) / 2 (central difference)
+        # Note: price falls when rate rises, so DV01 is positive
+        return (price_down - price_up) / 2
+
+    def cs01(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate CS01 of the convertible bond.
+
+        Uses numerical credit spread bumping. This measures sensitivity
+        to credit spread changes, which affects both the discount rate
+        and hazard rate in credit-adjusted models.
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Convertible CS01 (positive value, price decreases when spread rises)
+        """
+        spread_bump = 0.0001  # 1 basis point
+
+        # Get base price
+        base_price = self.price(bond)
+
+        # Create bond with bumped spread up
+        base_spread = bond.credit_spread if bond.credit_spread else 0.0
+        bond_up = self._create_spread_bumped_bond(bond, base_spread + spread_bump)
+        price_up = self.price(bond_up)
+
+        # Create bond with bumped spread down
+        bond_down = self._create_spread_bumped_bond(bond, max(0.0, base_spread - spread_bump))
+        price_down = self.price(bond_down)
+
+        # CS01 = (price_down - price_up) / 2 (central difference)
+        return (price_down - price_up) / 2
+
+    def modified_duration(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate modified duration of the convertible bond.
+
+        Derived from DV01: Duration = DV01 / (Price * 0.0001)
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Convertible modified duration
+        """
+        price = self.price(bond)
+        if price == 0:
+            return 0.0
+
+        dv01_value = self.dv01(bond)
+        return dv01_value / (price * 0.0001)
+
+    def convexity(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate convexity of the convertible bond.
+
+        Uses central difference with rate bumps.
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Convertible convexity
+        """
+        rate_bump = 0.0001  # 1 basis point
+        base_price = self.price(bond)
+
+        if base_price == 0:
+            return 0.0
+
+        # Get base rate
+        base_rate = self.pricing_env.get_rate(1.0)
+
+        # Price with rate bumped up
+        env_up = deepcopy(self.pricing_env)
+        env_up.rate_curve = FlatRateCurve(rate=base_rate + rate_bump)
+        engine_up = self._create_bumped_engine(env_up)
+        price_up = engine_up.price(bond)
+
+        # Price with rate bumped down
+        env_down = deepcopy(self.pricing_env)
+        env_down.rate_curve = FlatRateCurve(rate=base_rate - rate_bump)
+        engine_down = self._create_bumped_engine(env_down)
+        price_down = engine_down.price(bond)
+
+        # Convexity = (P_up + P_down - 2*P_base) / (P_base * bump^2)
+        return (price_up + price_down - 2 * base_price) / (base_price * rate_bump * rate_bump)
+
+    def _create_bumped_engine(self, bumped_env: PricingEnvironment):
+        """
+        Create a new engine instance with a bumped pricing environment.
+
+        Args:
+            bumped_env: Pricing environment with bumped parameters
+
+        Returns:
+            New engine instance
+        """
+        if self.method == ConvertibleBondMethod.BINOMIAL_GS:
+            return ConvertibleBondBinomialEngine(bumped_env, self.tree_params)
+        elif self.method == ConvertibleBondMethod.TRINOMIAL_HW:
+            return ConvertibleBondTrinomialEngine(bumped_env, self.tree_params)
+        elif self.method == ConvertibleBondMethod.JUMP_DIFFUSION:
+            params = self.pde_params or ConvertibleBondPDEParams()
+            return ConvertibleBondJumpDiffusionEngine(bumped_env, params)
+        elif self.method == ConvertibleBondMethod.TF:
+            params = self.pde_params or ConvertibleBondPDEParams()
+            return ConvertibleBondTFEngine(bumped_env, params)
+        else:
+            raise ValidationError(f"Unsupported method: {self.method}")
+
+    def _create_spread_bumped_bond(
+        self, bond: ConvertibleBond, new_spread: float
+    ) -> ConvertibleBond:
+        """
+        Create a copy of the bond with a bumped credit spread.
+
+        Args:
+            bond: Original convertible bond
+            new_spread: New credit spread value
+
+        Returns:
+            New bond with modified credit spread
+        """
+        return ConvertibleBond(
+            issue_date=bond.issue_date,
+            maturity_date=bond.maturity_date,
+            face_value=bond.face_value,
+            coupon_rate=bond.coupon_rate,
+            conversion_ratio=bond.conversion_ratio,
+            conversion_price=bond.conversion_price,
+            payment_frequency=bond.payment_frequency,
+            day_count_convention=bond.day_count_convention,
+            conversion_start_date=bond.conversion_start_date,
+            conversion_end_date=bond.conversion_end_date,
+            call_schedule=bond.call_schedule,
+            put_schedule=bond.put_schedule,
+            credit_spread=new_spread,
+            hazard_rate=bond.hazard_rate,
+            recovery_rate=bond.recovery_rate,
+            stock_jump_on_default=bond.stock_jump_on_default,
+            continuous_dividend_yield=bond.continuous_dividend_yield,
+            discrete_dividends=bond.discrete_dividends,
+        )
 
     def __repr__(self):
         return f"ConvertibleBondEngine(method={self.method.value})"

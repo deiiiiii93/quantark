@@ -305,6 +305,64 @@ def demo_two_level_enum():
     print(f"   Price: ${engine3.price(cb):.4f}")
 
 
+def demo_risk_metrics():
+    """Demonstrate DV01, CS01, duration, convexity, and floor bond metrics."""
+    print("\n" + "=" * 70)
+    print("INTEREST RATE AND CREDIT RISK METRICS")
+    print("=" * 70)
+
+    cb = create_simple_convertible()
+    env = create_pricing_environment(stock_price=12.0)
+
+    # Use tree method for efficiency
+    engine = ConvertibleBondEngine(
+        env,
+        tree_params=ConvertibleBondTreeParams(num_steps=100),
+    )
+
+    print(f"\nBond: {cb}")
+    print(f"Stock Price: ${env.spot:.2f}")
+
+    # Get full results including risk metrics
+    result = engine.price_with_details(cb)
+
+    print(f"\n--- Convertible Bond Metrics ---")
+    print(f"  Price (clean):       ${result.price:.4f}")
+    print(f"  Price (dirty):       ${result.dirty_price:.4f}")
+    print(f"  DV01:                ${result.dv01:.6f}")
+    print(f"  CS01:                ${result.cs01:.6f}")
+    print(f"  Modified Duration:   {result.modified_duration:.4f} years")
+    print(f"  Convexity:           {result.convexity:.2f}")
+
+    print(f"\n--- Floor Bond Metrics (Straight Bond Value) ---")
+    print(f"  Floor Bond Price:    ${result.floor_bond_price:.4f}")
+    print(f"  Floor Bond DV01:     ${result.floor_bond_dv01:.6f}")
+    print(f"  Floor Bond CS01:     ${result.floor_bond_cs01:.6f}")
+    print(f"  Floor Bond Duration: {result.floor_bond_duration:.4f} years")
+    print(f"  Floor Bond Convexity:{result.floor_bond_convexity:.2f}")
+
+    # Calculate option value
+    option_value = result.price - result.floor_bond_price
+    print(f"\n--- Value Decomposition ---")
+    print(f"  Floor Bond Value:    ${result.floor_bond_price:.4f} ({result.floor_bond_price/result.price*100:.1f}%)")
+    print(f"  Option Value:        ${option_value:.4f} ({option_value/result.price*100:.1f}%)")
+
+    # Compare DV01s
+    print(f"\n--- Interest Rate Sensitivity Comparison ---")
+    print(f"  Convertible DV01:    ${result.dv01:.6f}")
+    print(f"  Floor Bond DV01:     ${result.floor_bond_dv01:.6f}")
+    print(f"  Ratio (CB/Floor):    {result.dv01/result.floor_bond_dv01:.2%}")
+    print(f"\n  Note: Convertible has lower DV01 because the equity component")
+    print(f"        has less interest rate sensitivity than pure debt.")
+
+    # Demonstrate direct method calls
+    print(f"\n--- Direct Method Calls ---")
+    print(f"  engine.dv01(cb):              ${engine.dv01(cb):.6f}")
+    print(f"  engine.cs01(cb):              ${engine.cs01(cb):.6f}")
+    print(f"  engine.modified_duration(cb): {engine.modified_duration(cb):.4f}")
+    print(f"  engine.floor_bond_price(cb):  ${engine.floor_bond_price(cb):.4f}")
+
+
 def main():
     """Run all demos."""
     print("\n" + "=" * 70)
@@ -317,6 +375,7 @@ def main():
     demo_callable_puttable()
     demo_stock_price_sensitivity()
     demo_two_level_enum()
+    demo_risk_metrics()
 
     print("\n" + "=" * 70)
     print("DEMO COMPLETE")

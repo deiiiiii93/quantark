@@ -624,5 +624,233 @@ class TestPuttableBond(TestConvertibleBondEngineSetup):
         self.assertGreaterEqual(price_puttable, price_non_puttable - 5)
 
 
+class TestFloorBondMetrics(TestConvertibleBondEngineSetup):
+    """Tests for floor bond price and risk metrics."""
+
+    def test_floor_bond_price_positive(self):
+        """Test floor bond price is positive."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        floor_price = engine.floor_bond_price(self.cb)
+        self.assertGreater(floor_price, 0)
+
+    def test_floor_bond_price_less_than_convertible(self):
+        """Test floor bond price is less than or equal to convertible price."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        floor_price = engine.floor_bond_price(self.cb)
+        cb_price = engine.price(self.cb)
+
+        # Convertible >= floor bond (conversion option has value)
+        self.assertGreaterEqual(cb_price, floor_price - 1e-6)
+
+    def test_floor_bond_duration_positive(self):
+        """Test floor bond duration is positive."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        duration = engine.floor_bond_duration(self.cb)
+        self.assertGreater(duration, 0)
+
+    def test_floor_bond_duration_reasonable(self):
+        """Test floor bond duration is reasonable (< time to maturity)."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        duration = engine.floor_bond_duration(self.cb)
+        ttm = self.cb.time_to_maturity(self.pricing_env.valuation_date)
+
+        # Duration should be less than time to maturity for coupon bond
+        self.assertLess(duration, ttm)
+
+    def test_floor_bond_convexity_positive(self):
+        """Test floor bond convexity is positive."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        convexity = engine.floor_bond_convexity(self.cb)
+        self.assertGreater(convexity, 0)
+
+    def test_floor_bond_dv01_positive(self):
+        """Test floor bond DV01 is positive."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        dv01 = engine.floor_bond_dv01(self.cb)
+        self.assertGreater(dv01, 0)
+
+    def test_floor_bond_cs01_equals_dv01(self):
+        """Test floor bond CS01 equals DV01."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        dv01 = engine.floor_bond_dv01(self.cb)
+        cs01 = engine.floor_bond_cs01(self.cb)
+
+        # For floor bond, CS01 should equal DV01
+        self.assertAlmostEqual(cs01, dv01, places=10)
+
+    def test_floor_bond_dv01_duration_consistency(self):
+        """Test DV01 = duration * price * 0.0001."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+        dv01 = engine.floor_bond_dv01(self.cb)
+        duration = engine.floor_bond_duration(self.cb)
+        price = engine.floor_bond_price(self.cb)
+
+        expected_dv01 = duration * price * 0.0001
+        self.assertAlmostEqual(dv01, expected_dv01, places=10)
+
+    def test_floor_bond_expired(self):
+        """Test floor bond metrics for expired bond."""
+        # Create expired bond
+        cb_expired = ConvertibleBond(
+            issue_date=datetime(2020, 1, 1),
+            maturity_date=datetime(2023, 1, 1),
+            face_value=100.0,
+            coupon_rate=0.02,
+            conversion_ratio=10.0,
+        )
+
+        engine = ConvertibleBondEngine(self.pricing_env)
+        floor_price = engine.floor_bond_price(cb_expired)
+        duration = engine.floor_bond_duration(cb_expired)
+        convexity = engine.floor_bond_convexity(cb_expired)
+
+        self.assertEqual(floor_price, 0.0)
+        self.assertEqual(duration, 0.0)
+        self.assertEqual(convexity, 0.0)
+
+
+class TestConvertibleRiskMetrics(TestConvertibleBondEngineSetup):
+    """Tests for convertible bond risk metrics (numerical)."""
+
+    def test_dv01_positive(self):
+        """Test convertible DV01 is positive."""
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+        dv01 = engine.dv01(self.cb)
+        self.assertGreater(dv01, 0)
+
+    def test_cs01_positive(self):
+        """Test convertible CS01 is positive."""
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+        cs01 = engine.cs01(self.cb)
+        self.assertGreater(cs01, 0)
+
+    def test_modified_duration_positive(self):
+        """Test convertible modified duration is positive."""
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+        duration = engine.modified_duration(self.cb)
+        self.assertGreater(duration, 0)
+
+    def test_convexity_reasonable(self):
+        """Test convertible convexity has reasonable value."""
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+        convexity = engine.convexity(self.cb)
+        # Convexity can be positive or negative for convertibles
+        # but should be finite
+        self.assertTrue(abs(convexity) < 1e10)
+
+    def test_duration_dv01_consistency(self):
+        """Test duration = DV01 / (price * 0.0001)."""
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+        dv01 = engine.dv01(self.cb)
+        duration = engine.modified_duration(self.cb)
+        price = engine.price(self.cb)
+
+        expected_duration = dv01 / (price * 0.0001)
+        self.assertAlmostEqual(duration, expected_duration, places=6)
+
+    def test_dv01_less_than_floor_bond_dv01(self):
+        """Test convertible DV01 is typically less than floor bond DV01.
+
+        Because the equity component has less interest rate sensitivity.
+        """
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+
+        cb_dv01 = engine.dv01(self.cb)
+        floor_dv01 = engine.floor_bond_dv01(self.cb)
+
+        # Convertible DV01 should generally be less than floor bond DV01
+        # when the equity component is significant
+        self.assertLess(cb_dv01, floor_dv01 * 1.5)  # Allow some margin
+
+    def test_dv01_different_methods(self):
+        """Test DV01 is positive across different pricing methods."""
+        for method in [
+            ConvertibleBondMethod.BINOMIAL_GS,
+            ConvertibleBondMethod.TRINOMIAL_HW,
+        ]:
+            engine = ConvertibleBondEngine(
+                self.pricing_env,
+                method=method,
+                tree_params=ConvertibleBondTreeParams(num_steps=50),
+            )
+            dv01 = engine.dv01(self.cb)
+            # DV01 should be positive for all methods
+            self.assertGreater(dv01, 0, f"DV01 should be positive for {method}")
+
+
+class TestPriceWithDetailsRiskMetrics(TestConvertibleBondEngineSetup):
+    """Tests for risk metrics in price_with_details()."""
+
+    def test_price_with_details_includes_risk_metrics(self):
+        """Test price_with_details includes all risk metrics."""
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+        result = engine.price_with_details(self.cb)
+
+        # Check floor bond metrics
+        self.assertGreater(result.floor_bond_price, 0)
+        self.assertGreater(result.floor_bond_dv01, 0)
+        self.assertGreater(result.floor_bond_cs01, 0)
+        self.assertGreater(result.floor_bond_duration, 0)
+        self.assertGreater(result.floor_bond_convexity, 0)
+
+        # Check convertible metrics
+        self.assertGreater(result.dv01, 0)
+        self.assertGreater(result.cs01, 0)
+        self.assertGreater(result.modified_duration, 0)
+        # Convexity can be any value
+
+    def test_price_with_details_skip_risk_metrics(self):
+        """Test price_with_details can skip risk metrics."""
+        engine = ConvertibleBondEngine(
+            self.pricing_env,
+            tree_params=ConvertibleBondTreeParams(num_steps=30),
+        )
+        result = engine.price_with_details(self.cb, include_risk_metrics=False)
+
+        # Price should still be calculated
+        self.assertGreater(result.price, 0)
+
+        # Risk metrics should be zero
+        self.assertEqual(result.floor_bond_price, 0)
+        self.assertEqual(result.floor_bond_dv01, 0)
+        self.assertEqual(result.dv01, 0)
+        self.assertEqual(result.cs01, 0)
+
+    def test_floor_bond_price_consistency(self):
+        """Test floor bond price is consistent between methods."""
+        engine = ConvertibleBondEngine(self.pricing_env)
+
+        # Floor bond price from dedicated method
+        floor_price_direct = engine.floor_bond_price(self.cb)
+
+        # Floor bond price from price_with_details
+        result = engine.price_with_details(self.cb)
+
+        self.assertAlmostEqual(
+            floor_price_direct, result.floor_bond_price, places=10
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
