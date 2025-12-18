@@ -38,6 +38,18 @@ class PDEMethod(Enum):
         return self.value
 
 
+class ConvertibleBondMethod(Enum):
+    """Methods for convertible bond pricing."""
+
+    BINOMIAL_GS = "binomial_gs"  # Goldman Sachs credit-adjusted binomial
+    TRINOMIAL_HW = "trinomial_hw"  # Hull-White trinomial with default
+    JUMP_DIFFUSION = "jump_diffusion"  # Bloomberg OVCV model
+    TF = "tf"  # Tsiveriotis-Fernandes decomposition
+
+    def __str__(self):
+        return self.value
+
+
 class EngineType(Enum):
     """Type of pricing engine."""
 
@@ -45,6 +57,7 @@ class EngineType(Enum):
     MONTE_CARLO = auto()
     PDE = auto()
     QUADRATURE = auto()
+    TREE = auto()
 
     def __str__(self):
         return self.name.replace("_", " ").title()

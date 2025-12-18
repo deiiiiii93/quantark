@@ -10,6 +10,12 @@ from .option.euro_short_term_bond_option import (
     EuroShortTermBondOption,
     create_bond_option,
 )
+from .convertible.convertible_bond import (
+    ConvertibleBond,
+    CallScheduleEntry,
+    PutScheduleEntry,
+    DiscreteDividend,
+)
 
 __all__ = [
     "BaseBondProduct",
@@ -24,4 +30,8 @@ __all__ = [
     "DeliverableBond",
     "EuroShortTermBondOption",
     "create_bond_option",
+    "ConvertibleBond",
+    "CallScheduleEntry",
+    "PutScheduleEntry",
+    "DiscreteDividend",
 ]

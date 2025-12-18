@@ -8,6 +8,20 @@ from .analytical.bond_futures_engine import (
     BondFuturesResults,
     BondAnalysis,
 )
+from .tree.convertible import (
+    ConvertibleBondTreeParams,
+    ConvertibleBondBinomialEngine,
+    ConvertibleBondTrinomialEngine,
+)
+from .pde.convertible import (
+    ConvertibleBondPDEParams,
+    ConvertibleBondJumpDiffusionEngine,
+    ConvertibleBondTFEngine,
+)
+from .convertible import (
+    ConvertibleBondEngine,
+    ConvertibleBondResult,
+)
 
 __all__ = [
     "BondDiscountEngine",
@@ -18,4 +32,13 @@ __all__ = [
     "BondFuturesEngine",
     "BondFuturesResults",
     "BondAnalysis",
+    # Convertible bond engines
+    "ConvertibleBondTreeParams",
+    "ConvertibleBondBinomialEngine",
+    "ConvertibleBondTrinomialEngine",
+    "ConvertibleBondPDEParams",
+    "ConvertibleBondJumpDiffusionEngine",
+    "ConvertibleBondTFEngine",
+    "ConvertibleBondEngine",
+    "ConvertibleBondResult",
 ]
