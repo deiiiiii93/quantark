@@ -21,7 +21,7 @@ from asset.bond.engine.pde.convertible import (
     ConvertibleBondTFEngine,
 )
 from priceenv import PricingEnvironment
-from param.rrf import FlatRateCurve
+from param.rrf import ParallelShiftRateCurve
 from util.enum.engine_enums import EngineType, ConvertibleBondMethod, PDEMethod
 from util.exceptions import ValidationError
 
@@ -394,9 +394,11 @@ class ConvertibleBondEngine:
     # Floor Bond Methods
     # =========================================================================
 
-    def floor_bond_price(self, bond: ConvertibleBond) -> float:
+    def _floor_bond_price_with_env(
+        self, bond: ConvertibleBond, pricing_env: PricingEnvironment
+    ) -> float:
         """
-        Calculate the floor bond (straight bond) price.
+        Calculate floor bond (straight bond) price in a given environment.
 
         The floor bond is the value of the convertible assuming no conversion
         and no exercise of call/put options. It represents the investment
@@ -406,11 +408,12 @@ class ConvertibleBondEngine:
 
         Args:
             bond: Convertible bond product
+            pricing_env: Pricing environment to use
 
         Returns:
             Floor bond dirty price
         """
-        valuation_date = self.pricing_env.valuation_date
+        valuation_date = pricing_env.valuation_date
 
         # Check if bond has matured
         if bond.is_expired(valuation_date):
@@ -433,22 +436,31 @@ class ConvertibleBondEngine:
             if time_to_payment < 0:
                 continue
 
-            # Get risk-free rate and add credit spread
-            risk_free_rate = self.pricing_env.get_rate(time_to_payment)
-            risky_rate = risk_free_rate + credit_spread
-
-            # Discount factor at risky rate
-            discount_factor = math.exp(-risky_rate * time_to_payment)
-            pv += cf.amount * discount_factor
+            # Risk-free discount factor from curve; apply spread as parallel shift
+            df = pricing_env.get_discount_factor(time_to_payment)
+            risky_df = df * math.exp(-credit_spread * time_to_payment)
+            pv += cf.amount * risky_df
 
         return pv
+
+    def floor_bond_price(self, bond: ConvertibleBond) -> float:
+        """
+        Calculate the floor bond (straight bond) price.
+
+        Args:
+            bond: Convertible bond product
+
+        Returns:
+            Floor bond dirty price
+        """
+        return self._floor_bond_price_with_env(bond, self.pricing_env)
 
     def floor_bond_dv01(self, bond: ConvertibleBond) -> float:
         """
         Calculate DV01 of the floor bond.
 
-        DV01 is the price change for a 1 basis point increase in rates.
-        For the floor bond, this can be computed analytically.
+        DV01 is the price change for a 1 basis point parallel increase in rates.
+        Uses numerical bumping to remain consistent under non-flat curves.
 
         Args:
             bond: Convertible bond product
@@ -456,9 +468,24 @@ class ConvertibleBondEngine:
         Returns:
             Floor bond DV01 (positive value, price decreases when rates rise)
         """
-        duration = self.floor_bond_duration(bond)
-        price = self.floor_bond_price(bond)
-        return duration * price * 0.0001
+        rate_bump = 0.0001
+        base_price = self.floor_bond_price(bond)
+        if base_price == 0.0:
+            return 0.0
+
+        env_up = deepcopy(self.pricing_env)
+        env_up.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=rate_bump
+        )
+        price_up = self._floor_bond_price_with_env(bond, env_up)
+
+        env_down = deepcopy(self.pricing_env)
+        env_down.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=-rate_bump
+        )
+        price_down = self._floor_bond_price_with_env(bond, env_down)
+
+        return (price_down - price_up) / 2.0
 
     def floor_bond_cs01(self, bond: ConvertibleBond) -> float:
         """
@@ -481,8 +508,7 @@ class ConvertibleBondEngine:
         """
         Calculate modified duration of the floor bond.
 
-        Modified duration is the weighted average time to cashflows,
-        weighted by present value.
+        Derived from DV01: Duration = DV01 / (Price * 0.0001).
 
         Args:
             bond: Convertible bond product
@@ -490,40 +516,11 @@ class ConvertibleBondEngine:
         Returns:
             Floor bond modified duration
         """
-        valuation_date = self.pricing_env.valuation_date
-
-        if bond.is_expired(valuation_date):
+        price = self.floor_bond_price(bond)
+        if price == 0.0:
             return 0.0
-
-        cashflows = bond.get_cashflows(valuation_date)
-
-        if not cashflows:
-            return 0.0
-
-        credit_spread = bond.credit_spread if bond.credit_spread else 0.0
-
-        # Calculate price and weighted time
-        price = 0.0
-        weighted_time = 0.0
-
-        for cf in cashflows:
-            time_to_payment = (cf.payment_date - valuation_date).days / 365.0
-
-            if time_to_payment < 0:
-                continue
-
-            risk_free_rate = self.pricing_env.get_rate(time_to_payment)
-            risky_rate = risk_free_rate + credit_spread
-            discount_factor = math.exp(-risky_rate * time_to_payment)
-
-            pv = cf.amount * discount_factor
-            price += pv
-            weighted_time += pv * time_to_payment
-
-        if price == 0:
-            return 0.0
-
-        return weighted_time / price
+        dv01_value = self.floor_bond_dv01(bond)
+        return dv01_value / (price * 0.0001)
 
     def floor_bond_convexity(self, bond: ConvertibleBond) -> float:
         """
@@ -537,40 +534,26 @@ class ConvertibleBondEngine:
         Returns:
             Floor bond convexity
         """
-        valuation_date = self.pricing_env.valuation_date
-
-        if bond.is_expired(valuation_date):
+        rate_bump = 0.0001
+        base_price = self.floor_bond_price(bond)
+        if base_price == 0.0:
             return 0.0
 
-        cashflows = bond.get_cashflows(valuation_date)
+        env_up = deepcopy(self.pricing_env)
+        env_up.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=rate_bump
+        )
+        price_up = self._floor_bond_price_with_env(bond, env_up)
 
-        if not cashflows:
-            return 0.0
+        env_down = deepcopy(self.pricing_env)
+        env_down.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=-rate_bump
+        )
+        price_down = self._floor_bond_price_with_env(bond, env_down)
 
-        credit_spread = bond.credit_spread if bond.credit_spread else 0.0
-
-        # Calculate price and weighted time squared
-        price = 0.0
-        weighted_time_sq = 0.0
-
-        for cf in cashflows:
-            time_to_payment = (cf.payment_date - valuation_date).days / 365.0
-
-            if time_to_payment < 0:
-                continue
-
-            risk_free_rate = self.pricing_env.get_rate(time_to_payment)
-            risky_rate = risk_free_rate + credit_spread
-            discount_factor = math.exp(-risky_rate * time_to_payment)
-
-            pv = cf.amount * discount_factor
-            price += pv
-            weighted_time_sq += pv * time_to_payment * time_to_payment
-
-        if price == 0:
-            return 0.0
-
-        return weighted_time_sq / price
+        return (price_up + price_down - 2.0 * base_price) / (
+            base_price * rate_bump * rate_bump
+        )
 
     # =========================================================================
     # Convertible Bond Risk Metrics (Numerical)
@@ -591,18 +574,19 @@ class ConvertibleBondEngine:
         """
         rate_bump = 0.0001  # 1 basis point
 
-        # Get base rate
-        base_rate = self.pricing_env.get_rate(1.0)
-
         # Price with rate bumped up
         env_up = deepcopy(self.pricing_env)
-        env_up.rate_curve = FlatRateCurve(rate=base_rate + rate_bump)
+        env_up.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=rate_bump
+        )
         engine_up = self._create_bumped_engine(env_up)
         price_up = engine_up.price(bond)
 
         # Price with rate bumped down
         env_down = deepcopy(self.pricing_env)
-        env_down.rate_curve = FlatRateCurve(rate=base_rate - rate_bump)
+        env_down.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=-rate_bump
+        )
         engine_down = self._create_bumped_engine(env_down)
         price_down = engine_down.price(bond)
 
@@ -614,9 +598,12 @@ class ConvertibleBondEngine:
         """
         Calculate CS01 of the convertible bond.
 
-        Uses numerical credit spread bumping. This measures sensitivity
-        to credit spread changes, which affects both the discount rate
-        and hazard rate in credit-adjusted models.
+        Uses numerical credit bumping.
+
+        - For BINOMIAL_GS: bumps credit_spread directly (GS credit-adjusted discounting).
+        - For TRINOMIAL_HW / JUMP_DIFFUSION / TF: bumps hazard_rate using an
+          approximate mapping from spread shift to intensity shift:
+              d(lambda) ~= d(spread) / (1 - recovery)
 
         Args:
             bond: Convertible bond product
@@ -626,16 +613,37 @@ class ConvertibleBondEngine:
         """
         spread_bump = 0.0001  # 1 basis point
 
-        # Get base price
-        base_price = self.price(bond)
+        if self.method == ConvertibleBondMethod.BINOMIAL_GS:
+            # Create bond with bumped spread up
+            base_spread = bond.credit_spread if bond.credit_spread else 0.0
+            bond_up = self._create_spread_bumped_bond(
+                bond, base_spread + spread_bump
+            )
+            price_up = self.price(bond_up)
 
-        # Create bond with bumped spread up
-        base_spread = bond.credit_spread if bond.credit_spread else 0.0
-        bond_up = self._create_spread_bumped_bond(bond, base_spread + spread_bump)
+            # Create bond with bumped spread down
+            bond_down = self._create_spread_bumped_bond(
+                bond, max(0.0, base_spread - spread_bump)
+            )
+            price_down = self.price(bond_down)
+
+            # CS01 = (price_down - price_up) / 2 (central difference)
+            return (price_down - price_up) / 2
+
+        # Hazard-based models: bump hazard_rate
+        recovery = bond.recovery_rate if bond.recovery_rate is not None else 0.0
+        denom = max(1e-8, 1.0 - recovery)
+        hazard_bump = spread_bump / denom
+
+        base_hazard = bond.hazard_rate if bond.hazard_rate else 0.0
+        bond_up = self._create_hazard_bumped_bond(
+            bond, base_hazard + hazard_bump
+        )
         price_up = self.price(bond_up)
 
-        # Create bond with bumped spread down
-        bond_down = self._create_spread_bumped_bond(bond, max(0.0, base_spread - spread_bump))
+        bond_down = self._create_hazard_bumped_bond(
+            bond, max(0.0, base_hazard - hazard_bump)
+        )
         price_down = self.price(bond_down)
 
         # CS01 = (price_down - price_up) / 2 (central difference)
@@ -678,18 +686,19 @@ class ConvertibleBondEngine:
         if base_price == 0:
             return 0.0
 
-        # Get base rate
-        base_rate = self.pricing_env.get_rate(1.0)
-
         # Price with rate bumped up
         env_up = deepcopy(self.pricing_env)
-        env_up.rate_curve = FlatRateCurve(rate=base_rate + rate_bump)
+        env_up.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=rate_bump
+        )
         engine_up = self._create_bumped_engine(env_up)
         price_up = engine_up.price(bond)
 
         # Price with rate bumped down
         env_down = deepcopy(self.pricing_env)
-        env_down.rate_curve = FlatRateCurve(rate=base_rate - rate_bump)
+        env_down.rate_curve = ParallelShiftRateCurve(
+            self.pricing_env.rate_curve, shift=-rate_bump
+        )
         engine_down = self._create_bumped_engine(env_down)
         price_down = engine_down.price(bond)
 
@@ -747,6 +756,40 @@ class ConvertibleBondEngine:
             put_schedule=bond.put_schedule,
             credit_spread=new_spread,
             hazard_rate=bond.hazard_rate,
+            recovery_rate=bond.recovery_rate,
+            stock_jump_on_default=bond.stock_jump_on_default,
+            continuous_dividend_yield=bond.continuous_dividend_yield,
+            discrete_dividends=bond.discrete_dividends,
+        )
+
+    def _create_hazard_bumped_bond(
+        self, bond: ConvertibleBond, new_hazard_rate: float
+    ) -> ConvertibleBond:
+        """
+        Create a copy of the bond with a bumped hazard rate.
+
+        Args:
+            bond: Original convertible bond
+            new_hazard_rate: New hazard rate value
+
+        Returns:
+            New bond with modified hazard rate
+        """
+        return ConvertibleBond(
+            issue_date=bond.issue_date,
+            maturity_date=bond.maturity_date,
+            face_value=bond.face_value,
+            coupon_rate=bond.coupon_rate,
+            conversion_ratio=bond.conversion_ratio,
+            conversion_price=bond.conversion_price,
+            payment_frequency=bond.payment_frequency,
+            day_count_convention=bond.day_count_convention,
+            conversion_start_date=bond.conversion_start_date,
+            conversion_end_date=bond.conversion_end_date,
+            call_schedule=bond.call_schedule,
+            put_schedule=bond.put_schedule,
+            credit_spread=bond.credit_spread,
+            hazard_rate=new_hazard_rate,
             recovery_rate=bond.recovery_rate,
             stock_jump_on_default=bond.stock_jump_on_default,
             continuous_dividend_yield=bond.continuous_dividend_yield,

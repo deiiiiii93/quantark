@@ -16,7 +16,7 @@ from .option_enums import (
     TenorEnd,
     ObservationFrequency,
 )
-from .engine_enums import EngineType
+from .engine_enums import EngineType, ConvertibleBondTrinomialVolScheme
 from .deltaone_enums import DeltaOneType
 from .bond_enums import (
     PaymentFrequency,
@@ -43,6 +43,7 @@ __all__ = [
     "ObservationFrequency",
     # Engine enums
     "EngineType",
+    "ConvertibleBondTrinomialVolScheme",
     # Delta-one enums
     "DeltaOneType",
     # Bond enums

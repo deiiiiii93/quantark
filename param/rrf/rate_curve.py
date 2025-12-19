@@ -61,6 +61,39 @@ class RateCurve(ABC):
         return -math.log(df2 / df1) / (t2 - t1)
 
 
+class ParallelShiftRateCurve(RateCurve):
+    """
+    Parallel shift wrapper for a base rate curve.
+
+    Applies a constant additive shift to continuously-compounded rates.
+    Equivalent to shifting discount factors by exp(-shift * T):
+        DF_shift(T) = DF_base(T) * exp(-shift * T)
+    """
+
+    def __init__(self, base_curve: RateCurve, shift: float):
+        if base_curve is None:
+            raise ValidationError("base_curve is required")
+        self.base_curve = base_curve
+        self.shift = shift
+
+    def get_discount_factor(self, time_to_maturity: float) -> float:
+        if time_to_maturity < 0:
+            raise ValidationError(
+                f"Time to maturity must be non-negative, got {time_to_maturity}"
+            )
+        df_base = self.base_curve.get_discount_factor(time_to_maturity)
+        return df_base * math.exp(-self.shift * time_to_maturity)
+
+    def get_rate(self, time_to_maturity: float) -> float:
+        if time_to_maturity <= 0:
+            return self.base_curve.get_rate(time_to_maturity) + self.shift
+        df = self.get_discount_factor(time_to_maturity)
+        return -math.log(df) / time_to_maturity
+
+    def __repr__(self):
+        return f"ParallelShiftRateCurve(shift={self.shift:.2%}, base={self.base_curve!r})"
+
+
 @dataclass
 class FlatRateCurve(RateCurve):
     """
@@ -401,4 +434,3 @@ class CubicSplineRateCurve(InterpolatedRateCurve):
         """
         rate = self.get_rate(time_to_maturity)
         return math.exp(-rate * time_to_maturity)
-

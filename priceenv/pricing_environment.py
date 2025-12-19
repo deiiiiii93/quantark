@@ -8,6 +8,7 @@ from datetime import datetime
 from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield
 from util.exceptions import MarketDataError
 from util.calendar import DayCountConvention
+from util.numerical import safe_sqrt
 
 
 @dataclass
@@ -87,6 +88,41 @@ class PricingEnvironment:
                 "Spot quote not available in this pricing environment"
             )
         return self.vol_surface.get_vol(strike, time_to_maturity, self.spot)
+
+    def get_step_volatility(
+        self, strike: float, t_start: float, t_end: float
+    ) -> float:
+        """
+        Get effective volatility for a time step from implied vol term structure.
+
+        Uses total variance difference:
+            sigma_step = sqrt((w(t_end) - w(t_start)) / (t_end - t_start))
+        where:
+            w(t) = sigma_imp(strike, t)^2 * t
+
+        Args:
+            strike: Reference strike for volatility lookup (often spot)
+            t_start: Start time in years from valuation
+            t_end: End time in years from valuation
+
+        Returns:
+            Effective step volatility (annualized)
+        """
+        dt = t_end - t_start
+        if dt <= 0:
+            return self.get_vol(strike, max(t_end, 0.001))
+
+        vol_end = self.get_vol(strike, t_end)
+        w_end = vol_end * vol_end * t_end
+
+        if t_start <= 0:
+            w_start = 0.0
+        else:
+            vol_start = self.get_vol(strike, t_start)
+            w_start = vol_start * vol_start * t_start
+
+        var_step = max(0.0, w_end - w_start)
+        return safe_sqrt(var_step / dt)
 
     def get_rate(self, time_to_maturity: float) -> float:
         """

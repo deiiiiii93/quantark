@@ -2,6 +2,9 @@
 Configuration parameters for tree-based convertible bond pricing engines.
 """
 from dataclasses import dataclass
+from typing import Union
+
+from util.enum.engine_enums import ConvertibleBondTrinomialVolScheme
 
 
 @dataclass
@@ -16,6 +19,7 @@ class ConvertibleBondTreeParams:
         bump_size: Bump size for finite difference Greeks (default: 0.01 = 1%)
         min_stock_price: Minimum stock price as fraction of spot (default: 0.001)
         max_stock_price: Maximum stock price as multiple of spot (default: 10.0)
+        trinomial_vol_scheme: Volatility scheme for trinomial tree engines
     """
 
     num_steps: int = 200
@@ -24,6 +28,9 @@ class ConvertibleBondTreeParams:
     bump_size: float = 0.01
     min_stock_price: float = 0.001
     max_stock_price: float = 10.0
+    trinomial_vol_scheme: Union[
+        str, ConvertibleBondTrinomialVolScheme
+    ] = ConvertibleBondTrinomialVolScheme.CONSTANT_VOL
 
     def __post_init__(self):
         """Validate parameters."""
@@ -38,4 +45,28 @@ class ConvertibleBondTreeParams:
         if self.max_stock_price <= 1:
             raise ValueError(
                 f"max_stock_price must be > 1, got {self.max_stock_price}"
+            )
+        if isinstance(self.trinomial_vol_scheme, str):
+            scheme_name = self.trinomial_vol_scheme.strip().lower()
+            try:
+                self.trinomial_vol_scheme = ConvertibleBondTrinomialVolScheme(
+                    scheme_name
+                )
+            except ValueError:
+                try:
+                    self.trinomial_vol_scheme = (
+                        ConvertibleBondTrinomialVolScheme[scheme_name.upper()]
+                    )
+                except KeyError as exc:
+                    valid = [scheme.value for scheme in ConvertibleBondTrinomialVolScheme]
+                    raise ValueError(
+                        f"Invalid trinomial_vol_scheme: {self.trinomial_vol_scheme}. "
+                        f"Valid schemes: {valid}"
+                    ) from exc
+        if not isinstance(
+            self.trinomial_vol_scheme, ConvertibleBondTrinomialVolScheme
+        ):
+            raise ValueError(
+                "trinomial_vol_scheme must be a ConvertibleBondTrinomialVolScheme "
+                f"or str, got {type(self.trinomial_vol_scheme)}"
             )

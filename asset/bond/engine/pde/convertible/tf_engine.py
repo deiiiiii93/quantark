@@ -123,12 +123,9 @@ class ConvertibleBondTFEngine:
         # Get market data
         spot = self.pricing_env.spot
         T = bond.time_to_maturity(valuation_date)
-        vol = self.pricing_env.get_vol(spot, T)
-        r = self.pricing_env.rate_curve.get_rate(T)
 
         # Credit parameters
         credit_spread = bond.credit_spread
-        r_risky = r + credit_spread
 
         # Dividend yield
         q = bond.continuous_dividend_yield
@@ -154,16 +151,27 @@ class ConvertibleBondTFEngine:
         coupon_schedule = self._build_coupon_schedule(bond, valuation_date)
 
         # Time stepping - backward from T to 0
+        # All times are measured in years from valuation date
         for n in range(N_t - 1, -1, -1):
-            t = n * dt
+            t = n * dt  # Current time (years from valuation)
+            t_next = t + dt  # End of this step (closer to maturity)
             node_date = valuation_date + timedelta(days=int(t * 365))
 
             # Use Rannacher smoothing for first few steps
             use_implicit = n >= N_t - self.params.rannacher_steps
 
+            # Query time-local forward rate for this step
+            r_local = self.pricing_env.rate_curve.get_forward_rate(t, t_next)
+
+            # Query time-local effective volatility for this step
+            vol_local = self.pricing_env.get_step_volatility(spot, t, t_next)
+
+            # Risky discount rate for bond component
+            r_risky_local = r_local + credit_spread
+
             # Solve for equity component u (discounted at r)
             A_u, b_u = self._build_matrices(
-                S, u, r, q, vol, r, dt, use_implicit
+                S, u, r_local, q, vol_local, r_local, dt, use_implicit
             )
             u = spsolve(A_u.tocsr(), b_u)
 
@@ -171,14 +179,14 @@ class ConvertibleBondTFEngine:
             # known later-time state (coupons paid only if not converted).
             coupon_amount = 0.0
             for ct, ca in coupon_schedule:
-                if t < ct <= t + dt:
+                if t < ct <= t_next:
                     coupon_amount += ca
             if coupon_amount > 0.0:
                 v = v + coupon_amount
 
             # Solve for bond component v (discounted at r + credit_spread)
             A_v, b_v = self._build_matrices(
-                S, v, r, q, vol, r_risky, dt, use_implicit
+                S, v, r_local, q, vol_local, r_risky_local, dt, use_implicit
             )
 
             v = spsolve(A_v.tocsr(), b_v)
@@ -187,7 +195,7 @@ class ConvertibleBondTFEngine:
             P[0] = 0.0
             P[-1] = 1.0 if conversion_possible else 0.0
             A_p, b_p = self._build_matrices(
-                S, P, r, q, vol, 0.0, dt, use_implicit
+                S, P, r_local, q, vol_local, 0.0, dt, use_implicit
             )
             P = spsolve(A_p.tocsr(), b_p)
             P = np.clip(P, 0.0, 1.0)

@@ -5,6 +5,7 @@ Implements the Goldman Sachs credit-adjusted binomial model where the discount
 rate at each node is adjusted based on the probability of conversion vs.
 continuing as debt.
 """
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -17,6 +18,8 @@ from asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTreePa
 from priceenv import PricingEnvironment
 from util.exceptions import ValidationError, PricingError
 from util.numerical import safe_exp, safe_sqrt, is_zero
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -84,6 +87,25 @@ class ConvertibleBondBinomialEngine:
         self.pricing_env = pricing_env
         self.params = params if params is not None else ConvertibleBondTreeParams()
 
+    def _warn_if_non_flat_curves(self) -> None:
+        """
+        Log warning if volatility surface is non-flat.
+
+        This binomial implementation supports non-flat risk-free curves via
+        per-step forward rates. It still assumes constant volatility (uses
+        ATM volatility to maturity), and does not apply volatility term structure.
+        """
+        from param.vol.vol_surface import FlatVolSurface
+
+        vol_surface = self.pricing_env.vol_surface
+
+        if vol_surface is not None and not isinstance(vol_surface, FlatVolSurface):
+            logger.warning(
+                "Binomial GS engine supports non-flat risk-free curves, but "
+                "approximates volatility term structure using ATM vol to maturity. "
+                "Use PDE or Trinomial engines for better accuracy under vol term structure."
+            )
+
     def price(self, bond: ConvertibleBond) -> float:
         """
         Calculate the clean price of the convertible bond.
@@ -109,6 +131,9 @@ class ConvertibleBondBinomialEngine:
         Returns:
             ConvertibleBondBinomialResult with full pricing details
         """
+        # Warn if non-flat curves are detected
+        self._warn_if_non_flat_curves()
+
         valuation_date = self.pricing_env.valuation_date
 
         # Validate inputs
@@ -125,18 +150,23 @@ class ConvertibleBondBinomialEngine:
         dt = T / self.params.num_steps
 
         # Build tree parameters
-        r = self.pricing_env.rate_curve.get_rate(T)
+        # Use per-step forward rates for piecewise curve support
+        r_steps = np.zeros(self.params.num_steps)
+        for i in range(self.params.num_steps):
+            t = i * dt
+            r_steps[i] = self.pricing_env.rate_curve.get_forward_rate(t, t + dt)
+
         q = bond.continuous_dividend_yield  # Dividend yield from bond
 
         # CRR binomial parameters
-        u, d, p_up = self._calculate_tree_params(vol, r, q, dt)
+        u, d, _ = self._calculate_tree_params(vol, r_steps[0], q, dt)
 
         # Build stock price tree
         stock_tree = self._build_stock_tree(spot, u, d, self.params.num_steps)
 
         # Build value tree with backward induction
         value_tree, conv_prob_tree = self._backward_induction(
-            bond, stock_tree, r, q, dt, p_up
+            bond, stock_tree, u, d, r_steps, q, dt
         )
 
         # Extract results
@@ -226,10 +256,11 @@ class ConvertibleBondBinomialEngine:
         self,
         bond: ConvertibleBond,
         stock_tree: np.ndarray,
-        r: float,
+        u: float,
+        d: float,
+        r_steps: np.ndarray,
         q: float,
         dt: float,
-        p_up: float,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Perform backward induction to compute option values.
@@ -239,10 +270,11 @@ class ConvertibleBondBinomialEngine:
         Args:
             bond: Convertible bond
             stock_tree: Pre-built stock price tree
-            r: Risk-free rate
+            u: Up factor (constant)
+            d: Down factor (constant)
+            r_steps: Forward rate per step
             q: Dividend yield
             dt: Time step
-            p_up: Risk-neutral up probability
 
         Returns:
             Tuple of (value_tree, conversion_probability_tree)
@@ -287,6 +319,15 @@ class ConvertibleBondBinomialEngine:
         for i in range(n_steps - 1, -1, -1):
             t = i * dt
             node_date = valuation_date + timedelta(days=int(t * 365))
+            r_local = float(r_steps[i])
+
+            drift = safe_exp((r_local - q) * dt)
+            p_up = (drift - d) / (u - d)
+            if p_up < 0 or p_up > 1:
+                raise PricingError(
+                    f"Invalid risk-neutral probability at step {i}: {p_up}. "
+                    "Check volatility, rate curve, and num_steps."
+                )
 
             for j in range(i + 1):
                 stock = stock_tree[i, j]
@@ -303,8 +344,8 @@ class ConvertibleBondBinomialEngine:
                 # Credit-adjusted discount rate (GS model)
                 credit_spread = bond.credit_spread
                 discount_rate = (
-                    expected_conv_prob * r
-                    + (1 - expected_conv_prob) * (r + credit_spread)
+                    expected_conv_prob * r_local
+                    + (1 - expected_conv_prob) * (r_local + credit_spread)
                 )
 
                 # Discount continuation value

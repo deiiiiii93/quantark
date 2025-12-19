@@ -16,7 +16,7 @@ from .observation_schedule import (
     ResolvedObservationRecord,
     PricingEnv,
 )
-from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig
+from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig, AirbagConfig
 from util.enum import (
     ObservationType,
     ObservationAggregation,
@@ -88,6 +88,9 @@ class SnowballOption(BaseEquityOption):
     Accrual Attributes (via accrual_config):
         coupon_pay_type: INSTANT (at KO date) or EXPIRY (discounted to maturity)
         is_annualized: Flag for annualized accruals
+
+    Airbag Attributes (via airbag_config):
+        airbag_barrier: Barrier level for airbag protection
     """
 
     # Core parameters
@@ -118,6 +121,7 @@ class SnowballOption(BaseEquityOption):
     )
     payoff_config: PayoffConfig = field(default_factory=PayoffConfig)
     accrual_config: AccrualConfig = field(default_factory=AccrualConfig)
+    airbag_config: AirbagConfig = field(default_factory=AirbagConfig)
 
     def __init__(
         self,
@@ -126,6 +130,7 @@ class SnowballOption(BaseEquityOption):
         barrier_config: BarrierConfig,
         payoff_config: Optional[PayoffConfig] = None,
         accrual_config: Optional[AccrualConfig] = None,
+        airbag_config: Optional[AirbagConfig] = None,
         notional: float = 1.0,
         is_reverse: bool = False,
         maturity: Optional[float] = None,
@@ -146,6 +151,7 @@ class SnowballOption(BaseEquityOption):
             barrier_config: BarrierConfig with KO/KI barrier settings (required)
             payoff_config: PayoffConfig with rebate/protection/participation settings
             accrual_config: AccrualConfig with annualization flags
+            airbag_config: AirbagConfig with airbag barrier settings
             notional: Notional principal (default: 1.0)
             is_reverse: If True, creates a reverse snowball with embedded call option;
                        if False (default), creates standard snowball with embedded put
@@ -203,6 +209,9 @@ class SnowballOption(BaseEquityOption):
         )
         self.accrual_config = (
             accrual_config if accrual_config is not None else AccrualConfig()
+        )
+        self.airbag_config = (
+            airbag_config if airbag_config is not None else AirbagConfig()
         )
 
         self.validate()

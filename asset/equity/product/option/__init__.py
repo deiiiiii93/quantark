@@ -17,6 +17,15 @@ from .observation_schedule import (
 )
 from .snowball_option import SnowballOption
 from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig
+from .snowball_helpers import (
+    create_standard_snowball,
+    create_stepdown_snowball,
+    create_european_ki_snowball,
+    create_parachute_snowball,
+    create_airbag_snowball,
+    generate_ko_observation_dates,
+    generate_stepdown_barriers,
+)
 
 __all__ = [
     "BaseEquityOption",
@@ -34,4 +43,12 @@ __all__ = [
     "BarrierConfig",
     "PayoffConfig",
     "AccrualConfig",
+    # Snowball helpers
+    "create_standard_snowball",
+    "create_stepdown_snowball",
+    "create_european_ki_snowball",
+    "create_parachute_snowball",
+    "create_airbag_snowball",
+    "generate_ko_observation_dates",
+    "generate_stepdown_barriers",
 ]

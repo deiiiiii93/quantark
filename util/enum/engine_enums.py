@@ -50,6 +50,17 @@ class ConvertibleBondMethod(Enum):
         return self.value
 
 
+class ConvertibleBondTrinomialVolScheme(Enum):
+    """Volatility schemes for the trinomial convertible bond tree."""
+
+    CONSTANT_VOL = "constant_vol"
+    LOG_FIXED_DX = "log_fixed_dx"
+    LOG_VARIABLE_DX = "log_variable_dx"
+
+    def __str__(self):
+        return self.value
+
+
 class EngineType(Enum):
     """Type of pricing engine."""
 

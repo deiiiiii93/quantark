@@ -160,3 +160,34 @@ class AccrualConfig:
         # Validate coupon_pay_type is enum
         if not isinstance(self.coupon_pay_type, CouponPayType):
             raise ValueError(f"coupon_pay_type must be CouponPayType, got {type(self.coupon_pay_type)}")
+
+@dataclass(frozen=True)
+class AirbagConfig:
+    """
+    Configuration for airbag features.
+
+    Attributes:
+        airbag_barrier: Barrier level for airbag protection.
+                        If spot > airbag_barrier, principal is fully protected (subject to other terms).
+                        If spot < airbag_barrier, investor participates in downside.
+        airbag_participation_rate: Participation rate when spot < airbag_barrier (default: 1.0).
+        airbag_strike: Strike price for airbag payoff calculation (optional).
+                       If None, defaults to the product's strike.
+    """
+
+    airbag_barrier: Optional[float] = None
+    airbag_participation_rate: float = 1.0
+    airbag_strike: Optional[float] = None
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        if self.airbag_barrier is not None:
+            if not isinstance(self.airbag_barrier, (int, float)) or self.airbag_barrier <= 0:
+                raise ValueError(f"airbag_barrier must be a positive number, got {self.airbag_barrier}")
+        
+        if self.airbag_participation_rate <= 0:
+            raise ValueError(f"airbag_participation_rate must be positive, got {self.airbag_participation_rate}")
+
+        if self.airbag_strike is not None:
+            if not isinstance(self.airbag_strike, (int, float)) or self.airbag_strike <= 0:
+                raise ValueError(f"airbag_strike must be a positive number, got {self.airbag_strike}")
