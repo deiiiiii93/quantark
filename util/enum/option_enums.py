@@ -189,3 +189,23 @@ class ObservationFrequency(Enum):
                 "Cannot convert CUSTOM observation frequency to year fraction, as it implies irregular spacing."
             )
         raise ValueError(f"Unknown ObservationFrequency: {self}")
+
+
+class AveragingType(Enum):
+    """Averaging method for Asian options."""
+
+    ARITHMETIC = auto()  # Average = sum(prices) / n
+    GEOMETRIC = auto()  # Average = (product(prices))^(1/n)
+
+    def __str__(self):
+        return self.name.capitalize()
+
+
+class AsianStrikeType(Enum):
+    """Strike type for Asian options."""
+
+    FIXED = auto()  # Fixed strike (average price option): payoff based on avg vs K
+    FLOATING = auto()  # Floating strike (average strike option): payoff based on S_T vs avg
+
+    def __str__(self):
+        return self.name.capitalize()

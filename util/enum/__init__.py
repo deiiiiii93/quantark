@@ -15,6 +15,8 @@ from .option_enums import (
     ProtectionType,
     TenorEnd,
     ObservationFrequency,
+    AveragingType,
+    AsianStrikeType,
 )
 from .engine_enums import EngineType, ConvertibleBondTrinomialVolScheme
 from .deltaone_enums import DeltaOneType
@@ -41,6 +43,8 @@ __all__ = [
     "ProtectionType",
     "TenorEnd",
     "ObservationFrequency",
+    "AveragingType",
+    "AsianStrikeType",
     # Engine enums
     "EngineType",
     "ConvertibleBondTrinomialVolScheme",
