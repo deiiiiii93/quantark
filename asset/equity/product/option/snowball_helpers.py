@@ -728,19 +728,36 @@ def create_airbag_snowball(
     )
 
     # Apply defaults
-    if ko_barrier is None:
-        ko_barrier = 1.03 * initial_price
-    if ki_barrier is None:
-        ki_barrier = 0.75 * initial_price
-    if airbag_barrier is None:
-        airbag_barrier = 0.60 * initial_price
+    if is_reverse:
+        if ko_barrier is None:
+            ko_barrier = 0.97 * initial_price
+        if ki_barrier is None:
+            ki_barrier = 1.25 * initial_price
+        if airbag_barrier is None:
+            airbag_barrier = 1.40 * initial_price
+    else:
+        if ko_barrier is None:
+            ko_barrier = 1.03 * initial_price
+        if ki_barrier is None:
+            ki_barrier = 0.75 * initial_price
+        if airbag_barrier is None:
+            airbag_barrier = 0.60 * initial_price
 
     # Validate airbag barrier
-    if airbag_barrier >= ki_barrier:
-        raise ValidationError(
-            f"create_airbag_snowball: airbag_barrier ({airbag_barrier}) "
-            f"must be less than ki_barrier ({ki_barrier})"
-        )
+    # For standard snowball: airbag_barrier < ki_barrier (both below initial)
+    # For reverse snowball: airbag_barrier > ki_barrier (both above initial)
+    if is_reverse:
+        if airbag_barrier <= ki_barrier:
+            raise ValidationError(
+                f"create_airbag_snowball: for reverse snowball, airbag_barrier "
+                f"({airbag_barrier}) must be greater than ki_barrier ({ki_barrier})"
+            )
+    else:
+        if airbag_barrier >= ki_barrier:
+            raise ValidationError(
+                f"create_airbag_snowball: airbag_barrier ({airbag_barrier}) "
+                f"must be less than ki_barrier ({ki_barrier})"
+            )
 
     # Generate observation dates
     ko_observation_dates = [

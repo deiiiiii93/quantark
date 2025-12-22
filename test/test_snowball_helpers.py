@@ -417,6 +417,266 @@ class TestCreateAirbagSnowball:
             )
 
 
+class TestAirbagPayoffCalculation:
+    """Tests for airbag payoff calculation in get_maturity_payoff_v1."""
+
+    def test_airbag_payoff_below_airbag_barrier(self):
+        """Test airbag participation rate is used when spot < airbag_barrier."""
+        snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            airbag_barrier=60.0,
+            airbag_participation_rate=0.5,
+            participation_rate=1.0,
+            include_principal=False,
+        )
+        # Spot = 50, below airbag_barrier = 60
+        # Standard snowball V1: downside = participation * min(spot - strike, 0) * N / S0
+        # With airbag: downside = 0.5 * min(50 - 100, 0) * 1_000_000 / 100 = 0.5 * (-50) * 10000 = -250,000
+        payoff = snowball.get_maturity_payoff_v1(spot=50.0)
+        expected = 0.5 * (50.0 - 100.0) * 1_000_000 / 100.0  # -250,000
+        assert payoff == pytest.approx(expected, rel=1e-6)
+
+    def test_standard_payoff_above_airbag_barrier(self):
+        """Test standard participation rate is used when spot >= airbag_barrier."""
+        snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            airbag_barrier=60.0,
+            airbag_participation_rate=0.5,
+            participation_rate=1.0,
+            include_principal=False,
+        )
+        # Spot = 70, above airbag_barrier = 60
+        # Standard payoff: downside = 1.0 * min(70 - 100, 0) * 1_000_000 / 100 = -300,000
+        payoff = snowball.get_maturity_payoff_v1(spot=70.0)
+        expected = 1.0 * (70.0 - 100.0) * 1_000_000 / 100.0  # -300,000
+        assert payoff == pytest.approx(expected, rel=1e-6)
+
+    def test_airbag_reduces_loss(self):
+        """Test airbag payoff results in smaller loss than standard."""
+        # Create airbag snowball
+        airbag_snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            airbag_barrier=60.0,
+            airbag_participation_rate=0.5,
+            participation_rate=1.0,
+            include_principal=False,
+        )
+        # Create standard snowball with same params (no airbag)
+        standard_snowball = create_standard_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            participation_rate=1.0,
+            include_principal=False,
+        )
+        
+        # Test at spot=50 (below airbag barrier)
+        airbag_payoff = airbag_snowball.get_maturity_payoff_v1(spot=50.0)
+        standard_payoff = standard_snowball.get_maturity_payoff_v1(spot=50.0)
+        
+        # Airbag should have smaller loss (higher payoff since both are negative)
+        assert airbag_payoff > standard_payoff
+        # Specifically, airbag loss should be 50% of standard loss
+        assert airbag_payoff == pytest.approx(standard_payoff * 0.5, rel=1e-6)
+
+    def test_airbag_with_custom_strike(self):
+        """Test airbag payoff uses airbag_strike when specified."""
+        snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            airbag_barrier=60.0,
+            airbag_participation_rate=0.5,
+            airbag_strike=90.0,  # Custom airbag strike
+            include_principal=False,
+        )
+        # Spot = 50, below airbag_barrier = 60
+        # Airbag payoff uses airbag_strike=90: downside = 0.5 * min(50 - 90, 0) * 1_000_000 / 100
+        payoff = snowball.get_maturity_payoff_v1(spot=50.0)
+        expected = 0.5 * (50.0 - 90.0) * 1_000_000 / 100.0  # -200,000
+        assert payoff == pytest.approx(expected, rel=1e-6)
+
+    def test_airbag_with_principal(self):
+        """Test airbag payoff includes principal when configured."""
+        snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            airbag_barrier=60.0,
+            airbag_participation_rate=0.5,
+            include_principal=True,
+        )
+        # Spot = 50, below airbag_barrier = 60
+        # Payoff = principal + downside = 1_000_000 + 0.5 * (50 - 100) * 1_000_000 / 100
+        payoff = snowball.get_maturity_payoff_v1(spot=50.0)
+        downside = 0.5 * (50.0 - 100.0) * 1_000_000 / 100.0  # -250,000
+        expected = 1_000_000 + downside  # 750,000
+        assert payoff == pytest.approx(expected, rel=1e-6)
+
+    def test_airbag_at_barrier_boundary(self):
+        """Test behavior when spot equals airbag barrier exactly."""
+        snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            airbag_barrier=60.0,
+            airbag_participation_rate=0.5,
+            participation_rate=1.0,
+            include_principal=False,
+        )
+        # Spot = 60, exactly at airbag_barrier
+        # Standard payoff applies (spot >= airbag_barrier, strict inequality for airbag)
+        payoff = snowball.get_maturity_payoff_v1(spot=60.0)
+        expected = 1.0 * (60.0 - 100.0) * 1_000_000 / 100.0  # -400,000
+        assert payoff == pytest.approx(expected, rel=1e-6)
+
+    def test_airbag_reverse_snowball(self):
+        """Test airbag payoff with reverse snowball."""
+        snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=125.0,  # KI is up for reverse
+            airbag_barrier=140.0,  # Airbag is up for reverse
+            airbag_participation_rate=0.5,
+            participation_rate=1.0,
+            is_reverse=True,
+            include_principal=False,
+        )
+        # Reverse snowball: loss when spot > strike
+        # Airbag applies when spot > airbag_barrier
+        # Spot = 150, above airbag_barrier = 140
+        # Airbag payoff: downside = 0.5 * min(strike - spot, 0) * N / S0
+        #              = 0.5 * min(100 - 150, 0) * 1_000_000 / 100 = -250,000
+        payoff = snowball.get_maturity_payoff_v1(spot=150.0)
+        expected = 0.5 * (100.0 - 150.0) * 1_000_000 / 100.0  # -250,000
+        assert payoff == pytest.approx(expected, rel=1e-6)
+
+    def test_no_airbag_config(self):
+        """Test standard snowball without airbag behaves as before."""
+        snowball = create_standard_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            participation_rate=1.0,
+            include_principal=False,
+        )
+        # No airbag config, standard payoff at any spot
+        payoff = snowball.get_maturity_payoff_v1(spot=50.0)
+        expected = 1.0 * (50.0 - 100.0) * 1_000_000 / 100.0  # -500,000
+        assert payoff == pytest.approx(expected, rel=1e-6)
+
+
+# =============================================================================
+# Integration Tests
+# =============================================================================
+
+
+class TestAirbagMCEngineIntegration:
+    """Integration tests for airbag snowball with MC engine."""
+
+    def test_airbag_snowball_mc_pricing(self):
+        """Test MC engine correctly prices airbag snowball."""
+        from datetime import datetime
+        from asset.equity.engine.mc import SnowballMCEngine
+        from asset.equity.param import MCParams
+        from param import SpotQuote, FlatVolSurface, FlatRateCurve
+        from priceenv import PricingEnvironment
+        
+        # Create pricing environment (volatility will likely trigger KI for V1 payoff testing)
+        pricing_env = PricingEnvironment(
+            valuation_date=datetime(2024, 1, 1),
+            spot_quote=SpotQuote(spot=100.0),
+            vol_surface=FlatVolSurface(volatility=0.30),
+            rate_curve=FlatRateCurve(rate=0.05),
+        )
+        
+        # Create airbag snowball with include_principal=True for positive payoffs
+        airbag_snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            airbag_barrier=60.0,
+            airbag_participation_rate=0.5,
+            participation_rate=1.0,
+            include_principal=True,
+        )
+
+        # Create standard snowball with same params
+        standard_snowball = create_standard_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            ki_barrier=75.0,
+            participation_rate=1.0,
+            include_principal=True,
+        )
+        
+        # Price both with MC engine (use fewer paths for speed in tests)
+        engine = SnowballMCEngine(params=MCParams(num_paths=10000, seed=42))
+        
+        airbag_price = engine.price(airbag_snowball, pricing_env)
+        standard_price = engine.price(standard_snowball, pricing_env)
+        
+        # Airbag snowball should be worth more (less downside loss)
+        assert airbag_price > standard_price
+
+        # Both prices should be positive (with include_principal=True)
+        assert airbag_price > 0
+        assert standard_price > 0
+
+    def test_airbag_mc_statistics(self):
+        """Test MC engine returns reasonable statistics for airbag snowball."""
+        from datetime import datetime
+        from asset.equity.engine.mc import SnowballMCEngine
+        from asset.equity.param import MCParams
+        from param import SpotQuote, FlatVolSurface, FlatRateCurve
+        from priceenv import PricingEnvironment
+        
+        pricing_env = PricingEnvironment(
+            valuation_date=datetime(2024, 1, 1),
+            spot_quote=SpotQuote(spot=100.0),
+            vol_surface=FlatVolSurface(volatility=0.30),
+            rate_curve=FlatRateCurve(rate=0.05),
+        )
+        
+        snowball = create_airbag_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            include_principal=True,
+        )
+
+        engine = SnowballMCEngine(params=MCParams(num_paths=10000, seed=42))
+        engine.price(snowball, pricing_env)
+        
+        result = engine.get_last_result()
+        
+        # Probabilities should sum to 1
+        total_prob = result.ko_probability + result.v0_probability + result.v1_probability
+        assert total_prob == pytest.approx(1.0, rel=1e-6)
+        
+        # All probabilities should be in [0, 1]
+        assert 0 <= result.ko_probability <= 1
+        assert 0 <= result.v0_probability <= 1
+        assert 0 <= result.v1_probability <= 1
+
+
 # =============================================================================
 # Integration Tests
 # =============================================================================

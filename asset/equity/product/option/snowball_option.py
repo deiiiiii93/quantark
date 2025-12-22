@@ -700,16 +700,44 @@ class SnowballOption(BaseEquityOption):
         """
         principal = self.notional if self.payoff_config.include_principal else 0.0
 
+        # Determine if airbag logic applies
+        airbag_barrier = self.airbag_config.airbag_barrier
+
+        # Default to standard payoff configuration
+        participation_rate = self.payoff_config.participation_rate
+        effective_strike = self.strike
+
+        if airbag_barrier is not None:
+            # Standard snowball: airbag applies (unsafe) when spot < airbag_barrier
+            # Reverse snowball: airbag applies (unsafe) when spot > airbag_barrier
+            if self.is_reverse:
+                is_unsafe = spot > airbag_barrier
+            else:
+                is_unsafe = spot < airbag_barrier
+
+            if is_unsafe:
+                # In unsafe zone, use airbag participation and strike
+                participation_rate = self.airbag_config.airbag_participation_rate
+                effective_strike = (
+                    self.airbag_config.airbag_strike
+                    if self.airbag_config.airbag_strike is not None
+                    else self.strike
+                )
+            else:
+                # In safe zone (between airbag barrier and strike), provides full protection
+                # Set participation to 0 to ensure no downside loss
+                participation_rate = 0.0
+
         # Downside participation
         # Standard: Short Put (loss if spot < strike) -> downside = spot - strike
         # Reverse: Short Call (loss if spot > strike) -> downside = strike - spot
         if self.is_reverse:
-            raw_diff = self.strike - spot
+            raw_diff = effective_strike - spot
         else:
-            raw_diff = spot - self.strike
+            raw_diff = spot - effective_strike
 
         downside = (
-            self.payoff_config.participation_rate
+            participation_rate
             * min(raw_diff, 0.0)
             * self.notional
             / self.initial_price
