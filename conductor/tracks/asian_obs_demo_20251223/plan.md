@@ -7,8 +7,8 @@
 
 ## Phase 2: Implement Demonstration Scenarios
 - [x] Task: Implement **Scenario A: Historical Observations** (Fixed prices for past dates) f24643f
-- [~] Task: Implement **Scenario B: Future Observations** (Records without prices)
-- [ ] Task: Implement **Scenario C: Mixed History** (Mid-life option simulation)
+- [x] Task: Implement **Scenario B: Future Observations** (Records without prices) b8e1bc3
+- [~] Task: Implement **Scenario C: Mixed History** (Mid-life option simulation)
 - [ ] Task: Implement **Scenario D: Date-based Resolution** (Date-to-time resolution via PricingEnvironment)
 - [ ] Task: Conductor - User Manual Verification 'Implement Demonstration Scenarios' (Protocol in workflow.md)
 
