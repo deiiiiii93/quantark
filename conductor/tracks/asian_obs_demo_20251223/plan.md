@@ -2,7 +2,7 @@
 
 ## Phase 1: Setup and Basic Infrastructure
 - [x] Task: Import `AsianObservationRecord`, `PricingEnvironment`, and `datetime` in `example/asian_option_demo.py` 702d10e
-- [ ] Task: Create skeleton for `demonstrate_observation_records()` function
+- [x] Task: Create skeleton for `demonstrate_observation_records()` function eb9a157
 - [ ] Task: Conductor - User Manual Verification 'Setup and Basic Infrastructure' (Protocol in workflow.md)
 
 ## Phase 2: Implement Demonstration Scenarios
