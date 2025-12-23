@@ -1,9 +1,9 @@
 # Plan: Asian Observation Record Examples
 
-## Phase 1: Setup and Basic Infrastructure
+## Phase 1: Setup and Basic Infrastructure [checkpoint: 7b6005f]
 - [x] Task: Import `AsianObservationRecord`, `PricingEnvironment`, and `datetime` in `example/asian_option_demo.py` 702d10e
 - [x] Task: Create skeleton for `demonstrate_observation_records()` function eb9a157
-- [ ] Task: Conductor - User Manual Verification 'Setup and Basic Infrastructure' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Setup and Basic Infrastructure' (Protocol in workflow.md) 7b6005f
 
 ## Phase 2: Implement Demonstration Scenarios
 - [ ] Task: Implement **Scenario A: Historical Observations** (Fixed prices for past dates)
