@@ -247,6 +247,31 @@ def demonstrate_observation_records():
     print(f"Total observations for payoff: {total}")
     print()
 
+    # Scenario B: Future Observations
+    print("Scenario B: Future Observations (Records without prices)")
+    print("-" * 50)
+    
+    future_only_records = [
+        AsianObservationRecord(observation_time=0.25),
+        AsianObservationRecord(observation_time=0.50),
+        AsianObservationRecord(observation_time=0.75),
+        AsianObservationRecord(observation_time=1.00),
+    ]
+    
+    asian_future = AsianOption(
+        strike=100,
+        option_type=OptionType.CALL,
+        maturity=1.0,
+        observation_records=future_only_records,
+    )
+    
+    past_prices, future_times, total = asian_future.resolve_observations(pe)
+    
+    print(f"Past observed prices: {past_prices} (Expected: [])")
+    print(f"Future observation times to simulate: {future_times}")
+    print(f"Total observations for payoff: {total}")
+    print()
+
 
 def main():
     """Run all demonstrations."""
