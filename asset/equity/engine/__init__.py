@@ -7,6 +7,7 @@ from .analytical import (
     BlackScholesEngine,
     BarrierAnalyticalEngine,
     OneTouchAnalyticalEngine,
+    AsianOptionAnalyticalEngine,
 )
 from .pde_engine import PDEEngine
 from .mc import EuropeanMCEngine, SnowballMCEngine
@@ -29,6 +30,7 @@ __all__ = [
     "BlackScholesEngine",
     "BarrierAnalyticalEngine",
     "OneTouchAnalyticalEngine",
+    "AsianOptionAnalyticalEngine",
     # Monte Carlo
     "EuropeanMCEngine",
     "SnowballMCEngine",

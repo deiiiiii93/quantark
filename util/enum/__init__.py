@@ -18,7 +18,13 @@ from .option_enums import (
     AveragingType,
     AsianStrikeType,
 )
-from .engine_enums import EngineType, ConvertibleBondTrinomialVolScheme
+from .engine_enums import (
+    EngineType,
+    ConvertibleBondTrinomialVolScheme,
+    AsianAnalyticalMethod,
+    AmericanAnalyticalMethod,
+    MonteCarloMethod,
+)
 from .deltaone_enums import DeltaOneType
 from .bond_enums import (
     PaymentFrequency,
@@ -48,6 +54,9 @@ __all__ = [
     # Engine enums
     "EngineType",
     "ConvertibleBondTrinomialVolScheme",
+    "AsianAnalyticalMethod",
+    "AmericanAnalyticalMethod",
+    "MonteCarloMethod",
     # Delta-one enums
     "DeltaOneType",
     # Bond enums

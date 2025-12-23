@@ -61,6 +61,26 @@ class ConvertibleBondTrinomialVolScheme(Enum):
         return self.value
 
 
+class AsianAnalyticalMethod(Enum):
+    """Analytical methods for Asian option pricing.
+    
+    - KEMNA_VORST: Exact closed-form for geometric average options
+    - TURNBULL_WAKEMAN: Moment matching for arithmetic average options
+    - LEVY: Alternative arithmetic approximation (requires b != 0)
+    - CURRAN: Geometric conditioning approximation
+    - DISCRETE_HHM: Discrete arithmetic (Haug-Haug-Margrabe)
+    """
+
+    KEMNA_VORST = "kemna_vorst"
+    TURNBULL_WAKEMAN = "turnbull_wakeman"
+    LEVY = "levy"
+    CURRAN = "curran"
+    DISCRETE_HHM = "discrete_hhm"
+
+    def __str__(self):
+        return self.value
+
+
 class EngineType(Enum):
     """Type of pricing engine."""
 

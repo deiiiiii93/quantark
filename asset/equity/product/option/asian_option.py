@@ -130,7 +130,8 @@ class AsianOption(BaseEquityOption):
         observation_times: List of observation times as year fractions (legacy)
         observation_dates: List of observation dates (legacy, alternative to times)
         observation_records: List of AsianObservationRecord (preferred, supports historical prices)
-        num_observations: Number of observations for uniform schedule (default: 12)
+        num_observations: Number of observations for uniform schedule (default: 12).
+                          Set to None for continuous averaging.
         maturity: Time to maturity in years
     """
 
@@ -140,7 +141,7 @@ class AsianOption(BaseEquityOption):
     observation_times: Optional[List[float]] = None
     observation_dates: Optional[List[datetime]] = None
     observation_records: Optional[List[AsianObservationRecord]] = None
-    num_observations: int = 12
+    num_observations: Optional[int] = 12
 
     def __init__(
         self,
@@ -153,7 +154,7 @@ class AsianOption(BaseEquityOption):
         observation_times: Optional[List[float]] = None,
         observation_dates: Optional[List[datetime]] = None,
         observation_records: Optional[List[AsianObservationRecord]] = None,
-        num_observations: int = 12,
+        num_observations: Optional[int] = 12,
         initial_price: float = 0.0,
         notional: Optional[float] = None,
         quantity: float = 1.0,
@@ -250,7 +251,7 @@ class AsianOption(BaseEquityOption):
                 rec.validate()
 
         # Validate num_observations
-        if self.num_observations < 1:
+        if self.num_observations is not None and self.num_observations < 1:
             raise ValidationError(f"num_observations must be >= 1, got {self.num_observations}")
 
     def get_observation_times(self, maturity: Optional[float] = None) -> List[float]:
@@ -275,6 +276,10 @@ class AsianOption(BaseEquityOption):
         T = maturity if maturity is not None else self.maturity
         if T is None or T <= 0:
             raise ValidationError("Cannot generate observation schedule: maturity not set")
+
+        # If num_observations is None, signify continuous schedule
+        if self.num_observations is None:
+            return []
 
         # Generate n equally-spaced observations from 0 to T (inclusive of T)
         return list(np.linspace(0, T, self.num_observations + 1)[1:])
@@ -346,8 +351,16 @@ class AsianOption(BaseEquityOption):
 
         # All observations are future (no historical prices in legacy mode)
         past_prices: List[float] = []
-        future_times = [t for t in obs_times if t > 0]
-        total_observations = len(obs_times)
+        
+        if self.num_observations is None:
+            # Continuous mode
+            future_times = []
+            total_observations = 0 # Signifies continuous
+        else:
+            # Legacy mode has no historical prices, so times at valuation (t=0)
+            # are treated as known-at-start observations (deterministic under spot).
+            future_times = [t for t in obs_times if t >= 0]
+            total_observations = len(obs_times)
 
         return past_prices, future_times, total_observations
 
@@ -498,6 +511,10 @@ class AsianOption(BaseEquityOption):
     def is_geometric(self) -> bool:
         """Check if this uses geometric averaging."""
         return self.averaging_type == AveragingType.GEOMETRIC
+
+    def is_continuous(self) -> bool:
+        """Check if this uses continuous averaging."""
+        return self.num_observations is None and self.observation_times is None and self.observation_dates is None and self.observation_records is None
 
     def __repr__(self) -> str:
         """Return string representation of the Asian option."""
