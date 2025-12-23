@@ -272,6 +272,36 @@ def demonstrate_observation_records():
     print(f"Total observations for payoff: {total}")
     print()
 
+    # Scenario C: Mixed History (Mid-life Option)
+    print("Scenario C: Mixed History (Mid-life option simulation)")
+    print("-" * 50)
+    
+    mixed_records = [
+        AsianObservationRecord(observation_time=-0.3, observed_price=98.0),
+        AsianObservationRecord(observation_time=-0.2, observed_price=99.5),
+        AsianObservationRecord(observation_time=-0.1, observed_price=101.0),
+        AsianObservationRecord(observation_time=0.0, observed_price=102.5), # Today's fixing
+        AsianObservationRecord(observation_time=0.1),
+        AsianObservationRecord(observation_time=0.2),
+        AsianObservationRecord(observation_time=0.3),
+    ]
+    
+    asian_mid = AsianOption(
+        strike=100,
+        option_type=OptionType.CALL,
+        maturity=0.3,
+        observation_records=mixed_records,
+    )
+    
+    past_prices, future_times, total = asian_mid.resolve_observations(pe)
+    past_avg = asian_mid.get_past_average(pe)
+    
+    print(f"Past observed prices: {past_prices}")
+    print(f"Past average: {past_avg:.2f}")
+    print(f"Future observation times to simulate: {future_times}")
+    print(f"Total observations for payoff: {total}")
+    print()
+
 
 def main():
     """Run all demonstrations."""
