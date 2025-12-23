@@ -5,7 +5,7 @@ Equity option products.
 from .base_equity_option import BaseEquityOption
 from .european_vanilla_option import EuropeanVanillaOption
 from .american_option import AmericanOption
-from .asian_option import AsianOption
+from .asian_option import AsianOption, AsianObservationRecord
 from .digital_option import CashOrNothingDigitalOption
 from .barrier_option import BarrierOption
 from .double_barrier_option import DoubleBarrierOption
@@ -33,6 +33,7 @@ __all__ = [
     "EuropeanVanillaOption",
     "AmericanOption",
     "AsianOption",
+    "AsianObservationRecord",
     "CashOrNothingDigitalOption",
     "BarrierOption",
     "DoubleBarrierOption",
