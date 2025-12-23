@@ -11,8 +11,11 @@ Types demonstrated:
 3. Arithmetic vs geometric averaging
 """
 
+from datetime import datetime
 import numpy as np
-from asset.equity.product.option import AsianOption
+from asset.equity.product.option import AsianOption, AsianObservationRecord
+from priceenv import PricingEnvironment
+from param.rrf import FlatRateCurve
 from util.enum import OptionType, AveragingType, AsianStrikeType
 
 
