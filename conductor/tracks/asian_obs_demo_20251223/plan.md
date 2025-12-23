@@ -6,8 +6,8 @@
 - [x] Task: Conductor - User Manual Verification 'Setup and Basic Infrastructure' (Protocol in workflow.md) 7b6005f
 
 ## Phase 2: Implement Demonstration Scenarios
-- [ ] Task: Implement **Scenario A: Historical Observations** (Fixed prices for past dates)
-- [ ] Task: Implement **Scenario B: Future Observations** (Records without prices)
+- [x] Task: Implement **Scenario A: Historical Observations** (Fixed prices for past dates) f24643f
+- [~] Task: Implement **Scenario B: Future Observations** (Records without prices)
 - [ ] Task: Implement **Scenario C: Mixed History** (Mid-life option simulation)
 - [ ] Task: Implement **Scenario D: Date-based Resolution** (Date-to-time resolution via PricingEnvironment)
 - [ ] Task: Conductor - User Manual Verification 'Implement Demonstration Scenarios' (Protocol in workflow.md)
