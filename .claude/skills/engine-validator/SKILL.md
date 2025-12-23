@@ -405,6 +405,28 @@ Consider creating: asset/<type>/engine/mc/<product>_mc_engine.py
 - **Default tolerance**: 5% relative error
 - **User override**: Accept criteria from prompt (e.g., "use 1% tolerance")
 
+### IMPORTANT: Do NOT Adjust Tolerances
+
+**CRITICAL RULE**: NEVER adjust tolerances to make tests pass.
+
+```
+❌ WRONG: Changing tolerance from 5% to 15% because some tests fail
+❌ WRONG: Adding separate tolerance values for different methods to achieve "all pass"
+❌ WRONG: Hiding failed tests to improve reported pass rate
+
+✅ CORRECT: Report actual results with original tolerance
+✅ CORRECT: Document failures in validation report with explanation
+✅ CORRECT: Investigate and explain WHY tests fail (e.g., continuous vs discrete, approximation limits)
+```
+
+**When tests fail outside tolerance:**
+1. Record actual error values in the report
+2. Investigate the root cause (formula mismatch, MC convergence, model assumptions)
+3. Document known limitations (e.g., "continuous vs discrete averaging creates known bias")
+4. Provide recommendations for further investigation (e.g., "increase MC paths to 1M+")
+
+**The validation report should reflect REALITY, not a manufactured "all pass" result.**
+
 ### Script Generation
 
 Generate benchmark script at:
