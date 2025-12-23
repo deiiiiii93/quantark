@@ -5,9 +5,9 @@ Asian options are path-dependent options where the payoff depends on the average
 price of the underlying asset over a specified observation period.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 import numpy as np
 
 from util.enum import (
@@ -20,6 +20,94 @@ from util.exceptions import ValidationError
 from util.numerical import is_zero, safe_log, safe_exp
 
 from .base_equity_option import BaseEquityOption
+
+if TYPE_CHECKING:
+    from priceenv import PricingEnvironment
+
+try:
+    from util.calendar import calculate_year_fraction
+except ImportError:
+    calculate_year_fraction = None
+
+
+@dataclass
+class AsianObservationRecord:
+    """
+    Single observation entry for Asian option averaging.
+
+    For past observations (before valuation_date), observed_price should be set.
+    For future observations, observed_price should be None.
+
+    Attributes:
+        observation_time: Observation time as year fraction from initial date
+        observation_date: Observation date (alternative to observation_time)
+        observed_price: Actual observed price (for past observations only)
+    """
+
+    observation_time: Optional[float] = None
+    observation_date: Optional[datetime] = None
+    observed_price: Optional[float] = None
+
+    def resolve_time(self, pricing_env: "PricingEnvironment") -> float:
+        """
+        Resolve observation time relative to valuation date.
+
+        Args:
+            pricing_env: Pricing environment with valuation date
+
+        Returns:
+            Year fraction from valuation date to observation date
+            (negative if observation is in the past)
+
+        Raises:
+            ValidationError: If observation time/date cannot be resolved
+        """
+        if self.observation_time is not None:
+            return self.observation_time
+        if self.observation_date is not None:
+            if pricing_env is None or calculate_year_fraction is None:
+                raise ValidationError(
+                    "PricingEnvironment is required to resolve observation_date."
+                )
+
+            # Handle past, current and future dates correctly
+            if self.observation_date == pricing_env.valuation_date:
+                return 0.0
+            elif self.observation_date > pricing_env.valuation_date:
+                # Future date: positive year fraction
+                return calculate_year_fraction(
+                    pricing_env.valuation_date,
+                    self.observation_date,
+                    pricing_env.day_count_convention,
+                    pricing_env.bus_days_in_year,
+                )
+            else:
+                # Past date: negative year fraction
+                # We reverse dates for calculate_year_fraction and negate result
+                return -calculate_year_fraction(
+                    self.observation_date,
+                    pricing_env.valuation_date,
+                    pricing_env.day_count_convention,
+                    pricing_env.bus_days_in_year,
+                )
+        raise ValidationError(
+            "AsianObservationRecord requires observation_time or observation_date."
+        )
+
+    def is_observed(self) -> bool:
+        """Check if this observation has an observed price."""
+        return self.observed_price is not None
+
+    def validate(self) -> None:
+        """Validate the observation record."""
+        if self.observation_time is None and self.observation_date is None:
+            raise ValidationError(
+                "AsianObservationRecord must provide observation_time or observation_date."
+            )
+        if self.observed_price is not None and self.observed_price <= 0:
+            raise ValidationError(
+                f"observed_price must be positive, got {self.observed_price}"
+            )
 
 
 @dataclass
@@ -39,8 +127,9 @@ class AsianOption(BaseEquityOption):
         option_type: CALL or PUT
         asian_strike_type: FIXED or FLOATING
         averaging_type: ARITHMETIC or GEOMETRIC
-        observation_times: List of observation times as year fractions
-        observation_dates: List of observation dates (alternative to times)
+        observation_times: List of observation times as year fractions (legacy)
+        observation_dates: List of observation dates (legacy, alternative to times)
+        observation_records: List of AsianObservationRecord (preferred, supports historical prices)
         num_observations: Number of observations for uniform schedule (default: 12)
         maturity: Time to maturity in years
     """
@@ -50,6 +139,7 @@ class AsianOption(BaseEquityOption):
     averaging_type: AveragingType = AveragingType.ARITHMETIC
     observation_times: Optional[List[float]] = None
     observation_dates: Optional[List[datetime]] = None
+    observation_records: Optional[List[AsianObservationRecord]] = None
     num_observations: int = 12
 
     def __init__(
@@ -62,6 +152,7 @@ class AsianOption(BaseEquityOption):
         exercise_date: Optional[datetime] = None,
         observation_times: Optional[List[float]] = None,
         observation_dates: Optional[List[datetime]] = None,
+        observation_records: Optional[List[AsianObservationRecord]] = None,
         num_observations: int = 12,
         initial_price: float = 0.0,
         notional: Optional[float] = None,
@@ -77,8 +168,9 @@ class AsianOption(BaseEquityOption):
             averaging_type: ARITHMETIC or GEOMETRIC
             maturity: Time to maturity in years (optional if exercise_date provided)
             exercise_date: Date when option expires (optional if maturity provided)
-            observation_times: List of observation times as year fractions
-            observation_dates: List of observation dates (alternative to times)
+            observation_times: List of observation times as year fractions (legacy)
+            observation_dates: List of observation dates (legacy, alternative to times)
+            observation_records: List of AsianObservationRecord with optional observed prices
             num_observations: Number of observations for uniform schedule (default: 12)
             initial_price: Reference/initial underlying price
             notional: Notional principal amount (optional)
@@ -88,6 +180,7 @@ class AsianOption(BaseEquityOption):
         self.averaging_type = averaging_type
         self.observation_times = observation_times
         self.observation_dates = observation_dates
+        self.observation_records = observation_records
         self.num_observations = num_observations
 
         # For floating strike, strike can be zero (strike is the average)
@@ -149,16 +242,25 @@ class AsianOption(BaseEquityOption):
             if self.observation_dates != sorted(self.observation_dates):
                 raise ValidationError("observation_dates must be sorted in ascending order")
 
+        # Validate observation records if provided
+        if self.observation_records is not None:
+            if len(self.observation_records) == 0:
+                raise ValidationError("observation_records cannot be empty")
+            for rec in self.observation_records:
+                rec.validate()
+
         # Validate num_observations
         if self.num_observations < 1:
             raise ValidationError(f"num_observations must be >= 1, got {self.num_observations}")
 
     def get_observation_times(self, maturity: Optional[float] = None) -> List[float]:
         """
-        Get observation times as year fractions.
+        Get observation times as year fractions (legacy method).
 
         If observation_times is specified, returns it directly.
         Otherwise, generates uniform observations from 0 to maturity.
+
+        Note: For options with historical observations, use resolve_observations() instead.
 
         Args:
             maturity: Time to maturity (used if generating uniform schedule)
@@ -176,6 +278,106 @@ class AsianOption(BaseEquityOption):
 
         # Generate n equally-spaced observations from 0 to T (inclusive of T)
         return list(np.linspace(0, T, self.num_observations + 1)[1:])
+
+    def resolve_observations(
+        self,
+        pricing_env: "PricingEnvironment",
+    ) -> Tuple[List[float], List[float], int]:
+        """
+        Resolve observation records into past and future observations.
+
+        This method separates already-observed prices from future observation times,
+        accounting for the valuation date in pricing_env.
+
+        For observations with observation_time (year fractions from initial date):
+        - Times <= 0 are considered past (already observed)
+        - Times > 0 are considered future (to be simulated)
+
+        Args:
+            pricing_env: Pricing environment with valuation date
+
+        Returns:
+            Tuple of:
+            - past_prices: List of already-observed prices
+            - future_times: List of future observation times (relative to valuation date)
+            - total_observations: Total number of observations for averaging
+        """
+        if self.observation_records is not None:
+            return self._resolve_from_records(pricing_env)
+        else:
+            return self._resolve_from_legacy(pricing_env)
+
+    def _resolve_from_records(
+        self,
+        pricing_env: "PricingEnvironment",
+    ) -> Tuple[List[float], List[float], int]:
+        """Resolve observations from observation_records."""
+        past_prices: List[float] = []
+        future_times: List[float] = []
+
+        for rec in self.observation_records:
+            t = rec.resolve_time(pricing_env)
+
+            if t <= 0:
+                # Past observation - must have observed price
+                if rec.observed_price is None:
+                    raise ValidationError(
+                        f"Past observation (t={t}) must have observed_price set"
+                    )
+                past_prices.append(rec.observed_price)
+            else:
+                # Future observation
+                if rec.observed_price is not None:
+                    raise ValidationError(
+                        f"Future observation (t={t}) should not have observed_price set"
+                    )
+                future_times.append(t)
+
+        total_observations = len(past_prices) + len(future_times)
+        return past_prices, future_times, total_observations
+
+    def _resolve_from_legacy(
+        self,
+        pricing_env: "PricingEnvironment",
+    ) -> Tuple[List[float], List[float], int]:
+        """Resolve observations from legacy observation_times/observation_dates."""
+        T = self.get_maturity(pricing_env)
+        obs_times = self.get_observation_times(T)
+
+        # All observations are future (no historical prices in legacy mode)
+        past_prices: List[float] = []
+        future_times = [t for t in obs_times if t > 0]
+        total_observations = len(obs_times)
+
+        return past_prices, future_times, total_observations
+
+    def has_past_observations(self, pricing_env: "PricingEnvironment") -> bool:
+        """
+        Check if there are any past observations with recorded prices.
+
+        Args:
+            pricing_env: Pricing environment with valuation date
+
+        Returns:
+            True if there are past observations, False otherwise
+        """
+        past_prices, _, _ = self.resolve_observations(pricing_env)
+        return len(past_prices) > 0
+
+    def get_past_average(self, pricing_env: "PricingEnvironment") -> Optional[float]:
+        """
+        Get the average of past observations if any exist.
+
+        Args:
+            pricing_env: Pricing environment with valuation date
+
+        Returns:
+            Average of past observations, or None if no past observations
+        """
+        past_prices, _, _ = self.resolve_observations(pricing_env)
+        if len(past_prices) == 0:
+            return None
+        return self.get_average(past_prices)
 
     def get_average(
         self,

@@ -26,6 +26,18 @@ def test_asian_observation_record_date_resolution():
     t = record.resolve_time(pe)
     assert 0.49 < t < 0.51
 
+def test_asian_observation_record_past_date_resolution():
+    val_date = datetime(2025, 1, 1)
+    past_date = datetime(2024, 7, 1)
+    
+    rate_curve = FlatRateCurve(rate=0.05)
+    pe = PricingEnvironment(rate_curve=rate_curve, valuation_date=val_date)
+    
+    record = AsianObservationRecord(observation_date=past_date)
+    # 2024-07-01 is roughly -0.5 years from 2025-01-01
+    t = record.resolve_time(pe)
+    assert -0.51 < t < -0.49
+
 def test_asian_observation_record_validation():
     # Test validation
     record = AsianObservationRecord(observation_time=0.5, observed_price=100.0)
