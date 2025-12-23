@@ -5,12 +5,12 @@
 - [x] Task: Create skeleton for `demonstrate_observation_records()` function eb9a157
 - [x] Task: Conductor - User Manual Verification 'Setup and Basic Infrastructure' (Protocol in workflow.md) 7b6005f
 
-## Phase 2: Implement Demonstration Scenarios
+## Phase 2: Implement Demonstration Scenarios [checkpoint: 486bf1f]
 - [x] Task: Implement **Scenario A: Historical Observations** (Fixed prices for past dates) f24643f
 - [x] Task: Implement **Scenario B: Future Observations** (Records without prices) b8e1bc3
 - [x] Task: Implement **Scenario C: Mixed History** (Mid-life option simulation) f766dd0
 - [x] Task: Implement **Scenario D: Date-based Resolution** (Date-to-time resolution via PricingEnvironment) 0f193a5
-- [~] Task: Conductor - User Manual Verification 'Implement Demonstration Scenarios' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Implement Demonstration Scenarios' (Protocol in workflow.md) 486bf1f
 
 ## Phase 3: Final Integration and Demo Execution
 - [ ] Task: Integrate `demonstrate_observation_records()` into the `main()` function
