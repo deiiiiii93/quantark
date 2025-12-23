@@ -302,6 +302,33 @@ def demonstrate_observation_records():
     print(f"Total observations for payoff: {total}")
     print()
 
+    # Scenario D: Date-based Resolution
+    print("Scenario D: Date-based Resolution (via PricingEnvironment)")
+    print("-" * 50)
+    
+    date_records = [
+        AsianObservationRecord(observation_date=datetime(2024, 10, 1), observed_price=95.0),
+        AsianObservationRecord(observation_date=datetime(2025, 1, 1), observed_price=100.0), # Today
+        AsianObservationRecord(observation_date=datetime(2025, 4, 1)),
+        AsianObservationRecord(observation_date=datetime(2025, 7, 1)),
+    ]
+    
+    asian_dates = AsianOption(
+        strike=100,
+        option_type=OptionType.CALL,
+        exercise_date=datetime(2025, 7, 1),
+        observation_records=date_records,
+    )
+    
+    past_prices, future_times, total = asian_dates.resolve_observations(pe)
+    
+    print(f"Valuation Date: {valuation_date.date()}")
+    print(f"Observation dates: {[r.observation_date.date() for r in date_records]}")
+    print(f"Resolved past prices: {past_prices}")
+    print(f"Resolved future times: {[round(t, 4) for t in future_times]}")
+    print(f"Total observations: {total}")
+    print()
+
 
 def main():
     """Run all demonstrations."""
