@@ -206,8 +206,45 @@ def demonstrate_observation_records():
     print("ASIAN OBSERVATION RECORDS (ADVANCED)")
     print("=" * 60)
     print()
-    # Scenarios will be implemented here
-    print("Coming soon: Detailed scenarios for AsianObservationRecord")
+
+    # Setup environment for resolution
+    valuation_date = datetime(2025, 1, 1)
+    rate_curve = FlatRateCurve(rate=0.05)
+    pe = PricingEnvironment(rate_curve=rate_curve, valuation_date=valuation_date)
+
+    print(f"Valuation Date: {valuation_date.date()}")
+    print()
+
+    # Scenario A: Historical Observations
+    print("Scenario A: Historical Observations (Fixed prices for past dates)")
+    print("-" * 50)
+    
+    # Define past observations
+    past_records = [
+        AsianObservationRecord(observation_time=-0.2, observed_price=105.0),
+        AsianObservationRecord(observation_time=-0.1, observed_price=108.0),
+    ]
+    
+    # Define future observation times
+    future_records = [
+        AsianObservationRecord(observation_time=0.1),
+        AsianObservationRecord(observation_time=0.2),
+    ]
+    
+    asian_hist = AsianOption(
+        strike=100,
+        option_type=OptionType.CALL,
+        maturity=0.5,
+        observation_records=past_records + future_records,
+    )
+    
+    past_prices, future_times, total = asian_hist.resolve_observations(pe)
+    past_avg = asian_hist.get_past_average(pe)
+    
+    print(f"Past observed prices: {past_prices}")
+    print(f"Past average: {past_avg:.2f}")
+    print(f"Future observation times to simulate: {future_times}")
+    print(f"Total observations for payoff: {total}")
     print()
 
 
@@ -223,6 +260,7 @@ def main():
     demonstrate_floating_strike_options()
     demonstrate_averaging_types()
     demonstrate_observation_schedule()
+    demonstrate_observation_records()
 
     print("=" * 60)
     print("DEMO COMPLETE")
