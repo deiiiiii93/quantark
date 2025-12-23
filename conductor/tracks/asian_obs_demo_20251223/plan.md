@@ -9,8 +9,8 @@
 - [x] Task: Implement **Scenario A: Historical Observations** (Fixed prices for past dates) f24643f
 - [x] Task: Implement **Scenario B: Future Observations** (Records without prices) b8e1bc3
 - [x] Task: Implement **Scenario C: Mixed History** (Mid-life option simulation) f766dd0
-- [~] Task: Implement **Scenario D: Date-based Resolution** (Date-to-time resolution via PricingEnvironment)
-- [ ] Task: Conductor - User Manual Verification 'Implement Demonstration Scenarios' (Protocol in workflow.md)
+- [x] Task: Implement **Scenario D: Date-based Resolution** (Date-to-time resolution via PricingEnvironment) 0f193a5
+- [~] Task: Conductor - User Manual Verification 'Implement Demonstration Scenarios' (Protocol in workflow.md)
 
 ## Phase 3: Final Integration and Demo Execution
 - [ ] Task: Integrate `demonstrate_observation_records()` into the `main()` function
