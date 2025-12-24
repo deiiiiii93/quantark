@@ -13,9 +13,9 @@
 |------------|--------|-----------|
 | Method Implementation | ✅ PASS | - |
 | Boundary Checks | ✅ PASS | 100% (17/17) |
-| Benchmark Checks | ⚠️ WARN | 75.0% (15/20) |
+| Benchmark Checks | ✅ PASS | 87.5% (21/24) |
 
-**Overall Status**: ⚠️ VALIDATED WITH WARNINGS
+**Overall Status**: ✅ VALIDATED
 
 ---
 
@@ -23,13 +23,14 @@
 
 ### 1.1 Pricing Method Summary
 
-The engine implements **five distinct pricing methods** for Asian options:
+The engine implements **six distinct pricing methods** for Asian options:
 
-1. **KEMNA_VORST** (Kemna & Vorst, 1990) - Exact closed-form for geometric average options
-2. **TURNBULL_WAKEMAN** (Turnbull & Wakeman, 1991) - Moment matching approximation for arithmetic average
-3. **LEVY** (Levy, 1992) - Alternative arithmetic approximation (requires b ≠ 0)
-4. **CURRAN** (Curran, 1992) - Geometric conditioning approximation
-5. **DISCRETE_HHM** (Haug-Haug-Margrabe) - Discrete arithmetic approximation
+1. **KEMNA_VORST** (Kemna & Vorst, 1990) - Exact closed-form for continuous geometric average options
+2. **GEOMETRIC_DISCRETE** - Discrete geometric average using term-structure volatilities
+3. **TURNBULL_WAKEMAN** (Turnbull & Wakeman, 1991) - Moment matching approximation for arithmetic average
+4. **LEVY** (Levy, 1992) - Alternative arithmetic approximation (requires b ≠ 0)
+5. **CURRAN** (Curran, 1992) - Geometric conditioning approximation
+6. **DISCRETE_HHM** (Haug-Haug-Margrabe) - Discrete arithmetic approximation
 
 ### 1.2 Reference Comparison
 
@@ -37,6 +38,7 @@ The engine implements **five distinct pricing methods** for Asian options:
 |--------|-----------|----------------|-------|
 | KEMNA_VORST σ_A | σ/√3 | ✅ `sigma / np.sqrt(3)` | ✅ |
 | KEMNA_VORST b_A | ½(b - σ²/6) | ✅ `0.5 * (b - sigma**2 / 6)` | ✅ |
+| GEOMETRIC_DISCRETE | Term-structure formulation | ✅ `_price_geometric_discrete()` | ✅ |
 | TW M1 (continuous) | (e^(bT) - e^(bt1)) / (b(T-t1)) | ✅ Implemented | ✅ |
 | TW M2 (continuous) | Formula from Haug | ✅ Implemented | ✅ |
 | TW M1/M2 (discrete) | Computed from observation times | ✅ `_compute_M1_M2_discrete()` | ✅ |
@@ -114,11 +116,16 @@ The engine implements **five distinct pricing methods** for Asian options:
 
 | Case | Analytical | MC | SE | Error | Status |
 |------|-----------|-----|----|----|----|--------|
-| **KEMNA_VORST Geometric** |||||||
+| **KEMNA_VORST (Continuous Geometric)** |||||||
 | KV Geometric ATM Call | 5.5468 | 5.9399 | 0.0261 | 6.62% | ⚠️ FAIL |
 | KV Geometric OTM Call | 1.8447 | 2.1449 | 0.0162 | 14.00% | ⚠️ FAIL |
 | KV Geometric ITM Call | 12.7495 | 13.1199 | 0.0369 | 2.82% | ✅ PASS |
 | KV Geometric ATM Put | 3.4633 | 3.6513 | 0.0180 | 5.15% | ⚠️ FAIL |
+| **GEOMETRIC_DISCRETE (Discrete Geometric)** |||||||
+| GD Geometric ATM Call | 5.9402 | 5.9399 | 0.0261 | 0.01% | ✅ PASS |
+| GD Geometric OTM Call | 2.1443 | 2.1449 | 0.0162 | 0.03% | ✅ PASS |
+| GD Geometric ITM Call | 13.1187 | 13.1199 | 0.0369 | 0.01% | ✅ PASS |
+| GD Geometric ATM Put | 3.6517 | 3.6513 | 0.0180 | 0.01% | ✅ PASS |
 | **TURNBULL_WAKEMAN Arithmetic** |||||||
 | TW Arithmetic ATM Call | 3.7521 | 3.7462 | 0.0173 | 0.16% | ✅ PASS |
 | TW Arithmetic ITM Call | 6.9521 | 6.9383 | 0.0228 | 0.20% | ✅ PASS |
@@ -131,8 +138,8 @@ The engine implements **five distinct pricing methods** for Asian options:
 | **DISCRETE_HHM Arithmetic** |||||||
 | HHM Arithmetic ATM Call | 3.6257 | 3.6213 | 0.0167 | 0.12% | ✅ PASS |
 | **Floating Strike** |||||||
-| TW Floating Call | 6.2535 | 5.4709 | 0.0251 | 14.30% | ⚠️ FAIL |
-| TW Floating Put | 3.5916 | 3.2152 | 0.0154 | 11.71% | ⚠️ FAIL |
+| TW Floating Call | 5.4690 | 5.4709 | 0.0251 | 0.04% | ✅ PASS |
+| TW Floating Put | 3.2135 | 3.2152 | 0.0154 | 0.05% | ✅ PASS |
 | **Maturity Variation** |||||||
 | TW Maturity T=0.25 | 2.7790 | 2.7762 | 0.0125 | 0.10% | ✅ PASS |
 | TW Maturity T=0.5 | 4.1161 | 4.1091 | 0.0182 | 0.17% | ✅ PASS |
@@ -143,7 +150,7 @@ The engine implements **five distinct pricing methods** for Asian options:
 | TW Volatility σ=0.20 | 6.1742 | 6.1561 | 0.0269 | 0.29% | ✅ PASS |
 | TW Volatility σ=0.40 | 10.8892 | 10.7983 | 0.0556 | 0.84% | ✅ PASS |
 
-**Summary**: 15/20 cases passed (75.0%)
+**Summary**: 21/24 cases passed (87.5%)
 
 ### 3.1 Analysis of Failed Cases
 
@@ -153,14 +160,17 @@ The engine implements **five distinct pricing methods** for Asian options:
 - The MC engine uses **discrete geometric averaging** with `num_observations=12`
 - This creates a known difference between the analytical formula and MC simulation
 - **Not a bug** - continuous vs discrete averaging creates a model mismatch
-- The ITM call passes (2.82% error) suggesting the effect varies with moneyness
+- **Solution**: Use `GEOMETRIC_DISCRETE` method for discrete geometric options (all 4 pass with <0.03% error)
 
-**Floating Strike Options (2/2 failing):**
-- The floating-strike prices differ from MC by 11-14%
-- This warrants investigation:
-  - The Henderson-Wojakowski symmetry transformation may have an implementation issue
-  - Or MC simulation may have higher variance for floating-strike payoffs
-  - Further testing with higher MC paths recommended
+**GEOMETRIC_DISCRETE Options (4/4 passing):**
+- The `GEOMETRIC_DISCRETE` method matches MC simulation almost perfectly
+- All tests pass with errors < 0.03%
+- This validates the correctness of the `GEOMETRIC_DISCRETE` implementation
+- Confirms that the KEMNA_VORST discrepancies were due to continuous vs discrete averaging (not bugs)
+
+**Floating Strike Options (2/2 passing):**
+- The floating-strike prices now match MC simulation with errors < 0.05%
+- Henderson-Wojakowski symmetry transformation is working correctly
 
 ---
 
@@ -177,8 +187,24 @@ b_A = (b - σ²/6) / 2
 **Implementation**: `asian_option_analytical_engine.py:376-399`
 
 ✅ **Correct implementation** - matches Haug (4.91), (4.92)
+- **Note**: Assumes continuous geometric averaging; for discrete fixings, use GEOMETRIC_DISCRETE
 
-### 4.2 TURNBULL_WAKEMAN (Arithmetic Average)
+### 4.2 GEOMETRIC_DISCRETE (Discrete Geometric Average)
+
+**Formula**: Term-structure formulation for discrete geometric average
+```
+σ_g² = (∑σ_i²t_i + 2∑(n-i)σ_i²t_i) / (n²T)
+b_g = 0.5σ_g² + (∑(b-0.5σ_i²)t_i) / (nT)
+```
+
+**Implementation**: `asian_option_analytical_engine.py:424-484`
+
+✅ **Correct implementation** - validated against MC with 0.01-0.03% error
+- Handles discrete observation times
+- In-period adjustment with past prices
+- Matches discrete MC simulation almost perfectly
+
+### 4.3 TURNBULL_WAKEMAN (Arithmetic Average)
 
 **Formula**: Moment matching approximation
 ```
@@ -193,47 +219,47 @@ b_A = ln(M1) / T
 - Special case for b=0
 - In-period adjustment with past observations
 
-### 4.3 LEVY (Arithmetic Average)
+### 4.4 LEVY (Arithmetic Average)
 
 **Formula**: Alternative moment matching
 ```
 S_E = S/(Tb) × (e^((b-r)T_2) - e^(-rT_2))
 ```
 
-**Implementation**: `asian_option_analytical_engine.py:592-669`
+**Implementation**: `asian_option_analytical_engine.py:677-754`
 
 ✅ **Correct implementation** - matches Haug (4.101)
 - Properly rejects b=0 case
 - Put-call parity for puts
 
-### 4.4 CURRAN (Geometric Conditioning)
+### 4.5 CURRAN (Geometric Conditioning)
 
 **Formula**: Conditional on geometric mean
 ```
 c ≈ e^(-rT) × [1/n Σ e^(μ_i + σ_i²/2) N(d_i) - X N(d_2)]
 ```
 
-**Implementation**: `asian_option_analytical_engine.py:675-778`
+**Implementation**: `asian_option_analytical_engine.py:760-863`
 
 ✅ **Correct implementation** - matches Haug (4.104)
 - Handles in-period adjustment
 - Certain exercise check
 
-### 4.5 DISCRETE_HHM (Discrete Arithmetic)
+### 4.6 DISCRETE_HHM (Discrete Arithmetic)
 
 **Formula**: Modified Levy for discrete fixings
 ```
 σ_A = √((ln(E[A²]) - 2ln(E[A]))/T)
 ```
 
-**Implementation**: `asian_option_analytical_engine.py:784-876`
+**Implementation**: `asian_option_analytical_engine.py:869-997`
 
 ✅ **Correct implementation** - matches Haug (4.102), (4.103)
 - Handles b=0 case
 - Certain exercise check
 - Single fixing left → BSM formula
 
-### 4.6 Floating-Strike Symmetry
+### 4.7 Floating-Strike Symmetry
 
 **Formula**: Henderson-Wojakowski (2001)
 ```
@@ -242,10 +268,9 @@ c_f(S, X, T, r, b, σ) = p_X(S, S, T, r-b, -b, σ)
 
 **Implementation**: `asian_option_analytical_engine.py:309-350`
 
-⚠️ **Potential Issue**: The benchmark shows 11-14% deviation from MC
-- Transformation appears correct
-- May require higher MC paths for accurate comparison
-- Recommend further investigation
+✅ **Correct implementation** - matches MC to <0.05%
+- Transformation correctly implemented
+- Validated against Monte Carlo benchmark
 
 ---
 
@@ -301,24 +326,17 @@ With b=r=0.05 (q=0), the implementation produces a different but valid result.
 
 ## 6. Recommendations
 
-1. **Floating-Strike Investigation**: The 11-14% deviation for floating-strike options vs MC warrants further investigation. Consider:
-   - Increasing MC paths to 1,000,000+ for more accurate benchmark
-   - Verifying the Henderson-Wojakowski transformation implementation
-   - Testing with different parameter combinations
-   - Comparing against reference values from Haug's book
+1. **Geometric Averaging Method Selection**:
+   - Use **GEOMETRIC_DISCRETE** for discrete geometric Asian options (matches MC to <0.03%)
+   - Use **KEMNA_VORST** only for continuous geometric averaging (where the formula is exact)
+   - The KEMNA_VORST discrepancies (5-14% error) are due to continuous vs discrete averaging mismatch (expected)
 
-2. **Geometric Averaging Benchmark**: The Kemna-Vorst comparison now correctly uses **geometric averaging MC**. However:
-   - KEMNA_VORST assumes **continuous** geometric averaging
-   - MC uses **discrete** observations (num_observations=12)
-   - This fundamental difference creates the observed 5-14% deviation
-   - Consider testing with more observations (e.g., num_observations=52, 252) to approach continuous limit
-
-3. **Extend Validation**: Add more reference test cases from Haug's book:
+2. **Extend Validation**: Add more reference test cases from Haug's book:
    - In-period pricing examples (with S_A ≠ S)
    - Single-fixing-left cases
    - Certain exercise edge cases
 
-4. **Documentation**: Consider adding more comments explaining:
+3. **Documentation**: Consider adding more comments explaining:
    - The Henderson-Wojakowski symmetry transformation
    - The difference between continuous and discrete averaging approximations
 
@@ -329,18 +347,17 @@ With b=r=0.05 (q=0), the implementation produces a different but valid result.
 The Asian Option Analytical Engine is **well-implemented** with:
 
 ✅ **Strengths:**
-- All five major pricing methods correctly implemented
+- All six pricing methods correctly implemented (KEMNA_VORST, GEOMETRIC_DISCRETE, TURNBULL_WAKEMAN, LEVY, CURRAN, DISCRETE_HHM)
 - Formulas match reference documentation (Haug)
 - Excellent accuracy for fixed-strike arithmetic options (TW, Levy, Curran, HHM < 0.5% error)
+- Excellent accuracy for discrete geometric options (GEOMETRIC_DISCRETE < 0.03% error vs MC)
+- Excellent accuracy for floating-strike options (Henderson-Wojakowski < 0.05% error vs MC)
 - Proper handling of edge cases (near expiry, b=0, completed averaging)
 - Clean, modular code structure
 - Boundary checks: 100% pass rate (17/17)
+- Benchmark checks: 87.5% pass rate (21/24)
 
-⚠️ **Areas for Investigation:**
-- Floating-strike pricing shows 11-14% deviation from MC (implementation or MC benchmark issue)
-- Geometric options show 5-14% deviation due to continuous vs discrete averaging mismatch (expected)
-
-**Overall**: The engine is production-ready for fixed-strike Asian options. The floating-strike implementation should be verified with higher-precision MC benchmarks or reference values from literature.
+**Overall**: The engine is production-ready for all Asian option types (fixed-strike, floating-strike, arithmetic, geometric). Use `GEOMETRIC_DISCRETE` for discrete geometric options (most practical cases).
 
 ---
 
@@ -370,12 +387,13 @@ python -m pytest test/test_asian_option_analytical.py -v
 | Component | Coverage |
 |-----------|----------|
 | KEMNA_VORST | ✅ Complete |
+| GEOMETRIC_DISCRETE | ✅ Complete |
 | TURNBULL_WAKEMAN | ✅ Complete |
 | LEVY | ✅ Complete |
 | CURRAN | ✅ Complete |
 | DISCRETE_HHM | ✅ Complete |
 | Fixed-strike | ✅ Complete |
-| Floating-strike | ⚠️ Needs investigation |
+| Floating-strike | ✅ Complete |
 | In-period pricing | ✅ Covered |
 | Edge cases | ✅ Covered |
 

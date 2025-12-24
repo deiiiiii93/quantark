@@ -792,6 +792,8 @@ Example: AsianCurranApprox("c", 100, 110, 105, 0, 0.5, 360, 180, 0.07, 0.02, 0.2
 
 We have mainly been looking at how to value what is known as fixed-strike Asian options. In a floating-strike Asian option, the strike is set equal to the average, and a floating-strike call option will at maturity pay out the maximum of the spot price minus the realized average and zero,  $\max[S - A, 0]$ . Similarly, a floating-strike put will at maturity pay out  $\max[A - S, 0]$ . One way to find the value of a floating-strike Asian option, or vice versa, is by using what is known as fixed-floating Asian value symmetry, aka fixed-floating Asian Symmetry. Henderson and Wojakowski (2001) describe how to go from the value of a fixed-strike Asian option to a floating-strike Asian option, and vice versa.
 
+Note on fixing convention: the discrete symmetry relation below is stated for an average over fixings that exclude the terminal spot $S_T$ (or equivalently a continuous average over $[0,T)$). If the arithmetic average includes $S_T$, then $S_T - A = \frac{n-1}{n}\left(S_T - A_{\text{excl}}\right)$, so the floating payoff gains a factor $(n-1)/n$ relative to the symmetry using $A_{\text{excl}}$.
+
 $$
 c _ {f} = (S, 1, T, r, b, \sigma) = p _ {X} (S, S, T, r - b, - b, \sigma), \tag {4.105}
 $$

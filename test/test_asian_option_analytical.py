@@ -1,7 +1,8 @@
 """
 Unit tests for Asian option analytical pricing engine.
 
-Tests all five methods (KEMNA_VORST, TURNBULL_WAKEMAN, LEVY, CURRAN, DISCRETE_HHM)
+Tests all six methods (KEMNA_VORST, GEOMETRIC_DISCRETE, TURNBULL_WAKEMAN,
+LEVY, CURRAN, DISCRETE_HHM)
 for pricing Asian options. Validation cases are from Haug's "Complete Guide to
 Option Pricing Formulas" (2nd Edition), Tables 4-25, 4-26, 4-27.
 """
@@ -120,6 +121,69 @@ class TestKemnaVorstGeometric:
         # because averaging reduces volatility
         assert asian_price < vanilla_price, f"Geometric price {asian_price:.4f} should be < vanilla price {vanilla_price:.4f}"
         print(f"✓ Geometric average discount verified: ${asian_price:.4f} (vanilla: ${vanilla_price:.4f})")
+
+
+class TestGeometricDiscrete:
+    """Tests for discrete geometric average method."""
+
+    def test_geometric_discrete_basic(self):
+        """Test discrete geometric average pricing sanity checks."""
+        pricing_env = create_pricing_env(spot=100.0, vol=0.20, rate=0.05)
+
+        n = 12
+        T = 1.0
+        obs_times = [i * T / n for i in range(1, n + 1)]
+
+        option = AsianOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            averaging_type=AveragingType.GEOMETRIC,
+            asian_strike_type=AsianStrikeType.FIXED,
+            maturity=T,
+            observation_times=obs_times,
+        )
+
+        engine = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.GEOMETRIC_DISCRETE)
+        price = engine.price(option, pricing_env)
+
+        vanilla_option = EuropeanVanillaOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            maturity=T,
+        )
+        vanilla_price = BlackScholesEngine().price(vanilla_option, pricing_env)
+
+        assert price > 0, "Discrete geometric call price should be positive"
+        assert price < vanilla_price, "Discrete geometric should be cheaper than vanilla"
+        print(f"✓ Geometric discrete call: ${price:.4f} (vanilla: ${vanilla_price:.4f})")
+
+    def test_geometric_discrete_auto_selection(self):
+        """Auto-selection should use GEOMETRIC_DISCRETE for discrete geometric averaging."""
+        pricing_env = create_pricing_env(spot=100.0, vol=0.20, rate=0.05)
+
+        n = 8
+        T = 0.5
+        obs_times = [i * T / n for i in range(1, n + 1)]
+
+        option = AsianOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            averaging_type=AveragingType.GEOMETRIC,
+            asian_strike_type=AsianStrikeType.FIXED,
+            maturity=T,
+            observation_times=obs_times,
+        )
+
+        engine_auto = AsianOptionAnalyticalEngine()
+        engine_explicit = AsianOptionAnalyticalEngine(
+            method=AsianAnalyticalMethod.GEOMETRIC_DISCRETE
+        )
+
+        price_auto = engine_auto.price(option, pricing_env)
+        price_explicit = engine_explicit.price(option, pricing_env)
+
+        assert abs(price_auto - price_explicit) < 1e-10, "Auto-selection mismatch"
+        print(f"✓ Geometric discrete auto-selection: ${price_auto:.4f}")
 
 
 class TestTurnbullWakeman:
@@ -580,6 +644,52 @@ class TestFloatingStrike:
         assert price > 0, "Floating-strike geometric call should have positive value"
         print(f"✓ Floating-strike geometric call: ${price:.4f}")
 
+    def test_floating_symmetry_excludes_terminal_fixing(self):
+        """Floating-strike symmetry should align when terminal fixing is excluded."""
+        rate = 0.05
+        div = 0.0
+        vol = 0.20
+        spot = 100.0
+        T = 1.0
+        n = 12
+
+        pricing_env = create_pricing_env(spot=spot, vol=vol, rate=rate, div=div)
+        floating_option = AsianOption(
+            strike=0.0,
+            option_type=OptionType.CALL,
+            averaging_type=AveragingType.ARITHMETIC,
+            asian_strike_type=AsianStrikeType.FLOATING,
+            maturity=T,
+            num_observations=n,
+        )
+
+        engine = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.TURNBULL_WAKEMAN)
+        floating_price = engine.price(floating_option, pricing_env)
+
+        obs_times = list(np.linspace(0, T, n + 1)[1:-1])
+        rate_t = div
+        div_t = rate
+
+        pricing_env_transformed = create_pricing_env(
+            spot=spot, vol=vol, rate=rate_t, div=div_t
+        )
+        fixed_put = AsianOption(
+            strike=spot,
+            option_type=OptionType.PUT,
+            averaging_type=AveragingType.ARITHMETIC,
+            asian_strike_type=AsianStrikeType.FIXED,
+            maturity=T,
+            observation_times=obs_times,
+        )
+
+        fixed_price = engine.price(fixed_put, pricing_env_transformed)
+        scaled_fixed_price = fixed_price * (n - 1) / n
+
+        assert abs(floating_price - scaled_fixed_price) < 1e-10
+        print(
+            f"✓ Floating symmetry adjustment: ${floating_price:.4f} (scaled fixed: ${scaled_fixed_price:.4f})"
+        )
+
 
 class TestMethodComparison:
     """Compare pricing across different methods."""
@@ -838,6 +948,7 @@ if __name__ == "__main__":
     
     test_classes = [
         TestKemnaVorstGeometric,
+        TestGeometricDiscrete,
         TestTurnbullWakeman,
         TestLevy,
         TestCurran,

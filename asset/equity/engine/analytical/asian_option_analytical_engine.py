@@ -3,6 +3,7 @@ Analytical pricing engine for Asian options.
 
 This module implements multiple approximation methods for pricing Asian options:
 - KEMNA_VORST: Exact closed-form for geometric average options
+- GEOMETRIC_DISCRETE: Discrete geometric average-rate using term-structure vols
 - TURNBULL_WAKEMAN: Moment matching for arithmetic average options
 - LEVY: Alternative arithmetic approximation (requires b != 0)
 - CURRAN: Geometric conditioning approximation
@@ -33,15 +34,16 @@ from asset.equity.param import EngineParams
 from priceenv import PricingEnvironment
 from util.exceptions import ValidationError, NumericalError, PricingError
 from util.enum.engine_enums import AsianAnalyticalMethod, EngineType
-from util.numerical import is_zero
+from util.numerical import is_zero, is_close
 
 
 class AsianOptionAnalyticalEngine(BaseEngine):
     """
     Analytical pricing engine for Asian options.
 
-    Supports five approximation/exact methods:
+    Supports six approximation/exact methods:
     - KEMNA_VORST (default for geometric): Exact closed-form for geometric average
+    - GEOMETRIC_DISCRETE: Discrete geometric average-rate using term-structure vols
     - TURNBULL_WAKEMAN (default for arithmetic): Moment matching approximation
     - LEVY: Alternative arithmetic approximation (requires b != 0)
     - CURRAN: Geometric conditioning approximation
@@ -83,7 +85,7 @@ class AsianOptionAnalyticalEngine(BaseEngine):
             params: Engine configuration parameters
             method: Pricing method, can be:
                 - AsianAnalyticalMethod enum
-                - String "kemna_vorst"/"turnbull_wakeman"/"levy"/"curran"/"discrete_hhm"
+                - String "kemna_vorst"/"geometric_discrete"/"turnbull_wakeman"/"levy"/"curran"/"discrete_hhm"
                 - Tuple from EngineType.ANALYTICAL(AsianAnalyticalMethod.X)
                 - None (auto-selects based on averaging type)
 
@@ -205,6 +207,7 @@ class AsianOptionAnalyticalEngine(BaseEngine):
             "t1": t1,
             "future_times": future_times,
             "past_prices": past_prices,
+            "vol_times": [pricing_env.get_vol(K, t) for t in future_times],
             "is_continuous": product.is_continuous(),
         }
 
@@ -232,7 +235,9 @@ class AsianOptionAnalyticalEngine(BaseEngine):
 
         # Auto-select based on averaging type
         if product.is_geometric():
-            return self.DEFAULT_GEOMETRIC_METHOD
+            if product.is_continuous():
+                return self.DEFAULT_GEOMETRIC_METHOD
+            return AsianAnalyticalMethod.GEOMETRIC_DISCRETE
         else:
             return self.DEFAULT_METHOD
 
@@ -241,10 +246,20 @@ class AsianOptionAnalyticalEngine(BaseEngine):
     ) -> None:
         """Check if method is compatible with product."""
         # KEMNA_VORST only works for geometric averaging
-        if method == AsianAnalyticalMethod.KEMNA_VORST and product.is_arithmetic():
+        if method in (
+            AsianAnalyticalMethod.KEMNA_VORST,
+            AsianAnalyticalMethod.GEOMETRIC_DISCRETE,
+        ) and product.is_arithmetic():
             raise ValidationError(
-                "KEMNA_VORST only applies to geometric averaging. "
+                "Geometric methods only apply to geometric averaging. "
                 "Use TURNBULL_WAKEMAN, LEVY, CURRAN, or DISCRETE_HHM for arithmetic."
+            )
+
+        # GEOMETRIC_DISCRETE only applies to discrete averaging
+        if method == AsianAnalyticalMethod.GEOMETRIC_DISCRETE and product.is_continuous():
+            raise ValidationError(
+                "GEOMETRIC_DISCRETE only applies to discrete averaging. "
+                "Use KEMNA_VORST for continuous geometric averaging."
             )
 
         # LEVY does not support b=0
@@ -295,6 +310,8 @@ class AsianOptionAnalyticalEngine(BaseEngine):
 
         if method == AsianAnalyticalMethod.KEMNA_VORST:
             return self._price_kemna_vorst(params, is_call)
+        elif method == AsianAnalyticalMethod.GEOMETRIC_DISCRETE:
+            return self._price_geometric_discrete(params, is_call)
         elif method == AsianAnalyticalMethod.TURNBULL_WAKEMAN:
             return self._price_turnbull_wakeman(params, is_call)
         elif method == AsianAnalyticalMethod.LEVY:
@@ -333,19 +350,45 @@ class AsianOptionAnalyticalEngine(BaseEngine):
                 params["S"], avg, params["T"], params["r"], params["b"], params["sigma"], is_call
             )
 
-        # Transform parameters
+        scale = 1.0
         params_transformed = params.copy()
+        if (
+            product.is_arithmetic()
+            and not params["is_continuous"]
+            and params["future_times"]
+            and is_close(max(params["future_times"]), params["T"])
+        ):
+            # Symmetry assumes the average excludes the terminal fixing; adjust if it is included.
+            if n <= 1:
+                return 0.0
+            scale = (n - 1) / n
+            params_transformed = params.copy()
+            max_time = max(params["future_times"])
+            max_index = params["future_times"].index(max_time)
+            params_transformed["future_times"] = [
+                t
+                for idx, t in enumerate(params["future_times"])
+                if idx != max_index
+            ]
+            params_transformed["vol_times"] = [
+                v
+                for idx, v in enumerate(params["vol_times"])
+                if idx != max_index
+            ]
+            params_transformed["n"] = n - 1
+
+        # Transform parameters
         params_transformed["r"] = params["r"] - params["b"]
         params_transformed["b"] = -params["b"]
         params_transformed["K"] = params["S"]
 
         # Price as opposite option type
         if is_call:
-            return self._price_fixed_strike_internal(
+            return scale * self._price_fixed_strike_internal(
                 params_transformed, method, is_call=False
             )
         else:
-            return self._price_fixed_strike_internal(
+            return scale * self._price_fixed_strike_internal(
                 params_transformed, method, is_call=True
             )
 
@@ -358,6 +401,8 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         """Internal fixed-strike pricing with explicit is_call flag."""
         if method == AsianAnalyticalMethod.KEMNA_VORST:
             return self._price_kemna_vorst(params, is_call)
+        elif method == AsianAnalyticalMethod.GEOMETRIC_DISCRETE:
+            return self._price_geometric_discrete(params, is_call)
         elif method == AsianAnalyticalMethod.TURNBULL_WAKEMAN:
             return self._price_turnbull_wakeman(params, is_call)
         elif method == AsianAnalyticalMethod.LEVY:
@@ -397,6 +442,72 @@ class AsianOptionAnalyticalEngine(BaseEngine):
 
         # Apply BSM formula with adjusted parameters
         return self._bsm_price(S, K, T, r, b_A, sigma_A, is_call)
+
+    # =========================================================================
+    # GEOMETRIC DISCRETE: Geometric Average (Discrete Fixings)
+    # =========================================================================
+
+    def _price_geometric_discrete(self, params: dict, is_call: bool) -> float:
+        """
+        Price discrete geometric average Asian option using term-structure volatilities.
+
+        Uses Haug-Haug-Margrabe term-structure formulation for geometric average.
+        """
+        S = params["S"]
+        K = params["K"]
+        T = params["T"]
+        r = params["r"]
+        b = params["b"]
+        m = params["m"]
+        n_total = params["n"]
+        past_prices = params["past_prices"]
+
+        time_vol_pairs = sorted(
+            zip(params["future_times"], params["vol_times"]), key=lambda tv: tv[0]
+        )
+        future_times = [t for t, _ in time_vol_pairs]
+        future_vols = [v for _, v in time_vol_pairs]
+
+        n_future = len(future_times)
+        if n_future <= 0:
+            avg = params["S_A"] if m > 0 else S
+            payoff = max(avg - K, 0.0) if is_call else max(K - avg, 0.0)
+            return payoff * self._safe_exp(-r * T)
+
+        sum_sigma_t = 0.0
+        sum_sigma_t_weighted = 0.0
+        for idx, (ti, sigma_i) in enumerate(zip(future_times, future_vols), start=1):
+            sigma2_t = sigma_i**2 * ti
+            sum_sigma_t += sigma2_t
+            if idx < n_future:
+                sum_sigma_t_weighted += (n_future - idx) * sigma2_t
+
+        sigma_g2 = (sum_sigma_t + 2.0 * sum_sigma_t_weighted) / (n_future**2 * T)
+        if sigma_g2 < 1e-20:
+            sigma_g2 = 1e-20
+
+        b_g = 0.5 * sigma_g2 + (
+            sum(
+                (b - 0.5 * sigma_i**2) * ti
+                for sigma_i, ti in zip(future_vols, future_times)
+            )
+            / (n_future * T)
+        )
+
+        v_future = sigma_g2 * T
+        m_future = self._safe_log(S) + (b_g - 0.5 * sigma_g2) * T
+
+        if m > 0:
+            log_past = np.mean([self._safe_log(p) for p in past_prices])
+            weight_future = n_future / n_total
+            weight_past = m / n_total
+            m_total = weight_past * log_past + weight_future * m_future
+            v_total = (weight_future**2) * v_future
+        else:
+            m_total = m_future
+            v_total = v_future
+
+        return self._price_lognormal(m_total, v_total, K, r, T, is_call)
 
     # =========================================================================
     # TURNBULL-WAKEMAN: Arithmetic Average (Moment Matching)
@@ -914,6 +1025,28 @@ class AsianOptionAnalyticalEngine(BaseEngine):
     # =========================================================================
     # Helper Functions
     # =========================================================================
+
+    def _price_lognormal(
+        self, m: float, v: float, K: float, r: float, T: float, is_call: bool
+    ) -> float:
+        """Price option on a lognormal variable with log-mean m and variance v."""
+        if v < 1e-12:
+            intrinsic = self._safe_exp(m) - K
+            payoff = max(intrinsic, 0.0) if is_call else max(-intrinsic, 0.0)
+            return payoff * self._safe_exp(-r * T)
+
+        sqrt_v = np.sqrt(v)
+        d1 = (m - self._safe_log(K) + v) / sqrt_v
+        d2 = d1 - sqrt_v
+        forward = self._safe_exp(m + 0.5 * v)
+        df = self._safe_exp(-r * T)
+
+        if is_call:
+            price = df * (forward * norm.cdf(d1) - K * norm.cdf(d2))
+        else:
+            price = df * (K * norm.cdf(-d2) - forward * norm.cdf(-d1))
+
+        return max(price, 0.0)
 
     def _bsm_price(
         self,

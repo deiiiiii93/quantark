@@ -88,7 +88,7 @@ def run_benchmark_tests(results: BenchmarkResults):
     mc_engine = AsianOptionMCEngine(params=mc_params, method=MonteCarloMethod.QUASI)
 
     # ============================================================
-    # KEMNA_VORST vs MC (Geometric) - Using geometric MC for fair comparison
+    # KEMNA_VORST vs MC (Geometric) - Continuous vs Discrete
     # NOTE: KEMNA_VORST assumes CONTINUOUS geometric averaging, while MC uses
     # DISCRETE observations (num_observations=12). This creates a known
     # difference between the analytical formula and MC simulation.
@@ -96,7 +96,7 @@ def run_benchmark_tests(results: BenchmarkResults):
 
     analytical_kv = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.KEMNA_VORST)
 
-    # Geometric ATM call
+    # Geometric ATM call (KEMNA_VORST)
     env = create_pricing_env(spot=100.0, rate=0.05, vol=0.20)
     option = AsianOption(
         strike=100.0,
@@ -109,9 +109,9 @@ def run_benchmark_tests(results: BenchmarkResults):
     analytical_price = analytical_kv.price(option, env)
     mc_price = mc_engine.price(option, env)
     mc_result = mc_engine.get_last_result()
-    results.add_result("KV Geometric ATM Call", analytical_price, mc_price, mc_result.std_error)
+    results.add_result("KV (Continuous) Geometric ATM Call", analytical_price, mc_price, mc_result.std_error)
 
-    # Geometric OTM call
+    # Geometric OTM call (KEMNA_VORST)
     env = create_pricing_env(spot=100.0, rate=0.05, vol=0.20)
     option = AsianOption(
         strike=110.0,
@@ -124,9 +124,9 @@ def run_benchmark_tests(results: BenchmarkResults):
     analytical_price = analytical_kv.price(option, env)
     mc_price = mc_engine.price(option, env)
     mc_result = mc_engine.get_last_result()
-    results.add_result("KV Geometric OTM Call", analytical_price, mc_price, mc_result.std_error)
+    results.add_result("KV (Continuous) Geometric OTM Call", analytical_price, mc_price, mc_result.std_error)
 
-    # Geometric ITM call (additional test)
+    # Geometric ITM call (KEMNA_VORST)
     env = create_pricing_env(spot=110.0, rate=0.05, vol=0.20)
     option = AsianOption(
         strike=100.0,
@@ -139,9 +139,9 @@ def run_benchmark_tests(results: BenchmarkResults):
     analytical_price = analytical_kv.price(option, env)
     mc_price = mc_engine.price(option, env)
     mc_result = mc_engine.get_last_result()
-    results.add_result("KV Geometric ITM Call", analytical_price, mc_price, mc_result.std_error)
+    results.add_result("KV (Continuous) Geometric ITM Call", analytical_price, mc_price, mc_result.std_error)
 
-    # Geometric ATM put
+    # Geometric ATM put (KEMNA_VORST)
     env = create_pricing_env(spot=100.0, rate=0.05, vol=0.20)
     option = AsianOption(
         strike=100.0,
@@ -154,7 +154,76 @@ def run_benchmark_tests(results: BenchmarkResults):
     analytical_price = analytical_kv.price(option, env)
     mc_price = mc_engine.price(option, env)
     mc_result = mc_engine.get_last_result()
-    results.add_result("KV Geometric ATM Put", analytical_price, mc_price, mc_result.std_error)
+    results.add_result("KV (Continuous) Geometric ATM Put", analytical_price, mc_price, mc_result.std_error)
+
+    # ============================================================
+    # GEOMETRIC_DISCRETE vs MC (Geometric) - Discrete vs Discrete
+    # NOTE: GEOMETRIC_DISCRETE assumes DISCRETE geometric averaging,
+    # matching the MC simulation's discrete observations. This should
+    # provide much better agreement than KEMNA_VORST.
+    # ============================================================
+
+    analytical_gd = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.GEOMETRIC_DISCRETE)
+
+    # Geometric ATM call (GEOMETRIC_DISCRETE)
+    env = create_pricing_env(spot=100.0, rate=0.05, vol=0.20)
+    option = AsianOption(
+        strike=100.0,
+        option_type=OptionType.CALL,
+        averaging_type=AveragingType.GEOMETRIC,
+        asian_strike_type=AsianStrikeType.FIXED,
+        maturity=1.0,
+        num_observations=12,
+    )
+    analytical_price = analytical_gd.price(option, env)
+    mc_price = mc_engine.price(option, env)
+    mc_result = mc_engine.get_last_result()
+    results.add_result("GD (Discrete) Geometric ATM Call", analytical_price, mc_price, mc_result.std_error)
+
+    # Geometric OTM call (GEOMETRIC_DISCRETE)
+    env = create_pricing_env(spot=100.0, rate=0.05, vol=0.20)
+    option = AsianOption(
+        strike=110.0,
+        option_type=OptionType.CALL,
+        averaging_type=AveragingType.GEOMETRIC,
+        asian_strike_type=AsianStrikeType.FIXED,
+        maturity=1.0,
+        num_observations=12,
+    )
+    analytical_price = analytical_gd.price(option, env)
+    mc_price = mc_engine.price(option, env)
+    mc_result = mc_engine.get_last_result()
+    results.add_result("GD (Discrete) Geometric OTM Call", analytical_price, mc_price, mc_result.std_error)
+
+    # Geometric ITM call (GEOMETRIC_DISCRETE)
+    env = create_pricing_env(spot=110.0, rate=0.05, vol=0.20)
+    option = AsianOption(
+        strike=100.0,
+        option_type=OptionType.CALL,
+        averaging_type=AveragingType.GEOMETRIC,
+        asian_strike_type=AsianStrikeType.FIXED,
+        maturity=1.0,
+        num_observations=12,
+    )
+    analytical_price = analytical_gd.price(option, env)
+    mc_price = mc_engine.price(option, env)
+    mc_result = mc_engine.get_last_result()
+    results.add_result("GD (Discrete) Geometric ITM Call", analytical_price, mc_price, mc_result.std_error)
+
+    # Geometric ATM put (GEOMETRIC_DISCRETE)
+    env = create_pricing_env(spot=100.0, rate=0.05, vol=0.20)
+    option = AsianOption(
+        strike=100.0,
+        option_type=OptionType.PUT,
+        averaging_type=AveragingType.GEOMETRIC,
+        asian_strike_type=AsianStrikeType.FIXED,
+        maturity=1.0,
+        num_observations=12,
+    )
+    analytical_price = analytical_gd.price(option, env)
+    mc_price = mc_engine.price(option, env)
+    mc_result = mc_engine.get_last_result()
+    results.add_result("GD (Discrete) Geometric ATM Put", analytical_price, mc_price, mc_result.std_error)
 
     # ============================================================
     # TURNBULL_WAKEMAN vs MC (Arithmetic)

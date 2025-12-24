@@ -65,6 +65,7 @@ class AsianAnalyticalMethod(Enum):
     """Analytical methods for Asian option pricing.
     
     - KEMNA_VORST: Exact closed-form for geometric average options
+    - GEOMETRIC_DISCRETE: Discrete geometric average-rate using term-structure vols
     - TURNBULL_WAKEMAN: Moment matching for arithmetic average options
     - LEVY: Alternative arithmetic approximation (requires b != 0)
     - CURRAN: Geometric conditioning approximation
@@ -72,6 +73,7 @@ class AsianAnalyticalMethod(Enum):
     """
 
     KEMNA_VORST = "kemna_vorst"
+    GEOMETRIC_DISCRETE = "geometric_discrete"
     TURNBULL_WAKEMAN = "turnbull_wakeman"
     LEVY = "levy"
     CURRAN = "curran"
