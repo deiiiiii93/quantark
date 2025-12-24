@@ -10,7 +10,7 @@ from .analytical import (
     AsianOptionAnalyticalEngine,
 )
 from .pde_engine import PDEEngine
-from .mc import EuropeanMCEngine, SnowballMCEngine
+from .mc import EuropeanMCEngine, AmericanOptionMCEngine, SnowballMCEngine
 from .pde import (
     BasePDESolver,
     EuropeanPDESolver,
@@ -33,6 +33,7 @@ __all__ = [
     "AsianOptionAnalyticalEngine",
     # Monte Carlo
     "EuropeanMCEngine",
+    "AmericanOptionMCEngine",
     "SnowballMCEngine",
     # Unified PDE Engine
     "PDEEngine",
