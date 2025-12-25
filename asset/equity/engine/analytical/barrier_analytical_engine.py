@@ -87,7 +87,15 @@ class BarrierAnalyticalEngine(BaseEngine):
                 if product.pay_at_hit:
                     return product.rebate
                 return product.rebate * math.exp(-rate * maturity)
-            return product.get_payoff(spot) * participation
+            vanilla = EuropeanVanillaOption(
+                strike=product.strike,
+                option_type=product.option_type,
+                maturity=product.maturity,
+                exercise_date=product.exercise_date,
+                settlement_date=product.settlement_date,
+            )
+            vanilla_price = self._bs_engine.price(vanilla, pricing_env)
+            return participation * vanilla_price
 
         if obs_type == ObservationType.EXPIRY:
             return self._price_expiry(

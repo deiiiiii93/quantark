@@ -336,13 +336,11 @@ def compute_step_crossing_probabilities(
 
     # Same-side endpoints: Brownian-bridge crossing probability
     same_side = ~(crossed_mask | touched_mask)
-    valid = same_side & (h2 > 0.0)
-    if np.any(valid):
-        log_term = safe_log(S0[valid] / barrier_level) * safe_log(
-            S1[valid] / barrier_level
-        )
-        prob[valid] = np.exp(-2.0 * log_term / h2[valid])
-        prob[valid] = np.clip(prob[valid], 0.0, 1.0)
+    if np.any(same_side):
+        log_term = safe_log(S0 / barrier_level) * safe_log(S1 / barrier_level)
+        bridge_prob = np.exp(-2.0 * log_term / h2)
+        bridge_prob = np.clip(bridge_prob, 0.0, 1.0)
+        prob[same_side] = bridge_prob[same_side]
 
     return prob
 

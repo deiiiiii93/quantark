@@ -292,45 +292,88 @@ class ObservationSchedule:
             raise ValidationError("Observation records must be ordered by resolved observation time.")
         return resolved
 
-    def ensure_regular_frequency(self, times: List[float], tolerance: float = 1e-8) -> float:
+    def ensure_regular_frequency(
+        self,
+        times: List[float],
+        tolerance: float = 1e-8,
+        business_days_in_year: float = 252.0,
+    ) -> float:
         """Ensure schedule has a regular observation frequency; return the interval.
-        
+
+        This method supports three usage modes:
+        1) `frequency` is `ObservationFrequency.CUSTOM` or None: infer dt from `times`.
+        2) `frequency` is a numeric dt (legacy): validate against that dt.
+        3) `frequency` is an `ObservationFrequency`: validate against calendar or business-day dt.
+
         Args:
             times: List of observation times in years
             tolerance: Tolerance for comparing floating-point intervals (default: 1e-8)
-            
+            business_days_in_year: Business-day year length used when validating
+                business-day frequency conventions (default: 252.0).
+
         Returns:
             The regular frequency interval (float)
-            
+
         Raises:
-            ValidationError: If frequency is CUSTOM or if spacing does not match declared frequency.
+            ValidationError: If spacing is irregular or does not match declared frequency.
         """
-        if self.frequency == ObservationFrequency.CUSTOM:
-            raise ValidationError("ObservationSchedule requires a regular frequency for analytical usage, but is set to CUSTOM.")
-        
         if len(times) < 2:
             raise ValidationError("Need at least 2 observation times to determine interval.")
-            
-        # Get expected dt from the declared frequency
-        expected_dt = self.frequency.to_year_fraction()
-        
-        # Calculate inferred dt from the first interval
+
         inferred_dt = times[1] - times[0]
-        
-        # Validate that the inferred dt matches the expected dt (check both calendar and business day conventions)
-        expected_dt_calendar = self.frequency.to_year_fraction(use_business_days=False)
-        expected_dt_business = self.frequency.to_year_fraction(use_business_days=True)
-        
-        matches_calendar = isclose(inferred_dt, expected_dt_calendar, rel_tol=tolerance, abs_tol=tolerance)
-        matches_business = isclose(inferred_dt, expected_dt_business, rel_tol=tolerance, abs_tol=tolerance)
-        
+        if inferred_dt <= 0.0:
+            raise ValidationError("Observation times must be strictly increasing.")
+
+        for i in range(1, len(times) - 1):
+            dt_i = times[i + 1] - times[i]
+            if dt_i <= 0.0:
+                raise ValidationError("Observation times must be strictly increasing.")
+            if not isclose(dt_i, inferred_dt, rel_tol=tolerance, abs_tol=tolerance):
+                raise ValidationError(
+                    "ObservationSchedule requires a regular frequency for analytical usage, "
+                    "but observation_times are not equally spaced."
+                )
+
+        frequency = self.frequency
+
+        if frequency is None or frequency == ObservationFrequency.CUSTOM:
+            return inferred_dt
+
+        if isinstance(frequency, (int, float)):
+            expected_dt = float(frequency)
+            if not isclose(
+                inferred_dt, expected_dt, rel_tol=tolerance, abs_tol=tolerance
+            ):
+                raise ValidationError(
+                    f"ObservationSchedule declared frequency '{frequency}' "
+                    f"does not match inferred interval {inferred_dt:.6f} from observation_times."
+                )
+            return expected_dt
+
+        if not isinstance(frequency, ObservationFrequency):
+            raise ValidationError(
+                f"Invalid schedule frequency type: {type(frequency).__name__}"
+            )
+
+        expected_dt_calendar = frequency.to_year_fraction(use_business_days=False)
+        expected_dt_business = frequency.to_year_fraction(
+            use_business_days=True, days_in_year=business_days_in_year
+        )
+
+        matches_calendar = isclose(
+            inferred_dt, expected_dt_calendar, rel_tol=tolerance, abs_tol=tolerance
+        )
+        matches_business = isclose(
+            inferred_dt, expected_dt_business, rel_tol=tolerance, abs_tol=tolerance
+        )
+
         if not (matches_calendar or matches_business):
             raise ValidationError(
-                f"ObservationSchedule declared frequency '{self.frequency.name}' "
+                f"ObservationSchedule declared frequency '{frequency.name}' "
                 f"(expected dt={expected_dt_calendar:.6f} or {expected_dt_business:.6f}) "
                 f"does not match inferred interval {inferred_dt:.6f} from observation_times."
             )
-            
+
         return inferred_dt
 
     def has_fixed_payoff(self, default_payoff: float = 0.0, tolerance: float = 1e-8) -> bool:
@@ -358,22 +401,39 @@ class ObservationSchedule:
                 return False
         return True
 
-    def assert_analytical_ready(self, default_payoff: float = 0.0, tolerance: float = 1e-8) -> None:
+    def assert_analytical_ready(
+        self,
+        default_payoff: float = 0.0,
+        tolerance: float = 1e-8,
+        business_days_in_year: float = 252.0,
+    ) -> None:
         """
         Validate preconditions for analytical engines that rely on barrier shift:
         regular observation frequency and fixed payoff across observations.
-        
+
         Args:
             default_payoff: Default payoff value to use for records without explicit payoffs
             tolerance: Tolerance for validation checks (default: 1e-8 for numerical stability)
-            
+            business_days_in_year: Number of business days in a year used for validating
+                business-day frequency conventions (default: 252.0).
+
         Raises:
             ValidationError: If schedule is not suitable for analytical pricing
         """
-        times = [rec.observation_time for rec in self.records if rec.observation_time is not None]
-        self.ensure_regular_frequency(times, tolerance=tolerance)
-        if not self.has_fixed_payoff(default_payoff=default_payoff, tolerance=tolerance):
-            raise ValidationError("Analytical barrier shift requires a fixed payoff across observation records.")
+        times = [
+            rec.observation_time
+            for rec in self.records
+            if rec.observation_time is not None
+        ]
+        self.ensure_regular_frequency(
+            times, tolerance=tolerance, business_days_in_year=business_days_in_year
+        )
+        if not self.has_fixed_payoff(
+            default_payoff=default_payoff, tolerance=tolerance
+        ):
+            raise ValidationError(
+                "Analytical barrier shift requires a fixed payoff across observation records."
+            )
 
     @property
     def times(self) -> List[float]:
