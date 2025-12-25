@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from util.numerical import safe_log
+
 
 @dataclass
 class BrownianBridge:
@@ -258,6 +260,93 @@ def apply_brownian_bridge_multi_asset(z: np.ndarray, times: np.ndarray) -> np.nd
     return dW
 
 
+def compute_step_crossing_probabilities(
+    paths: np.ndarray,
+    barrier_level: float,
+    sigma: float,
+    times: np.ndarray,
+) -> np.ndarray:
+    """
+    Compute step-wise barrier crossing probabilities using a Brownian bridge.
+
+    For each simulated path and each time interval, it returns the probability
+    that the path has crossed the barrier between the endpoints.
+
+    Parameters
+    ----------
+    paths : np.ndarray
+        Simulated spot paths of shape (n_paths, n_steps + 1).
+    barrier_level : float
+        Barrier level in spot space.
+    sigma : float
+        Volatility used in the GBM dynamics.
+    times : np.ndarray
+        Time grid of shape (n_steps,) corresponding to the path intervals
+        (excluding t=0).
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n_paths, n_steps) containing the crossing probability
+        per step.
+    """
+    paths = np.asarray(paths, dtype=float)
+    times = np.asarray(times, dtype=float)
+
+    if paths.ndim != 2:
+        raise ValueError("paths must be a 2D array of shape (n_paths, n_steps + 1)")
+    if times.ndim != 1:
+        raise ValueError("times must be a 1D array of shape (n_steps,)")
+    if barrier_level <= 0.0:
+        raise ValueError("barrier_level must be positive")
+    if sigma <= 0.0:
+        raise ValueError("sigma must be positive")
+    if paths.shape[1] != times.shape[0] + 1:
+        raise ValueError(
+            "paths second dimension must be n_steps + 1 where n_steps = len(times)"
+        )
+    if np.any(np.diff(times) <= 0.0):
+        raise ValueError("times must be strictly increasing")
+
+    n_paths, n_cols = paths.shape
+    n_steps = n_cols - 1
+
+    S0 = paths[:, :-1]
+    S1 = paths[:, 1:]
+    dt = np.empty(n_steps, dtype=float)
+    dt[0] = times[0]
+    if n_steps > 1:
+        dt[1:] = np.diff(times)
+
+    # Broadcast dt to match shape of path slices
+    dt_matrix = dt.reshape(1, -1)
+    h2 = (sigma * sigma) * dt_matrix
+
+    # Initialize probabilities per step
+    prob = np.zeros_like(S0, dtype=float)
+
+    # Determine where paths are on different sides of the barrier
+    crossed_mask = ((S0 < barrier_level) & (S1 > barrier_level)) | (
+        (S0 > barrier_level) & (S1 < barrier_level)
+    )
+    touched_mask = (S0 == barrier_level) | (S1 == barrier_level)
+
+    # Opposite-side or touching endpoints imply a hit with probability 1
+    prob[crossed_mask | touched_mask] = 1.0
+
+    # Same-side endpoints: Brownian-bridge crossing probability
+    same_side = ~(crossed_mask | touched_mask)
+    valid = same_side & (h2 > 0.0)
+    if np.any(valid):
+        log_term = safe_log(S0[valid] / barrier_level) * safe_log(
+            S1[valid] / barrier_level
+        )
+        prob[valid] = np.exp(-2.0 * log_term / h2[valid])
+        prob[valid] = np.clip(prob[valid], 0.0, 1.0)
+
+    return prob
+
+
 def compute_barrier_crossing_probabilities(
     paths: np.ndarray,
     barrier_level: float,
@@ -291,47 +380,7 @@ def compute_barrier_crossing_probabilities(
         Array of shape (n_paths,) containing the approximate probability that
         each path crosses the barrier at least once.
     """
-    paths = np.asarray(paths, dtype=float)
-    times = np.asarray(times, dtype=float)
-
-    if paths.ndim != 2:
-        raise ValueError("paths must be a 2D array of shape (n_paths, n_steps + 1)")
-    if times.ndim != 1:
-        raise ValueError("times must be a 1D array of shape (n_steps,)")
-    if paths.shape[1] != times.shape[0] + 1:
-        raise ValueError(
-            "paths second dimension must be n_steps + 1 where n_steps = len(times)"
-        )
-    if np.any(np.diff(times) <= 0.0):
-        raise ValueError("times must be strictly increasing")
-
-    n_paths, n_cols = paths.shape
-    n_steps = n_cols - 1
-
-    S0 = paths[:, :-1]
-    S1 = paths[:, 1:]
-    dt = np.empty(n_steps, dtype=float)
-    dt[0] = times[0]
-    if n_steps > 1:
-        dt[1:] = np.diff(times)
-
-    # Broadcast dt to match shape of path slices
-    dt_matrix = dt.reshape(1, -1)
-    h = sigma * np.sqrt(dt_matrix)
-
-    # Initialize probabilities per step
-    prob = np.zeros_like(S0, dtype=float)
-
-    # Determine where paths are on different sides of the barrier
-    crossed_mask = ((S0 < barrier_level) & (S1 > barrier_level)) | (
-        (S0 > barrier_level) & (S1 < barrier_level)
-    )
-
-    # Avoid division by zero
-    valid = crossed_mask & (h > 0.0)
-    if np.any(valid):
-        log_term = np.log(S0[valid] / barrier_level) * np.log(S1[valid] / barrier_level)
-        prob[valid] = 1.0 - np.exp(-2.0 * log_term / (h[valid] ** 2))
+    prob = compute_step_crossing_probabilities(paths, barrier_level, sigma, times)
 
     # Combine step-wise probabilities into overall crossing probability
     # Assuming conditional independence given endpoints (standard Brownian bridge approximation)
@@ -343,5 +392,6 @@ __all__ = [
     "BrownianBridge",
     "apply_brownian_bridge",
     "apply_brownian_bridge_multi_asset",
+    "compute_step_crossing_probabilities",
     "compute_barrier_crossing_probabilities",
 ]

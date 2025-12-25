@@ -7,6 +7,7 @@ from .american_option_mc_engine import AmericanOptionMCEngine, AmericanMCResult
 from .snowball_mc_engine import SnowballMCEngine
 from .asian_option_mc_engine import AsianOptionMCEngine, AsianMCResult
 from .digital_option_mc_engine import DigitalOptionMCEngine
+from .barrier_option_mc_engine import BarrierOptionMCEngine
 
 __all__ = [
     "EuropeanMCEngine",
@@ -16,4 +17,5 @@ __all__ = [
     "AsianOptionMCEngine",
     "AsianMCResult",
     "DigitalOptionMCEngine",
+    "BarrierOptionMCEngine",
 ]

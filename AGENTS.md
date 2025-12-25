@@ -323,3 +323,8 @@ Pass a targeted natural language query describing what you're trying to accompli
 → Use classical search tools afterward if needed to fill gaps.
 
 CANNOT BE CALLED IN PARALLEL - one invocation at a time."
+
+## Skills
+- Load all skills in $CODEX_HOME/skills.
+- Always use the `engine-creator` skill when creating new pricing engines in this repository.
+- Always use the `engine-validator` skill when creating validation reports for pricing engines in this repository.

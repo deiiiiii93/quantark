@@ -15,6 +15,7 @@ from .mc import (
     AmericanOptionMCEngine,
     SnowballMCEngine,
     DigitalOptionMCEngine,
+    BarrierOptionMCEngine,
 )
 from .pde import (
     BasePDESolver,
@@ -41,6 +42,7 @@ __all__ = [
     "AmericanOptionMCEngine",
     "SnowballMCEngine",
     "DigitalOptionMCEngine",
+    "BarrierOptionMCEngine",
     # Unified PDE Engine
     "PDEEngine",
     # PDE Solvers
