@@ -10,7 +10,12 @@ from .analytical import (
     AsianOptionAnalyticalEngine,
 )
 from .pde_engine import PDEEngine
-from .mc import EuropeanMCEngine, AmericanOptionMCEngine, SnowballMCEngine
+from .mc import (
+    EuropeanMCEngine,
+    AmericanOptionMCEngine,
+    SnowballMCEngine,
+    DigitalOptionMCEngine,
+)
 from .pde import (
     BasePDESolver,
     EuropeanPDESolver,
@@ -35,6 +40,7 @@ __all__ = [
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
     "SnowballMCEngine",
+    "DigitalOptionMCEngine",
     # Unified PDE Engine
     "PDEEngine",
     # PDE Solvers
