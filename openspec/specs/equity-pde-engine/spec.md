@@ -2,7 +2,6 @@
 
 ## Purpose
 Provides a unified PDEEngine interface that automatically dispatches pricing requests to product-specific PDE solvers (European, American, Barrier, DoubleBarrier, OneTouch, DoubleOneTouch) based on product type. This enables seamless integration with GreeksCalculator for numerical Greeks calculation via finite difference methods, following the same API pattern as analytical engines.
-
 ## Requirements
 ### Requirement: Unified PDE Engine Interface
 The system SHALL provide a unified `PDEEngine` class that implements the `BaseEngine` interface and automatically dispatches pricing requests to product-specific PDE solvers based on the product type.
@@ -117,3 +116,26 @@ The system SHALL produce prices via `PDEEngine.price()` that are numerically con
 #### Scenario: Barrier option price consistency
 - **WHEN** a `BarrierOption` is priced using `PDEEngine` and directly via `BarrierPDESolver` with identical parameters
 - **THEN** the prices agree within numerical tolerance (1e-6 relative error)
+
+### Requirement: Feature-Aware Default PDE Grids
+When `PDEEngine`/PDE solvers are used with default mesh settings, the system SHALL choose spatial and temporal grids based on product features to improve numerical stability for barrier products.
+
+#### Scenario: Discrete barrier uses event-aligned time grid by default
+- **WHEN** a discretely monitored `BarrierOption` with observation times is priced using `PDEEngine` with default `PDEParams`
+- **THEN** the PDE solver time grid includes all observation times
+- **AND** the solver uses an event-aligned grid with approximately `4 × days per interval` resolution between observation dates
+
+#### Scenario: Barrier products use adaptive log-space grid by default
+- **WHEN** a barrier product (single or double barrier / one-touch) is priced using `PDEEngine` with default `PDEParams`
+- **THEN** the PDE solver uses an adaptive log-space grid concentrated at barriers (and strike when applicable)
+- **AND** barrier levels are grid nodes
+
+#### Scenario: Default meshes apply event-time Rannacher smoothing
+- **WHEN** a discretely monitored barrier product is priced using `PDEEngine` with default `PDEParams`
+- **THEN** the PDE solver applies Rannacher smoothing near maturity
+- **AND** applies Rannacher smoothing after observation event times
+
+#### Scenario: Custom mesh configuration bypasses auto grids
+- **WHEN** a user supplies custom mesh configuration (e.g., explicit `grid_size` / `time_steps` / `time_grid_type`) or sets `auto_grid=False`
+- **THEN** the PDE solver uses the user-provided mesh settings without overriding them
+

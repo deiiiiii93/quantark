@@ -16,6 +16,8 @@ from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.param import PDEParams
 from priceenv import PricingEnvironment
 from util.exceptions import PricingError, NumericalError
+from util.numerical import is_close
+from util.enum.option_enums import ExerciseType, ObservationType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid
@@ -24,31 +26,31 @@ from .spatial_grid import SpatialGrid
 class BasePDESolver(BaseEngine):
     """
     Abstract base class for PDE-based option pricing.
-    
+
     Solves the Black-Scholes PDE using finite difference methods:
         dV/dt + (r-q)S*dV/dS + 0.5*sigma^2*S^2*d2V/dS^2 - r*V = 0
-    
+
     In log-price space (x = ln(S)):
         dV/dt + (r-q-0.5*sigma^2)*dV/dx + 0.5*sigma^2*d2V/dx^2 - r*V = 0
-    
+
     The PDE is solved backward in time from maturity to valuation date.
-    
+
     Subclasses must implement:
         - set_terminal_condition(): Define payoff at maturity
         - set_boundary_conditions(): Define behavior at spatial boundaries
         - get_critical_points(): Return prices for grid concentration
     """
-    
+
     def __init__(self, params: Optional[PDEParams] = None):
         """
         Initialize the PDE solver.
-        
+
         Args:
             params: PDE engine configuration parameters
         """
         super().__init__(params if params is not None else PDEParams())
         self._matrix_cache: Dict[Tuple[float, float], Tuple] = {}
-    
+
     @abstractmethod
     def set_terminal_condition(
         self,
@@ -56,13 +58,13 @@ class BasePDESolver(BaseEngine):
         x_vec: np.ndarray,
         s_vec: np.ndarray,
         product: BaseEquityProduct,
-        pricing_env: PricingEnvironment
+        pricing_env: PricingEnvironment,
     ) -> None:
         """
         Set the terminal condition (payoff at maturity).
-        
+
         Modifies grid[:, -1] in place.
-        
+
         Args:
             grid: Solution grid [num_x, num_t]
             x_vec: Log-price grid points
@@ -71,7 +73,7 @@ class BasePDESolver(BaseEngine):
             pricing_env: Pricing environment
         """
         pass
-    
+
     @abstractmethod
     def set_boundary_conditions(
         self,
@@ -81,13 +83,13 @@ class BasePDESolver(BaseEngine):
         t_idx: int,
         tau: float,
         product: BaseEquityProduct,
-        pricing_env: PricingEnvironment
+        pricing_env: PricingEnvironment,
     ) -> None:
         """
         Set boundary conditions at the spatial edges.
-        
+
         Modifies grid[0, t_idx] and grid[-1, t_idx] in place.
-        
+
         Args:
             grid: Solution grid [num_x, num_t]
             x_vec: Log-price grid points
@@ -98,156 +100,143 @@ class BasePDESolver(BaseEngine):
             pricing_env: Pricing environment
         """
         pass
-    
+
     def get_critical_points(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> List[float]:
         """
         Get critical prices for grid concentration.
-        
+
         Override this method to specify strikes, barriers, etc.
         Default returns strike if available.
-        
+
         Args:
             product: The option product
             pricing_env: Pricing environment
-            
+
         Returns:
             List of critical prices
         """
         points = []
-        if hasattr(product, 'strike') and product.strike > 0:
+        if hasattr(product, "strike") and product.strike > 0:
             points.append(product.strike)
         return points
-    
+
     def price(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         """
         Price the option using PDE method.
-        
+
         Args:
             product: The option product
             pricing_env: Pricing environment
-            
+
         Returns:
             Option price
         """
         # Extract market parameters
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
-        
+
         if tau <= 0:
             # Option has expired, return intrinsic value
             return self._calculate_intrinsic(product, spot)
-        
-        strike = getattr(product, 'strike', spot)
+
+        strike = getattr(product, "strike", spot)
         r = pricing_env.get_rate(tau)
         q = pricing_env.get_div_yield(tau)
         sigma = pricing_env.get_vol(strike, tau)
-        
+
         # Build grids
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
             product, pricing_env, spot, sigma, tau, r, q
         )
-        
+
         num_x = len(x_vec)
         num_t = len(t_vec)
-        
+
         # Initialize solution grid
         grid = np.zeros((num_x, num_t))
-        
+
         # Set terminal condition
         self.set_terminal_condition(grid, x_vec, s_vec, product, pricing_env)
-        
+
         # Calculate finite difference coefficients
-        dx = dx_vec[0] if len(np.unique(np.round(dx_vec, 10))) == 1 else None
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
-        
+
         # Build spatial operator matrix
         A = self._build_operator_matrix(l, c, u, num_x)
-        
+
         # Time stepping (backward in time)
         self._time_stepping(
-            grid, A, x_vec, s_vec, t_vec, dt_vec,
-            product, pricing_env, r, q, sigma, tau
+            grid, A, x_vec, s_vec, t_vec, dt_vec, product, pricing_env, r, q, sigma, tau
         )
-        
+
         # Interpolate price at current spot
         spot_log = np.log(spot)
         price = self._interpolate_price(grid[:, 0], x_vec, spot_log)
-        
+
         return price
-    
+
     def calculate_greeks(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Dict[str, float]:
         """
         Calculate Greeks using finite differences on the PDE solution.
-        
+
         For delta and gamma, uses the solution surface directly.
         For other Greeks, uses bump-and-reprice.
-        
+
         Args:
             product: The option product
             pricing_env: Pricing environment
-            
+
         Returns:
             Dictionary of Greeks
         """
         # Get base price and solution surface
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
-        
+
         if tau <= 0:
             intrinsic = self._calculate_intrinsic(product, spot)
             return {
                 "price": intrinsic,
                 "delta": self._intrinsic_delta(product, spot),
-                "gamma": 0.0
+                "gamma": 0.0,
             }
-        
-        strike = getattr(product, 'strike', spot)
+
+        strike = getattr(product, "strike", spot)
         r = pricing_env.get_rate(tau)
         q = pricing_env.get_div_yield(tau)
         sigma = pricing_env.get_vol(strike, tau)
-        
+
         # Build grids and solve
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
             product, pricing_env, spot, sigma, tau, r, q
         )
-        
+
         num_x = len(x_vec)
         num_t = len(t_vec)
-        
+
         grid = np.zeros((num_x, num_t))
         self.set_terminal_condition(grid, x_vec, s_vec, product, pricing_env)
-        
+
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)
-        
+
         self._time_stepping(
-            grid, A, x_vec, s_vec, t_vec, dt_vec,
-            product, pricing_env, r, q, sigma, tau
+            grid, A, x_vec, s_vec, t_vec, dt_vec, product, pricing_env, r, q, sigma, tau
         )
-        
+
         # Calculate Greeks from solution surface
         spot_log = np.log(spot)
         price = self._interpolate_price(grid[:, 0], x_vec, spot_log)
         delta, gamma = self._calculate_delta_gamma(grid[:, 0], x_vec, spot_log, spot)
-        
-        return {
-            "price": price,
-            "delta": delta,
-            "gamma": gamma
-        }
-    
+
+        return {"price": price, "delta": delta, "gamma": gamma}
+
     def _build_grids(
         self,
         product: BaseEquityProduct,
@@ -256,163 +245,322 @@ class BasePDESolver(BaseEngine):
         sigma: float,
         tau: float,
         r: float,
-        q: float
+        q: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Build spatial and temporal grids.
-        
+
         Returns:
             Tuple of (x_vec, s_vec, dx_vec, t_vec, dt_vec)
         """
         params: PDEParams = self.params
-        
+        default_mesh = PDEParams(auto_grid=False)
+        apply_auto = params.auto_grid and (
+            params.grid_size == default_mesh.grid_size
+            and params.time_steps == default_mesh.time_steps
+            and params.adaptive_grid == default_mesh.adaptive_grid
+            and params.time_grid_type == default_mesh.time_grid_type
+            and params.s_min == default_mesh.s_min
+            and params.s_max == default_mesh.s_max
+        )
+
+        barriers = self._get_barriers(product)
+        has_barriers = len(barriers) > 0
+        exercise_type = getattr(product, "exercise_type", None)
+        is_early_exercise = exercise_type == ExerciseType.AMERICAN
+        observation_type = getattr(product, "observation_type", None)
+        is_discrete_observation = observation_type == ObservationType.DISCRETE
+
         # Determine spatial bounds
         if params.s_min > 0 and params.s_max > 0:
             s_min, s_max = params.s_min, params.s_max
         else:
-            strike = getattr(product, 'strike', spot)
-            barriers = self._get_barriers(product)
+            strike = getattr(product, "strike", spot)
             s_min, s_max = SpatialGrid.calculate_auto_bounds(
-                spot, sigma, tau, r, q,
-                strike=strike,
-                barriers=barriers
+                spot, sigma, tau, r, q, strike=strike, barriers=barriers
             )
-        
+
         # Get critical points for grid concentration
         critical_points = self.get_critical_points(product, pricing_env)
-        
+        if apply_auto:
+            if params.include_spot_in_critical_points and spot > 0:
+                critical_points.append(spot)
+            for b in barriers:
+                if b is not None and b > 0:
+                    critical_points.append(b)
+
+        # Determine effective spatial grid settings
+        effective_use_adaptive = params.adaptive_grid
+        effective_grid_size = params.grid_size
+        if apply_auto and has_barriers:
+            effective_use_adaptive = True
+
+        if apply_auto and effective_use_adaptive and critical_points:
+            # Heuristic: ensure target log-spacing near segments adjacent to key levels.
+            bounded = sorted({p for p in critical_points if p is not None and s_min < p < s_max})
+            if bounded:
+                key_levels = set(bounded)
+                if hasattr(product, "strike") and getattr(product, "strike", 0.0) > 0:
+                    key_levels.add(float(getattr(product, "strike")))
+                if spot > 0:
+                    key_levels.add(float(spot))
+
+                bounds = [s_min] + bounded + [s_max]
+                x_bounds = np.log(np.array(bounds))
+                total_len = float(x_bounds[-1] - x_bounds[0])
+                if total_len > 0:
+                    seg_lens = np.diff(x_bounds)
+                    recommended = effective_grid_size
+                    for i, L in enumerate(seg_lens):
+                        if L <= 0:
+                            continue
+                        left_s = bounds[i]
+                        right_s = bounds[i + 1]
+                        if left_s in key_levels or right_s in key_levels:
+                            required = max(3, int(np.ceil(float(L) / float(params.log_dx_target))) + 1)
+                            if required > 3:
+                                candidate = int(np.ceil(required * total_len / float(L) * 1.05))
+                                recommended = max(recommended, candidate)
+                    effective_grid_size = min(max(effective_grid_size, recommended), params.max_grid_size)
+
         # Build spatial grid
         x_vec, s_vec, dx_vec = SpatialGrid.build(
-            s_min, s_max, params.grid_size,
+            s_min,
+            s_max,
+            effective_grid_size,
             critical_points=critical_points,
-            use_adaptive=params.adaptive_grid
+            use_adaptive=effective_use_adaptive,
         )
-        
+
         # Get event times for time grid
         event_times = self._get_event_times(product, tau)
-        
+
         # Build time grid
-        t_vec, dt_vec = TimeGrid.build(
-            tau, params.time_steps,
-            method=params.time_grid_type,
-            event_times=event_times,
-            grade_exponent=params.grade_exponent
-        )
-        
+        if apply_auto and event_times and (has_barriers or is_discrete_observation):
+            # Event-aligned grid: resolve each observation interval in calendar days.
+            t_vec, dt_vec = TimeGrid.build(
+                tau,
+                params.time_steps,
+                method="event_aligned",
+                event_times=event_times,
+                grade_exponent=params.grade_exponent,
+                steps_per_day=params.event_steps_per_day,
+                day_count=params.bus_days_in_year,
+                min_steps_per_interval=params.event_min_steps_per_interval,
+                max_steps_total=params.max_time_steps,
+            )
+        elif apply_auto:
+            days_to_maturity = max(1, int(round(tau * float(params.bus_days_in_year))))
+            target_steps = days_to_maturity
+            if has_barriers and observation_type == ObservationType.CONTINUOUS:
+                target_steps = int(round(params.event_steps_per_day * float(days_to_maturity)))
+            elif is_early_exercise:
+                target_steps = int(round(1.5 * float(days_to_maturity)))
+
+            effective_time_steps = min(
+                max(params.time_steps, target_steps),
+                params.max_time_steps,
+            )
+
+            t_vec, dt_vec = TimeGrid.build(
+                tau,
+                effective_time_steps,
+                method="uniform",
+                event_times=event_times,
+                grade_exponent=params.grade_exponent,
+            )
+        else:
+            t_vec, dt_vec = TimeGrid.build(
+                tau,
+                params.time_steps,
+                method=params.time_grid_type,
+                event_times=event_times,
+                grade_exponent=params.grade_exponent,
+            )
+
         return x_vec, s_vec, dx_vec, t_vec, dt_vec
-    
+
     def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
         """Extract barrier levels from product if any."""
         barriers = []
-        for attr in ('barrier', 'upper_barrier', 'lower_barrier'):
+        for attr in ("barrier", "upper_barrier", "lower_barrier"):
             if hasattr(product, attr):
                 val = getattr(product, attr)
                 if val is not None and val > 0:
                     barriers.append(val)
         return barriers
-    
+
     def _get_event_times(
-        self,
-        product: BaseEquityProduct,
-        tau: float
+        self, product: BaseEquityProduct, tau: float
     ) -> Optional[List[float]]:
         """Extract observation times from product if any."""
-        for attr in ('observation_dates', 'obs_times', 'event_times'):
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None and getattr(schedule, "times", None):
+            times = schedule.times
+            if times is not None and len(times) > 0:
+                return [t for t in times if 0 < t < tau]
+
+        for attr in ("observation_dates", "obs_times", "event_times"):
             if hasattr(product, attr):
                 times = getattr(product, attr)
                 if times is not None and len(times) > 0:
                     return [t for t in times if 0 < t < tau]
         return None
-    
+
     def _calculate_coefficients(
-        self,
-        r: float,
-        q: float,
-        sigma: float,
-        dx_vec: np.ndarray,
-        num_x: int
+        self, r: float, q: float, sigma: float, dx_vec: np.ndarray, num_x: int
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Calculate finite difference coefficients for the log-price PDE.
-        
+
         The PDE in log-price space:
             dV/dt + mu*dV/dx + 0.5*sigma^2*d2V/dx^2 - r*V = 0
-        
+
         where mu = r - q - 0.5*sigma^2
-        
-        Using central differences:
+
+        For uniform grids, uses standard central differences:
             dV/dx ≈ (V[i+1] - V[i-1]) / (2*dx)
             d2V/dx^2 ≈ (V[i+1] - 2*V[i] + V[i-1]) / dx^2
-        
+
+        For non-uniform grids with h- = x[i] - x[i-1] and h+ = x[i+1] - x[i]:
+            dV/dx ≈ (h-^2*V[i+1] - h+^2*V[i-1] + (h+^2 - h-^2)*V[i]) / (h-*h+*(h- + h+))
+            d2V/dx^2 ≈ 2*V[i-1]/(h-*(h- + h+)) - 2*V[i]/(h-*h+) + 2*V[i+1]/(h+*(h- + h+))
+
         Returns coefficients (l, c, u) for the tridiagonal system:
             l[i] * V[i-1] + c[i] * V[i] + u[i] * V[i+1] = dV/dt
-        
+
         Args:
             r: Risk-free rate
             q: Dividend yield
             sigma: Volatility
-            dx_vec: Grid spacings
+            dx_vec: Grid spacings (length num_x - 1)
             num_x: Number of spatial points
-            
+
         Returns:
-            Tuple of (l, c, u) coefficient arrays
+            Tuple of (l, c, u) coefficient arrays, each of length num_x
         """
-        # For uniform grid, use average spacing
-        dx = np.mean(dx_vec)
-        
         # Drift and diffusion terms
         mu = r - q - 0.5 * sigma * sigma
-        diffusion = 0.5 * sigma * sigma
-        
-        # Coefficients
-        drift_term = mu / (2.0 * dx)
-        diff_term = diffusion / (dx * dx)
-        
-        l = np.full(num_x, diff_term - drift_term)  # Lower diagonal
-        c = np.full(num_x, -2.0 * diff_term - r)    # Main diagonal
-        u = np.full(num_x, diff_term + drift_term)  # Upper diagonal
-        
+        D = 0.5 * sigma * sigma  # Diffusion coefficient
+
+        # Check if grid is uniform (all spacings equal within tolerance)
+        tolerance = 1e-10
+        is_uniform = (np.max(dx_vec) - np.min(dx_vec)) < tolerance
+
+        if is_uniform:
+            # Optimized path for uniform grids
+            dx = dx_vec[0]
+
+            drift_term = mu / (2.0 * dx)
+            diff_term = D / (dx * dx)
+
+            l = np.full(num_x, diff_term - drift_term)  # Lower diagonal
+            c = np.full(num_x, -2.0 * diff_term - r)  # Main diagonal
+            u = np.full(num_x, diff_term + drift_term)  # Upper diagonal
+        else:
+            # Non-uniform grid: compute position-dependent coefficients
+            # dx_vec has length (num_x - 1), with dx_vec[i] = x[i+1] - x[i]
+            # For interior point i (1 to num_x-2):
+            #   h_minus = x[i] - x[i-1] = dx_vec[i-1]
+            #   h_plus = x[i+1] - x[i] = dx_vec[i]
+
+            # Interior points: indices 1 to num_x-2 (num_x-2 points)
+            # h_minus corresponds to dx_vec[0:num_x-2]
+            # h_plus corresponds to dx_vec[1:num_x-1]
+            h_minus = dx_vec[:-1]  # shape (num_x - 2,)
+            h_plus = dx_vec[1:]  # shape (num_x - 2,)
+            h_sum = h_minus + h_plus
+            h_prod = h_minus * h_plus
+
+            # Diffusion term coefficients for second derivative:
+            # d2V/dx2 ≈ 2*V[i-1]/(h-*(h-+h+)) - 2*V[i]/(h-*h+) + 2*V[i+1]/(h+*(h-+h+))
+            l_diff = 2.0 * D / (h_minus * h_sum)
+            c_diff = -2.0 * D / h_prod
+            u_diff = 2.0 * D / (h_plus * h_sum)
+
+            # Drift term coefficients for first derivative:
+            # dV/dx ≈ (h-^2*V[i+1] - h+^2*V[i-1] + (h+^2 - h-^2)*V[i]) / (h-*h+*(h-+h+))
+            # Rewriting: l_drift = -h+^2 / (h-*h+*(h-+h+)) = -h+ / (h-*(h-+h+))
+            #            c_drift = (h+^2 - h-^2) / (h-*h+*(h-+h+))
+            #            u_drift = h-^2 / (h-*h+*(h-+h+)) = h- / (h+*(h-+h+))
+            l_drift = -mu * h_plus / (h_minus * h_sum)
+            c_drift = mu * (h_plus - h_minus) / h_prod
+            u_drift = mu * h_minus / (h_plus * h_sum)
+
+            # Combined interior coefficients
+            l_interior = l_diff + l_drift
+            c_interior = c_diff + c_drift - r
+            u_interior = u_diff + u_drift
+
+            # Build full arrays with boundary padding
+            # Boundaries (index 0 and num_x-1) use placeholder values
+            # (they are overwritten by boundary conditions)
+            l = np.zeros(num_x)
+            c = np.zeros(num_x)
+            u = np.zeros(num_x)
+
+            l[1:-1] = l_interior
+            c[1:-1] = c_interior
+            u[1:-1] = u_interior
+
+            # Boundary values (will be replaced by boundary conditions)
+            # Use nearest interior value as placeholder
+            l[0] = l[1]
+            c[0] = c[1]
+            u[0] = u[1]
+            l[-1] = l[-2]
+            c[-1] = c[-2]
+            u[-1] = u[-2]
+
         return l, c, u
-    
+
     def _build_operator_matrix(
-        self,
-        l: np.ndarray,
-        c: np.ndarray,
-        u: np.ndarray,
-        num_x: int
+        self, l: np.ndarray, c: np.ndarray, u: np.ndarray, num_x: int
     ) -> sp.csc_matrix:
         """
         Build the sparse spatial operator matrix A.
-        
+
         The interior points use the tridiagonal stencil.
         Boundary rows are set to identity (boundary conditions applied separately).
-        
+
+        For interior point i (1 <= i <= num_x-2), the discretized equation is:
+            l[i] * V[i-1] + c[i] * V[i] + u[i] * V[i+1] = dV/dt
+
+        The matrix operates on interior values V[1:num_x-1], so:
+        - Row k (0-indexed) corresponds to interior point i = k + 1
+        - Lower diagonal (offset -1): coefficient l[k+1] connects row k to row k-1
+        - Main diagonal: coefficient c[k+1] for row k
+        - Upper diagonal (offset +1): coefficient u[k+1] connects row k to row k+1
+
         Args:
-            l: Lower diagonal coefficients
-            c: Center diagonal coefficients
-            u: Upper diagonal coefficients
+            l: Lower diagonal coefficients, length num_x
+            c: Center diagonal coefficients, length num_x
+            u: Upper diagonal coefficients, length num_x
             num_x: Number of spatial points
-            
+
         Returns:
-            Sparse CSC matrix
+            Sparse CSC matrix of shape (num_x-2, num_x-2)
         """
         # Build tridiagonal matrix for interior points
+        # Lower diagonal: connects rows 1..num_x-3 to rows 0..num_x-4
+        #                 needs coefficients l[2], l[3], ..., l[num_x-2]
+        # Main diagonal:  coefficients for rows 0..num_x-3
+        #                 needs coefficients c[1], c[2], ..., c[num_x-2]
+        # Upper diagonal: connects rows 0..num_x-4 to rows 1..num_x-3
+        #                 needs coefficients u[1], u[2], ..., u[num_x-3]
         diagonals = [
-            l[2:],      # Lower diagonal (offset -1)
-            c[1:-1],    # Main diagonal
-            u[:-2]      # Upper diagonal (offset +1)
+            l[2:-1],  # Lower diagonal (offset -1): l[2] to l[num_x-2]
+            c[1:-1],  # Main diagonal: c[1] to c[num_x-2]
+            u[1:-2],  # Upper diagonal (offset +1): u[1] to u[num_x-3]
         ]
-        
+
         # Create sparse matrix
         A = sp.diags(
-            diagonals,
-            offsets=[-1, 0, 1],
-            shape=(num_x - 2, num_x - 2),
-            format='csc'
+            diagonals, offsets=[-1, 0, 1], shape=(num_x - 2, num_x - 2), format="csc"
         )
-        
+
         return A
-    
+
     def _time_stepping(
         self,
         grid: np.ndarray,
@@ -426,16 +574,16 @@ class BasePDESolver(BaseEngine):
         r: float,
         q: float,
         sigma: float,
-        tau: float
+        tau: float,
     ) -> None:
         """
         Perform backward time stepping to solve the PDE.
-        
+
         Uses Crank-Nicolson scheme (theta = 0.5) with optional
         Rannacher smoothing (theta = 1.0 for first few steps).
-        
+
         Scheme: (I - theta*dt*A) * V^n = (I + (1-theta)*dt*A) * V^{n+1}
-        
+
         Args:
             grid: Solution grid, modified in place
             A: Spatial operator matrix
@@ -453,72 +601,96 @@ class BasePDESolver(BaseEngine):
         params: PDEParams = self.params
         num_t = len(t_vec)
         num_x = len(x_vec)
-        
+
+        rannacher_event_js = set()
+        default_mesh = PDEParams(auto_grid=False)
+        apply_auto = params.auto_grid and (
+            params.grid_size == default_mesh.grid_size
+            and params.time_steps == default_mesh.time_steps
+            and params.adaptive_grid == default_mesh.adaptive_grid
+            and params.time_grid_type == default_mesh.time_grid_type
+            and params.s_min == default_mesh.s_min
+            and params.s_max == default_mesh.s_max
+        )
+        if (
+            params.use_rannacher
+            and apply_auto
+            and params.rannacher_at_events
+            and params.rannacher_steps > 0
+        ):
+            event_times = self._get_event_times(product, tau)
+            if event_times:
+                for event_t in event_times:
+                    idx = int(np.argmin(np.abs(t_vec - event_t)))
+                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(event_t)):
+                        for k in range(params.rannacher_steps):
+                            j_idx = idx - 1 - k
+                            if j_idx >= 0:
+                                rannacher_event_js.add(j_idx)
+
         # Identity matrix for interior points
-        I = sp.eye(num_x - 2, format='csc')
-        
+        I = sp.eye(num_x - 2, format="csc")
+
         # Clear matrix cache for new solve
         self._matrix_cache.clear()
-        
+
         # Time step backward from maturity
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
             current_tau = tau - t_vec[j]  # Time remaining to maturity
-            
+
             # Determine theta (Rannacher smoothing at start)
             steps_from_end = num_t - 1 - j
-            if params.use_rannacher and steps_from_end < params.rannacher_steps:
+            if params.use_rannacher and (
+                steps_from_end < params.rannacher_steps or j in rannacher_event_js
+            ):
                 theta = 1.0  # Backward Euler for smoothing
             else:
                 theta = params.theta
-            
+
             # Get or compute matrices for this (dt, theta) combination
             M1, M2_lu = self._get_matrices(I, A, dt, theta)
-            
+
             # Set boundary conditions for current time step
             self.set_boundary_conditions(
                 grid, x_vec, s_vec, j, current_tau, product, pricing_env
             )
-            
+
             # Extract interior values at next time step
             V_next = grid[1:-1, j + 1]
-            
+
             # Right-hand side: (I + (1-theta)*dt*A) * V^{n+1}
             rhs = M1 @ V_next
-            
+
             # Add boundary contributions
             # These come from the first and last rows of the full system
             # For simplicity, we assume Dirichlet BCs are already set
-            
+
             # Solve: (I - theta*dt*A) * V^n = rhs
             V_curr = M2_lu.solve(rhs)
-            
+
             # Store interior solution
             grid[1:-1, j] = V_curr
-            
+
             # Apply any product-specific modifications (e.g., early exercise)
             self._apply_step_modifications(
                 grid, x_vec, s_vec, j, current_tau, product, pricing_env
             )
-    
+
     def _get_matrices(
-        self,
-        I: sp.csc_matrix,
-        A: sp.csc_matrix,
-        dt: float,
-        theta: float
+        self, I: sp.csc_matrix, A: sp.csc_matrix, dt: float, theta: float
     ) -> Tuple[sp.csc_matrix, spla.SuperLU]:
         """
         Get or compute matrices for time stepping.
-        
+
         Caches LU factorizations for efficiency when dt and theta repeat.
-        
+
         Args:
             I: Identity matrix
             A: Spatial operator matrix
             dt: Time step size
             theta: Scheme parameter (0.5 = CN, 1.0 = BE)
-            
+
         Returns:
             Tuple of (M1, M2_lu) where:
                 M1 = I + (1-theta)*dt*A (for RHS)
@@ -526,23 +698,23 @@ class BasePDESolver(BaseEngine):
         """
         # Round dt to avoid floating point comparison issues
         key = (round(dt, 12), round(theta, 6))
-        
+
         if key in self._matrix_cache:
             return self._matrix_cache[key]
-        
+
         # Build matrices
         M1 = I + (1.0 - theta) * dt * A
         M2 = I - theta * dt * A
-        
+
         # LU factorization of M2
         try:
             M2_lu = spla.splu(M2)
         except Exception as e:
             raise NumericalError(f"Failed to factorize matrix: {e}")
-        
+
         self._matrix_cache[key] = (M1, M2_lu)
         return M1, M2_lu
-    
+
     def _apply_step_modifications(
         self,
         grid: np.ndarray,
@@ -551,14 +723,14 @@ class BasePDESolver(BaseEngine):
         t_idx: int,
         tau: float,
         product: BaseEquityProduct,
-        pricing_env: PricingEnvironment
+        pricing_env: PricingEnvironment,
     ) -> None:
         """
         Apply product-specific modifications after each time step.
-        
+
         Override this method for American options (early exercise)
         or barrier options (barrier checks).
-        
+
         Args:
             grid: Solution grid
             x_vec: Log-price grid points
@@ -569,108 +741,92 @@ class BasePDESolver(BaseEngine):
             pricing_env: Pricing environment
         """
         pass  # Default: no modifications
-    
+
     def _interpolate_price(
-        self,
-        v_vec: np.ndarray,
-        x_vec: np.ndarray,
-        x_target: float
+        self, v_vec: np.ndarray, x_vec: np.ndarray, x_target: float
     ) -> float:
         """
         Interpolate option value at target log-price.
-        
+
         Uses linear interpolation between nearest grid points.
-        
+
         Args:
             v_vec: Option values at grid points
             x_vec: Log-price grid points
             x_target: Target log-price
-            
+
         Returns:
             Interpolated option value
         """
         return float(np.interp(x_target, x_vec, v_vec))
-    
+
     def _calculate_delta_gamma(
-        self,
-        v_vec: np.ndarray,
-        x_vec: np.ndarray,
-        x_target: float,
-        spot: float
+        self, v_vec: np.ndarray, x_vec: np.ndarray, x_target: float, spot: float
     ) -> Tuple[float, float]:
         """
         Calculate delta and gamma from the solution vector.
-        
+
         In log-space:
             dV/dS = (1/S) * dV/dx
             d2V/dS2 = (1/S^2) * (d2V/dx^2 - dV/dx)
-        
+
         Args:
             v_vec: Option values at grid points
             x_vec: Log-price grid points
             x_target: Target log-price (ln(spot))
             spot: Current spot price
-            
+
         Returns:
             Tuple of (delta, gamma)
         """
         # Find nearest grid points
         idx = np.searchsorted(x_vec, x_target)
         idx = max(1, min(idx, len(x_vec) - 2))
-        
+
         # Local grid spacing
         dx_left = x_vec[idx] - x_vec[idx - 1]
         dx_right = x_vec[idx + 1] - x_vec[idx]
         dx_avg = (dx_left + dx_right) / 2.0
-        
+
         # Central differences for derivatives in log-space
         dv_dx = (v_vec[idx + 1] - v_vec[idx - 1]) / (dx_left + dx_right)
-        d2v_dx2 = (v_vec[idx + 1] - 2 * v_vec[idx] + v_vec[idx - 1]) / (dx_avg ** 2)
-        
+        d2v_dx2 = (v_vec[idx + 1] - 2 * v_vec[idx] + v_vec[idx - 1]) / (dx_avg**2)
+
         # Convert to price-space derivatives
         delta = dv_dx / spot
-        gamma = (d2v_dx2 - dv_dx) / (spot ** 2)
-        
+        gamma = (d2v_dx2 - dv_dx) / (spot**2)
+
         return delta, gamma
-    
-    def _calculate_intrinsic(
-        self,
-        product: BaseEquityProduct,
-        spot: float
-    ) -> float:
+
+    def _calculate_intrinsic(self, product: BaseEquityProduct, spot: float) -> float:
         """
         Calculate intrinsic value of the option.
-        
+
         Args:
             product: The option product
             spot: Current spot price
-            
+
         Returns:
             Intrinsic value
         """
-        if hasattr(product, 'get_payoff'):
+        if hasattr(product, "get_payoff"):
             return product.get_payoff(spot)
         return 0.0
-    
-    def _intrinsic_delta(
-        self,
-        product: BaseEquityProduct,
-        spot: float
-    ) -> float:
+
+    def _intrinsic_delta(self, product: BaseEquityProduct, spot: float) -> float:
         """
         Calculate delta of intrinsic value.
-        
+
         Args:
             product: The option product
             spot: Current spot price
-            
+
         Returns:
             Intrinsic delta
         """
-        if hasattr(product, 'is_call') and hasattr(product, 'strike'):
+        if hasattr(product, "is_call") and hasattr(product, "strike"):
             if product.is_call():
                 return 1.0 if spot > product.strike else 0.0
             else:
                 return -1.0 if spot < product.strike else 0.0
         return 0.0
-

@@ -103,6 +103,16 @@ class TestPDEParams:
         assert params.grid_size == 400
         assert params.time_steps == 200
         assert params.adaptive_grid == False
+        assert params.auto_grid == True
+        assert params.time_grid_type == "uniform"
+        assert params.bus_days_in_year == 252
+        assert params.event_steps_per_day == 4
+        assert params.event_min_steps_per_interval == 10
+        assert params.max_time_steps == 5000
+        assert params.log_dx_target == 0.003
+        assert params.max_grid_size == 2000
+        assert params.include_spot_in_critical_points == True
+        assert params.rannacher_at_events == True
         assert params.theta == 0.5
         assert params.use_rannacher == True
         assert params.rannacher_steps == 1
@@ -141,6 +151,11 @@ class TestPDEParams:
         """Test that invalid time grid type raises error."""
         with pytest.raises(ValidationError):
             PDEParams(time_grid_type="invalid")
+
+    def test_event_aligned_time_grid_type_is_valid(self):
+        """Test that event_aligned time grid type is accepted."""
+        params = PDEParams(time_grid_type="event_aligned")
+        assert params.time_grid_type == "event_aligned"
 
 
 # ============================================================================
@@ -190,6 +205,25 @@ class TestTimeGrid:
         # Check that event times are in the grid
         for event in event_times:
             assert np.any(np.isclose(t_vec, event, atol=1e-10))
+
+    def test_event_aligned_grid(self):
+        """Test event-aligned time grid with day-based resolution."""
+        tau = 1.0
+        event_times = [0.25, 0.5, 0.75]
+
+        t_vec, dt_vec = TimeGrid.build_event_aligned(
+            tau,
+            event_times,
+            steps_per_day=4,
+            day_count=252,
+            min_steps_per_interval=10,
+            max_steps_total=5000,
+        )
+
+        for event in event_times:
+            assert np.any(np.isclose(t_vec, event, atol=1e-10))
+        assert np.isclose(t_vec[0], 0.0)
+        assert np.isclose(t_vec[-1], tau)
 
     def test_invalid_tau(self):
         """Test that invalid tau raises error."""
@@ -482,20 +516,95 @@ class TestBarrierPDESolver:
             valuation_date=datetime.now(),
         )
 
-        knockout = BarrierOption(
+        solver = BarrierPDESolver(pde_params)
+
+        knockout_hit = BarrierOption(
             strike=100.0,
             option_type=OptionType.CALL,
             barrier=100.0,  # At spot
             barrier_type=BarrierType.UP_OUT,
             maturity=0.5,
             rebate=5.0,
+            pay_at_hit=True,
+        )
+        price_hit = solver.price(knockout_hit, pricing_env)
+        assert np.isclose(price_hit, 5.0)
+
+        knockout_expiry = BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=100.0,  # At spot
+            barrier_type=BarrierType.UP_OUT,
+            maturity=0.5,
+            rebate=5.0,
+            pay_at_hit=False,
+        )
+        price_expiry = solver.price(knockout_expiry, pricing_env)
+        expected = 5.0 * np.exp(-pricing_env.get_rate(0.5) * 0.5)
+        assert np.isclose(price_expiry, expected)
+
+    def test_discrete_schedule_settlement_time_discounting(self, pde_params):
+        """Test discrete monitoring discounts to observation settlement time (not maturity)."""
+        pricing_env = PricingEnvironment(
+            spot_quote=SpotQuote(spot=100.0),
+            vol_surface=FlatVolSurface(volatility=0.01),
+            rate_curve=FlatRateCurve(rate=0.20),
+            div_yield=ContinuousDividendYield(div_yield=0.0),
+            valuation_date=datetime.now(),
+        )
+
+        option = BarrierOption(
+            strike=1_000_000.0,  # Negligible vanilla value
+            option_type=OptionType.CALL,
+            barrier=100.1,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=1.0,
+            rebate=5.0,
+            observation_type=ObservationType.DISCRETE,
+            observation_dates=[0.5],
         )
 
         solver = BarrierPDESolver(pde_params)
-        price = solver.price(knockout, pricing_env)
+        price = solver.price(option, pricing_env)
+        r = pricing_env.get_rate(1.0)
+        pv_hit = option.rebate * np.exp(-r * 0.5)
+        pv_expiry = option.rebate * np.exp(-r * 1.0)
+        assert abs(price - pv_hit) < abs(price - pv_expiry)
 
-        # Already knocked out, should get rebate
-        assert np.isclose(price, 5.0)
+    def test_discrete_without_maturity_observation_does_not_enforce_terminal_barrier(
+        self, pde_params
+    ):
+        """Test that discrete monitoring without maturity observation doesn't knock out at T."""
+        pricing_env = PricingEnvironment(
+            spot_quote=SpotQuote(spot=100.0),
+            vol_surface=FlatVolSurface(volatility=0.01),
+            rate_curve=FlatRateCurve(rate=0.01),
+            div_yield=ContinuousDividendYield(div_yield=0.20),
+            valuation_date=datetime.now(),
+        )
+
+        option = BarrierOption(
+            strike=90.0,
+            option_type=OptionType.PUT,
+            barrier=85.0,
+            barrier_type=BarrierType.DOWN_OUT,
+            maturity=1.0,
+            rebate=0.0,
+            observation_type=ObservationType.DISCRETE,
+            observation_dates=[0.5],  # No maturity observation
+        )
+
+        bs_engine = BlackScholesEngine()
+        vanilla_put = EuropeanVanillaOption(
+            strike=90.0,
+            option_type=OptionType.PUT,
+            maturity=1.0,
+        )
+        vanilla_price = bs_engine.price(vanilla_put, pricing_env)
+
+        solver = BarrierPDESolver(pde_params)
+        price = solver.price(option, pricing_env)
+        assert price == pytest.approx(vanilla_price, rel=0.10, abs=0.50)
 
 
 # ============================================================================

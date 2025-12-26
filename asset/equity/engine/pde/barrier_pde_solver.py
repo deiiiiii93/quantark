@@ -5,15 +5,18 @@ Implements the finite difference method for knock-in and knock-out
 barrier options with continuous or discrete monitoring.
 """
 
-from typing import Dict, Optional, List, Set
+from typing import Dict, List, Optional, Set
+
 import numpy as np
 
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option.barrier_option import BarrierOption
+from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
 from asset.equity.param import PDEParams
 from priceenv import PricingEnvironment
 from util.enum import ObservationType, ObservationAggregation
 from util.exceptions import PricingError
+from util.numerical import is_close, safe_divide
 
 from .base_pde_solver import BasePDESolver
 
@@ -47,10 +50,39 @@ class BarrierPDESolver(BasePDESolver):
         """
         super().__init__(params)
         self._observation_indices: Set[int] = set()
-        self._schedule_records: Dict[int, List] = {}
+        self._schedule_records: Dict[int, List[ResolvedObservationRecord]] = {}
         self._schedule_aggregation: ObservationAggregation = (
             ObservationAggregation.STOP_FIRST_HIT
         )
+        self._total_tau: float = 0.0
+        self._terminal_schedule_records: List[ResolvedObservationRecord] = []
+        self._has_terminal_observation: bool = False
+
+    @staticmethod
+    def _current_time(total_tau: float, tau_remaining: float) -> float:
+        return max(total_tau - tau_remaining, 0.0)
+
+    @staticmethod
+    def _df_between_times(
+        pricing_env: PricingEnvironment, start_time: float, end_time: float
+    ) -> float:
+        if end_time <= start_time:
+            return 1.0
+        df_end = pricing_env.get_discount_factor(end_time)
+        df_start = pricing_env.get_discount_factor(start_time)
+        return float(safe_divide(df_end, df_start, fallback=0.0))
+
+    def _cashflow_value_at_time(
+        self,
+        pricing_env: PricingEnvironment,
+        cashflow: float,
+        current_time: float,
+        settlement_time: Optional[float],
+    ) -> float:
+        if settlement_time is None or settlement_time <= current_time:
+            return float(cashflow)
+        df = self._df_between_times(pricing_env, current_time, settlement_time)
+        return float(cashflow) * df
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -86,8 +118,14 @@ class BarrierPDESolver(BasePDESolver):
         spot = pricing_env.spot
         if product.is_barrier_hit(spot):
             if product.is_knock_out:
-                # Already knocked out, return rebate
-                return product.rebate
+                maturity = product.get_maturity(pricing_env)
+                settlement_time = 0.0 if product.pay_at_hit else maturity
+                return self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=product.rebate,
+                    current_time=0.0,
+                    settlement_time=settlement_time,
+                )
             else:
                 # Knocked in, price as vanilla
                 return self._price_vanilla(product, pricing_env)
@@ -129,7 +167,7 @@ class BarrierPDESolver(BasePDESolver):
         )
 
         solver = EuropeanPDESolver(self.params)
-        return solver.price(vanilla, pricing_env)
+        return product.participation_rate * solver.price(vanilla, pricing_env)
 
     def _price_knock_out(
         self, product: BarrierOption, pricing_env: PricingEnvironment
@@ -166,6 +204,8 @@ class BarrierPDESolver(BasePDESolver):
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
             rebate=0.0,  # Zero rebate for decomposition
+            participation_rate=product.participation_rate,
+            pay_at_hit=product.pay_at_hit,
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,
@@ -197,20 +237,50 @@ class BarrierPDESolver(BasePDESolver):
         """
         K = product.strike
         barrier = product.barrier
+        participation = product.participation_rate
 
         # Calculate base payoff
         if product.is_call():
             payoff = np.maximum(s_vec - K, 0.0)
         else:
             payoff = np.maximum(K - s_vec, 0.0)
+        payoff = payoff * participation
 
-        # For knock-out, zero payoff where barrier is hit
-        if product.is_up_barrier:
-            # Up barrier: knockout at high prices
-            payoff[s_vec >= barrier] = product.rebate
-        else:
-            # Down barrier: knockout at low prices
-            payoff[s_vec <= barrier] = product.rebate
+        apply_terminal_barrier = product.observation_type != ObservationType.DISCRETE
+        apply_terminal_barrier = (
+            apply_terminal_barrier or self._has_terminal_observation
+        )
+
+        if apply_terminal_barrier:
+            if (
+                product.observation_type == ObservationType.DISCRETE
+                and self._terminal_schedule_records
+            ):
+                current_time = self._total_tau
+                for rec in self._terminal_schedule_records:
+                    rec_barrier = rec.barrier if rec.barrier is not None else barrier
+                    cashflow_value = self._cashflow_value_at_time(
+                        pricing_env=pricing_env,
+                        cashflow=rec.payoff,
+                        current_time=current_time,
+                        settlement_time=rec.settlement_time,
+                    )
+                    if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
+                        if product.is_up_barrier:
+                            payoff[s_vec >= rec_barrier] += cashflow_value
+                        else:
+                            payoff[s_vec <= rec_barrier] += cashflow_value
+                    else:
+                        if product.is_up_barrier:
+                            payoff[s_vec >= rec_barrier] = cashflow_value
+                        else:
+                            payoff[s_vec <= rec_barrier] = cashflow_value
+                        break
+            else:
+                if product.is_up_barrier:
+                    payoff[s_vec >= barrier] = product.rebate
+                else:
+                    payoff[s_vec <= barrier] = product.rebate
 
         grid[:, -1] = payoff
 
@@ -240,35 +310,49 @@ class BarrierPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         K = product.strike
-        rebate = product.rebate
+        total_tau = (
+            self._total_tau
+            if self._total_tau > 0
+            else product.get_maturity(pricing_env)
+        )
+        current_time = self._current_time(total_tau, tau)
+        df_to_maturity = self._df_between_times(pricing_env, current_time, total_tau)
 
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
         q = pricing_env.get_div_yield(tau) if tau > 0 else 0.0
-
-        df = np.exp(-r * tau) if tau > 0 else 1.0
         df_div = np.exp(-q * tau) if tau > 0 else 1.0
+        participation = product.participation_rate
 
-        # Discounted rebate (assuming rebate paid at expiry)
-        discounted_rebate = rebate * df
+        if product.observation_type == ObservationType.DISCRETE:
+            if product.is_call():
+                grid[0, t_idx] = 0.0
+                grid[-1, t_idx] = (
+                    max(s_vec[-1] * df_div - K * df_to_maturity, 0.0) * participation
+                )
+            else:
+                grid[0, t_idx] = K * df_to_maturity * participation
+                grid[-1, t_idx] = 0.0
+            return
+
+        settlement_time = current_time if product.pay_at_hit else total_tau
+        rebate_value = self._cashflow_value_at_time(
+            pricing_env=pricing_env,
+            cashflow=product.rebate,
+            current_time=current_time,
+            settlement_time=settlement_time,
+        )
 
         if product.is_up_barrier:
-            # Up barrier option
-            # Lower boundary: standard European-style
             if product.is_call():
                 grid[0, t_idx] = 0.0
             else:
-                grid[0, t_idx] = K * df
-
-            # Upper boundary: at/above barrier, value is rebate
-            grid[-1, t_idx] = discounted_rebate
+                grid[0, t_idx] = K * df_to_maturity * participation
+            grid[-1, t_idx] = rebate_value
         else:
-            # Down barrier option
-            # Lower boundary: at/below barrier, value is rebate
-            grid[0, t_idx] = discounted_rebate
-
-            # Upper boundary: standard European-style
+            grid[0, t_idx] = rebate_value
             if product.is_call():
-                grid[-1, t_idx] = max(s_vec[-1] * df_div - K * df, 0.0)
+                grid[-1, t_idx] = (
+                    max(s_vec[-1] * df_div - K * df_to_maturity, 0.0) * participation
+                )
             else:
                 grid[-1, t_idx] = 0.0
 
@@ -303,39 +387,52 @@ class BarrierPDESolver(BasePDESolver):
             if t_idx not in self._observation_indices:
                 return
 
+        total_tau = (
+            self._total_tau
+            if self._total_tau > 0
+            else product.get_maturity(pricing_env)
+        )
+        current_time = self._current_time(total_tau, tau)
         schedule_records = self._schedule_records.get(t_idx)
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
 
         if schedule_records:
             for rec in schedule_records:
                 barrier = rec.barrier if rec.barrier is not None else product.barrier
-                payoff = rec.payoff
-                discounted_payoff = payoff * np.exp(-r * tau)
+                cashflow_value = self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=rec.payoff,
+                    current_time=current_time,
+                    settlement_time=rec.settlement_time,
+                )
                 if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
                     if product.is_up_barrier:
-                        grid[s_vec >= barrier, t_idx] += discounted_payoff
+                        grid[s_vec >= barrier, t_idx] += cashflow_value
                     else:
-                        grid[s_vec <= barrier, t_idx] += discounted_payoff
+                        grid[s_vec <= barrier, t_idx] += cashflow_value
                 else:
                     if product.is_up_barrier:
-                        grid[s_vec >= barrier, t_idx] = discounted_payoff
+                        grid[s_vec >= barrier, t_idx] = cashflow_value
                     else:
-                        grid[s_vec <= barrier, t_idx] = discounted_payoff
+                        grid[s_vec <= barrier, t_idx] = cashflow_value
                     # Stop-first-hit semantics: once applied, exit early
                     return
             return
 
-        barrier = product.barrier
-        rebate = product.rebate
-        discounted_rebate = rebate * np.exp(-r * tau)
+        settlement_time = current_time if product.pay_at_hit else total_tau
+        rebate_value = self._cashflow_value_at_time(
+            pricing_env=pricing_env,
+            cashflow=product.rebate,
+            current_time=current_time,
+            settlement_time=settlement_time,
+        )
 
         # Apply barrier knockout
         if product.is_up_barrier:
             # Up barrier: knockout at high prices
-            grid[s_vec >= barrier, t_idx] = discounted_rebate
+            grid[s_vec >= product.barrier, t_idx] = rebate_value
         else:
             # Down barrier: knockout at low prices
-            grid[s_vec <= barrier, t_idx] = discounted_rebate
+            grid[s_vec <= product.barrier, t_idx] = rebate_value
 
     def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
         """Include schedule-specific barriers when building spatial bounds."""
@@ -364,9 +461,12 @@ class BarrierPDESolver(BasePDESolver):
         x_vec, s_vec, dx_vec, t_vec, dt_vec = result
 
         # Setup observation time indices for discrete monitoring
+        self._total_tau = tau
         self._observation_indices.clear()
         self._schedule_records.clear()
         self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
+        self._terminal_schedule_records = []
+        self._has_terminal_observation = False
 
         schedule = getattr(product, "observation_schedule", None)
         if schedule is not None:
@@ -385,8 +485,15 @@ class BarrierPDESolver(BasePDESolver):
                     f"PDE solver does not support aggregation mode {self._schedule_aggregation.value}"
                 )
             for rec in resolved_records:
-                if 0 < rec.observation_time < tau:
-                    idx = np.argmin(np.abs(t_vec - rec.observation_time))
+                if is_close(rec.observation_time, 0.0):
+                    idx = 0
+                    self._observation_indices.add(idx)
+                    self._schedule_records.setdefault(idx, []).append(rec)
+                elif is_close(rec.observation_time, tau):
+                    self._terminal_schedule_records.append(rec)
+                    self._has_terminal_observation = True
+                elif 0.0 < rec.observation_time < tau:
+                    idx = int(np.argmin(np.abs(t_vec - rec.observation_time)))
                     self._observation_indices.add(idx)
                     self._schedule_records.setdefault(idx, []).append(rec)
         elif (
@@ -396,8 +503,12 @@ class BarrierPDESolver(BasePDESolver):
             and product.observation_dates is not None
         ):
             for obs_time in product.observation_dates:
-                if 0 < obs_time < tau:
-                    idx = np.argmin(np.abs(t_vec - obs_time))
+                if is_close(obs_time, 0.0):
+                    self._observation_indices.add(0)
+                elif is_close(obs_time, tau):
+                    self._has_terminal_observation = True
+                elif 0.0 < obs_time < tau:
+                    idx = int(np.argmin(np.abs(t_vec - obs_time)))
                     self._observation_indices.add(idx)
 
         return result
