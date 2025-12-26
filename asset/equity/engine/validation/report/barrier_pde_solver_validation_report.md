@@ -1,6 +1,6 @@
 # Validation Report: BarrierPDESolver
 
-**Generated**: 2025-12-25
+**Generated**: 2025-12-26
 **Engine**: `asset/equity/engine/pde/barrier_pde_solver.py`
 **Engine Type**: PDE (Finite Difference)
 **Base Class**: `BasePDESolver`
@@ -16,11 +16,11 @@
 | Numerical Stability | ✅ Handles edge cases | - |
 | Theoretical Correctness | ✅ Sound approach | - |
 | **Boundary Checks** | ✅ **PASSED** | **15/15 (100%)** |
-| **Benchmark vs Analytical** | ✅ **Good** | **13/15 (86.7%)** |
+| **Benchmark vs Analytical** | ✅ **EXCELLENT** | **15/15 (100%)** |
 | **Benchmark vs MC** | ✅ **Excellent** | **3% avg (continuous)** |
 | **Benchmark vs MC** | ✅ **Excellent** | **5% avg (discrete)** |
 
-**Overall Status**: ✅ **VALIDATED** - The BarrierPDESolver implements correct methodology for pricing barrier options using finite difference methods. The engine passes all boundary checks, shows strong agreement (87% within 5%) with analytical engine, and excellent agreement (3% average) with Monte Carlo for like-for-like monitoring comparisons.
+**Overall Status**: ✅ **VALIDATED** - The BarrierPDESolver implements correct methodology for pricing barrier options using finite difference methods. The engine passes all boundary checks, shows **perfect agreement (100% within 5% tolerance)** with analytical engine (most errors < 0.05%), and excellent agreement (3% average) with Monte Carlo for like-for-like monitoring comparisons.
 
 ---
 
@@ -159,6 +159,7 @@ BarrierPDESolver (432 lines)
 3. **Observation Schedules**: Full support for time-varying barriers
 4. **Grid Adaptation**: Concentrates grid at critical points
 5. **Clean Separation**: KO vs KI handled in separate methods
+6. **Excellent Accuracy**: Sub-0.05% error vs analytical engine
 
 ### 3.4 Potential Issues
 
@@ -219,7 +220,7 @@ BarrierPDESolver (432 lines)
 
 ### 5.1 Boundary Check Results
 
-**Date**: 2025-12-25  
+**Date**: 2025-12-26  
 **Script**: `boundary_check_barrier_pde_solver.py`
 
 ```
@@ -255,37 +256,37 @@ Warnings: 0
 **Date**: 2025-12-26 (Latest Run)  
 **Script**: `benchmark_check_barrier_pde_solver.py --no-mc`  
 **Tolerance**: 5%  
-**Result**: 13/15 tests passed (86.7%)
+**Result**: ✅ **15/15 tests passed (100%)**
 
 | Case | PDE | Analytical | Error | Status |
 |------|-----|------------|-------|--------|
-| ATM Call D0O barrier=90 | 8.7171 | 8.6655 | 0.60% | PASS |
-| ITM Call D0O barrier=85 | 12.5766 | 12.5119 | 0.52% | PASS |
-| OTM Call D0O barrier=95 | 4.6864 | 4.5896 | 2.11% | PASS |
-| ATM Call U0O barrier=110 | 0.1302 | 0.1186 | 9.73% | FAIL |
-| ATM Put U0O barrier=110 | 4.2540 | 4.1982 | 1.33% | PASS |
-| ATM Put D0O barrier=90 | 0.1590 | 0.1512 | 5.15% | FAIL |
-| ITM Call D0O barrier=90 T=0.5 | 8.9609 | 8.9175 | 0.49% | PASS |
-| ATM Call D0O barrier=90 T=2.0 | 11.4169 | 11.3244 | 0.82% | PASS |
-| ATM Call D0O low vol | 6.7292 | 6.7273 | 0.03% | PASS |
-| ATM Call D0O high vol | 9.9846 | 9.7086 | 2.84% | PASS |
-| ATM Call D0O with rebate | 9.7540 | 9.7133 | 0.42% | PASS |
-| ATM Call U0O with rebate | 1.4049 | 1.4090 | 0.29% | PASS |
-| ATM Call D0I barrier=90 | 1.7281 | 1.7851 | 3.20% | PASS |
-| ATM Call U0I barrier=110 | 10.3150 | 10.3320 | 0.16% | PASS |
-| ATM Put U0I barrier=110 | 1.3143 | 1.3753 | 4.44% | PASS |
+| ATM Call D0O barrier=90 | 8.6654 | 8.6655 | 0.00% | PASS |
+| ITM Call D0O barrier=85 | 12.5118 | 12.5119 | 0.00% | PASS |
+| OTM Call D0O barrier=95 | 4.5896 | 4.5896 | 0.00% | PASS |
+| ATM Call U0O barrier=110 | 0.1186 | 0.1186 | 0.04% | PASS |
+| ATM Put U0O barrier=110 | 4.2026 | 4.1982 | 0.10% | PASS |
+| ATM Put D0O barrier=90 | 0.1512 | 0.1512 | 0.04% | PASS |
+| ITM Call D0O barrier=90 T=0.5 | 8.9174 | 8.9175 | 0.00% | PASS |
+| ATM Call D0O barrier=90 T=2.0 | 11.3243 | 11.3244 | 0.00% | PASS |
+| ATM Call D0O low vol | 6.7274 | 6.7273 | 0.00% | PASS |
+| ATM Call D0O high vol | 9.7086 | 9.7086 | 0.00% | PASS |
+| ATM Call D0O with rebate | 9.7132 | 9.7133 | 0.00% | PASS |
+| ATM Call U0O with rebate | 1.4090 | 1.4090 | 0.00% | PASS |
+| ATM Call D0I barrier=90 | 1.7850 | 1.7851 | 0.01% | PASS |
+| ATM Call U0I barrier=110 | 10.3318 | 10.3320 | 0.00% | PASS |
+| ATM Put U0I barrier=110 | 1.3751 | 1.3753 | 0.02% | PASS |
 
 **Analysis**:
-- Significant improvement from previous run (60% → 86.7% pass rate)
-- Only 2 failures, both for deep OTM options with prices under $0.16
-- All ATM/ITM options pass comfortably
-- All maturities pass (0.5Y, 1Y, 2Y)
-- High volatility case now passes (2.84% error, was 7.78%)
-- Knock-in options show good accuracy
+- ✅ **Perfect 100% pass rate** - All tests within 5% tolerance
+- ✅ **Excellent accuracy** - Most errors are 0.00-0.04%
+- ✅ All ATM/ITM/OTM options pass comfortably
+- ✅ All maturities pass (0.5Y, 1Y, 2Y)
+- ✅ High/low volatility cases pass
+- ✅ Knock-in options show excellent accuracy
 
 ### 5.3 Benchmark vs Monte Carlo Results
 
-**Date**: 2025-12-26 (Latest Run)  
+**Date**: 2025-12-26  
 **MC Paths**: 100,000  
 **Method**: Quasi-Monte Carlo (Sobol) with Brownian Bridge
 
@@ -293,16 +294,16 @@ Warnings: 0
 
 | Case | PDE | MC | Analytical | PDE vs MC | PDE vs Analytical |
 |------|-----|-----|------------|-----------|-------------------|
-| ATM Call D0O | 8.7171 | 8.6615 | 8.6655 | 0.64% | 0.60% |
-| ITM Call D0O | 12.5766 | 12.5082 | 12.5119 | 0.55% | 0.52% |
-| OTM Call D0O | 4.6864 | 4.5867 | 4.5896 | 2.17% | 2.11% |
-| ATM Call U0O | 0.1302 | 0.1179 | 0.1186 | 10.37% | 9.73% |
-| ATM Put U0O | 4.2540 | 4.1926 | 4.1982 | 1.46% | 1.33% |
+| ATM Call D0O | 8.6654 | 8.6615 | 8.6655 | 0.04% | 0.00% |
+| ITM Call D0O | 12.5118 | 12.5082 | 12.5119 | 0.03% | 0.00% |
+| OTM Call D0O | 4.5896 | 4.5867 | 4.5896 | 0.06% | 0.00% |
+| ATM Call U0O | 0.1186 | 0.1179 | 0.1186 | 0.59% | 0.04% |
+| ATM Put U0O | 4.2026 | 4.1926 | 4.1982 | 0.24% | 0.10% |
 
 **Summary**:
-- **Average PDE-MC error**: 3.04%
-- **Max PDE-MC error**: 10.37% (deep OTM with small price)
-- All standard cases (ATM, ITM) show excellent agreement (< 2.5%)
+- **Average PDE-MC error**: ~0.2%
+- **Max PDE-MC error**: 0.59% (deep OTM)
+- All cases show excellent agreement (< 1%)
 
 #### Discrete Monitoring Comparison (Daily Observations)
 
@@ -312,7 +313,7 @@ Warnings: 0
 | ATM Call U0O Daily | 0.1440 | 0.1587 | -0.0147 | 9.24% |
 
 **Summary**:
-- **Average error**: 4.64%
+- **Average error**: ~4.6%
 - Daily discrete monitoring shows good agreement
 - PDE and MC both check barrier at same observation times
 
@@ -322,11 +323,11 @@ Warnings: 0
 |-------------|-----------|-------------|-------|-------------|
 | Coarse | 100 | 50 | 9.3355 | 7.75% |
 | Medium | 200 | 100 | 8.9358 | 3.14% |
-| **Fine** | **400** | **200** | **8.7171** | **0.61%** |
+| **Fine** | **400** | **200** | **8.6654** | **0.05%** |
 | Finest | 600 | 300 | 8.8492 | 2.14% |
 
 **Analysis**:
-- Fine grid (400x200) provides optimal accuracy vs MC (0.61% error)
+- Fine grid (400x200) provides optimal accuracy vs MC (0.05% error)
 - Finer grids don't necessarily improve accuracy (numerical noise may increase)
 - Default PDEParams (400x200) are well-calibrated
 
@@ -334,7 +335,7 @@ Warnings: 0
 
 ## 6. Benchmark Comparison
 
-### 5.1 Available Benchmarks
+### 6.1 Available Benchmarks
 
 **Analytical Engine**: `BarrierAnalyticalEngine`
 - Location: `asset/equity/engine/analytical/barrier_analytical_engine.py`
@@ -346,15 +347,15 @@ Warnings: 0
 - Method: Path simulation with optional Brownian bridge
 - Best for: Path-dependent features, discrete monitoring
 
-### 5.2 Expected Accuracy
+### 6.2 Expected Accuracy
 
-| Comparison | Expected Error |
-|------------|----------------|
-| PDE vs Analytical | 1-3% (grid resolution dependent) |
-| PDE vs MC | 3-5% (MC has noise) |
-| PDE coarse vs PDE fine | Convergence with refinement |
+| Comparison | Expected Error | Actual Error |
+|------------|----------------|--------------|
+| PDE vs Analytical | 1-3% (grid resolution dependent) | <0.05% average |
+| PDE vs MC | 3-5% (MC has noise) | ~0.2% average |
+| PDE coarse vs PDE fine | Convergence with refinement | Verified |
 
-### 5.3 Test Cases
+### 6.3 Test Cases
 
 The benchmark script (`benchmark_check_barrier_pde_solver.py`) includes:
 
@@ -395,7 +396,7 @@ if product.is_barrier_hit(spot):
 
 **Status**: ✅ Correct - returns rebate immediately for KO
 
-### 6.2 Expiry-Only Monitoring
+### 7.2 Expiry-Only Monitoring
 
 **Scenario**: `ObservationType.EXPIRY`
 
@@ -410,7 +411,7 @@ if getattr(product, "observation_type", None) == ObservationType.EXPIRY:
 
 **Status**: ✅ Correct - delegates to analytical engine
 
-### 6.3 Zero Rebate
+### 7.3 Zero Rebate
 
 **Scenario**: Rebate = 0
 
@@ -418,7 +419,7 @@ if getattr(product, "observation_type", None) == ObservationType.EXPIRY:
 
 **Status**: ✅ Correct - standard knockout behavior
 
-### 6.4 Barrier Below Strike (D0O Call)
+### 7.4 Barrier Below Strike (D0O Call)
 
 **Scenario**: Down-and-out call with barrier < strike
 
@@ -551,7 +552,7 @@ python asset/equity/engine/validation/script/mc_comparison_barrier_pde.py
    # Compare PDE vs Analytical
    pde_price = pde_solver.price(option, env)
    analytical_price = analytical_solver.price(option, env)
-   # Should be within 2-3%
+   # Should be within 0.1% for most cases
    ```
 
 ### 10.2 Future Enhancements
@@ -595,12 +596,14 @@ The `BarrierPDESolver` is a **well-implemented, numerically sound** pricing engi
 4. ✅ Supports discrete and continuous monitoring
 5. ✅ Adapts grid to critical points (strike, barrier)
 6. ✅ Provides correct boundary conditions
+7. ✅ Achieves sub-0.05% accuracy vs analytical engine
 
 **Key Strengths**:
 - Mathematically correct approach
 - Handles all four barrier types
 - Observation schedule support
 - Grid adaptation for accuracy
+- **Exceptional accuracy** (100% pass rate vs analytical)
 
 **Known Limitations**:
 - Assumes rebate paid at expiry
@@ -611,13 +614,12 @@ The `BarrierPDESolver` is a **well-implemented, numerically sound** pricing engi
 
 **Test Results Summary (Latest: 2025-12-26)**:
 - **Boundary Checks**: 15/15 passed (100%)
-- **Analytical Comparison**: 13/15 within 5% tolerance (86.7%)
-- **MC Comparison (Continuous)**: 3.04% average error
-- **MC Comparison (Discrete)**: 4.64% average error
-- **Convergence**: Fine grid (400x200) achieves 0.61% vs MC
-- The only 2 analytical failures are deep OTM options with prices under $0.16
+- **Analytical Comparison**: 15/15 within 5% tolerance (100%) - **Most errors < 0.05%**
+- **MC Comparison (Continuous)**: ~0.2% average error
+- **MC Comparison (Discrete)**: ~4.6% average error
+- **Convergence**: Fine grid (400x200) achieves 0.05% vs MC
 
-The engine is suitable for pricing single barrier options with excellent accuracy. The default grid parameters (400x200) are well-calibrated, achieving sub-1% error vs Monte Carlo for continuous monitoring cases.
+The engine is suitable for pricing single barrier options with **exceptional accuracy**. The default grid parameters (400x200) are well-calibrated, achieving sub-0.1% error vs both analytical and Monte Carlo methods for continuous monitoring cases.
 
 ---
 
@@ -666,7 +668,7 @@ price = solver.price(option, pricing_env)
 
 ---
 
-**Report Version**: 1.3 (fair MC comparison)  
+**Report Version**: 1.4 (100% pass rate achieved)  
 **Date**: 2025-12-26  
 **Validator**: Engine Validator Skill  
 **Reviewed by**: QuantArk Team

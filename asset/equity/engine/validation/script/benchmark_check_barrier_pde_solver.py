@@ -91,9 +91,11 @@ class BenchmarkResults:
     def summary(self) -> bool:
         """Print summary and return True if all tests passed."""
         analytical_count = sum(1 for r in self.results if r["analytical"] is not None)
-        analytical_passed = sum(1 for r in self.results if r["analytical_pass"])
+        analytical_passed = sum(
+            1 for r in self.results if r["analytical"] is not None and r["analytical_pass"]
+        )
         mc_count = sum(1 for r in self.results if r["mc"] is not None)
-        mc_passed = sum(1 for r in self.results if r["mc_pass"])
+        mc_passed = sum(1 for r in self.results if r["mc"] is not None and r["mc_pass"])
 
         print(f"\n{'='*90}")
         print(f"BENCHMARK CHECK SUMMARY - BarrierPDESolver")

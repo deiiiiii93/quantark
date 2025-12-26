@@ -30,6 +30,7 @@ from asset.equity.product.option import (
 # Import engines
 from asset.equity.engine import (
     BlackScholesEngine,
+    BarrierAnalyticalEngine,
     EuropeanPDESolver,
     AmericanPDESolver,
     BarrierPDESolver,
@@ -443,6 +444,45 @@ class TestAmericanPDESolver:
 
 class TestBarrierPDESolver:
     """Tests for barrier option PDE solver."""
+
+    def test_continuous_up_and_out_converges_to_analytical(self, pricing_env):
+        """Regression: continuous U0O near spot should match analytical closely."""
+        option = BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=110.0,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=1.0,
+            rebate=0.0,
+            observation_type=ObservationType.CONTINUOUS,
+        )
+
+        analytical = BarrierAnalyticalEngine().price(option, pricing_env)
+        pde = BarrierPDESolver(PDEParams(grid_size=400, time_steps=1008)).price(
+            option, pricing_env
+        )
+
+        assert pde == pytest.approx(analytical, rel=5e-3, abs=1e-4)
+
+    def test_continuous_up_and_out_rebate_matches_analytical(self, pricing_env):
+        """Regression: continuous U0O rebate must be transmitted via boundary conditions."""
+        option = BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=110.0,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=1.0,
+            rebate=2.0,
+            observation_type=ObservationType.CONTINUOUS,
+            pay_at_hit=False,
+        )
+
+        analytical = BarrierAnalyticalEngine().price(option, pricing_env)
+        pde = BarrierPDESolver(PDEParams(grid_size=400, time_steps=1008)).price(
+            option, pricing_env
+        )
+
+        assert pde == pytest.approx(analytical, rel=1e-2, abs=2e-3)
 
     def test_knockout_leq_vanilla(self, pricing_env, pde_params):
         """Test knock-out option price <= vanilla option price."""
