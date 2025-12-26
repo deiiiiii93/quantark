@@ -251,7 +251,8 @@ def test_at_barrier(results: BoundaryCheckResults):
     """
     Test: Spot at barrier behavior.
     
-    When spot equals barrier, a knock-out should be worth only the rebate.
+    When spot equals barrier, a knock-out should be worth the discounted rebate.
+    The rebate is discounted if paid at expiry (pay_at_hit=False).
     """
     solver = BarrierPDESolver(create_pde_params())
 
@@ -265,15 +266,17 @@ def test_at_barrier(results: BoundaryCheckResults):
         maturity=1.0,
         rebate=2.0,
         observation_type=ObservationType.CONTINUOUS
+        # pay_at_hit defaults to False, so rebate is paid at expiry (discounted)
     )
 
     # When spot is at barrier, the option should be knocked out immediately
-    # The PDE solver checks this via is_barrier_hit()
     price_down = solver.price(option_down, env)
 
-    # Should return rebate (immediate knockout)
-    passed = price_down == pytest.approx(2.0, abs=1e-6)
-    message = f"Price: {price_down:.6f}, Expected: 2.0 (rebate)"
+    # Expected: discounted rebate = 2.0 * exp(-0.05 * 1.0) ≈ 1.9025
+    import math
+    expected_rebate = 2.0 * math.exp(-0.05 * 1.0)
+    passed = price_down == pytest.approx(expected_rebate, rel=1e-4)
+    message = f"Price: {price_down:.6f}, Expected: {expected_rebate:.6f} (discounted rebate)"
     results.add_result("At Barrier (D0O, spot=barrier)", passed, message)
 
 
@@ -281,7 +284,7 @@ def test_barrier_already_hit(results: BoundaryCheckResults):
     """
     Test: Option where barrier is already hit at pricing.
     
-    Should return rebate immediately for knock-out options.
+    Should return discounted rebate for knock-out options (pay_at_hit=False).
     """
     solver = BarrierPDESolver(create_pde_params())
 
@@ -295,13 +298,16 @@ def test_barrier_already_hit(results: BoundaryCheckResults):
         maturity=1.0,
         rebate=3.0,
         observation_type=ObservationType.CONTINUOUS
+        # pay_at_hit defaults to False
     )
 
     price = solver.price(option, env)
 
-    # Should return rebate immediately
-    passed = price == pytest.approx(3.0, abs=1e-6)
-    message = f"Price: {price:.6f}, Expected: 3.0 (rebate, already hit)"
+    # Expected: discounted rebate = 3.0 * exp(-0.05 * 1.0)
+    import math
+    expected_rebate = 3.0 * math.exp(-0.05 * 1.0)
+    passed = price == pytest.approx(expected_rebate, rel=1e-4)
+    message = f"Price: {price:.6f}, Expected: {expected_rebate:.6f} (discounted rebate)"
     results.add_result("Barrier Already Hit (U0O)", passed, message)
 
 
