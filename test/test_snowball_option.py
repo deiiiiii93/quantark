@@ -499,8 +499,8 @@ class TestPayoffCalculations:
         # For standard: participation × (Spot - Strike) = 1.0 × (90 - 100) = -10
         v1_payoff = snowball.get_maturity_payoff_v1(spot=90.0)
 
-        # Principal + participation * (spot - strike)
-        expected = 1_000_000.0 + 1.0 * (90.0 - 100.0)  # = 999,990
+        # Principal + participation * (spot - strike) scaled by notional / initial_price
+        expected = 1_000_000.0 + (90.0 - 100.0) * (1_000_000.0 / 100.0)
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_with_protection(self):
@@ -527,7 +527,10 @@ class TestPayoffCalculations:
         # Protected downside is max(-50, -500,000) = -50 (not floored since small)
         v1_payoff = snowball.get_maturity_payoff_v1(spot=50.0)
 
-        expected = 1_000_000.0 + max(1.0 * (50.0 - 100.0), -500_000.0)
+        expected = 1_000_000.0 + max(
+            (50.0 - 100.0) * (1_000_000.0 / 100.0),
+            -500_000.0,
+        )
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_spot_above_strike(self):
@@ -568,8 +571,8 @@ class TestPayoffCalculations:
         # V1 payoff when spot = 90
         v1_payoff = snowball.get_maturity_payoff_v1(spot=90.0)
 
-        # No principal, just participation * (spot - strike)
-        expected = 0.0 + 1.0 * (90.0 - 100.0)  # = -10
+        # No principal, just participation * (spot - strike) scaled by notional / initial_price
+        expected = (90.0 - 100.0) * (1_000_000.0 / 100.0)
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_with_participation_rate(self):
@@ -590,7 +593,7 @@ class TestPayoffCalculations:
         # participation × (Spot - Strike) = 0.5 × (80 - 100) = -10
         v1_payoff = snowball.get_maturity_payoff_v1(spot=80.0)
 
-        expected = 1_000_000.0 + 0.5 * (80.0 - 100.0)  # = 999,990
+        expected = 1_000_000.0 + 0.5 * (80.0 - 100.0) * (1_000_000.0 / 100.0)
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_reverse_snowball(self):
@@ -612,9 +615,9 @@ class TestPayoffCalculations:
 
         # Case 1: Spot > Strike (Loss for Short Call)
         # Spot = 110.0, Strike = 100.0
-        # Payoff = Principal + 1.0 * (Strike - Spot) = 1,000,000 + (100 - 110) = 999,990
+        # Payoff = Principal + 1.0 * (Strike - Spot) scaled by notional / initial_price
         v1_payoff_loss = snowball.get_maturity_payoff_v1(spot=110.0)
-        expected_loss = 1_000_000.0 + (100.0 - 110.0)
+        expected_loss = 1_000_000.0 + (100.0 - 110.0) * (1_000_000.0 / 100.0)
         assert abs(v1_payoff_loss - expected_loss) < 0.01, (
             f"Loss case: Expected {expected_loss}, got {v1_payoff_loss}"
         )

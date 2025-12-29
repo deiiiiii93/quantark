@@ -2,22 +2,22 @@
 Unit tests for European vanilla option pricing and Greeks.
 """
 
-import sys
-from pathlib import Path
 import math
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import EuropeanVanillaOption
 from asset.equity.engine.analytical import BlackScholesEngine
+from asset.equity.product.option import EuropeanVanillaOption
 from asset.equity.riskmeasures import GreeksCalculator
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.exceptions import ValidationError, NumericalError
 from util.calendar import DayCountConvention
+from util.enum import OptionType
+from util.exceptions import NumericalError, ValidationError
 
 
 def test_call_option_pricing():
@@ -48,9 +48,9 @@ def test_call_option_pricing():
     # Expected price (pre-calculated)
     expected_price = 9.227006
 
-    assert (
-        abs(price - expected_price) < 0.0001
-    ), f"Call price mismatch: {price} vs {expected_price}"
+    assert abs(price - expected_price) < 0.0001, (
+        f"Call price mismatch: {price} vs {expected_price}"
+    )
     print(f"✓ Call option pricing test passed: ${price:.6f}")
 
 
@@ -80,9 +80,9 @@ def test_put_option_pricing():
     # Expected price (pre-calculated)
     expected_price = 6.330081
 
-    assert (
-        abs(price - expected_price) < 0.0001
-    ), f"Put price mismatch: {price} vs {expected_price}"
+    assert abs(price - expected_price) < 0.0001, (
+        f"Put price mismatch: {price} vs {expected_price}"
+    )
     print(f"✓ Put option pricing test passed: ${price:.6f}")
 
 
@@ -212,12 +212,26 @@ def test_validation_errors():
     except ValidationError:
         print("✓ Negative spot validation test passed")
 
+    # Test zero spot
+    try:
+        spot = SpotQuote(spot=0.0)
+        assert False, "Should have raised ValidationError for zero spot"
+    except ValidationError:
+        print("✓ Zero spot validation test passed")
+
     # Test negative volatility
     try:
         vol = FlatVolSurface(volatility=-0.20)
         assert False, "Should have raised ValidationError for negative vol"
     except ValidationError:
         print("✓ Negative volatility validation test passed")
+
+    # Test zero volatility
+    try:
+        vol = FlatVolSurface(volatility=0.0)
+        assert False, "Should have raised ValidationError for zero vol"
+    except ValidationError:
+        print("✓ Zero volatility validation test passed")
 
     # Test negative strike
     try:
@@ -405,7 +419,9 @@ def test_date_validation():
     engine = BlackScholesEngine()
     try:
         price = engine.price(call, pricing_env)
-        assert False, "Should have raised ValidationError for exercise date before valuation date"
+        assert False, (
+            "Should have raised ValidationError for exercise date before valuation date"
+        )
     except ValidationError:
         print("✓ Date validation test passed (exercise date before valuation date)")
 

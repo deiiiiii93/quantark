@@ -14,32 +14,32 @@ Tests cover:
 """
 
 import sys
-from pathlib import Path
-import pytest
-import numpy as np
 from datetime import datetime
+from pathlib import Path
 from typing import List
+
+import numpy as np
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.product.option.snowball_option import SnowballOption
+from asset.equity.param import MCParams
 from asset.equity.product.option.snowball_config import (
+    AccrualConfig,
     BarrierConfig,
     PayoffConfig,
-    AccrualConfig,
 )
-from asset.equity.param import MCParams
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from asset.equity.product.option.snowball_option import SnowballOption
+from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from priceenv import PricingEnvironment
 from util.enum import (
-    ObservationType,
     CouponPayType,
+    ObservationType,
 )
-from util.enum.engine_enums import MonteCarloMethod, EngineType
-from util.exceptions import ValidationError, PricingError
-
+from util.enum.engine_enums import EngineType, MonteCarloMethod
+from util.exceptions import PricingError, ValidationError
 
 # =============================================================================
 # Fixtures - Common test configurations
@@ -434,21 +434,13 @@ class TestValidation:
 
     def test_invalid_spot_price(self):
         """Test error with non-positive spot price."""
-        snowball = create_standard_snowball()
-        env = create_pricing_env(spot=-100.0)
-        engine = SnowballMCEngine()
-
-        with pytest.raises(ValidationError, match="Spot price must be positive"):
-            engine.price(snowball, env)
+        with pytest.raises(ValidationError, match="spot must be positive"):
+            create_pricing_env(spot=-100.0)
 
     def test_invalid_volatility(self):
         """Test error with non-positive volatility."""
-        snowball = create_standard_snowball()
-        env = create_pricing_env(vol=-0.20)
-        engine = SnowballMCEngine()
-
-        with pytest.raises(ValidationError, match="Volatility must be positive"):
-            engine.price(snowball, env)
+        with pytest.raises(ValidationError, match="volatility must be positive"):
+            create_pricing_env(vol=-0.20)
 
 
 class TestTimeVaryingBarriers:
