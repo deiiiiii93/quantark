@@ -10,26 +10,27 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from asset.equity.product.option.base_equity_option import BaseEquityOption
+from util.calendar import calculate_year_fraction
+from util.calendar.day_counter import DayCountConvention
+from util.enum import (
+    BarrierType,
+    CouponPayType,
+    ExerciseType,
+    ObservationAggregation,
+    ObservationType,
+    OptionType,
+    ProtectionType,
+    TenorEnd,
+)
+from util.exceptions import ValidationError
+
 from .observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
-    ResolvedObservationRecord,
     PricingEnv,
+    ResolvedObservationRecord,
 )
-from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig, AirbagConfig
-from util.enum import (
-    ObservationType,
-    ObservationAggregation,
-    CouponPayType,
-    ProtectionType,
-    TenorEnd,
-    BarrierType,
-    OptionType,
-    ExerciseType,
-)
-from util.calendar.day_counter import DayCountConvention
-from util.calendar import calculate_year_fraction
-from util.exceptions import ValidationError
+from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
 
 
 @dataclass
@@ -304,6 +305,11 @@ class SnowballOption(BaseEquityOption):
         # Validate KI barrier if provided
         if self.barrier_config.ki_barrier is not None:
             self._validate_barrier_array(self.barrier_config.ki_barrier, "KI barrier")
+            if (
+                self.barrier_config.ki_continuous
+                or self.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+            ) and isinstance(self.barrier_config.ki_barrier, list):
+                raise ValidationError("Continuous KI requires scalar ki_barrier")
             ki_obs_len = self._get_observation_length(BarrierType.DOWN_IN)
             if ki_obs_len is not None:
                 self._validate_array_length(
@@ -581,22 +587,7 @@ class SnowballOption(BaseEquityOption):
         Raises:
             ValidationError: If maturity cannot be determined
         """
-        if self.maturity is not None:
-            return self.maturity
-
-        if self.exercise_date is not None:
-            if pricing_env is None:
-                raise ValidationError(
-                    "PricingEnvironment required to resolve exercise_date"
-                )
-            return calculate_year_fraction(
-                pricing_env.valuation_date,
-                self.exercise_date,
-                pricing_env.day_count_convention,
-                pricing_env.bus_days_in_year,
-            )
-
-        raise ValidationError("Cannot determine maturity")
+        return super().get_maturity(pricing_env)
 
     def get_contract_tenor(self, pricing_env: PricingEnv = None) -> float:
         """
@@ -623,8 +614,9 @@ class SnowballOption(BaseEquityOption):
         This method calculates the payoff assuming no KO has occurred.
         The actual payoff depends on the path history (KO triggered, KI triggered).
 
-        For full path-dependent payoff calculation, use get_ko_payoff,
-        get_maturity_payoff_v0, or get_maturity_payoff_v1 methods.
+        For full path-dependent payoff calculation, use
+        resolve_ko_observations, get_maturity_payoff_v0, or
+        get_maturity_payoff_v1 methods.
 
         Args:
             spot: Spot price at maturity
@@ -737,10 +729,7 @@ class SnowballOption(BaseEquityOption):
             raw_diff = spot - effective_strike
 
         downside = (
-            participation_rate
-            * min(raw_diff, 0.0)
-            * self.notional
-            / self.initial_price
+            participation_rate * min(raw_diff, 0.0) * self.notional / self.initial_price
         )
         if self.accrual_config.is_annualized_ki:
             contract_tenor = self.get_contract_tenor(pricing_env)
@@ -769,10 +758,9 @@ class SnowballOption(BaseEquityOption):
         Returns:
             True if KO barrier is triggered (spot >= KO barrier for up barrier)
         """
-        if isinstance(self.barrier_config.ko_barrier, list):
-            barrier = self.barrier_config.ko_barrier[observation_idx]
-        else:
-            barrier = self.barrier_config.ko_barrier
+        barrier = self._get_barrier_at(
+            self.barrier_config.ko_barrier, observation_idx, "KO barrier"
+        )
         return spot >= barrier
 
     def is_ki_triggered(self, spot: float, observation_idx: int = 0) -> bool:
@@ -789,10 +777,9 @@ class SnowballOption(BaseEquityOption):
         if self.barrier_config.ki_barrier is None:
             return False
 
-        if isinstance(self.barrier_config.ki_barrier, list):
-            barrier = self.barrier_config.ki_barrier[observation_idx]
-        else:
-            barrier = self.barrier_config.ki_barrier
+        barrier = self._get_barrier_at(
+            self.barrier_config.ki_barrier, observation_idx, "KI barrier"
+        )
         return spot <= barrier
 
     def _get_barrier_at(
@@ -809,6 +796,10 @@ class SnowballOption(BaseEquityOption):
             Barrier level at the specified index
         """
         if isinstance(barrier_value, list):
+            if index < 0 or index >= len(barrier_value):
+                raise ValidationError(
+                    f"{barrier_type} observation index {index} out of range"
+                )
             return barrier_value[index]
         return barrier_value
 
@@ -954,6 +945,9 @@ class SnowballOption(BaseEquityOption):
             self.notional if self.payoff_config.include_principal else 0.0
         )
         maturity_time: Optional[float] = None
+        bus_days_in_year = (
+            pricing_env.bus_days_in_year if pricing_env is not None else 252
+        )
 
         ko_records: List[ResolvedObservationRecord] = []
         for idx, rec in enumerate(resolved_schedule):
@@ -961,7 +955,46 @@ class SnowballOption(BaseEquityOption):
             if rate is None:
                 rate = self.get_ko_rate_at(idx)
 
-            accrual_factor = rec.observation_time if annualized_ko else 1.0
+            if annualized_ko:
+                schedule_record = schedule.records[idx]
+                accrual_start_date = self.initial_date
+                if schedule_record.observation_date is not None:
+                    if accrual_start_date is None:
+                        if pricing_env is None:
+                            raise ValidationError(
+                                "PricingEnvironment required to resolve KO accrual from observation_date."
+                            )
+                        accrual_start_date = pricing_env.valuation_date
+                    accrual_factor = calculate_year_fraction(
+                        accrual_start_date,
+                        schedule_record.observation_date,
+                        self.annualization_day_count,
+                        bus_days_in_year,
+                    )
+                else:
+                    if accrual_start_date is None:
+                        accrual_factor = rec.observation_time
+                    else:
+                        if pricing_env is None:
+                            raise ValidationError(
+                                "PricingEnvironment required to resolve KO accrual without observation_date."
+                            )
+                        if pricing_env.valuation_date < accrual_start_date:
+                            raise ValidationError(
+                                "valuation_date must be on or after initial_date to resolve KO accrual."
+                            )
+                        if pricing_env.valuation_date == accrual_start_date:
+                            initial_to_valuation = 0.0
+                        else:
+                            initial_to_valuation = calculate_year_fraction(
+                                accrual_start_date,
+                                pricing_env.valuation_date,
+                                self.annualization_day_count,
+                                pricing_env.bus_days_in_year,
+                            )
+                        accrual_factor = initial_to_valuation + rec.observation_time
+            else:
+                accrual_factor = 1.0
             coupon_payoff = self.notional * rate * accrual_factor
             payoff = principal_component + coupon_payoff
 
@@ -1046,7 +1079,15 @@ class SnowballOption(BaseEquityOption):
         """
         Convenience helper returning KI observation attributes for engine consumption.
         """
-        if self.barrier_config.ki_continuous:
+        ki_continuous = (
+            self.barrier_config.ki_continuous
+            or self.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        if ki_continuous:
+            if self.barrier_config.ki_barrier is None:
+                raise ValidationError("KI barrier configuration is missing.")
+            if isinstance(self.barrier_config.ki_barrier, list):
+                raise ValidationError("Continuous KI requires scalar ki_barrier")
             # For continuous KI, the engine generates its own time grid.
             # We return the base KI barrier as a scalar (in a list for consistency)
             # and empty lists for other attributes.

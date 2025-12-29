@@ -13,32 +13,38 @@ Tests cover:
 """
 
 import sys
-from pathlib import Path
-import pytest
 from datetime import datetime
+from pathlib import Path
 from typing import List
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option.snowball_option import SnowballOption
+from asset.equity.product.option.observation_schedule import (
+    ObservationRecord,
+    ObservationSchedule,
+)
 from asset.equity.product.option.snowball_config import (
+    AccrualConfig,
     BarrierConfig,
     PayoffConfig,
-    AccrualConfig,
 )
+from asset.equity.product.option.snowball_option import SnowballOption
+from param import FlatRateCurve
+from priceenv import PricingEnvironment
+from util.calendar import DayCountConvention, calculate_year_fraction
 from util.enum import (
+    BarrierType,
+    CouponPayType,
+    ExerciseType,
     ObservationType,
     OptionType,
-    ExerciseType,
-    CouponPayType,
     ProtectionType,
     TenorEnd,
-    BarrierType,
 )
-from util.calendar import DayCountConvention
 from util.exceptions import ValidationError
-
 
 # =============================================================================
 # Fixtures - Common test configurations
@@ -215,7 +221,7 @@ class TestBarrierConfiguration:
 
     def test_ko_barrier_triggering_standard(self):
         """Test KO barrier trigger for standard snowball (up barrier).
-        
+
         Note: Barriers are specified as ratios. is_ko_triggered compares spot to barrier directly.
         So if barrier=1.03, spot must be >= 1.03 to trigger.
         """
@@ -229,7 +235,7 @@ class TestBarrierConfiguration:
 
     def test_ki_barrier_triggering_standard(self):
         """Test KI barrier trigger for standard snowball (down barrier).
-        
+
         Note: Barriers are specified as ratios. is_ki_triggered compares spot to barrier directly.
         """
         snowball = create_standard_snowball()
@@ -289,6 +295,30 @@ class TestBarrierConfiguration:
         assert snowball.get_ko_rate_at(3) == 0.16
         assert snowball.get_ki_barrier_at(0) == 0.80
         assert snowball.get_ki_barrier_at(3) == 0.75
+
+    def test_barrier_index_out_of_range(self):
+        """Test that out-of-range barrier indices raise ValidationError."""
+        barrier_config = BarrierConfig(
+            ko_barrier=[1.03],
+            ko_rate=[0.10],
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.5],
+            ki_barrier=[0.80],
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_dates=[0.5],
+        )
+        snowball = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            notional=1_000_000.0,
+            maturity=1.0,
+        )
+
+        with pytest.raises(ValidationError, match="out of range"):
+            snowball.get_ko_barrier_at(2)
+        with pytest.raises(ValidationError, match="out of range"):
+            snowball.get_ki_barrier_at(2)
 
     def test_get_ko_direction_standard(self):
         """Test KO barrier direction for standard snowball."""
@@ -370,6 +400,56 @@ class TestPayoffCalculations:
         payoff_v0 = snowball.get_payoff(spot=100.0, knocked_in=False)
 
         assert payoff_default == payoff_v0, "Default should be V0 payoff"
+
+    def test_ko_coupon_accrues_from_initial_date(self):
+        """Test that KO coupon accrues from initial_date when annualized."""
+        observation_date = datetime(2024, 10, 1)
+        schedule = ObservationSchedule(
+            records=[
+                ObservationRecord(
+                    observation_date=observation_date,
+                    barrier=1.03,
+                )
+            ]
+        )
+        barrier_config = BarrierConfig(
+            ko_barrier=1.03,
+            ko_rate=0.10,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=schedule,
+            ki_barrier=None,
+        )
+        payoff_config = PayoffConfig(include_principal=False)
+        accrual_config = AccrualConfig(is_annualized=True, is_annualized_ko=True)
+
+        snowball = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            payoff_config=payoff_config,
+            accrual_config=accrual_config,
+            notional=1_000_000.0,
+            maturity=1.0,
+            initial_date=datetime(2024, 1, 1),
+        )
+
+        pricing_env = PricingEnvironment(
+            rate_curve=FlatRateCurve(rate=0.01),
+            valuation_date=datetime(2024, 6, 1),
+            day_count_convention=DayCountConvention.ACT_365,
+        )
+
+        records = snowball.resolve_ko_observations(pricing_env)
+        expected_accrual = calculate_year_fraction(
+            snowball.initial_date,
+            observation_date,
+            snowball.annualization_day_count,
+            pricing_env.bus_days_in_year,
+        )
+        expected_payoff = snowball.notional * barrier_config.ko_rate * expected_accrual
+
+        assert len(records) == 1
+        assert abs(records[0].payoff - expected_payoff) < 1e-10
 
     def test_get_payoff_negative_spot_raises(self):
         """Test that get_payoff raises ValidationError for negative spot."""
@@ -535,14 +615,18 @@ class TestPayoffCalculations:
         # Payoff = Principal + 1.0 * (Strike - Spot) = 1,000,000 + (100 - 110) = 999,990
         v1_payoff_loss = snowball.get_maturity_payoff_v1(spot=110.0)
         expected_loss = 1_000_000.0 + (100.0 - 110.0)
-        assert abs(v1_payoff_loss - expected_loss) < 0.01, f"Loss case: Expected {expected_loss}, got {v1_payoff_loss}"
+        assert abs(v1_payoff_loss - expected_loss) < 0.01, (
+            f"Loss case: Expected {expected_loss}, got {v1_payoff_loss}"
+        )
 
         # Case 2: Spot < Strike (Gain/No Loss for Short Call)
         # Spot = 90.0, Strike = 100.0
         # Reverse: Short Call is OTM. Downside = min(100 - 90, 0) = 0.
         v1_payoff_gain = snowball.get_maturity_payoff_v1(spot=90.0)
         expected_gain = 1_000_000.0 + 0.0
-        assert abs(v1_payoff_gain - expected_gain) < 0.01, f"Gain case: Expected {expected_gain}, got {v1_payoff_gain}"
+        assert abs(v1_payoff_gain - expected_gain) < 0.01, (
+            f"Gain case: Expected {expected_gain}, got {v1_payoff_gain}"
+        )
 
 
 class TestIntrinsicValue:
@@ -720,6 +804,45 @@ class TestValidationErrors:
                 notional=1_000_000.0,
                 maturity=1.0,
             )
+
+    def test_continuous_ki_requires_scalar_barrier(self):
+        """Test that continuous KI requires a scalar barrier."""
+        barrier_config = BarrierConfig(
+            ko_barrier=1.03,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.5],
+            ki_barrier=[0.75, 0.80],
+            ki_observation_type=ObservationType.CONTINUOUS,
+            ki_continuous=True,
+        )
+
+        with pytest.raises(ValidationError, match="Continuous KI requires scalar"):
+            SnowballOption(
+                initial_price=100.0,
+                strike=100.0,
+                barrier_config=barrier_config,
+                notional=1_000_000.0,
+                maturity=1.0,
+            )
+
+    def test_get_maturity_after_exercise_date_raises(self):
+        """Test that valuation after exercise_date raises ValidationError."""
+        barrier_config = create_basic_barrier_config()
+        snowball = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            notional=1_000_000.0,
+            exercise_date=datetime(2024, 1, 1),
+        )
+        pricing_env = PricingEnvironment(
+            rate_curve=FlatRateCurve(rate=0.01),
+            valuation_date=datetime(2024, 1, 2),
+        )
+
+        with pytest.raises(ValidationError, match="Valuation date"):
+            snowball.get_maturity(pricing_env)
 
 
 class TestConfigurationObjects:
