@@ -14,6 +14,7 @@ from .barrier_pde_solver import BarrierPDESolver
 from .double_barrier_pde_solver import DoubleBarrierPDESolver
 from .one_touch_pde_solver import OneTouchPDESolver
 from .double_one_touch_pde_solver import DoubleOneTouchPDESolver
+from .snowball_pde_solver import SnowballPDESolver
 
 __all__ = [
     # Grid utilities
@@ -27,5 +28,6 @@ __all__ = [
     'DoubleBarrierPDESolver',
     'OneTouchPDESolver',
     'DoubleOneTouchPDESolver',
+    'SnowballPDESolver',
 ]
 

@@ -97,7 +97,6 @@ class SnowballOption(BaseEquityOption):
     # Core parameters
     initial_price: float = 0.0
     strike: float = 0.0
-    notional: float = 1.0
     is_reverse: bool = False
 
     # Option type parameters (inherited from BaseEquityOption)
@@ -224,9 +223,9 @@ class SnowballOption(BaseEquityOption):
         Raises:
             ValidationError: If parameters are invalid
         """
-        super().validate()
         self._validate_core_parameters()
         self._validate_maturity_parameters()
+        super().validate()
         self._validate_barrier_parameters()
         self._validate_observation_parameters()
         self._validate_payoff_parameters()

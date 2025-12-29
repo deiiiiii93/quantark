@@ -16,6 +16,7 @@ from asset.equity.product.option import (
     DoubleBarrierOption,
     OneTouchOption,
     DoubleOneTouchOption,
+    SnowballOption,
 )
 from asset.equity.param import PDEParams
 from priceenv import PricingEnvironment
@@ -30,6 +31,7 @@ from .pde import (
     DoubleBarrierPDESolver,
     OneTouchPDESolver,
     DoubleOneTouchPDESolver,
+    SnowballPDESolver,
 )
 
 
@@ -50,6 +52,7 @@ class PDEEngine(BaseEngine):
         - DoubleBarrierOption → DoubleBarrierPDESolver
         - OneTouchOption → OneTouchPDESolver
         - DoubleOneTouchOption → DoubleOneTouchPDESolver
+        - SnowballOption → SnowballPDESolver
 
     Usage:
         # Basic usage
@@ -77,6 +80,7 @@ class PDEEngine(BaseEngine):
         DoubleBarrierOption: DoubleBarrierPDESolver,
         OneTouchOption: OneTouchPDESolver,
         DoubleOneTouchOption: DoubleOneTouchPDESolver,
+        SnowballOption: SnowballPDESolver,
     }
 
     DEFAULT_METHOD = PDEMethod.CRANK_NICOLSON
