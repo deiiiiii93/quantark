@@ -18,28 +18,27 @@ from typing import Dict, Optional, Tuple, Union
 import numpy as np
 
 from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.param import MCParams
-from priceenv import PricingEnvironment
-from util.enum import (
-    ObservationType,
-    CouponPayType,
-)
-from util.enum.engine_enums import MonteCarloMethod, EngineType
-from util.exceptions import ValidationError, PricingError
-
 from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
+from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
 from asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
 )
-from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
-
+from asset.equity.product.base_equity_product import BaseEquityProduct
+from asset.equity.product.option.snowball_option import SnowballOption
+from priceenv import PricingEnvironment
+from util.enum import (
+    CouponPayType,
+    ObservationType,
+)
+from util.enum.engine_enums import EngineType, MonteCarloMethod
+from util.exceptions import PricingError, ValidationError
+from util.numerical import safe_log
 
 # Optional Dask import
 try:
-    from dask import delayed, compute
+    from dask import compute, delayed
 
     DASK_AVAILABLE = True
 except ImportError:
@@ -216,7 +215,9 @@ class SnowballMCEngine(BaseEngine):
 
         self._last_result = result
 
-        if result.price < 0:
+        # Negative PV is valid for some structures (e.g., principal-excluded notes)
+        # where the payoff is effectively "coupon minus embedded option loss".
+        if result.price < 0 and product.payoff_config.include_principal:
             raise PricingError(f"Negative price computed: {result.price}")
 
         return result.price
@@ -359,7 +360,7 @@ class SnowballMCEngine(BaseEngine):
             num_paths=effective_num_paths,
             model="bsm",
             random_stream=random_stream,
-            use_brownian_bridge=False,
+            use_brownian_bridge=is_qmc,
             vr_config=vr_config,
             is_qmc=is_qmc,
             dt_array=dt_array,
@@ -435,9 +436,6 @@ class SnowballMCEngine(BaseEngine):
 
         # Extract prices at KI observation times (offset by 1 for t=0)
         ki_prices = paths[:, ki_indices + 1]  # (num_paths, num_ki_obs)
-
-        # Extract prices at KI observation times (offset by 1 for t=0)
-        ki_prices = paths[:, ki_indices + 1]  # (num_paths, num_ki_obs)
         num_ki_obs_times = ki_prices.shape[1]
 
         ki_barriers_effective = np.array(ki_barriers)
@@ -473,6 +471,118 @@ class SnowballMCEngine(BaseEngine):
 
         return ki_triggered, first_ki_idx
 
+    def _check_ki_barriers_continuous_with_bridge(
+        self,
+        paths: np.ndarray,
+        all_times: np.ndarray,
+        ki_barrier: float,
+        sigma: float,
+        is_reverse: bool,
+        rng_seed: int,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Continuous KI monitoring with Brownian-bridge barrier correction.
+
+        The path is simulated on a discrete grid. If both endpoints of an interval
+        are on the non-breached side of the KI barrier, a Brownian-bridge estimate
+        is used to sample whether a barrier hit occurred within the interval.
+        """
+        if ki_barrier <= 0:
+            raise ValidationError(f"ki_barrier must be positive, got {ki_barrier}")
+        if sigma <= 0:
+            raise ValidationError(f"volatility must be positive, got {sigma}")
+
+        n_paths = len(paths)
+        if n_paths == 0:
+            return np.zeros(0, dtype=bool), np.zeros(0, dtype=int)
+
+        ki_triggered = np.zeros(n_paths, dtype=bool)
+        first_ki_idx = np.full(n_paths, -1, dtype=int)
+
+        # Immediate breach at valuation (t=0) counts as KI for continuous monitoring.
+        spot0 = paths[:, 0]
+        if is_reverse:
+            already_breached = spot0 >= ki_barrier
+        else:
+            already_breached = spot0 <= ki_barrier
+        if already_breached.any():
+            ki_triggered[already_breached] = True
+            first_ki_idx[already_breached] = 0
+
+        all_times = np.asarray(all_times, dtype=float)
+        if all_times.ndim != 1:
+            raise ValidationError("all_times must be a 1D array of time points")
+
+        n_steps = paths.shape[1] - 1
+        if all_times.shape[0] != n_steps:
+            raise ValidationError(
+                f"all_times length ({all_times.shape[0]}) must match number of steps ({n_steps})"
+            )
+
+        dt = np.empty(n_steps, dtype=float)
+        dt[0] = float(all_times[0])
+        if n_steps > 1:
+            dt[1:] = np.diff(all_times)
+        if np.any(dt <= 0.0):
+            raise ValidationError("all_times must be strictly increasing and > 0")
+
+        rng = np.random.default_rng(int(rng_seed))
+
+        # Sample step-wise hit events using the Brownian-bridge probabilities.
+        # If a hit occurs in step k, we record the right endpoint index k.
+        for k in range(n_steps):
+            active = ~ki_triggered
+            if not active.any():
+                break
+
+            # If the barrier is already breached at the right endpoint, it's a certain hit.
+            s1 = paths[:, k + 1]
+            if is_reverse:
+                breached_at_endpoint = s1 >= ki_barrier
+            else:
+                breached_at_endpoint = s1 <= ki_barrier
+
+            new_hit = active & breached_at_endpoint
+            if new_hit.any():
+                ki_triggered[new_hit] = True
+                first_ki_idx[new_hit] = k
+
+            active = ~ki_triggered
+            if not active.any():
+                break
+
+            s0 = paths[:, k]
+            s1 = paths[:, k + 1]
+
+            if is_reverse:
+                # KI if price >= barrier; non-breached region is below the barrier.
+                non_breached = (s0 < ki_barrier) & (s1 < ki_barrier)
+            else:
+                # KI if price <= barrier; non-breached region is above the barrier.
+                non_breached = (s0 > ki_barrier) & (s1 > ki_barrier)
+
+            bridge_candidates = active & non_breached
+            if not bridge_candidates.any():
+                continue
+
+            idx = np.flatnonzero(bridge_candidates)
+            dt_k = float(dt[k])
+            h2 = float(sigma * sigma) * dt_k
+
+            log_term = safe_log(s0[idx] / ki_barrier) * safe_log(s1[idx] / ki_barrier)
+            exponent = -2.0 * log_term / h2
+            exponent = np.clip(exponent, -745.0, 0.0)
+            p = np.exp(exponent)
+
+            u = rng.random(idx.size)
+            hit = u < p
+            if hit.any():
+                hit_paths = idx[hit]
+                ki_triggered[hit_paths] = True
+                first_ki_idx[hit_paths] = k
+
+        return ki_triggered, first_ki_idx
+
     def _compute_payoffs(
         self,
         product: SnowballOption,
@@ -483,6 +593,8 @@ class SnowballMCEngine(BaseEngine):
         ki_indices: np.ndarray,
         r: float,
         T: float,
+        sigma: float,
+        rng_seed: int,
     ) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
         """
         Compute payoffs for all paths based on their terminal state.
@@ -526,9 +638,30 @@ class SnowballMCEngine(BaseEngine):
         ki_triggered = np.zeros(num_paths, dtype=bool)
         first_ki_idx = np.full(num_paths, -1, dtype=int)
         if ki_barriers_val is not None:
-            ki_triggered, first_ki_idx = self._check_ki_barriers(
-                paths, ki_indices, ki_barriers_val, product.is_reverse
+            ki_continuous = (
+                product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+                or product.barrier_config.ki_continuous
             )
+            if ki_continuous:
+                if ki_barriers_val.shape not in ((), (1,)):
+                    raise ValidationError(
+                        "Continuous KI monitoring requires a scalar ki_barrier."
+                    )
+                ki_barrier_scalar = float(ki_barriers_val.reshape(-1)[0])
+                ki_triggered, first_ki_idx = (
+                    self._check_ki_barriers_continuous_with_bridge(
+                        paths=paths,
+                        all_times=all_times,
+                        ki_barrier=ki_barrier_scalar,
+                        sigma=float(sigma),
+                        is_reverse=product.is_reverse,
+                        rng_seed=int(rng_seed),
+                    )
+                )
+            else:
+                ki_triggered, first_ki_idx = self._check_ki_barriers(
+                    paths, ki_indices, ki_barriers_val, product.is_reverse
+                )
 
         # Handle disable_ko_after_ki logic
         if product.barrier_config.disable_ko_after_ki and ki_barriers_val is not None:
@@ -643,7 +776,16 @@ class SnowballMCEngine(BaseEngine):
 
         # Compute payoffs
         payoffs, settlement_times, stats = self._compute_payoffs(
-            product, pricing_env, paths, all_times, ko_indices, ki_indices, r, T
+            product,
+            pricing_env,
+            paths,
+            all_times,
+            ko_indices,
+            ki_indices,
+            r,
+            T,
+            sigma,
+            rng_seed=int(self.params.seed) + 1337,
         )
 
         # Discount payoffs
@@ -694,7 +836,16 @@ class SnowballMCEngine(BaseEngine):
 
         # Compute payoffs
         payoffs, settlement_times, stats = self._compute_payoffs(
-            product, pricing_env, paths, all_times, ko_indices, ki_indices, r, T
+            product,
+            pricing_env,
+            paths,
+            all_times,
+            ko_indices,
+            ki_indices,
+            r,
+            T,
+            sigma,
+            rng_seed=int(self.params.seed) + 1337 + int(batch_id) * 1000,
         )
 
         # Discount payoffs
@@ -853,8 +1004,20 @@ class SnowballMCEngine(BaseEngine):
 
         def pricer_fn(paths, aux):
             """Pricer function for RQMC driver."""
+            batch_id = 0
+            if aux is not None and "batch_id" in aux:
+                batch_id = int(aux["batch_id"])
             payoffs, settlement_times, _ = self._compute_payoffs(
-                product, pricing_env, paths, all_times, ko_indices, ki_indices, r, T
+                product,
+                pricing_env,
+                paths,
+                all_times,
+                ko_indices,
+                ki_indices,
+                r,
+                T,
+                sigma,
+                rng_seed=int(self.params.seed) + 1337 + batch_id * 1000,
             )
             discount_factors = np.exp(-r * settlement_times)
             return payoffs * discount_factors
@@ -875,7 +1038,16 @@ class SnowballMCEngine(BaseEngine):
         # Run one more batch to get statistics
         paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
         _, _, stats = self._compute_payoffs(
-            product, pricing_env, paths, all_times, ko_indices, ki_indices, r, T
+            product,
+            pricing_env,
+            paths,
+            all_times,
+            ko_indices,
+            ki_indices,
+            r,
+            T,
+            sigma,
+            rng_seed=int(self.params.seed) + 1337,
         )
 
         return SnowballMCResult(

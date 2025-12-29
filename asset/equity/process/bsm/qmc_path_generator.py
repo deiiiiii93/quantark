@@ -241,6 +241,8 @@ class GBMPathGenerator:
         aux: Optional[Dict[str, np.ndarray]] = None
         if return_aux:
             aux = {}
+            # Include batch identifier for downstream engines (e.g., barrier corrections)
+            aux["batch_id"] = np.array(batch_id if batch_id is not None else 0)
             if weights is not None:
                 aux["weights"] = weights
             if control_variate is not None:

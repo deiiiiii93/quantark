@@ -181,6 +181,20 @@ class SnowballPDESolver(BasePDESolver):
                 self._ko_terminal_record,
             )
 
+        # Apply terminal KI if at maturity observation (European KI fix)
+        # If the KI barrier is breached at maturity, V0 should transition to V1 immediately
+        # so that the final payoff reflects the knocked-in state (downside) instead of V0 (rebate).
+        if product.has_ki_barrier:
+            is_terminal_ki = self._ki_continuous
+            if not is_terminal_ki:
+                # Check if the terminal time step corresponds to a KI observation
+                # (num_t - 1) is the index of maturity in the time grid
+                if (num_t - 1) in self._ki_observation_indices:
+                    is_terminal_ki = True
+            
+            if is_terminal_ki:
+                self._apply_ki_jump(self._grid_v0, self._grid_v1, s_vec, num_t - 1, product)
+
         # Build operator matrices
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)

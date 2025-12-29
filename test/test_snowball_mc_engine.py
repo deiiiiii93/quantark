@@ -412,6 +412,37 @@ class TestEdgeCases:
         # With barrier so far from spot, KO probability should be low
         assert result.ko_probability < 0.3
 
+    def test_negative_price_allowed_when_principal_excluded(self):
+        """Coupon-only structures may have negative PV; engine should not raise."""
+        barrier_config = BarrierConfig(
+            ko_barrier=1.0e12,  # Practically never KO
+            ko_rate=0.0,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=1.0e12,  # Always in KI region (standard: KI if S <= barrier)
+            ki_observation_type=ObservationType.CONTINUOUS,
+            ki_continuous=True,
+        )
+        payoff_config = PayoffConfig(
+            rebate_rate=0.0,
+            include_principal=False,
+            participation_rate=1.0,
+        )
+        snowball = SnowballOption(
+            initial_price=100.0,
+            strike=120.0,  # Deep ITM short put payoff on KI -> negative payoff
+            barrier_config=barrier_config,
+            payoff_config=payoff_config,
+            notional=1_000_000.0,
+            maturity=1.0,
+            is_reverse=False,
+        )
+        env = create_pricing_env(spot=100.0, vol=0.20, rate=0.0, div_yield=0.0)
+        engine = SnowballMCEngine(params=MCParams(num_paths=20000, seed=42))
+
+        price = engine.price(snowball, env)
+        assert price < 0.0
+
 
 class TestValidation:
     """Tests for validation errors."""
