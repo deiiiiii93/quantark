@@ -306,6 +306,216 @@ class SpatialGrid:
 
         return x_vec, s_vec, dx_vec
 
+    # ============================================================
+    # ODE-based Tavella-Randall helper methods for multiple critical points
+    # ============================================================
+
+    @staticmethod
+    def _ode_f(y: float, A: float, beta: float, crits: np.ndarray) -> float:
+        """
+        Right-hand side of the ODE for multi-critical-point grid generation.
+
+        ODE: dY/de = A * (sum_k J_k^-2)^(-0.5)
+        where J_k = sqrt(beta^2 + (Y - B_k)^2)
+
+        Args:
+            y: Current position in log-space
+            A: Scaling constant (found via shooting)
+            beta: Concentration parameter
+            crits: Array of critical points in log-space
+
+        Returns:
+            dY/de value at current position
+        """
+        j_sq = beta * beta + (y - crits) ** 2
+        s = np.sum(1.0 / j_sq)
+        return A / np.sqrt(s)
+
+    @staticmethod
+    def _ode_rk4_step(
+        y: float, h: float, A: float, beta: float, crits: np.ndarray
+    ) -> float:
+        """
+        Single RK4 (Runge-Kutta 4th order) integration step.
+
+        Args:
+            y: Current position
+            h: Step size in parameter space e
+            A: Scaling constant
+            beta: Concentration parameter
+            crits: Critical points array
+
+        Returns:
+            New position after one RK4 step
+        """
+        f = SpatialGrid._ode_f
+        k1 = f(y, A, beta, crits)
+        k2 = f(y + 0.5 * h * k1, A, beta, crits)
+        k3 = f(y + 0.5 * h * k2, A, beta, crits)
+        k4 = f(y + h * k3, A, beta, crits)
+        return y + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    @staticmethod
+    def _ode_integrate(
+        y_min: float, N: int, A: float, beta: float, crits: np.ndarray
+    ) -> np.ndarray:
+        """
+        Integrate ODE from e=0 to e=1 with N steps.
+
+        Args:
+            y_min: Starting position (Y(0) = y_min)
+            N: Number of steps (generates N+1 points)
+            A: Scaling constant
+            beta: Concentration parameter
+            crits: Critical points array
+
+        Returns:
+            Array of N+1 grid points
+        """
+        h = 1.0 / N
+        mesh = np.empty(N + 1, dtype=float)
+        mesh[0] = y_min
+        y = y_min
+        for i in range(1, N + 1):
+            y = SpatialGrid._ode_rk4_step(y, h, A, beta, crits)
+            mesh[i] = y
+        return mesh
+
+    @staticmethod
+    def _ode_find_A(
+        y_min: float, y_max: float, N: int, beta: float, crits: np.ndarray
+    ) -> float:
+        """
+        Find scaling constant A via shooting method (bisection).
+
+        Solves for A such that Y(1) = y_max given Y(0) = y_min.
+
+        Args:
+            y_min: Lower boundary
+            y_max: Upper boundary
+            N: Number of grid intervals
+            beta: Concentration parameter
+            crits: Critical points array
+
+        Returns:
+            Scaling constant A
+        """
+        a_lo = 0.0
+        a_hi = max(4.0 * abs(y_max), abs(y_max - y_min))
+
+        def residual(A: float) -> float:
+            mesh = SpatialGrid._ode_integrate(y_min, N, A, beta, crits)
+            return mesh[-1] - y_max
+
+        f_lo = residual(a_lo)
+        f_hi = residual(a_hi)
+
+        # Expand bracket if needed
+        for _ in range(20):
+            if f_lo * f_hi <= 0:
+                break
+            a_hi *= 2.0
+            f_hi = residual(a_hi)
+
+        # Bisection
+        tol = 1e-10
+        for _ in range(100):
+            if abs(a_hi - a_lo) <= tol:
+                break
+            a_mid = 0.5 * (a_lo + a_hi)
+            f_mid = residual(a_mid)
+            if f_mid == 0.0:
+                return a_mid
+            if f_lo * f_mid < 0:
+                a_hi, f_hi = a_mid, f_mid
+            else:
+                a_lo, f_lo = a_mid, f_mid
+
+        return 0.5 * (a_lo + a_hi)
+
+    @staticmethod
+    def _calculate_beta_for_multi_crit(
+        x_min: float,
+        x_max: float,
+        x_crits: np.ndarray,
+        num_points: int,
+        eps_crit: float,
+    ) -> float:
+        """
+        Find beta that achieves target spacing at critical points.
+
+        Uses bisection to find beta such that the minimum spacing
+        near any critical point is approximately eps_crit.
+
+        Args:
+            x_min: Minimum log-price
+            x_max: Maximum log-price
+            x_crits: Critical points in log-space
+            num_points: Number of grid points
+            eps_crit: Target relative spacing
+
+        Returns:
+            Beta value
+        """
+        dx_target = np.log1p(eps_crit)
+        N = num_points - 1
+
+        # Bracket for beta (log-scale search)
+        beta_lo = 1e-6 * (x_max - x_min)
+        beta_hi = 10.0 * (x_max - x_min)
+
+        def min_spacing_near_crits(beta: float) -> float:
+            A = SpatialGrid._ode_find_A(x_min, x_max, N, beta, x_crits)
+            mesh = SpatialGrid._ode_integrate(x_min, N, A, beta, x_crits)
+            dx = np.diff(mesh)
+
+            # Find minimum spacing near any critical point
+            min_dx = float("inf")
+            for xc in x_crits:
+                idx = np.searchsorted(mesh, xc)
+                idx = max(0, min(idx, len(dx) - 1))
+                if idx > 0:
+                    min_dx = min(min_dx, dx[idx - 1])
+                if idx < len(dx):
+                    min_dx = min(min_dx, dx[idx])
+            return min_dx
+
+        # Bisection with geometric mean (log-scale)
+        for _ in range(40):
+            beta_mid = np.sqrt(beta_lo * beta_hi)
+            current_dx = min_spacing_near_crits(beta_mid)
+            if current_dx > dx_target:
+                beta_hi = beta_mid  # Need tighter concentration
+            else:
+                beta_lo = beta_mid  # Loosen concentration
+
+        return np.sqrt(beta_lo * beta_hi)
+
+    @staticmethod
+    def _snap_critical_points(x_vec: np.ndarray, x_crits: np.ndarray) -> np.ndarray:
+        """
+        Snap nearest grid points to exact critical values.
+
+        Ensures critical points are exactly included in the grid,
+        which is important for barrier boundary conditions.
+
+        Args:
+            x_vec: Grid points array
+            x_crits: Critical points to snap to
+
+        Returns:
+            Grid with critical points exactly included
+        """
+        x_vec = x_vec.copy()
+        for xc in x_crits:
+            # Find nearest grid index
+            idx = np.argmin(np.abs(x_vec - xc))
+            # Snap to exact critical value
+            x_vec[idx] = xc
+        # Re-sort to maintain monotonicity (shouldn't change much)
+        x_vec = np.sort(x_vec)
+        return x_vec
+
     @staticmethod
     def build_tavella_randall_multi(
         s_min: float,
@@ -318,8 +528,12 @@ class SpatialGrid:
         """
         Build a non-uniform grid with concentration near multiple critical points.
 
-        Uses piecewise Tavella-Randall segments between critical points.
-        Points are allocated proportionally to segment length.
+        Uses the ODE-based Tavella-Randall method:
+            dY/de = A * (sum_k J_k^-2)^(-0.5)
+        where J_k = sqrt(beta^2 + (Y - B_k)^2), solved via RK4 with shooting.
+
+        This method provides C-infinity smooth grids that naturally concentrate
+        around all critical points simultaneously.
 
         Args:
             s_min: Minimum spot price (S space)
@@ -331,10 +545,25 @@ class SpatialGrid:
                       Only used when beta is None. Default: 0.003 (0.3%).
 
         Returns:
-            Tuple of (x_vec, s_vec, dx_vec)
+            Tuple of (x_vec, s_vec, dx_vec):
+                - x_vec: Log-price grid points
+                - s_vec: Price grid points
+                - dx_vec: Variable grid spacings
+
+        Notes:
+            Critical points are exactly included in the final grid via post-processing,
+            which is important for barrier boundary conditions.
         """
+        # Validation
+        if s_min <= 0:
+            raise ValueError(f"s_min must be positive, got {s_min}")
+        if s_max <= s_min:
+            raise ValueError(f"s_max ({s_max}) must be greater than s_min ({s_min})")
+        if num_points < 3:
+            raise ValueError(f"num_points must be at least 3, got {num_points}")
+
+        # Handle empty critical points -> uniform grid
         if not critical_points:
-            # Fall back to uniform grid if no critical points
             x_vec, s_vec, dx = SpatialGrid.build_uniform_log(s_min, s_max, num_points)
             dx_vec = np.full(num_points - 1, dx)
             return x_vec, s_vec, dx_vec
@@ -349,87 +578,39 @@ class SpatialGrid:
 
         crits = np.sort(np.unique(crits))
 
-        # If only one critical point, use single Tavella-Randall
+        # If only one critical point, use single Tavella-Randall (optimization)
         if len(crits) == 1:
             return SpatialGrid.build_tavella_randall(
                 s_min, s_max, num_points, crits[0], beta, eps_crit
             )
 
-        # Build segments: [s_min, c1], [c1, c2], ..., [cn, s_max]
-        boundaries = np.concatenate([[s_min], crits, [s_max]])
-        n_segments = len(boundaries) - 1
+        # Convert to log-space
+        x_min = np.log(s_min)
+        x_max = np.log(s_max)
+        x_crits = np.log(crits)
+        N = num_points - 1
 
-        # Allocate points proportionally to segment length (in log space)
-        log_boundaries = np.log(boundaries)
-        segment_lengths = np.diff(log_boundaries)
-        total_length = segment_lengths.sum()
-
-        min_points_per_segment = 3
-        if num_points < min_points_per_segment * n_segments:
-            # Not enough points to guarantee stable Tavella-Randall segments.
-            # Fall back to uniform log grid to avoid invalid small segments.
-            x_vec, s_vec, dx = SpatialGrid.build_uniform_log(s_min, s_max, num_points)
-            dx_vec = np.full(num_points - 1, dx)
-            return x_vec, s_vec, dx_vec
-
-        # Points per segment (proportional, minimum 3 per segment)
-        points_per_segment = np.maximum(
-            min_points_per_segment,
-            np.round(segment_lengths / total_length * num_points).astype(int),
-        )
-
-        # Adjust to match total, without violating the minimum
-        diff = int(num_points - points_per_segment.sum())
-        if diff > 0:
-            # Add points to the longest segments first
-            order = np.argsort(-segment_lengths)
-            for i in range(diff):
-                points_per_segment[order[i % n_segments]] += 1
-        elif diff < 0:
-            to_remove = -diff
-            for _ in range(to_remove):
-                eligible = np.where(points_per_segment > min_points_per_segment)[0]
-                if eligible.size == 0:
-                    break
-                idx = int(eligible[np.argmax(points_per_segment[eligible])])
-                points_per_segment[idx] -= 1
-
-            # If we couldn't remove enough without breaking the minimum, fall back.
-            if points_per_segment.sum() != num_points:
-                x_vec, s_vec, dx = SpatialGrid.build_uniform_log(s_min, s_max, num_points)
-                dx_vec = np.full(num_points - 1, dx)
-                return x_vec, s_vec, dx_vec
-
-        # Build each segment
-        all_x = []
-        for i in range(n_segments):
-            seg_smin = boundaries[i]
-            seg_smax = boundaries[i + 1]
-            seg_n = points_per_segment[i]
-
-            # Critical point for this segment is the midpoint or boundary
-            if i == 0:
-                seg_crit = boundaries[i + 1]  # First critical point
-            elif i == n_segments - 1:
-                seg_crit = boundaries[i]  # Last critical point
-            else:
-                # Middle segments: use the ending critical point
-                seg_crit = boundaries[i + 1]
-
-            # Clamp critical point to be within segment
-            seg_crit = max(seg_smin * 1.001, min(seg_smax * 0.999, seg_crit))
-
-            x_seg, _, _ = SpatialGrid.build_tavella_randall(
-                seg_smin, seg_smax, seg_n, seg_crit, beta, eps_crit
+        # Auto-calculate beta if not provided
+        if beta is None:
+            if eps_crit is None:
+                eps_crit = SpatialGrid.DEFAULT_EPSILON_CRIT
+            beta = SpatialGrid._calculate_beta_for_multi_crit(
+                x_min, x_max, x_crits, num_points, eps_crit
             )
 
-            # Avoid duplicating boundary points
-            if i > 0:
-                x_seg = x_seg[1:]
+        # Safeguard against extreme concentration
+        beta = max(beta, 1e-10 * (x_max - x_min))
 
-            all_x.append(x_seg)
+        # Find scaling constant A via shooting method
+        A = SpatialGrid._ode_find_A(x_min, x_max, N, beta, x_crits)
 
-        x_vec = np.concatenate(all_x)
+        # Generate mesh via RK4 integration
+        x_vec = SpatialGrid._ode_integrate(x_min, N, A, beta, x_crits)
+
+        # Snap critical points to grid (ensure exact inclusion)
+        x_vec = SpatialGrid._snap_critical_points(x_vec, x_crits)
+
+        # Convert to price space and compute spacings
         s_vec = np.exp(x_vec)
         dx_vec = np.diff(x_vec)
 

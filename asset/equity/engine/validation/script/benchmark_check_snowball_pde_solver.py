@@ -569,6 +569,208 @@ def run_variant_tests(results: BenchmarkResults):
 
 
 # ============================================================
+# NON-UNIFORM GRID TESTS
+# ============================================================
+
+
+def create_pde_solver_nonuniform(
+    grid_size: int = 250, time_steps: int = 250, log_dx_target: float = 0.003
+) -> SnowballPDESolver:
+    """Create PDE solver with non-uniform (adaptive) grid."""
+    params = PDEParams(
+        grid_size=grid_size,
+        time_steps=time_steps,
+        theta=0.5,
+        use_rannacher=True,
+        rannacher_steps=2,
+        adaptive_grid=True,  # Enable Tavella-Randall non-uniform grid
+        log_dx_target=log_dx_target,  # Target spacing near critical points
+    )
+    return SnowballPDESolver(params=params)
+
+
+def run_nonuniform_grid_tests(results: BenchmarkResults):
+    """Run tests comparing non-uniform grid performance for snowball variants."""
+    mc_engine = create_mc_engine()
+
+    print("\n>>> Non-Uniform Grid Tests: Standard Snowball")
+    # ─────────────────────────────────────────────────────────
+    # STANDARD SNOWBALL WITH NON-UNIFORM GRID
+    # ─────────────────────────────────────────────────────────
+    env = create_pricing_env(spot=100.0, vol=0.20)
+
+    # Coarse grid with non-uniform (should still be accurate due to concentration)
+    pde_solver_nu_coarse = create_pde_solver_nonuniform(grid_size=150, time_steps=150)
+    snowball = create_snowball()
+    run_comparison("NonUniform Grid 150×150", snowball, env, pde_solver_nu_coarse, mc_engine, results)
+
+    # Standard grid with non-uniform
+    pde_solver_nu_std = create_pde_solver_nonuniform(grid_size=250, time_steps=250)
+    run_comparison("NonUniform Grid 250×250", snowball, env, pde_solver_nu_std, mc_engine, results)
+
+    # Fine grid with non-uniform (tighter epsilon)
+    pde_solver_nu_fine = create_pde_solver_nonuniform(
+        grid_size=200, time_steps=200, log_dx_target=0.002
+    )
+    run_comparison("NonUniform Grid eps=0.2%", snowball, env, pde_solver_nu_fine, mc_engine, results)
+
+    # ─────────────────────────────────────────────────────────
+    # STEPDOWN SNOWBALL (MULTIPLE CRITICAL POINTS)
+    # ─────────────────────────────────────────────────────────
+    print("\n>>> Non-Uniform Grid Tests: Stepdown (Multi-Critical)")
+
+    # Stepdown has multiple KO barriers - good test for multi-critical-point grid
+    pde_solver_nu = create_pde_solver_nonuniform(grid_size=250, time_steps=250)
+
+    # Standard stepdown
+    snowball = create_stepdown_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        initial_ko_barrier=103.0,
+        stepdown_rate=0.005,
+        ki_barrier=75.0,
+    )
+    run_comparison("Stepdown NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # Aggressive stepdown (more barrier levels)
+    snowball = create_stepdown_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        initial_ko_barrier=110.0,
+        stepdown_rate=0.015,  # 1.5% per period - creates wider spread of barriers
+        ki_barrier=75.0,
+    )
+    run_comparison("Stepdown 1.5%/mo NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # ─────────────────────────────────────────────────────────
+    # EUROPEAN KI SNOWBALL
+    # ─────────────────────────────────────────────────────────
+    print("\n>>> Non-Uniform Grid Tests: European KI")
+
+    snowball = create_european_ki_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+    )
+    run_comparison("European KI NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # European KI with low KI barrier (farther from strike)
+    snowball = create_european_ki_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        ko_barrier=103.0,
+        ki_barrier=60.0,
+    )
+    run_comparison("European KI Low KI NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # ─────────────────────────────────────────────────────────
+    # PARACHUTE SNOWBALL
+    # ─────────────────────────────────────────────────────────
+    print("\n>>> Non-Uniform Grid Tests: Parachute")
+
+    snowball = create_parachute_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+    )
+    run_comparison("Parachute NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # Parachute with high KO barrier
+    snowball = create_parachute_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        ko_barrier=110.0,
+        ki_barrier=75.0,
+    )
+    run_comparison("Parachute High KO NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # ─────────────────────────────────────────────────────────
+    # AIRBAG SNOWBALL (3 CRITICAL POINTS: KO, KI, AIRBAG)
+    # ─────────────────────────────────────────────────────────
+    print("\n>>> Non-Uniform Grid Tests: Airbag (Triple Critical Points)")
+
+    # Airbag has 3 critical points: KO barrier, KI barrier, and airbag barrier
+    snowball = create_airbag_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        airbag_barrier=60.0,
+        participation_rate=1.0,
+        airbag_participation_rate=0.5,
+    )
+    run_comparison("Airbag NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # Airbag with higher airbag barrier (closer to KI)
+    snowball = create_airbag_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        airbag_barrier=70.0,
+        participation_rate=1.0,
+        airbag_participation_rate=0.5,
+    )
+    run_comparison("Airbag High AB NonUniform", snowball, env, pde_solver_nu, mc_engine, results)
+
+    # ─────────────────────────────────────────────────────────
+    # NON-UNIFORM GRID STRESS TESTS
+    # ─────────────────────────────────────────────────────────
+    print("\n>>> Non-Uniform Grid Stress Tests")
+
+    mc_engine_fine = create_mc_engine(num_paths=500000)
+    pde_solver_nu_fine = create_pde_solver_nonuniform(
+        grid_size=300, time_steps=300, log_dx_target=0.002
+    )
+
+    # Spot near KO barrier
+    env_near_ko = create_pricing_env(spot=102.5, vol=0.20)
+    snowball = create_snowball(ko_barrier=103.0)
+    run_comparison("Spot near KO NonUniform", snowball, env_near_ko, pde_solver_nu_fine, mc_engine_fine, results)
+
+    # Spot near KI barrier
+    env_near_ki = create_pricing_env(spot=76.0, vol=0.20)
+    snowball = create_snowball(ki_barrier=75.0)
+    run_comparison("Spot near KI NonUniform", snowball, env_near_ki, pde_solver_nu_fine, mc_engine_fine, results)
+
+    # High volatility with non-uniform grid
+    env_high_vol = create_pricing_env(spot=100.0, vol=0.40)
+    snowball = create_snowball()
+    run_comparison("High Vol σ=40% NonUniform", snowball, env_high_vol, pde_solver_nu_fine, mc_engine_fine, results)
+
+    # Stepdown near KO with non-uniform
+    env_near_ko = create_pricing_env(spot=102.0, vol=0.20)
+    snowball = create_stepdown_helper(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        notional=1_000_000.0,
+        initial_ko_barrier=103.0,
+        stepdown_rate=0.005,
+        ki_barrier=75.0,
+    )
+    run_comparison("Stepdown near KO NonUniform", snowball, env_near_ko, pde_solver_nu_fine, mc_engine_fine, results)
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -580,7 +782,8 @@ if __name__ == "__main__":
     parser.add_argument("--tolerance", type=float, default=TOLERANCE, help="Error tolerance")
     parser.add_argument("--stress", action="store_true", help="Include stress tests")
     parser.add_argument("--variants", action="store_true", help="Include snowball variant tests")
-    parser.add_argument("--all", action="store_true", help="Run all tests (stress + variants)")
+    parser.add_argument("--nonuniform", action="store_true", help="Include non-uniform grid tests")
+    parser.add_argument("--all", action="store_true", help="Run all tests (stress + variants + nonuniform)")
     args = parser.parse_args()
 
     results = BenchmarkResults(tolerance=args.tolerance)
@@ -596,6 +799,9 @@ if __name__ == "__main__":
 
     if args.variants or args.all:
         run_variant_tests(results)
+
+    if args.nonuniform or args.all:
+        run_nonuniform_grid_tests(results)
 
     success = results.summary()
     sys.exit(0 if success else 1)

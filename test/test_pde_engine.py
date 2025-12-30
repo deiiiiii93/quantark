@@ -302,6 +302,121 @@ class TestSpatialGrid:
         with pytest.raises(ValueError):
             SpatialGrid.build_uniform_log(100.0, 50.0, 100)
 
+    def test_tavella_randall_multi_concentration(self):
+        """Test ODE-based multi-critical grid concentrates near all critical points."""
+        s_min = 50.0
+        s_max = 200.0
+        num_points = 200
+        critical_points = [80.0, 100.0, 150.0]
+
+        x_vec, s_vec, dx_vec = SpatialGrid.build_tavella_randall_multi(
+            s_min, s_max, num_points, critical_points
+        )
+
+        assert len(x_vec) == num_points
+
+        # Grid spacing should be smaller near each critical point
+        for crit in critical_points:
+            crit_idx = np.argmin(np.abs(s_vec - crit))
+            avg_dx_near_crit = np.mean(
+                dx_vec[max(0, crit_idx - 5) : min(len(dx_vec), crit_idx + 5)]
+            )
+            # Compare to spacing at edges (should be larger)
+            avg_dx_at_edges = np.mean([dx_vec[0], dx_vec[-1]])
+            assert avg_dx_near_crit < avg_dx_at_edges, (
+                f"Grid should be finer near critical point {crit}"
+            )
+
+    def test_tavella_randall_multi_boundary_values(self):
+        """Test that grid boundaries are correct."""
+        s_min = 50.0
+        s_max = 200.0
+        num_points = 100
+        critical_points = [80.0, 120.0]
+
+        x_vec, s_vec, dx_vec = SpatialGrid.build_tavella_randall_multi(
+            s_min, s_max, num_points, critical_points
+        )
+
+        assert np.isclose(s_vec[0], s_min, rtol=1e-6)
+        assert np.isclose(s_vec[-1], s_max, rtol=1e-6)
+        assert len(dx_vec) == num_points - 1
+        # dx_vec should match diff of x_vec
+        assert np.allclose(dx_vec, np.diff(x_vec))
+
+    def test_tavella_randall_multi_critical_on_grid(self):
+        """Test that critical points are exactly included in the grid."""
+        s_min = 50.0
+        s_max = 200.0
+        num_points = 150
+        critical_points = [75.0, 100.0, 130.0]
+
+        x_vec, s_vec, dx_vec = SpatialGrid.build_tavella_randall_multi(
+            s_min, s_max, num_points, critical_points
+        )
+
+        # Each critical point should be exactly on the grid
+        for crit in critical_points:
+            x_crit = np.log(crit)
+            assert x_crit in x_vec, (
+                f"Critical point {crit} (x={x_crit:.6f}) should be exactly on grid"
+            )
+
+    def test_tavella_randall_multi_smoothness(self):
+        """Test that grid spacing changes smoothly (no discontinuities)."""
+        s_min = 50.0
+        s_max = 200.0
+        num_points = 200
+        critical_points = [80.0, 120.0]
+
+        x_vec, s_vec, dx_vec = SpatialGrid.build_tavella_randall_multi(
+            s_min, s_max, num_points, critical_points
+        )
+
+        # Check spacing changes smoothly: ratio of consecutive spacings
+        # should not have large jumps (C∞ continuity means smooth transitions)
+        dx_ratios = dx_vec[1:] / dx_vec[:-1]
+        max_ratio = np.max(dx_ratios)
+        min_ratio = np.min(dx_ratios)
+
+        # Ratios should be close to 1 (smooth change), not extreme jumps
+        assert max_ratio < 1.5, f"Spacing jumps too much: max ratio {max_ratio}"
+        assert min_ratio > 0.67, f"Spacing drops too much: min ratio {min_ratio}"
+
+    def test_tavella_randall_multi_fallback_empty(self):
+        """Test that empty critical points falls back to uniform grid."""
+        s_min = 50.0
+        s_max = 150.0
+        num_points = 100
+
+        x_vec, s_vec, dx_vec = SpatialGrid.build_tavella_randall_multi(
+            s_min, s_max, num_points, critical_points=[]
+        )
+
+        # Should get uniform spacing
+        assert np.allclose(dx_vec, dx_vec[0], rtol=1e-10)
+
+    def test_tavella_randall_multi_fallback_single(self):
+        """Test single critical point delegates to single Tavella-Randall."""
+        s_min = 50.0
+        s_max = 150.0
+        num_points = 100
+        critical = 100.0
+
+        # Single critical point in list
+        x_vec_multi, s_vec_multi, dx_vec_multi = SpatialGrid.build_tavella_randall_multi(
+            s_min, s_max, num_points, critical_points=[critical]
+        )
+
+        # Should match single Tavella-Randall
+        x_vec_single, s_vec_single, dx_vec_single = SpatialGrid.build_tavella_randall(
+            s_min, s_max, num_points, critical
+        )
+
+        assert np.allclose(x_vec_multi, x_vec_single)
+        assert np.allclose(s_vec_multi, s_vec_single)
+        assert np.allclose(dx_vec_multi, dx_vec_single)
+
 
 # ============================================================================
 # Test EuropeanPDESolver

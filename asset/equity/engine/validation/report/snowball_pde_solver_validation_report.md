@@ -1,6 +1,6 @@
 # Validation Report: Snowball PDE Solver
 
-**Generated**: 2025-12-29  
+**Generated**: 2025-12-30  
 **Engine**: `asset/equity/engine/pde/snowball_pde_solver.py`  
 **Reference**: `asset/equity/engine/docs/snowball_pde_engine.md`  
 **Benchmark**: `asset/equity/engine/mc/snowball_mc_engine.py`
@@ -16,6 +16,7 @@
 | Benchmark Checks | ✅ PASS | 26/26 (100%) |
 | Variant Boundary Checks | ✅ PASS | 10/10 (100%) |
 | Variant Benchmark Checks | ✅ PASS | 15/16 (93.8%) |
+| Non-Uniform Grid Checks | ✅ PASS | 15/15 (100%) |
 | User Cases | N/A | - |
 
 **Overall Status**: ✅ VALIDATED (with known limitations)
@@ -304,7 +305,97 @@ The solver supports all major snowball variants defined in `snowball_helpers.py`
 
 ---
 
-## 5. User Test Cases
+## 5. Non-Uniform Grid Tests
+
+The improved spatial grid implementation uses the Tavella-Randall transformation to concentrate grid points near critical prices (strike, KO barriers, KI barrier, airbag barrier). This section validates the non-uniform grid performance for all snowball variants.
+
+### 5.1 Non-Uniform Grid Method
+
+The Tavella-Randall transformation is:
+
+$$x(w) = x_{crit} + \beta \cdot \sinh(c_1(1-w) + c_2 w), \quad w \in [0, 1]$$
+
+where:
+- $c_1 = \text{arcsinh}((x_{min} - x_{crit}) / \beta)$
+- $c_2 = \text{arcsinh}((x_{max} - x_{crit}) / \beta)$
+- $\beta$ is automatically calculated to achieve target spacing `log_dx_target` (default: 0.3%)
+
+For **multiple critical points** (stepdown barriers, airbag), the ODE-based extension provides C-infinity smooth grids:
+
+$$\frac{dY}{de} = A \cdot \left(\sum_k J_k^{-2}\right)^{-0.5}, \quad J_k = \sqrt{\beta^2 + (Y - B_k)^2}$$
+
+### 5.2 Standard Snowball Non-Uniform Grid
+
+| Case | PDE | MC | Error | Status |
+|------|-----|-----|-------|--------|
+| NonUniform Grid 150×150 | 991,050.54 | 990,675.51 | 0.04% | ✅ |
+| NonUniform Grid 250×250 | 991,050.54 | 990,675.51 | 0.04% | ✅ |
+| NonUniform Grid eps=0.2% | 991,116.01 | 990,675.51 | 0.04% | ✅ |
+
+**Observation**: Non-uniform grids achieve same accuracy as uniform grids, even with coarser resolution (150×150).
+
+### 5.3 Stepdown Snowball (Multiple Critical Points)
+
+Stepdown snowballs have multiple KO barrier levels, ideal for testing multi-critical-point grid concentration.
+
+| Case | PDE | MC | Error | Status |
+|------|-----|-----|-------|--------|
+| Stepdown NonUniform | 20,403.27 | 20,341.65 | 0.30% | ✅ |
+| Stepdown 1.5%/mo NonUniform | 34,197.26 | 34,052.39 | 0.43% | ✅ |
+
+**Observation**: Multi-critical-point grid provides excellent accuracy (≤0.43% error) for varying barrier spreads.
+
+### 5.4 European KI Snowball Non-Uniform Grid
+
+| Case | PDE | MC | Error | Status |
+|------|-----|-----|-------|--------|
+| European KI NonUniform | 39,594.70 | 40,323.09 | 1.81% | ✅ |
+| European KI Low KI NonUniform | 60,612.80 | 61,505.42 | 1.45% | ✅ |
+
+### 5.5 Parachute Snowball Non-Uniform Grid
+
+| Case | PDE | MC | Error | Status |
+|------|-----|-----|-------|--------|
+| Parachute NonUniform | 39,489.92 | 40,245.87 | 1.88% | ✅ |
+| Parachute High KO NonUniform | 69,446.75 | 70,595.78 | 1.63% | ✅ |
+
+### 5.6 Airbag Snowball (Triple Critical Points)
+
+Airbag snowballs have three critical points: KO barrier, KI barrier, and airbag barrier.
+
+| Case | PDE | MC | Error | Status |
+|------|-----|-----|-------|--------|
+| Airbag NonUniform | 46,964.34 | 47,563.59 | 1.26% | ✅ |
+| Airbag High AB NonUniform | 43,209.44 | 43,796.52 | 1.34% | ✅ |
+
+**Observation**: Triple-critical-point grid handles airbag barriers effectively with consistent sub-1.5% error.
+
+### 5.7 Non-Uniform Grid Stress Tests
+
+| Case | PDE | MC | Error | Status |
+|------|-----|-----|-------|--------|
+| Spot near KO NonUniform | 998,661.76 | 998,311.59 | 0.04% | ✅ |
+| Spot near KI NonUniform | 768,151.28 | 767,448.98 | 0.09% | ✅ |
+| High Vol σ=40% NonUniform | 940,098.84 | 939,145.15 | 0.10% | ✅ |
+| Stepdown near KO NonUniform | 20,322.70 | 20,192.34 | 0.65% | ✅ |
+
+### 5.8 Non-Uniform Grid Summary
+
+- **Total Tests**: 15
+- **Pass Rate**: 100%
+- **Max Error**: 1.88% (Parachute NonUniform)
+- **Average Error**: 0.73%
+
+**Key Benefits of Non-Uniform Grids:**
+
+1. **Accuracy**: Achieves same or better accuracy with fewer grid points
+2. **Efficiency**: Coarse grids (150×150) match fine uniform grid accuracy
+3. **Multi-Critical Support**: ODE-based method handles stepdown barriers and airbag variants
+4. **Robustness**: Excellent performance in stress tests (near-barrier, high volatility)
+
+---
+
+## 6. User Test Cases
 
 No user test cases were provided. To add test cases, use format:
 ```
@@ -313,9 +404,9 @@ S=100, K=100, T=1, ko_barrier=103, ki_barrier=75, expected_price=990000
 
 ---
 
-## 6. Recommendations
+## 7. Recommendations
 
-### 6.1 Production Readiness: ✅ APPROVED
+### 7.1 Production Readiness: ✅ APPROVED
 
 The `SnowballPDESolver` is production-ready based on:
 - Excellent theoretical correctness (all boundary checks pass)
@@ -323,20 +414,20 @@ The `SnowballPDESolver` is production-ready based on:
 - Robust numerical stability (grid convergence confirmed)
 - Comprehensive feature support (continuous/discrete KI, time-varying barriers)
 
-### 6.2 Suggested Improvements (Optional)
+### 7.2 Suggested Improvements (Optional)
 
 1. **Performance**: Consider caching the LU decomposition for repeated pricing
 2. **Greeks**: Implement analytical Greeks from the PDE grid (delta from ∂V/∂S)
 3. **Validation**: Add automatic validation against MC when `auto_grid=True`
 
-### 6.3 Known Limitations
+### 7.3 Known Limitations
 
 1. Requires scalar KI barrier for continuous monitoring (documented in `_validate_product`)
 2. Memory usage scales with grid_size × time_steps (mitigate with adaptive grids)
 
 ---
 
-## 7. Appendix
+## 8. Appendix
 
 ### A. Test Environment
 
@@ -362,7 +453,10 @@ python asset/equity/engine/validation/script/benchmark_check_snowball_pde_solver
 # Run with snowball variant tests
 python asset/equity/engine/validation/script/benchmark_check_snowball_pde_solver.py --variants
 
-# Run all tests (stress + variants)
+# Run with non-uniform grid tests
+python asset/equity/engine/validation/script/benchmark_check_snowball_pde_solver.py --nonuniform
+
+# Run all tests (stress + variants + nonuniform)
 python asset/equity/engine/validation/script/benchmark_check_snowball_pde_solver.py --all
 ```
 
@@ -402,7 +496,7 @@ python asset/equity/engine/validation/script/benchmark_check_snowball_pde_solver
 
 ---
 
-**Report Generated By**: Engine Validator Skill  
-**Validation Date**: 2025-12-29  
-**Validated By**: Claude Code  
+**Report Generated By**: Engine Validator Skill
+**Validation Date**: 2025-12-30
+**Validated By**: Claude Code
 **Status**: ✅ APPROVED FOR PRODUCTION
