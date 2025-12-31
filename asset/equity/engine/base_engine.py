@@ -7,6 +7,7 @@ from typing import Dict, Optional
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from priceenv import PricingEnvironment
 from asset.equity.param import EngineParams
+from util.enum.engine_enums import EngineType
 
 
 class BaseEngine(ABC):
@@ -14,7 +15,12 @@ class BaseEngine(ABC):
     Abstract base class for all pricing engines.
 
     Engines are responsible for computing prices and Greeks for derivatives.
+
+    Attributes:
+        engine_type: The type category of this engine (ANALYTICAL, MONTE_CARLO, PDE, etc.)
     """
+
+    engine_type: EngineType = EngineType.ANALYTICAL
 
     def __init__(self, params: Optional[EngineParams] = None):
         """

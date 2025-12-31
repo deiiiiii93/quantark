@@ -65,6 +65,8 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         engine = AsianOptionAnalyticalEngine(method="levy")
     """
 
+    engine_type = EngineType.ANALYTICAL
+
     DEFAULT_METHOD = AsianAnalyticalMethod.TURNBULL_WAKEMAN
     DEFAULT_GEOMETRIC_METHOD = AsianAnalyticalMethod.KEMNA_VORST
 

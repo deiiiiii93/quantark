@@ -4,7 +4,7 @@ Analytical pricing engine for American vanilla options.
 This module implements three approximation methods:
 - BS93: Bjerksund-Stensland (1993) single-barrier approximation
 - BS02: Bjerksund-Stensland (2002) two-barrier approximation
-- BAW: Barone-Adesi-Whaley (1987) quadratic approximation
+- BAW: Barone-Adesi & Whaley (1987) quadratic approximation
 
 References:
     [1] Bjerksund, P., and Stensland, G., 1993. Closed-form approximation of American options.
@@ -38,6 +38,8 @@ class AmericanOptionAnalyticalEngine(BaseEngine):
 
     For American puts, BS93/BS02 use put-call transformation while BAW uses direct put pricing.
     """
+
+    engine_type = EngineType.ANALYTICAL
 
     DEFAULT_METHOD = AmericanAnalyticalMethod.BS93
 

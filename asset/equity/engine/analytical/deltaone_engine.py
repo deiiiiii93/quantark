@@ -10,6 +10,7 @@ from asset.equity.product.deltaone import BaseDeltaOneProduct, SpotInstrument, F
 from asset.equity.param import EngineParams
 from priceenv import PricingEnvironment
 from util.enum.deltaone_enums import DeltaOneType
+from util.enum.engine_enums import EngineType
 from util.exceptions import ValidationError, PricingError
 
 
@@ -34,9 +35,12 @@ class DeltaOneEngine(BaseEngine):
         - Rho: value * time
     
     Attributes:
+        engine_type: EngineType.ANALYTICAL
         use_market_price: If True, use mark-to-market for futures when available
     """
     
+    engine_type = EngineType.ANALYTICAL
+
     def __init__(self, params: Optional[EngineParams] = None, use_market_price: bool = False):
         """
         Initialize delta one engine.

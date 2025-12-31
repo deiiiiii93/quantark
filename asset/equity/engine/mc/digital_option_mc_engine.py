@@ -55,6 +55,8 @@ class DigitalOptionMCEngine(BaseEngine):
     environment and MCParams configuration.
     """
 
+    engine_type = EngineType.MONTE_CARLO
+
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
     def __init__(

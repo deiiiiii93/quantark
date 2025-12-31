@@ -18,6 +18,7 @@ from priceenv import PricingEnvironment
 from util.exceptions import PricingError, NumericalError
 from util.numerical import is_close
 from util.enum.option_enums import ExerciseType, ObservationType
+from util.enum.engine_enums import EngineType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid
@@ -52,6 +53,8 @@ class BasePDESolver(BaseEngine):
 
     The PDE is solved backward in time from maturity to valuation date.
     """
+
+    engine_type = EngineType.PDE
 
     def __init__(self, params: Optional[PDEParams] = None):
         """Initialize the PDE solver with configuration parameters."""

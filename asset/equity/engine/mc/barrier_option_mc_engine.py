@@ -47,6 +47,8 @@ class BarrierOptionMCEngine(BaseEngine):
     monitoring to approximate barrier crossings between time steps.
     """
 
+    engine_type = EngineType.MONTE_CARLO
+
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
     def __init__(

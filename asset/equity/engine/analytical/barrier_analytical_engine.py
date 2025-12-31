@@ -23,6 +23,7 @@ from asset.equity.param import EngineParams
 from priceenv import PricingEnvironment
 from util.barrier_shift import apply_barrier_shift
 from util.enum import ObservationType, BarrierDirection, TouchType
+from util.enum.engine_enums import EngineType
 from util.exceptions import ValidationError, PricingError
 
 from .black_scholes_engine import BlackScholesEngine
@@ -38,6 +39,8 @@ class BarrierAnalyticalEngine(BaseEngine):
           a regular observation grid and fixed payoff across observations.
         - Rebates for continuous/discrete monitoring are valued via OneTouchAnalyticalEngine.
     """
+
+    engine_type = EngineType.ANALYTICAL
 
     MIN_VOL = 0.001
     MAX_VOL = 5.0

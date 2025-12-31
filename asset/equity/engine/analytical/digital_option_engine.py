@@ -11,6 +11,7 @@ from asset.equity.product.option import CashOrNothingDigitalOption
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.param import EngineParams
 from priceenv import PricingEnvironment
+from util.enum.engine_enums import EngineType
 from util.exceptions import ValidationError, NumericalError, PricingError
 
 
@@ -25,6 +26,8 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
         d1 = [ln(S/K) + (r - q + 0.5σ²)T] / (σ√T)
         d2 = d1 - σ√T
     """
+
+    engine_type = EngineType.ANALYTICAL
 
     MIN_VOL = 0.001
     MAX_VOL = 5.0

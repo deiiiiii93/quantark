@@ -73,6 +73,8 @@ class PDEEngine(BaseEngine):
         )
     """
 
+    engine_type = EngineType.PDE
+
     PRODUCT_SOLVER_MAP: Dict[Type[BaseEquityProduct], Type[BasePDESolver]] = {
         EuropeanVanillaOption: EuropeanPDESolver,
         AmericanOption: AmericanPDESolver,
@@ -203,6 +205,27 @@ class PDEEngine(BaseEngine):
 
         solver = self._get_solver(product)
         return solver.price(product, pricing_env)
+
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks using the appropriate PDE solver's grid-based method.
+
+        Automatically dispatches to the correct solver based on product type.
+
+        Args:
+            product: The derivative product
+            pricing_env: Pricing environment with market data
+
+        Returns:
+            Dictionary of Greeks (price, delta, gamma)
+        """
+        if product is None:
+            raise ValidationError("Product cannot be None")
+
+        solver = self._get_solver(product)
+        return solver.calculate_greeks(product, pricing_env)
 
     def __repr__(self):
         return f"PDEEngine(method={self.method.value})"

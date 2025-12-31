@@ -105,3 +105,23 @@ class EngineType(Enum):
         if method is not None:
             return (self, method)
         return self
+
+
+class GreeksCalculationMode(Enum):
+    """Mode for calculating delta/gamma in GreeksCalculator.
+
+    Controls whether delta and gamma are calculated using the engine's
+    built-in calculate_greeks() method or the finite difference bump method.
+
+    Attributes:
+        ENGINE: Use engine.calculate_greeks() if available (e.g., PDE grid Greeks)
+        BUMP: Use finite difference bump method (universal, but requires re-pricing)
+        AUTO: Use engine method for PDE engines, bump method otherwise
+    """
+
+    ENGINE = "engine"  # Use engine.calculate_greeks() if available
+    BUMP = "bump"      # Use finite difference bump method
+    AUTO = "auto"      # Use engine method for PDE, bump otherwise
+
+    def __str__(self):
+        return self.value

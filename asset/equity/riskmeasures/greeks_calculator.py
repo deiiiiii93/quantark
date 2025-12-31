@@ -16,6 +16,7 @@ from asset.equity.param import EngineParams
 from priceenv import PricingEnvironment
 from util.exceptions import ValidationError
 from util.calendar import calculate_year_fraction
+from util.enum.engine_enums import GreeksCalculationMode, EngineType
 
 
 class GreeksCalculator:
@@ -25,17 +26,47 @@ class GreeksCalculator:
     Supports:
     - Analytical Greeks: Using closed-form Black-Scholes formulas
     - Numerical Greeks: Using finite difference method (FDM)
+
+    The greeks_mode parameter controls delta/gamma calculation for engines that
+    implement their own calculate_greeks() method (e.g., PDE engines):
+    - GreeksCalculationMode.BUMP: Always use finite difference bump method
+    - GreeksCalculationMode.ENGINE: Use engine.calculate_greeks() if available
+    - GreeksCalculationMode.AUTO: Use engine method for PDE engines, bump otherwise
     """
 
-    def __init__(self, params: Optional[EngineParams] = None):
+    def __init__(
+        self,
+        params: Optional[EngineParams] = None,
+        greeks_mode: GreeksCalculationMode = GreeksCalculationMode.BUMP,
+    ):
         """
         Initialize Greeks calculator.
 
         Args:
             params: Engine parameters (for bump sizes in FDM)
+            greeks_mode: Mode for delta/gamma calculation when engine has
+                        its own calculate_greeks() method (e.g., PDE engines)
         """
         self.params = params if params is not None else EngineParams()
         self._bump_config = self.params.get_effective_bump_config()
+        self.greeks_mode = greeks_mode
+
+    def _should_use_engine_greeks(self, engine: BaseEngine) -> bool:
+        """
+        Check if engine's calculate_greeks() should be used for delta/gamma.
+
+        Args:
+            engine: The pricing engine
+
+        Returns:
+            True if engine.calculate_greeks() should be used
+        """
+        if self.greeks_mode == GreeksCalculationMode.BUMP:
+            return False
+        if self.greeks_mode == GreeksCalculationMode.ENGINE:
+            return True
+        # AUTO mode: use for PDE engines
+        return getattr(engine, 'engine_type', None) == EngineType.PDE
 
     def calculate_analytical_greeks(
         self,
@@ -159,6 +190,9 @@ class GreeksCalculator:
             - Rho: Absolute rate bump (default: 1bp)
             - Dividend Rho: Absolute div yield bump (default: 1bp)
 
+        For delta and gamma, if greeks_mode is ENGINE or AUTO (with PDE engine),
+        the engine's own calculate_greeks() method is used instead of bumping.
+
         Args:
             product: The derivative product
             pricing_env: Pricing environment
@@ -179,27 +213,42 @@ class GreeksCalculator:
         greeks = {"price": base_price}
         config = self._bump_config
 
-        # Precompute spot bumps once for delta/gamma.
-        spot_prices = self._spot_bumped_prices(
-            product, pricing_env, engine, config.spot_bump, base_price=base_price
-        )[1:]
+        # Check if we should use engine's calculate_greeks() for delta/gamma
+        use_engine_greeks = (
+            self._should_use_engine_greeks(engine)
+            and hasattr(engine, 'calculate_greeks')
+        )
 
-        greeks["delta"] = self.calculate_numerical_delta(
-            product,
-            pricing_env,
-            engine,
-            base_price=base_price,
-            spot_prices=spot_prices,
-            bump=config.spot_bump,
-        )
-        greeks["gamma"] = self.calculate_numerical_gamma(
-            product,
-            pricing_env,
-            engine,
-            base_price=base_price,
-            spot_prices=spot_prices,
-            bump=config.spot_bump,
-        )
+        if use_engine_greeks:
+            # Use engine's built-in calculate_greeks() (e.g., PDE grid-based)
+            engine_greeks = engine.calculate_greeks(product, pricing_env)
+            greeks["delta"] = engine_greeks["delta"]
+            greeks["gamma"] = engine_greeks["gamma"]
+        else:
+            # Use bump method for delta/gamma (original behavior)
+            # Precompute spot bumps once for delta/gamma.
+            spot_prices = self._spot_bumped_prices(
+                product, pricing_env, engine, config.spot_bump, base_price=base_price
+            )[1:]
+
+            greeks["delta"] = self.calculate_numerical_delta(
+                product,
+                pricing_env,
+                engine,
+                base_price=base_price,
+                spot_prices=spot_prices,
+                bump=config.spot_bump,
+            )
+            greeks["gamma"] = self.calculate_numerical_gamma(
+                product,
+                pricing_env,
+                engine,
+                base_price=base_price,
+                spot_prices=spot_prices,
+                bump=config.spot_bump,
+            )
+
+        # Other Greeks always use bump method
         greeks["vega"] = self.calculate_numerical_vega(
             product, pricing_env, engine, base_price=base_price, vol_bump=config.vol_bump
         )

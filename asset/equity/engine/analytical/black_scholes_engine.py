@@ -11,6 +11,7 @@ from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.param import EngineParams
 from priceenv import PricingEnvironment
 from util.exceptions import ValidationError, NumericalError, PricingError
+from util.enum.engine_enums import EngineType
 
 
 class BlackScholesEngine(BaseEngine):
@@ -25,6 +26,8 @@ class BlackScholesEngine(BaseEngine):
         d1 = [ln(S/K) + (r - q + σ²/2)*T] / (σ*√T)
         d2 = d1 - σ*√T
     """
+
+    engine_type = EngineType.ANALYTICAL
 
     def __init__(self, params: Optional[EngineParams] = None):
         """

@@ -88,6 +88,8 @@ class AsianOptionMCEngine(BaseEngine):
     environment and product observation schedule.
     """
 
+    engine_type = EngineType.MONTE_CARLO
+
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
     def __init__(
