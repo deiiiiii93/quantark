@@ -1,0 +1,333 @@
+"""
+Integration tests for Greeks calculation with BumpConfig.
+"""
+
+import pytest
+from datetime import datetime
+from asset.equity.product.option import EuropeanVanillaOption
+from asset.equity.engine.analytical import BlackScholesEngine
+from asset.equity.param import EngineParams, BumpConfig
+from asset.equity.riskmeasures import GreeksCalculator
+from param import SpotQuote, FlatVolSurface, FlatRateCurve
+from param.div import ContinuousDividendYield
+from priceenv import PricingEnvironment
+from util.enum import OptionType
+
+
+@pytest.fixture
+def pricing_env():
+    """Create a standard pricing environment for testing."""
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.05),
+        div_yield=ContinuousDividendYield(div_yield=0.02),
+        valuation_date=datetime(2024, 1, 1),
+    )
+
+
+@pytest.fixture
+def call_option():
+    """Create a call option for testing."""
+    return EuropeanVanillaOption(
+        strike=100.0,
+        option_type=OptionType.CALL,
+        maturity=1.0
+    )
+
+
+@pytest.fixture
+def put_option():
+    """Create a put option for testing."""
+    return EuropeanVanillaOption(
+        strike=100.0,
+        option_type=OptionType.PUT,
+        maturity=1.0
+    )
+
+
+@pytest.fixture
+def bs_engine():
+    """Create Black-Scholes engine for testing."""
+    return BlackScholesEngine()
+
+
+class TestEngineParamsBackwardCompatibility:
+    """Test backward compatibility for bump_size."""
+
+    def test_legacy_bump_size_creates_bump_config(self):
+        """Test that legacy bump_size creates valid BumpConfig."""
+        params = EngineParams(bump_size=0.001)
+        assert params.bump_config is not None
+        assert params.bump_config.spot_bump == 0.001
+
+    def test_explicit_bump_config_overrides_default(self):
+        """Test that explicit bump_config is used."""
+        custom_config = BumpConfig(spot_bump=0.005)
+        params = EngineParams(bump_size=0.001, bump_config=custom_config)
+        assert params.get_effective_bump_config().spot_bump == 0.005
+
+    def test_greeks_calculator_uses_bump_config(self):
+        """Test that GreeksCalculator uses bump_config values."""
+        config = BumpConfig(
+            spot_bump=0.001,  # 0.1% instead of 1%
+            vol_bump=0.005,   # 0.5 vol points
+        )
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        assert calc._bump_config.spot_bump == 0.001
+        assert calc._bump_config.vol_bump == 0.005
+
+
+class TestNumericalGreeksWithBumpConfig:
+    """Test numerical Greeks with custom bump configurations."""
+
+    def test_greeks_with_default_bump_config(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test Greeks calculation with default bump config."""
+        calc = GreeksCalculator()
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+
+        # Check all expected Greeks are present
+        assert "price" in greeks
+        assert "delta" in greeks
+        assert "gamma" in greeks
+        assert "vega" in greeks
+        assert "theta" in greeks
+        assert "rho" in greeks
+        assert "dividend_rho" in greeks
+
+    def test_delta_with_custom_spot_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test delta calculation with custom spot bump."""
+        config = BumpConfig(spot_bump=0.001)  # Smaller bump
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+        # Delta should be in reasonable range for ATM call
+        assert 0 < greeks["delta"] < 1
+
+    def test_gamma_with_custom_spot_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test gamma calculation with custom spot bump."""
+        config = BumpConfig(spot_bump=0.005)  # 0.5% bump
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+        # Gamma should be positive
+        assert greeks["gamma"] > 0
+
+    def test_vega_with_custom_vol_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test vega with custom vol bump."""
+        config = BumpConfig(vol_bump=0.005)  # 0.5 vol points
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+        # Vega should be positive for call
+        assert greeks["vega"] > 0
+
+    def test_theta_with_custom_time_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test theta with 7-day bump instead of 1-day."""
+        config = BumpConfig(time_bump_days=7)
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+        # Theta should be negative for call (time decay)
+        assert greeks["theta"] < 0
+
+    def test_rho_with_custom_rate_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test rho with custom rate bump."""
+        config = BumpConfig(rate_bump=0.0001)  # 1bp
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+        # Rho should be positive for call
+        assert greeks["rho"] > 0
+
+    def test_dividend_rho_call_negative(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test that dividend_rho is negative for calls."""
+        config = BumpConfig(div_bump=0.0001)
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+        assert "dividend_rho" in greeks
+        # Higher dividend yield -> lower call price
+        assert greeks["dividend_rho"] < 0
+
+    def test_dividend_rho_put_positive(
+        self, put_option, pricing_env, bs_engine
+    ):
+        """Test that dividend_rho is positive for puts."""
+        config = BumpConfig(div_bump=0.0001)
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(put_option, pricing_env, bs_engine)
+        assert "dividend_rho" in greeks
+        # Higher dividend yield -> higher put price
+        assert greeks["dividend_rho"] > 0
+
+    def test_all_greeks_with_full_custom_config(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test all Greeks with fully custom BumpConfig."""
+        config = BumpConfig(
+            spot_bump=0.005,   # 0.5%
+            vol_bump=0.02,     # 2 vol points
+            time_bump_days=7,  # 7-day theta
+            rate_bump=0.001,   # 10bp
+            div_bump=0.001,    # 10bp
+        )
+        params = EngineParams(bump_config=config)
+        calc = GreeksCalculator(params=params)
+
+        greeks = calc.calculate_numerical_greeks(call_option, pricing_env, bs_engine)
+
+        # Verify all Greeks are calculated
+        assert "price" in greeks
+        assert "delta" in greeks
+        assert "gamma" in greeks
+        assert "vega" in greeks
+        assert "theta" in greeks
+        assert "rho" in greeks
+        assert "dividend_rho" in greeks
+
+        # Verify signs for call option
+        assert greeks["delta"] > 0
+        assert greeks["gamma"] > 0
+        assert greeks["vega"] > 0
+        assert greeks["theta"] < 0  # Time decay
+        assert greeks["rho"] > 0
+        assert greeks["dividend_rho"] < 0  # Higher div -> lower call price
+
+
+class TestIndividualGreekMethodOverrides:
+    """Test individual Greek calculation methods with override parameters."""
+
+    def test_delta_override_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test delta with explicit bump parameter override."""
+        calc = GreeksCalculator()
+        # Use 0.5% bump instead of default 1%
+        delta = calc.calculate_numerical_delta(
+            call_option, pricing_env, bs_engine, bump=0.005
+        )
+        assert 0 < delta < 1
+
+    def test_gamma_override_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test gamma with explicit bump parameter override."""
+        calc = GreeksCalculator()
+        gamma = calc.calculate_numerical_gamma(
+            call_option, pricing_env, bs_engine, bump=0.005
+        )
+        assert gamma > 0
+
+    def test_vega_override_vol_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test vega with explicit vol_bump parameter override."""
+        calc = GreeksCalculator()
+        vega = calc.calculate_numerical_vega(
+            call_option, pricing_env, bs_engine, vol_bump=0.02
+        )
+        assert vega > 0
+
+    def test_theta_override_time_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test theta with explicit time_bump_days parameter override."""
+        calc = GreeksCalculator()
+        theta = calc.calculate_numerical_theta(
+            call_option, pricing_env, bs_engine, time_bump_days=7
+        )
+        assert theta < 0
+
+    def test_rho_override_rate_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test rho with explicit rate_bump parameter override."""
+        calc = GreeksCalculator()
+        rho = calc.calculate_numerical_rho(
+            call_option, pricing_env, bs_engine, rate_bump=0.001
+        )
+        assert rho > 0
+
+    def test_dividend_rho_override_div_bump(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test dividend_rho with explicit div_bump parameter override."""
+        calc = GreeksCalculator()
+        div_rho = calc.calculate_numerical_dividend_rho(
+            call_option, pricing_env, bs_engine, div_bump=0.001
+        )
+        assert div_rho < 0  # Negative for call
+
+
+class TestEdgeCases:
+    """Test edge cases for bump configurations."""
+
+    def test_zero_dividend_yield(self, call_option, pricing_env, bs_engine):
+        """Test dividend_rho with zero dividend yield."""
+        env_no_div = PricingEnvironment(
+            spot_quote=SpotQuote(spot=100.0),
+            vol_surface=FlatVolSurface(volatility=0.20),
+            rate_curve=FlatRateCurve(rate=0.05),
+            div_yield=ContinuousDividendYield(div_yield=0.0),
+            valuation_date=datetime(2024, 1, 1),
+        )
+
+        calc = GreeksCalculator()
+        greeks = calc.calculate_numerical_greeks(call_option, env_no_div, bs_engine)
+        assert "dividend_rho" in greeks
+
+    def test_near_expiry_theta(self, pricing_env, bs_engine):
+        """Test theta calculation when near expiry."""
+        # Option with 0.5 days to maturity
+        near_expiry_option = EuropeanVanillaOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            maturity=0.5 / 365
+        )
+
+        calc = GreeksCalculator()
+        greeks = calc.calculate_numerical_greeks(
+            near_expiry_option, pricing_env, bs_engine
+        )
+        # Theta should handle case where time_bump exceeds maturity
+        assert "theta" in greeks
+
+    def test_low_volatility_vega(self, call_option, bs_engine):
+        """Test vega with very low volatility."""
+        env_low_vol = PricingEnvironment(
+            spot_quote=SpotQuote(spot=100.0),
+            vol_surface=FlatVolSurface(volatility=0.01),  # 1% vol
+            rate_curve=FlatRateCurve(rate=0.05),
+            div_yield=ContinuousDividendYield(div_yield=0.02),
+            valuation_date=datetime(2024, 1, 1),
+        )
+
+        calc = GreeksCalculator()
+        greeks = calc.calculate_numerical_greeks(call_option, env_low_vol, bs_engine)
+        assert "vega" in greeks
+        assert greeks["vega"] > 0
