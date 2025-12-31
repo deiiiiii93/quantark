@@ -133,6 +133,107 @@ class DoubleBarrierPDESolver(BasePDESolver):
 
         return super().price(ko_product, pricing_env)
 
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for a double barrier option using PDE method.
+
+        For knock-in options, uses: Greeks_KI = Greeks_Vanilla - Greeks_KO
+
+        Args:
+            product: Double barrier option
+            pricing_env: Pricing environment
+
+        Returns:
+            Dictionary with price, delta, gamma
+
+        Raises:
+            PricingError: If product is not a double barrier option
+        """
+        if not isinstance(product, DoubleBarrierOption):
+            raise PricingError(
+                f"DoubleBarrierPDESolver only supports DoubleBarrierOption, "
+                f"got {type(product).__name__}"
+            )
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        # Handle expired case
+        if tau <= 0:
+            return {
+                "price": self._calculate_intrinsic(product, spot),
+                "delta": self._intrinsic_delta(product, spot),
+                "gamma": 0.0,
+            }
+
+        # Check if barrier is already hit (outside corridor)
+        if product.is_barrier_hit(spot):
+            if product.is_knock_out:
+                # Already knocked out: rebate is constant, so delta=gamma=0
+                return {"price": product.rebate, "delta": 0.0, "gamma": 0.0}
+            else:
+                # Knocked in: return vanilla Greeks
+                return self._calculate_greeks_vanilla(product, pricing_env)
+
+        if product.is_knock_in:
+            # Knock-in = Vanilla - Knock-out decomposition
+            vanilla_greeks = self._calculate_greeks_vanilla(product, pricing_env)
+            ko_greeks = self._calculate_greeks_knock_out(product, pricing_env)
+
+            return {
+                "price": vanilla_greeks["price"] - ko_greeks["price"],
+                "delta": vanilla_greeks["delta"] - ko_greeks["delta"],
+                "gamma": vanilla_greeks["gamma"] - ko_greeks["gamma"],
+            }
+        else:
+            # Direct knock-out pricing
+            return super().calculate_greeks(product, pricing_env)
+
+    def _calculate_greeks_vanilla(
+        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for the underlying vanilla option.
+        """
+        from asset.equity.product.option import EuropeanVanillaOption
+        from .european_pde_solver import EuropeanPDESolver
+
+        vanilla = EuropeanVanillaOption(
+            strike=product.strike,
+            option_type=product.option_type,
+            maturity=product.maturity,
+            exercise_date=product.exercise_date,
+            settlement_date=product.settlement_date,
+        )
+
+        solver = EuropeanPDESolver(self.params)
+        return solver.calculate_greeks(vanilla, pricing_env)
+
+    def _calculate_greeks_knock_out(
+        self, product: DoubleBarrierOption, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks as knock-out (for knock-in decomposition).
+        """
+        ko_product = DoubleBarrierOption(
+            strike=product.strike,
+            option_type=product.option_type,
+            upper_barrier=product.upper_barrier,
+            lower_barrier=product.lower_barrier,
+            barrier_type=DoubleBarrierType.KNOCK_OUT,
+            maturity=product.maturity,
+            exercise_date=product.exercise_date,
+            settlement_date=product.settlement_date,
+            rebate=0.0,  # Zero rebate for decomposition
+            observation_type=product.observation_type,
+            observation_dates=product.observation_dates,
+            observation_schedule=product.observation_schedule,
+        )
+
+        return super().calculate_greeks(ko_product, pricing_env)
+
     def set_terminal_condition(
         self,
         grid: np.ndarray,

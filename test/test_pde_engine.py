@@ -991,6 +991,222 @@ class TestDoubleOneTouchPDESolver:
 
 
 # ============================================================================
+# Greeks Consistency Tests
+# ============================================================================
+
+
+class TestGreeksConsistency:
+    """Tests that calculate_greeks() returns consistent prices with price()."""
+
+    def test_european_greeks_price_consistency(self, pricing_env, pde_params):
+        """Test that EuropeanPDESolver Greeks price matches price()."""
+        call = EuropeanVanillaOption(
+            strike=100.0, option_type=OptionType.CALL, maturity=1.0
+        )
+
+        solver = EuropeanPDESolver(pde_params)
+        price = solver.price(call, pricing_env)
+        greeks = solver.calculate_greeks(call, pricing_env)
+
+        # Price from calculate_greeks() should match price()
+        assert abs(greeks["price"] - price) < 1e-10
+
+    def test_american_greeks_price_consistency(self, pricing_env, pde_params):
+        """Test that AmericanPDESolver Greeks price matches price()."""
+        put = AmericanOption(
+            strike=100.0, option_type=OptionType.PUT, maturity=1.0
+        )
+
+        solver = AmericanPDESolver(pde_params)
+        price = solver.price(put, pricing_env)
+        greeks = solver.calculate_greeks(put, pricing_env)
+
+        assert abs(greeks["price"] - price) < 1e-10
+
+    def test_barrier_knockout_greeks_price_consistency(self, pricing_env, pde_params):
+        """Test that BarrierPDESolver Greeks price matches price() for knock-out."""
+        knockout = BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=120.0,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=0.5,
+            rebate=0.0,
+        )
+
+        solver = BarrierPDESolver(pde_params)
+        price = solver.price(knockout, pricing_env)
+        greeks = solver.calculate_greeks(knockout, pricing_env)
+
+        assert abs(greeks["price"] - price) < 1e-10
+
+    def test_barrier_knockin_greeks_price_consistency(self, pricing_env, pde_params):
+        """Test that BarrierPDESolver Greeks price matches price() for knock-in."""
+        knockin = BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=120.0,
+            barrier_type=BarrierType.UP_IN,
+            maturity=0.5,
+            rebate=0.0,
+        )
+
+        solver = BarrierPDESolver(pde_params)
+        price = solver.price(knockin, pricing_env)
+        greeks = solver.calculate_greeks(knockin, pricing_env)
+
+        # Price should match (both use knock-in decomposition)
+        assert abs(greeks["price"] - price) < 1e-10
+
+    def test_barrier_knockin_greeks_decomposition(self, pricing_env, pde_params):
+        """Test that knock-in Greeks = vanilla Greeks - knock-out Greeks."""
+        strike = 100.0
+        barrier = 120.0
+        maturity = 0.5
+
+        vanilla = EuropeanVanillaOption(
+            strike=strike, option_type=OptionType.CALL, maturity=maturity
+        )
+        knockin = BarrierOption(
+            strike=strike,
+            option_type=OptionType.CALL,
+            barrier=barrier,
+            barrier_type=BarrierType.UP_IN,
+            maturity=maturity,
+            rebate=0.0,
+        )
+        knockout = BarrierOption(
+            strike=strike,
+            option_type=OptionType.CALL,
+            barrier=barrier,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=maturity,
+            rebate=0.0,
+        )
+
+        euro_solver = EuropeanPDESolver(pde_params)
+        barrier_solver = BarrierPDESolver(pde_params)
+
+        vanilla_greeks = euro_solver.calculate_greeks(vanilla, pricing_env)
+        ki_greeks = barrier_solver.calculate_greeks(knockin, pricing_env)
+        ko_greeks = barrier_solver.calculate_greeks(knockout, pricing_env)
+
+        # KI + KO = Vanilla for each Greek
+        assert abs(ki_greeks["price"] + ko_greeks["price"] - vanilla_greeks["price"]) < 0.01
+        assert abs(ki_greeks["delta"] + ko_greeks["delta"] - vanilla_greeks["delta"]) < 0.01
+        assert abs(ki_greeks["gamma"] + ko_greeks["gamma"] - vanilla_greeks["gamma"]) < 0.01
+
+    def test_double_barrier_greeks_price_consistency(self, pricing_env, pde_params):
+        """Test that DoubleBarrierPDESolver Greeks price matches price()."""
+        double_ko = DoubleBarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            upper_barrier=120.0,
+            lower_barrier=80.0,
+            barrier_type=DoubleBarrierType.KNOCK_OUT,
+            maturity=0.5,
+        )
+
+        solver = DoubleBarrierPDESolver(pde_params)
+        price = solver.price(double_ko, pricing_env)
+        greeks = solver.calculate_greeks(double_ko, pricing_env)
+
+        assert abs(greeks["price"] - price) < 1e-10
+
+    def test_one_touch_greeks_price_consistency(self, pricing_env, pde_params):
+        """Test that OneTouchPDESolver Greeks price matches price()."""
+        no_touch = OneTouchOption(
+            barrier=150.0,
+            barrier_direction=BarrierDirection.UP,
+            maturity=0.5,
+            rebate=100.0,
+            payment_at_hit=False,
+            touch_type=TouchType.NO_TOUCH,
+        )
+
+        solver = OneTouchPDESolver(pde_params)
+        price = solver.price(no_touch, pricing_env)
+        greeks = solver.calculate_greeks(no_touch, pricing_env)
+
+        assert abs(greeks["price"] - price) < 1e-10
+
+    def test_double_one_touch_greeks_price_consistency(self, pricing_env, pde_params):
+        """Test that DoubleOneTouchPDESolver Greeks price matches price()."""
+        double_no_touch = DoubleOneTouchOption(
+            upper_barrier=150.0,
+            lower_barrier=50.0,
+            maturity=0.5,
+            rebate=100.0,
+            payment_at_hit=False,
+            touch_type=TouchType.DOUBLE_NO_TOUCH,
+        )
+
+        solver = DoubleOneTouchPDESolver(pde_params)
+        price = solver.price(double_no_touch, pricing_env)
+        greeks = solver.calculate_greeks(double_no_touch, pricing_env)
+
+        assert abs(greeks["price"] - price) < 1e-10
+
+    def test_expired_option_greeks(self, pde_params):
+        """Test Greeks for near-expired option converge to intrinsic values.
+
+        Note: Gamma can be numerically unstable for very small tau, so we
+        only verify price and delta converge to intrinsic values.
+        """
+        pricing_env = PricingEnvironment(
+            spot_quote=SpotQuote(spot=110.0),
+            vol_surface=FlatVolSurface(volatility=0.20),
+            rate_curve=FlatRateCurve(rate=0.05),
+            div_yield=ContinuousDividendYield(div_yield=0.0),
+            valuation_date=datetime.now(),
+        )
+
+        # Near-expired deep ITM call (should approach intrinsic value)
+        call = EuropeanVanillaOption(
+            strike=100.0, option_type=OptionType.CALL, maturity=1e-4  # ~1 hour
+        )
+
+        solver = EuropeanPDESolver(pde_params)
+        greeks = solver.calculate_greeks(call, pricing_env)
+
+        # Price should be very close to intrinsic (110 - 100 = 10)
+        # Small time value remains for short maturity
+        assert abs(greeks["price"] - 10.0) < 0.5
+        # Delta should be close to 1 for deep ITM near expiry
+        assert greeks["delta"] > 0.9
+
+    def test_barrier_hit_greeks(self, pde_params):
+        """Test Greeks when barrier is already hit."""
+        # Spot above barrier (already knocked out)
+        pricing_env = PricingEnvironment(
+            spot_quote=SpotQuote(spot=130.0),
+            vol_surface=FlatVolSurface(volatility=0.20),
+            rate_curve=FlatRateCurve(rate=0.05),
+            div_yield=ContinuousDividendYield(div_yield=0.0),
+            valuation_date=datetime.now(),
+        )
+
+        knockout = BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=120.0,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=0.5,
+            rebate=5.0,
+            pay_at_hit=True,
+        )
+
+        solver = BarrierPDESolver(pde_params)
+        greeks = solver.calculate_greeks(knockout, pricing_env)
+
+        # Price should be rebate
+        assert abs(greeks["price"] - 5.0) < 0.01
+        # Delta and gamma should be 0 (fixed rebate)
+        assert abs(greeks["delta"]) < 0.01
+        assert abs(greeks["gamma"]) < 0.01
+
+
+# ============================================================================
 # Integration Tests
 # ============================================================================
 

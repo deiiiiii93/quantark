@@ -213,6 +213,156 @@ class BarrierPDESolver(BasePDESolver):
 
         return super().price(ko_product, pricing_env)
 
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for a barrier option using PDE method.
+
+        For knock-in options, uses: Greeks_KI = Greeks_Vanilla - Greeks_KO
+
+        Args:
+            product: Barrier option
+            pricing_env: Pricing environment
+
+        Returns:
+            Dictionary with price, delta, gamma
+
+        Raises:
+            PricingError: If product is not a barrier option
+        """
+        if not isinstance(product, BarrierOption):
+            raise PricingError(
+                f"BarrierPDESolver only supports BarrierOption, "
+                f"got {type(product).__name__}"
+            )
+
+        if getattr(product, "observation_type", None) == ObservationType.EXPIRY:
+            raise PricingError(
+                "BarrierPDESolver does not support EXPIRY observation_type. "
+                "Use BarrierAnalyticalEngine for expiry-only monitoring."
+            )
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        # Handle expired case
+        if tau <= 0:
+            return {
+                "price": self._calculate_intrinsic(product, spot),
+                "delta": self._intrinsic_delta(product, spot),
+                "gamma": 0.0,
+            }
+
+        # Check if barrier is already hit
+        if product.is_barrier_hit(spot):
+            if product.is_knock_out:
+                # Knocked out: return rebate Greeks (rebate is constant, so delta=gamma=0)
+                maturity = product.get_maturity(pricing_env)
+                settlement_time = 0.0 if product.pay_at_hit else maturity
+                rebate_value = self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=product.rebate,
+                    current_time=0.0,
+                    settlement_time=settlement_time,
+                )
+                return {"price": rebate_value, "delta": 0.0, "gamma": 0.0}
+            else:
+                # Knocked in: return vanilla Greeks
+                return self._calculate_greeks_vanilla(product, pricing_env)
+
+        if product.is_knock_in:
+            # Knock-in = Vanilla - Knock-out decomposition
+            vanilla_greeks = self._calculate_greeks_vanilla(product, pricing_env)
+            ko_greeks = self._calculate_greeks_knock_out(product, pricing_env)
+
+            return {
+                "price": vanilla_greeks["price"] - ko_greeks["price"],
+                "delta": vanilla_greeks["delta"] - ko_greeks["delta"],
+                "gamma": vanilla_greeks["gamma"] - ko_greeks["gamma"],
+            }
+        else:
+            # Direct knock-out pricing
+            return super().calculate_greeks(product, pricing_env)
+
+    def _calculate_greeks_vanilla(
+        self, product: BarrierOption, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for the underlying vanilla option.
+
+        Args:
+            product: Barrier option (used for strike, type, maturity)
+            pricing_env: Pricing environment
+
+        Returns:
+            Dictionary with price, delta, gamma for vanilla option
+        """
+        from asset.equity.product.option import EuropeanVanillaOption
+        from .european_pde_solver import EuropeanPDESolver
+
+        vanilla = EuropeanVanillaOption(
+            strike=product.strike,
+            option_type=product.option_type,
+            maturity=product.maturity,
+            exercise_date=product.exercise_date,
+            settlement_date=product.settlement_date,
+        )
+
+        solver = EuropeanPDESolver(self.params)
+        greeks = solver.calculate_greeks(vanilla, pricing_env)
+
+        # Apply participation rate
+        pr = product.participation_rate
+        return {
+            "price": pr * greeks["price"],
+            "delta": pr * greeks["delta"],
+            "gamma": pr * greeks["gamma"],
+        }
+
+    def _calculate_greeks_knock_out(
+        self, product: BarrierOption, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks as a knock-out option (for knock-in decomposition).
+
+        Creates a temporary knock-out version and calculates Greeks.
+
+        Args:
+            product: Original barrier option
+            pricing_env: Pricing environment
+
+        Returns:
+            Dictionary with price, delta, gamma for knock-out option
+        """
+        from util.enum import BarrierType
+
+        # Convert knock-in type to knock-out
+        if product.barrier_type == BarrierType.UP_IN:
+            ko_type = BarrierType.UP_OUT
+        elif product.barrier_type == BarrierType.DOWN_IN:
+            ko_type = BarrierType.DOWN_OUT
+        else:
+            ko_type = product.barrier_type
+
+        ko_product = BarrierOption(
+            strike=product.strike,
+            option_type=product.option_type,
+            barrier=product.barrier,
+            barrier_type=ko_type,
+            maturity=product.maturity,
+            exercise_date=product.exercise_date,
+            settlement_date=product.settlement_date,
+            rebate=0.0,  # Zero rebate for decomposition
+            participation_rate=product.participation_rate,
+            pay_at_hit=product.pay_at_hit,
+            observation_type=product.observation_type,
+            observation_dates=product.observation_dates,
+            observation_schedule=product.observation_schedule,
+        )
+
+        return super().calculate_greeks(ko_product, pricing_env)
+
     def set_terminal_condition(
         self,
         grid: np.ndarray,

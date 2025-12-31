@@ -6,7 +6,7 @@ backward in time, with support for Rannacher smoothing.
 """
 
 from abc import abstractmethod
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, NamedTuple
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
@@ -21,6 +21,26 @@ from util.enum.option_enums import ExerciseType, ObservationType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid
+
+
+class PDESolutionResult(NamedTuple):
+    """
+    Result from PDE solving containing solution and grid data.
+
+    This type allows both price() and calculate_greeks() to share the
+    common solving logic via _solve(), eliminating code duplication.
+
+    Attributes:
+        solution_vec: Solution values at t=0 (present time)
+        x_vec: Log-price grid points
+        s_vec: Price grid points (for convenience)
+        spot_log: Log of spot price for interpolation
+    """
+
+    solution_vec: np.ndarray
+    x_vec: np.ndarray
+    s_vec: np.ndarray
+    spot_log: float
 
 
 class BasePDESolver(BaseEngine):
@@ -73,15 +93,29 @@ class BasePDESolver(BaseEngine):
             points.append(product.strike)
         return points
 
-    def price(
+    def _solve(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> float:
-        """Price the option using the PDE finite difference method."""
+    ) -> PDESolutionResult:
+        """
+        Core PDE solving logic shared by price() and calculate_greeks().
+
+        This method contains all the common grid building, terminal condition setup,
+        and time stepping logic. Subclasses can override this method to implement
+        custom solving strategies (e.g., two-surface approach for Snowball).
+
+        Args:
+            product: The equity product to price
+            pricing_env: Pricing environment with market data
+
+        Returns:
+            PDESolutionResult containing solution vector and grid data
+
+        Note:
+            This method assumes tau > 0 (not expired). Callers should handle
+            the expired case before calling _solve().
+        """
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
-
-        if tau <= 0:
-            return self._calculate_intrinsic(product, spot)
 
         strike = getattr(product, "strike", spot)
         r = pricing_env.get_rate(tau)
@@ -118,7 +152,25 @@ class BasePDESolver(BaseEngine):
             tau,
         )
 
-        return self._interpolate_price(grid[:, 0], x_vec, np.log(spot))
+        return PDESolutionResult(
+            solution_vec=grid[:, 0],
+            x_vec=x_vec,
+            s_vec=s_vec,
+            spot_log=np.log(spot),
+        )
+
+    def price(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        """Price the option using the PDE finite difference method."""
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        if tau <= 0:
+            return self._calculate_intrinsic(product, spot)
+
+        result = self._solve(product, pricing_env)
+        return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -134,41 +186,11 @@ class BasePDESolver(BaseEngine):
                 "gamma": 0.0,
             }
 
-        strike = getattr(product, "strike", spot)
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
-
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
+        result = self._solve(product, pricing_env)
+        price = self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+        delta, gamma = self._calculate_delta_gamma(
+            result.solution_vec, result.x_vec, result.spot_log, spot
         )
-
-        grid = np.zeros((len(x_vec), len(t_vec)))
-        self.set_terminal_condition(grid, x_vec, s_vec, product, pricing_env)
-
-        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, len(x_vec))
-        A = self._build_operator_matrix(l, c, u, len(x_vec))
-
-        self._time_stepping(
-            grid,
-            A,
-            l,
-            u,
-            x_vec,
-            s_vec,
-            t_vec,
-            dt_vec,
-            product,
-            pricing_env,
-            r,
-            q,
-            sigma,
-            tau,
-        )
-
-        spot_log = np.log(spot)
-        price = self._interpolate_price(grid[:, 0], x_vec, spot_log)
-        delta, gamma = self._calculate_delta_gamma(grid[:, 0], x_vec, spot_log, spot)
 
         return {"price": price, "delta": delta, "gamma": gamma}
 

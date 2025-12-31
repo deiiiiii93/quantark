@@ -18,7 +18,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from asset.equity.engine.pde.base_pde_solver import BasePDESolver
+from asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
 from asset.equity.param import PDEParams
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
@@ -79,6 +79,136 @@ class SnowballPDESolver(BasePDESolver):
         # Time tracking
         self._total_tau: float = 0.0
 
+    def _solve(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> PDESolutionResult:
+        """
+        Core Two-Surface PDE solving logic for Snowball options.
+
+        This method contains the common solving logic shared by price() and
+        calculate_greeks(). It handles the two-surface approach with V0/V1
+        state transitions.
+
+        Args:
+            product: SnowballOption to price (already validated)
+            pricing_env: Pricing environment with market data
+
+        Returns:
+            PDESolutionResult with appropriate surface (V0 or V1) at t=0
+
+        Note:
+            This method assumes the product has been validated and is not
+            expired or knocked out at valuation. Callers should check these
+            conditions before calling _solve().
+        """
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        # Determine knocked-in state at valuation
+        ki_continuous = (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
+            product, spot, pricing_env, ki_continuous=ki_continuous
+        )
+
+        # Store the state for potential use in calculate_greeks
+        self._knocked_in_at_valuation = knocked_in_at_valuation
+
+        # Extract market data
+        strike = product.strike
+        r = pricing_env.get_rate(tau)
+        q = pricing_env.get_div_yield(tau)
+        sigma = pricing_env.get_vol(strike, tau)
+
+        # Store product properties for later use
+        self._is_reverse = product.is_reverse
+        self._ki_continuous = ki_continuous
+        if product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            if isinstance(ki_barrier, list):
+                self._ki_barrier = ki_barrier[0]
+            else:
+                self._ki_barrier = ki_barrier
+
+        # Build grids
+        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+            product, pricing_env, spot, sigma, tau, r, q
+        )
+
+        # Initialize both grids
+        num_x, num_t = len(x_vec), len(t_vec)
+        self._grid_v0 = np.zeros((num_x, num_t))
+        self._grid_v1 = np.zeros((num_x, num_t))
+
+        # Set terminal conditions
+        self._set_terminal_condition_v0(
+            self._grid_v0, x_vec, s_vec, product, pricing_env
+        )
+        self._set_terminal_condition_v1(
+            self._grid_v1, x_vec, s_vec, product, pricing_env
+        )
+
+        # Apply terminal KO if at maturity observation
+        if self._has_terminal_ko and self._ko_terminal_record is not None:
+            self._apply_terminal_ko(
+                self._grid_v0,
+                self._grid_v1,
+                s_vec,
+                product,
+                pricing_env,
+                self._ko_terminal_record,
+            )
+
+        # Apply terminal KI if at maturity observation (European KI fix)
+        if product.has_ki_barrier:
+            is_terminal_ki = self._ki_continuous
+            if not is_terminal_ki:
+                if (num_t - 1) in self._ki_observation_indices:
+                    is_terminal_ki = True
+            if is_terminal_ki:
+                self._apply_ki_jump(
+                    self._grid_v0, self._grid_v1, s_vec, num_t - 1, product
+                )
+
+        # Build operator matrices
+        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
+        A = self._build_operator_matrix(l, c, u, num_x)
+
+        # Time stepping for both surfaces
+        self._time_stepping_two_surface(
+            self._grid_v0,
+            self._grid_v1,
+            A,
+            l,
+            u,
+            x_vec,
+            s_vec,
+            t_vec,
+            dt_vec,
+            product,
+            pricing_env,
+            r,
+            q,
+            sigma,
+            tau,
+        )
+
+        # Return appropriate surface based on knocked-in state
+        spot_log = np.log(spot)
+        if knocked_in_at_valuation:
+            solution_vec = self._grid_v1[:, 0]
+        else:
+            solution_vec = self._grid_v0[:, 0]
+
+        return PDESolutionResult(
+            solution_vec=solution_vec,
+            x_vec=x_vec,
+            s_vec=s_vec,
+            spot_log=spot_log,
+        )
+
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
@@ -117,113 +247,83 @@ class SnowballPDESolver(BasePDESolver):
             # Expired: return terminal payoff
             return self._calculate_terminal_value(product, spot, pricing_env)
 
-        # Determine the state at valuation date (t=0). For discrete monitoring,
-        # barrier states can only change on observation times.
-        ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
-            product, spot, pricing_env, ki_continuous=ki_continuous
-        )
+        # Check if knocked out at valuation
         knocked_out_at_valuation = self._is_knocked_out_at_valuation(
             product, spot, pricing_env
         )
-
         if knocked_out_at_valuation:
             return self._get_immediate_ko_payoff(product, pricing_env)
 
-        # Extract market data
-        strike = product.strike
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
+        # Solve PDE and interpolate price
+        result = self._solve(product, pricing_env)
+        return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
 
-        # Store product properties for later use
-        self._is_reverse = product.is_reverse
-        self._ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        if product.has_ki_barrier:
-            ki_barrier = product.barrier_config.ki_barrier
-            if isinstance(ki_barrier, list):
-                self._ki_barrier = ki_barrier[0]  # Use first for continuous check
-            else:
-                self._ki_barrier = ki_barrier
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for a Snowball option using Two-Surface PDE method.
 
-        # Build grids
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
+        Args:
+            product: SnowballOption
+            pricing_env: Pricing environment with market data
 
-        # Initialize both grids
-        num_x, num_t = len(x_vec), len(t_vec)
-        self._grid_v0 = np.zeros((num_x, num_t))
-        self._grid_v1 = np.zeros((num_x, num_t))
+        Returns:
+            Dictionary with price, delta, gamma
 
-        # Set terminal conditions
-        self._set_terminal_condition_v0(
-            self._grid_v0, x_vec, s_vec, product, pricing_env
-        )
-        self._set_terminal_condition_v1(
-            self._grid_v1, x_vec, s_vec, product, pricing_env
-        )
-
-        # Apply terminal KO if at maturity observation
-        if self._has_terminal_ko and self._ko_terminal_record is not None:
-            self._apply_terminal_ko(
-                self._grid_v0,
-                self._grid_v1,
-                s_vec,
-                product,
-                pricing_env,
-                self._ko_terminal_record,
+        Raises:
+            PricingError: If product is not a SnowballOption
+            ValidationError: If product configuration is incompatible with PDE
+        """
+        if not isinstance(product, SnowballOption):
+            raise PricingError(
+                f"SnowballPDESolver only supports SnowballOption, "
+                f"got {type(product).__name__}"
             )
 
-        # Apply terminal KI if at maturity observation (European KI fix)
-        # If the KI barrier is breached at maturity, V0 should transition to V1 immediately
-        # so that the final payoff reflects the knocked-in state (downside) instead of V0 (rebate).
-        if product.has_ki_barrier:
-            is_terminal_ki = self._ki_continuous
-            if not is_terminal_ki:
-                # Check if the terminal time step corresponds to a KI observation
-                # (num_t - 1) is the index of maturity in the time grid
-                if (num_t - 1) in self._ki_observation_indices:
-                    is_terminal_ki = True
-            
-            if is_terminal_ki:
-                self._apply_ki_jump(self._grid_v0, self._grid_v1, s_vec, num_t - 1, product)
+        if pricing_env is None:
+            raise ValidationError(
+                "PricingEnvironment is required for SnowballPDESolver"
+            )
 
-        # Build operator matrices
-        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
-        A = self._build_operator_matrix(l, c, u, num_x)
+        # Validate PDE compatibility
+        self._validate_product(product)
 
-        # Time stepping for both surfaces
-        self._time_stepping_two_surface(
-            self._grid_v0,
-            self._grid_v1,
-            A,
-            l,
-            u,
-            x_vec,
-            s_vec,
-            t_vec,
-            dt_vec,
-            product,
-            pricing_env,
-            r,
-            q,
-            sigma,
-            tau,
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        if tau <= 0 or is_zero(tau):
+            # Expired: return terminal value with zero Greeks
+            return {
+                "price": self._calculate_terminal_value(product, spot, pricing_env),
+                "delta": 0.0,
+                "gamma": 0.0,
+            }
+
+        # Check if knocked out at valuation
+        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
+            product, spot, pricing_env
+        )
+        if knocked_out_at_valuation:
+            # KO payoff is fixed, so delta and gamma are zero
+            return {
+                "price": self._get_immediate_ko_payoff(product, pricing_env),
+                "delta": 0.0,
+                "gamma": 0.0,
+            }
+
+        # Solve PDE
+        result = self._solve(product, pricing_env)
+
+        # Extract price and Greeks from appropriate surface
+        price = self._interpolate_price(
+            result.solution_vec, result.x_vec, result.spot_log
+        )
+        delta, gamma = self._calculate_delta_gamma(
+            result.solution_vec, result.x_vec, result.spot_log, spot
         )
 
-        # Interpolate final price from appropriate surface
-        spot_log = np.log(spot)
-        if knocked_in_at_valuation:
-            return self._interpolate_price(self._grid_v1[:, 0], x_vec, spot_log)
-        else:
-            return self._interpolate_price(self._grid_v0[:, 0], x_vec, spot_log)
+        return {"price": price, "delta": delta, "gamma": gamma}
 
     def _validate_product(self, product: SnowballOption) -> None:
         """

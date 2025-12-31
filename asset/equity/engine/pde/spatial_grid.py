@@ -440,6 +440,7 @@ class SpatialGrid:
         x_crits: np.ndarray,
         num_points: int,
         eps_crit: float,
+        use_heuristic_beta: bool = False,
     ) -> float:
         """
         Find beta that achieves target spacing at critical points.
@@ -447,26 +448,50 @@ class SpatialGrid:
         Uses bisection to find beta such that the minimum spacing
         near any critical point is approximately eps_crit.
 
-        Args:
-            x_min: Minimum log-price
-            x_max: Maximum log-price
-            x_crits: Critical points in log-space
-            num_points: Number of grid points
-            eps_crit: Target relative spacing
-
-        Returns:
-            Beta value
+        Optimization: Uses a coarse grid for the expensive search,
+        scaling the target spacing accordingly.
         """
+        if use_heuristic_beta:
+            M = len(x_crits)
+            # Heuristic: beta ~ ln(1+eps) * sqrt(M/12)
+            # Adjusts concentration based on number of observation dates
+            beta = np.log1p(eps_crit) * np.sqrt(max(M, 1) / 12.0)
+
+            # Check grid quality and adjust if necessary
+            # Ensure spacing ratio is acceptable (avoid tail coarseness)
+            N_check = num_points - 1
+            max_check_iters = 5
+            
+            for _ in range(max_check_iters):
+                # Generate grid to check spacing ratio
+                A = SpatialGrid._ode_find_A(x_min, x_max, N_check, beta, x_crits)
+                mesh = SpatialGrid._ode_integrate(x_min, N_check, A, beta, x_crits)
+                dx = np.diff(mesh)
+                
+                is_acceptable, _ = SpatialGrid.check_grid_quality(dx, max_ratio=100.0)
+                if is_acceptable:
+                    break
+                
+                # If ratio too high, increase beta (smoother grid)
+                beta *= 1.2
+            
+            return beta
+
         dx_target = np.log1p(eps_crit)
         N = num_points - 1
+
+        # Use coarse grid for beta search to improve performance
+        # Beta is a shape parameter, so we can estimate it on a coarser mesh
+        N_coarse = min(N, 64)
+        dx_target_adj = dx_target * (N / N_coarse)
 
         # Bracket for beta (log-scale search)
         beta_lo = 1e-6 * (x_max - x_min)
         beta_hi = 10.0 * (x_max - x_min)
 
         def min_spacing_near_crits(beta: float) -> float:
-            A = SpatialGrid._ode_find_A(x_min, x_max, N, beta, x_crits)
-            mesh = SpatialGrid._ode_integrate(x_min, N, A, beta, x_crits)
+            A = SpatialGrid._ode_find_A(x_min, x_max, N_coarse, beta, x_crits)
+            mesh = SpatialGrid._ode_integrate(x_min, N_coarse, A, beta, x_crits)
             dx = np.diff(mesh)
 
             # Find minimum spacing near any critical point
@@ -481,10 +506,11 @@ class SpatialGrid:
             return min_dx
 
         # Bisection with geometric mean (log-scale)
-        for _ in range(40):
+        # Reduced iterations (20) as precise beta is not critical for grid quality
+        for _ in range(20):
             beta_mid = np.sqrt(beta_lo * beta_hi)
             current_dx = min_spacing_near_crits(beta_mid)
-            if current_dx > dx_target:
+            if current_dx > dx_target_adj:
                 beta_hi = beta_mid  # Need tighter concentration
             else:
                 beta_lo = beta_mid  # Loosen concentration

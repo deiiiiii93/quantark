@@ -88,6 +88,50 @@ class OneTouchPDESolver(BasePDESolver):
 
         return super().price(product, pricing_env)
 
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        """
+        Calculate Greeks for a one-touch or no-touch option.
+
+        Args:
+            product: One-touch option
+            pricing_env: Pricing environment
+
+        Returns:
+            Dictionary with price, delta, gamma
+
+        Raises:
+            PricingError: If product is not a one-touch option
+        """
+        if not isinstance(product, OneTouchOption):
+            raise PricingError(
+                f"OneTouchPDESolver only supports OneTouchOption, "
+                f"got {type(product).__name__}"
+            )
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        # Handle expired case
+        if tau <= 0:
+            return {
+                "price": self._calculate_intrinsic(product, spot),
+                "delta": self._intrinsic_delta(product, spot),
+                "gamma": 0.0,
+            }
+
+        # Check if barrier already hit
+        if product.is_barrier_hit(spot):
+            if product.is_one_touch:
+                # Already touched, fixed rebate (delta=gamma=0)
+                return {"price": product.rebate, "delta": 0.0, "gamma": 0.0}
+            else:
+                # No-touch already failed
+                return {"price": 0.0, "delta": 0.0, "gamma": 0.0}
+
+        return super().calculate_greeks(product, pricing_env)
+
     def set_terminal_condition(
         self,
         grid: np.ndarray,
