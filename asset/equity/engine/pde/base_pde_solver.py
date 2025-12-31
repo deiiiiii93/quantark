@@ -491,92 +491,6 @@ class BasePDESolver(BaseEngine):
     def _get_matrices(
         self, I: sp.csc_matrix, A: sp.csc_matrix, dt: float, theta: float
     ) -> Tuple[sp.csc_matrix, spla.SuperLU]:
-        """Compute and cache solver matrices for efficiency."""
-        key = (round(dt, 12), round(theta, 6))
-        if key in self._matrix_cache:
-            return self._matrix_cache[key]
-
-        M1 = I + (1.0 - theta) * dt * A
-        try:
-            M2_lu = spla.splu(I - theta * dt * A)
-        except Exception as e:
-            raise NumericalError(f"PDE Matrix factorization failed: {e}")
-
-        self._matrix_cache[key] = (M1, M2_lu)
-        return M1, M2_lu
-
-    def _apply_step_modifications(
-        self,
-        grid: np.ndarray,
-        x_vec: np.ndarray,
-        s_vec: np.ndarray,
-        t_idx: int,
-        tau: float,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-    ) -> None:
-        """Apply early exercise or barrier constraints."""
-        pass
-
-    def _interpolate_price(
-        self, v_vec: np.ndarray, x_vec: np.ndarray, x_target: float
-    ) -> float:
-        """Linear interpolation in log-price space."""
-        return float(np.interp(x_target, x_vec, v_vec))
-
-    def _calculate_delta_gamma(
-        self, v_vec: np.ndarray, x_vec: np.ndarray, x_target: float, spot: float
-    ) -> Tuple[float, float]:
-        """Extract Delta and Gamma from the solution vector."""
-        idx = max(1, min(np.searchsorted(x_vec, x_target), len(x_vec) - 2))
-        dx_l, dx_r = x_vec[idx] - x_vec[idx - 1], x_vec[idx + 1] - x_vec[idx]
-        dv_dx = (v_vec[idx + 1] - v_vec[idx - 1]) / (dx_l + dx_r)
-        d2v_dx2 = (v_vec[idx + 1] - 2 * v_vec[idx] + v_vec[idx - 1]) / (
-            ((dx_l + dx_r) / 2.0) ** 2
-        )
-        return dv_dx / spot, (d2v_dx2 - dv_dx) / (spot**2)
-
-    def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
-        """Helper to collect barrier levels from known product attributes."""
-        barriers = []
-        for attr in ("barrier", "upper_barrier", "lower_barrier"):
-            if hasattr(product, attr):
-                val = getattr(product, attr)
-                if val is not None and val > 0:
-                    barriers.append(val)
-        return barriers
-
-    def _get_event_times(
-        self, product: BaseEquityProduct, tau: float
-    ) -> Optional[List[float]]:
-        """Helper to collect observation/event times."""
-        schedule = getattr(product, "observation_schedule", None)
-        if schedule is not None and getattr(schedule, "times", None):
-            return [t for t in schedule.times if 0 < t < tau]
-        for attr in ("observation_dates", "obs_times", "event_times"):
-            if hasattr(product, attr):
-                times = getattr(product, attr)
-                if times:
-                    return [t for t in times if 0 < t < tau]
-        return None
-
-    def _calculate_intrinsic(self, product: BaseEquityProduct, spot: float) -> float:
-        """Calculate intrinsic value at a spot price."""
-        return product.get_payoff(spot) if hasattr(product, "get_payoff") else 0.0
-
-    def _intrinsic_delta(self, product: BaseEquityProduct, spot: float) -> float:
-        """Calculate intrinsic Delta at a spot price."""
-        if hasattr(product, "is_call") and hasattr(product, "strike"):
-            return (
-                (1.0 if spot > product.strike else 0.0)
-                if product.is_call()
-                else (-1.0 if spot < product.strike else 0.0)
-            )
-        return 0.0
-
-    def _get_matrices(
-        self, I: sp.csc_matrix, A: sp.csc_matrix, dt: float, theta: float
-    ) -> Tuple[sp.csc_matrix, spla.SuperLU]:
         """
         Get or compute matrices for time stepping.
 
@@ -727,3 +641,27 @@ class BasePDESolver(BaseEngine):
             else:
                 return -1.0 if spot < product.strike else 0.0
         return 0.0
+
+    def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
+        """Helper to collect barrier levels from known product attributes."""
+        barriers = []
+        for attr in ("barrier", "upper_barrier", "lower_barrier"):
+            if hasattr(product, attr):
+                val = getattr(product, attr)
+                if val is not None and val > 0:
+                    barriers.append(val)
+        return barriers
+
+    def _get_event_times(
+        self, product: BaseEquityProduct, tau: float
+    ) -> Optional[List[float]]:
+        """Helper to collect observation/event times."""
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None and getattr(schedule, "times", None):
+            return [t for t in schedule.times if 0 < t < tau]
+        for attr in ("observation_dates", "obs_times", "event_times"):
+            if hasattr(product, attr):
+                times = getattr(product, attr)
+                if times:
+                    return [t for t in times if 0 < t < tau]
+        return None
