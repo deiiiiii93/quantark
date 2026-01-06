@@ -299,7 +299,7 @@ def _thirty_360_us(start_date: datetime, end_date: datetime) -> float:
     Used for US corporate and municipal bonds.
 
     Formula: (360*(Y2-Y1) + 30*(M2-M1) + (D2-D1)) / 360
-    With adjustments for month-end dates.
+    With adjustments for month-end dates per ISDA 2006 Section 4.16(h).
     """
     d1 = start_date.day
     m1 = start_date.month
@@ -315,8 +315,12 @@ def _thirty_360_us(start_date: datetime, end_date: datetime) -> float:
     elif d1 == 31:
         d1 = 30
 
-    # Adjust d2 if d1 is 30 or 31 and d2 is 31
-    if d2 == 31 and d1 >= 30:
+    # Adjust d2:
+    # 1. If d2 is the last day of February, set to 30
+    # 2. If d1 was adjusted (30 or 31) and d2 is 31, set d2 to 30
+    if _is_last_day_of_february(end_date):
+        d2 = 30
+    elif d2 == 31 and d1 >= 30:
         d2 = 30
 
     days = 360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1)

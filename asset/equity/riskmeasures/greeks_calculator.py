@@ -3,20 +3,22 @@ Greeks calculation for equity derivatives.
 """
 
 import math
-from datetime import timedelta
-from typing import Dict, Optional, Tuple
-from scipy import stats
 from copy import deepcopy
 from dataclasses import replace
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.product.option.observation_schedule import ObservationSchedule
-from asset.equity.product.base_equity_product import BaseEquityProduct
+from datetime import timedelta
+from typing import Dict, Optional, Tuple
+
+from scipy import stats
+
 from asset.equity.engine.base_engine import BaseEngine
 from asset.equity.param import EngineParams
+from asset.equity.product.base_equity_product import BaseEquityProduct
+from asset.equity.product.option import EuropeanVanillaOption
+from asset.equity.product.option.observation_schedule import ObservationSchedule
 from priceenv import PricingEnvironment
-from util.exceptions import ValidationError
 from util.calendar import calculate_year_fraction
-from util.enum.engine_enums import GreeksCalculationMode, EngineType
+from util.enum.engine_enums import EngineType, GreeksCalculationMode
+from util.exceptions import ValidationError
 
 
 class GreeksCalculator:
@@ -30,7 +32,7 @@ class GreeksCalculator:
     The greeks_mode parameter controls delta/gamma calculation for engines that
     implement their own calculate_greeks() method (e.g., PDE engines):
     - GreeksCalculationMode.BUMP: Always use finite difference bump method
-    - GreeksCalculationMode.ENGINE: Use engine.calculate_greeks() if available
+    - GreeksCalculationMode.ENGINE: Use engine.calculate_greeks() when overridden
     - GreeksCalculationMode.AUTO: Use engine method for PDE engines, bump otherwise
     """
 
@@ -61,12 +63,22 @@ class GreeksCalculator:
         Returns:
             True if engine.calculate_greeks() should be used
         """
+        # Only use engine Greeks when the engine provides a custom implementation.
+        # BaseEngine.calculate_greeks() is a generic bump-and-reprice fallback that
+        # can diverge from GreeksCalculator's bump configuration.
+        engine_calculate_greeks = getattr(engine.__class__, "calculate_greeks", None)
+        if (
+            engine_calculate_greeks is None
+            or engine_calculate_greeks is BaseEngine.calculate_greeks
+        ):
+            return False
+
         if self.greeks_mode == GreeksCalculationMode.BUMP:
             return False
         if self.greeks_mode == GreeksCalculationMode.ENGINE:
             return True
         # AUTO mode: use for PDE engines
-        return getattr(engine, 'engine_type', None) == EngineType.PDE
+        return getattr(engine, "engine_type", None) == EngineType.PDE
 
     def calculate_analytical_greeks(
         self,
@@ -202,29 +214,32 @@ class GreeksCalculator:
         Returns:
             Dictionary of Greeks: delta, gamma, vega, theta, rho, dividend_rho
         """
-        # Calculate base price if not provided
-        if base_price is None:
-            base_price = engine.price(product, pricing_env)
-
         # Check if this is a delta-one product (SpotInstrument, Futures)
         if self._is_deltaone_product(product):
+            # Calculate base price if not provided
+            if base_price is None:
+                base_price = engine.price(product, pricing_env)
             return self._greeks_for_deltaone(product, base_price)
 
-        greeks = {"price": base_price}
         config = self._bump_config
 
         # Check if we should use engine's calculate_greeks() for delta/gamma
-        use_engine_greeks = (
-            self._should_use_engine_greeks(engine)
-            and hasattr(engine, 'calculate_greeks')
-        )
+        use_engine_greeks = self._should_use_engine_greeks(engine)
 
         if use_engine_greeks:
             # Use engine's built-in calculate_greeks() (e.g., PDE grid-based)
             engine_greeks = engine.calculate_greeks(product, pricing_env)
+            if base_price is None:
+                base_price = engine_greeks["price"]
+            greeks = {"price": base_price}
             greeks["delta"] = engine_greeks["delta"]
             greeks["gamma"] = engine_greeks["gamma"]
         else:
+            # Calculate base price if not provided
+            if base_price is None:
+                base_price = engine.price(product, pricing_env)
+            greeks = {"price": base_price}
+
             # Use bump method for delta/gamma (original behavior)
             # Precompute spot bumps once for delta/gamma.
             spot_prices = self._spot_bumped_prices(
@@ -250,17 +265,32 @@ class GreeksCalculator:
 
         # Other Greeks always use bump method
         greeks["vega"] = self.calculate_numerical_vega(
-            product, pricing_env, engine, base_price=base_price, vol_bump=config.vol_bump
+            product,
+            pricing_env,
+            engine,
+            base_price=base_price,
+            vol_bump=config.vol_bump,
         )
         greeks["theta"] = self.calculate_numerical_theta(
-            product, pricing_env, engine, base_price=base_price,
-            time_bump_days=config.time_bump_days
+            product,
+            pricing_env,
+            engine,
+            base_price=base_price,
+            time_bump_days=config.time_bump_days,
         )
         greeks["rho"] = self.calculate_numerical_rho(
-            product, pricing_env, engine, base_price=base_price, rate_bump=config.rate_bump
+            product,
+            pricing_env,
+            engine,
+            base_price=base_price,
+            rate_bump=config.rate_bump,
         )
         greeks["dividend_rho"] = self.calculate_numerical_dividend_rho(
-            product, pricing_env, engine, base_price=base_price, div_bump=config.div_bump
+            product,
+            pricing_env,
+            engine,
+            base_price=base_price,
+            div_bump=config.div_bump,
         )
 
         return greeks
@@ -345,7 +375,9 @@ class GreeksCalculator:
     ) -> float:
         """Numerical theta via time bump with observation schedule handling."""
         time_bump_days = (
-            time_bump_days if time_bump_days is not None else self._bump_config.time_bump_days
+            time_bump_days
+            if time_bump_days is not None
+            else self._bump_config.time_bump_days
         )
         base_price = (
             base_price if base_price is not None else engine.price(product, pricing_env)
@@ -353,13 +385,13 @@ class GreeksCalculator:
         product_theta = deepcopy(product)
         env_theta = deepcopy(pricing_env)
         current_maturity = product.get_maturity(pricing_env)
-        
+
         bumped_date = pricing_env.valuation_date + timedelta(days=time_bump_days)
         time_bump = calculate_year_fraction(
             pricing_env.valuation_date,
             bumped_date,
             pricing_env.day_count_convention,
-            pricing_env.bus_days_in_year
+            pricing_env.bus_days_in_year,
         )
 
         if current_maturity <= time_bump:
@@ -706,12 +738,12 @@ class GreeksCalculator:
     ) -> None:
         """
         Synchronize legacy observation_dates with bumped ObservationSchedule.
-        
+
         Only update legacy observation_dates when the schedule uses observation_time values
         to avoid overwriting legacy dates for date-based schedules.
         """
         if not hasattr(product, "observation_dates"):
             return
-        
+
         if bumped_schedule.times:
             product.observation_dates = bumped_schedule.times

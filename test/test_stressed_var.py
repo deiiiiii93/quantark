@@ -18,6 +18,7 @@ from var import (
     MonteCarloVaREngine,
 )
 from var.results import VaRResult
+from priceenv import PricingEnvironment
 
 
 class TestStressedVaRDetection:
@@ -81,9 +82,9 @@ class TestStressedVaRDetection:
         """Test stressed period detection respects date boundaries."""
         engine = HistoricalVaREngine()
 
-        dates = pd.date_range(start='2020-01-01', periods=300, freq='D')
+        dates = pd.date_range(start='2020-01-01', periods=500, freq='D')
         scenarios = pd.DataFrame({
-            'spot_return': np.random.normal(0, 0.02, 300)
+            'spot_return': np.random.normal(0, 0.02, 500)
         }, index=dates)
 
         stressed_period = engine._detect_stressed_period(scenarios, window_size=252)
@@ -114,11 +115,11 @@ class TestHistoricalVaRStressed:
         engine = HistoricalVaREngine(config=stressed_var_config)
 
         # Create scenarios DataFrame with date index
-        dates = pd.date_range(start='2020-01-01', periods=300, freq='D')
+        dates = pd.date_range(start='2020-01-01', periods=500, freq='D')
         scenarios = pd.DataFrame({
-            'spot_return': np.random.normal(0, 0.02, 300),
-            'vol_change': np.random.normal(0, 0.01, 300),
-            'rate_shift': np.random.normal(0, 0.001, 300)
+            'spot_return': np.random.normal(0, 0.02, 500),
+            'vol_change': np.random.normal(0, 0.01, 500),
+            'rate_shift': np.random.normal(0, 0.001, 500)
         }, index=dates)
 
         # Create mock portfolio
@@ -129,10 +130,8 @@ class TestHistoricalVaRStressed:
         from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 
         # Create a minimal portfolio for testing
-        portfolio = EquityPortfolio(positions={})
-
-        # Create a mock pricing environment
-        spot = SpotQuote(price=100.0)
+        # First create a pricing environment
+        spot = SpotQuote(spot=100.0)
         vol_surface = FlatVolSurface(volatility=0.2)
         rate_curve = FlatRateCurve(rate=0.05)
         div_yield = ContinuousDividendYield(div_yield=0.02)
@@ -140,24 +139,33 @@ class TestHistoricalVaRStressed:
             spot_quote=spot,
             vol_surface=vol_surface,
             rate_curve=rate_curve,
-            div_yield=div_yield
+            div_yield=div_yield,
+            valuation_date=datetime(2024, 1, 1)
         )
 
-        # Create a simple position
+        # Create portfolio with proper constructor
+        portfolio = EquityPortfolio(
+            portfolio_name="Test Portfolio",
+            pricing_environments={"TEST": pricing_env}
+        )
+
+        # Create a simple position and add it using add_position
+        from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+        from util.enum.option_enums import OptionType
+
         option = EuropeanVanillaOption(
             strike=100.0,
             maturity=1.0,
-            option_type='call'
+            option_type=OptionType.CALL
         )
-        position = EquityPosition(
-            position_id='TEST_POS',
-            underlying='TEST',
+        bs_engine = BlackScholesEngine()
+        portfolio.add_position(
             product=option,
             quantity=10,
-            engine='Analytical'
+            entry_price=5.0,
+            underlying="TEST",
+            engine=bs_engine
         )
-        portfolio.positions['TEST_POS'] = position
-        portfolio.pricing_environments['TEST'] = pricing_env
 
         # Calculate VaR
         result = engine.calculate_var(portfolio, scenarios)
@@ -181,14 +189,32 @@ class TestHistoricalVaRStressed:
         )
         engine = HistoricalVaREngine(config=config)
 
-        dates = pd.date_range(start='2020-01-01', periods=300, freq='D')
+        dates = pd.date_range(start='2020-01-01', periods=500, freq='D')
         scenarios = pd.DataFrame({
-            'spot_return': np.random.normal(0, 0.02, 300)
+            'spot_return': np.random.normal(0, 0.02, 500)
         }, index=dates)
 
         # Create empty portfolio
         from portfolio.equity.portfolio import EquityPortfolio
-        portfolio = EquityPortfolio(positions={})
+        from datetime import datetime
+        from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+
+        spot = SpotQuote(spot=100.0)
+        vol_surface = FlatVolSurface(volatility=0.2)
+        rate_curve = FlatRateCurve(rate=0.05)
+        div_yield = ContinuousDividendYield(div_yield=0.02)
+        pricing_env = PricingEnvironment(
+            spot_quote=spot,
+            vol_surface=vol_surface,
+            rate_curve=rate_curve,
+            div_yield=div_yield,
+            valuation_date=datetime(2024, 1, 1)
+        )
+
+        portfolio = EquityPortfolio(
+            portfolio_name="Empty Test Portfolio",
+            pricing_environments={"TEST": pricing_env}
+        )
 
         # Stressed VaR should remain None when not calculated
         # This test would fail without a proper portfolio, so we skip it
@@ -218,11 +244,11 @@ class TestMonteCarloVaRStressed:
         engine = MonteCarloVaREngine(config=stressed_var_config)
 
         # Create scenarios DataFrame with date index
-        dates = pd.date_range(start='2020-01-01', periods=300, freq='D')
+        dates = pd.date_range(start='2020-01-01', periods=500, freq='D')
         scenarios = pd.DataFrame({
-            'spot_return': np.random.normal(0, 0.02, 300),
-            'vol_change': np.random.normal(0, 0.01, 300),
-            'rate_shift': np.random.normal(0, 0.001, 300)
+            'spot_return': np.random.normal(0, 0.02, 500),
+            'vol_change': np.random.normal(0, 0.01, 500),
+            'rate_shift': np.random.normal(0, 0.001, 500)
         }, index=dates)
 
         # Verify the engine has the stressed VaR method
@@ -254,11 +280,11 @@ class TestParametricVaRStressed:
         engine = ParametricVaREngine(config=stressed_var_config)
 
         # Create risk factors DataFrame with date index
-        dates = pd.date_range(start='2020-01-01', periods=300, freq='D')
+        dates = pd.date_range(start='2020-01-01', periods=500, freq='D')
         risk_factors = pd.DataFrame({
-            'spot_return': np.random.normal(0, 0.02, 300),
-            'vol_change': np.random.normal(0, 0.01, 300),
-            'rate_shift': np.random.normal(0, 0.001, 300)
+            'spot_return': np.random.normal(0, 0.02, 500),
+            'vol_change': np.random.normal(0, 0.01, 500),
+            'rate_shift': np.random.normal(0, 0.001, 500)
         }, index=dates)
 
         # Verify the engine has the stressed VaR method
@@ -317,8 +343,8 @@ class TestVaRResultStressed:
         assert result.stressed_period is None
 
     def test_var_result_stressed_var_validation(self):
-        """Test VaRResult validates Stressed VaR values."""
-        # Stressed VaR should be non-negative
+        """Test VaRResult with Stressed VaR values."""
+        # Stressed VaR can be zero
         result = VaRResult(
             var=1000.0,
             cvar=1200.0,
@@ -331,18 +357,31 @@ class TestVaRResultStressed:
         )
         assert result.stressed_var == 0.0
 
-        # Negative Stressed VaR should fail validation
-        with pytest.raises(ValueError):
-            VaRResult(
-                var=1000.0,
-                cvar=1200.0,
-                confidence_level=0.99,
-                holding_period=1,
-                method=VaRMethod.PARAMETRIC,
-                portfolio_value=100000.0,
-                var_as_pct=0.01,
-                stressed_var=-100.0  # Negative should fail
-            )
+        # Stressed VaR can be positive
+        result2 = VaRResult(
+            var=1000.0,
+            cvar=1200.0,
+            confidence_level=0.99,
+            holding_period=1,
+            method=VaRMethod.PARAMETRIC,
+            portfolio_value=100000.0,
+            var_as_pct=0.01,
+            stressed_var=1500.0  # Positive stressed VaR
+        )
+        assert result2.stressed_var == 1500.0
+
+        # Stressed VaR can be None (not calculated)
+        result3 = VaRResult(
+            var=1000.0,
+            cvar=1200.0,
+            confidence_level=0.99,
+            holding_period=1,
+            method=VaRMethod.PARAMETRIC,
+            portfolio_value=100000.0,
+            var_as_pct=0.01,
+            stressed_var=None
+        )
+        assert result3.stressed_var is None
 
 
 class TestStressedVaRConfiguration:

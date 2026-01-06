@@ -6,31 +6,32 @@ and automatically routes pricing requests to the appropriate PDE solver based on
 the product type.
 """
 
-from typing import Optional, Union, Dict, Type
+from typing import Dict, Optional, Type, Union
+
 from asset.equity.engine.base_engine import BaseEngine
+from asset.equity.param import PDEParams
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option import (
-    EuropeanVanillaOption,
     AmericanOption,
     BarrierOption,
     DoubleBarrierOption,
-    OneTouchOption,
     DoubleOneTouchOption,
+    EuropeanVanillaOption,
+    OneTouchOption,
     SnowballOption,
 )
-from asset.equity.param import PDEParams
 from priceenv import PricingEnvironment
+from util.enum.engine_enums import EngineType, PDEMethod
 from util.exceptions import ValidationError
-from util.enum.engine_enums import PDEMethod, EngineType
 
 from .pde import (
-    BasePDESolver,
-    EuropeanPDESolver,
     AmericanPDESolver,
     BarrierPDESolver,
+    BasePDESolver,
     DoubleBarrierPDESolver,
-    OneTouchPDESolver,
     DoubleOneTouchPDESolver,
+    EuropeanPDESolver,
+    OneTouchPDESolver,
     SnowballPDESolver,
 )
 
@@ -56,7 +57,7 @@ class PDEEngine(BaseEngine):
 
     Usage:
         # Basic usage
-        engine = PDEEngine(PDEParams(num_space_steps=500))
+        engine = PDEEngine(PDEParams(grid_size=500))
         price = engine.price(european_option, pricing_env)
 
         # With method selection (two-level enum pattern)
@@ -114,9 +115,7 @@ class PDEEngine(BaseEngine):
         elif isinstance(method, tuple):
             engine_type, pde_method = method
             if engine_type != EngineType.PDE:
-                raise ValidationError(
-                    f"Expected EngineType.PDE, got {engine_type}"
-                )
+                raise ValidationError(f"Expected EngineType.PDE, got {engine_type}")
             if not isinstance(pde_method, PDEMethod):
                 raise ValidationError(
                     f"Expected PDEMethod, got {type(pde_method).__name__}"
@@ -170,7 +169,7 @@ class PDEEngine(BaseEngine):
             return self._solver_cache[product_type]
 
         solver_class = self.PRODUCT_SOLVER_MAP.get(product_type)
-        
+
         if solver_class is None:
             supported_types = [cls.__name__ for cls in self.PRODUCT_SOLVER_MAP.keys()]
             raise ValidationError(

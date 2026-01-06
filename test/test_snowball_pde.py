@@ -412,7 +412,7 @@ class TestSnowballPDEVsMC:
         pde_price = pde_solver.price(snowball, env)
 
         # MC price with many paths
-        mc_engine = SnowballMCEngine(MCParams(num_paths=100000, num_steps=252))
+        mc_engine = SnowballMCEngine(MCParams(num_paths=100000, time_steps=252))
         mc_price = mc_engine.price(snowball, env)
 
         # Should be within 2% of each other
@@ -430,7 +430,7 @@ class TestSnowballPDEVsMC:
         pde_solver = SnowballPDESolver(PDEParams(grid_size=400, time_steps=200))
         pde_price = pde_solver.price(snowball, env)
 
-        mc_engine = SnowballMCEngine(MCParams(num_paths=100000, num_steps=252))
+        mc_engine = SnowballMCEngine(MCParams(num_paths=100000, time_steps=252))
         mc_price = mc_engine.price(snowball, env)
 
         rel_diff = abs(pde_price - mc_price) / max(abs(pde_price), abs(mc_price))

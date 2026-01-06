@@ -14,7 +14,7 @@ from portfolio.equity.position import EquityPosition
 from asset.equity.product.option import EuropeanVanillaOption
 from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
 from priceenv import PricingEnvironment
-from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield
+from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from util.enum.option_enums import OptionType
 from util.exceptions import ValidationError
 
@@ -24,23 +24,11 @@ def sample_pricing_env():
     """Create a sample pricing environment."""
     valuation_date = datetime(2024, 1, 1)
     spot_quote = SpotQuote(spot=100.0, timestamp=valuation_date)
-    
-    vol_surface = VolatilitySurface(
-        valuation_date=valuation_date,
-        spot=100.0,
-        flat_vol=0.2
-    )
-    
-    rate_curve = RateCurve(
-        valuation_date=valuation_date,
-        flat_rate=0.05
-    )
-    
-    div_yield = DividendYield(
-        valuation_date=valuation_date,
-        flat_yield=0.02
-    )
-    
+
+    vol_surface = FlatVolSurface(volatility=0.2)
+    rate_curve = FlatRateCurve(rate=0.05)
+    div_yield = ContinuousDividendYield(div_yield=0.02)
+
     return PricingEnvironment(
         spot_quote=spot_quote,
         vol_surface=vol_surface,
@@ -60,7 +48,7 @@ def sample_portfolio(sample_pricing_env):
     
     call_option = EuropeanVanillaOption(
         strike=100.0,
-        expiry=datetime(2024, 7, 1),
+        maturity=0.5,
         option_type=OptionType.CALL
     )
     

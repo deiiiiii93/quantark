@@ -7,15 +7,17 @@ This test file covers:
 3. PDE engine Greeks vs bump method
 """
 
-import pytest
 from datetime import datetime
-from asset.equity.product.option import EuropeanVanillaOption, AmericanOption
+
+import pytest
+
 from asset.equity.engine.analytical import BlackScholesEngine
 from asset.equity.engine.mc import EuropeanMCEngine
 from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.param import EngineParams, PDEParams, MCParams
+from asset.equity.param import EngineParams, MCParams, PDEParams
+from asset.equity.product.option import AmericanOption, EuropeanVanillaOption
 from asset.equity.riskmeasures import GreeksCalculator
-from param import SpotQuote, FlatVolSurface, FlatRateCurve
+from param import FlatRateCurve, FlatVolSurface, SpotQuote
 from param.div import ContinuousDividendYield
 from priceenv import PricingEnvironment
 from util.enum import OptionType
@@ -38,20 +40,14 @@ def pricing_env():
 def euro_call():
     """Create a European call option for testing."""
     return EuropeanVanillaOption(
-        strike=100.0,
-        option_type=OptionType.CALL,
-        maturity=1.0
+        strike=100.0, option_type=OptionType.CALL, maturity=1.0
     )
 
 
 @pytest.fixture
 def american_put():
     """Create an American put option for testing."""
-    return AmericanOption(
-        strike=100.0,
-        option_type=OptionType.PUT,
-        maturity=1.0
-    )
+    return AmericanOption(strike=100.0, option_type=OptionType.PUT, maturity=1.0)
 
 
 class TestEngineTypeAttribute:
@@ -60,6 +56,7 @@ class TestEngineTypeAttribute:
     def test_base_engine_default_type(self):
         """Test that BaseEngine has default type ANALYTICAL."""
         from asset.equity.engine.base_engine import BaseEngine
+
         assert BaseEngine.engine_type == EngineType.ANALYTICAL
 
     def test_black_scholes_engine_type(self):
@@ -81,6 +78,7 @@ class TestEngineTypeAttribute:
         """Test that BasePDESolver has type PDE."""
         from asset.equity.engine.pde.base_pde_solver import BasePDESolver
         from util.enum.engine_enums import EngineType
+
         assert BasePDESolver.engine_type == EngineType.PDE
 
 
@@ -120,11 +118,14 @@ class TestGreeksCalculatorMode:
         assert not calc._should_use_engine_greeks(pde_engine)
 
     def test_should_use_engine_greeks_engine_mode(self, pricing_env):
-        """Test _should_use_engine_greeks returns True for ENGINE mode."""
+        """Test _should_use_engine_greeks returns True only for engines with overrides."""
         bs_engine = BlackScholesEngine()
         calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.ENGINE)
-        # Even for non-PDE engine, ENGINE mode returns True
-        assert calc._should_use_engine_greeks(bs_engine)
+        # BlackScholesEngine inherits BaseEngine.calculate_greeks; do not use it.
+        assert not calc._should_use_engine_greeks(bs_engine)
+
+        pde_engine = PDEEngine(params=PDEParams(grid_size=100, time_steps=50))
+        assert calc._should_use_engine_greeks(pde_engine)
 
     def test_should_use_engine_greeks_auto_with_pde(self, pricing_env):
         """Test _should_use_engine_greeks with AUTO mode and PDE engine."""
@@ -207,6 +208,65 @@ class TestGreeksCalculatorPDEIntegration:
         assert "gamma" in greeks
 
 
+class TestGreeksCalculatorAvoidsDoublePricing:
+    """Test that engine Greeks mode does not call engine.price for base price."""
+
+    class _FakeEngine(BlackScholesEngine):
+        """
+        Fake engine that overrides calculate_greeks but tracks price calls.
+
+        Extends BlackScholesEngine only to satisfy BaseEngine interface; price()
+        is fully overridden to produce deterministic numbers for bumped scenarios.
+        """
+
+        def __init__(self):
+            super().__init__()
+            self.price_calls = []
+
+        def price(self, product, pricing_env) -> float:  # type: ignore[override]
+            T = product.get_maturity(pricing_env)
+            strike = getattr(product, "strike", pricing_env.spot)
+            snapshot = (
+                float(pricing_env.spot),
+                float(pricing_env.get_vol(strike, T)),
+                float(pricing_env.get_rate(T)),
+                float(pricing_env.get_div_yield(T)),
+                float(T),
+                pricing_env.valuation_date,
+            )
+            self.price_calls.append(snapshot)
+            # Simple deterministic proxy price.
+            return snapshot[0] * 0.01 + snapshot[1] + snapshot[2] + snapshot[3]
+
+        def calculate_greeks(self, product, pricing_env):  # type: ignore[override]
+            return {"price": 123.0, "delta": 0.12, "gamma": 0.003}
+
+    def test_engine_mode_uses_engine_price_for_base(self, euro_call, pricing_env):
+        """
+        ENGINE mode should source base price from engine.calculate_greeks(), not engine.price().
+        """
+        engine = self._FakeEngine()
+        calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.ENGINE)
+
+        greeks = calc.calculate_numerical_greeks(euro_call, pricing_env, engine)
+
+        assert greeks["price"] == 123.0
+        assert greeks["delta"] == 0.12
+        assert greeks["gamma"] == 0.003
+
+        # Ensure we never priced the un-bumped base environment.
+        T = euro_call.get_maturity(pricing_env)
+        base_snapshot = (
+            float(pricing_env.spot),
+            float(pricing_env.get_vol(euro_call.strike, T)),
+            float(pricing_env.get_rate(T)),
+            float(pricing_env.get_div_yield(T)),
+            float(T),
+            pricing_env.valuation_date,
+        )
+        assert base_snapshot not in engine.price_calls
+
+
 class TestGreeksComparison:
     """Compare PDE grid Greeks vs bump method Greeks."""
 
@@ -216,15 +276,19 @@ class TestGreeksComparison:
 
         # Get PDE grid-based Greeks
         calc_pde = GreeksCalculator(greeks_mode=GreeksCalculationMode.AUTO)
-        greeks_pde = calc_pde.calculate_numerical_greeks(euro_call, pricing_env, pde_engine)
+        greeks_pde = calc_pde.calculate_numerical_greeks(
+            euro_call, pricing_env, pde_engine
+        )
 
         # Get bump method Greeks
         calc_bump = GreeksCalculator(greeks_mode=GreeksCalculationMode.BUMP)
-        greeks_bump = calc_bump.calculate_numerical_greeks(euro_call, pricing_env, pde_engine)
+        greeks_bump = calc_bump.calculate_numerical_greeks(
+            euro_call, pricing_env, pde_engine
+        )
 
         # Delta should be similar
         assert abs(greeks_pde["delta"] - greeks_bump["delta"]) < 0.05
-        
+
         # For gamma, check that PDE grid gives positive value (expected for call)
         # Note: bump method with PDE engines can have numerical issues due to
         # grid interpolation and re-solving the PDE multiple times

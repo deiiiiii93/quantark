@@ -359,8 +359,9 @@ class TestGreeksCalculatorIntegration:
 
     @pytest.fixture
     def calculator(self):
-        """Create GreeksCalculator."""
-        return GreeksCalculator()
+        """Create GreeksCalculator with ENGINE mode for PDE grid-based Greeks."""
+        from util.enum.engine_enums import GreeksCalculationMode
+        return GreeksCalculator(greeks_mode=GreeksCalculationMode.ENGINE)
 
     def test_european_option_greeks(self, pde_engine, pricing_env, calculator):
         """Test Greeks calculation for European option via PDE."""
@@ -379,9 +380,7 @@ class TestGreeksCalculatorIntegration:
 
         assert greeks["price"] > 0
         assert 0 < greeks["delta"] < 1  # Call delta
-        assert (
-            abs(greeks["gamma"]) < 0.1
-        )  # Should be small/positive, allow numerical error
+        assert 0 < greeks["gamma"] < 0.1  # Grid-based gamma, should be positive and small
         assert abs(greeks["vega"]) < 100  # Should be reasonable
 
     def test_american_option_greeks(self, pde_engine, pricing_env, calculator):

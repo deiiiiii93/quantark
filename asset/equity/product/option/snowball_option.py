@@ -714,10 +714,7 @@ class SnowballOption(BaseEquityOption):
                     if self.airbag_config.airbag_strike is not None
                     else self.strike
                 )
-            else:
-                # In safe zone (between airbag barrier and strike), provides full protection
-                # Set participation to 0 to ensure no downside loss
-                participation_rate = 0.0
+            # When not in unsafe zone, use standard participation rate (already set above)
 
         # Downside participation
         # Standard: Short Put (loss if spot < strike) -> downside = spot - strike
