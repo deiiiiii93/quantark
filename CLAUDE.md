@@ -166,6 +166,7 @@ Each asset class (`asset/equity/`, `asset/bond/`, `asset/rate/`) follows the sam
 ### Supporting Modules
 
 - **VaR** (`var/`) - Portfolio Value-at-Risk calculations (parametric, historical, Monte Carlo)
+- **SIMM** (`simm/`) - ISDA SIMM v2.6 initial margin calculations
 - **Portfolio** (`portfolio/`) - Portfolio management with position tracking (equity and fixed income)
 - **Backtest** (`backtest/`) - Framework for testing hedging strategies (delta-neutral, DV01-neutral)
 - **Dynamic Scenario** (`dynamicscenario/`) - Multi-day scenario simulation
