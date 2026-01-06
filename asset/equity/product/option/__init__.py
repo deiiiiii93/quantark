@@ -27,6 +27,15 @@ from .snowball_helpers import (
     generate_ko_observation_dates,
     generate_stepdown_barriers,
 )
+from .phoenix_option import PhoenixOption
+from .phoenix_config import CouponBarrierConfig
+from .phoenix_helpers import (
+    create_standard_phoenix,
+    create_stepdown_phoenix,
+    create_reverse_phoenix,
+    create_memory_phoenix,
+    create_non_memory_phoenix,
+)
 
 __all__ = [
     "BaseEquityOption",
@@ -54,4 +63,13 @@ __all__ = [
     "create_airbag_snowball",
     "generate_ko_observation_dates",
     "generate_stepdown_barriers",
+    # Phoenix option
+    "PhoenixOption",
+    "CouponBarrierConfig",
+    # Phoenix helpers
+    "create_standard_phoenix",
+    "create_stepdown_phoenix",
+    "create_reverse_phoenix",
+    "create_memory_phoenix",
+    "create_non_memory_phoenix",
 ]

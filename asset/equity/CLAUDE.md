@@ -18,7 +18,8 @@ The Equity Derivatives module (`asset/equity/`) is a comprehensive framework for
 │  ├── BarrierOption, DoubleBarrierOption                        │
 │  ├── OneTouchOption, DoubleOneTouchOption                      │
 │  ├── CashOrNothingDigitalOption                                │
-│  └── SnowballOption                                            │
+│  ├── SnowballOption                                            │
+│  └── PhoenixOption                                             │
 └────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -63,6 +64,9 @@ asset/equity/
 │   │   ├── snowball_option.py
 │   │   ├── snowball_config.py
 │   │   ├── snowball_helpers.py
+│   │   ├── phoenix_option.py
+│   │   ├── phoenix_config.py
+│   │   ├── phoenix_helpers.py
 │   │   └── observation_schedule.py
 │   └── deltaone/
 │       ├── spot_instrument.py
@@ -123,6 +127,7 @@ asset/equity/
 | `OneTouchOption` | Pays if barrier touched | Analytical, PDE |
 | `DoubleOneTouchOption` | Pays if either barrier touched | PDE |
 | `SnowballOption` | Autocallable with KO/KI | MC, PDE |
+| `PhoenixOption` | Autocallable with periodic coupons | MC, PDE |
 
 ### Delta-One Products (`product/deltaone/`)
 
@@ -228,6 +233,70 @@ snowball = SnowballOption(
 engine = SnowballMCEngine(params=MCParams(num_paths=100000))
 price = engine.price(snowball, pricing_env)
 ```
+
+### Phoenix (Autocallable with Coupons) Option
+
+```python
+from asset.equity.product.option import (
+    PhoenixOption,
+    create_standard_phoenix,
+)
+from asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from asset.equity.engine.mc import SnowballMCEngine
+from util.calendar.day_counter import DayCountConvention
+from util.enum import CouponPayType
+
+# Method 1: Use factory helper (recommended)
+phoenix = create_standard_phoenix(
+    initial_price=100.0,
+    strike=100.0,
+    maturity=1.0,
+    ko_barrier=103.0,      # KO at 103%
+    ki_barrier=75.0,       # KI at 75%
+    coupon_barrier=85.0,   # Coupon paid when spot >= 85%
+    coupon_rate=0.01,      # 1% per period
+    num_observations=12,   # Monthly observations
+    memory_coupon=True,    # Accumulate missed coupons
+    day_count_convention=DayCountConvention.ACT_365,
+    coupon_pay_type=CouponPayType.INSTANT,
+)
+
+# Method 2: Direct construction with custom configs
+from asset.equity.product.option.snowball_config import BarrierConfig
+
+barrier_config = BarrierConfig(
+    ko_barrier=103.0,
+    ko_rate=0.15,
+    ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+    ki_barrier=75.0,
+    ki_continuous=True,
+)
+
+coupon_config = CouponBarrierConfig(
+    coupon_barrier=[85.0, 84.0, 83.0, 82.0],  # Step-down coupon barriers
+    coupon_rate=0.01,
+    memory_coupon=True,
+    day_count_convention=DayCountConvention.ACT_365,
+)
+
+phoenix = PhoenixOption(
+    initial_price=100.0,
+    strike=100.0,
+    maturity=1.0,
+    barrier_config=barrier_config,
+    coupon_config=coupon_config,
+    notional=1_000_000.0,
+)
+
+# Pricing (reuses SnowballMC engine)
+engine = SnowballMCEngine(params=MCParams(num_paths=100000))
+price = engine.price(phoenix, pricing_env)
+```
+
+**Phoenix vs Snowball:**
+- **Snowball**: Coupon paid only on knock-out event
+- **Phoenix**: Coupons paid at each observation where coupon barrier is hit
+- **Memory Coupon**: Both support accumulating missed coupons when barrier is eventually hit
 
 ## Parameters
 
@@ -338,6 +407,7 @@ if is_zero(time_to_expiry):
 
 ## Summary
 
-- **Products**: 10 option types + 2 delta-one types
+- **Products**: 11 option types + 2 delta-one types
 - **Engines**: 7 analytical, 6 Monte Carlo, 8 PDE solvers
 - **Features**: 3 pricing methods, QMC variance reduction, American exercise (analytical + LSM), full Greeks suite
+- **Autocallables**: Snowball (KO coupon only) and Phoenix (periodic coupons) with memory coupon support
