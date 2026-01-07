@@ -257,21 +257,42 @@ class BaseEquityOption(BaseEquityProduct):
                 )
 
     def _validate_notional_quantity(self) -> None:
-        """Validate notional and quantity parameters are non-negative."""
-        if self.notional is not None and self.notional < 0:
-            raise ValidationError(f"Notional must be non-negative, got {self.notional}")
-        if self.quantity is not None and self.quantity < 0:
-            raise ValidationError(f"Quantity must be non-negative, got {self.quantity}")
-        # No warning or auto-correction - handled in _resolve_notional_quantity()
+        """Validate notional and quantity parameters.
+
+        NOTE: These should ideally be at the position level, not product level.
+        Products define ONE unit of an instrument; positions manage quantity/direction.
+        For now, we allow negative values for short position compatibility.
+
+        Validation rules:
+        - Zero is invalid (no position size)
+        - Negative is valid (short position)
+        - Signs must match (both long or both short)
+        """
+        # Zero is invalid (no position)
+        if self.notional is not None and self.notional == 0:
+            raise ValidationError("Notional cannot be zero")
+        if self.quantity is not None and self.quantity == 0:
+            raise ValidationError("Quantity cannot be zero")
+
+        # Signs must match (both long or both short)
+        if (
+            self.notional is not None
+            and self.quantity is not None
+            and (self.notional < 0) != (self.quantity < 0)
+        ):
+            raise ValidationError(
+                f"Notional ({self.notional}) and quantity ({self.quantity}) "
+                "must have the same sign (both positive for long, both negative for short)"
+            )
 
     def _resolve_notional_quantity(self) -> tuple[Optional[float], float]:
         """
         Resolve notional and quantity to ensure consistency.
 
-        Notional and quantity are dual representations of position size:
-        - notional: Total dollar value of the position (e.g., $1,000,000)
-        - quantity: Number of contracts or shares
-        - Relationship: notional = quantity × initial_price
+        Supports short positions (negative values) where:
+        - Negative quantity = short position
+        - Negative notional = short notional amount
+        - Relationship: notional = quantity × initial_price (with signs)
 
         Resolution rules:
         - If both provided and consistent: keep both as-is
@@ -288,20 +309,40 @@ class BaseEquityOption(BaseEquityProduct):
         """
         from util.numerical.constants import Tolerance
 
-        # Determine what was provided
-        has_notional = self.notional is not None and self.notional > 0
-        has_quantity = self.quantity is not None and self.quantity > 0
+        # Check for zero values before proceeding
+        # (Need to check here because != 0 below would treat zero as "not provided")
+        if self.notional == 0:
+            raise ValidationError("Notional cannot be zero")
+        if self.quantity == 0:
+            raise ValidationError("Quantity cannot be zero")
+
+        # Determine what was provided (using != 0 to include negative values)
+        has_notional = self.notional is not None and self.notional != 0
+        has_quantity = self.quantity is not None and self.quantity != 0
         has_initial_price = self.initial_price is not None and self.initial_price > 0
 
-        # Case 1: Neither provided - use defaults
+        # Determine position sign from provided values
+        position_sign = 1
+        if has_notional:
+            position_sign = 1 if self.notional > 0 else -1
+        elif has_quantity:
+            position_sign = 1 if self.quantity > 0 else -1
+
+        # Case 1: Neither provided - use defaults (long position)
         if not has_notional and not has_quantity:
             return None, 1.0
 
+        # Work with magnitudes for consistency checking
+        notional_magnitude = abs(self.notional) if has_notional else None
+        quantity_magnitude = abs(self.quantity) if has_quantity else None
+
         # Case 2: Only quantity provided
         if not has_notional:
-            # quantity is the source of truth
-            derived_notional = self.quantity * self.initial_price if has_initial_price else None
-            return derived_notional, self.quantity
+            derived_notional_magnitude = quantity_magnitude * self.initial_price if has_initial_price else None
+            resolved_notional = (
+                derived_notional_magnitude * position_sign if derived_notional_magnitude is not None else None
+            )
+            return resolved_notional, self.quantity
 
         # Case 3: Only notional provided
         if not has_quantity:
@@ -310,30 +351,36 @@ class BaseEquityOption(BaseEquityProduct):
                     "Cannot derive quantity from notional without initial_price. "
                     "Provide initial_price or specify quantity directly."
                 )
-            return self.notional, self.notional / self.initial_price
+            quantity_magnitude = notional_magnitude / self.initial_price
+            return self.notional, quantity_magnitude * position_sign
 
-        # Case 4: Both provided - check consistency
-        expected_quantity = self.notional / self.initial_price if has_initial_price else None
-        if expected_quantity is not None:
-            if is_close(self.quantity, expected_quantity, rel_tol=Tolerance.RELATIVE):
+        # Case 4: Both provided - check consistency using magnitudes
+        expected_quantity_magnitude = notional_magnitude / self.initial_price if has_initial_price else None
+        if expected_quantity_magnitude is not None:
+            if is_close(quantity_magnitude, expected_quantity_magnitude, rel_tol=Tolerance.RELATIVE):
                 # Consistent - keep both as-is
                 return self.notional, self.quantity
             else:
-                # Inconsistent - apply policy
+                # Inconsistent - apply policy to magnitudes, then restore sign
                 if self.reconciliation_policy == NotionalQuantityPolicy.STRICT:
-                    expected_notional = self.quantity * self.initial_price
+                    expected_notional_magnitude = quantity_magnitude * self.initial_price
                     raise ValidationError(
                         f"Notional ({self.notional}) and quantity ({self.quantity}) "
                         f"inconsistent with initial_price ({self.initial_price}). "
-                        f"Expected quantity={expected_quantity:.6g} for given notional, "
-                        f"or notional={expected_notional:.6g} for given quantity."
+                        f"Expected quantity={expected_quantity_magnitude * position_sign:.6g} "
+                        f"for given notional, or "
+                        f"notional={expected_notional_magnitude * position_sign:.6g} "
+                        f"for given quantity."
                     )
                 elif self.reconciliation_policy == NotionalQuantityPolicy.PREFER_NOTIONAL:
-                    # Notional wins, derive quantity
-                    return self.notional, expected_quantity
+                    # Notional wins - derive quantity magnitude, then apply sign
+                    return self.notional, expected_quantity_magnitude * position_sign
                 else:  # PREFER_QUANTITY
-                    # Quantity wins, derive notional
-                    return self.quantity * self.initial_price, self.quantity
+                    # Quantity wins - derive notional magnitude, then apply sign
+                    return (
+                        quantity_magnitude * self.initial_price * position_sign,
+                        self.quantity
+                    )
 
         # Cannot validate consistency without initial_price, keep both
         return self.notional, self.quantity

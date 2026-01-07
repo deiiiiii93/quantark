@@ -17,6 +17,7 @@ from .option_enums import (
     ObservationFrequency,
     AveragingType,
     AsianStrikeType,
+    NotionalQuantityPolicy,
 )
 from .engine_enums import (
     EngineType,
@@ -54,6 +55,7 @@ __all__ = [
     "ObservationFrequency",
     "AveragingType",
     "AsianStrikeType",
+    "NotionalQuantityPolicy",
     # Engine enums
     "EngineType",
     "GreeksCalculationMode",
