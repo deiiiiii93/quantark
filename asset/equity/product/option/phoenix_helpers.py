@@ -131,7 +131,7 @@ def create_standard_phoenix(
     maturity: float,
     notional: float = 1_000_000.0,
     ko_barrier: Optional[float] = None,
-    ko_rate: float = 0.15,
+    ko_rate: float = 0.0,
     ki_barrier: Optional[float] = None,
     coupon_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
@@ -158,7 +158,7 @@ def create_standard_phoenix(
         maturity: Time to maturity in years
         notional: Notional principal (default: 1,000,000)
         ko_barrier: Knock-out barrier (default: 103% of initial_price)
-        ko_rate: Annualized knock-out rate (default: 15%)
+        ko_rate: Annualized knock-out rate (default: 0%)
         ki_barrier: Knock-in barrier (default: 75% of initial_price)
         coupon_barrier: Coupon barrier (default: 85% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
@@ -273,7 +273,7 @@ def create_stepdown_phoenix(
     initial_coupon_barrier: Optional[float] = None,
     ko_stepdown_rate: float = 0.005,
     coupon_stepdown_rate: float = 0.005,
-    ko_rate: float = 0.15,
+    ko_rate: float = 0.0,
     ki_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
     num_observations: int = 12,
@@ -298,7 +298,7 @@ def create_stepdown_phoenix(
         initial_coupon_barrier: Starting coupon barrier (default: 85% of initial_price)
         ko_stepdown_rate: KO barrier decrease per period as % of initial_price (default: 0.5%)
         coupon_stepdown_rate: Coupon barrier decrease per period (default: 0.5%)
-        ko_rate: Annualized knock-out rate (default: 15%)
+        ko_rate: Annualized knock-out rate (default: 0%)
         ki_barrier: Knock-in barrier (default: 75% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
         num_observations: Number of observations (default: 12)
@@ -425,7 +425,7 @@ def create_reverse_phoenix(
     maturity: float,
     notional: float = 1_000_000.0,
     ko_barrier: Optional[float] = None,
-    ko_rate: float = 0.15,
+    ko_rate: float = 0.0,
     ki_barrier: Optional[float] = None,
     coupon_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
@@ -450,7 +450,7 @@ def create_reverse_phoenix(
         maturity: Time to maturity in years
         notional: Notional principal (default: 1,000,000)
         ko_barrier: Knock-out barrier (default: 97% of initial_price)
-        ko_rate: Annualized knock-out rate (default: 15%)
+        ko_rate: Annualized knock-out rate (default: 0%)
         ki_barrier: Knock-in barrier (default: 125% of initial_price)
         coupon_barrier: Coupon barrier (default: 115% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)

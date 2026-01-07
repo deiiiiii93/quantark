@@ -12,7 +12,7 @@ from datetime import datetime
 
 from util.calendar import DayCountConvention, calculate_year_fraction
 from ..base_equity_product import BaseEquityProduct
-from util.enum import OptionType, ExerciseType, TenorEnd
+from util.enum import OptionType, ExerciseType, TenorEnd, NotionalQuantityPolicy
 from util.exceptions import ValidationError
 from util.numerical.comparison import is_close
 
@@ -91,7 +91,8 @@ class BaseEquityOption(BaseEquityProduct):
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
         initial_price: float = 0.0,
         notional: Optional[float] = None,
-        quantity: float = 1.0,
+        quantity: Optional[float] = None,
+        reconciliation_policy: NotionalQuantityPolicy = NotionalQuantityPolicy.PREFER_NOTIONAL,
     ):
         """
         Initialize base equity option.
@@ -111,6 +112,7 @@ class BaseEquityOption(BaseEquityProduct):
             initial_price: Reference/initial underlying price (optional)
             notional: Notional principal amount (optional)
             quantity: Number of option contracts (default: 1.0)
+            reconciliation_policy: Policy for reconciling notional/quantity when both provided
         """
         self.strike = strike
         self.option_type = option_type
@@ -126,6 +128,12 @@ class BaseEquityOption(BaseEquityProduct):
         self.initial_price = initial_price
         self.notional = notional
         self.quantity = quantity
+        self.reconciliation_policy = reconciliation_policy
+
+        # Resolve notional/quantity relationship BEFORE validation
+        resolved_notional, resolved_quantity = self._resolve_notional_quantity()
+        self.notional = resolved_notional
+        self.quantity = resolved_quantity
 
         self.validate()
 
@@ -249,20 +257,86 @@ class BaseEquityOption(BaseEquityProduct):
                 )
 
     def _validate_notional_quantity(self) -> None:
-        """Validate notional and quantity parameters."""
+        """Validate notional and quantity parameters are non-negative."""
         if self.notional is not None and self.notional < 0:
             raise ValidationError(f"Notional must be non-negative, got {self.notional}")
         if self.quantity is not None and self.quantity < 0:
             raise ValidationError(f"Quantity must be non-negative, got {self.quantity}")
-        if (
-            self.notional is not None
-            and self.initial_price is not None
-            and not is_close(self.notional, self.quantity * self.initial_price)
-        ):
-            self.quantity = self.notional / self.initial_price
-            print(
-                f"WARNING: Notional ({self.notional}) is not equal to quantity ({self.quantity}) * initial_price ({self.initial_price}), setting quantity to {self.quantity}"
-            )
+        # No warning or auto-correction - handled in _resolve_notional_quantity()
+
+    def _resolve_notional_quantity(self) -> tuple[Optional[float], float]:
+        """
+        Resolve notional and quantity to ensure consistency.
+
+        Notional and quantity are dual representations of position size:
+        - notional: Total dollar value of the position (e.g., $1,000,000)
+        - quantity: Number of contracts or shares
+        - Relationship: notional = quantity × initial_price
+
+        Resolution rules:
+        - If both provided and consistent: keep both as-is
+        - If both provided and inconsistent: apply reconciliation_policy
+        - If only notional provided: derive quantity
+        - If only quantity provided: derive notional (if initial_price available)
+        - If neither: use default quantity=1.0, notional=None
+
+        Returns:
+            Tuple of (resolved_notional, resolved_quantity)
+
+        Raises:
+            ValidationError: If parameters are invalid or resolution fails
+        """
+        from util.numerical.constants import Tolerance
+
+        # Determine what was provided
+        has_notional = self.notional is not None and self.notional > 0
+        has_quantity = self.quantity is not None and self.quantity > 0
+        has_initial_price = self.initial_price is not None and self.initial_price > 0
+
+        # Case 1: Neither provided - use defaults
+        if not has_notional and not has_quantity:
+            return None, 1.0
+
+        # Case 2: Only quantity provided
+        if not has_notional:
+            # quantity is the source of truth
+            derived_notional = self.quantity * self.initial_price if has_initial_price else None
+            return derived_notional, self.quantity
+
+        # Case 3: Only notional provided
+        if not has_quantity:
+            if not has_initial_price:
+                raise ValidationError(
+                    "Cannot derive quantity from notional without initial_price. "
+                    "Provide initial_price or specify quantity directly."
+                )
+            return self.notional, self.notional / self.initial_price
+
+        # Case 4: Both provided - check consistency
+        expected_quantity = self.notional / self.initial_price if has_initial_price else None
+        if expected_quantity is not None:
+            if is_close(self.quantity, expected_quantity, rel_tol=Tolerance.RELATIVE):
+                # Consistent - keep both as-is
+                return self.notional, self.quantity
+            else:
+                # Inconsistent - apply policy
+                if self.reconciliation_policy == NotionalQuantityPolicy.STRICT:
+                    expected_notional = self.quantity * self.initial_price
+                    raise ValidationError(
+                        f"Notional ({self.notional}) and quantity ({self.quantity}) "
+                        f"inconsistent with initial_price ({self.initial_price}). "
+                        f"Expected quantity={expected_quantity:.6g} for given notional, "
+                        f"or notional={expected_notional:.6g} for given quantity."
+                    )
+                elif self.reconciliation_policy == NotionalQuantityPolicy.PREFER_NOTIONAL:
+                    # Notional wins, derive quantity
+                    return self.notional, expected_quantity
+                else:  # PREFER_QUANTITY
+                    # Quantity wins, derive notional
+                    return self.quantity * self.initial_price, self.quantity
+
+        # Cannot validate consistency without initial_price, keep both
+        return self.notional, self.quantity
 
     # ==========================================================================
     # Quantity and Notional

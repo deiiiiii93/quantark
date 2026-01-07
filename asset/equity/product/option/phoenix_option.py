@@ -163,7 +163,42 @@ class PhoenixOption(BaseEquityOption):
         Raises:
             ValidationError: If parameters are invalid
         """
+        # Set configuration objects
+        self.barrier_config = barrier_config
+        self.coupon_config = coupon_config
+        self.payoff_config = (
+            payoff_config if payoff_config is not None else PayoffConfig()
+        )
+        self.accrual_config = (
+            accrual_config if accrual_config is not None else AccrualConfig()
+        )
+        self.airbag_config = (
+            airbag_config if airbag_config is not None else AirbagConfig()
+        )
+
+        # Set core attributes for local use before base init if needed
+        self.is_reverse = is_reverse
+        # Set option type based on standard vs reverse
+        self.option_type = OptionType.CALL if is_reverse else OptionType.PUT
+        self.exercise_type = ExerciseType.EUROPEAN
+
         # Set base class attributes
+        super().__init__(
+            strike=strike,
+            option_type=self.option_type,
+            exercise_type=self.exercise_type,
+            maturity=maturity,
+            tenor=tenor,
+            initial_date=initial_date,
+            exercise_date=exercise_date,
+            settlement_date=settlement_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
+            initial_price=initial_price,
+            notional=notional,
+        )
+
         self.initial_date = initial_date
         self.exercise_date = exercise_date
         self.settlement_date = settlement_date
@@ -177,24 +212,9 @@ class PhoenixOption(BaseEquityOption):
         self.initial_price = initial_price
         self.strike = strike
         self.notional = notional
-        self.is_reverse = is_reverse
+        # is_reverse already set above
 
-        # Set option type based on standard vs reverse
-        self.option_type = OptionType.CALL if is_reverse else OptionType.PUT
-        self.exercise_type = ExerciseType.EUROPEAN
-
-        # Set configuration objects
-        self.barrier_config = barrier_config
-        self.coupon_config = coupon_config
-        self.payoff_config = (
-            payoff_config if payoff_config is not None else PayoffConfig()
-        )
-        self.accrual_config = (
-            accrual_config if accrual_config is not None else AccrualConfig()
-        )
-        self.airbag_config = (
-            airbag_config if airbag_config is not None else AirbagConfig()
-        )
+        # Configuration objects already set above
 
         self.validate()
 
@@ -222,7 +242,7 @@ class PhoenixOption(BaseEquityOption):
             )
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
-        if self.notional <= 0:
+        if self.notional is not None and self.notional <= 0:
             raise ValidationError(f"Notional must be positive, got {self.notional}")
 
     def _validate_maturity_parameters(self) -> None:
@@ -663,7 +683,12 @@ class PhoenixOption(BaseEquityOption):
 
         ko_coupon = self.notional * ko_rate * accrual_factor
 
-        return principal + ko_coupon + accumulated_coupons
+        # Check if current period coupon is triggered
+        current_coupon = 0.0
+        if self.is_coupon_triggered(spot, observation_idx):
+            current_coupon = self.get_coupon_payoff(observation_idx)
+
+        return principal + ko_coupon + accumulated_coupons + current_coupon
 
     def get_maturity_payoff_v0(
         self,
