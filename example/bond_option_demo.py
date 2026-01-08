@@ -42,7 +42,7 @@ def example_1_basic_option_pricing():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,  # 5% annual coupon
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_ACT_ISDA
@@ -111,7 +111,7 @@ def example_2_greeks_calculation():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL
     )
@@ -185,7 +185,7 @@ def example_3_put_call_parity():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL
     )
@@ -254,7 +254,7 @@ def example_4_volatility_sensitivity():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL
     )
@@ -301,7 +301,7 @@ def example_5_rate_sensitivity():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL
     )
@@ -354,7 +354,7 @@ def example_6_bond_risk_measures():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL
     )
@@ -404,7 +404,7 @@ def example_7_strike_analysis():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL
     )
@@ -467,7 +467,7 @@ def example_8_implied_volatility():
     underlying = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL
     )

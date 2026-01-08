@@ -38,13 +38,13 @@ def example_1_simple_bond():
     # Create a simple 5-year bond with 5% coupon, semi-annual payments
     issue_date = datetime(2023, 1, 1)
     maturity_date = datetime(2028, 1, 1)
-    notional = 1000.0
+    denominator = 1000.0
     coupon_rate = 0.05  # 5% annual coupon
 
     bond = create_simple_fixed_bond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         coupon_rate=coupon_rate,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_ACT_ISDA,
@@ -72,7 +72,7 @@ def example_1_simple_bond():
     print(f"  Dirty Price: ${dirty_price:.2f}")
     print(f"  Clean Price: ${clean_price:.2f}")
     print(f"  Accrued Interest: ${accrued:.2f}")
-    print(f"  Price as % of par: {clean_price/notional*100:.3f}%")
+    print(f"  Price as % of par: {clean_price/denominator*100:.3f}%")
 
     # Calculate bond metrics
     mod_duration = engine.modified_duration(bond)
@@ -99,7 +99,7 @@ def example_2_different_frequencies():
 
     issue_date = datetime(2023, 1, 1)
     maturity_date = datetime(2028, 1, 1)
-    notional = 1000.0
+    denominator = 1000.0
     coupon_rate = 0.06
     valuation_date = datetime(2024, 1, 1)
 
@@ -122,7 +122,7 @@ def example_2_different_frequencies():
         bond = create_simple_fixed_bond(
             issue_date=issue_date,
             maturity_date=maturity_date,
-            notional=notional,
+            denominator=denominator,
             coupon_rate=coupon_rate,
             payment_frequency=freq,
         )
@@ -143,7 +143,7 @@ def example_3_day_count_conventions():
 
     issue_date = datetime(2023, 1, 1)
     maturity_date = datetime(2028, 1, 1)
-    notional = 1000.0
+    denominator = 1000.0
     coupon_rate = 0.05
     valuation_date = datetime(2024, 2, 1)
 
@@ -167,7 +167,7 @@ def example_3_day_count_conventions():
         bond = create_simple_fixed_bond(
             issue_date=issue_date,
             maturity_date=maturity_date,
-            notional=notional,
+            denominator=denominator,
             coupon_rate=coupon_rate,
             day_count_convention=convention,
         )
@@ -188,14 +188,14 @@ def example_4_interpolated_curves():
 
     issue_date = datetime(2023, 1, 1)
     maturity_date = datetime(2028, 1, 1)
-    notional = 1000.0
+    denominator = 1000.0
     coupon_rate = 0.05
     valuation_date = datetime(2024, 1, 1)
 
     bond = create_simple_fixed_bond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         coupon_rate=coupon_rate,
     )
 
@@ -242,14 +242,14 @@ def example_5_yield_curve_sensitivity():
 
     issue_date = datetime(2023, 1, 1)
     maturity_date = datetime(2033, 1, 1)  # 10-year bond
-    notional = 1000.0
+    denominator = 1000.0
     coupon_rate = 0.04
     valuation_date = datetime(2024, 1, 1)
 
     bond = create_simple_fixed_bond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         coupon_rate=coupon_rate,
     )
 
@@ -270,7 +270,7 @@ def example_5_yield_curve_sensitivity():
         duration = engine.modified_duration(bond)
 
         print(
-            f"Yield {yield_level:.1%}: Price=${price:8.2f} ({price/notional*100:6.2f}%), "
+            f"Yield {yield_level:.1%}: Price=${price:8.2f} ({price/denominator*100:6.2f}%), "
             f"Duration={duration:.3f} years"
         )
 
@@ -285,13 +285,13 @@ def example_6_cashflow_schedule():
 
     issue_date = datetime(2024, 1, 1)
     maturity_date = datetime(2027, 1, 1)  # 3-year bond for shorter schedule
-    notional = 1000.0
+    denominator = 1000.0
     coupon_rate = 0.05
 
     bond = create_simple_fixed_bond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         coupon_rate=coupon_rate,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
     )
@@ -327,7 +327,7 @@ def example_7_business_day_adjustment():
 
     issue_date = datetime(2024, 1, 1)
     maturity_date = datetime(2027, 1, 1)
-    notional = 1000.0
+    denominator = 1000.0
     coupon_rate = 0.05
 
     # Create bond with US calendar
@@ -336,7 +336,7 @@ def example_7_business_day_adjustment():
     bond = FixedBond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         coupon_rate=coupon_rate,
         payment_frequency=PaymentFrequency.QUARTERLY,
         day_count_convention=DayCountConvention.ACT_360,

@@ -51,13 +51,13 @@ def example_1_simple_sofr_frn():
     # Create a 5-year FRN linked to 3-month SOFR with 50bp spread
     issue_date = datetime(2024, 1, 1)
     maturity_date = datetime(2029, 1, 1)
-    notional = 1000000.0
+    denominator = 1000000.0
     spread = 0.0050  # 50bp
     
     frn = create_simple_frn(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         index=SOFR_3M,
         spread=spread,
         payment_frequency=PaymentFrequency.QUARTERLY
@@ -87,7 +87,7 @@ def example_1_simple_sofr_frn():
     print(f"  Dirty Price: ${dirty_price:,.2f}")
     print(f"  Clean Price: ${clean_price:,.2f}")
     print(f"  Accrued Interest: ${accrued:,.2f}")
-    print(f"  Price as % of par: {clean_price/notional*100:.3f}%")
+    print(f"  Price as % of par: {clean_price/denominator*100:.3f}%")
     
     # Risk metrics
     eff_dur = engine.effective_duration(frn)
@@ -115,7 +115,7 @@ def example_2_discount_margin_calculation():
     frn = create_simple_frn(
         issue_date=datetime(2024, 1, 1),
         maturity_date=datetime(2029, 1, 1),
-        notional=1000000.0,
+        denominator=1000000.0,
         index=SOFR_3M,
         spread=0.0050,  # 50bp quoted spread
         payment_frequency=PaymentFrequency.QUARTERLY
@@ -142,7 +142,7 @@ def example_2_discount_margin_calculation():
         dm = engine.discount_margin(frn, price, clean_price=True)
         sm = engine.simple_margin(frn, price, clean_price=True)
         
-        print(f"${price:>10,} {price/frn.notional*100:>9.2f}% {dm*10000:>9.1f}bp {sm*10000:>14.1f}bp")
+        print(f"${price:>10,} {price/frn.denominator*100:>9.2f}% {dm*10000:>9.1f}bp {sm*10000:>14.1f}bp")
     
     print("\nNote: At par, DM equals the quoted spread")
     print()
@@ -174,11 +174,11 @@ def example_3_different_indices():
     print(f"{'Name':<20} {'Index':<12} {'Spread':>8} {'Price %':>10} {'Eff Dur':>10}")
     print("-" * 65)
     
-    for name, index, spread, currency, notional in frns:
+    for name, index, spread, currency, denominator in frns:
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=notional,
+            denominator=denominator,
             index=index,
             spread=spread,
             payment_frequency=PaymentFrequency.QUARTERLY
@@ -187,7 +187,7 @@ def example_3_different_indices():
         price = engine.clean_price(frn)
         eff_dur = engine.effective_duration(frn)
         
-        print(f"{name:<20} {index.name:<12} {spread*10000:>6.0f}bp {price/notional*100:>9.2f}% {eff_dur:>9.4f}")
+        print(f"{name:<20} {index.name:<12} {spread*10000:>6.0f}bp {price/denominator*100:>9.2f}% {eff_dur:>9.4f}")
     
     print()
 
@@ -201,7 +201,7 @@ def example_4_reset_conventions():
     base_params = {
         "issue_date": datetime(2024, 1, 1),
         "maturity_date": datetime(2027, 1, 1),
-        "notional": 1000000.0,
+        "denominator": 1000000.0,
         "index": SOFR_3M,
         "spread": 0.0050,
         "payment_frequency": PaymentFrequency.QUARTERLY,
@@ -241,7 +241,7 @@ def example_5_cap_and_floor():
     frn = FloatingRateBond(
         issue_date=datetime(2024, 1, 1),
         maturity_date=datetime(2029, 1, 1),
-        notional=1000000.0,
+        denominator=1000000.0,
         index=SOFR_3M,
         spread=0.0050,  # 50bp spread
         payment_frequency=PaymentFrequency.QUARTERLY,
@@ -286,7 +286,7 @@ def example_6_cashflow_schedule():
     frn = create_simple_frn(
         issue_date=datetime(2024, 1, 1),
         maturity_date=datetime(2026, 1, 1),  # 2-year for shorter display
-        notional=1000000.0,
+        denominator=1000000.0,
         index=SOFR_3M,
         spread=0.0050,
         payment_frequency=PaymentFrequency.QUARTERLY
@@ -318,8 +318,8 @@ def example_6_cashflow_schedule():
     total_coupons = sum(cf.amount for cf in cashflows)
     print("-" * 100)
     print(f"Total coupon payments: ${total_coupons:,.2f}")
-    print(f"Principal at maturity: ${frn.notional:,.2f}")
-    print(f"Total cashflows: ${total_coupons + frn.notional:,.2f}")
+    print(f"Principal at maturity: ${frn.denominator:,.2f}")
+    print(f"Total cashflows: ${total_coupons + frn.denominator:,.2f}")
     
     print()
 
@@ -333,7 +333,7 @@ def example_7_full_analysis():
     frn = create_simple_frn(
         issue_date=datetime(2024, 1, 1),
         maturity_date=datetime(2029, 1, 1),
-        notional=1000000.0,
+        denominator=1000000.0,
         index=SOFR_3M,
         spread=0.0060,  # 60bp spread
         payment_frequency=PaymentFrequency.QUARTERLY
@@ -360,7 +360,7 @@ def example_7_full_analysis():
     print(f"  Index: {frn.index.name}")
     print(f"  Quoted Spread: {frn.spread:.2%}")
     print(f"  Maturity: {frn.maturity_date.date()}")
-    print(f"  Notional: ${frn.notional:,.2f}")
+    print(f"  Notional: ${frn.denominator:,.2f}")
     
     print(f"\nMarket Data:")
     print(f"  Market Price: ${market_price:,.2f}")
@@ -395,7 +395,7 @@ def example_8_upward_sloping_curve():
     frn = create_simple_frn(
         issue_date=datetime(2024, 1, 1),
         maturity_date=datetime(2029, 1, 1),
-        notional=1000000.0,
+        denominator=1000000.0,
         index=SOFR_3M,
         spread=0.0050,
         payment_frequency=PaymentFrequency.QUARTERLY
@@ -432,7 +432,7 @@ def example_8_upward_sloping_curve():
         
         price = engine.clean_price(frn)
         
-        print(f"{curve_name:<20}: ${price:>12,.2f} ({price/frn.notional*100:.3f}%)")
+        print(f"{curve_name:<20}: ${price:>12,.2f} ({price/frn.denominator*100:.3f}%)")
     
     print()
 

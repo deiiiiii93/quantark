@@ -27,7 +27,7 @@ class TestBondOptionCreation(unittest.TestCase):
         self.underlying = create_simple_fixed_bond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -129,7 +129,7 @@ class TestBondOptionPayoff(unittest.TestCase):
         self.underlying = create_simple_fixed_bond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05
         )
     
@@ -208,7 +208,7 @@ class TestBlackBondOptionEngine(unittest.TestCase):
         self.underlying = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -366,7 +366,7 @@ class TestBondGreeksCalculator(unittest.TestCase):
         self.underlying = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -525,7 +525,7 @@ class TestEdgeCases(unittest.TestCase):
         self.underlying = create_simple_fixed_bond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05
         )
         
@@ -620,7 +620,7 @@ class TestImpliedVolatility(unittest.TestCase):
         self.underlying = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05
         )
         

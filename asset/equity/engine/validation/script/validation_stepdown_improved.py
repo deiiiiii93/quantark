@@ -35,7 +35,7 @@ def validate_stepdown_pricing():
         initial_price=S,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,
         stepdown_rate=0.005,
         ki_barrier=75.0,

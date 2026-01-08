@@ -91,6 +91,8 @@ class BlackScholesEngine(BaseEngine):
         except Exception as e:
             raise NumericalError(f"Error calculating option price: {e}")
 
+        price *= product.contract_multiplier
+
         # Sanity checks on output
         if price < 0:
             raise NumericalError(f"Negative price computed: {price}")

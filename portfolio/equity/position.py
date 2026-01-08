@@ -76,7 +76,7 @@ class EquityPosition:
     def get_market_value(self, pricing_env: PricingEnvironment) -> float:
         """
         Calculate current market value of the position.
-        
+
         Market value = current_price × quantity
         
         Args:
@@ -87,6 +87,32 @@ class EquityPosition:
         """
         current_price = self.get_current_price(pricing_env)
         return current_price * self.quantity
+
+    def get_actual_notional(
+        self, pricing_env: Optional[PricingEnvironment] = None
+    ) -> float:
+        """
+        Calculate actual notional based on contract multiplier.
+
+        Uses product.initial_price when available; otherwise falls back to spot
+        from pricing_env.
+
+        Args:
+            pricing_env: Pricing environment for spot fallback (optional)
+
+        Returns:
+            Actual notional amount
+        """
+        base_price = getattr(self.product, "initial_price", 0.0) or 0.0
+        if base_price <= 0:
+            if pricing_env is None:
+                raise ValidationError(
+                    "PricingEnvironment required when product.initial_price is not set"
+                )
+            base_price = pricing_env.spot
+
+        contract_multiplier = getattr(self.product, "contract_multiplier", 1.0)
+        return self.quantity * base_price * contract_multiplier
     
     def get_pnl(self, pricing_env: PricingEnvironment) -> float:
         """
@@ -216,4 +242,3 @@ class EquityPosition:
 
 # Backward compatibility alias
 Position = EquityPosition
-

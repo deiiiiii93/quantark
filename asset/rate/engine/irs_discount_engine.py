@@ -160,7 +160,6 @@ class IRSDiscountEngine:
 
             receive_pv = self._leg_pv(swap.receive_leg, valuation_date)
             pay_pv = self._leg_pv(swap.pay_leg, valuation_date)
-
             return receive_pv - pay_pv
 
         elif isinstance(swap, BasisSwap):
@@ -169,7 +168,6 @@ class IRSDiscountEngine:
 
             leg2_pv = self._leg_pv(swap.leg2, valuation_date)
             leg1_pv = self._leg_pv(swap.leg1, valuation_date)
-
             return leg2_pv - leg1_pv
 
         else:

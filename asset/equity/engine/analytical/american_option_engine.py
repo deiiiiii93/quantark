@@ -124,6 +124,7 @@ class AmericanOptionAnalyticalEngine(BaseEngine):
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
+        multiplier = product.contract_multiplier
 
         self._validate_inputs(S, K, T, r, q, sigma)
 
@@ -138,10 +139,10 @@ class AmericanOptionAnalyticalEngine(BaseEngine):
         is_call = product.is_call()
 
         if is_call and b >= r and r >= 0:
-            return self._european_call_bsm(S, K, T, r, b, sigma)
+            return self._european_call_bsm(S, K, T, r, b, sigma) * multiplier
 
         if is_call and b >= r and r < 0 and q <= r:
-            return self._european_call_bsm(S, K, T, r, b, sigma)
+            return self._european_call_bsm(S, K, T, r, b, sigma) * multiplier
 
         try:
             if self.method == AmericanAnalyticalMethod.BS93:
@@ -154,6 +155,7 @@ class AmericanOptionAnalyticalEngine(BaseEngine):
             if np.isnan(price) or np.isinf(price):
                 raise NumericalError("NaN or Inf result detected")
 
+            price *= multiplier
             intrinsic = product.intrinsic_value(S)
             if price < intrinsic - 1e-6:
                 raise NumericalError(
@@ -169,9 +171,9 @@ class AmericanOptionAnalyticalEngine(BaseEngine):
                 f"American option pricing failed ({e}), using European fallback"
             )
             if is_call:
-                return self._european_call_bsm(S, K, T, r, b, sigma)
+                return self._european_call_bsm(S, K, T, r, b, sigma) * multiplier
             else:
-                return self._european_put_bsm(S, K, T, r, b, sigma)
+                return self._european_put_bsm(S, K, T, r, b, sigma) * multiplier
 
     def _validate_inputs(
         self, S: float, K: float, T: float, r: float, q: float, sigma: float

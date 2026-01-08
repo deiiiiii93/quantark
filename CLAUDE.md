@@ -163,6 +163,12 @@ Each asset class (`asset/equity/`, `asset/bond/`, `asset/rate/`) follows the sam
 - `process/` - Stochastic processes
 - `riskmeasures/` - Risk calculations
 
+### Product vs Position Sizing
+
+Products represent one contract/unit, while positions carry quantity:
+- Equity options use `contract_multiplier` to scale per-contract payoffs.
+- Bonds use `denominator` as the minimum tradable notional; position quantity scales.
+
 ### Supporting Modules
 
 - **VaR** (`var/`) - Portfolio Value-at-Risk calculations (parametric, historical, Monte Carlo)

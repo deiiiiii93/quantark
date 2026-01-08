@@ -68,7 +68,7 @@ class PhoenixOption(BaseEquityOption):
     Core Attributes:
         initial_price: Reference price for payoff calculations
         strike: Strike for the embedded option (put for standard, call for reverse)
-        notional: Notional principal (N)
+        contract_multiplier: Underlying units represented by one contract
         is_reverse: If True, reverse phoenix; if False (default), standard phoenix
 
     Barrier Attributes (via barrier_config):
@@ -127,7 +127,7 @@ class PhoenixOption(BaseEquityOption):
         payoff_config: Optional[PayoffConfig] = None,
         accrual_config: Optional[AccrualConfig] = None,
         airbag_config: Optional[AirbagConfig] = None,
-        notional: float = 1.0,
+        contract_multiplier: float = 1.0,
         is_reverse: bool = False,
         maturity: Optional[float] = None,
         tenor: Optional[float] = None,
@@ -149,7 +149,7 @@ class PhoenixOption(BaseEquityOption):
             payoff_config: PayoffConfig with rebate/protection settings
             accrual_config: AccrualConfig with annualization flags
             airbag_config: AirbagConfig with airbag barrier settings
-            notional: Notional principal (default: 1.0)
+            contract_multiplier: Underlying units represented by one contract
             is_reverse: If True, creates a reverse phoenix
             maturity: Time to maturity from valuation (years)
             tenor: Contract tenor in years
@@ -196,7 +196,7 @@ class PhoenixOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             initial_price=initial_price,
-            notional=notional,
+            contract_multiplier=contract_multiplier,
         )
 
         self.initial_date = initial_date
@@ -211,7 +211,7 @@ class PhoenixOption(BaseEquityOption):
         # Set core attributes
         self.initial_price = initial_price
         self.strike = strike
-        self.notional = notional
+        self.contract_multiplier = contract_multiplier
         # is_reverse already set above
 
         # Configuration objects already set above
@@ -242,8 +242,6 @@ class PhoenixOption(BaseEquityOption):
             )
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
-        if self.notional is not None and self.notional <= 0:
-            raise ValidationError(f"Notional must be positive, got {self.notional}")
 
     def _validate_maturity_parameters(self) -> None:
         """Validate maturity, tenor, and date-related parameters."""
@@ -495,7 +493,7 @@ class PhoenixOption(BaseEquityOption):
         Calculate coupon payoff for a single observation period.
 
         The coupon is calculated as:
-            coupon = notional × coupon_rate × year_fraction
+            coupon = initial_price × contract_multiplier × coupon_rate × year_fraction
 
         Args:
             observation_idx: Index of observation date
@@ -516,7 +514,8 @@ class PhoenixOption(BaseEquityOption):
             # Default to per-period rate without annualization
             dcf = 1.0
 
-        return self.notional * self.coupon_config.coupon_rate * dcf
+        principal = self.initial_price * self.contract_multiplier
+        return principal * self.coupon_config.coupon_rate * dcf
 
     def get_coupon_year_fraction(
         self, start_date: datetime, end_date: datetime
@@ -635,7 +634,11 @@ class PhoenixOption(BaseEquityOption):
         Returns:
             KO payoff = principal + ko_coupon + accumulated_coupons
         """
-        principal = self.notional if self.payoff_config.include_principal else 0.0
+        principal = (
+            self.initial_price * self.contract_multiplier
+            if self.payoff_config.include_principal
+            else 0.0
+        )
 
         # KO coupon based on ko_rate
         ko_rate = self.get_ko_rate_at(observation_idx)
@@ -681,7 +684,7 @@ class PhoenixOption(BaseEquityOption):
         else:
             accrual_factor = 1.0
 
-        ko_coupon = self.notional * ko_rate * accrual_factor
+        ko_coupon = self.initial_price * self.contract_multiplier * ko_rate * accrual_factor
 
         # Check if current period coupon is triggered
         current_coupon = 0.0
@@ -709,7 +712,11 @@ class PhoenixOption(BaseEquityOption):
         Returns:
             V0 maturity payoff
         """
-        principal = self.notional if self.payoff_config.include_principal else 0.0
+        principal = (
+            self.initial_price * self.contract_multiplier
+            if self.payoff_config.include_principal
+            else 0.0
+        )
         contract_tenor: Optional[float] = None
 
         if (
@@ -724,7 +731,7 @@ class PhoenixOption(BaseEquityOption):
                 call_payoff = max(spot - call_strike, 0.0)
             rebate = (
                 self.payoff_config.call_participation_rate
-                * (self.notional / self.initial_price)
+                * self.contract_multiplier
                 * call_payoff
             )
             if self.accrual_config.is_annualized_rebate:
@@ -734,9 +741,18 @@ class PhoenixOption(BaseEquityOption):
             # Fixed rebate
             contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
             if self.accrual_config.is_annualized_rebate:
-                rebate = self.payoff_config.rebate_rate * self.notional * contract_tenor
+                rebate = (
+                    self.payoff_config.rebate_rate
+                    * self.initial_price
+                    * self.contract_multiplier
+                    * contract_tenor
+                )
             else:
-                rebate = self.payoff_config.rebate_rate * self.notional
+                rebate = (
+                    self.payoff_config.rebate_rate
+                    * self.initial_price
+                    * self.contract_multiplier
+                )
 
         return principal + rebate + accumulated_coupons
 
@@ -753,7 +769,11 @@ class PhoenixOption(BaseEquityOption):
         Returns:
             V1 maturity payoff
         """
-        principal = self.notional if self.payoff_config.include_principal else 0.0
+        principal = (
+            self.initial_price * self.contract_multiplier
+            if self.payoff_config.include_principal
+            else 0.0
+        )
         participation_rate = self.payoff_config.participation_rate
         effective_strike = self.strike
 
@@ -776,15 +796,17 @@ class PhoenixOption(BaseEquityOption):
         else:
             raw_diff = spot - effective_strike
 
-        downside = (
-            participation_rate * min(raw_diff, 0.0) * self.notional / self.initial_price
-        )
+        downside = participation_rate * min(raw_diff, 0.0) * self.contract_multiplier
 
         # Apply protection floor
         if self.payoff_config.protection_type == ProtectionType.FULL:
             downside = max(downside, 0.0)
         elif self.payoff_config.protection_type == ProtectionType.PARTIAL:
-            floor = self.payoff_config.protection_rate * self.notional
+            floor = (
+                self.payoff_config.protection_rate
+                * self.initial_price
+                * self.contract_multiplier
+            )
             downside = max(downside, -floor)
 
         return principal + downside
@@ -879,5 +901,7 @@ class PhoenixOption(BaseEquityOption):
             raise ValidationError(f"Spot must be non-negative, got {spot}")
 
         if self.is_reverse:
-            return max(spot - self.strike, 0.0)
-        return max(self.strike - spot, 0.0)
+            intrinsic = max(spot - self.strike, 0.0)
+        else:
+            intrinsic = max(self.strike - spot, 0.0)
+        return intrinsic * self.contract_multiplier

@@ -71,7 +71,7 @@ $$\frac{\partial V}{\partial t} + (r - q) S \frac{\partial V}{\partial S} + \fra
 No significant issues were found. The implementation closely follows the reference documentation.
 
 **Minor observations:**
-- The warning about notional vs quantity is a product-level validation, not a solver issue
+- The warning about contract multiplier validation is a product-level check, not a solver issue
 - Grid convergence is excellent (~0% difference between 100x100 and 300x300 grids)
 
 ---

@@ -148,12 +148,12 @@ class TestFixedBond(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
         
-        self.assertEqual(bond.notional, 1000.0)
+        self.assertEqual(bond.denominator, 1000.0)
         self.assertEqual(bond.coupon_rate, 0.05)
         self.assertEqual(bond.payment_frequency, PaymentFrequency.SEMI_ANNUAL)
     
@@ -162,7 +162,7 @@ class TestFixedBond(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2026, 1, 1),  # 2 years
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.06,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -181,7 +181,7 @@ class TestFixedBond(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.06,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -195,7 +195,7 @@ class TestFixedBond(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.06,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -217,7 +217,7 @@ class TestBondPricing(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -241,7 +241,7 @@ class TestBondPricing(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.06,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -265,7 +265,7 @@ class TestBondPricing(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.04,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -289,7 +289,7 @@ class TestBondPricing(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -313,7 +313,7 @@ class TestBondPricing(unittest.TestCase):
         bond = create_simple_fixed_bond(
             issue_date=datetime(2023, 1, 1),
             maturity_date=datetime(2028, 1, 1),
-            notional=1000.0,
+            denominator=1000.0,
             coupon_rate=0.05,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL
         )
@@ -344,17 +344,17 @@ class TestValidation(unittest.TestCase):
             create_simple_fixed_bond(
                 issue_date=datetime(2028, 1, 1),
                 maturity_date=datetime(2024, 1, 1),  # Before issue
-                notional=1000.0,
+                denominator=1000.0,
                 coupon_rate=0.05
             )
     
-    def test_negative_notional(self):
-        """Test that negative notional raises error."""
+    def test_negative_denominator(self):
+        """Test that negative denominator raises error."""
         with self.assertRaises(ValidationError):
             create_simple_fixed_bond(
                 issue_date=datetime(2024, 1, 1),
                 maturity_date=datetime(2028, 1, 1),
-                notional=-1000.0,  # Negative
+                denominator=-1000.0,  # Negative
                 coupon_rate=0.05
             )
     
@@ -364,11 +364,10 @@ class TestValidation(unittest.TestCase):
             create_simple_fixed_bond(
                 issue_date=datetime(2024, 1, 1),
                 maturity_date=datetime(2028, 1, 1),
-                notional=1000.0,
+                denominator=1000.0,
                 coupon_rate=-0.05  # Negative
             )
 
 
 if __name__ == '__main__':
     unittest.main()
-

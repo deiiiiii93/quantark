@@ -52,14 +52,14 @@ class SwapDirection(Enum):
 @dataclass
 class NotionalSchedule:
     """
-    Notional schedule for amortizing/accreting swaps.
+    Denominator schedule for amortizing/accreting swaps.
 
-    Supports arbitrary notional changes over the life of the swap.
+    Supports arbitrary denominator changes over the life of the swap.
 
     Attributes:
-        notional_dates: List of dates when notional changes
-        notional_amounts: List of notional amounts corresponding to each date
-        initial_notional: Initial notional amount (before any amortization)
+        notional_dates: List of dates when denominator changes
+        notional_amounts: List of denominator amounts corresponding to each date
+        initial_notional: Initial denominator amount (before any amortization)
     """
 
     notional_dates: List[datetime]
@@ -87,13 +87,13 @@ class NotionalSchedule:
 
     def get_notional(self, as_of_date: datetime) -> float:
         """
-        Get the notional amount for a given date.
+        Get the denominator amount for a given date.
 
         Args:
-            as_of_date: Date to look up notional
+            as_of_date: Date to look up denominator
 
         Returns:
-            Notional amount effective on that date
+            Denominator amount effective on that date
         """
         # Before first change, use initial notional
         if not self.notional_dates or as_of_date < self.notional_dates[0]:
@@ -106,13 +106,25 @@ class NotionalSchedule:
 
         return self.initial_notional
 
+    def get_denominator(self, as_of_date: datetime) -> float:
+        """
+        Get the denominator amount for a given date.
+
+        Args:
+            as_of_date: Date to look up denominator
+
+        Returns:
+            Denominator amount effective on that date
+        """
+        return self.get_notional(as_of_date)
+
     @classmethod
     def constant(cls, notional: float) -> "NotionalSchedule":
         """
-        Create a constant notional schedule (bullet swap).
+        Create a constant denominator schedule (bullet swap).
 
         Args:
-            notional: Constant notional amount
+            notional: Constant denominator amount
 
         Returns:
             NotionalSchedule with no changes
@@ -129,14 +141,14 @@ class NotionalSchedule:
         final_notional: float = 0.0,
     ) -> "NotionalSchedule":
         """
-        Create a linearly amortizing notional schedule.
+        Create a linearly amortizing denominator schedule.
 
         Args:
-            initial_notional: Starting notional
+            initial_notional: Starting denominator
             start_date: When amortization starts
             end_date: When amortization ends
             num_periods: Number of amortization periods
-            final_notional: Final notional amount (default: 0)
+            final_notional: Final denominator amount (default: 0)
 
         Returns:
             NotionalSchedule with linear amortization
@@ -204,15 +216,27 @@ class SwapLeg(ABC):
     @abstractmethod
     def get_notional(self, as_of_date: datetime) -> float:
         """
-        Get the notional amount for a given date.
+        Get the denominator amount for a given date.
 
         Args:
-            as_of_date: Date to look up notional
+            as_of_date: Date to look up denominator
 
         Returns:
-            Notional amount
+            Denominator amount
         """
         pass
+
+    def get_denominator(self, as_of_date: datetime) -> float:
+        """
+        Get the denominator amount for a given date.
+
+        Args:
+            as_of_date: Date to look up denominator
+
+        Returns:
+            Denominator amount
+        """
+        return self.get_notional(as_of_date)
 
     @abstractmethod
     def get_start_date(self) -> datetime:
@@ -248,13 +272,13 @@ class FixedLeg(SwapLeg):
     """
     Fixed rate leg of an interest rate swap.
 
-    Pays a fixed rate on the notional amount at specified
+    Pays a fixed rate on the denominator amount at specified
     payment intervals.
 
     Attributes:
         start_date: Effective date of the leg
         end_date: Maturity date of the leg
-        notional_schedule: Notional schedule (supports amortization)
+        notional_schedule: Denominator schedule (supports amortization)
         fixed_rate: Fixed interest rate (annual)
         payment_frequency: Payment frequency
         day_count_convention: Day count convention
@@ -383,7 +407,7 @@ class FixedLeg(SwapLeg):
         return self._cached_schedule
 
     def get_notional(self, as_of_date: datetime) -> float:
-        """Get the notional amount for a given date."""
+        """Get the denominator amount for a given date."""
         return self.notional_schedule.get_notional(as_of_date)
 
     def get_start_date(self) -> datetime:
@@ -427,13 +451,13 @@ class FloatingLeg(SwapLeg):
     """
     Floating rate leg of an interest rate swap.
 
-    Pays a floating rate (index + spread) on the notional amount.
+    Pays a floating rate (index + spread) on the denominator amount.
     Supports overnight rate compounding with lookback/lockout.
 
     Attributes:
         start_date: Effective date of the leg
         end_date: Maturity date of the leg
-        notional_schedule: Notional schedule (supports amortization)
+        notional_schedule: Denominator schedule (supports amortization)
         index: Reference rate index
         spread: Spread over the index rate
         payment_frequency: Payment frequency
@@ -686,7 +710,7 @@ class FloatingLeg(SwapLeg):
         return [cf for cf in self._cached_schedule if cf.payment_date > valuation_date]
 
     def get_notional(self, as_of_date: datetime) -> float:
-        """Get the notional amount for a given date."""
+        """Get the denominator amount for a given date."""
         return self.notional_schedule.get_notional(as_of_date)
 
     def get_start_date(self) -> datetime:
@@ -806,8 +830,12 @@ class InterestRateSwap:
         return max(self.fixed_leg.end_date, self.floating_leg.end_date)
 
     def get_notional(self, as_of_date: datetime) -> float:
-        """Get the notional amount (from fixed leg) for a given date."""
+        """Get the denominator amount (from fixed leg) for a given date."""
         return self.fixed_leg.get_notional(as_of_date)
+
+    def get_denominator(self, as_of_date: datetime) -> float:
+        """Get the denominator amount (from fixed leg) for a given date."""
+        return self.fixed_leg.get_denominator(as_of_date)
 
     def get_fixed_rate(self) -> float:
         """Get the fixed rate of the swap."""
@@ -897,8 +925,12 @@ class BasisSwap:
         return max(self.leg1.end_date, self.leg2.end_date)
 
     def get_notional(self, as_of_date: datetime) -> float:
-        """Get the notional amount (from leg1) for a given date."""
+        """Get the denominator amount (from leg1) for a given date."""
         return self.leg1.get_notional(as_of_date)
+
+    def get_denominator(self, as_of_date: datetime) -> float:
+        """Get the denominator amount (from leg1) for a given date."""
+        return self.leg1.get_denominator(as_of_date)
 
     def get_basis_spread(self) -> float:
         """Get the net basis spread (leg2.spread - leg1.spread)."""
@@ -936,7 +968,7 @@ class BasisSwap:
 def create_vanilla_irs(
     effective_date: datetime,
     maturity_date: datetime,
-    notional: float,
+    denominator: float,
     fixed_rate: float,
     index: RateIndex,
     spread: float = 0.0,
@@ -951,7 +983,7 @@ def create_vanilla_irs(
     Args:
         effective_date: Start date of the swap
         maturity_date: Maturity date of the swap
-        notional: Notional amount
+        denominator: Denominator amount
         fixed_rate: Fixed rate (annual)
         index: Floating rate index
         spread: Spread over floating index
@@ -963,7 +995,7 @@ def create_vanilla_irs(
     Returns:
         InterestRateSwap object
     """
-    notional_schedule = NotionalSchedule.constant(notional)
+    notional_schedule = NotionalSchedule.constant(denominator)
     calendar = create_calendar(index.calendar_type)
 
     fixed_leg = FixedLeg(
@@ -998,7 +1030,7 @@ def create_vanilla_irs(
 def create_basis_swap(
     effective_date: datetime,
     maturity_date: datetime,
-    notional: float,
+    denominator: float,
     index1: RateIndex,
     index2: RateIndex,
     spread1: float = 0.0,
@@ -1014,7 +1046,7 @@ def create_basis_swap(
     Args:
         effective_date: Start date of the swap
         maturity_date: Maturity date of the swap
-        notional: Notional amount
+        denominator: Denominator amount
         index1: First floating rate index (pay leg)
         index2: Second floating rate index (receive leg)
         spread1: Spread over first index
@@ -1027,7 +1059,7 @@ def create_basis_swap(
     Returns:
         BasisSwap object
     """
-    notional_schedule = NotionalSchedule.constant(notional)
+    notional_schedule = NotionalSchedule.constant(denominator)
     calendar = create_calendar(index1.calendar_type)
 
     leg1 = FloatingLeg(
@@ -1076,10 +1108,10 @@ def create_amortizing_irs(
     Args:
         effective_date: Start date of the swap
         maturity_date: Maturity date of the swap
-        initial_notional: Initial notional amount
+        initial_notional: Initial denominator amount
         fixed_rate: Fixed rate (annual)
         index: Floating rate index
-        amortization_schedule: List of (date, new_notional) tuples
+        amortization_schedule: List of (date, new_denominator) tuples
         spread: Spread over floating index
         direction: PAYER or RECEIVER
         payment_frequency: Payment frequency
@@ -1128,7 +1160,7 @@ def create_amortizing_irs(
 def create_compounding_irs(
     effective_date: datetime,
     maturity_date: datetime,
-    notional: float,
+    denominator: float,
     fixed_rate: float,
     index: RateIndex,
     spread: float = 0.0,
@@ -1146,7 +1178,7 @@ def create_compounding_irs(
     Args:
         effective_date: Start date of the swap
         maturity_date: Maturity date of the swap
-        notional: Notional amount
+        denominator: Denominator amount
         fixed_rate: Fixed rate (annual)
         index: Overnight rate index (e.g., SOFR)
         spread: Spread over compounded rate
@@ -1158,7 +1190,7 @@ def create_compounding_irs(
     Returns:
         InterestRateSwap object
     """
-    notional_schedule = NotionalSchedule.constant(notional)
+    notional_schedule = NotionalSchedule.constant(denominator)
     calendar = create_calendar(index.calendar_type)
 
     fixed_leg = FixedLeg(

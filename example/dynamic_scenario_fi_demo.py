@@ -77,7 +77,7 @@ def create_demo_fi_portfolio():
     bond_2y = create_simple_fixed_bond(
         issue_date=valuation_date,
         maturity_date=maturity_2y,
-        notional=1000000,  # $1M face
+        denominator=1000000,  # $1M face
         coupon_rate=0.04,  # 4% coupon
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_ACT_ISDA,
@@ -97,7 +97,7 @@ def create_demo_fi_portfolio():
     bond_5y = create_simple_fixed_bond(
         issue_date=valuation_date,
         maturity_date=maturity_5y,
-        notional=1000000,
+        denominator=1000000,
         coupon_rate=0.0425,  # 4.25% coupon
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_ACT_ISDA,
@@ -117,7 +117,7 @@ def create_demo_fi_portfolio():
     bond_10y = create_simple_fixed_bond(
         issue_date=valuation_date,
         maturity_date=maturity_10y,
-        notional=1000000,
+        denominator=1000000,
         coupon_rate=0.0450,  # 4.5% coupon
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_ACT_ISDA,

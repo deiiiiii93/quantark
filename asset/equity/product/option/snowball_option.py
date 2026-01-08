@@ -66,7 +66,7 @@ class SnowballOption(BaseEquityOption):
     Core Attributes:
         initial_price: Reference price for payoff calculations
         strike: Strike for the embedded option (put for standard, call for reverse)
-        notional: Notional principal (N)
+        contract_multiplier: Underlying units represented by one contract
         is_reverse: If True, reverse snowball; if False (default), standard snowball
         option_type: CALL for reverse, PUT for standard (auto-set based on is_reverse)
         exercise_type: EUROPEAN (autocallables are European-style)
@@ -131,7 +131,7 @@ class SnowballOption(BaseEquityOption):
         payoff_config: Optional[PayoffConfig] = None,
         accrual_config: Optional[AccrualConfig] = None,
         airbag_config: Optional[AirbagConfig] = None,
-        notional: float = 1.0,
+        contract_multiplier: float = 1.0,
         is_reverse: bool = False,
         maturity: Optional[float] = None,
         tenor: Optional[float] = None,
@@ -152,7 +152,7 @@ class SnowballOption(BaseEquityOption):
             payoff_config: PayoffConfig with rebate/protection/participation settings
             accrual_config: AccrualConfig with annualization flags
             airbag_config: AirbagConfig with airbag barrier settings
-            notional: Notional principal (default: 1.0)
+            contract_multiplier: Underlying units represented by one contract
             is_reverse: If True, creates a reverse snowball with embedded call option;
                        if False (default), creates standard snowball with embedded put
             maturity: Time to maturity from valuation (years)
@@ -193,7 +193,7 @@ class SnowballOption(BaseEquityOption):
         # Set core attributes
         self.initial_price = initial_price
         self.strike = strike
-        self.notional = notional
+        self.contract_multiplier = contract_multiplier
         self.is_reverse = is_reverse
 
         # Set option type based on standard vs reverse snowball
@@ -233,15 +233,13 @@ class SnowballOption(BaseEquityOption):
         self._build_observation_schedules()
 
     def _validate_core_parameters(self) -> None:
-        """Validate core product parameters (initial_price, strike, notional)."""
+        """Validate core product parameters (initial_price, strike)."""
         if self.initial_price <= 0:
             raise ValidationError(
                 f"Initial price must be positive, got {self.initial_price}"
             )
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
-        if self.notional <= 0:
-            raise ValidationError(f"Notional must be positive, got {self.notional}")
 
     def _validate_maturity_parameters(self) -> None:
         """Validate maturity, tenor, and date-related parameters."""
@@ -649,7 +647,11 @@ class SnowballOption(BaseEquityOption):
         Returns:
             V0 maturity payoff
         """
-        principal = self.notional if self.payoff_config.include_principal else 0.0
+        principal = (
+            self.initial_price * self.contract_multiplier
+            if self.payoff_config.include_principal
+            else 0.0
+        )
         contract_tenor: Optional[float] = None
 
         if (
@@ -660,7 +662,7 @@ class SnowballOption(BaseEquityOption):
             call_payoff = max(spot - self.payoff_config.call_strike, 0.0)
             rebate = (
                 self.payoff_config.call_participation_rate
-                * (self.notional / self.initial_price)
+                * self.contract_multiplier
                 * call_payoff
             )
             if self.accrual_config.is_annualized_rebate:
@@ -670,9 +672,18 @@ class SnowballOption(BaseEquityOption):
             # Fixed rebate
             contract_tenor = contract_tenor or self.get_contract_tenor(pricing_env)
             if self.accrual_config.is_annualized_rebate:
-                rebate = self.payoff_config.rebate_rate * self.notional * contract_tenor
+                rebate = (
+                    self.payoff_config.rebate_rate
+                    * self.initial_price
+                    * self.contract_multiplier
+                    * contract_tenor
+                )
             else:
-                rebate = self.payoff_config.rebate_rate * self.notional
+                rebate = (
+                    self.payoff_config.rebate_rate
+                    * self.initial_price
+                    * self.contract_multiplier
+                )
 
         return principal + rebate
 
@@ -689,7 +700,11 @@ class SnowballOption(BaseEquityOption):
         Returns:
             V1 maturity payoff
         """
-        principal = self.notional if self.payoff_config.include_principal else 0.0
+        principal = (
+            self.initial_price * self.contract_multiplier
+            if self.payoff_config.include_principal
+            else 0.0
+        )
 
         # Determine if airbag logic applies
         airbag_barrier = self.airbag_config.airbag_barrier
@@ -725,7 +740,7 @@ class SnowballOption(BaseEquityOption):
             raw_diff = spot - effective_strike
 
         downside = (
-            participation_rate * min(raw_diff, 0.0) * self.notional / self.initial_price
+            participation_rate * min(raw_diff, 0.0) * self.contract_multiplier
         )
         if self.accrual_config.is_annualized_ki:
             contract_tenor = self.get_contract_tenor(pricing_env)
@@ -738,7 +753,11 @@ class SnowballOption(BaseEquityOption):
             downside = max(downside, -floor)
         elif self.payoff_config.protection_type == ProtectionType.PARTIAL:
             # Partial protection: floor at -protection_rate × N
-            floor = self.payoff_config.protection_rate * self.notional
+            floor = (
+                self.payoff_config.protection_rate
+                * self.initial_price
+                * self.contract_multiplier
+            )
             downside = max(downside, -floor)
 
         return principal + downside
@@ -893,11 +912,10 @@ class SnowballOption(BaseEquityOption):
             raise ValidationError(f"Spot must be non-negative, got {spot}")
 
         if self.is_reverse:
-            # Reverse snowball: embedded CALL
-            return max(spot - self.strike, 0.0)
+            intrinsic = max(spot - self.strike, 0.0)
         else:
-            # Standard snowball: embedded PUT
-            return max(self.strike - spot, 0.0)
+            intrinsic = max(self.strike - spot, 0.0)
+        return intrinsic * self.contract_multiplier
 
     def _effective_annualized_flag(self, flag: Optional[bool]) -> bool:
         """Resolve specific annualized flag with product-level default."""
@@ -938,7 +956,9 @@ class SnowballOption(BaseEquityOption):
             self.accrual_config.is_annualized_ko
         )
         principal_component = (
-            self.notional if self.payoff_config.include_principal else 0.0
+            self.initial_price * self.contract_multiplier
+            if self.payoff_config.include_principal
+            else 0.0
         )
         maturity_time: Optional[float] = None
         bus_days_in_year = (
@@ -991,7 +1011,9 @@ class SnowballOption(BaseEquityOption):
                         accrual_factor = initial_to_valuation + rec.observation_time
             else:
                 accrual_factor = 1.0
-            coupon_payoff = self.notional * rate * accrual_factor
+            coupon_payoff = (
+                self.initial_price * self.contract_multiplier * rate * accrual_factor
+            )
             payoff = principal_component + coupon_payoff
 
             settlement_time = rec.settlement_time
@@ -1137,7 +1159,8 @@ class SnowballOption(BaseEquityOption):
 
         return (
             f"SnowballOption("
-            f"S0={self.initial_price:.4f}, K={self.strike:.4f}, N={self.notional:.4f}, "
+            f"S0={self.initial_price:.4f}, K={self.strike:.4f}, "
+            f"mult={self.contract_multiplier:.4f}, "
             f"KO={ko_barrier_str} [{ko_obs_desc}] @rate={ko_rate_str}, "
             f"KI={ki_barrier_str} [{ki_obs_desc}], "
             f"pay={pay_timing}, protection={protection}, {principal_flag})"

@@ -117,7 +117,7 @@ class ConvertibleBond(BaseBondProduct):
     Attributes:
         issue_date: Bond issue date
         maturity_date: Bond maturity date
-        face_value: Par/notional value of the bond (typically 100 or 1000)
+        face_value: Par value of the bond (typically 100 or 1000)
         coupon_rate: Annual coupon rate (e.g., 0.05 for 5%)
         conversion_ratio: Number of shares received upon conversion per bond
         payment_frequency: Coupon payment frequency
@@ -375,8 +375,8 @@ class ConvertibleBond(BaseBondProduct):
         """Get the issue date of the bond."""
         return self.issue_date
 
-    def get_notional(self) -> float:
-        """Get the face value of the bond."""
+    def get_denominator(self) -> float:
+        """Get the minimum tradable notional (denominator) of the bond."""
         return self.face_value
 
     def calculate_accrued_interest(self, settlement_date: datetime) -> float:

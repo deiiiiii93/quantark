@@ -119,7 +119,7 @@ class BaseBondProduct(ABC):
     def get_issue_date() -> datetime
     
     @abstractmethod
-    def get_notional() -> float
+    def get_denominator() -> float
     
     @abstractmethod
     def calculate_accrued_interest(settlement_date) -> float
@@ -143,7 +143,7 @@ class BaseBondProduct(ABC):
 Full-featured fixed rate bond:
 
 **Attributes**:
-- Issue date, maturity date, notional
+- Issue date, maturity date, denominator
 - Coupon rate, payment frequency
 - Day count convention
 - Business day calendar and convention
@@ -414,7 +414,7 @@ from util.enum import PaymentFrequency
 bond = create_simple_fixed_bond(
     issue_date=datetime(2023, 1, 1),
     maturity_date=datetime(2028, 1, 1),
-    notional=1000.0,
+    denominator=1000.0,
     coupon_rate=0.05,
     payment_frequency=PaymentFrequency.SEMI_ANNUAL
 )
@@ -461,7 +461,7 @@ calendar = create_calendar(CalendarType.US, year_range=(2024, 2030))
 bond = FixedBond(
     issue_date=datetime(2024, 1, 1),
     maturity_date=datetime(2029, 1, 1),
-    notional=1000.0,
+    denominator=1000.0,
     coupon_rate=0.05,
     payment_frequency=PaymentFrequency.QUARTERLY,
     day_count_convention=DayCountConvention.ACT_360,
@@ -573,4 +573,3 @@ All planned features have been successfully implemented:
 **Date**: November 24, 2025  
 **Total development time**: Single session  
 **Code quality**: Production-ready
-

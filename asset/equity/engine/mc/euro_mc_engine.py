@@ -158,6 +158,9 @@ class EuropeanMCEngine(BaseEngine):
                 product, S, K, T, r, q, sigma
             )
 
+        contract_multiplier = product.contract_multiplier
+        price *= contract_multiplier
+        std_error *= contract_multiplier
         self._last_std_error = std_error
 
         if price < 0:

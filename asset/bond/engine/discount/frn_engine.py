@@ -139,7 +139,7 @@ class FRNDiscountEngine:
             base_rate = self.pricing_env.get_rate(time_to_maturity)
             discount_rate = base_rate + spread_adjustment
             df_maturity = math.exp(-discount_rate * time_to_maturity)
-            pv += frn.notional * df_maturity
+            pv += frn.denominator * df_maturity
 
         return pv
 
@@ -380,7 +380,7 @@ class FRNDiscountEngine:
         time_to_maturity = (frn.maturity_date - valuation_date).days / 365.0
         if time_to_maturity > 0:
             df = math.exp(-ytm * time_to_maturity)
-            dirty_price += frn.notional * df
+            dirty_price += frn.denominator * df
 
         if clean_price:
             accrued = frn.calculate_accrued_interest(settlement_date)
@@ -553,9 +553,9 @@ class FRNDiscountEngine:
             if cashflow_data:
                 last_time = cashflow_data[-1][0]
                 last_coupon = cashflow_data[-1][1]
-                cashflow_data[-1] = (last_time, last_coupon + frn.notional)
+                cashflow_data[-1] = (last_time, last_coupon + frn.denominator)
             else:
-                cashflow_data.append((time_to_maturity, frn.notional))
+                cashflow_data.append((time_to_maturity, frn.denominator))
 
         if not cashflow_data:
             raise ValidationError("No valid cashflows for YTM calculation")
@@ -631,11 +631,11 @@ class FRNDiscountEngine:
 
         # Convert price to percentage of par
         if clean_price:
-            price_pct = (market_price / frn.notional) * 100
+            price_pct = (market_price / frn.denominator) * 100
         else:
             accrued = frn.calculate_accrued_interest(valuation_date)
             clean = market_price - accrued
-            price_pct = (clean / frn.notional) * 100
+            price_pct = (clean / frn.denominator) * 100
 
         # Simple margin formula
         # (100 - Price) / WAL gives annualized capital gain/loss

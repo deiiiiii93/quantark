@@ -138,13 +138,12 @@ def main():
     parametric_engine = ParametricVaREngine(config=parametric_config)
     parametric_result = parametric_engine.calculate_var(portfolio, historical_data)
 
-    summary = VaRReportGenerator.generate_summary(parametric_result)
-    for key, value in summary.items():
-        print(f"{key:30s}: {value}")
+    report_generator = VaRReportGenerator()
+    summary = report_generator.generate_summary(parametric_result)
+    print(summary)
 
     if parametric_result.factor_var:
-        print("\nFactor VaR Attribution:")
-        factor_report = VaRReportGenerator.generate_factor_report(parametric_result)
+        factor_report = report_generator.generate_factor_report(parametric_result)
         print(factor_report)
 
     print("\n" + "=" * 80)
@@ -161,9 +160,8 @@ def main():
     historical_engine = HistoricalVaREngine(config=historical_config)
     historical_result = historical_engine.calculate_var(portfolio, historical_data)
 
-    summary = VaRReportGenerator.generate_summary(historical_result)
-    for key, value in summary.items():
-        print(f"{key:30s}: {value}")
+    summary = report_generator.generate_summary(historical_result)
+    print(summary)
 
     print(f"\nWorst 5 scenarios (P&L):")
     for i, scenario in enumerate(historical_result.worst_scenarios[:5], 1):
@@ -184,9 +182,8 @@ def main():
     mc_engine = MonteCarloVaREngine(config=mc_config)
     mc_result = mc_engine.calculate_var(portfolio, historical_data)
 
-    summary = VaRReportGenerator.generate_summary(mc_result)
-    for key, value in summary.items():
-        print(f"{key:30s}: {value}")
+    summary = report_generator.generate_summary(mc_result)
+    print(summary)
 
     print("\n" + "=" * 80)
     print("VaR Comparison Summary")

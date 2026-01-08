@@ -43,7 +43,7 @@ def create_initial_bond_position(underlying: str, start_date: datetime) -> FIPos
     bond = FixedBond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=1000000.0,  # $1M notional per bond
+        denominator=1000000.0,  # $1M denominator per bond
         coupon_rate=0.05,    # 5% coupon
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.THIRTY_360_US,
@@ -265,4 +265,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

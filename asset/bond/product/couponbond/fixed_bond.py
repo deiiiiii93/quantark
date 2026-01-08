@@ -34,7 +34,7 @@ class FixedBond(BaseBondProduct):
     Attributes:
         issue_date: Bond issue date
         maturity_date: Bond maturity date
-        notional: Face value/principal amount
+        denominator: Minimum tradable notional amount
         coupon_rate: Annual coupon rate (e.g., 0.05 for 5%)
         payment_frequency: Payment frequency (annual, semi-annual, etc.)
         day_count_convention: Day count convention for calculating accruals
@@ -47,7 +47,7 @@ class FixedBond(BaseBondProduct):
     """
     issue_date: datetime
     maturity_date: datetime
-    notional: float
+    denominator: float
     coupon_rate: float
     payment_frequency: PaymentFrequency
     day_count_convention: DayCountConvention
@@ -85,8 +85,10 @@ class FixedBond(BaseBondProduct):
                 f"Maturity date {self.maturity_date} must be after issue date {self.issue_date}"
             )
         
-        if self.notional <= 0:
-            raise ValidationError(f"Notional must be positive, got {self.notional}")
+        if self.denominator <= 0:
+            raise ValidationError(
+                f"Denominator must be positive, got {self.denominator}"
+            )
         
         if self.coupon_rate < 0:
             raise ValidationError(f"Coupon rate must be non-negative, got {self.coupon_rate}")
@@ -127,7 +129,7 @@ class FixedBond(BaseBondProduct):
         )
         
         return generator.generate_schedule(
-            notional=self.notional,
+            notional=self.denominator,
             coupon_rate=self.coupon_rate
         )
     
@@ -172,9 +174,9 @@ class FixedBond(BaseBondProduct):
         """Get the issue date of the bond."""
         return self.issue_date
     
-    def get_notional(self) -> float:
-        """Get the notional/face value of the bond."""
-        return self.notional
+    def get_denominator(self) -> float:
+        """Get the minimum tradable notional (denominator) of the bond."""
+        return self.denominator
     
     def calculate_accrued_interest(self, settlement_date: datetime) -> float:
         """
@@ -211,7 +213,7 @@ class FixedBond(BaseBondProduct):
                 settlement_date=settlement_date,
                 next_coupon_date=next_coupon_date,
                 coupon_rate=self.coupon_rate,
-                notional=self.notional,
+                notional=self.denominator,
                 day_count_convention=self.day_count_convention
             )
             
@@ -228,13 +230,15 @@ class FixedBond(BaseBondProduct):
         Returns:
             Coupon payment amount
         """
-        return self.notional * self.coupon_rate / self.payment_frequency.periods_per_year
+        return (
+            self.denominator * self.coupon_rate / self.payment_frequency.periods_per_year
+        )
     
     def __repr__(self):
         return (f"FixedBond("
                 f"issue={self.issue_date.date()}, "
                 f"maturity={self.maturity_date.date()}, "
-                f"notional={self.notional:.2f}, "
+                f"denominator={self.denominator:.2f}, "
                 f"coupon={self.coupon_rate:.2%}, "
                 f"freq={self.payment_frequency.name})")
 
@@ -242,10 +246,10 @@ class FixedBond(BaseBondProduct):
 def create_simple_fixed_bond(
     issue_date: datetime,
     maturity_date: datetime,
-    notional: float,
+    denominator: float,
     coupon_rate: float,
     payment_frequency: PaymentFrequency = PaymentFrequency.SEMI_ANNUAL,
-    day_count_convention: DayCountConvention = DayCountConvention.ACT_ACT_ISDA
+    day_count_convention: DayCountConvention = DayCountConvention.ACT_ACT_ISDA,
 ) -> FixedBond:
     """
     Create a simple fixed bond with standard conventions.
@@ -259,7 +263,7 @@ def create_simple_fixed_bond(
     Args:
         issue_date: Bond issue date
         maturity_date: Bond maturity date
-        notional: Face value/principal amount
+        denominator: Minimum tradable notional amount
         coupon_rate: Annual coupon rate
         payment_frequency: Payment frequency (default: semi-annual)
         day_count_convention: Day count convention (default: ACT/ACT ISDA)
@@ -270,7 +274,7 @@ def create_simple_fixed_bond(
     return FixedBond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         coupon_rate=coupon_rate,
         payment_frequency=payment_frequency,
         day_count_convention=day_count_convention,
@@ -279,4 +283,3 @@ def create_simple_fixed_bond(
         settlement_days=0,
         stub_type=StubType.NONE
     )
-

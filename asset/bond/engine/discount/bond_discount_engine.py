@@ -319,7 +319,9 @@ class BondDiscountEngine:
         else:
             # Rough estimate from price
             ttm = bond.time_to_maturity(valuation_date)
-            ytm = -math.log(price / bond.get_notional()) / ttm if ttm > 0 else 0.05
+            ytm = (
+                -math.log(price / bond.get_denominator()) / ttm if ttm > 0 else 0.05
+            )
 
         # Newton-Raphson iteration
         for iteration in range(max_iterations):

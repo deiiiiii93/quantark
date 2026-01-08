@@ -66,6 +66,7 @@ class DoubleBarrierOption(BaseEquityOption):
         observation_type: ObservationType = ObservationType.CONTINUOUS,
         observation_dates: Optional[List[float]] = None,
         observation_schedule: Optional[ObservationSchedule] = None,
+        contract_multiplier: float = 1.0,
     ):
         """
         Initialize double barrier option.
@@ -108,6 +109,7 @@ class DoubleBarrierOption(BaseEquityOption):
             exercise_type=ExerciseType.EUROPEAN,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            contract_multiplier=contract_multiplier,
         )
 
     def validate(self) -> None:
@@ -212,9 +214,11 @@ class DoubleBarrierOption(BaseEquityOption):
             raise ValidationError(f"Spot price must be non-negative, got {spot}")
 
         if self.is_call():
-            return max(spot - self.strike, 0.0)
+            intrinsic = max(spot - self.strike, 0.0)
         else:
-            return max(self.strike - spot, 0.0)
+            intrinsic = max(self.strike - spot, 0.0)
+
+        return intrinsic * self.contract_multiplier
 
     def intrinsic_value(self, spot: float) -> float:
         """
@@ -280,4 +284,3 @@ class DoubleBarrierOption(BaseEquityOption):
             f"L={self.lower_barrier:.2f}, U={self.upper_barrier:.2f}, "
             f"{self.barrier_type}, T={self.maturity:.4f})"
         )
-

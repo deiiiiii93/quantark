@@ -94,7 +94,7 @@ def create_basic_coupon_config(
 def create_test_phoenix(
     initial_price: float = 100.0,
     strike: float = 100.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = None,
     maturity: float = 1.0,
     barrier_config: BarrierConfig = None,
     coupon_config: CouponBarrierConfig = None,
@@ -106,6 +106,8 @@ def create_test_phoenix(
         barrier_config = create_basic_barrier_config()
     if coupon_config is None:
         coupon_config = create_basic_coupon_config()
+    if contract_multiplier is None:
+        contract_multiplier = 1.0
 
     return PhoenixOption(
         initial_price=initial_price,
@@ -113,10 +115,15 @@ def create_test_phoenix(
         barrier_config=barrier_config,
         coupon_config=coupon_config,
         payoff_config=payoff_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=is_reverse,
     )
+
+
+def get_principal(phoenix: PhoenixOption) -> float:
+    """Return per-contract principal based on initial price and contract multiplier."""
+    return phoenix.initial_price * phoenix.contract_multiplier
 
 
 # =============================================================================
@@ -133,7 +140,7 @@ class TestPhoenixCreation:
 
         assert phoenix.initial_price == 100.0
         assert phoenix.strike == 100.0
-        assert phoenix.notional == 1_000_000.0
+        assert get_principal(phoenix) == 100.0
         assert phoenix.maturity == 1.0
         assert phoenix.is_reverse is False
         assert phoenix.is_standard is True
@@ -285,11 +292,12 @@ class TestCouponPayoff:
 
     def test_coupon_payoff_basic(self):
         """Test basic coupon payoff calculation."""
-        phoenix = create_test_phoenix()  # notional=1_000_000, coupon_rate=0.01
+        phoenix = create_test_phoenix()
+        principal = get_principal(phoenix)
 
         # With default year_fraction (1.0)
         payoff = phoenix.get_coupon_payoff(observation_idx=0, year_fraction=1.0)
-        expected = 1_000_000 * 0.01 * 1.0  # 10,000
+        expected = principal * 0.01 * 1.0  # 10,000
         assert payoff == expected
 
     def test_coupon_payoff_with_year_fraction(self):
@@ -298,7 +306,7 @@ class TestCouponPayoff:
 
         # 3 months = 0.25 year fraction
         payoff = phoenix.get_coupon_payoff(observation_idx=0, year_fraction=0.25)
-        expected = 1_000_000 * 0.01 * 0.25  # 2,500
+        expected = get_principal(phoenix) * 0.01 * 0.25  # 2,500
         assert payoff == expected
 
     def test_coupon_payoff_with_dates(self):
@@ -315,7 +323,7 @@ class TestCouponPayoff:
         )
         # ACT/365: 91/365 = 0.2493...
         expected_dcf = 91 / 365
-        expected = 1_000_000 * 0.01 * expected_dcf
+        expected = get_principal(phoenix) * 0.01 * expected_dcf
         assert abs(payoff - expected) < 0.01
 
 
@@ -383,9 +391,13 @@ class TestMaturityPayoffs:
         phoenix = create_test_phoenix(payoff_config=payoff_config)
 
         # V0 payoff = rebate + accumulated coupons
-        payoff = phoenix.get_maturity_payoff_v0(spot=100.0, accumulated_coupons=30_000)
-        rebate = 1_000_000 * 0.15  # 150,000
-        expected = rebate + 30_000  # 180,000
+        principal = get_principal(phoenix)
+        accumulated = principal * 0.03
+        payoff = phoenix.get_maturity_payoff_v0(
+            spot=100.0, accumulated_coupons=accumulated
+        )
+        rebate = principal * 0.15
+        expected = rebate + accumulated
         assert payoff == expected
 
     def test_v0_payoff_with_principal(self):
@@ -397,8 +409,8 @@ class TestMaturityPayoffs:
         phoenix = create_test_phoenix(payoff_config=payoff_config)
 
         payoff = phoenix.get_maturity_payoff_v0(spot=100.0, accumulated_coupons=0)
-        principal = 1_000_000
-        rebate = 1_000_000 * 0.15
+        principal = get_principal(phoenix)
+        rebate = principal * 0.15
         expected = principal + rebate
         assert payoff == expected
 
@@ -412,10 +424,9 @@ class TestMaturityPayoffs:
 
         # Spot at 80, strike at 100 -> loss of 20%
         payoff = phoenix.get_maturity_payoff_v1(spot=80.0)
-        principal = 1_000_000
-        # Standard: raw_diff = spot - strike = 80 - 100 = -20
-        # downside = 1.0 * min(-20, 0) * 1_000_000 / 100 = -200_000
-        expected = principal - 200_000  # 800,000
+        principal = get_principal(phoenix)
+        downside = -20.0 * phoenix.contract_multiplier
+        expected = principal + downside
         assert payoff == expected
 
     def test_v1_payoff_reverse(self):
@@ -433,10 +444,9 @@ class TestMaturityPayoffs:
 
         # Spot at 120, strike at 100 -> loss of 20% for reverse
         payoff = phoenix.get_maturity_payoff_v1(spot=120.0)
-        principal = 1_000_000
-        # Reverse: raw_diff = strike - spot = 100 - 120 = -20
-        # downside = 1.0 * min(-20, 0) * 1_000_000 / 100 = -200_000
-        expected = principal - 200_000  # 800,000
+        principal = get_principal(phoenix)
+        downside = -20.0 * phoenix.contract_multiplier
+        expected = principal + downside
         assert payoff == expected
 
     def test_v1_payoff_with_protection(self):
@@ -451,11 +461,9 @@ class TestMaturityPayoffs:
 
         # Spot at 40, strike at 100 -> huge loss, but protected
         payoff = phoenix.get_maturity_payoff_v1(spot=40.0)
-        principal = 1_000_000
-        # raw_diff = 40 - 100 = -60
-        # downside = 1.0 * min(-60, 0) * 1_000_000 / 100 = -600_000
-        # Floor at -500_000 (50% of notional)
-        expected = principal - 500_000  # 500,000
+        principal = get_principal(phoenix)
+        floor = 0.5 * phoenix.initial_price * phoenix.contract_multiplier
+        expected = principal - floor
         assert payoff == expected
 
 
@@ -472,7 +480,7 @@ class TestKOPayoff:
             payoff_config=payoff_config
         )
 
-        accumulated = 30_000
+        accumulated = get_principal(phoenix) * 0.03
         payoff = phoenix.get_ko_payoff(
             spot=105.0,
             observation_idx=1,  # 0.5 years
@@ -483,15 +491,15 @@ class TestKOPayoff:
         # 1. KO rebate (Snowball-like bonus): 15% rate at 0.5 years
         ko_rate = 0.15
         accrual_factor = 0.5  # observation at 0.5
-        ko_rebate = 1_000_000 * ko_rate * accrual_factor  # 75,000
+        ko_rebate = get_principal(phoenix) * ko_rate * accrual_factor
         
-        # 2. Accumulated coupons (passed in): 30,000
+        # 2. Accumulated coupons (passed in)
         
         # 3. Current period coupon: Triggered because spot 105 >= coupon_barrier 85
         # Default coupon rate 1% per period (not annualized in default get_coupon_payoff)
-        current_coupon = 1_000_000 * 0.01 * 1.0  # 10,000
+        current_coupon = get_principal(phoenix) * 0.01 * 1.0
         
-        expected = ko_rebate + accumulated + current_coupon  # 75k + 30k + 10k = 115k
+        expected = ko_rebate + accumulated + current_coupon
         assert payoff == expected
 
 
@@ -560,7 +568,7 @@ class TestIntrinsicValue:
         phoenix = create_test_phoenix(is_reverse=True)
         # Strike 100, spot 120 -> CALL ITM
         iv = phoenix.intrinsic_value(spot=120.0)
-        assert iv == 20.0  # max(120 - 100, 0)
+        assert iv == 20.0 * phoenix.contract_multiplier
 
     def test_intrinsic_value_reverse_otm(self):
         """Test intrinsic value for OTM reverse phoenix (CALL)."""
@@ -575,7 +583,7 @@ class TestValidation:
 
     def test_validation_negative_initial_price(self):
         """Test validation error for negative initial price."""
-        # BaseEquityOption catches this during quantity resolution if notional is present
+        # BaseEquityOption catches this during contract multiplier validation.
         # but initial_price is invalid/missing
         with pytest.raises(ValidationError, match="Cannot derive quantity|Initial price"):
             create_test_phoenix(initial_price=-100.0)
@@ -585,18 +593,10 @@ class TestValidation:
         with pytest.raises(ValidationError, match="Strike"):
             create_test_phoenix(strike=0.0)
 
-    def test_validation_negative_notional(self):
-        """Test validation error for negative notional."""
-        with pytest.raises(ValidationError, match="Notional"):
-            # Ensure BaseEquityOption sees it as negative notional, not missing notional
-            # by passing a valid initial price so it doesn't fall back to quantity defaults
-            # However, BaseEquityOption validation runs last.
-            # If we pass negative notional, BaseEquityOption._resolve_notional_quantity sees it as None/Invalid
-            # and might default to quantity=1.0.
-            # We explicitly check for negative input in BaseEquityOption.validate()
-            # but that is called AFTER resolution.
-            # Actually, BaseEquityOption._validate_notional_quantity checks for negative values explicitly.
-            create_test_phoenix(notional=-1_000_000.0)
+    def test_validation_negative_contract_multiplier(self):
+        """Test validation error for negative contract multiplier."""
+        with pytest.raises(ValidationError, match="Contract multiplier"):
+            create_test_phoenix(contract_multiplier=-10_000.0)
 
     def test_validation_zero_maturity(self):
         """Test validation error for zero maturity."""
@@ -618,7 +618,7 @@ class TestHelperFunctions:
         assert phoenix.initial_price == 100.0
         assert phoenix.strike == 100.0
         assert phoenix.maturity == 1.0
-        assert phoenix.notional == 1_000_000.0  # Default
+        assert get_principal(phoenix) == 100.0  # Default
         assert phoenix.barrier_config.ko_barrier == 103.0  # 103% default
         assert phoenix.coupon_config.coupon_barrier == 85.0  # 85% default
         assert phoenix.coupon_config.memory_coupon is True  # Default

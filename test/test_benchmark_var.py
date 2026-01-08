@@ -16,6 +16,12 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List
 
+from asset.equity.engine.analytical import BlackScholesEngine
+from asset.equity.product.option import EuropeanVanillaOption
+from param import FlatRateCurve, FlatVolSurface, SpotQuote
+from portfolio.equity.portfolio import EquityPortfolio
+from priceenv import PricingEnvironment
+from util.enum import OptionType
 from var import (
     VaRConfig,
     VaRMethod,
@@ -24,6 +30,34 @@ from var import (
     MonteCarloVaREngine,
 )
 from var.config import EquityRiskFactorConfig
+
+
+def _build_equity_portfolio(position_count: int) -> EquityPortfolio:
+    pricing_env = PricingEnvironment(
+        rate_curve=FlatRateCurve(0.02),
+        valuation_date=datetime(2019, 1, 1),
+        spot_quote=SpotQuote(100.0),
+        vol_surface=FlatVolSurface(0.2),
+    )
+    portfolio = EquityPortfolio(
+        portfolio_name="benchmark",
+        pricing_environments={"ASSET": pricing_env},
+    )
+    product = EuropeanVanillaOption(
+        strike=100.0,
+        option_type=OptionType.CALL,
+        maturity=1.0,
+    )
+    engine = BlackScholesEngine()
+    for _ in range(position_count):
+        portfolio.add_position(
+            product=product,
+            quantity=100.0,
+            entry_price=10.0,
+            underlying="ASSET",
+            engine=engine,
+        )
+    return portfolio
 
 
 class TestVarBenchmarkBasics:
@@ -47,7 +81,10 @@ class TestVarBenchmarkBasics:
         config = VaRConfig(
             confidence_level=0.99,
             var_method=VaRMethod.PARAMETRIC,
-            lookback_days=252
+            lookback_days=252,
+            calculate_component_var=False,
+            calculate_marginal_var=False,
+            calculate_factor_var=False,
         )
         engine = ParametricVaREngine(config=config)
 
@@ -171,33 +208,16 @@ class TestVarPortfolioSizeScaling:
         engine = ParametricVaREngine(config=config)
 
         # Test with different portfolio sizes
-        sizes = [10, 50, 100, 500, 1000]
+        sizes = [10, 25, 50, 100, 200]
         times = []
 
         for size in sizes:
-            class MockPortfolio:
-                def __init__(self, n):
-                    self.positions = {}
-                    for i in range(n):
-                        self.positions[f'POS_{i}'] = type('obj', (object,), {
-                            'position_id': f'POS_{i}',
-                            'underlying': f'ASSET_{i}',
-                            'quantity': 100,
-                            'get_sensitivities': lambda: {
-                                'delta': 0.5,
-                                'gamma': 0.01,
-                                'vega': 0.1,
-                                'rho': 0.05
-                            },
-                            'get_market_value': lambda: 10000.0
-                        })()
-
-            portfolio = MockPortfolio(size)
+            portfolio = _build_equity_portfolio(size)
 
             # Measure time
-            start_time = time.time()
-            # result = engine.calculate_var(portfolio, equity_market_data)
-            elapsed = time.time() - start_time
+            start_time = time.perf_counter()
+            _ = engine.calculate_var(portfolio, equity_market_data)
+            elapsed = time.perf_counter() - start_time
             times.append(elapsed)
 
             # Verify calculation time increases with portfolio size
@@ -212,33 +232,24 @@ class TestVarPortfolioSizeScaling:
         config = VaRConfig(
             confidence_level=0.99,
             var_method=VaRMethod.HISTORICAL,
-            lookback_days=252
+            lookback_days=50,
+            calculate_component_var=False,
+            calculate_marginal_var=False,
+            calculate_factor_var=False,
         )
         engine = HistoricalVaREngine(config=config)
 
         # Test with different portfolio sizes
-        sizes = [10, 50, 100, 500, 1000]
+        sizes = [10, 25, 50, 100, 200]
         times = []
 
         for size in sizes:
-            class MockPortfolio:
-                def __init__(self, n):
-                    self.positions = {}
-                    for i in range(n):
-                        self.positions[f'POS_{i}'] = type('obj', (object,), {
-                            'position_id': f'POS_{i}',
-                            'underlying': f'ASSET_{i}',
-                            'quantity': 100,
-                            'calculate_pnl': lambda scenario: np.random.normal(0, 100),
-                            'get_market_value': lambda: 10000.0
-                        })()
-
-            portfolio = MockPortfolio(size)
+            portfolio = _build_equity_portfolio(size)
 
             # Measure time
-            start_time = time.time()
-            # result = engine.calculate_var(portfolio, equity_market_data)
-            elapsed = time.time() - start_time
+            start_time = time.perf_counter()
+            _ = engine.calculate_var(portfolio, equity_market_data)
+            elapsed = time.perf_counter() - start_time
             times.append(elapsed)
 
         # Assert that time increases with size
@@ -759,22 +770,10 @@ class TestVarEngineComparison:
     def test_monte_carlo_simulation_accuracy_speed_tradeoff(self, equity_market_data):
         """Test Monte Carlo accuracy vs speed tradeoff."""
         # Create portfolio
-        class MockPortfolio:
-            def __init__(self):
-                self.positions = {
-                    'POS_1': type('obj', (object,), {
-                        'position_id': 'POS_1',
-                        'underlying': 'ASSET_1',
-                        'quantity': 100,
-                        'calculate_pnl': lambda scenario: np.random.normal(0, 100),
-                        'get_market_value': lambda: 10000.0
-                    })()
-                }
-
-        portfolio = MockPortfolio()
+        portfolio = _build_equity_portfolio(1)
 
         # Test different simulation counts
-        sim_counts = [1000, 5000, 10000, 25000]
+        sim_counts = [500, 1000, 2000, 5000]
         times = []
 
         for sims in sim_counts:
@@ -782,12 +781,15 @@ class TestVarEngineComparison:
                 confidence_level=0.99,
                 var_method=VaRMethod.MONTE_CARLO,
                 mc_num_simulations=sims,
+                calculate_component_var=False,
+                calculate_marginal_var=False,
+                calculate_factor_var=False,
                 mc_seed=42  # Fixed seed for reproducibility
             )
             engine = MonteCarloVaREngine(config=config)
 
             start_time = time.time()
-            # result = engine.calculate_var(portfolio, equity_market_data)
+            _ = engine.calculate_var(portfolio, equity_market_data)
             elapsed = time.time() - start_time
             times.append(elapsed)
 

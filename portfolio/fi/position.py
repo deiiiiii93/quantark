@@ -74,6 +74,11 @@ class FIPosition:
             return self.engine_factory(pricing_env)
         return self.engine
 
+    def _get_denominator(self) -> float:
+        if hasattr(self.product, "get_denominator"):
+            return self.product.get_denominator()
+        return self.notional_per_unit
+
     def get_current_price(self, pricing_env: PricingEnvironment) -> float:
         """
         Get current clean price of the bond.
@@ -106,7 +111,7 @@ class FIPosition:
         """
         Calculate current market value of the position.
         
-        Market value = dirty_price × quantity × notional_per_unit / 100
+        Market value = dirty_price × quantity
         
         Args:
             pricing_env: Pricing environment with rate curve
@@ -115,13 +120,13 @@ class FIPosition:
             Current market value
         """
         dirty_price = self.get_dirty_price(pricing_env)
-        return dirty_price * self.quantity * self.notional_per_unit / 100.0
+        return dirty_price * self.quantity
     
     def get_pnl(self, pricing_env: PricingEnvironment) -> float:
         """
         Calculate unrealized P&L of the position.
         
-        P&L = (current_price - entry_price) × quantity × notional_per_unit / 100
+        P&L = (current_price - entry_price) × quantity
         
         Args:
             pricing_env: Pricing environment with rate curve
@@ -130,13 +135,13 @@ class FIPosition:
             Unrealized profit/loss
         """
         current_price = self.get_current_price(pricing_env)
-        return (current_price - self.entry_price) * self.quantity * self.notional_per_unit / 100.0
+        return (current_price - self.entry_price) * self.quantity
     
     def get_dv01(self, pricing_env: PricingEnvironment) -> float:
         """
         Calculate DV01 (dollar value of 1 basis point) for this position.
         
-        DV01 = per-bond DV01 × quantity × notional_per_unit / 100
+        DV01 = per-bond DV01 × quantity
         
         Args:
             pricing_env: Pricing environment with rate curve
@@ -147,7 +152,7 @@ class FIPosition:
         valuation_date = pricing_env.valuation_date
         engine = self._engine_for_env(pricing_env)
         per_unit_dv01 = engine.dv01(self.product, valuation_date, valuation_date)
-        return per_unit_dv01 * self.quantity * self.notional_per_unit / 100.0
+        return per_unit_dv01 * self.quantity
     
     def get_modified_duration(self, pricing_env: PricingEnvironment) -> float:
         """
@@ -219,6 +224,15 @@ class FIPosition:
             risk_measures['yield'] = 0.0
         
         return risk_measures
+
+    def get_actual_notional(self) -> float:
+        """
+        Calculate actual notional based on denominator.
+
+        Returns:
+            Actual notional amount
+        """
+        return self.quantity * self._get_denominator()
     
     def is_long(self) -> bool:
         """Check if position is long."""
@@ -256,4 +270,3 @@ class FIPosition:
             f"{direction} {abs(self.quantity)} x {self.product.__class__.__name__}, "
             f"entry=${self.entry_price:.2f}, underlying={self.underlying})"
         )
-

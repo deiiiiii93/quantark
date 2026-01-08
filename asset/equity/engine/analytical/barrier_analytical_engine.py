@@ -68,13 +68,14 @@ class BarrierAnalyticalEngine(BaseEngine):
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(strike, maturity)
         participation = product.participation_rate
+        multiplier = product.contract_multiplier
 
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product.barrier)
 
         # Immediate handling for zero maturity
         if maturity < self.MIN_MATURITY:
             if product.is_knock_out and product.is_barrier_hit(spot):
-                return product.rebate
+                return product.rebate * multiplier
             if product.is_knock_in and product.is_barrier_hit(spot):
                 return product.get_payoff(spot) * participation
             if product.is_knock_in:
@@ -88,8 +89,8 @@ class BarrierAnalyticalEngine(BaseEngine):
             if product.is_knock_out:
                 # Pay rebate depending on timing preference
                 if product.pay_at_hit:
-                    return product.rebate
-                return product.rebate * math.exp(-rate * maturity)
+                    return product.rebate * multiplier
+                return product.rebate * math.exp(-rate * maturity) * multiplier
             vanilla = EuropeanVanillaOption(
                 strike=product.strike,
                 option_type=product.option_type,
@@ -98,7 +99,7 @@ class BarrierAnalyticalEngine(BaseEngine):
                 settlement_date=product.settlement_date,
             )
             vanilla_price = self._bs_engine.price(vanilla, pricing_env)
-            return participation * vanilla_price
+            return participation * vanilla_price * multiplier
 
         if obs_type == ObservationType.EXPIRY:
             return self._price_expiry(
@@ -171,7 +172,8 @@ class BarrierAnalyticalEngine(BaseEngine):
         rebate_val = self._price_rebate_leg(product, pricing_env)
 
         if product.is_knock_out:
-            return participation * max(ko_price, 0.0) + rebate_val
+            value = participation * max(ko_price, 0.0) + rebate_val
+            return value * product.contract_multiplier
 
         vanilla = EuropeanVanillaOption(
             strike=product.strike,
@@ -182,7 +184,8 @@ class BarrierAnalyticalEngine(BaseEngine):
         )
         vanilla_price = self._bs_engine.price(vanilla, pricing_env)
         ki_price = max(vanilla_price - max(ko_price, 0.0), 0.0)
-        return participation * ki_price + rebate_val
+        value = participation * ki_price + rebate_val
+        return value * product.contract_multiplier
 
     def _price_knock_out_closed_form(
         self,
@@ -322,11 +325,13 @@ class BarrierAnalyticalEngine(BaseEngine):
 
         if product.is_knock_out:
             rebate_component = product.rebate * discount * prob_hit
-            return max(participation * ko_no_rebate + rebate_component, 0.0)
+            value = max(participation * ko_no_rebate + rebate_component, 0.0)
+            return value * product.contract_multiplier
 
         ki_no_rebate = max(vanilla_price - ko_no_rebate, 0.0)
         rebate_component = product.rebate * discount * prob_survive
-        return max(participation * ki_no_rebate + rebate_component, 0.0)
+        value = max(participation * ki_no_rebate + rebate_component, 0.0)
+        return value * product.contract_multiplier
 
     def _expiry_call_knock_out(
         self,

@@ -2,19 +2,18 @@
 Base class for equity options.
 
 This module provides the abstract base class for all equity option products,
-defining common attributes and methods for date handling, notional/quantity
-management, maturity/tenor calculations, and option type checks.
+defining common attributes and methods for date handling, contract scaling,
+maturity/tenor calculations, and option type checks.
 """
 
 from abc import abstractmethod
-from typing import Optional, Union
+from typing import Optional
 from datetime import datetime
 
 from util.calendar import DayCountConvention, calculate_year_fraction
 from ..base_equity_product import BaseEquityProduct
-from util.enum import OptionType, ExerciseType, TenorEnd, NotionalQuantityPolicy
+from util.enum import OptionType, ExerciseType, TenorEnd
 from util.exceptions import ValidationError
-from util.numerical.comparison import is_close
 
 
 class BaseEquityOption(BaseEquityProduct):
@@ -25,7 +24,7 @@ class BaseEquityOption(BaseEquityProduct):
     products including:
     - Date fields (initial, exercise, settlement, maturity dates)
     - Type fields (option type, exercise type)
-    - Notional and quantity management
+    - Contract multiplier management
     - Tenor/maturity calculation methods
     - Moneyness utilities
 
@@ -42,8 +41,7 @@ class BaseEquityOption(BaseEquityProduct):
         exercise_type: EUROPEAN, AMERICAN, or BERMUDAN
         initial_price: Reference/initial underlying price for payoff calculations
         strike: Strike price
-        notional: Notional principal amount (optional)
-        quantity: Number of option contracts (default: 1.0)
+        contract_multiplier: Underlying units represented by one contract
     """
 
     # ==========================================================================
@@ -71,10 +69,9 @@ class BaseEquityOption(BaseEquityProduct):
     strike: float = 0.0
 
     # ==========================================================================
-    # Notional parameters
+    # Contract parameters
     # ==========================================================================
-    notional: Optional[float] = None
-    quantity: float = 1.0
+    contract_multiplier: float = 1.0
 
     def __init__(
         self,
@@ -90,9 +87,7 @@ class BaseEquityOption(BaseEquityProduct):
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
         initial_price: float = 0.0,
-        notional: Optional[float] = None,
-        quantity: Optional[float] = None,
-        reconciliation_policy: NotionalQuantityPolicy = NotionalQuantityPolicy.PREFER_NOTIONAL,
+        contract_multiplier: float = 1.0,
     ):
         """
         Initialize base equity option.
@@ -110,9 +105,7 @@ class BaseEquityOption(BaseEquityProduct):
             tenor_end: Determines which date to use for tenor calculations
             annualization_day_count: Day count convention for year fractions
             initial_price: Reference/initial underlying price (optional)
-            notional: Notional principal amount (optional)
-            quantity: Number of option contracts (default: 1.0)
-            reconciliation_policy: Policy for reconciling notional/quantity when both provided
+            contract_multiplier: Underlying units represented by one contract
         """
         self.strike = strike
         self.option_type = option_type
@@ -126,14 +119,7 @@ class BaseEquityOption(BaseEquityProduct):
         self.tenor_end = tenor_end
         self.annualization_day_count = annualization_day_count
         self.initial_price = initial_price
-        self.notional = notional
-        self.quantity = quantity
-        self.reconciliation_policy = reconciliation_policy
-
-        # Resolve notional/quantity relationship BEFORE validation
-        resolved_notional, resolved_quantity = self._resolve_notional_quantity()
-        self.notional = resolved_notional
-        self.quantity = resolved_quantity
+        self.contract_multiplier = contract_multiplier
 
         self.validate()
 
@@ -164,12 +150,19 @@ class BaseEquityOption(BaseEquityProduct):
         self._validate_date_ordering()
         self._validate_types()
         self._validate_tenor_end()
-        self._validate_notional_quantity()
+        self._validate_contract_multiplier()
 
     def _validate_strike(self) -> None:
         """Validate strike price is positive."""
         if self.strike <= 0:
             raise ValidationError(f"Strike must be positive, got {self.strike}")
+
+    def _validate_contract_multiplier(self) -> None:
+        """Validate contract multiplier is positive."""
+        if self.contract_multiplier <= 0:
+            raise ValidationError(
+                f"Contract multiplier must be positive, got {self.contract_multiplier}"
+            )
 
     def _validate_maturity_dates(self) -> None:
         """Validate maturity and date parameters are properly specified."""
@@ -255,219 +248,6 @@ class BaseEquityOption(BaseEquityProduct):
                     "maturity_date, exercise_date, or maturity required "
                     "when tenor_end is MATURITY"
                 )
-
-    def _validate_notional_quantity(self) -> None:
-        """Validate notional and quantity parameters.
-
-        NOTE: These should ideally be at the position level, not product level.
-        Products define ONE unit of an instrument; positions manage quantity/direction.
-        For now, we allow negative values for short position compatibility.
-
-        Validation rules:
-        - Zero is invalid (no position size)
-        - Negative is valid (short position)
-        - Signs must match (both long or both short)
-        """
-        # Zero is invalid (no position)
-        if self.notional is not None and self.notional == 0:
-            raise ValidationError("Notional cannot be zero")
-        if self.quantity is not None and self.quantity == 0:
-            raise ValidationError("Quantity cannot be zero")
-
-        # Signs must match (both long or both short)
-        if (
-            self.notional is not None
-            and self.quantity is not None
-            and (self.notional < 0) != (self.quantity < 0)
-        ):
-            raise ValidationError(
-                f"Notional ({self.notional}) and quantity ({self.quantity}) "
-                "must have the same sign (both positive for long, both negative for short)"
-            )
-
-    def _resolve_notional_quantity(self) -> tuple[Optional[float], float]:
-        """
-        Resolve notional and quantity to ensure consistency.
-
-        Supports short positions (negative values) where:
-        - Negative quantity = short position
-        - Negative notional = short notional amount
-        - Relationship: notional = quantity × initial_price (with signs)
-
-        Resolution rules:
-        - If both provided and consistent: keep both as-is
-        - If both provided and inconsistent: apply reconciliation_policy
-        - If only notional provided: derive quantity
-        - If only quantity provided: derive notional (if initial_price available)
-        - If neither: use default quantity=1.0, notional=None
-
-        Returns:
-            Tuple of (resolved_notional, resolved_quantity)
-
-        Raises:
-            ValidationError: If parameters are invalid or resolution fails
-        """
-        from util.numerical.constants import Tolerance
-
-        # Check for zero values before proceeding
-        # (Need to check here because != 0 below would treat zero as "not provided")
-        if self.notional == 0:
-            raise ValidationError("Notional cannot be zero")
-        if self.quantity == 0:
-            raise ValidationError("Quantity cannot be zero")
-
-        # Determine what was provided (using != 0 to include negative values)
-        has_notional = self.notional is not None and self.notional != 0
-        has_quantity = self.quantity is not None and self.quantity != 0
-        has_initial_price = self.initial_price is not None and self.initial_price > 0
-
-        # Determine position sign from provided values
-        position_sign = 1
-        if has_notional:
-            position_sign = 1 if self.notional > 0 else -1
-        elif has_quantity:
-            position_sign = 1 if self.quantity > 0 else -1
-
-        # Case 1: Neither provided - use defaults (long position)
-        if not has_notional and not has_quantity:
-            return None, 1.0
-
-        # Work with magnitudes for consistency checking
-        notional_magnitude = abs(self.notional) if has_notional else None
-        quantity_magnitude = abs(self.quantity) if has_quantity else None
-
-        # Case 2: Only quantity provided
-        if not has_notional:
-            derived_notional_magnitude = quantity_magnitude * self.initial_price if has_initial_price else None
-            resolved_notional = (
-                derived_notional_magnitude * position_sign if derived_notional_magnitude is not None else None
-            )
-            return resolved_notional, self.quantity
-
-        # Case 3: Only notional provided
-        if not has_quantity:
-            if not has_initial_price:
-                raise ValidationError(
-                    "Cannot derive quantity from notional without initial_price. "
-                    "Provide initial_price or specify quantity directly."
-                )
-            quantity_magnitude = notional_magnitude / self.initial_price
-            return self.notional, quantity_magnitude * position_sign
-
-        # Case 4: Both provided - check consistency using magnitudes
-        expected_quantity_magnitude = notional_magnitude / self.initial_price if has_initial_price else None
-        if expected_quantity_magnitude is not None:
-            if is_close(quantity_magnitude, expected_quantity_magnitude, rel_tol=Tolerance.RELATIVE):
-                # Consistent - keep both as-is
-                return self.notional, self.quantity
-            else:
-                # Inconsistent - apply policy to magnitudes, then restore sign
-                if self.reconciliation_policy == NotionalQuantityPolicy.STRICT:
-                    expected_notional_magnitude = quantity_magnitude * self.initial_price
-                    raise ValidationError(
-                        f"Notional ({self.notional}) and quantity ({self.quantity}) "
-                        f"inconsistent with initial_price ({self.initial_price}). "
-                        f"Expected quantity={expected_quantity_magnitude * position_sign:.6g} "
-                        f"for given notional, or "
-                        f"notional={expected_notional_magnitude * position_sign:.6g} "
-                        f"for given quantity."
-                    )
-                elif self.reconciliation_policy == NotionalQuantityPolicy.PREFER_NOTIONAL:
-                    # Notional wins - derive quantity magnitude, then apply sign
-                    return self.notional, expected_quantity_magnitude * position_sign
-                else:  # PREFER_QUANTITY
-                    # Quantity wins - derive notional magnitude, then apply sign
-                    return (
-                        quantity_magnitude * self.initial_price * position_sign,
-                        self.quantity
-                    )
-
-        # Cannot validate consistency without initial_price, keep both
-        return self.notional, self.quantity
-
-    # ==========================================================================
-    # Quantity and Notional
-    # ==========================================================================
-
-    def get_quantity(self) -> float:
-        """
-        Get the quantity (number of contracts) of the option.
-
-        If quantity is directly set, returns it. Otherwise, derives quantity
-        from notional and initial_price.
-
-        Returns:
-            Quantity of the option
-
-        Raises:
-            ValidationError: If quantity cannot be determined
-        """
-        if self.quantity is not None and self.quantity > 0:
-            return self.quantity
-        if self.notional is not None and self.initial_price is not None:
-            if self.initial_price <= 0:
-                raise ValidationError(
-                    f"Initial price must be positive to derive quantity, "
-                    f"got {self.initial_price}"
-                )
-            return self.notional / self.initial_price
-        raise ValidationError(
-            "Quantity cannot be determined: set quantity or notional with initial_price"
-        )
-
-    def set_quantity(self, quantity: float) -> None:
-        """
-        Set the quantity of the option.
-
-        Args:
-            quantity: Number of option contracts
-
-        Raises:
-            ValidationError: If quantity is negative
-        """
-        if quantity < 0:
-            raise ValidationError(f"Quantity must be non-negative, got {quantity}")
-        self.quantity = quantity
-
-    def get_notional(self) -> float:
-        """
-        Get the notional principal amount.
-
-        If notional is directly set, returns it. Otherwise, derives notional
-        from quantity and initial_price.
-
-        Returns:
-            Notional amount
-
-        Raises:
-            ValidationError: If notional cannot be determined
-        """
-        if self.notional is not None:
-            return self.notional
-        if self.quantity is not None and self.initial_price is not None:
-            if self.initial_price <= 0:
-                raise ValidationError(
-                    f"Initial price must be positive to derive notional, "
-                    f"got {self.initial_price}"
-                )
-            return self.quantity * self.initial_price
-        raise ValidationError(
-            "Notional cannot be determined: set notional or quantity with initial_price"
-        )
-
-    def set_notional(self, notional: float) -> None:
-        """
-        Set the notional principal amount.
-
-        Args:
-            notional: Notional principal amount
-
-        Raises:
-            ValidationError: If notional is negative
-        """
-        if notional < 0:
-            raise ValidationError(f"Notional must be non-negative, got {notional}")
-        self.notional = notional
 
     # ==========================================================================
     # Maturity and Tenor Calculations
@@ -804,9 +584,11 @@ class BaseEquityOption(BaseEquityProduct):
             )
 
         if self.is_call():
-            return max(spot - self.strike, 0.0)
+            intrinsic = max(spot - self.strike, 0.0)
         else:
-            return max(self.strike - spot, 0.0)
+            intrinsic = max(self.strike - spot, 0.0)
+
+        return intrinsic * self.contract_multiplier
 
     # ==========================================================================
     # Abstract Methods

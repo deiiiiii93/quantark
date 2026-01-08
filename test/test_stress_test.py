@@ -390,7 +390,7 @@ class TestFIStressEngine(unittest.TestCase):
         ten_year = FixedBond(
             issue_date=datetime(2019, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.04,
             payment_frequency=PaymentFrequency.SEMI_ANNUAL,
             day_count_convention=DayCountConvention.ACT_365,
@@ -505,4 +505,3 @@ class TestConfig(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

@@ -30,6 +30,7 @@ class EuropeanVanillaOption(BaseEquityOption):
         maturity: Optional[float] = None,
         exercise_date: Optional[datetime] = None,
         settlement_date: Optional[datetime] = None,
+        contract_multiplier: float = 1.0,
     ):
         """
         Initialize European vanilla option.
@@ -57,6 +58,7 @@ class EuropeanVanillaOption(BaseEquityOption):
             exercise_type=ExerciseType.EUROPEAN,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            contract_multiplier=contract_multiplier,
         )
 
     def get_payoff(self, spot: float) -> float:
@@ -76,9 +78,11 @@ class EuropeanVanillaOption(BaseEquityOption):
             raise ValidationError(f"Spot price must be non-negative, got {spot}")
 
         if self.is_call():
-            return max(spot - self.strike, 0.0)
+            intrinsic = max(spot - self.strike, 0.0)
         else:  # put
-            return max(self.strike - spot, 0.0)
+            intrinsic = max(self.strike - spot, 0.0)
+
+        return intrinsic * self.contract_multiplier
 
     def intrinsic_value(self, spot: float) -> float:
         """

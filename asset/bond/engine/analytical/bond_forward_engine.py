@@ -376,8 +376,13 @@ class BondForwardEngine:
         base_results = self.price(forward, valuation_date)
         dv01 = self._calculate_dv01(forward, valuation_date, base_results)
 
-        # Scale by contract size (assuming prices are per 100 notional)
-        bpv = dv01 * forward.contract_size / 100.0
+        # Scale by contract size relative to underlying bond denominator.
+        denominator = forward.underlying.get_denominator()
+        if denominator <= 0:
+            raise ValidationError(
+                f"Denominator must be positive, got {denominator}"
+            )
+        bpv = dv01 * (forward.contract_size / denominator)
 
         return bpv
 

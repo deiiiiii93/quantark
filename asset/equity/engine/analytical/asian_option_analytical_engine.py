@@ -157,7 +157,8 @@ class AsianOptionAnalyticalEngine(BaseEngine):
 
         # Handle near-expiry case
         if params["T"] < self.MIN_MATURITY:
-            return self._handle_near_expiry(product, params)
+            price = self._handle_near_expiry(product, params)
+            return price * product.contract_multiplier
 
         # Clamp parameters for numerical stability
         params["sigma"] = np.clip(params["sigma"], self.MIN_VOL, self.MAX_VOL)
@@ -171,10 +172,12 @@ class AsianOptionAnalyticalEngine(BaseEngine):
 
         # Handle floating-strike via symmetry
         if product.is_floating_strike():
-            return self._price_floating_strike(product, params, method)
+            price = self._price_floating_strike(product, params, method)
+            return price * product.contract_multiplier
 
         # Price fixed-strike option
-        return self._price_fixed_strike(product, params, method)
+        price = self._price_fixed_strike(product, params, method)
+        return price * product.contract_multiplier
 
     def _extract_params(
         self, product: AsianOption, pricing_env: PricingEnvironment
@@ -288,7 +291,7 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         else:
             avg = S
 
-        return product.get_payoff(S, average=avg)
+        return product.get_payoff(S, average=avg) / product.contract_multiplier
 
     def _price_fixed_strike(
         self,

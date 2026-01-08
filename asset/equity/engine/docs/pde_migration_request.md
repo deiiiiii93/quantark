@@ -770,7 +770,7 @@ class TwoSurfacePDESolver(BasePDESolver):
 **Terminal Conditions**:
 ```python
 def set_terminal_condition(self, V0, V1, S_levels):
-    principal = self.notional
+    principal = self.initial_price * self.contract_multiplier
     
     # V0 at T: just principal (no knockin occurred)
     V0[:, -1] = principal if self.include_principal else 0.0
@@ -984,4 +984,3 @@ def test_convergence():
 
 *Document Version: 1.0*
 *Created for: PDE Engine Migration Project*
-

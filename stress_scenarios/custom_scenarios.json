@@ -11,7 +11,8 @@
           "stress_value": -0.15,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -19,11 +20,12 @@
           "stress_value": 0.4,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "metadata": {},
-      "created_at": "2025-11-24T23:09:14.658812",
+      "created_at": "2026-01-08T14:14:23.175031",
       "scenario_id": null
     },
     {
@@ -36,7 +38,8 @@
           "stress_value": 0.02,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "spot",
@@ -44,7 +47,8 @@
           "stress_value": -0.05,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -52,11 +56,12 @@
           "stress_value": 0.15,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "metadata": {},
-      "created_at": "2025-11-24T23:09:14.658822",
+      "created_at": "2026-01-08T14:14:23.175044",
       "scenario_id": null
     },
     {
@@ -69,7 +74,8 @@
           "stress_value": -0.2,
           "level": "underlying",
           "target": "AAPL",
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -77,11 +83,12 @@
           "stress_value": 0.5,
           "level": "underlying",
           "target": "AAPL",
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "metadata": {},
-      "created_at": "2025-11-24T23:09:14.658826",
+      "created_at": "2026-01-08T14:14:23.175048",
       "scenario_id": null
     },
     {
@@ -94,7 +101,8 @@
           "stress_value": 0.1,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -102,11 +110,12 @@
           "stress_value": -0.25,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "metadata": {},
-      "created_at": "2025-11-24T23:09:14.658831",
+      "created_at": "2026-01-08T14:14:23.175050",
       "scenario_id": null
     }
   ]

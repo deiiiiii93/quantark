@@ -24,7 +24,7 @@ print("\n1. Creating a simple 5-year bond with 5% coupon...")
 bond = create_simple_fixed_bond(
     issue_date=datetime(2023, 1, 1),
     maturity_date=datetime(2028, 1, 1),
-    notional=1000.0,
+    denominator=1000.0,
     coupon_rate=0.05,
     payment_frequency=PaymentFrequency.SEMI_ANNUAL,
     day_count_convention=DayCountConvention.ACT_ACT_ISDA
@@ -117,7 +117,7 @@ for freq in frequencies:
     bond_freq = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 1),
         maturity_date=datetime(2028, 1, 1),
-        notional=1000.0,
+        denominator=1000.0,
         coupon_rate=0.06,
         payment_frequency=freq
     )

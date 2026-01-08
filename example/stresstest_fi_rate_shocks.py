@@ -39,7 +39,7 @@ def build_demo_portfolio() -> FIPortfolio:
     ten_year = FixedBond(
         issue_date=datetime(2020, 1, 1),
         maturity_date=datetime(2030, 1, 1),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.04,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_365,
@@ -56,7 +56,7 @@ def build_demo_portfolio() -> FIPortfolio:
     thirty_year = FixedBond(
         issue_date=datetime(2015, 1, 1),
         maturity_date=datetime(2045, 1, 1),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_365,

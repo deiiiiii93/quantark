@@ -38,7 +38,7 @@ class FloatingRateBond(BaseBondProduct):
     Attributes:
         issue_date: Bond issue date
         maturity_date: Bond maturity date
-        notional: Face value/principal amount
+        denominator: Minimum tradable notional amount
         index: Reference rate index (e.g., SOFR, EURIBOR_3M)
         spread: Spread over the index (e.g., 0.0050 for 50bp)
         payment_frequency: Coupon payment frequency
@@ -58,7 +58,7 @@ class FloatingRateBond(BaseBondProduct):
 
     issue_date: datetime
     maturity_date: datetime
-    notional: float
+    denominator: float
     index: RateIndex
     spread: float
     payment_frequency: PaymentFrequency
@@ -111,8 +111,10 @@ class FloatingRateBond(BaseBondProduct):
                 f"Maturity date {self.maturity_date} must be after issue date {self.issue_date}"
             )
 
-        if self.notional <= 0:
-            raise ValidationError(f"Notional must be positive, got {self.notional}")
+        if self.denominator <= 0:
+            raise ValidationError(
+                f"Denominator must be positive, got {self.denominator}"
+            )
 
         if self.settlement_days < 0:
             raise ValidationError(
@@ -267,7 +269,7 @@ class FloatingRateBond(BaseBondProduct):
                 accrual_start_date=accrual_start,
                 accrual_end_date=accrual_end,
                 fixing_date=fixing_date,
-                notional=self.notional,
+                notional=self.denominator,
                 spread=self.spread,
                 day_count_fraction=day_count_fraction,
                 index_fixing=fixing,
@@ -376,7 +378,7 @@ class FloatingRateBond(BaseBondProduct):
                 notional=last_cf.notional,
                 rate=last_cf.rate,
                 day_count_fraction=last_cf.day_count_fraction,
-                amount=last_cf.amount + self.notional,
+                amount=last_cf.amount + self.denominator,
             )
 
         return cashflows
@@ -401,9 +403,9 @@ class FloatingRateBond(BaseBondProduct):
         """Get the issue date of the bond."""
         return self.issue_date
 
-    def get_notional(self) -> float:
-        """Get the notional/face value of the bond."""
-        return self.notional
+    def get_denominator(self) -> float:
+        """Get the minimum tradable notional (denominator) of the bond."""
+        return self.denominator
 
     def calculate_accrued_interest(self, settlement_date: datetime) -> float:
         """
@@ -436,7 +438,7 @@ class FloatingRateBond(BaseBondProduct):
                 )
 
                 # Accrued interest based on current rate
-                return self.notional * cf.effective_rate * accrued_fraction
+                return self.denominator * cf.effective_rate * accrued_fraction
 
         return 0.0
 
@@ -484,14 +486,14 @@ class FloatingRateBond(BaseBondProduct):
             f"index={self.index.name}, "
             f"spread={self.spread:.2%}, "
             f"maturity={self.maturity_date.date()}, "
-            f"notional={self.notional:.2f})"
+            f"denominator={self.denominator:.2f})"
         )
 
 
 def create_simple_frn(
     issue_date: datetime,
     maturity_date: datetime,
-    notional: float,
+    denominator: float,
     index: RateIndex,
     spread: float,
     payment_frequency: PaymentFrequency = PaymentFrequency.QUARTERLY,
@@ -510,7 +512,7 @@ def create_simple_frn(
     Args:
         issue_date: Bond issue date
         maturity_date: Bond maturity date
-        notional: Face value/principal amount
+        denominator: Minimum tradable notional amount
         index: Reference rate index
         spread: Spread over index (e.g., 0.005 for 50bp)
         payment_frequency: Payment frequency (default: quarterly)
@@ -523,7 +525,7 @@ def create_simple_frn(
     return FloatingRateBond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         index=index,
         spread=spread,
         payment_frequency=payment_frequency,

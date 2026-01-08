@@ -8,8 +8,8 @@
   "net_pnl": -180.88840555963316,
   "total_hedges": 0,
   "num_days": 7,
-  "execution_timestamp": "2025-11-26T00:10:42.557741",
-  "total_execution_time": 0.005908012390136719,
+  "execution_timestamp": "2026-01-08T14:07:59.084491",
+  "total_execution_time": 0.0037539005279541016,
   "config_summary": {
     "calculate_greeks": true,
     "greeks_method": "analytical",
@@ -44,7 +44,7 @@
       },
       "positions": [
         {
-          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "position_id": "194c952a-c9b2-4aca-bc5d-5b22a8dc65ca",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -61,7 +61,7 @@
           }
         },
         {
-          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "position_id": "a839e43a-f941-4dc8-a398-05f725b0c234",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -113,7 +113,7 @@
       },
       "positions": [
         {
-          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "position_id": "194c952a-c9b2-4aca-bc5d-5b22a8dc65ca",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -130,7 +130,7 @@
           }
         },
         {
-          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "position_id": "a839e43a-f941-4dc8-a398-05f725b0c234",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -182,7 +182,7 @@
       },
       "positions": [
         {
-          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "position_id": "194c952a-c9b2-4aca-bc5d-5b22a8dc65ca",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -199,7 +199,7 @@
           }
         },
         {
-          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "position_id": "a839e43a-f941-4dc8-a398-05f725b0c234",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -251,7 +251,7 @@
       },
       "positions": [
         {
-          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "position_id": "194c952a-c9b2-4aca-bc5d-5b22a8dc65ca",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -268,7 +268,7 @@
           }
         },
         {
-          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "position_id": "a839e43a-f941-4dc8-a398-05f725b0c234",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -320,7 +320,7 @@
       },
       "positions": [
         {
-          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "position_id": "194c952a-c9b2-4aca-bc5d-5b22a8dc65ca",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -337,7 +337,7 @@
           }
         },
         {
-          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "position_id": "a839e43a-f941-4dc8-a398-05f725b0c234",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -389,7 +389,7 @@
       },
       "positions": [
         {
-          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "position_id": "194c952a-c9b2-4aca-bc5d-5b22a8dc65ca",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -406,7 +406,7 @@
           }
         },
         {
-          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "position_id": "a839e43a-f941-4dc8-a398-05f725b0c234",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -458,7 +458,7 @@
       },
       "positions": [
         {
-          "position_id": "e38fa671-d20b-4819-bf77-07b92352b706",
+          "position_id": "194c952a-c9b2-4aca-bc5d-5b22a8dc65ca",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -475,7 +475,7 @@
           }
         },
         {
-          "position_id": "ebced451-50fe-43ab-bd05-ef340ecca33a",
+          "position_id": "a839e43a-f941-4dc8-a398-05f725b0c234",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,

@@ -93,7 +93,7 @@ def create_basic_barrier_config(
 def create_standard_snowball(
     initial_price: float = 100.0,
     strike: float = 100.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = None,
     maturity: float = 1.0,
     barrier_config: BarrierConfig = None,
     payoff_config: PayoffConfig = None,
@@ -102,6 +102,8 @@ def create_standard_snowball(
     """Create a standard snowball option for testing."""
     if barrier_config is None:
         barrier_config = create_basic_barrier_config()
+    if contract_multiplier is None:
+        contract_multiplier = 1_000_000.0 / initial_price
 
     return SnowballOption(
         initial_price=initial_price,
@@ -109,7 +111,7 @@ def create_standard_snowball(
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=False,
     )
@@ -118,7 +120,7 @@ def create_standard_snowball(
 def create_reverse_snowball(
     initial_price: float = 100.0,
     strike: float = 100.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = None,
     maturity: float = 1.0,
     barrier_config: BarrierConfig = None,
     payoff_config: PayoffConfig = None,
@@ -136,6 +138,8 @@ def create_reverse_snowball(
             ki_observation_type=ObservationType.CONTINUOUS,
             ki_continuous=True,
         )
+    if contract_multiplier is None:
+        contract_multiplier = 1_000_000.0 / initial_price
 
     return SnowballOption(
         initial_price=initial_price,
@@ -143,10 +147,15 @@ def create_reverse_snowball(
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=True,
     )
+
+
+def get_principal(snowball: SnowballOption) -> float:
+    """Return per-contract principal based on initial price and contract multiplier."""
+    return snowball.initial_price * snowball.contract_multiplier
 
 
 # =============================================================================
@@ -433,7 +442,7 @@ class TestEdgeCases:
             strike=120.0,  # Deep ITM short put payoff on KI -> negative payoff
             barrier_config=barrier_config,
             payoff_config=payoff_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=1.0,
             is_reverse=False,
         )

@@ -11,14 +11,14 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             line-height: 1.6;
             color: #333;
             background-color: #f4f4f4;
         }
-        
+
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -26,19 +26,19 @@
             background-color: white;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
-        
+
         header {
             text-align: center;
             padding: 20px 0;
             border-bottom: 3px solid #2c3e50;
             margin-bottom: 30px;
         }
-        
+
         h1 {
             color: #2c3e50;
             margin-bottom: 10px;
         }
-        
+
         h2 {
             color: #34495e;
             margin-top: 30px;
@@ -46,68 +46,68 @@
             padding-bottom: 10px;
             border-bottom: 2px solid #ecf0f1;
         }
-        
+
         h3 {
             color: #34495e;
             margin-top: 20px;
             margin-bottom: 10px;
         }
-        
+
         .timestamp {
             color: #7f8c8d;
             font-style: italic;
         }
-        
+
         .summary-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 20px;
             margin: 20px 0;
         }
-        
+
         .summary-card {
             background-color: #ecf0f1;
             padding: 20px;
             border-radius: 8px;
             border-left: 4px solid #3498db;
         }
-        
+
         .summary-card.negative {
             border-left-color: #e74c3c;
         }
-        
+
         .summary-card.positive {
             border-left-color: #2ecc71;
         }
-        
+
         .summary-card h3 {
             margin-top: 0;
             font-size: 0.9em;
             text-transform: uppercase;
             color: #7f8c8d;
         }
-        
+
         .summary-card .value {
             font-size: 1.8em;
             font-weight: bold;
             color: #2c3e50;
         }
-        
+
         .summary-card .value.negative {
             color: #e74c3c;
         }
-        
+
         .summary-card .value.positive {
             color: #2ecc71;
         }
-        
+
         table {
             width: 100%;
             border-collapse: collapse;
             margin: 20px 0;
             background-color: white;
         }
-        
+
         th {
             background-color: #34495e;
             color: white;
@@ -115,33 +115,33 @@
             text-align: left;
             font-weight: 600;
         }
-        
+
         td {
             padding: 10px 12px;
             border-bottom: 1px solid #ecf0f1;
         }
-        
+
         tr:hover {
             background-color: #f8f9fa;
         }
-        
+
         .positive {
             color: #2ecc71;
         }
-        
+
         .negative {
             color: #e74c3c;
         }
-        
+
         .neutral {
             color: #7f8c8d;
         }
-        
+
         .plot-container {
             margin: 30px 0;
             text-align: center;
         }
-        
+
         .plot-container img {
             max-width: 100%;
             height: auto;
@@ -149,7 +149,7 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        
+
         .scenario-detail {
             background-color: #f8f9fa;
             padding: 15px;
@@ -157,16 +157,16 @@
             border-radius: 8px;
             border-left: 4px solid #3498db;
         }
-        
+
         .stress-list {
             list-style-type: none;
             padding-left: 20px;
         }
-        
+
         .stress-list li {
             padding: 5px 0;
         }
-        
+
         footer {
             text-align: center;
             padding: 20px 0;
@@ -182,9 +182,9 @@
     <div class="container">
         <header>
             <h1>Tech Options Portfolio - Stress Test Report</h1>
-            <p class="timestamp">Generated: 2025-11-24 23:09:16</p>
+            <p class="timestamp">Generated: 2026-01-08 14:14:23</p>
         </header>
-        
+
         
         <section class="executive-summary">
             <h2>Executive Summary</h2>
@@ -327,13 +327,14 @@
         </section>
         
         
+
         
         <section class="visualizations">
             <h2>Visualizations</h2>
             <p><em>For detailed visualizations, please use the interactive dashboard or export plots separately.</em></p>
         </section>
         
-        
+
         
         <section class="detailed-scenarios">
             <h2>Detailed Scenario Breakdown</h2>
@@ -343,7 +344,7 @@
                 <p><strong>Description:</strong> 15% drop in tech stocks with volatility spike</p>
                 <p><strong>P&L:</strong> <span class="negative">$-5,722.72 (-47.87%)</span></p>
                 <p><strong>Portfolio Value:</strong> $6,231.82</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -359,7 +360,7 @@
                 <p><strong>Description:</strong> 200bps rate increase with moderate equity pressure</p>
                 <p><strong>P&L:</strong> <span class="negative">$-1,467.63 (-12.28%)</span></p>
                 <p><strong>Portfolio Value:</strong> $10,486.91</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -377,7 +378,7 @@
                 <p><strong>Description:</strong> AAPL drops 20% while GOOGL unaffected</p>
                 <p><strong>P&L:</strong> <span class="negative">$-1,690.07 (-14.14%)</span></p>
                 <p><strong>Portfolio Value:</strong> $10,264.47</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -393,7 +394,7 @@
                 <p><strong>Description:</strong> Modest gains with volatility compression</p>
                 <p><strong>P&L:</strong> <span class="positive">$6,698.17 (+56.03%)</span></p>
                 <p><strong>Portfolio Value:</strong> $18,652.71</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -409,7 +410,7 @@
                 <p><strong>Description:</strong> Equity drops -20% with volatility spike +50%</p>
                 <p><strong>P&L:</strong> <span class="negative">$-7,406.13 (-61.95%)</span></p>
                 <p><strong>Portfolio Value:</strong> $4,548.42</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -425,7 +426,7 @@
                 <p><strong>Description:</strong> Equity rises +15% with volatility compression -30%</p>
                 <p><strong>P&L:</strong> <span class="positive">$12,265.49 (+102.60%)</span></p>
                 <p><strong>Portfolio Value:</strong> $24,220.03</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -441,7 +442,7 @@
                 <p><strong>Description:</strong> Volatility increases +80%</p>
                 <p><strong>P&L:</strong> <span class="positive">$9,849.87 (+82.39%)</span></p>
                 <p><strong>Portfolio Value:</strong> $21,804.42</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -455,7 +456,7 @@
                 <p><strong>Description:</strong> Historical: Oct 19, 1987 - 22.6% drop</p>
                 <p><strong>P&L:</strong> <span class="positive">$8.05 (+0.07%)</span></p>
                 <p><strong>Portfolio Value:</strong> $11,962.59</p>
-                
+
                 <h4>Stresses Applied:</h4>
                 <ul class="stress-list">
             
@@ -468,7 +469,7 @@
             
         </section>
         
-        
+
         <footer>
             <p>Generated by QuantArk Stress Test Module</p>
         </footer>

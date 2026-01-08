@@ -157,13 +157,13 @@ class TestFloatingRateBond(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,  # 50bp
             payment_frequency=PaymentFrequency.QUARTERLY,
         )
 
-        self.assertEqual(frn.notional, 1000000.0)
+        self.assertEqual(frn.denominator, 1000000.0)
         self.assertEqual(frn.spread, 0.0050)
         self.assertEqual(frn.index.name, "SOFR_3M")
 
@@ -172,7 +172,7 @@ class TestFloatingRateBond(unittest.TestCase):
         frn = FloatingRateBond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -188,7 +188,7 @@ class TestFloatingRateBond(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2026, 1, 1),  # 2 years
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -208,7 +208,7 @@ class TestFloatingRateBond(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2025, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -234,7 +234,7 @@ class TestFloatingRateBond(unittest.TestCase):
         frn = FloatingRateBond(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2025, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -247,12 +247,12 @@ class TestFloatingRateBond(unittest.TestCase):
 
     def test_frn_validation_errors(self):
         """Test FRN validation."""
-        # Negative notional
+        # Negative denominator
         with self.assertRaises(ValidationError):
             create_simple_frn(
                 issue_date=datetime(2024, 1, 1),
                 maturity_date=datetime(2025, 1, 1),
-                notional=-1000000.0,
+                denominator=-1000000.0,
                 index=SOFR_3M,
                 spread=0.0050,
             )
@@ -262,7 +262,7 @@ class TestFloatingRateBond(unittest.TestCase):
             create_simple_frn(
                 issue_date=datetime(2025, 1, 1),
                 maturity_date=datetime(2024, 1, 1),
-                notional=1000000.0,
+                denominator=1000000.0,
                 index=SOFR_3M,
                 spread=0.0050,
             )
@@ -273,7 +273,7 @@ class TestFloatingRateBond(unittest.TestCase):
             FloatingRateBond(
                 issue_date=datetime(2024, 1, 1),
                 maturity_date=datetime(2025, 1, 1),
-                notional=1000000.0,
+                denominator=1000000.0,
                 index=SOFR_3M,
                 spread=0.0050,
                 payment_frequency=PaymentFrequency.QUARTERLY,
@@ -371,7 +371,7 @@ class TestFRNPricing(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0,  # Zero spread
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -383,14 +383,14 @@ class TestFRNPricing(unittest.TestCase):
         price = self.engine.clean_price(frn)
 
         # Should be close to par (1,000,000)
-        self.assertAlmostEqual(price / frn.notional, 1.0, delta=0.01)
+        self.assertAlmostEqual(price / frn.denominator, 1.0, delta=0.01)
 
     def test_premium_frn_pricing(self):
         """Test FRN with positive spread prices above par."""
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0100,  # 100bp above market
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -399,14 +399,14 @@ class TestFRNPricing(unittest.TestCase):
         price = self.engine.clean_price(frn)
 
         # Should be above par
-        self.assertGreater(price, frn.notional)
+        self.assertGreater(price, frn.denominator)
 
     def test_discount_frn_pricing(self):
         """Test FRN with negative spread prices below par."""
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=-0.0050,  # 50bp below market
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -415,14 +415,14 @@ class TestFRNPricing(unittest.TestCase):
         price = self.engine.clean_price(frn)
 
         # Should be below par
-        self.assertLess(price, frn.notional)
+        self.assertLess(price, frn.denominator)
 
     def test_dirty_vs_clean_price(self):
         """Test relationship between dirty and clean price."""
         frn = create_simple_frn(
             issue_date=datetime(2023, 10, 1),  # Started 3 months ago
             maturity_date=datetime(2028, 10, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -447,7 +447,7 @@ class TestFRNPricing(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2023, 10, 1),
             maturity_date=datetime(2028, 10, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -482,14 +482,14 @@ class TestDiscountMargin(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,  # 50bp
             payment_frequency=PaymentFrequency.QUARTERLY,
         )
 
         # Price at par
-        par_price = frn.notional
+        par_price = frn.denominator
 
         dm = self.engine.discount_margin(frn, par_price)
 
@@ -501,14 +501,14 @@ class TestDiscountMargin(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
         )
 
         # Price above par
-        premium_price = frn.notional * 1.02  # 102%
+        premium_price = frn.denominator * 1.02  # 102%
 
         dm = self.engine.discount_margin(frn, premium_price)
 
@@ -520,14 +520,14 @@ class TestDiscountMargin(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
         )
 
         # Price below par
-        discount_price = frn.notional * 0.98  # 98%
+        discount_price = frn.denominator * 0.98  # 98%
 
         dm = self.engine.discount_margin(frn, discount_price)
 
@@ -552,13 +552,13 @@ class TestSimpleMargin(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
         )
 
-        sm = self.engine.simple_margin(frn, frn.notional)
+        sm = self.engine.simple_margin(frn, frn.denominator)
 
         # At par, SM = spread
         self.assertAlmostEqual(sm, frn.spread, delta=0.001)
@@ -568,13 +568,13 @@ class TestSimpleMargin(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
         )
 
-        discount_price = frn.notional * 0.98
+        discount_price = frn.denominator * 0.98
 
         sm = self.engine.simple_margin(frn, discount_price)
 
@@ -597,7 +597,7 @@ class TestFRNRiskMetrics(unittest.TestCase):
         self.frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -660,7 +660,7 @@ class TestYieldToMaturity(unittest.TestCase):
         self.frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,  # 50bp
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -669,7 +669,7 @@ class TestYieldToMaturity(unittest.TestCase):
     def test_ytm_at_par(self):
         """Test YTM at par price."""
         ytm = self.engine.yield_to_maturity(
-            self.frn, self.frn.notional, clean_price=True
+            self.frn, self.frn.denominator, clean_price=True
         )
 
         # YTM should be approximately index rate + spread
@@ -678,9 +678,9 @@ class TestYieldToMaturity(unittest.TestCase):
 
     def test_ytm_discount_vs_premium(self):
         """Test that YTM is higher for discount price, lower for premium."""
-        par_price = self.frn.notional
-        discount_price = self.frn.notional * 0.98
-        premium_price = self.frn.notional * 1.02
+        par_price = self.frn.denominator
+        discount_price = self.frn.denominator * 0.98
+        premium_price = self.frn.denominator * 1.02
 
         ytm_par = self.engine.yield_to_maturity(self.frn, par_price)
         ytm_discount = self.engine.yield_to_maturity(self.frn, discount_price)
@@ -696,7 +696,7 @@ class TestYieldToMaturity(unittest.TestCase):
         assumed_rate = 0.06  # 6%
 
         ytm = self.engine.yield_to_maturity(
-            self.frn, self.frn.notional, assumed_index_rate=assumed_rate
+            self.frn, self.frn.denominator, assumed_index_rate=assumed_rate
         )
 
         # YTM should be approximately assumed rate + spread
@@ -705,7 +705,7 @@ class TestYieldToMaturity(unittest.TestCase):
 
     def test_ytm_positive(self):
         """Test that YTM is positive for reasonable prices."""
-        ytm = self.engine.yield_to_maturity(self.frn, self.frn.notional)
+        ytm = self.engine.yield_to_maturity(self.frn, self.frn.denominator)
         self.assertGreater(ytm, 0)
 
 
@@ -724,7 +724,7 @@ class TestPriceFromYield(unittest.TestCase):
         self.frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -738,7 +738,7 @@ class TestPriceFromYield(unittest.TestCase):
         )
 
         # Should be close to par
-        self.assertAlmostEqual(price / self.frn.notional, 1.0, delta=0.02)
+        self.assertAlmostEqual(price / self.frn.denominator, 1.0, delta=0.02)
 
     def test_price_from_yield_inverse_relationship(self):
         """Test that higher yield gives lower price."""
@@ -768,7 +768,7 @@ class TestPriceFromYield(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2023, 10, 1),
             maturity_date=datetime(2028, 10, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -805,13 +805,15 @@ class TestFullAnalysis(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR_3M,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
         )
 
-        results = engine.full_analysis(frn, market_price=frn.notional, clean_price=True)
+        results = engine.full_analysis(
+            frn, market_price=frn.denominator, clean_price=True
+        )
 
         self.assertIsInstance(results, FRNPricingResults)
         self.assertIsNotNone(results.dirty_price)
@@ -834,7 +836,7 @@ class TestDifferentIndices(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,
+            denominator=1000000.0,
             index=SOFR,
             spread=0.0050,
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -848,7 +850,7 @@ class TestDifferentIndices(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=10000000.0,  # CNY
+            denominator=10000000.0,  # CNY
             index=SHIBOR_3M,
             spread=0.0080,  # 80bp
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -862,7 +864,7 @@ class TestDifferentIndices(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2027, 1, 1),
-            notional=50000000.0,  # CNY
+            denominator=50000000.0,  # CNY
             index=REPO_7D,
             spread=0.0100,  # 100bp
             payment_frequency=PaymentFrequency.QUARTERLY,
@@ -875,7 +877,7 @@ class TestDifferentIndices(unittest.TestCase):
         frn = create_simple_frn(
             issue_date=datetime(2024, 1, 1),
             maturity_date=datetime(2029, 1, 1),
-            notional=1000000.0,  # EUR
+            denominator=1000000.0,  # EUR
             index=EURIBOR_3M,
             spread=0.0075,  # 75bp
             payment_frequency=PaymentFrequency.QUARTERLY,

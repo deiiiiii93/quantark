@@ -23,7 +23,7 @@ Example:
     ...     initial_price=100.0,
     ...     strike=100.0,
     ...     maturity=1.0,
-    ...     notional=1_000_000.0,
+    ...     contract_multiplier=1.0,
     ... )
 """
 
@@ -161,7 +161,7 @@ def _validate_core_params(
     initial_price: float,
     strike: float,
     maturity: float,
-    notional: float,
+    contract_multiplier: float,
     func_name: str,
 ) -> None:
     """Validate core parameters common to all helpers."""
@@ -173,8 +173,10 @@ def _validate_core_params(
         raise ValidationError(f"{func_name}: strike must be positive, got {strike}")
     if maturity <= 0:
         raise ValidationError(f"{func_name}: maturity must be positive, got {maturity}")
-    if notional <= 0:
-        raise ValidationError(f"{func_name}: notional must be positive, got {notional}")
+    if contract_multiplier <= 0:
+        raise ValidationError(
+            f"{func_name}: contract_multiplier must be positive, got {contract_multiplier}"
+        )
 
 
 def _extract_config_kwargs(kwargs: dict) -> tuple:
@@ -223,7 +225,7 @@ def create_standard_snowball(
     initial_price: float,
     strike: float,
     maturity: float,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = 1.0,
     ko_barrier: Optional[float] = None,
     ko_rate: float = 0.15,
     ki_barrier: Optional[float] = None,
@@ -244,7 +246,7 @@ def create_standard_snowball(
         initial_price: Reference price for payoff calculations
         strike: Strike price for embedded option
         maturity: Time to maturity in years
-        notional: Notional principal (default: 1,000,000)
+        contract_multiplier: Underlying units represented by one contract
         ko_barrier: Knock-out barrier (default: 103% of initial_price)
         ko_rate: Annualized knock-out rate (default: 15%)
         ki_barrier: Knock-in barrier (default: 75% of initial_price)
@@ -265,7 +267,7 @@ def create_standard_snowball(
         103.0
     """
     _validate_core_params(
-        initial_price, strike, maturity, notional, "create_standard_snowball"
+        initial_price, strike, maturity, contract_multiplier, "create_standard_snowball"
     )
 
     # Apply defaults
@@ -318,7 +320,7 @@ def create_standard_snowball(
         initial_price=initial_price,
         strike=strike,
         maturity=maturity,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
@@ -331,7 +333,7 @@ def create_stepdown_snowball(
     initial_price: float,
     strike: float,
     maturity: float,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = 1.0,
     initial_ko_barrier: Optional[float] = None,
     stepdown_rate: float = 0.005,
     ko_rate: float = 0.15,
@@ -351,7 +353,7 @@ def create_stepdown_snowball(
         initial_price: Reference price for payoff calculations
         strike: Strike price for embedded option
         maturity: Time to maturity in years
-        notional: Notional principal (default: 1,000,000)
+        contract_multiplier: Underlying units represented by one contract
         initial_ko_barrier: Starting KO barrier (default: 103% of initial_price)
         stepdown_rate: Rate of barrier decrease per period as fraction of initial_price
                       (default: 0.5% per period)
@@ -375,7 +377,7 @@ def create_stepdown_snowball(
         [103.0, 102.5, 102.0, 101.5]
     """
     _validate_core_params(
-        initial_price, strike, maturity, notional, "create_stepdown_snowball"
+        initial_price, strike, maturity, contract_multiplier, "create_stepdown_snowball"
     )
 
     # Apply defaults
@@ -436,7 +438,7 @@ def create_stepdown_snowball(
         initial_price=initial_price,
         strike=strike,
         maturity=maturity,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
@@ -449,7 +451,7 @@ def create_european_ki_snowball(
     initial_price: float,
     strike: float,
     maturity: float,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = 1.0,
     ko_barrier: Optional[float] = None,
     ko_rate: float = 0.15,
     ki_barrier: Optional[float] = None,
@@ -468,7 +470,7 @@ def create_european_ki_snowball(
         initial_price: Reference price for payoff calculations
         strike: Strike price for embedded option
         maturity: Time to maturity in years
-        notional: Notional principal (default: 1,000,000)
+        contract_multiplier: Underlying units represented by one contract
         ko_barrier: Knock-out barrier (default: 103% of initial_price)
         ko_rate: Annualized knock-out rate (default: 15%)
         ki_barrier: Knock-in barrier (default: 75% of initial_price)
@@ -491,7 +493,11 @@ def create_european_ki_snowball(
         [1.0]
     """
     _validate_core_params(
-        initial_price, strike, maturity, notional, "create_european_ki_snowball"
+        initial_price,
+        strike,
+        maturity,
+        contract_multiplier,
+        "create_european_ki_snowball",
     )
 
     # Apply defaults
@@ -546,7 +552,7 @@ def create_european_ki_snowball(
         initial_price=initial_price,
         strike=strike,
         maturity=maturity,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
@@ -559,7 +565,7 @@ def create_parachute_snowball(
     initial_price: float,
     strike: float,
     maturity: float,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = 1.0,
     ko_barrier: Optional[float] = None,
     ko_rate: float = 0.15,
     ki_barrier: Optional[float] = None,
@@ -579,7 +585,7 @@ def create_parachute_snowball(
         initial_price: Reference price for payoff calculations
         strike: Strike price for embedded option
         maturity: Time to maturity in years
-        notional: Notional principal (default: 1,000,000)
+        contract_multiplier: Underlying units represented by one contract
         ko_barrier: Knock-out barrier for early observations (default: 103% of initial_price)
         ko_rate: Annualized knock-out rate (default: 15%)
         ki_barrier: Knock-in barrier, also final KO barrier (default: 75% of initial_price)
@@ -601,7 +607,11 @@ def create_parachute_snowball(
         True
     """
     _validate_core_params(
-        initial_price, strike, maturity, notional, "create_parachute_snowball"
+        initial_price,
+        strike,
+        maturity,
+        contract_multiplier,
+        "create_parachute_snowball",
     )
 
     # Apply defaults
@@ -657,7 +667,7 @@ def create_parachute_snowball(
         initial_price=initial_price,
         strike=strike,
         maturity=maturity,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
@@ -673,7 +683,7 @@ def create_airbag_snowball(
     initial_price: float,
     strike: float,
     maturity: float,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = 1.0,
     ko_barrier: Optional[float] = None,
     ko_rate: float = 0.15,
     ki_barrier: Optional[float] = None,
@@ -696,7 +706,7 @@ def create_airbag_snowball(
         initial_price: Reference price for payoff calculations
         strike: Strike price for embedded option
         maturity: Time to maturity in years
-        notional: Notional principal (default: 1,000,000)
+        contract_multiplier: Underlying units represented by one contract
         ko_barrier: Knock-out barrier (default: 103% of initial_price)
         ko_rate: Annualized knock-out rate (default: 15%)
         ki_barrier: Knock-in barrier (default: 75% of initial_price)
@@ -724,7 +734,11 @@ def create_airbag_snowball(
         0.5
     """
     _validate_core_params(
-        initial_price, strike, maturity, notional, "create_airbag_snowball"
+        initial_price,
+        strike,
+        maturity,
+        contract_multiplier,
+        "create_airbag_snowball",
     )
 
     # Apply defaults
@@ -811,7 +825,7 @@ def create_airbag_snowball(
         initial_price=initial_price,
         strike=strike,
         maturity=maturity,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,

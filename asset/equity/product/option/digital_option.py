@@ -29,6 +29,7 @@ class CashOrNothingDigitalOption(BaseEquityOption):
         maturity: Optional[float] = None,
         exercise_date: Optional[datetime] = None,
         settlement_date: Optional[datetime] = None,
+        contract_multiplier: float = 1.0,
     ):
         """
         Initialize cash-or-nothing digital option.
@@ -58,6 +59,7 @@ class CashOrNothingDigitalOption(BaseEquityOption):
             exercise_type=ExerciseType.EUROPEAN,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            contract_multiplier=contract_multiplier,
         )
 
     def validate(self) -> None:
@@ -83,9 +85,11 @@ class CashOrNothingDigitalOption(BaseEquityOption):
             raise ValidationError(f"Spot price must be non-negative, got {spot}")
 
         if self.is_call():
-            return self.payout if spot > self.strike else 0.0
+            payoff = self.payout if spot > self.strike else 0.0
         else:
-            return self.payout if spot < self.strike else 0.0
+            payoff = self.payout if spot < self.strike else 0.0
+
+        return payoff * self.contract_multiplier
 
     def intrinsic_value(self, spot: float) -> float:
         """Intrinsic value equals digital payoff."""
@@ -96,4 +100,3 @@ class CashOrNothingDigitalOption(BaseEquityOption):
             f"CashOrNothingDigitalOption("
             f"{self.option_type}, K={self.strike:.4f}, P={self.payout:.4f}, T={self.maturity:.4f})"
         )
-

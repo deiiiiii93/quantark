@@ -102,7 +102,7 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
         if price < 0:
             raise NumericalError(f"Negative price computed: {price}")
 
-        return price
+        return price * product.contract_multiplier
 
     def _validate_inputs(
         self, S: float, K: float, T: float, r: float, q: float, sigma: float, payout: float
@@ -166,4 +166,3 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
             return d1, d2
         except (OverflowError, ValueError) as e:
             raise NumericalError(f"Numerical overflow in d1/d2 calculation: {e}")
-

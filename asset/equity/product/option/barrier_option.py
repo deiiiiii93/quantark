@@ -69,6 +69,7 @@ class BarrierOption(BaseEquityOption):
         observation_type: ObservationType = ObservationType.CONTINUOUS,
         observation_dates: Optional[List[float]] = None,
         observation_schedule: Optional[ObservationSchedule] = None,
+        contract_multiplier: float = 1.0,
     ):
         """
         Initialize barrier option.
@@ -111,6 +112,7 @@ class BarrierOption(BaseEquityOption):
             exercise_type=ExerciseType.EUROPEAN,  # Barrier options are typically European
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            contract_multiplier=contract_multiplier,
         )
 
     def validate(self) -> None:
@@ -219,9 +221,11 @@ class BarrierOption(BaseEquityOption):
             raise ValidationError(f"Spot price must be non-negative, got {spot}")
 
         if self.is_call():
-            return max(spot - self.strike, 0.0)
+            intrinsic = max(spot - self.strike, 0.0)
         else:
-            return max(self.strike - spot, 0.0)
+            intrinsic = max(self.strike - spot, 0.0)
+
+        return intrinsic * self.contract_multiplier
 
     def intrinsic_value(self, spot: float) -> float:
         """

@@ -136,7 +136,9 @@ class GreeksCalculator:
 
         greeks = {}
 
-        # Calculate price if not provided
+        multiplier = product.contract_multiplier
+
+        # Calculate price if not provided (per-unit)
         if price is None:
             if product.is_call():
                 price = S * discount_div * N_d1 - K * discount_rf * N_d2
@@ -144,6 +146,8 @@ class GreeksCalculator:
                 price = K * discount_rf * stats.norm.cdf(
                     -d2
                 ) - S * discount_div * stats.norm.cdf(-d1)
+        else:
+            price = price / multiplier
         greeks["price"] = price
 
         # Delta: ∂V/∂S
@@ -162,16 +166,28 @@ class GreeksCalculator:
         greeks["vega"] = vega
 
         # Theta: ∂V/∂t (per day, divided by 365)
+        # Decomposed into three components:
+        #   convexity_theta: time decay from gamma/convexity erosion (always negative)
+        #   r_theta: time decay from interest rate cost of carry
+        #   q_theta: time decay from dividend yield
         term1 = -S * discount_div * n_d1 * sigma / (2 * sqrt_T)
         if product.is_call():
             term2 = -r * K * discount_rf * N_d2
             term3 = q * S * discount_div * N_d1
-            theta = (term1 + term2 + term3) / 365
         else:
             term2 = r * K * discount_rf * stats.norm.cdf(-d2)
             term3 = -q * S * discount_div * stats.norm.cdf(-d1)
-            theta = (term1 + term2 + term3) / 365
+
+        # Store decomposed components (per day)
+        convexity_theta = term1 / 365
+        r_theta = term2 / 365
+        q_theta = term3 / 365
+        theta = convexity_theta + r_theta + q_theta
+
         greeks["theta"] = theta
+        greeks["convexity_theta"] = convexity_theta
+        greeks["r_theta"] = r_theta
+        greeks["q_theta"] = q_theta
 
         # Rho: ∂V/∂r (divided by 100 for 1% change)
         if product.is_call():
@@ -179,6 +195,16 @@ class GreeksCalculator:
         else:
             rho = -K * T * discount_rf * stats.norm.cdf(-d2) / 100
         greeks["rho"] = rho
+
+        # Dividend Rho: ∂V/∂q (divided by 100 for 1% change)
+        if product.is_call():
+            dividend_rho = -S * T * discount_div * N_d1 / 100
+        else:
+            dividend_rho = S * T * discount_div * stats.norm.cdf(-d1) / 100
+        greeks["dividend_rho"] = dividend_rho
+
+        for key, value in greeks.items():
+            greeks[key] = value * multiplier
 
         return greeks
 
@@ -292,6 +318,22 @@ class GreeksCalculator:
             base_price=base_price,
             div_bump=config.div_bump,
         )
+
+        # Estimate theta components using fast approximation from existing Greeks
+        T = product.get_maturity(pricing_env)
+        r = pricing_env.get_rate(T)
+        q = pricing_env.get_div_yield(T)
+        theta_components = self.estimate_theta_components(
+            theta=greeks["theta"],
+            rho=greeks["rho"],
+            dividend_rho=greeks["dividend_rho"],
+            r=r,
+            q=q,
+            T=T,
+            rate_bump=config.rate_bump,
+            dividend_bump=config.div_bump,
+        )
+        greeks.update(theta_components)
 
         return greeks
 
@@ -556,6 +598,141 @@ class GreeksCalculator:
         price_up_div = engine.price(product, env_up_div)
         return price_up_div - base_price  # Per div_bump change
 
+    def estimate_theta_components(
+        self,
+        theta: float,
+        rho: float,
+        dividend_rho: float,
+        r: float,
+        q: float,
+        T: float,
+        rate_bump: float,
+        dividend_bump: float,
+    ) -> Dict[str, float]:
+        """
+        Fast estimation of theta components from existing Greeks.
+
+        Uses the relationships between theta components and other Greeks:
+            r_theta ≈ -r/T * rho / rate_bump (corrected for scale and daily conversion)
+            q_theta ≈ -q/T * dividend_rho / dividend_bump (corrected for scale and daily conversion)
+            convexity_theta ≈ theta - r_theta - q_theta
+
+        This is an approximation that avoids repricing. For exact decomposition,
+        use _calculate_numerical_theta_components() instead.
+
+        Args:
+            theta: Total theta (per day)
+            rho: Rho (sensitivity to rate, per 1% change)
+            dividend_rho: Dividend rho (sensitivity to dividend yield, per 1% change)
+            r: Interest rate (annual)
+            q: Dividend yield (annual)
+            T: Time to maturity in years
+            rate_bump: Interest rate bump size
+            dividend_bump: Dividend yield bump size
+
+        Returns:
+            Dictionary with convexity_theta, r_theta, q_theta (all per day)
+        """
+        if T < 1e-10:
+            return {
+                "convexity_theta": 0.0,
+                "r_theta": 0.0,
+                "q_theta": 0.0,
+            }
+
+        # Rho/Dividend Rho are per bump size, so divide by bump size to get raw derivative.
+        # Divide by 365 to convert annual rate decay to daily theta equivalent.
+        # Divide by T to cancel out the T term in Rho (Rho = dV/dr = T * dV/d(rT) approx).
+        r_theta = -r / T * (rho / rate_bump) / 365
+        q_theta = -q / T * (dividend_rho / dividend_bump) / 365
+        convexity_theta = theta - r_theta - q_theta
+
+        return {
+            "convexity_theta": convexity_theta,
+            "r_theta": r_theta,
+            "q_theta": q_theta,
+        }
+
+    def _calculate_numerical_theta_components(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        base_price: Optional[float] = None,
+        time_bump_days: Optional[int] = None,
+    ) -> Dict[str, float]:
+        """
+        Exact numerical theta decomposition via repricing with zeroed r/q.
+
+        This method computes exact theta components by repricing with different
+        rate and dividend yield combinations:
+            1. theta_no_rq = theta with r=0, q=0 → convexity_theta
+            2. theta_no_q = theta with q=0 → r_theta = theta_no_q - convexity_theta
+            3. theta_no_r = theta with r=0 → q_theta = theta_no_r - convexity_theta
+
+        Note: This is computationally expensive (3 extra pricings). For fast
+        estimation, use estimate_theta_components() instead.
+
+        Args:
+            product: The derivative product
+            pricing_env: Pricing environment
+            engine: Pricing engine
+            base_price: Pre-calculated base price
+            time_bump_days: Time bump in days
+
+        Returns:
+            Dictionary with convexity_theta, r_theta, q_theta (all per day)
+        """
+        from param.div import ContinuousDividendYield
+        from param.rrf import FlatRateCurve
+
+        time_bump_days = (
+            time_bump_days
+            if time_bump_days is not None
+            else self._bump_config.time_bump_days
+        )
+
+        T = product.get_maturity(pricing_env)
+        if T < 1e-10:
+            return {
+                "convexity_theta": 0.0,
+                "r_theta": 0.0,
+                "q_theta": 0.0,
+            }
+
+        # Create environments with zeroed r and/or q
+        env_no_r = deepcopy(pricing_env)
+        env_no_r.rate_curve = FlatRateCurve(0.0)
+
+        env_no_q = deepcopy(pricing_env)
+        env_no_q.div_yield = ContinuousDividendYield(0.0)
+
+        env_no_rq = deepcopy(pricing_env)
+        env_no_rq.rate_curve = FlatRateCurve(0.0)
+        env_no_rq.div_yield = ContinuousDividendYield(0.0)
+
+        # Calculate theta in each environment
+        theta_no_rq = self.calculate_numerical_theta(
+            product, env_no_rq, engine, time_bump_days=time_bump_days
+        )
+        theta_no_q = self.calculate_numerical_theta(
+            product, env_no_q, engine, time_bump_days=time_bump_days
+        )
+        theta_no_r = self.calculate_numerical_theta(
+            product, env_no_r, engine, time_bump_days=time_bump_days
+        )
+
+        # Decompose
+        convexity_theta = theta_no_rq
+        r_theta = theta_no_q - convexity_theta
+        q_theta = theta_no_r - convexity_theta
+
+        return {
+            "convexity_theta": convexity_theta,
+            "r_theta": r_theta,
+            "q_theta": q_theta,
+        }
+
     def _spot_bumped_prices(
         self,
         product: BaseEquityProduct,
@@ -623,6 +800,9 @@ class GreeksCalculator:
             "gamma": 0.0,
             "vega": 0.0,
             "theta": 0.0,
+            "convexity_theta": 0.0,
+            "r_theta": 0.0,
+            "q_theta": 0.0,
             "rho": 0.0,
             "dividend_rho": 0.0,
         }
@@ -645,7 +825,8 @@ class GreeksCalculator:
         Returns:
             Dictionary of Greeks
         """
-        price = product.get_payoff(spot)
+        multiplier = product.contract_multiplier
+        price = product.get_payoff(spot) / multiplier
 
         # Delta at expiry
         if product.is_call():
@@ -654,11 +835,14 @@ class GreeksCalculator:
             delta = -1.0 if spot < product.strike else 0.0
 
         return {
-            "price": price,
-            "delta": delta,
+            "price": price * multiplier,
+            "delta": delta * multiplier,
             "gamma": 0.0,
             "vega": 0.0,
             "theta": 0.0,
+            "convexity_theta": 0.0,
+            "r_theta": 0.0,
+            "q_theta": 0.0,
             "rho": 0.0,
         }
 

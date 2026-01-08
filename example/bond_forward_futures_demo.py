@@ -39,13 +39,13 @@ def example_1_simple_bond_forward():
     # Create underlying bond: 10-year 5% coupon bond
     issue_date = datetime(2023, 1, 15)
     maturity_date = datetime(2033, 1, 15)
-    notional = 100.0
+    denominator = 100.0
     coupon_rate = 0.05
 
     bond = create_simple_fixed_bond(
         issue_date=issue_date,
         maturity_date=maturity_date,
-        notional=notional,
+        denominator=denominator,
         coupon_rate=coupon_rate,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         day_count_convention=DayCountConvention.ACT_ACT_ISDA,
@@ -118,7 +118,7 @@ def example_2_forward_with_contracted_price():
     bond = create_simple_fixed_bond(
         issue_date=datetime(2023, 6, 15),
         maturity_date=datetime(2033, 6, 15),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.04,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
     )
@@ -180,7 +180,7 @@ def example_3_implied_repo_rate():
     bond = create_simple_fixed_bond(
         issue_date=datetime(2023, 1, 15),
         maturity_date=datetime(2033, 1, 15),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.05,
     )
 
@@ -236,7 +236,7 @@ def example_4_simple_bond_futures():
     bond1 = create_simple_fixed_bond(
         issue_date=datetime(2020, 3, 15),
         maturity_date=datetime(2030, 3, 15),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.045,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
     )
@@ -245,7 +245,7 @@ def example_4_simple_bond_futures():
     bond2 = create_simple_fixed_bond(
         issue_date=datetime(2021, 6, 15),
         maturity_date=datetime(2031, 6, 15),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.05,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
     )
@@ -254,7 +254,7 @@ def example_4_simple_bond_futures():
     bond3 = create_simple_fixed_bond(
         issue_date=datetime(2022, 9, 15),
         maturity_date=datetime(2032, 9, 15),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.035,
         payment_frequency=PaymentFrequency.SEMI_ANNUAL,
     )
@@ -328,25 +328,25 @@ def example_5_detailed_basis_analysis():
         create_simple_fixed_bond(
             issue_date=datetime(2019, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.06,
         ),
         create_simple_fixed_bond(
             issue_date=datetime(2020, 7, 15),
             maturity_date=datetime(2030, 7, 15),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.05,
         ),
         create_simple_fixed_bond(
             issue_date=datetime(2021, 3, 15),
             maturity_date=datetime(2031, 3, 15),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.04,
         ),
         create_simple_fixed_bond(
             issue_date=datetime(2022, 9, 15),
             maturity_date=datetime(2032, 9, 15),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.035,
         ),
     ]
@@ -431,7 +431,7 @@ def example_6_conversion_factors():
         bond = create_simple_fixed_bond(
             issue_date=datetime(2020, 3, 15),
             maturity_date=maturity,
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=coupon,
         )
 
@@ -462,7 +462,7 @@ def example_7_hedge_ratio():
     target_bond = create_simple_fixed_bond(
         issue_date=datetime(2022, 6, 15),
         maturity_date=datetime(2032, 6, 15),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.055,
     )
 
@@ -477,7 +477,7 @@ def example_7_hedge_ratio():
                 create_simple_fixed_bond(
                     issue_date=datetime(2021, 3, 15),
                     maturity_date=datetime(2031, 3, 15),
-                    notional=100.0,
+                    denominator=100.0,
                     coupon_rate=0.05,
                 )
             ),
@@ -545,19 +545,19 @@ def example_8_delivery_option_value():
         create_simple_fixed_bond(
             issue_date=datetime(2018, 1, 15),
             maturity_date=datetime(2028, 1, 15),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.07,  # High coupon
         ),
         create_simple_fixed_bond(
             issue_date=datetime(2020, 7, 15),
             maturity_date=datetime(2030, 7, 15),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.05,  # Medium coupon
         ),
         create_simple_fixed_bond(
             issue_date=datetime(2022, 3, 15),
             maturity_date=datetime(2032, 3, 15),
-            notional=100.0,
+            denominator=100.0,
             coupon_rate=0.03,  # Low coupon
         ),
     ]
@@ -611,7 +611,7 @@ def example_9_rate_sensitivity():
     bond = create_simple_fixed_bond(
         issue_date=datetime(2022, 6, 15),
         maturity_date=datetime(2032, 6, 15),
-        notional=100.0,
+        denominator=100.0,
         coupon_rate=0.05,
     )
 

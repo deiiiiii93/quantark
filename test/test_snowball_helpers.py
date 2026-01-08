@@ -130,7 +130,7 @@ class TestCreateStandardSnowball:
         assert isinstance(snowball, SnowballOption)
         assert snowball.initial_price == 100.0
         assert snowball.strike == 100.0
-        assert snowball.notional == 1_000_000.0
+        assert snowball.contract_multiplier == 1.0
 
     def test_default_ko_barrier(self):
         """Test default KO barrier is 103% of initial price."""
@@ -181,15 +181,15 @@ class TestCreateStandardSnowball:
         )
         assert snowball.barrier_config.ko_barrier == 105.0
 
-    def test_custom_notional(self):
-        """Test custom notional."""
+    def test_custom_contract_multiplier(self):
+        """Test custom contract multiplier."""
         snowball = create_standard_snowball(
             initial_price=100.0,
             strike=100.0,
             maturity=1.0,
-            notional=5_000_000.0,
+            contract_multiplier=10_000.0,
         )
-        assert snowball.notional == 5_000_000.0
+        assert snowball.contract_multiplier == 10_000.0
 
     def test_reverse_snowball(self):
         """Test reverse snowball creation."""
@@ -434,9 +434,8 @@ class TestAirbagPayoffCalculation:
         )
         # Spot = 50, below airbag_barrier = 60
         # Standard snowball V1: downside = participation * min(spot - strike, 0) * N / S0
-        # With airbag: downside = 0.5 * min(50 - 100, 0) * 1_000_000 / 100 = 0.5 * (-50) * 10000 = -250,000
         payoff = snowball.get_maturity_payoff_v1(spot=50.0)
-        expected = 0.5 * (50.0 - 100.0) * 1_000_000 / 100.0  # -250,000
+        expected = 0.5 * (50.0 - 100.0) * snowball.contract_multiplier
         assert payoff == pytest.approx(expected, rel=1e-6)
 
     def test_standard_payoff_above_airbag_barrier(self):
@@ -452,9 +451,8 @@ class TestAirbagPayoffCalculation:
             include_principal=False,
         )
         # Spot = 70, above airbag_barrier = 60
-        # Standard payoff: downside = 1.0 * min(70 - 100, 0) * 1_000_000 / 100 = -300,000
         payoff = snowball.get_maturity_payoff_v1(spot=70.0)
-        expected = 1.0 * (70.0 - 100.0) * 1_000_000 / 100.0  # -300,000
+        expected = 1.0 * (70.0 - 100.0) * snowball.contract_multiplier
         assert payoff == pytest.approx(expected, rel=1e-6)
 
     def test_airbag_reduces_loss(self):
@@ -502,9 +500,8 @@ class TestAirbagPayoffCalculation:
             include_principal=False,
         )
         # Spot = 50, below airbag_barrier = 60
-        # Airbag payoff uses airbag_strike=90: downside = 0.5 * min(50 - 90, 0) * 1_000_000 / 100
         payoff = snowball.get_maturity_payoff_v1(spot=50.0)
-        expected = 0.5 * (50.0 - 90.0) * 1_000_000 / 100.0  # -200,000
+        expected = 0.5 * (50.0 - 90.0) * snowball.contract_multiplier
         assert payoff == pytest.approx(expected, rel=1e-6)
 
     def test_airbag_with_principal(self):
@@ -519,10 +516,10 @@ class TestAirbagPayoffCalculation:
             include_principal=True,
         )
         # Spot = 50, below airbag_barrier = 60
-        # Payoff = principal + downside = 1_000_000 + 0.5 * (50 - 100) * 1_000_000 / 100
         payoff = snowball.get_maturity_payoff_v1(spot=50.0)
-        downside = 0.5 * (50.0 - 100.0) * 1_000_000 / 100.0  # -250,000
-        expected = 1_000_000 + downside  # 750,000
+        principal = snowball.initial_price * snowball.contract_multiplier
+        downside = 0.5 * (50.0 - 100.0) * snowball.contract_multiplier
+        expected = principal + downside
         assert payoff == pytest.approx(expected, rel=1e-6)
 
     def test_airbag_at_barrier_boundary(self):
@@ -540,7 +537,7 @@ class TestAirbagPayoffCalculation:
         # Spot = 60, exactly at airbag_barrier
         # Standard payoff applies (spot >= airbag_barrier, strict inequality for airbag)
         payoff = snowball.get_maturity_payoff_v1(spot=60.0)
-        expected = 1.0 * (60.0 - 100.0) * 1_000_000 / 100.0  # -400,000
+        expected = 1.0 * (60.0 - 100.0) * snowball.contract_multiplier
         assert payoff == pytest.approx(expected, rel=1e-6)
 
     def test_airbag_reverse_snowball(self):
@@ -559,10 +556,8 @@ class TestAirbagPayoffCalculation:
         # Reverse snowball: loss when spot > strike
         # Airbag applies when spot > airbag_barrier
         # Spot = 150, above airbag_barrier = 140
-        # Airbag payoff: downside = 0.5 * min(strike - spot, 0) * N / S0
-        #              = 0.5 * min(100 - 150, 0) * 1_000_000 / 100 = -250,000
         payoff = snowball.get_maturity_payoff_v1(spot=150.0)
-        expected = 0.5 * (100.0 - 150.0) * 1_000_000 / 100.0  # -250,000
+        expected = 0.5 * (100.0 - 150.0) * snowball.contract_multiplier
         assert payoff == pytest.approx(expected, rel=1e-6)
 
     def test_no_airbag_config(self):
@@ -577,7 +572,7 @@ class TestAirbagPayoffCalculation:
         )
         # No airbag config, standard payoff at any spot
         payoff = snowball.get_maturity_payoff_v1(spot=50.0)
-        expected = 1.0 * (50.0 - 100.0) * 1_000_000 / 100.0  # -500,000
+        expected = 1.0 * (50.0 - 100.0) * snowball.contract_multiplier
         assert payoff == pytest.approx(expected, rel=1e-6)
 
 

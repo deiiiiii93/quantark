@@ -791,8 +791,11 @@ class SnowballPDESolver(BasePDESolver):
             pricing_env, current_time, self._total_tau
         )
 
-        principal = product.notional if product.payoff_config.include_principal else 0.0
-        rebate = product.payoff_config.rebate_rate * product.notional
+        principal_per_contract = product.initial_price * product.contract_multiplier
+        principal = (
+            principal_per_contract if product.payoff_config.include_principal else 0.0
+        )
+        rebate = product.payoff_config.rebate_rate * principal_per_contract
 
         # Lower boundary (S -> 0)
         # For V0, if continuous KI, it will transition to V1
@@ -834,7 +837,10 @@ class SnowballPDESolver(BasePDESolver):
             pricing_env, current_time, self._total_tau
         )
 
-        principal = product.notional if product.payoff_config.include_principal else 0.0
+        principal_per_contract = product.initial_price * product.contract_multiplier
+        principal = (
+            principal_per_contract if product.payoff_config.include_principal else 0.0
+        )
         strike = product.strike
         initial_price = product.initial_price
         participation = product.payoff_config.participation_rate
@@ -847,12 +853,12 @@ class SnowballPDESolver(BasePDESolver):
         else:
             # Standard: embedded put, S=0 means maximum loss
             # Loss = participation × (-K/S0) × N
-            max_loss = participation * (-strike / initial_price) * product.notional
+            max_loss = participation * (-strike / initial_price) * principal_per_contract
             # Apply protection floor if applicable
             if product.payoff_config.protection_type.name == "FULL":
                 max_loss = 0.0
             elif product.payoff_config.protection_type.name == "PARTIAL":
-                floor = -product.payoff_config.protection_rate * product.notional
+                floor = -product.payoff_config.protection_rate * principal_per_contract
                 max_loss = max(max_loss, floor)
             grid[0, t_idx] = (principal + max_loss) * df_to_maturity
 

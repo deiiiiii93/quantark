@@ -129,7 +129,7 @@ def create_portfolio_for_backtesting():
     return portfolio
 
 
-def generate_historical_data_extended(num_days=800):
+def generate_historical_data_extended(num_days=300):
     """Generate extended historical market data for backtesting."""
     np.random.seed(42)
     dates = pd.date_range(start=datetime(2021, 1, 1), periods=num_days, freq="D")
@@ -142,18 +142,27 @@ def generate_historical_data_extended(num_days=800):
         vol_factor = 1 + 0.15 * abs(spot_returns[i-1]) * 10
         spot_returns[i] *= vol_factor
 
-    # Add some crisis periods
+    # Add some crisis periods with milder, economically realistic shocks
+    # Reduced from original -25%/-20% to -8%/-6% to avoid arbitrage violations
     crisis_periods = [
-        (200, 220, -0.25, 0.80),  # Crisis 1
-        (500, 520, -0.20, 0.60),  # Crisis 2
+        (100, 115, -0.08, 0.30),  # Crisis 1: -8% spot, +30% vol
+        (200, 215, -0.06, 0.25),  # Crisis 2: -6% spot, +25% vol
     ]
 
     for start, end, shock, vol_up in crisis_periods:
-        spot_returns[start:end] += np.random.normal(shock, 0.03, end-start)
+        spot_returns[start:end] += np.random.normal(shock, 0.02, end-start)
         spot_returns[start:end] *= (1 + vol_up)
 
     vol_changes = np.random.normal(0.0, 0.012, num_days)
     rate_shifts = np.random.normal(0.0, 0.0006, num_days)
+
+    # Add spot-vol correlation: vol increases when spot decreases (leverage effect)
+    # This makes scenarios more economically realistic
+    for i in range(num_days):
+        if spot_returns[i] < -0.02:  # Down days
+            vol_changes[i] += abs(spot_returns[i]) * 0.5  # Vol increases
+        elif spot_returns[i] > 0.02:  # Up days
+            vol_changes[i] -= spot_returns[i] * 0.2  # Vol decreases
 
     data = pd.DataFrame(
         {
@@ -176,7 +185,11 @@ def generate_portfolio_pnl_timeseries(portfolio, historical_data, method="Histor
     var_config = VaRConfig(
         confidence_level=0.99,
         holding_period=1,
+        lookback_days=30,  # Reduced to match backtester's minimum (30 days)
         var_method=VaRMethod.HISTORICAL,
+        calculate_component_var=False,
+        calculate_marginal_var=False,
+        calculate_factor_var=False,
     )
 
     engine = HistoricalVaREngine(config=var_config)
@@ -185,10 +198,11 @@ def generate_portfolio_pnl_timeseries(portfolio, historical_data, method="Histor
     pnl_series = []
     var_series = []
 
-    # Use 252-day rolling window for backtesting
-    window_size = 252
+    # Use 30-day rolling window for backtesting
+    window_size = 30
     start_date = historical_data.index[window_size]
 
+    base_value = portfolio.get_portfolio_value()
     for i in range(window_size, len(historical_data)):
         # Get historical data up to current date
         hist_data_window = historical_data.iloc[:i]
@@ -198,12 +212,10 @@ def generate_portfolio_pnl_timeseries(portfolio, historical_data, method="Histor
         var_series.append(result.var)
 
         # Get portfolio P&L for current scenario
-        if result.scenarios is not None and not result.scenarios.empty:
-            # Use the latest scenario P&L
-            pnl = result.scenarios.iloc[-1]['portfolio_pnl']
-        else:
-            # Fallback: estimate P&L
-            pnl = portfolio.get_portfolio_value() * historical_data.iloc[i]['spot_return']
+        scenario = historical_data.iloc[i]
+        # Reuse engine scenario revaluation for consistent shocks.
+        stressed_value = engine._revalue_portfolio_under_scenario(portfolio, scenario)
+        pnl = stressed_value - base_value
 
         pnl_series.append(pnl)
 
@@ -253,7 +265,13 @@ def main():
     print("=" * 80)
 
     # Generate portfolio P&L and VaR time series
-    portfolio_pnl, var_values = generate_portfolio_pnl_timeseries(portfolio, historical_data)
+    portfolio_pnl, var_values = generate_portfolio_pnl_timeseries(
+        portfolio, historical_data
+    )
+    # Keep only dates with realized P&L for backtesting.
+    backtest_data = historical_data.join(portfolio_pnl, how="inner")
+    backtest_data = backtest_data.rename(columns={"portfolio_pnl": "pnl"})
+    backtest_data = backtest_data.dropna(subset=["pnl"])
 
     print()
     print(f"Generated {len(portfolio_pnl)} days of data")
@@ -266,22 +284,30 @@ def main():
 
     confidence_level = 0.99
     expected_violation_rate = 1 - confidence_level
-    total_days = len(portfolio_pnl)
-    expected_violations = int(total_days * expected_violation_rate)
-
     print(f"Confidence Level: {confidence_level:.1%}")
     print(f"Expected Violation Rate: {expected_violation_rate:.2%}")
-    print(f"Total Backtesting Days: {total_days}")
-    print(f"Expected Violations (if model perfect): {expected_violations:.1f}")
+    print(f"Backtest Input Rows: {len(backtest_data)}")
     print()
 
     print("=" * 80)
     print("Running VaR Backtester")
     print("=" * 80)
 
-    # Run backtester
+    # Create VaR engine for backtesting
+    var_config = VaRConfig(
+        confidence_level=confidence_level,
+        holding_period=1,
+        lookback_days=30,  # Match backtester's minimum (30 days)
+        var_method=VaRMethod.HISTORICAL,
+        calculate_component_var=False,
+        calculate_marginal_var=False,
+        calculate_factor_var=False,
+    )
+    var_engine = HistoricalVaREngine(config=var_config)
+
+    # Run backtester with new API
     backtester = VaRBacktester(confidence_level=confidence_level)
-    backtest_result = backtester.run_backtest(portfolio_pnl, var_values)
+    backtest_result = backtester.run_backtest(portfolio, backtest_data, var_engine)
 
     print()
     print("=" * 80)
@@ -289,16 +315,20 @@ def main():
     print("=" * 80)
     print()
 
+    total_days = backtest_result.num_observations
+    expected_violations = total_days * expected_violation_rate
+
     # Summary statistics
-    print(f"Total Days: {backtest_result.total_days}")
-    print(f"Number of Violations: {backtest_result.num_violations}")
-    print(f"Violation Rate: {backtest_result.violation_rate:.2%}")
+    print(f"Total Days: {total_days}")
+    print(f"Number of Violations: {backtest_result.num_exceptions}")
+    print(f"Violation Rate: {backtest_result.exception_rate:.2%}")
     print(f"Expected Rate: {expected_violation_rate:.2%}")
     print(f"Expected Violations: {expected_violations:.1f}")
 
-    if backtest_result.num_violations > 0:
-        print(f"Average Loss on Violation Days: ${backtest_result.avg_loss_on_violations:,.2f}")
-        print(f"Maximum Single-Day Loss: ${backtest_result.max_loss:,.2f}")
+    if backtest_result.num_exceptions > 0:
+        losses = [d['actual_pnl'] for d in backtest_result.exception_details]
+        print(f"Average Loss on Violation Days: ${sum(losses)/len(losses):,.2f}")
+        print(f"Maximum Single-Day Loss: ${min(losses):,.2f}")
     else:
         print("No violations observed (model was conservative)")
 
@@ -310,30 +340,45 @@ def main():
     print("=" * 80)
     print()
 
-    violations = backtest_result.num_violations
-    zone_classification = backtest_result.zone_classification
+    violations = backtest_result.num_exceptions
+    zone_classification = backtest_result.basel_zone
+    zone_label = {
+        "green": "Zone 1 (Green)",
+        "yellow": "Zone 2 (Yellow)",
+        "red": "Zone 3 (Red)",
+    }.get(zone_classification, zone_classification)
+    basel_thresholds_apply = confidence_level == 0.99 and total_days >= 250
 
     print(f"Violations (out of {total_days} days): {violations}")
-    print(f"Basel Zone: {zone_classification}")
+    print(f"Basel Zone: {zone_label}")
 
-    if zone_classification == "Zone 1 (Green)":
+    if zone_classification == "green":
         print()
         print("✓ GREEN ZONE - Acceptable Model")
-        print("  • Violations ≤ 5")
+        if basel_thresholds_apply:
+            print("  • Violations ≤ 4 (Basel 250-day rule)")
+        else:
+            print(f"  • Violations within ~1.5× expected ({expected_violations:.1f})")
         print("  • Model is considered accurate")
         print("  • No supervisory action required")
         print("  • Continue current model")
-    elif zone_classification == "Zone 2 (Yellow)":
+    elif zone_classification == "yellow":
         print()
         print("⚠ YELLOW ZONE - Acceptable with Response")
-        print("  • Violations: 6-10")
+        if basel_thresholds_apply:
+            print("  • Violations: 5-9 (Basel 250-day rule)")
+        else:
+            print(f"  • Violations within ~2.5× expected ({expected_violations:.1f})")
         print("  • Model needs review")
         print("  • Supervisory response required")
         print("  • Consider model improvements")
     else:
         print()
         print("✗ RED ZONE - Unacceptable Model")
-        print("  • Violations ≥ 11")
+        if basel_thresholds_apply:
+            print("  • Violations ≥ 10 (Basel 250-day rule)")
+        else:
+            print(f"  • Violations exceed ~2.5× expected ({expected_violations:.1f})")
         print("  • Model is inadequate")
         print("  • Immediate supervisory action")
         print("  • Model must be revised")
@@ -352,11 +397,11 @@ def main():
     print(f"   H₀: Violation rate = {expected_violation_rate:.2%}")
     print(f"   H₁: Violation rate ≠ {expected_violation_rate:.2%}")
     print()
-    print(f"   Test Statistic (LR_POF): {backtest_result.kupiec_stat:.4f}")
-    print(f"   p-value: {backtest_result.kupiec_pvalue:.4f}")
-    print(f"   Critical Value (99%): {backtest_result.kupiec_critical_value:.4f}")
+    print(f"   Test Statistic (LR_POF): {backtest_result.kupiec_pof_statistic:.4f}")
+    print(f"   p-value: {backtest_result.kupiec_pof_pvalue:.4f}")
+    print(f"   Critical Value (99%): {11.34}")  # Chi-square(1, 0.99)
 
-    if backtest_result.kupiec_pvalue > 0.01:
+    if backtest_result.kupiec_pof_pvalue > 0.01:
         print()
         print("   ✓ PASS: Fail to reject H₀")
         print("     Violation rate is statistically consistent with expected rate")
@@ -373,7 +418,7 @@ def main():
     print(f"   H₀: Violations are independent across time")
     print(f"   H₁: Violations are not independent (clustered)")
     print()
-    print(f"   Test Statistic (LR_ind): {backtest_result.christoffersen_stat:.4f}")
+    print(f"   Test Statistic (LR_ind): {backtest_result.christoffersen_statistic:.4f}")
     print(f"   p-value: {backtest_result.christoffersen_pvalue:.4f}")
 
     if backtest_result.christoffersen_pvalue > 0.01:
@@ -393,10 +438,13 @@ def main():
     print("=" * 80)
     print()
 
-    print(f"Combined Test Statistic (LR_cc): {backtest_result.combined_stat:.4f}")
-    print(f"p-value: {backtest_result.combined_pvalue:.4f}")
+    # Combined test is not directly provided by VaRBacktestResult
+    # For simplicity, we check both tests pass
+    combined_pass = backtest_result.kupiec_pof_pass and backtest_result.christoffersen_pass
+    print(f"Kupiec POF Test: {'PASS' if backtest_result.kupiec_pof_pass else 'FAIL'}")
+    print(f"Christoffersen Test: {'PASS' if backtest_result.christoffersen_pass else 'FAIL'}")
 
-    if backtest_result.combined_pvalue > 0.01:
+    if combined_pass:
         print()
         print("✓ OVERALL: Model passes statistical validation")
         print("  VaR model is both accurate (correct violation rate)")
@@ -430,7 +478,7 @@ def main():
     print("=" * 80)
     print()
 
-    if violations <= 5 and backtest_result.kupiec_pvalue > 0.01:
+    if violations <= 5 and backtest_result.kupiec_pof_pvalue > 0.01:
         print("✓ Model Status: VALIDATED")
         print()
         print("Recommendations:")
@@ -494,7 +542,7 @@ def main():
     print("=" * 80)
     print()
     print("Key Takeaways:")
-    print(f"  • {violations}/{total_days} violations observed ({backtest_result.violation_rate:.1%})")
+    print(f"  • {violations}/{total_days} violations observed ({backtest_result.exception_rate:.1%})")
     print(f"  • Basel Zone: {zone_classification}")
     print("  • Backtesting validates model accuracy")
     print("  • Statistical tests ensure proper calibration")

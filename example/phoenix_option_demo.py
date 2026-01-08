@@ -58,7 +58,7 @@ def demo_basic_phoenix():
         coupon_rate=0.01,
         num_observations=12,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     print("\nStandard Phoenix (12 monthly observations):")
@@ -74,7 +74,8 @@ def demo_basic_phoenix():
     print(f"  Coupon Pay Type: {phoenix.coupon_config.coupon_pay_type.name}")
     print(f"  Number of KO Observations: {phoenix.num_ko_observations}")
     print(f"  Maturity: {phoenix.maturity} years")
-    print(f"  Notional: {phoenix.notional:,.0f}")
+    principal = phoenix.initial_price * phoenix.contract_multiplier
+    print(f"  Principal: {principal:,.0f}")
     print(f"  Is Reverse: {phoenix.is_reverse}")
 
 
@@ -94,7 +95,7 @@ def demo_coupon_triggering():
         coupon_rate=0.01,
         num_observations=4,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     print("\nStandard Phoenix - Coupon triggers when spot >= coupon_barrier:")
@@ -117,7 +118,7 @@ def demo_coupon_triggering():
         coupon_rate=0.01,
         num_observations=4,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     print("\nReverse Phoenix - Coupon triggers when spot <= coupon_barrier:")
@@ -146,25 +147,26 @@ def demo_coupon_payoff():
         coupon_rate=0.02,  # 2% per period
         num_observations=4,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     print("\nCoupon Payoff Calculation:")
-    print(f"  Notional: {phoenix.notional:,.0f}")
+    principal = phoenix.initial_price * phoenix.contract_multiplier
+    print(f"  Principal: {principal:,.0f}")
     print(f"  Coupon Rate: {phoenix.coupon_config.coupon_rate:.1%} per period")
     print("-" * 50)
 
     # Basic coupon payoff (full period = 1.0 year fraction)
     basic_payoff = phoenix.get_coupon_payoff(observation_idx=0, year_fraction=1.0)
     print(f"\n  Full Year Fraction (1.0):")
-    print(f"    Payoff = Notional x Rate x YearFraction")
-    print(f"    Payoff = {phoenix.notional:,.0f} x {phoenix.coupon_config.coupon_rate} x 1.0")
+    print(f"    Payoff = Principal x Rate x YearFraction")
+    print(f"    Payoff = {principal:,.0f} x {phoenix.coupon_config.coupon_rate} x 1.0")
     print(f"    Payoff = {basic_payoff:,.2f}")
 
     # Quarterly coupon
     quarterly_payoff = phoenix.get_coupon_payoff(observation_idx=0, year_fraction=0.25)
     print(f"\n  Quarterly (0.25 year fraction):")
-    print(f"    Payoff = {phoenix.notional:,.0f} x {phoenix.coupon_config.coupon_rate} x 0.25")
+    print(f"    Payoff = {principal:,.0f} x {phoenix.coupon_config.coupon_rate} x 0.25")
     print(f"    Payoff = {quarterly_payoff:,.2f}")
 
     # Coupon payoff with date calculation
@@ -209,7 +211,7 @@ def demo_day_count_conventions():
             coupon_rate=0.01,
             num_observations=4,
             maturity=1.0,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             day_count_convention=convention,
         )
 
@@ -236,7 +238,7 @@ def demo_day_count_conventions():
             coupon_rate=0.01,
             num_observations=4,
             maturity=1.0,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             day_count_convention=convention,
         )
 
@@ -260,7 +262,7 @@ def demo_phoenix_variants():
         coupon_rate=0.01,
         num_observations=4,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     # Standard Phoenix
@@ -304,7 +306,7 @@ def demo_stepdown_phoenix():
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,  # Starting KO barrier
         initial_coupon_barrier=95.0,  # Starting coupon barrier
         ko_stepdown_rate=0.01,  # Decrease by 1% of initial_price each period
@@ -350,7 +352,7 @@ def demo_ko_ki_triggering():
         coupon_rate=0.01,
         num_observations=4,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     print("\nStandard Phoenix KO/KI Triggering:")
@@ -387,11 +389,12 @@ def demo_payoff_calculations():
         coupon_rate=0.01,
         num_observations=4,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     print("\nPhoenix Payoff Calculations:")
-    print(f"  Notional: {phoenix.notional:,.0f}")
+    principal = phoenix.initial_price * phoenix.contract_multiplier
+    print(f"  Principal: {principal:,.0f}")
     print(f"  KO Rate: {phoenix.barrier_config.ko_rate:.1%}")
     print("-" * 50)
 
@@ -405,8 +408,8 @@ def demo_payoff_calculations():
     # Maturity payoff V0 (no KI)
     print("\n2. Maturity Payoff V0 (no knock-in occurred):")
     v0_payoff = phoenix.get_maturity_payoff_v0(spot=100.0)
-    print(f"   V0 Payoff = Notional x Rebate Rate")
-    print(f"   V0 Payoff = {phoenix.notional:,.0f} x {phoenix.payoff_config.rebate_rate}")
+    print(f"   V0 Payoff = Principal x Rebate Rate")
+    print(f"   V0 Payoff = {principal:,.0f} x {phoenix.payoff_config.rebate_rate}")
     print(f"   V0 Payoff = {v0_payoff:,.2f}")
 
     # Maturity payoff V1 (KI occurred)
@@ -433,7 +436,7 @@ def demo_coupon_pay_types():
         coupon_rate=0.01,
         num_observations=4,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
 
     print("\nCoupon Payment Timing Options:")

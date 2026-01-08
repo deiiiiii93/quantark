@@ -100,7 +100,7 @@ def create_basic_barrier_config(
 def create_standard_snowball(
     initial_price: float = 100.0,
     strike: float = 100.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = None,
     maturity: float = 1.0,
     barrier_config: BarrierConfig = None,
     payoff_config: PayoffConfig = None,
@@ -109,6 +109,8 @@ def create_standard_snowball(
     """Create a standard snowball option for testing."""
     if barrier_config is None:
         barrier_config = create_basic_barrier_config()
+    if contract_multiplier is None:
+        contract_multiplier = 1_000_000.0 / initial_price
 
     return SnowballOption(
         initial_price=initial_price,
@@ -116,7 +118,7 @@ def create_standard_snowball(
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=False,
     )
@@ -125,7 +127,7 @@ def create_standard_snowball(
 def create_reverse_snowball(
     initial_price: float = 100.0,
     strike: float = 100.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = None,
     maturity: float = 1.0,
     barrier_config: BarrierConfig = None,
     payoff_config: PayoffConfig = None,
@@ -143,6 +145,8 @@ def create_reverse_snowball(
             ki_observation_type=ObservationType.CONTINUOUS,
             ki_continuous=True,
         )
+    if contract_multiplier is None:
+        contract_multiplier = 1_000_000.0 / initial_price
 
     return SnowballOption(
         initial_price=initial_price,
@@ -150,10 +154,15 @@ def create_reverse_snowball(
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=True,
     )
+
+
+def get_principal(snowball: SnowballOption) -> float:
+    """Return per-contract principal based on initial price and contract multiplier."""
+    return snowball.initial_price * snowball.contract_multiplier
 
 
 # =============================================================================
@@ -186,8 +195,8 @@ class TestSnowballPDESolverBasic:
 
         # Price should be positive (option has value)
         assert price > 0
-        # Price should be less than notional (sanity check)
-        assert price < snowball.notional
+        # Price should be less than principal (sanity check)
+        assert price < get_principal(snowball)
 
     def test_reverse_snowball_pricing(self):
         """Test basic reverse snowball pricing returns a positive value."""
@@ -198,7 +207,7 @@ class TestSnowballPDESolverBasic:
         price = solver.price(snowball, env)
 
         assert price > 0
-        assert price < snowball.notional
+        assert price < get_principal(snowball)
 
     def test_invalid_product_type(self):
         """Test that solver rejects non-SnowballOption products."""

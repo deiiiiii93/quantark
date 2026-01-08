@@ -36,7 +36,7 @@ class BondForward(BaseBondForward):
         delivery_date: Date when bond is delivered
         forward_price: Agreed forward clean price (None for theoretical pricing)
         repo_rate: Repo/financing rate for carry calculation
-        contract_size: Notional per contract (default: 100,000)
+        contract_size: Denominator per contract (default: 100,000)
         is_long: True if long the forward (buying the bond), False if short
 
     Example:
@@ -48,7 +48,7 @@ class BondForward(BaseBondForward):
         >>> bond = FixedBond(
         ...     issue_date=datetime(2024, 1, 15),
         ...     maturity_date=datetime(2034, 1, 15),
-        ...     notional=100.0,
+        ...     denominator=100.0,
         ...     coupon_rate=0.05,
         ...     payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         ...     day_count_convention=DayCountConvention.ACT_ACT_ISDA
@@ -144,7 +144,7 @@ class BondForward(BaseBondForward):
                 # Exclude principal repayment (at maturity)
                 coupon_amount = cf.amount
                 if cf.payment_date == self.underlying.maturity_date:
-                    coupon_amount = cf.amount - self.underlying.notional
+                    coupon_amount = cf.amount - self.underlying.get_denominator()
                 if coupon_amount > 0:
                     coupons.append(cf)
 
@@ -317,6 +317,10 @@ class BondForward(BaseBondForward):
         implied_repo = math.log(adjusted_forward / spot_dirty_price) / time_to_delivery
 
         return implied_repo
+
+    def get_denominator(self) -> float:
+        """Get the minimum tradable notional (denominator) per contract."""
+        return self.contract_size
 
     def __repr__(self):
         direction = "Long" if self.is_long else "Short"

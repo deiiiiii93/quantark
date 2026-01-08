@@ -264,7 +264,7 @@ class BondFuturesEngine:
                 # Exclude principal
                 amount = cf.amount
                 if cf.payment_date == bond.maturity_date:
-                    amount = cf.amount - bond.notional
+                    amount = cf.amount - bond.get_denominator()
                 if amount > 0:
                     coupon_income += amount
 

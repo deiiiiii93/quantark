@@ -86,7 +86,7 @@ def demo_basic_pricing():
         strike=100.0,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         maturity=1.0,
         is_reverse=False,
     )
@@ -138,7 +138,7 @@ def demo_mc_methods():
         initial_price=100.0,
         strike=100.0,
         barrier_config=barrier_config,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         maturity=1.0,
     )
 
@@ -189,7 +189,7 @@ def demo_convergence():
         initial_price=100.0,
         strike=100.0,
         barrier_config=barrier_config,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         maturity=1.0,
     )
 
@@ -242,7 +242,7 @@ def demo_time_varying_barriers():
         initial_price=100.0,
         strike=100.0,
         barrier_config=barrier_config,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         maturity=1.0,
     )
 
@@ -290,7 +290,7 @@ def demo_coupon_timing():
             strike=100.0,
             barrier_config=barrier_config,
             accrual_config=accrual_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=1.0,
         )
 
@@ -333,7 +333,7 @@ def demo_disable_ko_after_ki():
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=1.0,
         )
 
@@ -373,7 +373,7 @@ def demo_reverse_snowball():
         initial_price=100.0,
         strike=100.0,
         barrier_config=barrier_config,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         maturity=1.0,
         is_reverse=True,
     )

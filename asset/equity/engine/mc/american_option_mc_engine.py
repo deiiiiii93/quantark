@@ -199,6 +199,9 @@ class AmericanOptionMCEngine(BaseEngine):
         else:
             result = self._price_mc_or_qmc(product, S, K, T, r, q, sigma)
 
+        contract_multiplier = product.contract_multiplier
+        result.price *= contract_multiplier
+        result.std_error *= contract_multiplier
         self._last_result = result
 
         if result.price < 0.0:

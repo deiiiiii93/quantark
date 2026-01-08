@@ -47,13 +47,13 @@ This directory contains a comprehensive implementation of fixed-rate coupon bond
 Abstract base class defining the bond product interface:
 - `get_cashflows()`: Get future cashflows
 - `get_maturity_date()`: Get maturity date
-- `get_notional()`: Get face value
+- `get_denominator()`: Get minimum tradable notional (par value)
 - `calculate_accrued_interest()`: Calculate accrued interest
 - `validate()`: Validate parameters
 
 #### Fixed Bond (`asset/bond/product/couponbond/fixed_bond.py`)
 Complete fixed-rate coupon bond implementation:
-- Configurable issue date, maturity date, notional
+- Configurable issue date, maturity date, denominator
 - Fixed coupon rate
 - Multiple payment frequencies
 - Various day count conventions
@@ -121,7 +121,7 @@ from util.enum import PaymentFrequency
 bond = create_simple_fixed_bond(
     issue_date=datetime(2023, 1, 1),
     maturity_date=datetime(2028, 1, 1),
-    notional=1000.0,
+    denominator=1000.0,
     coupon_rate=0.05,
     payment_frequency=PaymentFrequency.SEMI_ANNUAL
 )
@@ -177,7 +177,7 @@ calendar = create_calendar(CalendarType.US, year_range=(2024, 2030))
 bond = FixedBond(
     issue_date=datetime(2024, 1, 1),
     maturity_date=datetime(2029, 1, 1),
-    notional=1000.0,
+    denominator=1000.0,
     coupon_rate=0.05,
     payment_frequency=PaymentFrequency.QUARTERLY,
     day_count_convention=DayCountConvention.ACT_360,
@@ -245,4 +245,3 @@ The foundation is now in place to easily add:
 - Credit spread modeling
 - OAS (Option-Adjusted Spread) calculations
 - Bond futures and options
-

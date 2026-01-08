@@ -117,7 +117,7 @@ def create_snowball(
     ki_barrier: float = 75.0,
     ko_rate: float = 0.15,
     maturity: float = 1.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = 10_000.0,
     num_ko_obs: int = 12,
     ki_continuous: bool = True,
 ) -> SnowballOption:
@@ -136,7 +136,7 @@ def create_snowball(
         initial_price=initial_price,
         strike=initial_price,
         barrier_config=barrier_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
     )
 
@@ -315,7 +315,7 @@ def run_benchmark_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         barrier_config=barrier_config_discrete,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         maturity=1.0,
     )
     run_comparison("Discrete KI T=1Y", snowball_discrete, env, pde_solver, mc_engine, results)
@@ -365,7 +365,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,
         stepdown_rate=0.005,  # 0.5% per period
         ki_barrier=75.0,
@@ -377,7 +377,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=105.0,
         stepdown_rate=0.01,  # 1% per period
         ki_barrier=75.0,
@@ -390,7 +390,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
     )
     run_comparison("Stepdown σ=30%", snowball, env_high_vol, pde_solver, mc_engine, results)
 
@@ -405,7 +405,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -416,7 +416,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=60.0,  # Lower KI barrier
     )
@@ -427,7 +427,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=2.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         num_ko_observations=24,
@@ -445,7 +445,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -456,7 +456,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=110.0,  # Higher KO barrier
         ki_barrier=75.0,
     )
@@ -467,7 +467,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=0.5,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=80.0,
         num_observations=6,
@@ -485,7 +485,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=60.0,
@@ -499,7 +499,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=70.0,  # Higher airbag barrier (more protection)
@@ -513,7 +513,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=60.0,
@@ -528,7 +528,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         airbag_barrier=60.0,
         airbag_participation_rate=0.5,
     )
@@ -548,7 +548,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,
         stepdown_rate=0.005,
         ki_barrier=75.0,
@@ -561,7 +561,7 @@ def run_variant_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -627,7 +627,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,
         stepdown_rate=0.005,
         ki_barrier=75.0,
@@ -639,7 +639,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=110.0,
         stepdown_rate=0.015,  # 1.5% per period - creates wider spread of barriers
         ki_barrier=75.0,
@@ -655,7 +655,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -666,7 +666,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=60.0,
     )
@@ -681,7 +681,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -692,7 +692,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=110.0,
         ki_barrier=75.0,
     )
@@ -708,7 +708,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=60.0,
@@ -722,7 +722,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=70.0,
@@ -762,7 +762,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,
         stepdown_rate=0.005,
         ki_barrier=75.0,

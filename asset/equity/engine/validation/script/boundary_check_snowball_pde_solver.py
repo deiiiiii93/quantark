@@ -101,7 +101,7 @@ def create_standard_snowball(
     ki_barrier: float = 75.0,
     ko_rate: float = 0.15,
     maturity: float = 1.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = 10_000.0,
     num_ko_obs: int = 12,
     ki_continuous: bool = True,
 ) -> SnowballOption:
@@ -120,7 +120,7 @@ def create_standard_snowball(
         initial_price=initial_price,
         strike=initial_price,
         barrier_config=barrier_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
     )
 
@@ -168,7 +168,7 @@ def test_low_volatility(results: BoundaryCheckResults):
         price = solver.price(snowball, env)
         # With very low vol and KO barrier above spot, price should be positive
         # (principal + rebate if survives, KO payoff if triggered)
-        passed = price > 0 and price <= snowball.notional * 1.5
+        passed = price > 0 and price <= snowball.initial_price * snowball.contract_multiplier * 1.5
         results.add_result(
             "Low Volatility",
             passed,
@@ -234,7 +234,7 @@ def test_near_expiry(results: BoundaryCheckResults):
         # Near expiry, price should be close to terminal V0 payoff
         # (spot is between KI and KO barriers)
         terminal_v0 = snowball.get_maturity_payoff_v0(spot, env)
-        passed = abs(price - terminal_v0) < snowball.notional * 0.05
+        passed = abs(price - terminal_v0) < snowball.initial_price * snowball.contract_multiplier * 0.05
         results.add_result(
             "Near Expiry",
             passed,
@@ -263,7 +263,7 @@ def test_deep_in_ko_region(results: BoundaryCheckResults):
         # If spot starts above KO barrier and first observation is at t=0,
         # price should be immediate KO payoff
         # Otherwise, interpolated from V0 surface at high spot
-        passed = price > 0 and price <= snowball.notional * 1.5
+        passed = price > 0 and price <= snowball.initial_price * snowball.contract_multiplier * 1.5
         results.add_result(
             "Deep in KO Region",
             passed,
@@ -294,7 +294,7 @@ def test_deep_in_ki_region(results: BoundaryCheckResults):
         # Should use V1 surface (lower value due to downside exposure)
         terminal_v1 = snowball.get_maturity_payoff_v1(spot, env)
         # V1 price should be less than principal due to downside
-        passed = price < snowball.notional
+        passed = price < snowball.initial_price * snowball.contract_multiplier
         results.add_result(
             "Deep in KI Region",
             passed,
@@ -357,7 +357,7 @@ def test_v0_v1_relationship(results: BoundaryCheckResults):
 
         # For V1 comparison, we'd need to set up a knocked-in state
         # For now, check that V0 price is reasonable
-        passed = price_v0 > 0 and price_v0 <= snowball.notional * 1.5
+        passed = price_v0 > 0 and price_v0 <= snowball.initial_price * snowball.contract_multiplier * 1.5
         results.add_result(
             "V0-V1 Relationship",
             passed,
@@ -496,7 +496,7 @@ def test_principal_bounds(results: BoundaryCheckResults):
 
         # Price should be positive and bounded
         lower_bound = 0
-        upper_bound = snowball.notional * 1.5  # Principal + generous coupon estimate
+        upper_bound = snowball.initial_price * snowball.contract_multiplier * 1.5  # Principal + generous coupon estimate
         passed = lower_bound < price < upper_bound
         results.add_result(
             "Principal Bounds",
@@ -533,7 +533,7 @@ def test_continuous_vs_discrete_ki(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         barrier_config=barrier_config_discrete,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         maturity=maturity,
     )
     snowball_continuous = create_standard_snowball(ki_continuous=True)
@@ -609,7 +609,7 @@ def test_spot_sensitivity(results: BoundaryCheckResults):
         delta_down = (price_base - price_down) / 1.0
 
         # Deltas should have same sign and similar magnitude
-        passed = abs(delta_up - delta_down) < snowball.notional * 0.1
+        passed = abs(delta_up - delta_down) < snowball.initial_price * snowball.contract_multiplier * 0.1
         results.add_result(
             "Spot Sensitivity",
             passed,
@@ -638,7 +638,7 @@ def test_stepdown_snowball_basics(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,
         stepdown_rate=0.005,  # 0.5% per period
         ki_barrier=75.0,
@@ -648,7 +648,7 @@ def test_stepdown_snowball_basics(results: BoundaryCheckResults):
     try:
         price = solver.price(snowball, env)
         # Price should be positive and bounded
-        passed = 0 < price < snowball.notional * 1.5
+        passed = 0 < price < snowball.initial_price * snowball.contract_multiplier * 1.5
         results.add_result(
             "Stepdown Snowball Basics",
             passed,
@@ -672,7 +672,7 @@ def test_stepdown_vs_flat_ko(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         initial_ko_barrier=103.0,
         stepdown_rate=0.005,
         ki_barrier=75.0,
@@ -683,7 +683,7 @@ def test_stepdown_vs_flat_ko(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -719,7 +719,7 @@ def test_european_ki_snowball_basics(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -728,7 +728,7 @@ def test_european_ki_snowball_basics(results: BoundaryCheckResults):
     try:
         price = solver.price(snowball, env)
         # Price should be positive and bounded
-        passed = 0 < price < snowball.notional * 1.5
+        passed = 0 < price < snowball.initial_price * snowball.contract_multiplier * 1.5
         results.add_result(
             "European KI Snowball Basics",
             passed,
@@ -752,7 +752,7 @@ def test_european_ki_vs_continuous_ki(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -762,7 +762,7 @@ def test_european_ki_vs_continuous_ki(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -798,7 +798,7 @@ def test_parachute_snowball_basics(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -807,7 +807,7 @@ def test_parachute_snowball_basics(results: BoundaryCheckResults):
     try:
         price = solver.price(snowball, env)
         # Price should be positive and bounded
-        passed = 0 < price < snowball.notional * 1.5
+        passed = 0 < price < snowball.initial_price * snowball.contract_multiplier * 1.5
         results.add_result(
             "Parachute Snowball Basics",
             passed,
@@ -832,7 +832,7 @@ def test_parachute_vs_standard(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -842,7 +842,7 @@ def test_parachute_vs_standard(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -877,7 +877,7 @@ def test_airbag_snowball_basics(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=60.0,
@@ -889,7 +889,7 @@ def test_airbag_snowball_basics(results: BoundaryCheckResults):
     try:
         price = solver.price(snowball, env)
         # Price should be positive and bounded
-        passed = 0 < price < snowball.notional * 1.5
+        passed = 0 < price < snowball.initial_price * snowball.contract_multiplier * 1.5
         results.add_result(
             "Airbag Snowball Basics",
             passed,
@@ -913,7 +913,7 @@ def test_airbag_vs_standard(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=60.0,
@@ -926,7 +926,7 @@ def test_airbag_vs_standard(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
     )
@@ -962,7 +962,7 @@ def test_airbag_barrier_effect(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=50.0,  # Low
@@ -974,7 +974,7 @@ def test_airbag_barrier_effect(results: BoundaryCheckResults):
         initial_price=100.0,
         strike=100.0,
         maturity=1.0,
-        notional=1_000_000.0,
+        contract_multiplier=10_000.0,
         ko_barrier=103.0,
         ki_barrier=75.0,
         airbag_barrier=70.0,  # High (closer to KI)
@@ -1008,19 +1008,19 @@ def test_variant_volatility_sensitivity(results: BoundaryCheckResults):
 
     variants = [
         ("Standard", create_standard_helper(
-            initial_price=100.0, strike=100.0, maturity=1.0, notional=1_000_000.0
+            initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=10_000.0
         )),
         ("Stepdown", create_stepdown_helper(
-            initial_price=100.0, strike=100.0, maturity=1.0, notional=1_000_000.0
+            initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=10_000.0
         )),
         ("European KI", create_european_ki_helper(
-            initial_price=100.0, strike=100.0, maturity=1.0, notional=1_000_000.0
+            initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=10_000.0
         )),
         ("Parachute", create_parachute_helper(
-            initial_price=100.0, strike=100.0, maturity=1.0, notional=1_000_000.0
+            initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=10_000.0
         )),
         ("Airbag", create_airbag_helper(
-            initial_price=100.0, strike=100.0, maturity=1.0, notional=1_000_000.0,
+            initial_price=100.0, strike=100.0, maturity=1.0, contract_multiplier=10_000.0,
             airbag_barrier=60.0, airbag_participation_rate=0.5
         )),
     ]

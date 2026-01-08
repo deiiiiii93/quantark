@@ -317,7 +317,7 @@ class TestInterestRateSwap(unittest.TestCase):
         irs = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             spread=0.0,
@@ -335,7 +335,7 @@ class TestInterestRateSwap(unittest.TestCase):
         payer = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             direction=SwapDirection.PAYER,
@@ -348,7 +348,7 @@ class TestInterestRateSwap(unittest.TestCase):
         receiver = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             direction=SwapDirection.RECEIVER,
@@ -362,7 +362,7 @@ class TestInterestRateSwap(unittest.TestCase):
         irs = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
         )
@@ -375,7 +375,7 @@ class TestInterestRateSwap(unittest.TestCase):
         irs = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
         )
@@ -394,7 +394,7 @@ class TestBasisSwap(unittest.TestCase):
         swap = create_basis_swap(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             index1=SOFR,
             index2=SOFR_3M,
             spread1=0.0,
@@ -411,7 +411,7 @@ class TestBasisSwap(unittest.TestCase):
         swap = create_basis_swap(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             index1=SOFR,
             index2=SOFR_3M,
             spread1=0.001,  # 10bp on pay leg
@@ -443,10 +443,10 @@ class TestAmortizingSwap(unittest.TestCase):
             amortization_schedule=amort_schedule,
         )
         
-        # Check notional at different dates
-        self.assertEqual(irs.get_notional(datetime(2024, 6, 1)), 10000000.0)
-        self.assertEqual(irs.get_notional(datetime(2025, 6, 1)), 8000000.0)
-        self.assertEqual(irs.get_notional(datetime(2028, 6, 1)), 2000000.0)
+        # Check denominator at different dates
+        self.assertEqual(irs.get_denominator(datetime(2024, 6, 1)), 10000000.0)
+        self.assertEqual(irs.get_denominator(datetime(2025, 6, 1)), 8000000.0)
+        self.assertEqual(irs.get_denominator(datetime(2028, 6, 1)), 2000000.0)
 
 
 class TestCompoundingSwap(unittest.TestCase):
@@ -457,7 +457,7 @@ class TestCompoundingSwap(unittest.TestCase):
         irs = create_compounding_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR,
             spread=0.0005,  # 5bp
@@ -492,7 +492,7 @@ class TestIRSPricing(unittest.TestCase):
         test_swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.04,
             index=SOFR_3M,
             direction=SwapDirection.PAYER,
@@ -505,7 +505,7 @@ class TestIRSPricing(unittest.TestCase):
         at_market = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=par_rate,
             index=SOFR_3M,
             direction=SwapDirection.PAYER,
@@ -521,7 +521,7 @@ class TestIRSPricing(unittest.TestCase):
         payer = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             direction=SwapDirection.PAYER,
@@ -530,7 +530,7 @@ class TestIRSPricing(unittest.TestCase):
         receiver = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             direction=SwapDirection.RECEIVER,
@@ -547,7 +547,7 @@ class TestIRSPricing(unittest.TestCase):
         irs = create_vanilla_irs(
             effective_date=datetime(2020, 1, 15),
             maturity_date=datetime(2022, 1, 15),  # Already matured
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
         )
@@ -562,7 +562,7 @@ class TestIRSPricing(unittest.TestCase):
         high_rate_swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.05,  # Higher than curve rate
             index=SOFR_3M,
             direction=SwapDirection.PAYER,
@@ -594,7 +594,7 @@ class TestBasisSwapPricing(unittest.TestCase):
         swap = create_basis_swap(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             index1=SOFR,
             index2=SOFR_3M,
             spread1=0.0,
@@ -611,7 +611,7 @@ class TestBasisSwapPricing(unittest.TestCase):
         swap = create_basis_swap(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             index1=SOFR,
             index2=SOFR_3M,
             spread1=0.0,
@@ -642,7 +642,7 @@ class TestRiskMetrics(unittest.TestCase):
         self.swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             direction=SwapDirection.PAYER,
@@ -718,7 +718,7 @@ class TestFullAnalysis(unittest.TestCase):
         swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
         )
@@ -754,7 +754,7 @@ class TestDifferentIndices(unittest.TestCase):
         swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR,
         )
@@ -768,7 +768,7 @@ class TestDifferentIndices(unittest.TestCase):
         swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.035,
             index=EURIBOR_3M,
         )
@@ -782,7 +782,7 @@ class TestDifferentIndices(unittest.TestCase):
         swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=70000000.0,  # CNY
+            denominator=70000000.0,  # CNY
             fixed_rate=0.025,
             index=SHIBOR_3M,
         )
@@ -810,7 +810,7 @@ class TestEdgeCases(unittest.TestCase):
         short_swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2024, 7, 15),  # 6 months
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
         )
@@ -823,7 +823,7 @@ class TestEdgeCases(unittest.TestCase):
         long_swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2054, 1, 15),  # 30 years
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
         )
@@ -836,7 +836,7 @@ class TestEdgeCases(unittest.TestCase):
         swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             spread=0.0,
@@ -850,7 +850,7 @@ class TestEdgeCases(unittest.TestCase):
         swap = create_vanilla_irs(
             effective_date=datetime(2024, 1, 15),
             maturity_date=datetime(2029, 1, 15),
-            notional=10000000.0,
+            denominator=10000000.0,
             fixed_rate=0.045,
             index=SOFR_3M,
             spread=-0.001,  # Negative spread
@@ -862,4 +862,3 @@ class TestEdgeCases(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

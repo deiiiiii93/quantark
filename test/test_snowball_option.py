@@ -74,7 +74,7 @@ def create_basic_barrier_config(
 def create_standard_snowball(
     initial_price: float = 100.0,
     strike: float = 100.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = None,
     maturity: float = 1.0,
     barrier_config: BarrierConfig = None,
     payoff_config: PayoffConfig = None,
@@ -82,13 +82,15 @@ def create_standard_snowball(
     """Create a standard snowball option for testing."""
     if barrier_config is None:
         barrier_config = create_basic_barrier_config()
+    if contract_multiplier is None:
+        contract_multiplier = 1.0
 
     return SnowballOption(
         initial_price=initial_price,
         strike=strike,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=False,
     )
@@ -97,7 +99,7 @@ def create_standard_snowball(
 def create_reverse_snowball(
     initial_price: float = 100.0,
     strike: float = 100.0,
-    notional: float = 1_000_000.0,
+    contract_multiplier: float = None,
     maturity: float = 1.0,
     barrier_config: BarrierConfig = None,
     payoff_config: PayoffConfig = None,
@@ -105,16 +107,23 @@ def create_reverse_snowball(
     """Create a reverse snowball option for testing."""
     if barrier_config is None:
         barrier_config = create_basic_barrier_config()
+    if contract_multiplier is None:
+        contract_multiplier = 1.0
 
     return SnowballOption(
         initial_price=initial_price,
         strike=strike,
         barrier_config=barrier_config,
         payoff_config=payoff_config,
-        notional=notional,
+        contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=True,
     )
+
+
+def get_principal(snowball: SnowballOption) -> float:
+    """Return per-contract principal based on initial price and contract multiplier."""
+    return snowball.initial_price * snowball.contract_multiplier
 
 
 # =============================================================================
@@ -131,7 +140,7 @@ class TestSnowballCreation:
 
         assert snowball.initial_price == 100.0
         assert snowball.strike == 100.0
-        assert snowball.notional == 1_000_000.0
+        assert get_principal(snowball) == 100.0
         assert snowball.maturity == 1.0
         assert snowball.is_reverse is False
         assert snowball.is_standard is True
@@ -142,7 +151,7 @@ class TestSnowballCreation:
 
         assert snowball.initial_price == 100.0
         assert snowball.strike == 100.0
-        assert snowball.notional == 1_000_000.0
+        assert get_principal(snowball) == 100.0
         assert snowball.maturity == 1.0
         assert snowball.is_reverse is True
         assert snowball.is_standard is False
@@ -155,7 +164,7 @@ class TestSnowballCreation:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             initial_date=datetime(2024, 1, 1),
             exercise_date=datetime(2025, 1, 1),
             settlement_date=datetime(2025, 1, 3),
@@ -173,7 +182,7 @@ class TestSnowballCreation:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=0.5,
             tenor=1.0,
         )
@@ -263,7 +272,7 @@ class TestBarrierConfiguration:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=1.0,
         )
         assert snowball_without_ki.has_ki_barrier is False
@@ -284,7 +293,7 @@ class TestBarrierConfiguration:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=1.0,
         )
 
@@ -311,7 +320,7 @@ class TestBarrierConfiguration:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=1.0,
         )
 
@@ -428,7 +437,7 @@ class TestPayoffCalculations:
             barrier_config=barrier_config,
             payoff_config=payoff_config,
             accrual_config=accrual_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=1.0,
             initial_date=datetime(2024, 1, 1),
         )
@@ -446,7 +455,9 @@ class TestPayoffCalculations:
             snowball.annualization_day_count,
             pricing_env.bus_days_in_year,
         )
-        expected_payoff = snowball.notional * barrier_config.ko_rate * expected_accrual
+        expected_payoff = (
+            get_principal(snowball) * barrier_config.ko_rate * expected_accrual
+        )
 
         assert len(records) == 1
         assert abs(records[0].payoff - expected_payoff) < 1e-10
@@ -494,13 +505,14 @@ class TestPayoffCalculations:
             payoff_config=payoff_config,
         )
         snowball.accrual_config = accrual_config
+        principal = get_principal(snowball)
 
         # V1 payoff when spot = 90 (below strike of 100)
         # For standard: participation × (Spot - Strike) = 1.0 × (90 - 100) = -10
         v1_payoff = snowball.get_maturity_payoff_v1(spot=90.0)
 
-        # Principal + participation * (spot - strike) scaled by notional / initial_price
-        expected = 1_000_000.0 + (90.0 - 100.0) * (1_000_000.0 / 100.0)
+        # Principal + participation * (spot - strike) scaled by contract multiplier
+        expected = principal + (90.0 - 100.0) * snowball.contract_multiplier
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_with_protection(self):
@@ -519,17 +531,18 @@ class TestPayoffCalculations:
             payoff_config=payoff_config,
         )
         snowball.accrual_config = accrual_config
+        principal = get_principal(snowball)
 
         # V1 payoff with 50% protection
-        # Downside floor = -protection_rate * notional = -500,000
+        # Downside floor = -protection_rate * principal = -500,000
         # When spot = 50 (deep below strike)
         # Unprotected downside = 1.0 * (50 - 100) = -50
         # Protected downside is max(-50, -500,000) = -50 (not floored since small)
         v1_payoff = snowball.get_maturity_payoff_v1(spot=50.0)
 
-        expected = 1_000_000.0 + max(
-            (50.0 - 100.0) * (1_000_000.0 / 100.0),
-            -500_000.0,
+        expected = principal + max(
+            (50.0 - 100.0) * snowball.contract_multiplier,
+            -0.5 * principal,
         )
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
@@ -546,12 +559,13 @@ class TestPayoffCalculations:
         )
         snowball = create_standard_snowball(payoff_config=payoff_config)
         snowball.accrual_config = accrual_config
+        principal = get_principal(snowball)
 
         # V1 payoff when spot = 110 (above strike of 100)
         # Standard: Short Put is OTM. Downside = min(110 - 100, 0) = 0.
         v1_payoff = snowball.get_maturity_payoff_v1(spot=110.0)
 
-        expected = 1_000_000.0 + 0.0  # = 1,000,000
+        expected = principal + 0.0
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_without_principal(self):
@@ -571,8 +585,8 @@ class TestPayoffCalculations:
         # V1 payoff when spot = 90
         v1_payoff = snowball.get_maturity_payoff_v1(spot=90.0)
 
-        # No principal, just participation * (spot - strike) scaled by notional / initial_price
-        expected = (90.0 - 100.0) * (1_000_000.0 / 100.0)
+        # No principal, just participation * (spot - strike) scaled by contract multiplier
+        expected = (90.0 - 100.0) * snowball.contract_multiplier
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_with_participation_rate(self):
@@ -588,12 +602,13 @@ class TestPayoffCalculations:
         )
         snowball = create_standard_snowball(payoff_config=payoff_config)
         snowball.accrual_config = accrual_config
+        principal = get_principal(snowball)
 
         # V1 payoff when spot = 80
         # participation × (Spot - Strike) = 0.5 × (80 - 100) = -10
         v1_payoff = snowball.get_maturity_payoff_v1(spot=80.0)
 
-        expected = 1_000_000.0 + 0.5 * (80.0 - 100.0) * (1_000_000.0 / 100.0)
+        expected = principal + 0.5 * (80.0 - 100.0) * snowball.contract_multiplier
         assert abs(v1_payoff - expected) < 0.01, f"Expected {expected}, got {v1_payoff}"
 
     def test_v1_payoff_reverse_snowball(self):
@@ -612,12 +627,13 @@ class TestPayoffCalculations:
             strike=100.0,
         )
         snowball.accrual_config = accrual_config
+        principal = get_principal(snowball)
 
         # Case 1: Spot > Strike (Loss for Short Call)
         # Spot = 110.0, Strike = 100.0
-        # Payoff = Principal + 1.0 * (Strike - Spot) scaled by notional / initial_price
+        # Payoff = Principal + 1.0 * (Strike - Spot) scaled by contract multiplier
         v1_payoff_loss = snowball.get_maturity_payoff_v1(spot=110.0)
-        expected_loss = 1_000_000.0 + (100.0 - 110.0) * (1_000_000.0 / 100.0)
+        expected_loss = principal + (100.0 - 110.0) * snowball.contract_multiplier
         assert abs(v1_payoff_loss - expected_loss) < 0.01, (
             f"Loss case: Expected {expected_loss}, got {v1_payoff_loss}"
         )
@@ -626,7 +642,7 @@ class TestPayoffCalculations:
         # Spot = 90.0, Strike = 100.0
         # Reverse: Short Call is OTM. Downside = min(100 - 90, 0) = 0.
         v1_payoff_gain = snowball.get_maturity_payoff_v1(spot=90.0)
-        expected_gain = 1_000_000.0 + 0.0
+        expected_gain = principal + 0.0
         assert abs(v1_payoff_gain - expected_gain) < 0.01, (
             f"Gain case: Expected {expected_gain}, got {v1_payoff_gain}"
         )
@@ -640,7 +656,7 @@ class TestIntrinsicValue:
         snowball = create_standard_snowball()
 
         # ITM: spot < strike
-        assert snowball.intrinsic_value(90.0) == 10.0
+        assert snowball.intrinsic_value(90.0) == 10.0 * snowball.contract_multiplier
         # ATM: spot == strike
         assert snowball.intrinsic_value(100.0) == 0.0
         # OTM: spot > strike
@@ -655,7 +671,7 @@ class TestIntrinsicValue:
         # ATM: spot == strike
         assert snowball.intrinsic_value(100.0) == 0.0
         # ITM: spot > strike
-        assert snowball.intrinsic_value(110.0) == 10.0
+        assert snowball.intrinsic_value(110.0) == 10.0 * snowball.contract_multiplier
 
     def test_intrinsic_value_negative_spot_raises(self):
         """Test that negative spot raises ValidationError."""
@@ -680,7 +696,7 @@ class TestBaseClassMethods:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             maturity=0.5,
             tenor=1.0,
         )
@@ -691,10 +707,10 @@ class TestBaseClassMethods:
         snowball = create_standard_snowball(maturity=0.75)
         assert snowball.get_tenor() == 0.75
 
-    def test_get_notional(self):
-        """Test get_notional method."""
-        snowball = create_standard_snowball(notional=2_000_000.0)
-        assert snowball.get_notional() == 2_000_000.0
+    def test_contract_multiplier(self):
+        """Test contract multiplier storage."""
+        snowball = create_standard_snowball(contract_multiplier=20_000.0)
+        assert snowball.contract_multiplier == 20_000.0
 
     def test_moneyness(self):
         """Test moneyness calculation."""
@@ -733,7 +749,7 @@ class TestValidationErrors:
                 initial_price=-100.0,
                 strike=100.0,
                 barrier_config=barrier_config,
-                notional=1_000_000.0,
+                contract_multiplier=10_000.0,
                 maturity=1.0,
             )
 
@@ -746,20 +762,22 @@ class TestValidationErrors:
                 initial_price=100.0,
                 strike=-100.0,
                 barrier_config=barrier_config,
-                notional=1_000_000.0,
+                contract_multiplier=10_000.0,
                 maturity=1.0,
             )
 
-    def test_negative_notional_raises(self):
-        """Test that negative notional raises ValidationError."""
+    def test_negative_contract_multiplier_raises(self):
+        """Test that negative contract multiplier raises ValidationError."""
         barrier_config = create_basic_barrier_config()
 
-        with pytest.raises(ValidationError, match="Notional must be positive"):
+        with pytest.raises(
+            ValidationError, match="Contract multiplier must be positive"
+        ):
             SnowballOption(
                 initial_price=100.0,
                 strike=100.0,
                 barrier_config=barrier_config,
-                notional=-1_000_000.0,
+                contract_multiplier=-10_000.0,
                 maturity=1.0,
             )
 
@@ -772,7 +790,7 @@ class TestValidationErrors:
                 initial_price=100.0,
                 strike=100.0,
                 barrier_config=barrier_config,
-                notional=1_000_000.0,
+                contract_multiplier=10_000.0,
                 maturity=-1.0,
             )
 
@@ -785,7 +803,7 @@ class TestValidationErrors:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             exercise_date=datetime(2025, 1, 1),
         )
         assert snowball.exercise_date == datetime(2025, 1, 1)
@@ -804,7 +822,7 @@ class TestValidationErrors:
                 initial_price=100.0,
                 strike=100.0,
                 barrier_config=barrier_config,
-                notional=1_000_000.0,
+                contract_multiplier=10_000.0,
                 maturity=1.0,
             )
 
@@ -825,7 +843,7 @@ class TestValidationErrors:
                 initial_price=100.0,
                 strike=100.0,
                 barrier_config=barrier_config,
-                notional=1_000_000.0,
+                contract_multiplier=10_000.0,
                 maturity=1.0,
             )
 
@@ -836,7 +854,7 @@ class TestValidationErrors:
             initial_price=100.0,
             strike=100.0,
             barrier_config=barrier_config,
-            notional=1_000_000.0,
+            contract_multiplier=10_000.0,
             exercise_date=datetime(2024, 1, 1),
         )
         pricing_env = PricingEnvironment(
@@ -905,7 +923,7 @@ class TestEdgeCases:
                 initial_price=100.0,
                 strike=0.0,
                 barrier_config=barrier_config,
-                notional=1_000_000.0,
+                contract_multiplier=10_000.0,
                 maturity=1.0,
             )
 
@@ -921,12 +939,12 @@ class TestEdgeCases:
 
         assert snowball.get_maturity() == 10.0
 
-    def test_high_notional(self):
-        """Test with high notional value."""
-        snowball = create_standard_snowball(notional=1_000_000_000.0)  # 1 billion
+    def test_high_contract_multiplier(self):
+        """Test with high contract multiplier value."""
+        snowball = create_standard_snowball(contract_multiplier=10_000_000.0)  # 1 billion
 
-        assert snowball.notional == 1_000_000_000.0
-        assert snowball.get_notional() == 1_000_000_000.0
+        assert snowball.contract_multiplier == 10_000_000.0
+        assert get_principal(snowball) == 1_000_000_000.0
 
 
 class TestReprAndStr:

@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "execution_timestamp": "2025-11-24T23:09:14.680830",
-    "total_execution_time": 0.01764702796936035,
+    "execution_timestamp": "2026-01-08T14:14:23.188683",
+    "total_execution_time": 0.009679794311523438,
     "num_scenarios": 8
   },
   "config": {
@@ -24,9 +24,10 @@
       "delta": 97.34345484261915,
       "gamma": 0.872112252404048,
       "vega": 417.1041125636309,
-      "theta": -42.42607967244069,
+      "theta": -42.426079672440686,
       "rho": 355.96790653555513
-    }
+    },
+    "fi_metrics": {}
   },
   "scenarios": [
     {
@@ -40,10 +41,10 @@
         "delta": 77.13216914971834,
         "gamma": 0.5416908426220403,
         "vega": 318.4918994254005,
-        "theta": -41.184124798468176,
+        "theta": -41.18412479846816,
         "rho": 203.1315472646241
       },
-      "execution_time": 0.002329111099243164,
+      "execution_time": 0.0011827945709228516,
       "stresses": [
         {
           "parameter": "spot",
@@ -51,7 +52,8 @@
           "stress_value": -0.15,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -59,12 +61,13 @@
           "stress_value": 0.4,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -77,12 +80,15 @@
             "delta": 32.39674643884456,
             "gamma": 1.1357632235591397,
             "vega": 32.31068908022072,
-            "theta": -3.470274454454203,
+            "theta": -3.470274454454202,
+            "convexity_theta": -3.0982852542677395,
+            "r_theta": -0.4851559171988654,
+            "q_theta": 0.11316671701240223,
             "rho": 17.70819097775859
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
@@ -95,12 +101,15 @@
             "delta": 28.298674474440638,
             "gamma": -0.6196126998808068,
             "vega": -17.62701316676539,
-            "theta": 1.168998670915549,
+            "theta": 1.1689986709155489,
+            "convexity_theta": 1.6902615365391467,
+            "r_theta": -0.6201143997466437,
+            "q_theta": 0.09885153412304606,
             "rho": 22.634175590752495
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -113,7 +122,10 @@
             "delta": 16.43674823643314,
             "gamma": 0.02554031894370733,
             "vega": 303.8082235119452,
-            "theta": -38.88284901492952,
+            "theta": -38.88284901492951,
+            "convexity_theta": -34.95875448630601,
+            "r_theta": -4.459977553318165,
+            "q_theta": 0.5358830246946695,
             "rho": 162.78918069611302
           }
         }
@@ -127,7 +139,7 @@
             "delta": 60.6954209132852,
             "gamma": 0.5161505236783329,
             "vega": 14.683675913455328,
-            "theta": -2.301275783538654,
+            "theta": -2.301275783538653,
             "rho": 40.34236656851108
           }
         },
@@ -139,11 +151,12 @@
             "delta": 16.43674823643314,
             "gamma": 0.02554031894370733,
             "vega": 303.8082235119452,
-            "theta": -38.88284901492952,
+            "theta": -38.88284901492951,
             "rho": 162.78918069611302
           }
         }
-      }
+      },
+      "fi_metrics": {}
     },
     {
       "name": "Fed Rate Hike",
@@ -159,7 +172,7 @@
         "theta": -47.32625598872447,
         "rho": 301.51992404678504
       },
-      "execution_time": 0.003329038619995117,
+      "execution_time": 0.0012140274047851562,
       "stresses": [
         {
           "parameter": "rate",
@@ -167,7 +180,8 @@
           "stress_value": 0.02,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "spot",
@@ -175,7 +189,8 @@
           "stress_value": -0.05,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -183,12 +198,13 @@
           "stress_value": 0.15,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -201,12 +217,15 @@
             "delta": 49.62775964228225,
             "gamma": 1.3702468032686355,
             "vega": 39.997825339005985,
-            "theta": -4.11854600334598,
+            "theta": -4.118546003345979,
+            "convexity_theta": -3.1505136397162237,
+            "r_theta": -1.1617845759318168,
+            "q_theta": 0.19375221230206086,
             "rho": 30.289383586793793
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
@@ -219,12 +238,15 @@
             "delta": 18.324621936785665,
             "gamma": -0.647462778157932,
             "vega": -18.899590243518666,
-            "theta": 0.980633478048927,
+            "theta": 0.9806334780489269,
+            "convexity_theta": 1.488666354797703,
+            "r_theta": -0.5795742089677337,
+            "q_theta": 0.07154133221895774,
             "rho": 15.11032759094449
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -238,6 +260,9 @@
             "gamma": 0.030512962016269518,
             "vega": 372.4232117229962,
             "theta": -44.188343463427415,
+            "convexity_theta": -35.20164603957086,
+            "r_theta": -9.823788986757958,
+            "q_theta": 0.837091562901402,
             "rho": 256.1202128690467
           }
         }
@@ -251,7 +276,7 @@
             "delta": 67.95238157906792,
             "gamma": 0.7227840251107035,
             "vega": 21.09823509548732,
-            "theta": -3.137912525297053,
+            "theta": -3.137912525297052,
             "rho": 45.39971117773828
           }
         },
@@ -267,23 +292,24 @@
             "rho": 256.1202128690467
           }
         }
-      }
+      },
+      "fi_metrics": {}
     },
     {
       "name": "AAPL Specific Risk",
       "description": "AAPL drops 20% while GOOGL unaffected",
-      "portfolio_value": 10264.46919641593,
-      "portfolio_pnl": -1690.0711879939827,
-      "portfolio_pnl_pct": -14.137483614159091,
+      "portfolio_value": 10264.469196415932,
+      "portfolio_pnl": -1690.0711879939809,
+      "portfolio_pnl_pct": -14.137483614159077,
       "greeks": {
-        "market_value": 10264.46919641593,
+        "market_value": 10264.469196415932,
         "delta": 84.17155571559464,
         "gamma": 0.4723796233202913,
         "vega": 405.36785042359486,
-        "theta": -41.85137912387902,
+        "theta": -41.85137912387901,
         "rho": 345.79360119547187
       },
-      "execution_time": 0.002089977264404297,
+      "execution_time": 0.0011610984802246094,
       "stresses": [
         {
           "parameter": "spot",
@@ -291,7 +317,8 @@
           "stress_value": -0.2,
           "level": "underlying",
           "target": "AAPL",
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -299,12 +326,13 @@
           "stress_value": 0.5,
           "level": "underlying",
           "target": "AAPL",
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -318,29 +346,35 @@
             "gamma": 1.0206800221490278,
             "vega": 27.55836059802375,
             "theta": -3.114808962178713,
+            "convexity_theta": -2.8313384176051795,
+            "r_theta": -0.36956953554534855,
+            "q_theta": 0.0860989909718148,
             "rho": 13.489288047405223
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
           "original_value": -247.75590623927394,
-          "stressed_value": -1187.3741758281135,
-          "pnl": -939.6182695888396,
-          "pnl_pct": 379.25161254536926,
+          "stressed_value": -1187.3741758281128,
+          "pnl": -939.6182695888389,
+          "pnl_pct": 379.25161254536897,
           "greeks": {
-            "market_value": -1187.3741758281135,
+            "market_value": -1187.3741758281128,
             "delta": 32.11646981130485,
             "gamma": -0.5817627358775685,
             "vega": -15.707593868694353,
-            "theta": 1.0287863183297785,
-            "rho": 25.20675276592348
+            "theta": 1.0287863183297787,
+            "convexity_theta": 1.6137938906192826,
+            "r_theta": -0.6905959661896842,
+            "q_theta": 0.10558839390018032,
+            "rho": 25.206752765923472
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -353,7 +387,10 @@
             "delta": 25.866642817029454,
             "gamma": 0.03346233704883209,
             "vega": 393.51708369426547,
-            "theta": -39.765356480030086,
+            "theta": -39.76535648003008,
+            "convexity_theta": -32.34386989267934,
+            "r_theta": -8.413631791291595,
+            "q_theta": 0.9921452039408559,
             "rho": 307.0975603821432
           }
         }
@@ -361,14 +398,14 @@
       "underlying_results": {
         "AAPL": {
           "num_positions": 2,
-          "total_value": -742.6186148379181,
+          "total_value": -742.6186148379174,
           "greeks": {
-            "market_value": -742.6186148379181,
+            "market_value": -742.6186148379174,
             "delta": 58.304912898565185,
             "gamma": 0.4389172862714592,
             "vega": 11.850766729329397,
-            "theta": -2.086022643848935,
-            "rho": 38.6960408133287
+            "theta": -2.0860226438489344,
+            "rho": 38.69604081332869
           }
         },
         "GOOGL": {
@@ -379,11 +416,12 @@
             "delta": 25.866642817029454,
             "gamma": 0.03346233704883209,
             "vega": 393.51708369426547,
-            "theta": -39.765356480030086,
+            "theta": -39.76535648003008,
             "rho": 307.0975603821432
           }
         }
-      }
+      },
+      "fi_metrics": {}
     },
     {
       "name": "Calm Recovery",
@@ -399,7 +437,7 @@
         "theta": -36.179499486731785,
         "rho": 534.765302134458
       },
-      "execution_time": 0.001750946044921875,
+      "execution_time": 0.0011513233184814453,
       "stresses": [
         {
           "parameter": "spot",
@@ -407,7 +445,8 @@
           "stress_value": 0.1,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -415,12 +454,13 @@
           "stress_value": -0.25,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -433,30 +473,36 @@
             "delta": 82.12507572464969,
             "gamma": 1.1709016201347986,
             "vega": 29.88543432015928,
-            "theta": -2.7454406278378847,
+            "theta": -2.7454406278378842,
+            "convexity_theta": -1.5352106671314694,
+            "r_theta": -1.5814803030233244,
+            "q_theta": 0.37125034231690957,
             "rho": 57.72403106035136
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
           "original_value": -247.75590623927394,
-          "stressed_value": -37.13770519132042,
-          "pnl": 210.6182010479535,
-          "pnl_pct": -85.01036534101668,
+          "stressed_value": -37.137705191320336,
+          "pnl": 210.61820104795362,
+          "pnl_pct": -85.01036534101672,
           "greeks": {
-            "market_value": -37.13770519132042,
-            "delta": 3.6139924446550586,
+            "market_value": -37.137705191320336,
+            "delta": 3.613992444655059,
             "gamma": -0.3141609958690974,
             "vega": -8.018468543002667,
             "theta": 0.34147136927948096,
+            "convexity_theta": 0.41190763063369856,
+            "r_theta": -0.08677348747389112,
+            "q_theta": 0.01633722611967356,
             "rho": 3.167232292797026
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -470,6 +516,9 @@
             "gamma": 0.03392666005898892,
             "vega": 362.07210148154167,
             "theta": -33.77553022817338,
+            "convexity_theta": -22.319513105026537,
+            "r_theta": -12.982850377570129,
+            "q_theta": 1.5268332544232806,
             "rho": 473.87403878130965
           }
         }
@@ -477,13 +526,13 @@
       "underlying_results": {
         "AAPL": {
           "num_positions": 2,
-          "total_value": 1968.6935773056102,
+          "total_value": 1968.6935773056105,
           "greeks": {
-            "market_value": 1968.6935773056102,
+            "market_value": 1968.6935773056105,
             "delta": 85.73906816930474,
             "gamma": 0.8567406242657012,
             "vega": 21.866965777156615,
-            "theta": -2.4039692585584036,
+            "theta": -2.403969258558403,
             "rho": 60.89126335314838
           }
         },
@@ -499,23 +548,24 @@
             "rho": 473.87403878130965
           }
         }
-      }
+      },
+      "fi_metrics": {}
     },
     {
       "name": "Market Crash",
       "description": "Equity drops -20% with volatility spike +50%",
-      "portfolio_value": 4548.415179704269,
-      "portfolio_pnl": -7406.125204705644,
+      "portfolio_value": 4548.41517970427,
+      "portfolio_pnl": -7406.125204705643,
       "portfolio_pnl_pct": -61.9524044133397,
       "greeks": {
-        "market_value": 4548.415179704269,
+        "market_value": 4548.41517970427,
         "delta": 72.2883853381164,
         "gamma": 0.46248733384600066,
         "vega": 277.9471758268723,
         "theta": -38.02936714129848,
         "rho": 168.85576316359138
       },
-      "execution_time": 0.0024099349975585938,
+      "execution_time": 0.001135110855102539,
       "stresses": [
         {
           "parameter": "spot",
@@ -523,7 +573,8 @@
           "stress_value": -0.2,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -531,12 +582,13 @@
           "stress_value": 0.5,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -550,29 +602,35 @@
             "gamma": 1.0206800221490278,
             "vega": 27.55836059802375,
             "theta": -3.114808962178713,
+            "convexity_theta": -2.8313384176051795,
+            "r_theta": -0.36956953554534855,
+            "q_theta": 0.0860989909718148,
             "rho": 13.489288047405223
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
           "original_value": -247.75590623927394,
-          "stressed_value": -1187.3741758281135,
-          "pnl": -939.6182695888396,
-          "pnl_pct": 379.25161254536926,
+          "stressed_value": -1187.3741758281128,
+          "pnl": -939.6182695888389,
+          "pnl_pct": 379.25161254536897,
           "greeks": {
-            "market_value": -1187.3741758281135,
+            "market_value": -1187.3741758281128,
             "delta": 32.11646981130485,
             "gamma": -0.5817627358775685,
             "vega": -15.707593868694353,
-            "theta": 1.0287863183297785,
-            "rho": 25.20675276592348
+            "theta": 1.0287863183297787,
+            "convexity_theta": 1.6137938906192826,
+            "r_theta": -0.6905959661896842,
+            "q_theta": 0.10558839390018032,
+            "rho": 25.206752765923472
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -586,6 +644,9 @@
             "gamma": 0.02357004757454143,
             "vega": 266.0964090975429,
             "theta": -35.943344497449544,
+            "convexity_theta": -32.806406601066925,
+            "r_theta": -3.566019790418156,
+            "q_theta": 0.4290818940355442,
             "rho": 130.15972235026268
           }
         }
@@ -593,14 +654,14 @@
       "underlying_results": {
         "AAPL": {
           "num_positions": 2,
-          "total_value": -742.6186148379181,
+          "total_value": -742.6186148379174,
           "greeks": {
-            "market_value": -742.6186148379181,
+            "market_value": -742.6186148379174,
             "delta": 58.304912898565185,
             "gamma": 0.4389172862714592,
             "vega": 11.850766729329397,
-            "theta": -2.086022643848935,
-            "rho": 38.6960408133287
+            "theta": -2.0860226438489344,
+            "rho": 38.69604081332869
           }
         },
         "GOOGL": {
@@ -615,7 +676,8 @@
             "rho": 130.15972235026268
           }
         }
-      }
+      },
+      "fi_metrics": {}
     },
     {
       "name": "Market Rally",
@@ -628,10 +690,10 @@
         "delta": 133.23259670717476,
         "gamma": 0.6217254411988473,
         "vega": 309.2897813795082,
-        "theta": -32.384902759416505,
+        "theta": -32.3849027594165,
         "rho": 620.0188181214804
       },
-      "execution_time": 0.0016262531280517578,
+      "execution_time": 0.0011546611785888672,
       "stresses": [
         {
           "parameter": "spot",
@@ -639,7 +701,8 @@
           "stress_value": 0.15,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -647,12 +710,13 @@
           "stress_value": -0.3,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -665,12 +729,15 @@
             "delta": 90.74146931268055,
             "gamma": 0.7446429176930178,
             "vega": 19.388058217152505,
-            "theta": -2.285337531757357,
+            "theta": -2.2853375317573574,
+            "convexity_theta": -0.9295644350689556,
+            "r_theta": -1.7846197667277823,
+            "q_theta": 0.42884667003938076,
             "rho": 65.13862148556406
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
@@ -680,15 +747,18 @@
           "pnl_pct": -95.18262273605332,
           "greeks": {
             "market_value": -11.935336697255838,
-            "delta": 1.3947628561222951,
+            "delta": 1.3947628561222953,
             "gamma": -0.14990467284429979,
             "vega": -3.9030258061577965,
-            "theta": 0.15912964675521862,
+            "theta": 0.15912964675521865,
+            "convexity_theta": 0.18713137426783955,
+            "r_theta": -0.03459341498333586,
+            "q_theta": 0.006591687470714958,
             "rho": 1.262659646891759
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -701,7 +771,10 @@
             "delta": 41.09636453837192,
             "gamma": 0.026987196350129198,
             "vega": 293.8047489685135,
-            "theta": -30.258694874414367,
+            "theta": -30.25869487441436,
+            "convexity_theta": -16.903834872161045,
+            "r_theta": -15.167603753123965,
+            "q_theta": 1.8127437508706514,
             "rho": 553.6175369890246
           }
         }
@@ -715,7 +788,7 @@
             "delta": 92.13623216880285,
             "gamma": 0.5947382448487181,
             "vega": 15.485032410994709,
-            "theta": -2.126207885002138,
+            "theta": -2.1262078850021386,
             "rho": 66.40128113245582
           }
         },
@@ -727,11 +800,12 @@
             "delta": 41.09636453837192,
             "gamma": 0.026987196350129198,
             "vega": 293.8047489685135,
-            "theta": -30.258694874414367,
+            "theta": -30.25869487441436,
             "rho": 553.6175369890246
           }
         }
-      }
+      },
+      "fi_metrics": {}
     },
     {
       "name": "Volatility Spike",
@@ -747,7 +821,7 @@
         "theta": -68.20109599026263,
         "rho": 340.1144238339564
       },
-      "execution_time": 0.0016179084777832031,
+      "execution_time": 0.001107931137084961,
       "stresses": [
         {
           "parameter": "volatility",
@@ -755,12 +829,13 @@
           "stress_value": 0.8,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -774,11 +849,14 @@
             "gamma": 0.8114326309064761,
             "vega": 41.078776939640356,
             "theta": -5.749340723269429,
+            "convexity_theta": -5.064506745983056,
+            "r_theta": -0.9252009477000996,
+            "q_theta": 0.2403669704137267,
             "rho": 33.76983459105364
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
@@ -791,12 +869,15 @@
             "delta": 16.43818797057971,
             "gamma": -0.377670935049635,
             "vega": -19.119591086887773,
-            "theta": 2.0020290816658957,
+            "theta": 2.002029081665896,
+            "convexity_theta": 2.3572098600272597,
+            "r_theta": -0.42273497550073225,
+            "q_theta": 0.06755419713936865,
             "rho": 15.429826605776729
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
@@ -810,6 +891,9 @@
             "gamma": 0.018379791078689034,
             "vega": 389.06341755368953,
             "theta": -64.4537843486591,
+            "convexity_theta": -57.560067254518444,
+            "r_theta": -7.970267469510303,
+            "q_theta": 1.0765503753696475,
             "rho": 290.91476263712605
           }
         }
@@ -823,7 +907,7 @@
             "delta": 74.92748410458655,
             "gamma": 0.4337616958568411,
             "vega": 21.959185852752583,
-            "theta": -3.7473116416035337,
+            "theta": -3.7473116416035332,
             "rho": 49.19966119683036
           }
         },
@@ -839,23 +923,24 @@
             "rho": 290.91476263712605
           }
         }
-      }
+      },
+      "fi_metrics": {}
     },
     {
       "name": "Black Monday 1987",
       "description": "Historical: Oct 19, 1987 - 22.6% drop",
-      "portfolio_value": 11962.587077864231,
-      "portfolio_pnl": 8.046693454318302,
-      "portfolio_pnl_pct": 0.06731077227203239,
+      "portfolio_value": 11962.587077864224,
+      "portfolio_pnl": 8.046693454311026,
+      "portfolio_pnl_pct": 0.06731077227197153,
       "greeks": {
-        "market_value": 11962.587077864231,
+        "market_value": 11962.587077864224,
         "delta": 85.67009272765317,
         "gamma": 0.37130708031386345,
         "vega": 311.0734447123117,
         "theta": -67.99320833532454,
-        "rho": 196.8329806553545
+        "rho": 196.83298065535453
       },
-      "execution_time": 0.0016789436340332031,
+      "execution_time": 0.0011458396911621094,
       "stresses": [
         {
           "parameter": "spot",
@@ -863,7 +948,8 @@
           "stress_value": -0.226,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         },
         {
           "parameter": "volatility",
@@ -871,12 +957,13 @@
           "stress_value": 1.5,
           "level": "portfolio",
           "target": null,
-          "description": null
+          "description": null,
+          "metadata": {}
         }
       ],
       "position_results": [
         {
-          "position_id": "8a0729c0-8210-4500-b2ca-83357b5d4621",
+          "position_id": "51e125b3-ea9c-4a1d-86ab-3c4ead6fedea",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 100,
@@ -890,11 +977,14 @@
             "gamma": 0.7365568661561277,
             "vega": 31.02563961206356,
             "theta": -5.644227572586736,
+            "convexity_theta": -5.312609522613623,
+            "r_theta": -0.45092712260775625,
+            "q_theta": 0.1193090726346426,
             "rho": 16.458839975183107
           }
         },
         {
-          "position_id": "60ed8686-e0b4-4be0-83a3-ea5cd3c1cf46",
+          "position_id": "69b8cdb3-578d-4768-a68d-57f3a12b670f",
           "underlying": "AAPL",
           "product_type": "EuropeanVanillaOption",
           "quantity": -50,
@@ -908,25 +998,31 @@
             "gamma": -0.3820637346922184,
             "vega": -16.093491604064678,
             "theta": 2.1662361768773017,
+            "convexity_theta": 2.755734863709705,
+            "r_theta": -0.6785148275610613,
+            "q_theta": 0.08901614072865771,
             "rho": 24.765791205978733
           }
         },
         {
-          "position_id": "ea4bf210-0f0e-4f21-9212-746532bfc7c4",
+          "position_id": "c28c07e2-7054-4918-92cb-148dcc3214fc",
           "underlying": "GOOGL",
           "product_type": "EuropeanVanillaOption",
           "quantity": 50,
           "original_value": 11007.087811253848,
-          "stressed_value": 12603.643026336136,
-          "pnl": 1596.5552150822878,
-          "pnl_pct": 14.504792207162556,
+          "stressed_value": 12603.643026336129,
+          "pnl": 1596.5552150822805,
+          "pnl_pct": 14.50479220716249,
           "greeks": {
-            "market_value": 12603.643026336136,
+            "market_value": 12603.643026336129,
             "delta": 20.17594726890673,
             "gamma": 0.01681394884995414,
             "vega": 296.1412967043128,
             "theta": -64.5152169396151,
-            "rho": 155.60834947419266
+            "convexity_theta": -60.85095137759852,
+            "r_theta": -4.263242451347746,
+            "q_theta": 0.5989768893311598,
+            "rho": 155.6083494741927
           }
         }
       ],
@@ -945,33 +1041,34 @@
         },
         "GOOGL": {
           "num_positions": 1,
-          "total_value": 12603.643026336136,
+          "total_value": 12603.643026336129,
           "greeks": {
-            "market_value": 12603.643026336136,
+            "market_value": 12603.643026336129,
             "delta": 20.17594726890673,
             "gamma": 0.01681394884995414,
             "vega": 296.1412967043128,
             "theta": -64.5152169396151,
-            "rho": 155.60834947419266
+            "rho": 155.6083494741927
           }
         }
-      }
+      },
+      "fi_metrics": {}
     }
   ],
   "risk_summary": {
     "baseline_value": 11954.540384409913,
     "num_scenarios": 8,
-    "worst_pnl": -7406.125204705644,
+    "worst_pnl": -7406.125204705643,
     "worst_pnl_pct": -61.9524044133397,
     "worst_scenario": "Market Crash",
     "best_pnl": 12265.489853970059,
     "best_pnl_pct": 102.60109932763002,
     "best_scenario": "Market Rally",
-    "avg_pnl": 1566.879804450208,
-    "median_pnl": -729.7900167465441,
+    "avg_pnl": 1566.8798044502073,
+    "median_pnl": -729.7900167465477,
     "std_pnl": 6757.38004415403,
-    "avg_pnl_pct": 13.10698491172106,
-    "median_pnl_pct": -6.104709953535928,
+    "avg_pnl_pct": 13.106984911721055,
+    "median_pnl_pct": -6.104709953535958,
     "max_drawdown_pct": -61.9524044133397,
     "max_upside_pct": 102.60109932763002
   }

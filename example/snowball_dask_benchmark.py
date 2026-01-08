@@ -74,7 +74,7 @@ def run_benchmark():
     product = SnowballOption(
         initial_price=spot_price,
         strike=spot_price, # ATM strike
-        notional=1000000.0, # 1M notional
+        contract_multiplier=10000.0, # 1M principal at 100 spot
         barrier_config=barrier_config,
         payoff_config=payoff_config,
         accrual_config=accrual_config,

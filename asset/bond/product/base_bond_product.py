@@ -50,12 +50,12 @@ class BaseBondProduct(ABC):
         pass
     
     @abstractmethod
-    def get_notional(self) -> float:
+    def get_denominator(self) -> float:
         """
-        Get the notional/face value of the bond.
-        
+        Get the minimum tradable notional (denominator) of the bond.
+
         Returns:
-            Notional amount
+            Denominator amount
         """
         pass
     
@@ -111,5 +111,4 @@ class BaseBondProduct(ABC):
     def __repr__(self):
         return (f"{self.__class__.__name__}("
                 f"maturity={self.get_maturity_date().date()}, "
-                f"notional={self.get_notional():.2f})")
-
+                f"denominator={self.get_denominator():.2f})")

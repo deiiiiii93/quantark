@@ -47,7 +47,7 @@ class BondFutures(BaseBondForward):
     Attributes:
         delivery_date: Futures contract delivery/expiration date
         deliverable_basket: List of DeliverableBond objects
-        contract_size: Notional per contract (default: 100,000)
+        contract_size: Denominator per contract (default: 100,000)
         futures_price: Current futures price (for CTD analysis)
         tick_size: Minimum price movement (default: 1/32 of 1%)
         notional_coupon: Coupon rate for CF calculation (default: 6%)
@@ -62,7 +62,7 @@ class BondFutures(BaseBondForward):
         >>> bond1 = FixedBond(
         ...     issue_date=datetime(2020, 1, 15),
         ...     maturity_date=datetime(2030, 1, 15),
-        ...     notional=100.0,
+        ...     denominator=100.0,
         ...     coupon_rate=0.04,
         ...     payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         ...     day_count_convention=DayCountConvention.ACT_ACT_ISDA
@@ -70,7 +70,7 @@ class BondFutures(BaseBondForward):
         >>> bond2 = FixedBond(
         ...     issue_date=datetime(2021, 6, 15),
         ...     maturity_date=datetime(2031, 6, 15),
-        ...     notional=100.0,
+        ...     denominator=100.0,
         ...     coupon_rate=0.05,
         ...     payment_frequency=PaymentFrequency.SEMI_ANNUAL,
         ...     day_count_convention=DayCountConvention.ACT_ACT_ISDA
@@ -149,6 +149,10 @@ class BondFutures(BaseBondForward):
     def get_delivery_date(self) -> datetime:
         """Get the delivery date of the futures."""
         return self.delivery_date
+
+    def get_denominator(self) -> float:
+        """Get the minimum tradable notional (denominator) per contract."""
+        return self.contract_size
 
     def _compute_conversion_factors(self) -> None:
         """
@@ -343,7 +347,7 @@ class BondFutures(BaseBondForward):
                 # Exclude principal repayment
                 coupon_amount = cf_item.amount
                 if cf_item.payment_date == bond.maturity_date:
-                    coupon_amount = cf_item.amount - bond.notional
+                    coupon_amount = cf_item.amount - bond.get_denominator()
                 if coupon_amount > 0:
                     total_coupon += coupon_amount
 
@@ -452,7 +456,7 @@ class BondFutures(BaseBondForward):
             if valuation_date < cf_item.payment_date <= self.delivery_date:
                 coupon_amount = cf_item.amount
                 if cf_item.payment_date == bond.maturity_date:
-                    coupon_amount = cf_item.amount - bond.notional
+                    coupon_amount = cf_item.amount - bond.get_denominator()
                 if coupon_amount > 0:
                     time_to_delivery_from_coupon = (
                         self.delivery_date - cf_item.payment_date

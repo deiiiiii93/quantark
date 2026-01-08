@@ -528,9 +528,9 @@ class TestConvertibleBondBaseBondMethods(unittest.TestCase):
         """Test get_issue_date method."""
         self.assertEqual(self.cb.get_issue_date(), datetime(2024, 1, 1))
 
-    def test_get_notional(self):
-        """Test get_notional method."""
-        self.assertEqual(self.cb.get_notional(), 100.0)
+    def test_get_denominator(self):
+        """Test get_denominator method."""
+        self.assertEqual(self.cb.get_denominator(), 100.0)
 
     def test_time_to_maturity(self):
         """Test time to maturity calculation."""

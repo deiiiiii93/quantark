@@ -156,8 +156,7 @@ class AsianOption(BaseEquityOption):
         observation_records: Optional[List[AsianObservationRecord]] = None,
         num_observations: Optional[int] = 12,
         initial_price: float = 0.0,
-        notional: Optional[float] = None,
-        quantity: float = 1.0,
+        contract_multiplier: float = 1.0,
     ):
         """
         Initialize Asian option.
@@ -174,8 +173,7 @@ class AsianOption(BaseEquityOption):
             observation_records: List of AsianObservationRecord with optional observed prices
             num_observations: Number of observations for uniform schedule (default: 12)
             initial_price: Reference/initial underlying price
-            notional: Notional principal amount (optional)
-            quantity: Number of option contracts (default: 1.0)
+            contract_multiplier: Underlying units represented by one contract
         """
         self.asian_strike_type = asian_strike_type
         self.averaging_type = averaging_type
@@ -195,8 +193,7 @@ class AsianOption(BaseEquityOption):
             maturity=maturity,
             exercise_date=exercise_date,
             initial_price=initial_price,
-            notional=notional,
-            quantity=quantity,
+            contract_multiplier=contract_multiplier,
         )
 
     def validate(self) -> None:
@@ -214,7 +211,7 @@ class AsianOption(BaseEquityOption):
         self._validate_date_ordering()
         self._validate_types()
         self._validate_tenor_end()
-        self._validate_notional_quantity()
+        self._validate_contract_multiplier()
         self._validate_asian_parameters()
 
     def _validate_asian_parameters(self) -> None:
@@ -465,15 +462,17 @@ class AsianOption(BaseEquityOption):
         if self.asian_strike_type == AsianStrikeType.FIXED:
             # Fixed strike (average price option)
             if self.is_call():
-                return max(avg - self.strike, 0.0)
+                payoff = max(avg - self.strike, 0.0)
             else:
-                return max(self.strike - avg, 0.0)
+                payoff = max(self.strike - avg, 0.0)
         else:
             # Floating strike (average strike option)
             if self.is_call():
-                return max(spot - avg, 0.0)
+                payoff = max(spot - avg, 0.0)
             else:
-                return max(avg - spot, 0.0)
+                payoff = max(avg - spot, 0.0)
+
+        return payoff * self.contract_multiplier
 
     def intrinsic_value(
         self,

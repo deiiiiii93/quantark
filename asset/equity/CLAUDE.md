@@ -226,7 +226,7 @@ snowball = SnowballOption(
     initial_price=100.0,
     strike=100.0,
     barrier_config=barrier_config,
-    notional=1_000_000.0,
+    contract_multiplier=10_000.0,
     maturity=1.0,
 )
 
@@ -285,7 +285,7 @@ phoenix = PhoenixOption(
     maturity=1.0,
     barrier_config=barrier_config,
     coupon_config=coupon_config,
-    notional=1_000_000.0,
+    contract_multiplier=10_000.0,
 )
 
 # Pricing (reuses SnowballMC engine)

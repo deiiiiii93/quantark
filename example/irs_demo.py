@@ -71,7 +71,7 @@ def demo_vanilla_irs():
     irs = create_vanilla_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         fixed_rate=0.045,  # 4.50%
         index=SOFR_3M,
         spread=0.0,
@@ -141,7 +141,7 @@ def demo_receiver_swap():
     receiver_swap = create_vanilla_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         fixed_rate=0.045,
         index=SOFR_3M,
         spread=0.0,
@@ -176,7 +176,7 @@ def demo_basis_swap():
     basis_swap = create_basis_swap(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         index1=SOFR,       # Pay leg
         index2=SOFR_3M,    # Receive leg
         spread1=0.0,
@@ -201,7 +201,7 @@ def demo_basis_swap():
 
 
 def demo_amortizing_swap():
-    """Demonstrate amortizing notional swap."""
+    """Demonstrate amortizing denominator swap."""
     print_separator("4. AMORTIZING SWAP")
     
     valuation_date = datetime(2024, 1, 15)
@@ -213,9 +213,9 @@ def demo_amortizing_swap():
     engine = IRSDiscountEngine(pricing_env)
     
     print("\nCreating 5-year amortizing swap:")
-    print("  - Initial notional: $10,000,000")
+    print("  - Initial denominator: $10,000,000")
     print("  - Annual amortization: $2,000,000")
-    print("  - Final notional: $2,000,000")
+    print("  - Final denominator: $2,000,000")
     
     amort_schedule = [
         (datetime(2025, 1, 15), 8_000_000),
@@ -237,8 +237,8 @@ def demo_amortizing_swap():
     
     print(f"\nSwap: {amort_swap}")
     
-    # Show notional schedule
-    print("\nNotional Schedule:")
+    # Show denominator schedule
+    print("\nDenominator Schedule:")
     for date, amount in amort_schedule:
         print(f"  {date.date()}: ${amount:,.0f}")
     
@@ -276,7 +276,7 @@ def demo_compounding_swap():
     sofr_swap = create_compounding_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         fixed_rate=0.045,
         index=SOFR,  # Overnight SOFR
         spread=0.0005,  # 5bp
@@ -317,7 +317,7 @@ def demo_par_rate_calculation():
     test_swap = create_vanilla_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         fixed_rate=0.04,  # Arbitrary rate
         index=SOFR_3M,
         spread=0.0,
@@ -333,7 +333,7 @@ def demo_par_rate_calculation():
     at_market_swap = create_vanilla_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         fixed_rate=par_rate,
         index=SOFR_3M,
         spread=0.0,
@@ -363,7 +363,7 @@ def demo_risk_metrics():
     swap = create_vanilla_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         fixed_rate=0.045,
         index=SOFR_3M,
         spread=0.0,
@@ -413,7 +413,7 @@ def demo_different_currencies():
     eur_swap = create_vanilla_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=10_000_000,
+        denominator=10_000_000,
         fixed_rate=0.035,  # 3.50%
         index=EURIBOR_3M,
         spread=0.0,
@@ -428,7 +428,7 @@ def demo_different_currencies():
     cny_swap = create_vanilla_irs(
         effective_date=datetime(2024, 1, 15),
         maturity_date=datetime(2029, 1, 15),
-        notional=70_000_000,  # ~$10M equivalent
+        denominator=70_000_000,  # ~$10M equivalent
         fixed_rate=0.025,  # 2.50%
         index=SHIBOR_3M,
         spread=0.0,
@@ -460,7 +460,7 @@ def main():
     print("The IRS module supports:")
     print("  - Vanilla IRS (fixed vs floating)")
     print("  - Basis Swaps (floating vs floating)")
-    print("  - Amortizing notional schedules")
+    print("  - Amortizing denominator schedules")
     print("  - SOFR overnight compounding")
     print("  - Multiple rate indices (SOFR, EURIBOR, SHIBOR, etc.)")
     print("  - Full risk metrics (NPV, DV01, Duration, Par Rate)")
@@ -468,4 +468,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
