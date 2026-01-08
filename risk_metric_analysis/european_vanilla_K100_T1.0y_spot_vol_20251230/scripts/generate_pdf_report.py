@@ -77,6 +77,7 @@ param_data = [
     ['Time to Maturity', '1.00 year'],
     ['Option Types', 'CALL, PUT'],
     ['Valuation Date', VALUATION_DATE.strftime('%Y-%m-%d')],
+    ['Contract Multiplier', f"{call_df.get('Contract Multiplier', pd.Series([1.0])).iloc[0]:.0f}"],
 ]
 
 param_table = Table(param_data, colWidths=[2.5*inch, 3*inch], hAlign='LEFT')
@@ -159,15 +160,19 @@ strike = call_df['Strike'].iloc[0]
 rate = call_df['Rate'].iloc[0]
 div_yield = call_df['Dividend Yield'].iloc[0]
 maturity = call_df['Maturity (years)'].iloc[0]
+multiplier = call_df.get('Contract Multiplier', pd.Series([1.0])).iloc[0]
 
 lhs = call_price - put_price
-rhs = spot * pow(2.718281828, -div_yield * maturity) - strike * pow(2.718281828, -rate * maturity)
+rhs = (
+    spot * pow(2.718281828, -div_yield * maturity)
+    - strike * pow(2.718281828, -rate * maturity)
+) * multiplier
 diff = lhs - rhs
 
 parity_text = f"""
 The put-call parity relationship for European options with continuous dividends is:
 
-<b>C - P = S·e^(-qT) - K·e^(-rT)</b>
+<b>C - P = (S·e^(-qT) - K·e^(-rT)) × M</b>
 
 Where:
 <ul>
@@ -178,12 +183,13 @@ Where:
 <li>q = Dividend yield = {div_yield:.1%}</li>
 <li>r = Risk-free rate = {rate:.1%}</li>
 <li>T = Time to maturity = {maturity:.2f} years</li>
+<li>M = Contract multiplier = {multiplier:.0f}</li>
 </ul>
 
 Verification:
 <table style="width: 100%%">
 <tr><td><b>LHS (C - P):</b></td><td>${lhs:.4f}</td></tr>
-<tr><td><b>RHS (S·e^(-qT) - K·e^(-rT)):</b></td><td>${rhs:.4f}</td></tr>
+<tr><td><b>RHS ((S·e^(-qT) - K·e^(-rT)) × M):</b></td><td>${rhs:.4f}</td></tr>
 <tr><td><b>Difference:</b></td><td>${abs(diff):.8f}</td></tr>
 </table>
 
@@ -279,7 +285,7 @@ insights = f"""
 
 <b>Risk Management Implications:</b>
 <ul>
-<li>Delta-neutral hedge would require selling {call_df['Delta'].iloc[0]:.3f} shares per call option held</li>
+<li>Delta-neutral hedge would require selling {call_df['Delta'].iloc[0]:.3f} shares per call option held (per contract)</li>
 <li>Gamma risk is highest near the strike, requiring frequent rebalancing for delta-hedged positions</li>
 <li>Vega exposure is significant — consider volatility hedges if holding naked options</li>
 </ul>
