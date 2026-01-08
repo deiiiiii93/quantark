@@ -223,8 +223,8 @@ Before generating any scripts or reports, confirm the following with the user:
 | **Engine preference** | Analytical, PDE, or Monte Carlo | Auto-select based on product |
 | **Barrier monitoring** | Continuous or discrete (for barrier options) | Continuous |
 | **Valuation date** | Specific date or "today" | `datetime.now()` |
-| **Output conventions** | Per-unit or total PV (incl. notional) | Per-unit for equity, PV for bonds |
-| **Notional/position size** | Contract size or notional amount | 1 contract (equity), user-specified (bonds) |
+| **Output conventions** | Per-contract vs total position | Per-contract for equity (includes contract_multiplier), PV per bond (includes denominator) |
+| **Position size** | Number of contracts/bonds | Default 1; scale totals with position quantity only |
 | **Requested metrics** | Specific Greeks or "all defaults" | All defaults for asset class |
 | **Output format** | Markdown, PDF, DOCX, or CSV-only | Markdown + CSV |
 | **Include visualizations** | Yes/No | No (unless requested) |
@@ -340,22 +340,106 @@ When using Monte Carlo or PDE engines for numerical Greeks, follow these practic
 
 See [risk-metrics-reference.md](risk-metrics-reference.md) for detailed formulas.
 
-**Units and Scaling Conventions**
+**Units and Scaling Conventions (CRITICAL)**
 
-| Greek | Unit | Scaling | Notes |
-|-------|------|---------|-------|
-| **Price** | Currency | Per contract (equity) / PV incl notional (bonds) | Equity: per 1 contract; Bonds: includes notional |
-| **Delta** | Δ per $1 spot | Per unit (equity) / Scaled by notional (bonds) | Equity: multiply by position size; Bonds: already includes notional |
-| **Gamma** | Δ² per $1 spot | Per unit (equity) / Scaled by notional (bonds) | Same convention as Delta |
-| **Vega** | $ per 1% vol | Per 1% absolute vol change | Returned as PnL for +1% vol bump |
-| **Theta** | $ per day | Per calendar day | Negative for long options (time decay) |
-| **Rho** | $ per 1% rate | Per 1% absolute rate change | Returned as PnL for +1% rate bump |
-| **DV01** | $ per 1bp | Per 1 basis point (0.01%) | Bonds only; typically positive for long positions |
+QuantArk uses a **two-stage scaling model** that must be understood for correct risk reporting:
 
-**IMPORTANT: Equity vs Bond Conventions**
-- **Equity Greeks**: Returned "per unit" (per contract). Multiply by position size/notional for total exposure.
-- **Bond Greeks**: Returned "PV including notional". Delta, Gamma, Vega already scaled by `option.notional`.
-- **Report Template**: Always clarify whether output is "per unit" or "total PV" in the report header.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TWO-STAGE SCALING MODEL                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Stage 1: Engine Output (Per Contract/Unit)                      │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ Equity: price = theoretical_value × contract_multiplier      │ │
+│  │ Bond:   price = PV (already includes denominator)            │ │
+│  │ Greeks: Same scaling as price                                │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                           │                                     │
+│                           ▼                                     │
+│  Stage 2: Position Scaling                                      │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ All Assets: market_value = engine_price × quantity          │ │
+│  │ All Assets: position_greek = engine_greek × quantity        │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Understanding Engine-Returned Values:**
+
+| Metric | Equity Derivatives | Fixed Income |
+|--------|-------------------|--------------|
+| **Price** | `theoretical_value × contract_multiplier` | `PV` (already includes denominator) |
+| **Delta** | `∂price/∂spot × contract_multiplier` | `∂price/∂yield × denominator` |
+| **Gamma** | `∂²price/∂spot² × contract_multiplier` | `∂²price/∂yield² × denominator` |
+| **Vega** | `∂price/∂vol × contract_multiplier` | `∂price/∂vol × denominator` |
+| **Theta** | `∂price/∂time × contract_multiplier` | `∂price/∂time × denominator` |
+| **Rho** | `∂price/∂rate × contract_multiplier` | (rate sensitivity via DV01) |
+| **DV01** | N/A | `∂price/∂yield` per 1bp |
+
+**Unit Reference Table:**
+
+| Greek | Unit | What It Means | Scaling Applied |
+|-------|------|---------------|-----------------|
+| **Price** | Currency $ | Price of ONE contract/unit | × contract_multiplier (equity) |
+| **Delta** | $ per $1 spot | P&L for $1 spot move per contract | × contract_multiplier (equity) |
+| **Gamma** | $ per $1 spot² | Delta change per $1 spot move per contract | × contract_multiplier (equity) |
+| **Vega** | $ per 1% vol | P&L for +1% vol change per contract | × contract_multiplier (equity) |
+| **Theta** | $ per day | P&L for 1 day passage per contract | × contract_multiplier (equity) |
+| **Rho** | $ per 1% rate | P&L for +1% rate change per contract | × contract_multiplier (equity) |
+| **DV01** | $ per 1bp | P&L for +1bp rate change per bond | × denominator (bond) |
+
+**IMPORTANT Reporting Conventions:**
+
+When generating risk reports, ALWAYS clarify the scaling convention:
+
+```markdown
+## Risk Metrics Report
+
+**Scaling Convention:**
+- **Per-Unit Greeks**: Values are per contract/unit. Multiply by position quantity for total exposure.
+- **Contract Multiplier**: 100 (equity options represent 100 shares)
+- **Position Size**: 50 contracts
+
+| Metric | Per-Unit | Position (50 contracts) |
+|--------|----------|------------------------|
+| Delta  | $52.30   | $2,615.00              |
+| Gamma  | $1.25    | $62.50                 |
+```
+
+**For Equity Options:**
+```python
+# Engine returns price scaled by contract_multiplier
+engine = BlackScholesEngine()
+product = EuropeanVanillaOption(strike=100, contract_multiplier=100)
+price_per_contract = engine.price(product, pricing_env)  # = theoretical_value × 100
+
+# Position scales by quantity
+position = EquityPosition(product, quantity=50, ...)
+total_value = price_per_contract * 50  # Total position value
+```
+
+**For Bonds:**
+```python
+# Bond engines return price including denominator
+engine = BondDiscountEngine()
+bond = FixedBond(denominator=1000, ...)
+price_per_bond = engine.dirty_price(bond, valuation_date)  # PV of $1000 notional
+
+# Position scales by quantity
+position = FIPosition(bond, quantity=10, ...)
+total_value = price_per_bond * 10  # Total position value
+```
+
+**Common Mistakes to Avoid:**
+
+| Mistake | Symptom | Correct Approach |
+|---------|---------|------------------|
+| Treating engine price as "per share" | Greeks too small | Engine returns contract-level prices |
+| Double scaling by multiplier | Values too large | Engine already applied multiplier |
+| Forgetting position quantity | Missing total exposure | `position_greek = engine_greek × quantity` |
+| Comparing equity vs bond Greeks directly | Inconsistent magnitudes | Different conventions: equity (per contract) vs bond (per denominator) |
 
 ### Step 4: Define Product Parameters
 
@@ -374,6 +458,9 @@ spot: float          # Spot price
 volatility: float    # Implied volatility
 rate: float          # Risk-free rate
 div_yield: float     # Dividend yield
+
+# Optional (contract scaling)
+contract_multiplier: float  # Default 1.0, equity contract size
 ```
 
 **Barrier Options:**
@@ -390,7 +477,7 @@ strike: float            # Strike price
 option_type: OptionType  # CALL or PUT
 expiry_date: date        # Option expiry
 underlying: Bond         # Underlying bond
-notional: float          # Option notional
+notional: float          # Contract size (number of bonds per option)
 ```
 
 **If user doesn't provide parameters:**

@@ -118,6 +118,67 @@ Compare the engine implementation against reference documentation:
 | **Numerical Stability** | Are `util.numerical` utilities used correctly? |
 | **Barrier Adjustment** | For barrier options: Is discrete monitoring shift applied? |
 | **Greeks** | Are analytical Greeks provided where formulas exist? |
+| **Scaling** | Is `contract_multiplier` applied for equity engines? |
+
+### Pricing Scale Validation (CRITICAL)
+
+**IMPORTANT: Verify that engines apply correct scaling for asset class.**
+
+QuantArk uses a two-stage scaling model:
+1. **Engines** return per-contract prices scaled by `contract_multiplier` (equity) or `denominator` (bonds)
+2. **Positions** apply quantity scaling for total market value
+
+**For Equity Derivatives:**
+
+| Check | How to Verify |
+|-------|---------------|
+| contract_multiplier applied | Search for `* product.contract_multiplier` or `price *=" pattern |
+| Scaling at correct location | Must be final step before return, NOT before Greeks calculation |
+| MC scaling | Both price and std_error scaled (see `euro_mc_engine.py:161-162`) |
+
+**Validation Test:**
+```python
+# Test: Verify contract_multiplier scaling
+product = EuropeanVanillaOption(strike=100, contract_multiplier=100)  # 100 shares
+engine = BlackScholesEngine()
+
+# Price with multiplier=100 should be 100× price with multiplier=1
+price_100 = engine.price(product, pricing_env)
+product.contract_multiplier = 1
+price_1 = engine.price(product, pricing_env)
+
+assert abs(price_100 - price_1 * 100) < 1e-10, "Multiplier scaling incorrect"
+```
+
+**For Fixed Income:**
+
+| Check | How to Verify |
+|-------|---------------|
+| denominator handling | Price should be for full denominator (e.g., $1000 notional) |
+| Clean vs dirty | Clean price excludes accrued, dirty includes it |
+| DV01 scaling | DV01 should be per bond, scaled by denominator |
+
+**Validation Test:**
+```python
+# Test: Verify denominator scaling
+bond = FixedBond(denominator=1000, coupon_rate=0.05)
+engine = BondDiscountEngine()
+
+dirty = engine.dirty_price(bond, valuation_date, valuation_date)
+
+# Price should be in range that reflects $1000 notional
+# (e.g., if bond is at par, dirty_price ≈ 1000 + accrued)
+assert 0 < dirty < 5000, f"Price {dirty} outside reasonable range for denom=1000"
+```
+
+**Common Scaling Bugs to Check:**
+
+| Bug | Symptom | Fix |
+|-----|---------|-----|
+| Missing multiplier | Prices too small (factor of 100-10000) | Add `* product.contract_multiplier` |
+| Scaling before Greeks | Greeks also scaled incorrectly | Scale only final price, not intermediate values |
+| Double scaling | Prices too large | Check not scaling by both multiplier AND quantity |
+| Wrong denominator | Bond prices don't match market | Use `bond.get_denominator()` consistently |
 
 ---
 

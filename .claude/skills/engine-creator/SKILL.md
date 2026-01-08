@@ -207,6 +207,94 @@ class MyEngine(BaseEngine):
             self.method = MyMethodEnum.DEFAULT
 ```
 
+### Step 7.5: Apply Pricing Scale Conventions (CRITICAL)
+
+**IMPORTANT: Engines must return prices scaled by contract multiplier or denominator.**
+
+QuantArk uses a two-stage scaling model:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PRICING SCALE ARCHITECTURE                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Stage 1: Engine Output (per contract/unit)                     │
+│  ┌─────────────────┬─────────────────────────────────────────┐  │
+│  │ Equity Options  │ price = theoretical_value × multiplier  │  │
+│  │ Fixed Income    │ price = present_value (incl. denominator)│  │
+│  └─────────────────┴─────────────────────────────────────────┘  │
+│                           │                                     │
+│                           ▼                                     │
+│  Stage 2: Position Scaling                                      │
+│  ┌─────────────────┬─────────────────────────────────────────┐  │
+│  │ All Assets      │ market_value = engine_price × quantity   │  │
+│  └─────────────────┴─────────────────────────────────────────┘  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**For Equity Derivatives:**
+
+Products have a `contract_multiplier` attribute (default: 1.0). Engines **MUST** scale by this:
+
+```python
+def price(self, product, pricing_env) -> float:
+    # ... calculate theoretical value ...
+    theoretical_value = self._calculate_theoretical_price(product, pricing_env)
+
+    # CRITICAL: Scale by contract multiplier
+    price = theoretical_value * product.contract_multiplier
+    return price
+```
+
+**Example from BlackScholesEngine:**
+```python
+# Line 94 in black_scholes_engine.py
+price *= product.contract_multiplier
+```
+
+**For Fixed Income:**
+
+Products have a `denominator` attribute (minimum tradable notional). Bond engines return prices that include this scaling implicitly:
+
+```python
+# Bond dirty_price already includes denominator scaling
+# For a bond with denominator=1000, price represents PV of $1000 notional
+def dirty_price(self, bond, valuation_date, valuation_date):
+    # ... calculate PV including denominator ...
+    return pv  # Already scaled by bond.get_denominator()
+```
+
+**Why This Matters:**
+
+1. **Engines** return per-contract prices with multiplier/denominator scaling applied
+2. **Positions** apply quantity scaling: `market_value = engine.price() × quantity`
+3. **Greeks** are also scaled by the engine (multiplier/denominator included)
+4. **Risk reports** must clarify whether values are "per unit" or "total position"
+
+**Common Mistakes to Avoid:**
+
+```python
+# ❌ WRONG: Forgetting contract multiplier
+def price(self, product, pricing_env):
+    return self._calculate_value(...)  # Missing multiplier!
+
+# ❌ WRONG: Scaling by quantity in the engine
+def price(self, product, pricing_env):
+    value = self._calculate_value(...)
+    return value * product.quantity  # Quantity is position's job!
+
+# ✅ CORRECT: Scale only by contract_multiplier
+def price(self, product, pricing_env):
+    value = self._calculate_value(...)
+    return value * product.contract_multiplier
+```
+
+**Reference Examples:**
+- `asset/equity/engine/analytical/black_scholes_engine.py:94` - `price *= product.contract_multiplier`
+- `asset/equity/engine/mc/euro_mc_engine.py:161-162` - MC scaling
+- `asset/equity/riskmeasures/greeks_calculator.py:139` - Greeks scaling
+
 ### Step 8: Apply Codebase Patterns
 
 See [patterns.md](patterns.md) for detailed patterns.

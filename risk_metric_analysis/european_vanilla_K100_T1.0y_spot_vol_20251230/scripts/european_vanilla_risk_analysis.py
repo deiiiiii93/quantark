@@ -51,12 +51,12 @@ engine = BlackScholesEngine()
 calculator = GreeksCalculator()
 
 # Call option Greeks
-call_greeks = calculator.calculate_analytical_greeks(call_option, pricing_env, engine)
 call_price = engine.price(call_option, pricing_env)
+call_greeks = calculator.calculate_analytical_greeks(call_option, pricing_env)
 
 # Put option Greeks
-put_greeks = calculator.calculate_analytical_greeks(put_option, pricing_env, engine)
 put_price = engine.price(put_option, pricing_env)
+put_greeks = calculator.calculate_analytical_greeks(put_option, pricing_env)
 
 # === Calculate Intrinsic and Time Values ===
 # Intrinsic value = max(S - K*e^-(r-q)T, 0) for call, max(K*e^-(r-q)T - S, 0) for put

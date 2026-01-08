@@ -63,7 +63,7 @@ for greek_name in greeks_to_plot:
             env = deepcopy(pricing_env)
             env.spot_quote = SpotQuote(spot=s)
             env.vol_surface = FlatVolSurface(volatility=v)
-            greeks = calculator.calculate_analytical_greeks(call_option, env, engine)
+            greeks = calculator.calculate_analytical_greeks(call_option, env)
             call_greek_values[greek_name][i, j] = greeks[greek_name]
 
 # === Calculate Greeks for PUT Option ===
@@ -76,7 +76,7 @@ for greek_name in greeks_to_plot:
             env = deepcopy(pricing_env)
             env.spot_quote = SpotQuote(spot=s)
             env.vol_surface = FlatVolSurface(volatility=v)
-            greeks = calculator.calculate_analytical_greeks(put_option, env, engine)
+            greeks = calculator.calculate_analytical_greeks(put_option, env)
             put_greek_values[greek_name][i, j] = greeks[greek_name]
 
 # === Create Combined Heatmaps for CALL ===
