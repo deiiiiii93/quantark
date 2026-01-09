@@ -1,0 +1,230 @@
+# 压力测试模块：理论与方法论
+
+## 概述
+
+压力测试是风险管理的关键组成部分，用于评估投资组合在极端但合理的市场条件下的弹性。QuantArk 的压力测试模块实现了**静态情景分析**框架。它对市场因子施加瞬时冲击，并在不考虑时间推移的情况下重新评估投资组合的价值。
+
+## 与其他风险模块的关系
+
+压力测试模块是 QuantArk 中三个互补的风险分析框架之一，每个框架解决不同的风险维度：
+
+| 模块 | 时间维度 | 数据来源 | 回答的风险问题 |
+|--------|----------------|-------------|------------------------|
+| **压力测试** | 瞬时 (t=0) | 假设冲击 | "如果 X 现在发生，我会损失多少？" |
+| **动态情景** | 多日 (t=0→T) | 假设路径 | "在情景 X 下，风险如何随 T 天演化？" |
+| **回测** | 历史 | 实际市场数据 | "该策略历史上表现如何？" |
+
+压力测试模块的独特之处在于其**瞬时**特性：它在单一点时间检查尾部风险，非常适合监管资本计算和"假设"分析。与动态情景不同，它不模拟风险随时间的演化；与回测不同，它不受历史模式限制。
+
+## 理论基础
+
+压力测试的核心价值在于回答这样一个问题：*"如果现在发生 [X] 事件，我会损失多少？"*
+
+价值变化 (ΔV) 计算如下：
+$$ \Delta V = V(S_{stressed}, \sigma_{stressed}, r_{stressed}, ...) - V(S_{0}, \sigma_{0}, r_{0}, ...) $$
+
+其中：
+*   $V(...)$ 是投资组合估值函数。
+*   $S, \sigma, r$ 分别代表现货价格、波动率和利率。
+*   下标 $0$ 表示当前市场状态。
+*   下标 $stressed$ 表示冲击后的状态。
+
+**[图片占位符]**
+> **Prompt for Nanobanana**: /diagram prompt: "A 3D risk surface plot (financial volatility plane). X-axis: 'Spot Price Change', Y-axis: 'Volatility Change', Z-axis: 'Portfolio P&L'. The surface features a dramatic 'cliff' or steep drop-off representing tail risk. Style: High-tech scientific visualization, heatmap coloring."
+
+## 全重估 vs. 希腊值近似
+
+### 全重估方法
+
+QuantArk 的压力测试采用**冲击后全重估**：引擎构造受冲击后的 `PricingEnvironment`，并在该环境下对每个持仓使用其定价引擎重新估值。
+
+### 泰勒展开近似
+
+与之相对的是常见的希腊值近似（可作为快速诊断）：
+
+$$
+\Delta V \approx \Delta \,\Delta S + \frac{1}{2}\Gamma (\Delta S)^2 + \text{Vega}\,\Delta \sigma + \text{Rho}\,\Delta r + \cdots
+$$
+
+### 误差边界与选择标准
+
+泰勒近似的误差取决于冲击大小和高阶导数的幅度：
+
+$$
+\epsilon_{\text{Taylor}} = \mathcal{O}(|\Delta S|^3) + \mathcal{O}(|\Delta \sigma|^2) + \cdots
+$$
+
+**方法选择指南：**
+
+| 冲击大小 | 泰勒近似 | 全重估 |
+|------------|---------------------|----------------|
+| 小幅 (±1-2%) | 优秀；误差 < 1% | 不必要的开销 |
+| 中等 (±5-10%) | 良好；误差 ~1-5% | 建议使用以保证准确性 |
+| 大幅 (±20%+) | 较差；误差可超过 10% | 必须使用 |
+
+对于障碍期权、数字期权或其他高度非线性收益，**始终建议**使用全重估，无论冲击大小如何——泰勒展开可能遗漏关键的不连续点。
+
+## 压力情景中的因子相关性
+
+### 现货-波动率相关性现象
+
+现实世界的压力事件在风险因子之间表现出强相关性。最显著的是市场危机期间观察到的**负现货-波动率相关性**：
+
+$$
+\rho_{S,\sigma} = \text{Corr}(\Delta S/S, \Delta \sigma) < 0 \quad \text{(危机期间)}
+$$
+
+这种"杠杆效应"产生的原因是：
+1. 股价下跌增加财务杠杆，提高违约风险
+2. 不确定性上升推动对期权作为保护工具的需求，推高隐含波动率
+3. 做市商 Delta 对冲卖出，形成反馈循环
+
+### 多因子情景设计
+
+因此，现实主义的压力情景必须结合对相关因子的冲击。对于"市场崩盘"情景：
+
+$$
+\begin{aligned}
+\Delta S &= -20\% \\
+\Delta \sigma &= +50\% \\
+\Delta r &= -50\text{bps} \quad \text{(避险导致的利率下降)}
+\end{aligned}
+$$
+
+联合效应往往是**非加性的**，由于交叉 Gamma 项：
+
+$$
+\Delta V \approx \Delta \cdot \Delta S + \frac{1}{2}\Gamma (\Delta S)^2 + \text{Vega} \cdot \Delta \sigma + \text{Vanna} \cdot \Delta S \cdot \Delta \sigma + \cdots
+$$
+
+其中 **Vanna** = \(\frac{\partial^2 V}{\partial S \partial \sigma}\) 捕获了 Delta 对波动率变化的敏感度。
+
+## 压力架构
+
+### 1. 冲击类型 (Stress Types)
+
+为了提供灵活性，可以通过三种方式施加冲击：
+
+*   **百分比冲击 (Percentage)**：相对变化（例如，权益现货 -20%）。
+    $$ X_{new} = X_{old} \times (1 + \text{shock}) $$
+*   **绝对冲击 (Absolute)**：加法变化（例如，利率 +100bps）。
+    $$ X_{new} = X_{old} + \text{shock} $$
+*   **数值覆盖 (Value)**：设定特定水平（例如，波动率 = 80%）。
+    $$ X_{new} = \text{shock} $$
+
+#### 组合性质
+
+冲击类型的选择影响多个冲击如何组合。对于**百分比冲击**，顺序应用时：
+
+$$
+X_{n} = X_0 \prod_{i=1}^{n}(1 + \epsilon_i)
+$$
+
+这意味着对于大冲击，应用顺序很重要（不可交换）。对于**绝对冲击**：
+
+$$
+X_{n} = X_0 + \sum_{i=1}^{n}\delta_i
+$$
+
+这些与顺序无关。实际含义：
+- 对具有指数动态的变量使用**百分比冲击**（现货价格、波动率）
+- 对加法变化为市场惯例的利率和利差使用**绝对冲击**
+- 使用**数值覆盖**来设定特定的压力水平，无论起点如何
+
+#### 加法 vs. 乘法冲击
+
+对于小冲击 \(|\epsilon| \ll 1\)，区别可以忽略：
+
+$$
+X(1+\epsilon) \approx X + X\epsilon
+$$
+
+但对于大压力情景（±20% 或更多），区别很重要：
+- 先下跌 20% 再上涨 20%：\(X \times 0.8 \times 1.2 = 0.96X\)（净损失 4%）
+- 对比绝对值：\((X - 0.2X) + 0.2X = X\)（无净损失）
+
+这反映了市场的真实特征：乘法冲击捕捉了复利效应。
+
+### 2. 粒度级别 (Granularity Levels)
+
+风险因子可以在不同范围内进行压力测试，反映不同类型的风险事件：
+
+*   **投资组合级**：全局冲击（例如，"全球市场崩盘"影响所有权益资产）。用于系统性事件。
+*   **标的级**：特质冲击（例如，"AAPL 财报不及预期"仅影响 AAPL）。用于单一名称风险。
+*   **持仓级**：针对某一持仓 ID 的特定调整。用于对特定持仓的假设分析。
+
+**理论依据**：这种层级映射到资产定价基本定理——系统性风险与特质风险。投资组合级冲击测试系统性风险敞口，而标的/持仓级冲击测试集中度风险。
+
+## 支持的风险因子
+该模块支持对跨资产类别的广泛市场驱动因子进行压力测试：
+
+*   **权益现货 (Equity Spot)**：标的资产价格的直接百分比变化。
+*   **隐含波动率 (Implied Volatility)**：波动率曲面的移动。可以是平行移动（水平）或扭曲（偏度/微笑调整）。
+*   **利率 (Interest Rates)**：无风险收益率曲线的移动。对于长期期权和债券投资组合至关重要。
+*   **股息率 (Dividend Yield)**：调整连续股息率假设。
+*   **信用利差 (Credit Spreads)**：对于固定收益，扩大或收窄相对于无风险曲线的 Z-spread 或 OAS。
+
+## 情景构建
+
+**情景 (Scenario)** 是同时发生的冲击的集合。现实世界的危机很少只涉及单一因子的变动。
+
+### 标准情景
+*   **市场崩盘**：通常特征是现货价格急剧下跌和波动率飙升（现货-波动率通常呈负相关）。
+*   **加息/降息**：收益率曲线的平行移动，影响固定收益资产和权益衍生品的贴现。
+*   **流动性危机**：信用利差和买卖价差的扩大。
+
+### 历史情景
+该模块支持基于历史数据的“重演”情景：
+*   **黑色星期一 (1987)**：极端的股市崩盘。
+*   **2008 金融危机**：股市下跌与波动率爆发的结合。
+*   **COVID-19 (2020)**：快速崩盘后伴随高波动率机制。
+
+**[图片占位符]**
+> **Prompt for Nanobanana**: /diagram prompt: "A hierarchical structure diagram of a Stress Test Scenario. Top node: 'Scenario: Market Crash'. Middle layer (3 nodes): 'Stress 1: Spot Price -20%', 'Stress 2: Volatility +50%', 'Stress 3: Rates +100bps'. Bottom node: 'Portfolio Valuation Engine'. Arrows flow from Stresses to the Engine. Style: Clean professional flowchart."
+
+## 模型覆盖（QuantArk 实现）
+
+QuantArk 通过 `PricingEnvironment` 的参数适配器来施加冲击。默认支持：
+
+### 支持的参数
+
+*   **spot**：要求环境中存在现货报价；冲击后价格必须为正。
+*   **volatility / vol**：仅支持平坦波动率曲面（`FlatVolSurface`）。
+*   **rate**：支持平坦利率曲线与插值曲线；以平行移动方式施加。
+*   **key_rate**：需要 `tenor_bucket` 元数据（如 `"5Y"`）；在插值曲线上对指定期限桶施加变化（平坦曲线会回退为平行移动）。
+*   **dividend_yield / div_yield / dividend**：支持平坦/连续股息率；冲击后股息率不能为负。
+*   **spread**：当前映射为与利率冲击相同的"平行移动代理"。
+
+若参数未被支持，引擎会报错；也可注册自定义适配器以扩展可冲击的风险因子。
+
+### 情景持久化
+
+情景可以通过 YAML/JSON 序列化进行持久化和恢复。这实现了：
+- **情景库**：构建可重用的压力测试套件
+- **版本控制**：跟踪情景演化
+- **共享**：在团队间分发情景
+- **监管报告**：记录压力测试假设
+
+### 实践中的粒度
+
+粒度级别（PORTFOLIO/UNDERLYING/POSITION）实现了复杂的险分析：
+
+| 用例 | 粒度 | 示例 |
+|----------|-------------|---------|
+| 监管资本（如 FRTB） | Portfolio | 市场范围的压力情景 |
+| 单一名称集中度 | Underlying | "如果 TSLA 下跌 30%？" |
+| 特定工具分析 | Position | "如果这个虚值期权变为实值？" |
+
+### 风险聚合
+
+在计算每个情景的盈亏后，模块会聚合结果以提供关键的风险洞察：
+
+*   **最坏情况情景**：识别导致最大损失的情景。
+*   **情景比较**：并排查看不同机制下的盈亏（例如，牛市与熊市）。
+*   **希腊值敏感度**：分析对冲参数（Delta, Gamma）在压力下如何变化。例如，一个投资组合现在可能是 Delta 中性的，但在市场下跌后，由于负 Gamma 的存在，可能会变成显著的做空 Delta。
+
+### 参考文献
+
+*   Basel Committee on Banking Supervision (2016). "Minimum Capital Requirements for Market Risk."
+*   Hull, J. (2022). *Options, Futures, and Other Derivatives* (11th ed.). Pearson.
+*   Cont, R., & Deguest, R. (2013). "Stress Testing Banks." *International Monetary Fund Working Paper*.
