@@ -4,6 +4,11 @@ MIN HUANG AND GUO LUO
 
 ABSTRACT. We present a simple, fast, and accurate method for pricing a variety of discretely monitored options in the Black-Scholes framework, including autocollable structured products, single and double barrier options, and Bermudan options. The method is based on a quadrature technique, and it employs only elementary calculations and a fixed one-dimensional uniform grid. The convergence rate is  $O(1 / N^4)$  and the complexity is  $O(MN\log N)$ , where  $N$  is the number of grid points and  $M$  is the number of observation dates.
 
+# QUANTARK IMPLEMENTATION NOTES
+
+- The QuadratureCore implements the recursion in Eq. (3.5) using observation dates as time steps (no implicit uniform resampling).
+- Product-specific adapters map barrier and one-touch contracts into boundary levels (`K^-`, `K^+`) and linear payoff coefficients (`a^-`, `b^-`, `a^+`, `b^+`, `a_M`, `b_M`).
+
 # 1. INTRODUCTION
 
 Exotic options are commonly traded throughout the world. Many popular exotic options are path-dependent and have early-exercise features. These options can often be priced using analytical formulas if they are continuously monitored (e.g. barrier options). In practice, however, most path-dependent exotic options are discretely monitored [4], in which case they need to be priced using numerical techniques. Due to the complicated structures of these options, traditional pricing models based on Monte-Carlo simulations and finite difference methods are often too time-consuming to be useful in practical situations. More recent pricing methods based on advanced mathematical techniques, on the other hand, tend to be more efficient (e.g. [14, 12, 10, 11]), but for many financial institutions, these methods are often too difficult to understand and to properly implement. To strike a balance between model performance and practical utility, we propose a new quadrature-based method that is much faster and more accurate than the traditional Monte-Carlo and PDE methods, yet at the same time is easy to understand and to implement. We will first give a brief review of the types of products considered, as well as the quadrature-based pricing model which is the foundation of our work. Then we will explain our method and provide numerical examples.

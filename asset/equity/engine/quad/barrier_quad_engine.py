@@ -8,21 +8,15 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 
 from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.engine.quad.barrier_quad_solver import _BarrierQuadratureSolver
 from asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
-from asset.equity.engine.quad.one_touch_quad_engine import OneTouchQuadEngine
+from asset.equity.engine.quad.quad_adapters import build_barrier_quad_inputs
+from asset.equity.engine.quad.quad_core import QuadratureCore
 from asset.equity.param import QuadParams
 from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option import BarrierOption, OneTouchOption
+from asset.equity.product.option import BarrierOption
 from asset.equity.product.option.observation_schedule import ObservationSchedule
 from priceenv import PricingEnvironment
-from util.enum import (
-    BarrierDirection,
-    BarrierType,
-    ObservationAggregation,
-    ObservationType,
-    TouchType,
-)
+from util.enum import BarrierType, ObservationAggregation, ObservationType
 from util.enum.engine_enums import EngineType
 from util.exceptions import PricingError, ValidationError
 
@@ -53,7 +47,6 @@ class BarrierQuadEngine(BaseEngine):
             )
         super().__init__(params)
         self._vanilla_engine = EuropeanQuadEngine(params=params)
-        self._one_touch_engine = OneTouchQuadEngine(params=params)
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -112,7 +105,6 @@ class BarrierQuadEngine(BaseEngine):
         if product.is_knock_in:
             ko_price = self._price_knock_out(
                 self._to_knock_out(product),
-                pricing_env,
                 S,
                 K,
                 T,
@@ -128,7 +120,7 @@ class BarrierQuadEngine(BaseEngine):
             ) * product.contract_multiplier
 
         ko_price = self._price_knock_out(
-            product, pricing_env, S, K, T, r, q, sigma, resolved
+            product, S, K, T, r, q, sigma, resolved
         )
         return ko_price * product.contract_multiplier
 
@@ -230,7 +222,6 @@ class BarrierQuadEngine(BaseEngine):
     def _price_knock_out(
         self,
         product: BarrierOption,
-        pricing_env: PricingEnvironment,
         spot: float,
         strike: float,
         maturity: float,
@@ -245,169 +236,42 @@ class BarrierQuadEngine(BaseEngine):
         if len(obs_times) > 1 and np.any(np.diff(obs_times) <= 0.0):
             raise ValidationError("Observation times must be strictly increasing.")
 
-        barriers = np.array([rec.barrier for rec in resolved], dtype=float)
-        payoffs = np.array([rec.payoff for rec in resolved], dtype=float)
-        settlement_times = np.array(
-            [
-                rec.settlement_time
-                if rec.settlement_time is not None
-                else rec.observation_time
-                for rec in resolved
-            ],
-            dtype=float,
+        inputs = build_barrier_quad_inputs(
+            product=product,
+            resolved=resolved,
+            maturity=maturity,
+            rate=rate,
         )
 
-        grid_t = self._select_time_steps(maturity, len(obs_times))
-        time_grid = np.linspace(0.0, maturity, grid_t + 1)
-        obs_indices = np.searchsorted(time_grid, obs_times, side="left")
-        obs_indices = np.clip(obs_indices, 0, grid_t)
-
-        # Numerical Stability Check:
-        # Ensure grid spacing h is small enough to resolve the Gaussian kernel width (sigma * sqrt(dt)).
-        # Heuristic: h <= 0.5 * sigma * sqrt(dt)
-        # Range width approx: 2 * log_c (calculated inside solver, but approximated here)
-        dt = maturity / grid_t
-        vol_max = vol if np.isscalar(vol) else float(np.max(vol))
-        
-        # Approximate log_c from solver logic
-        approx_log_c = 10.0 * vol_max * math.sqrt(maturity) + (1.0 + 0.5 * vol_max**2) * maturity
-        range_width = 2.0 * approx_log_c
-        
-        target_h = 0.5 * vol_max * math.sqrt(dt)
-        safe_grid_x = int(range_width / target_h) + 1
-        
-        # Use the larger of user-specified points or safe points
-        effective_grid_x = max(self.params.grid_points, safe_grid_x)
-
-        solver = _BarrierQuadratureSolver(
+        effective_grid_x = self._select_grid_points(
+            inputs.observation_times, maturity, vol
+        )
+        core = QuadratureCore(
             grid_x=effective_grid_x,
-            grid_t=grid_t,
-            maturity=maturity,
             spot=spot,
-            r=rate,
-            q=div,
+            observation_times=inputs.observation_times,
+            rate=rate,
+            div=div,
             vol=vol,
         )
-        upper_bounds = np.full(grid_t + 1, spot * solver.constant_c)
-        lower_bounds = np.full(grid_t + 1, spot / solver.constant_c)
+        return core.price(inputs)
 
-        if product.is_up_barrier:
-            upper_bounds[obs_indices] = barriers
-        else:
-            lower_bounds[obs_indices] = barriers
+    def _select_grid_points(
+        self, observation_times: np.ndarray, maturity: float, vol: float
+    ) -> int:
+        intervals = np.diff(np.concatenate(([0.0], observation_times)))
+        dt_min = float(np.min(intervals)) if intervals.size else maturity
+        vol_max = vol if np.isscalar(vol) else float(np.max(vol))
 
-        factors = {
-            "asset1": np.zeros(grid_t + 1),
-            "asset2": np.zeros(grid_t + 1),
-            "asset3": np.zeros(grid_t + 1),
-            "cash1": np.zeros(grid_t + 1),
-            "cash2": np.zeros(grid_t + 1),
-            "cash3": np.zeros(grid_t + 1),
-        }
-
-        maturity_barrier = None
-        maturity_tol = 1e-10
-        maturity_mask = np.isclose(obs_times, maturity, atol=maturity_tol, rtol=0.0)
-        if np.any(maturity_mask):
-            maturity_barrier = float(barriers[np.where(maturity_mask)[0][-1]])
-
-        payoff_lower = None
-        payoff_upper = None
-        if product.is_call():
-            payoff_lower = strike
-            if maturity_barrier is not None:
-                if product.is_up_barrier:
-                    payoff_upper = maturity_barrier
-                else:
-                    payoff_lower = max(strike, maturity_barrier)
-        else:
-            payoff_upper = strike
-            if maturity_barrier is not None:
-                if product.is_up_barrier:
-                    payoff_upper = min(strike, maturity_barrier)
-                else:
-                    payoff_lower = maturity_barrier
-
-        payoff_active = True
-        if payoff_upper is not None and payoff_lower is not None:
-            if payoff_upper <= payoff_lower:
-                payoff_active = False
-
-        if payoff_active:
-            if payoff_lower is not None:
-                lower_bounds[-1] = payoff_lower
-            if payoff_upper is not None:
-                upper_bounds[-1] = payoff_upper
-            if product.is_call():
-                payoff_asset = 1.0
-                payoff_cash = -strike
-            else:
-                payoff_asset = -1.0
-                payoff_cash = strike
-            payoff_asset *= product.participation_rate
-            payoff_cash *= product.participation_rate
-            factors["asset2"][-1] = payoff_asset
-            factors["cash2"][-1] = payoff_cash
-
-        rebate_leg = 0.0
-        rebate_in_factors = False
-        if product.rebate > 0.0:
-            try:
-                rebate_leg = self._price_rebate_leg(product, pricing_env)
-            except (ValidationError, PricingError):
-                rebate_in_factors = True
-
-        if rebate_in_factors:
-            discount_T = math.exp(-rate * maturity)
-            if product.pay_at_hit:
-                rebate_discount = np.exp(-rate * settlement_times)
-            else:
-                rebate_discount = discount_T * np.ones_like(settlement_times)
-            rebate_values = payoffs * rebate_discount
-            if product.is_up_barrier:
-                factors["cash3"][obs_indices] = rebate_values
-            else:
-                factors["cash1"][obs_indices] = rebate_values
-
-        quad_value = solver.price(
-            upper_bounds=upper_bounds,
-            lower_bounds=lower_bounds,
-            upper_indices=obs_indices if product.is_up_barrier else [],
-            lower_indices=obs_indices if product.is_down_barrier else [],
-            factors=factors,
+        approx_log_c = (
+            10.0 * vol_max * math.sqrt(maturity)
+            + (1.0 + 0.5 * vol_max**2) * maturity
         )
-        return quad_value + rebate_leg
+        range_width = 2.0 * approx_log_c
 
-    def _price_rebate_leg(
-        self, product: BarrierOption, pricing_env: PricingEnvironment
-    ) -> float:
-        if product.rebate <= 0.0:
-            return 0.0
-
-        barrier_direction = (
-            BarrierDirection.UP if product.is_up_barrier else BarrierDirection.DOWN
-        )
-        touch_type = TouchType.ONE_TOUCH if product.is_knock_out else TouchType.NO_TOUCH
-        pay_at_hit = product.pay_at_hit if product.is_knock_out else False
-
-        rebate_leg = OneTouchOption(
-            barrier=product.barrier,
-            barrier_direction=barrier_direction,
-            maturity=product.maturity,
-            exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
-            rebate=product.rebate,
-            payment_at_hit=pay_at_hit,
-            touch_type=touch_type,
-            observation_type=product.observation_type,
-            observation_dates=product.observation_dates,
-            observation_schedule=product.observation_schedule,
-        )
-        return self._one_touch_engine.price(rebate_leg, pricing_env)
-
-    def _select_time_steps(self, maturity: float, obs_count: int) -> int:
-        steps = max(int(self.params.bus_days_in_year * maturity), obs_count * 4, 10)
-        return max(steps, 3)
+        target_h = 0.5 * vol_max * math.sqrt(dt_min)
+        safe_grid_x = int(range_width / target_h) + 1
+        return max(self.params.grid_points, safe_grid_x)
 
     def _to_knock_out(self, product: BarrierOption) -> BarrierOption:
         """Convert knock-in to knock-out for barrier parity decomposition.
