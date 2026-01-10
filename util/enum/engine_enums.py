@@ -107,6 +107,16 @@ class EngineType(Enum):
         return self
 
 
+class QuadratureMethod(Enum):
+    """Quadrature methods for numerical integration pricing."""
+
+    SIMPSON = "simpson"
+    GAUSS_LEGENDRE = "gauss_legendre"
+
+    def __str__(self):
+        return self.value
+
+
 class GreeksCalculationMode(Enum):
     """Mode for calculating delta/gamma in GreeksCalculator.
 

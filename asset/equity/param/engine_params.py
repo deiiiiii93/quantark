@@ -322,3 +322,42 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 f"rannacher_steps must be non-negative, got {self.rannacher_steps}"
             )
+
+
+@dataclass
+class QuadParams(EngineParams):
+    """
+    Quadrature engine configuration.
+
+    Attributes:
+        grid_points: Number of integration points (default: 1000).
+                     Must be odd for Simpson's rule.
+        num_std_devs: Number of standard deviations for integration bounds (default: 10).
+                      Larger values capture more of the distribution tail.
+    """
+
+    grid_points: int = 1001  # Odd number for Simpson's rule
+    num_std_devs: float = 10.0
+
+    def __post_init__(self):
+        """Validate quadrature parameters."""
+        super().__post_init__()
+        if self.grid_points <= 0:
+            raise ValidationError(
+                f"grid_points must be positive, got {self.grid_points}"
+            )
+        if self.grid_points < 100:
+            raise ValidationError(
+                f"grid_points should be at least 100 for accuracy, got {self.grid_points}"
+            )
+        # Ensure odd number for Simpson's rule
+        if self.grid_points % 2 == 0:
+            self.grid_points += 1
+        if self.num_std_devs <= 0:
+            raise ValidationError(
+                f"num_std_devs must be positive, got {self.num_std_devs}"
+            )
+        if self.num_std_devs < 3:
+            raise ValidationError(
+                f"num_std_devs should be at least 3 for accuracy, got {self.num_std_devs}"
+            )

@@ -101,6 +101,9 @@ $$
 
 ## 压力架构
 
+**[图片占位符]**
+> **Prompt for Nanobanana**: /diagram prompt: "A system workflow diagram for Stress Testing. Three stages: 1. Inputs (Portfolio, Base Market, Scenarios) -> 2. Processing (Apply Shocks, Generate Stressed Envs, Full Repricing) -> 3. Outputs (P&L Impact, Greek Sensitivities, Capital Report). Style: Professional block diagram, clear input-process-output flow."
+
 ### 1. 冲击类型 (Stress Types)
 
 为了提供灵活性，可以通过三种方式施加冲击：

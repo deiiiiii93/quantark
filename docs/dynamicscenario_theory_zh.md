@@ -138,6 +138,9 @@ $$
 4. 若启用对冲：运行触发与头寸计算、执行对冲交易、必要时再重估
 5. 记录当日结果（价值、P&L、风险、交易与成本）
 
+**[图片占位符]**
+> **Prompt for Nanobanana**: /diagram prompt: "A flowchart diagram of the Dynamic Scenario Simulation Loop. Visual flow: Start -> [Update Market Data (t)] -> [Reprice Portfolio] -> [Check Hedge Triggers] -> [Execute Trades] -> [Record Results] -> [Advance Time (t+1)] -> Loop back. Style: Technical process diagram, circular cycle, modern UI elements."
+
 ### 路径依赖分析
 
 此框架捕捉了静态分析遗漏的风险。以下是关键路径依赖风险的正式定义：

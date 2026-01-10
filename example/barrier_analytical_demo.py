@@ -15,6 +15,8 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from asset.equity.engine.analytical import BarrierAnalyticalEngine
+from asset.equity.engine.mc import BarrierOptionMCEngine
+from asset.equity.param import MCParams
 from asset.equity.product.option import (
     BarrierOption,
     ObservationRecord,
@@ -42,7 +44,7 @@ def make_pricing_env() -> PricingEnvironment:
     )
 
 
-def demo_continuous_knock_out(engine: BarrierAnalyticalEngine, env: PricingEnvironment):
+def demo_continuous_knock_out(engine: BarrierAnalyticalEngine, mc_engine: BarrierOptionMCEngine, env: PricingEnvironment):
     """Continuous DOWN&OUT call, no rebate."""
     print_section("Continuous monitoring (Down-and-Out Call)")
     option = BarrierOption(
@@ -54,10 +56,12 @@ def demo_continuous_knock_out(engine: BarrierAnalyticalEngine, env: PricingEnvir
         observation_type=ObservationType.CONTINUOUS,
     )
     price = engine.price(option, env)
-    print(f"Price (continuous down-out call): {price:.6f}")
+    mc_price = mc_engine.price(option, env)
+    print(f"Price (continuous down-out call) [Analytic]: {price:.6f}")
+    print(f"Price (continuous down-out call) [MC]      : {mc_price:.6f}")
 
 
-def demo_daily_knock_out(engine: BarrierAnalyticalEngine, env: PricingEnvironment):
+def demo_daily_knock_out(engine: BarrierAnalyticalEngine, mc_engine: BarrierOptionMCEngine, env: PricingEnvironment):
     """Discrete DOWN&OUT call with daily observations, no rebate."""
     print_section("Discrete monitoring with daily observations (Down-and-Out Call)")
     daily = 1.0 / 245.0
@@ -78,10 +82,12 @@ def demo_daily_knock_out(engine: BarrierAnalyticalEngine, env: PricingEnvironmen
         observation_schedule=schedule,
     )
     price = engine.price(option, env)
-    print(f"Price (daily down-out call): {price:.6f}")
+    mc_price = mc_engine.price(option, env)
+    print(f"Price (daily down-out call) [Analytic]: {price:.6f}")
+    print(f"Price (daily down-out call) [MC]      : {mc_price:.6f}")
 
 
-def demo_discrete_knock_out(engine: BarrierAnalyticalEngine, env: PricingEnvironment):
+def demo_discrete_knock_out(engine: BarrierAnalyticalEngine, mc_engine: BarrierOptionMCEngine, env: PricingEnvironment):
     """Discrete UP&OUT call with monthly observations (barrier shift applied)."""
     print_section("Discrete monitoring with barrier shift (Up-and-Out Call)")
     monthly = 1.0 / 12.0
@@ -102,10 +108,12 @@ def demo_discrete_knock_out(engine: BarrierAnalyticalEngine, env: PricingEnviron
         observation_schedule=schedule,
     )
     price = engine.price(option, env)
-    print(f"Price (discrete up-out call, monthly obs): {price:.6f}")
+    mc_price = mc_engine.price(option, env)
+    print(f"Price (discrete up-out call, monthly obs) [Analytic]: {price:.6f}")
+    print(f"Price (discrete up-out call, monthly obs) [MC]      : {mc_price:.6f}")
 
 
-def demo_expiry_with_rebate(engine: BarrierAnalyticalEngine, env: PricingEnvironment):
+def demo_expiry_with_rebate(engine: BarrierAnalyticalEngine, mc_engine: BarrierOptionMCEngine, env: PricingEnvironment):
     """Expiry-only UP&OUT call with rebate, uses vanilla + digital decomposition."""
     print_section("Expiry-only monitoring (Up-and-Out Call with rebate)")
     option = BarrierOption(
@@ -118,17 +126,23 @@ def demo_expiry_with_rebate(engine: BarrierAnalyticalEngine, env: PricingEnviron
         rebate=2.0,
     )
     price = engine.price(option, env)
-    print(f"Price (expiry up-out call with rebate): {price:.6f}")
+    mc_price = mc_engine.price(option, env)
+    print(f"Price (expiry up-out call with rebate) [Analytic]: {price:.6f}")
+    print(f"Price (expiry up-out call with rebate) [MC]      : {mc_price:.6f}")
 
 
 def main():
     env = make_pricing_env()
     engine = BarrierAnalyticalEngine()
+    
+    # Setup MC engine with enough paths and steps for reasonable accuracy
+    mc_params = MCParams(num_paths=50000, time_steps=252, seed=42)
+    mc_engine = BarrierOptionMCEngine(params=mc_params)
 
-    demo_continuous_knock_out(engine, env)
-    demo_daily_knock_out(engine, env)
-    demo_discrete_knock_out(engine, env)
-    demo_expiry_with_rebate(engine, env)
+    demo_continuous_knock_out(engine, mc_engine, env)
+    demo_daily_knock_out(engine, mc_engine, env)
+    demo_discrete_knock_out(engine, mc_engine, env)
+    demo_expiry_with_rebate(engine, mc_engine, env)
 
 
 if __name__ == "__main__":

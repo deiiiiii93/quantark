@@ -28,6 +28,7 @@ from .pde import (
     TimeGrid,
     SpatialGrid,
 )
+from .quad import EuropeanQuadEngine, BarrierQuadEngine, OneTouchQuadEngine
 
 __all__ = [
     # Base
@@ -56,4 +57,8 @@ __all__ = [
     # Grid utilities
     "TimeGrid",
     "SpatialGrid",
+    # Quadrature
+    "EuropeanQuadEngine",
+    "BarrierQuadEngine",
+    "OneTouchQuadEngine",
 ]

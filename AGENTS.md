@@ -325,6 +325,15 @@ Pass a targeted natural language query describing what you're trying to accompli
 CANNOT BE CALLED IN PARALLEL - one invocation at a time."
 
 ## Skills
-- Load all skills in $CODEX_HOME/skills.
+- Load all skills in $CODEX_HOME/skills (including $CODEX_HOME/skills/.system).
 - Always use the `engine-creator` skill when creating new pricing engines in this repository.
 - Always use the `engine-validator` skill when creating validation reports for pricing engines in this repository.
+
+### Available Skills
+- draft-commit-message: Draft a Conventional Commit message when the user asks for help writing a commit message.
+- engine-creator: Create new pricing engine scripts in the asset/ directory following QuantArk patterns.
+- engine-validator: Validate pricing engine scripts and generate validation reports.
+- gh-address-comments: Address review/issue comments on the open GitHub PR using gh CLI.
+- product-creator: Create new financial product classes in the asset/ directory following QuantArk patterns.
+- skill-creator: Create or update Codex skills.
+- skill-installer: Install Codex skills into $CODEX_HOME/skills.

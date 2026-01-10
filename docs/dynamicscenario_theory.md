@@ -137,6 +137,9 @@ Conceptually, the engine loop is:
 4. If hedging enabled: run strategy trigger + sizing, execute hedge trades, then reprice again
 5. Record day result (value, P&L, risk, trades, costs)
 
+**[Image Placeholder]**
+> **Prompt for Nanobanana**: /diagram prompt: "A flowchart diagram of the Dynamic Scenario Simulation Loop. Visual flow: Start -> [Update Market Data (t)] -> [Reprice Portfolio] -> [Check Hedge Triggers] -> [Execute Trades] -> [Record Results] -> [Advance Time (t+1)] -> Loop back. Style: Technical process diagram, circular cycle, modern UI elements."
+
 ### Path Dependency Analysis
 This framework captures risks that static analysis misses. The following are formal definitions of key path-dependent risks:
 

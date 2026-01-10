@@ -101,6 +101,9 @@ where **Vanna** = \(\frac{\partial^2 V}{\partial S \partial \sigma}\) captures t
 
 ## Stress Architecture
 
+**[Image Placeholder]**
+> **Prompt for Nanobanana**: /diagram prompt: "A system workflow diagram for Stress Testing. Three stages: 1. Inputs (Portfolio, Base Market, Scenarios) -> 2. Processing (Apply Shocks, Generate Stressed Envs, Full Repricing) -> 3. Outputs (P&L Impact, Greek Sensitivities, Capital Report). Style: Professional block diagram, clear input-process-output flow."
+
 ### 1. Stress Types
 
 To provide flexibility, shocks can be applied in three ways:
