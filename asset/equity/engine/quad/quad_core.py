@@ -294,6 +294,42 @@ class QuadratureCore:
             p0 = (p_ur - p_lr) % 2
         return p_lr, p_ur, p0
 
+    def _calculate_tail_integral_left(
+        self,
+        x_array: np.ndarray,
+        m: int,
+        bound_lr: float,
+        xee_lr: float,
+        v_bound_lr: float,
+        v_xee_lr: float,
+        anchor_grid: float,
+        anchor_value: float,
+    ) -> np.ndarray:
+        weight = (anchor_grid - bound_lr) / 6.0
+        return weight * (
+            self._omega(x_array - bound_lr, m) * v_bound_lr
+            + 4.0 * self._omega(x_array - xee_lr, m) * v_xee_lr
+            + self._omega(x_array - anchor_grid, m) * anchor_value
+        )
+
+    def _calculate_tail_integral_right(
+        self,
+        x_array: np.ndarray,
+        m: int,
+        bound_ur: float,
+        xee_ur: float,
+        v_bound_ur: float,
+        v_xee_ur: float,
+        anchor_grid: float,
+        anchor_value: float,
+    ) -> np.ndarray:
+        weight = (bound_ur - anchor_grid) / 6.0
+        return weight * (
+            self._omega(x_array - bound_ur, m) * v_bound_ur
+            + 4.0 * self._omega(x_array - xee_ur, m) * v_xee_ur
+            + self._omega(x_array - anchor_grid, m) * anchor_value
+        )
+
     def _calculate_values_at_M_minus_1(
         self, bound_upper: np.ndarray, bound_lower: np.ndarray, factors: dict
     ) -> tuple:
@@ -421,20 +457,29 @@ class QuadratureCore:
         )
 
         y1 = self._calculate_convolution_fft(omega_array, u_array)
+        anchor_left = self.grid[p_lr_m]
+        anchor_right = self.grid[p_ur_m + p0_m]
 
-        y2 = (self.grid[p_lr_m] - bound_lr_m) / 6.0
-        y2 = y2 * (
-            self._omega(self.grid - bound_lr_m, m) * v_bound_lr_m
-            + 4.0 * self._omega(self.grid - xee_lr_m, m) * v_xee_lr_m
-            + self._omega(self.grid - self.grid[p_lr_m], m) * y_array[p_lr_m]
+        y2 = self._calculate_tail_integral_left(
+            self.grid,
+            m,
+            bound_lr_m,
+            xee_lr_m,
+            v_bound_lr_m,
+            v_xee_lr_m,
+            anchor_left,
+            y_array[p_lr_m],
         )
 
-        y3 = (bound_ur_m - self.grid[p_ur_m + p0_m]) / 6.0
-        y3 = y3 * (
-            self._omega(self.grid - bound_ur_m, m) * v_bound_ur_m
-            + 4.0 * self._omega(self.grid - xee_ur_m, m) * v_xee_ur_m
-            + self._omega(self.grid - self.grid[p_ur_m + p0_m], m)
-            * y_array[p_ur_m + p0_m]
+        y3 = self._calculate_tail_integral_right(
+            self.grid,
+            m,
+            bound_ur_m,
+            xee_ur_m,
+            v_bound_ur_m,
+            v_xee_ur_m,
+            anchor_right,
+            y_array[p_ur_m + p0_m],
         )
 
         a = []
@@ -446,19 +491,26 @@ class QuadratureCore:
             a.append(float(np.sum(tmp) * self.h / 3.0))
         a = np.array(a)
 
-        b = (self.grid[p_lr_m] - bound_lr_m) / 6.0
-        b = b * (
-            self._omega(x_m_n1 - bound_lr_m, m) * v_bound_lr_m
-            + 4.0 * self._omega(x_m_n1 - xee_lr_m, m) * v_xee_lr_m
-            + self._omega(x_m_n1 - self.grid[p_lr_m], m) * y_array[p_lr_m]
+        b = self._calculate_tail_integral_left(
+            x_m_n1,
+            m,
+            bound_lr_m,
+            xee_lr_m,
+            v_bound_lr_m,
+            v_xee_lr_m,
+            anchor_left,
+            y_array[p_lr_m],
         )
 
-        c = (bound_ur_m - self.grid[p_ur_m + p0_m]) / 6.0
-        c = c * (
-            self._omega(x_m_n1 - bound_ur_m, m) * v_bound_ur_m
-            + 4.0 * self._omega(x_m_n1 - xee_ur_m, m) * v_xee_ur_m
-            + self._omega(x_m_n1 - self.grid[p_ur_m + p0_m], m)
-            * y_array[p_ur_m + p0_m]
+        c = self._calculate_tail_integral_right(
+            x_m_n1,
+            m,
+            bound_ur_m,
+            xee_ur_m,
+            v_bound_ur_m,
+            v_xee_ur_m,
+            anchor_right,
+            y_array[p_ur_m + p0_m],
         )
 
         spot_array = self.spot * np.exp(x_m_n1)
