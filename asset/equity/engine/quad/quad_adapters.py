@@ -1,255 +1,696 @@
 """
-Adapter helpers to map products into quadrature core inputs.
+Adapter layer for building quadrature core inputs from product types.
 """
 
+from __future__ import annotations
+
 import math
-from typing import Sequence
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Sequence, TYPE_CHECKING
 
 import numpy as np
 
-from asset.equity.product.option import BarrierOption, OneTouchOption
-from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from util.exceptions import ValidationError
-from util.numerical import Tolerance
+from asset.equity.engine.quad.quad_core import QuadCoreInputs
+from asset.equity.product.base_equity_product import BaseEquityProduct
+from asset.equity.product.option import BarrierOption, EuropeanVanillaOption, OneTouchOption
+from asset.equity.product.option.observation_schedule import (
+    ObservationSchedule,
+    ResolvedObservationRecord,
+)
+from priceenv import PricingEnvironment
+from util.enum import ObservationAggregation, ObservationType
+from util.exceptions import PricingError, ValidationError
+from util.numerical import Tolerance, is_zero, validate_non_negative, validate_positive
 
-from .quad_core import QuadCoreInputs
+if TYPE_CHECKING:
+    from asset.equity.engine.quad.discrete_quad_engine import DiscreteQuadEngine
 
 
-def build_barrier_quad_inputs(
-    product: BarrierOption,
-    resolved: Sequence[ResolvedObservationRecord],
-    maturity: float,
-    rate: float,
-) -> QuadCoreInputs:
-    obs_times, barriers, payoffs, settlement_times = _extract_observations(
-        resolved, maturity, product.is_up_barrier
-    )
+@dataclass(frozen=True)
+class QuadPricingContext:
+    """Shared pricing context for discrete quadrature adapters."""
 
-    if product.is_up_barrier:
-        k_plus = np.array(barriers, dtype=float)
-        k_minus = np.zeros_like(k_plus)
-    else:
-        k_minus = np.array(barriers, dtype=float)
-        k_plus = np.full_like(k_minus, math.inf, dtype=float)
+    spot: float
+    maturity: float
+    rate: float
+    div: float
+    vol: float
+    contract_multiplier: float
 
-    a_minus = np.zeros_like(k_minus, dtype=float)
-    b_minus = np.zeros_like(k_minus, dtype=float)
-    a_plus = np.zeros_like(k_plus, dtype=float)
-    b_plus = np.zeros_like(k_plus, dtype=float)
 
-    rebate_values = _discount_rebates(
-        payoffs=payoffs,
-        observation_times=obs_times,
-        settlement_times=settlement_times,
-        maturity=maturity,
-        rate=rate,
-        pay_at_hit=product.pay_at_hit,
-    )
+class QuadInputAdapter(ABC):
+    """Interface for building quad core inputs from a product."""
 
-    if product.rebate > 0.0:
-        if product.is_up_barrier:
-            b_plus = rebate_values
+    @abstractmethod
+    def can_handle(self, product: BaseEquityProduct) -> bool:
+        """Return True if adapter can handle the product."""
+
+    @abstractmethod
+    def build_pricing_context(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: "DiscreteQuadEngine",
+    ) -> QuadPricingContext:
+        """Build shared pricing context for the product."""
+
+    @abstractmethod
+    def early_price(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+        engine: "DiscreteQuadEngine",
+    ) -> float | None:
+        """Return a price if no core evaluation is needed; otherwise None."""
+
+    @abstractmethod
+    def resolve_schedule(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+    ) -> Sequence[ResolvedObservationRecord]:
+        """Resolve observation schedule into concrete records."""
+
+    @abstractmethod
+    def build_inputs(
+        self,
+        product: BaseEquityProduct,
+        resolved: Sequence[ResolvedObservationRecord],
+        context: QuadPricingContext,
+    ) -> QuadCoreInputs:
+        """Construct quad core inputs for the product."""
+
+    @abstractmethod
+    def finalize_price(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+        core_price: float,
+        engine: "DiscreteQuadEngine",
+    ) -> float:
+        """Post-process the core output into a final product price."""
+
+
+class BaseDiscreteQuadAdapter(QuadInputAdapter):
+    """Base adapter with shared schedule handling helpers."""
+
+    def resolve_schedule(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+    ) -> Sequence[ResolvedObservationRecord]:
+        maturity = context.maturity
+        default_payoff = self._default_payoff(product)
+
+        if product.observation_type == ObservationType.EXPIRY:
+            schedule = ObservationSchedule.from_legacy(
+                observation_dates=[maturity],
+                default_barrier=product.barrier,
+                default_payoff=default_payoff,
+                aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
+            )
         else:
-            b_minus = rebate_values
+            schedule = product.observation_schedule
+            if schedule is None and product.observation_dates:
+                schedule = ObservationSchedule.from_legacy(
+                    observation_dates=product.observation_dates,
+                    default_barrier=product.barrier,
+                    default_payoff=default_payoff,
+                    aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
+                )
 
-    maturity_barrier = _resolve_maturity_barrier(obs_times, barriers, maturity)
-    a_terminal, b_terminal = _apply_terminal_payoff_structure(
-        product,
-        maturity_barrier,
-        k_minus,
-        k_plus,
-        a_minus,
-        b_minus,
-        a_plus,
-        b_plus,
-    )
+        if schedule is None or not schedule.records:
+            raise PricingError("Discrete monitoring requires ObservationSchedule.")
+        if schedule.aggregation_mode != ObservationAggregation.STOP_FIRST_HIT:
+            raise PricingError("DiscreteQuadEngine requires STOP_FIRST_HIT aggregation.")
 
-    return QuadCoreInputs(
-        observation_times=obs_times,
-        k_minus=k_minus,
-        k_plus=k_plus,
-        a_minus=a_minus,
-        b_minus=b_minus,
-        a_plus=a_plus,
-        b_plus=b_plus,
-        a_terminal=a_terminal,
-        b_terminal=b_terminal,
-    )
+        resolved = schedule.resolve(
+            pricing_env,
+            default_barrier=product.barrier,
+            default_payoff=default_payoff,
+            require_single=True,
+        )
+        return resolved
 
+    def _default_payoff(self, product: BaseEquityProduct) -> float:
+        return float(getattr(product, "rebate", 0.0))
 
-def build_one_touch_quad_inputs(
-    product: OneTouchOption,
-    resolved: Sequence[ResolvedObservationRecord],
-    maturity: float,
-    rate: float,
-) -> QuadCoreInputs:
-    obs_times, barriers, payoffs, settlement_times = _extract_observations(
-        resolved, maturity, product.is_up_barrier
-    )
+    def _extract_observations(
+        self,
+        resolved: Sequence[ResolvedObservationRecord],
+        maturity: float,
+        is_up_barrier: bool,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
+        barriers = np.array([rec.barrier for rec in resolved], dtype=float)
+        payoffs = np.array([rec.payoff for rec in resolved], dtype=float)
+        settlement_times = np.array(
+            [
+                rec.settlement_time if rec.settlement_time is not None else rec.observation_time
+                for rec in resolved
+            ],
+            dtype=float,
+        )
 
-    if product.is_up_barrier:
-        k_plus = np.array(barriers, dtype=float)
-        k_minus = np.zeros_like(k_plus)
-    else:
-        k_minus = np.array(barriers, dtype=float)
-        k_plus = np.full_like(k_minus, math.inf, dtype=float)
+        if obs_times.size == 0:
+            raise ValidationError("Resolved observation schedule is empty.")
 
-    a_minus = np.zeros_like(k_minus, dtype=float)
-    b_minus = np.zeros_like(k_minus, dtype=float)
-    a_plus = np.zeros_like(k_plus, dtype=float)
-    b_plus = np.zeros_like(k_plus, dtype=float)
+        if maturity - obs_times[-1] > Tolerance.ZERO:
+            obs_times = np.append(obs_times, maturity)
+            barriers = np.append(barriers, math.inf if is_up_barrier else 0.0)
+            payoffs = np.append(payoffs, 0.0)
+            settlement_times = np.append(settlement_times, maturity)
 
-    rebate_values = _discount_rebates(
-        payoffs=payoffs,
-        observation_times=obs_times,
-        settlement_times=settlement_times,
-        maturity=maturity,
-        rate=rate,
-        pay_at_hit=product.payment_at_hit,
-    )
+        return obs_times, barriers, payoffs, settlement_times
 
-    if product.rebate > 0.0:
-        if product.is_up_barrier:
-            b_plus = rebate_values
+    def _discount_rebates(
+        self,
+        payoffs: np.ndarray,
+        observation_times: np.ndarray,
+        settlement_times: np.ndarray,
+        maturity: float,
+        rate: float,
+        pay_at_hit: bool,
+    ) -> np.ndarray:
+        if payoffs.size == 0:
+            return payoffs
+        if pay_at_hit:
+            delays = np.maximum(settlement_times - observation_times, 0.0)
+            discount = np.exp(-rate * delays)
         else:
-            b_minus = rebate_values
-
-    return QuadCoreInputs(
-        observation_times=obs_times,
-        k_minus=k_minus,
-        k_plus=k_plus,
-        a_minus=a_minus,
-        b_minus=b_minus,
-        a_plus=a_plus,
-        b_plus=b_plus,
-        a_terminal=0.0,
-        b_terminal=0.0,
-    )
+            discount = np.exp(-rate * (maturity - observation_times))
+        return payoffs * discount
 
 
-def _extract_observations(
-    resolved: Sequence[ResolvedObservationRecord],
-    maturity: float,
-    is_up_barrier: bool,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
-    barriers = np.array([rec.barrier for rec in resolved], dtype=float)
-    payoffs = np.array([rec.payoff for rec in resolved], dtype=float)
-    settlement_times = np.array(
-        [
-            rec.settlement_time if rec.settlement_time is not None else rec.observation_time
-            for rec in resolved
-        ],
-        dtype=float,
-    )
+class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
+    """Adapter for barrier options in discrete quadrature."""
 
-    if obs_times.size == 0:
-        raise ValidationError("Resolved observation schedule is empty.")
+    def can_handle(self, product: BaseEquityProduct) -> bool:
+        return isinstance(product, BarrierOption)
 
-    if maturity - obs_times[-1] > Tolerance.ZERO:
-        obs_times = np.append(obs_times, maturity)
-        if is_up_barrier:
-            barriers = np.append(barriers, math.inf)
-        else:
-            barriers = np.append(barriers, 0.0)
-        payoffs = np.append(payoffs, 0.0)
-        settlement_times = np.append(settlement_times, maturity)
+    def build_pricing_context(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        engine: "DiscreteQuadEngine",
+    ) -> QuadPricingContext:
+        spot = pricing_env.spot
+        maturity = product.get_maturity(pricing_env)
+        rate = pricing_env.get_rate(maturity)
+        div = pricing_env.get_div_yield(maturity)
+        vol = pricing_env.get_vol(product.strike, maturity)
+        contract_multiplier = product.contract_multiplier
 
-    return obs_times, barriers, payoffs, settlement_times
+        self._validate_inputs(
+            spot, product.strike, maturity, rate, div, vol, product.barrier, engine
+        )
 
+        return QuadPricingContext(
+            spot=spot,
+            maturity=maturity,
+            rate=rate,
+            div=div,
+            vol=vol,
+            contract_multiplier=contract_multiplier,
+        )
 
-def _discount_rebates(
-    payoffs: np.ndarray,
-    observation_times: np.ndarray,
-    settlement_times: np.ndarray,
-    maturity: float,
-    rate: float,
-    pay_at_hit: bool,
-) -> np.ndarray:
-    if payoffs.size == 0:
-        return payoffs
-    if pay_at_hit:
-        delays = np.maximum(settlement_times - observation_times, 0.0)
-        discount = np.exp(-rate * delays)
-    else:
-        discount = np.exp(-rate * (maturity - observation_times))
-    return payoffs * discount
+    def early_price(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+        engine: "DiscreteQuadEngine",
+    ) -> float | None:
+        if context.maturity < engine.MIN_MATURITY:
+            value = self._barrier_expired_price(
+                product, context.spot, context.rate, context.maturity
+            )
+            return value * context.contract_multiplier
 
+        if (
+            product.observation_type != ObservationType.EXPIRY
+            and product.is_barrier_hit(context.spot)
+        ):
+            if product.is_knock_out:
+                value = self._barrier_immediate_ko_price(
+                    product, context.rate, context.maturity
+                )
+                return value * context.contract_multiplier
+            value = self._vanilla_price(product, pricing_env, engine)
+            return value * context.contract_multiplier
 
-def _resolve_maturity_barrier(
-    observation_times: np.ndarray, barriers: np.ndarray, maturity: float
-) -> float | None:
-    maturity_mask = np.isclose(
-        observation_times, maturity, atol=Tolerance.ZERO, rtol=0.0
-    )
-    if not np.any(maturity_mask):
+        if product.observation_type == ObservationType.CONTINUOUS:
+            raise PricingError(
+                "DiscreteQuadEngine supports discrete monitoring only. "
+                "Use BarrierAnalyticalEngine for continuous barriers."
+            )
+
         return None
-    value = float(barriers[np.where(maturity_mask)[0][-1]])
-    if not math.isfinite(value) or value <= 0.0:
-        return None
-    return value
 
+    def resolve_schedule(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+    ) -> Sequence[ResolvedObservationRecord]:
+        return super().resolve_schedule(product, pricing_env, context)
 
-def _apply_terminal_payoff_structure(
-    product: BarrierOption,
-    maturity_barrier: float | None,
-    k_minus: np.ndarray,
-    k_plus: np.ndarray,
-    a_minus: np.ndarray,
-    b_minus: np.ndarray,
-    a_plus: np.ndarray,
-    b_plus: np.ndarray,
-) -> tuple[float, float]:
-    participation = product.participation_rate
-    strike = product.strike
-    is_call = product.is_call()
+    def build_inputs(
+        self,
+        product: BarrierOption,
+        resolved: Sequence[ResolvedObservationRecord],
+        context: QuadPricingContext,
+    ) -> QuadCoreInputs:
+        obs_times, barriers, payoffs, settlement_times = self._extract_observations(
+            resolved, context.maturity, product.is_up_barrier
+        )
 
-    a_terminal = 0.0
-    b_terminal = 0.0
-
-    if maturity_barrier is None:
-        if is_call:
-            k_minus[-1] = strike
-            a_terminal = participation
-            b_terminal = -participation * strike
+        if product.is_up_barrier:
+            k_plus = np.array(barriers, dtype=float)
+            k_minus = np.zeros_like(k_plus)
         else:
-            k_plus[-1] = strike
-            a_terminal = -participation
-            b_terminal = participation * strike
-        return a_terminal, b_terminal
+            k_minus = np.array(barriers, dtype=float)
+            k_plus = np.full_like(k_minus, math.inf, dtype=float)
 
-    barrier = maturity_barrier
+        a_minus = np.zeros_like(k_minus, dtype=float)
+        b_minus = np.zeros_like(k_minus, dtype=float)
+        a_plus = np.zeros_like(k_plus, dtype=float)
+        b_plus = np.zeros_like(k_plus, dtype=float)
 
-    if product.is_up_barrier:
-        k_plus[-1] = barrier
-        if is_call:
-            if barrier > strike:
+        if product.rebate > 0.0:
+            rebate_values = self._discount_rebates(
+                payoffs,
+                obs_times,
+                settlement_times,
+                context.maturity,
+                context.rate,
+                product.pay_at_hit,
+            )
+            if product.is_up_barrier:
+                b_plus = rebate_values
+            else:
+                b_minus = rebate_values
+
+        maturity_barrier = self._resolve_maturity_barrier(
+            obs_times, barriers, context.maturity
+        )
+        a_terminal, b_terminal = self._apply_terminal_payoff_structure(
+            product,
+            maturity_barrier,
+            k_minus,
+            k_plus,
+            a_minus,
+            b_minus,
+            a_plus,
+            b_plus,
+        )
+
+        return QuadCoreInputs(
+            observation_times=obs_times,
+            k_minus=k_minus,
+            k_plus=k_plus,
+            a_minus=a_minus,
+            b_minus=b_minus,
+            a_plus=a_plus,
+            b_plus=b_plus,
+            a_terminal=a_terminal,
+            b_terminal=b_terminal,
+        )
+
+    def finalize_price(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+        core_price: float,
+        engine: "DiscreteQuadEngine",
+    ) -> float:
+        if product.is_knock_in:
+            vanilla_price = self._vanilla_price(product, pricing_env, engine)
+            rebate_discount = product.rebate * math.exp(-context.rate * context.maturity)
+            value = vanilla_price + rebate_discount - core_price
+            return value * context.contract_multiplier
+        return core_price * context.contract_multiplier
+
+    def _validate_inputs(
+        self,
+        spot: float,
+        strike: float,
+        maturity: float,
+        rate: float,
+        div: float,
+        vol: float,
+        barrier: float,
+        engine: "DiscreteQuadEngine",
+    ) -> None:
+        if spot <= 0:
+            raise ValidationError(f"Spot price must be positive, got {spot}")
+        if strike <= 0:
+            raise ValidationError(f"Strike price must be positive, got {strike}")
+        if maturity < 0:
+            raise ValidationError(f"Time to maturity must be non-negative, got {maturity}")
+        if vol <= 0:
+            raise ValidationError(f"Volatility must be positive, got {vol}")
+        if barrier <= 0:
+            raise ValidationError(f"Barrier must be positive, got {barrier}")
+        if div < 0:
+            raise ValidationError(f"Dividend yield must be non-negative, got {div}")
+        if abs(rate) > 1.0:
+            raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
+        if vol > engine.MAX_VOL:
+            raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
+
+    def _resolve_maturity_barrier(
+        self, observation_times: np.ndarray, barriers: np.ndarray, maturity: float
+    ) -> float | None:
+        maturity_mask = np.isclose(
+            observation_times, maturity, atol=Tolerance.ZERO, rtol=0.0
+        )
+        if not np.any(maturity_mask):
+            return None
+        value = float(barriers[np.where(maturity_mask)[0][-1]])
+        if not math.isfinite(value) or value <= 0.0:
+            return None
+        return value
+
+    def _apply_terminal_payoff_structure(
+        self,
+        product: BarrierOption,
+        maturity_barrier: float | None,
+        k_minus: np.ndarray,
+        k_plus: np.ndarray,
+        a_minus: np.ndarray,
+        b_minus: np.ndarray,
+        a_plus: np.ndarray,
+        b_plus: np.ndarray,
+    ) -> tuple[float, float]:
+        participation = product.participation_rate
+        strike = product.strike
+        is_call = product.is_call()
+        a_terminal = 0.0
+        b_terminal = 0.0
+
+        if maturity_barrier is None:
+            if is_call:
                 k_minus[-1] = strike
                 a_terminal = participation
                 b_terminal = -participation * strike
-        else:
-            if barrier > strike:
-                k_minus[-1] = strike
-                a_minus[-1] = -participation
-                b_minus[-1] = participation * strike
             else:
+                k_plus[-1] = strike
                 a_terminal = -participation
                 b_terminal = participation * strike
+            return a_terminal, b_terminal
+
+        barrier = maturity_barrier
+
+        if product.is_up_barrier:
+            k_plus[-1] = barrier
+            if is_call:
+                if barrier > strike:
+                    k_minus[-1] = strike
+                    a_terminal = participation
+                    b_terminal = -participation * strike
+            else:
+                if barrier > strike:
+                    k_minus[-1] = strike
+                    a_minus[-1] = -participation
+                    b_minus[-1] = participation * strike
+                else:
+                    a_terminal = -participation
+                    b_terminal = participation * strike
+            return a_terminal, b_terminal
+
+        k_minus[-1] = barrier
+        if is_call:
+            if barrier < strike:
+                k_plus[-1] = strike
+                a_plus[-1] = participation
+                b_plus[-1] = -participation * strike
+            else:
+                a_terminal = participation
+                b_terminal = -participation * strike
+        else:
+            if barrier < strike:
+                k_plus[-1] = strike
+                a_terminal = -participation
+                b_terminal = participation * strike
+
         return a_terminal, b_terminal
 
-    k_minus[-1] = barrier
-    if is_call:
-        if barrier < strike:
-            k_plus[-1] = strike
-            a_plus[-1] = participation
-            b_plus[-1] = -participation * strike
+    def _barrier_expired_price(
+        self, product: BarrierOption, spot: float, rate: float, maturity: float
+    ) -> float:
+        hit = product.is_barrier_hit(spot)
+        if product.is_call():
+            intrinsic = max(spot - product.strike, 0.0)
         else:
-            a_terminal = participation
-            b_terminal = -participation * strike
-    else:
-        if barrier < strike:
-            k_plus[-1] = strike
-            a_terminal = -participation
-            b_terminal = participation * strike
+            intrinsic = max(product.strike - spot, 0.0)
+        vanilla = intrinsic * product.participation_rate
+        if product.is_knock_out:
+            value = product.rebate if hit else vanilla
+        else:
+            value = vanilla if hit else product.rebate
+        if maturity <= 0.0:
+            return value
+        return value * math.exp(-rate * maturity)
 
-    return a_terminal, b_terminal
+    def _barrier_immediate_ko_price(
+        self, product: BarrierOption, rate: float, maturity: float
+    ) -> float:
+        if product.pay_at_hit:
+            return product.rebate
+        return product.rebate * math.exp(-rate * maturity)
+
+    def _vanilla_price(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        engine: "DiscreteQuadEngine",
+    ) -> float:
+        vanilla = EuropeanVanillaOption(
+            strike=product.strike,
+            option_type=product.option_type,
+            maturity=product.maturity,
+            exercise_date=product.exercise_date,
+            settlement_date=product.settlement_date,
+            contract_multiplier=1.0,
+        )
+        price = engine.vanilla_engine.price(vanilla, pricing_env)
+        return price * product.participation_rate
+
+
+class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
+    """Adapter for one-touch/no-touch options in discrete quadrature."""
+
+    def can_handle(self, product: BaseEquityProduct) -> bool:
+        return isinstance(product, OneTouchOption)
+
+    def build_pricing_context(
+        self,
+        product: OneTouchOption,
+        pricing_env: PricingEnvironment,
+        engine: "DiscreteQuadEngine",
+    ) -> QuadPricingContext:
+        spot = pricing_env.spot
+        maturity = product.get_maturity(pricing_env)
+        rate = pricing_env.get_rate(maturity)
+        div = pricing_env.get_div_yield(maturity)
+        vol = pricing_env.get_vol(product.barrier, maturity)
+        contract_multiplier = getattr(product, "contract_multiplier", 1.0)
+
+        self._validate_inputs(
+            spot, product.barrier, maturity, rate, div, vol, product.rebate, engine
+        )
+
+        return QuadPricingContext(
+            spot=spot,
+            maturity=maturity,
+            rate=rate,
+            div=div,
+            vol=vol,
+            contract_multiplier=contract_multiplier,
+        )
+
+    def early_price(
+        self,
+        product: OneTouchOption,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+        engine: "DiscreteQuadEngine",
+    ) -> float | None:
+        if is_zero(context.maturity, tol=engine.MIN_MATURITY):
+            pay_at_hit = product.payment_at_hit if product.is_one_touch else False
+            value = self._one_touch_instant_payoff(
+                product, context.spot, context.maturity, context.rate, pay_at_hit
+            )
+            return value * context.contract_multiplier
+
+        if (
+            product.observation_type != ObservationType.EXPIRY
+            and product.is_barrier_hit(context.spot)
+        ):
+            if product.is_one_touch:
+                pay_at_hit = product.payment_at_hit
+                value = product.rebate if pay_at_hit else product.rebate * math.exp(
+                    -context.rate * context.maturity
+                )
+                return value * context.contract_multiplier
+            return 0.0
+
+        if product.observation_type == ObservationType.CONTINUOUS:
+            raise PricingError(
+                "DiscreteQuadEngine supports discrete or expiry monitoring only. "
+                "Use OneTouchAnalyticalEngine for continuous monitoring."
+            )
+
+        if product.rebate <= 0.0:
+            return 0.0
+
+        return None
+
+    def resolve_schedule(
+        self,
+        product: OneTouchOption,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+    ) -> Sequence[ResolvedObservationRecord]:
+        return super().resolve_schedule(product, pricing_env, context)
+
+    def build_inputs(
+        self,
+        product: OneTouchOption,
+        resolved: Sequence[ResolvedObservationRecord],
+        context: QuadPricingContext,
+    ) -> QuadCoreInputs:
+        obs_times, barriers, payoffs, settlement_times = self._extract_observations(
+            resolved, context.maturity, product.is_up_barrier
+        )
+
+        if product.is_up_barrier:
+            k_plus = np.array(barriers, dtype=float)
+            k_minus = np.zeros_like(k_plus)
+        else:
+            k_minus = np.array(barriers, dtype=float)
+            k_plus = np.full_like(k_minus, math.inf, dtype=float)
+
+        a_minus = np.zeros_like(k_minus, dtype=float)
+        b_minus = np.zeros_like(k_minus, dtype=float)
+        a_plus = np.zeros_like(k_plus, dtype=float)
+        b_plus = np.zeros_like(k_plus, dtype=float)
+
+        if product.rebate > 0.0:
+            rebate_values = self._discount_rebates(
+                payoffs,
+                obs_times,
+                settlement_times,
+                context.maturity,
+                context.rate,
+                product.payment_at_hit,
+            )
+            if product.is_up_barrier:
+                b_plus = rebate_values
+            else:
+                b_minus = rebate_values
+
+        return QuadCoreInputs(
+            observation_times=obs_times,
+            k_minus=k_minus,
+            k_plus=k_plus,
+            a_minus=a_minus,
+            b_minus=b_minus,
+            a_plus=a_plus,
+            b_plus=b_plus,
+            a_terminal=0.0,
+            b_terminal=0.0,
+        )
+
+    def finalize_price(
+        self,
+        product: OneTouchOption,
+        pricing_env: PricingEnvironment,
+        context: QuadPricingContext,
+        core_price: float,
+        engine: "DiscreteQuadEngine",
+    ) -> float:
+        if product.is_no_touch:
+            rebate_discount = product.rebate * math.exp(-context.rate * context.maturity)
+            value = rebate_discount - core_price
+            return max(0.0, value) * context.contract_multiplier
+        return core_price * context.contract_multiplier
+
+    def _validate_inputs(
+        self,
+        spot: float,
+        barrier: float,
+        maturity: float,
+        rate: float,
+        div: float,
+        vol: float,
+        rebate: float,
+        engine: "DiscreteQuadEngine",
+    ) -> None:
+        validate_positive(spot, "spot")
+        validate_positive(barrier, "barrier")
+        validate_positive(vol, "volatility")
+        validate_positive(maturity, "maturity", allow_zero=True)
+        validate_non_negative(rebate, "rebate")
+        validate_non_negative(div, "dividend_yield")
+
+        if abs(rate) > 1.0:
+            raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
+        if vol > engine.MAX_VOL:
+            raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
+
+    def _one_touch_instant_payoff(
+        self,
+        product: OneTouchOption,
+        spot: float,
+        maturity: float,
+        rate: float,
+        pay_at_hit: bool,
+    ) -> float:
+        touched = product.is_barrier_hit(spot)
+        discount = math.exp(-rate * maturity)
+        if product.is_one_touch:
+            if touched:
+                return product.rebate if pay_at_hit else product.rebate * discount
+            return 0.0
+        return product.rebate * discount if not touched else 0.0
+
+
+class QuadInputAdapterRegistry:
+    """Registry for quad input adapters."""
+
+    def __init__(self) -> None:
+        self._adapters: list[QuadInputAdapter] = []
+
+    def register(self, adapter: QuadInputAdapter) -> None:
+        self._adapters.append(adapter)
+
+    def resolve(self, product: BaseEquityProduct) -> QuadInputAdapter:
+        for adapter in self._adapters:
+            if adapter.can_handle(product):
+                return adapter
+        raise PricingError(
+            f"DiscreteQuadEngine has no adapter for product type {type(product).__name__}"
+        )
+
+
+_ADAPTER_REGISTRY = QuadInputAdapterRegistry()
+_ADAPTER_REGISTRY.register(BarrierQuadInputAdapter())
+_ADAPTER_REGISTRY.register(OneTouchQuadInputAdapter())
+
+
+def register_quad_adapter(adapter: QuadInputAdapter) -> None:
+    """Register a custom quad input adapter."""
+    _ADAPTER_REGISTRY.register(adapter)
+
+
+def resolve_quad_adapter(product: BaseEquityProduct) -> QuadInputAdapter:
+    """Resolve the quad input adapter for a product."""
+    return _ADAPTER_REGISTRY.resolve(product)

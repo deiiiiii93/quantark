@@ -69,37 +69,26 @@ class EuropeanQuadEngine(BaseEngine):
     def _parse_method(
         self, method: Union[str, QuadratureMethod, tuple, None]
     ) -> QuadratureMethod:
-        """
-        Parse method from various input formats.
-
-        Supports:
-        - QuadratureMethod enum
-        - String ("simpson", "gauss_legendre")
-        - Two-level enum tuple: (EngineType.QUADRATURE, QuadratureMethod.SIMPSON)
-        - None (uses default)
-        """
+        """Parse method from various input formats."""
         if method is None:
             return self.DEFAULT_METHOD
 
-        # Handle two-level enum pattern: EngineType.QUADRATURE(QuadratureMethod.SIMPSON)
-        if isinstance(method, tuple):
-            if len(method) == 2 and method[0] == EngineType.QUADRATURE:
-                return method[1]
-            raise ValidationError(f"Invalid method tuple: {method}")
+        # Handle two-level enum pattern
+        if isinstance(method, tuple) and len(method) == 2 and method[0] == EngineType.QUADRATURE:
+            return method[1]
 
-        # Handle direct QuadratureMethod enum
+        # Handle QuadratureMethod enum
         if isinstance(method, QuadratureMethod):
             return method
 
         # Handle string
         if isinstance(method, str):
-            method_lower = method.lower()
             for m in QuadratureMethod:
-                if m.value == method_lower:
+                if m.value == method.lower():
                     return m
+            valid = [m.value for m in QuadratureMethod]
             raise ValidationError(
-                f"Unknown quadrature method: {method}. "
-                f"Valid methods: {[m.value for m in QuadratureMethod]}"
+                f"Unknown quadrature method: {method}. Valid: {valid}"
             )
 
         raise ValidationError(f"Invalid method type: {type(method)}")
