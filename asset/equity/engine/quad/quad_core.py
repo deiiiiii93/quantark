@@ -14,6 +14,7 @@ from scipy.stats import norm
 
 from util.exceptions import NumericalError, ValidationError
 from util.numerical import Tolerance
+from asset.equity.engine.quad.quad_math import QuadratureMath
 
 
 @dataclass(frozen=True)
@@ -111,11 +112,17 @@ class QuadratureCore:
         )
 
         self.maturity = float(times[-1])
-        self.constant_c = math.exp(self._factor_c())
-        log_c = math.log(self.constant_c)
-        self.grid = np.linspace(-log_c, log_c, self.grid_x)
-        self.h = 2.0 * log_c / (self.grid_x - 1)
-        self._z_grid = -2.0 * log_c + np.arange(2 * self.grid_x - 1) * self.h
+        vol_max = float(np.max(self.vol[1:]))
+        self._math = QuadratureMath(
+            grid_x=self.grid_x,
+            spot=self.spot,
+            maturity=self.maturity,
+            vol_max=vol_max,
+        )
+        self.constant_c = self._math.constant_c
+        self.grid = self._math.grid
+        self.h = self._math.h
+        self._z_grid = self._math.z_grid
 
     def _broadcast_param(self, param: float | Sequence[float], name: str) -> np.ndarray:
         values = np.asarray(param, dtype=float)
@@ -127,13 +134,6 @@ class QuadratureCore:
             return values.astype(float)
         raise ValidationError(
             f"{name} length must be 1, {self.grid_t}, or {self.grid_t + 1}."
-        )
-
-    def _factor_c(self) -> float:
-        vol_max = float(np.max(self.vol[1:]))
-        return (
-            10.0 * vol_max * math.sqrt(self.maturity)
-            + (1.0 + 0.5 * vol_max * vol_max) * self.maturity
         )
 
     def price(self, inputs: QuadCoreInputs) -> float:
@@ -282,37 +282,17 @@ class QuadratureCore:
     def _calculate_integral_simpson(
         self, values: np.ndarray, p_lr: int, p_ur: int, p0: int
     ) -> np.ndarray:
-        u_array = np.zeros(2 * self.grid_x - 1)
-        u_array[p_lr] = values[p_lr]
-        u_array[p_ur + p0] = values[p_ur + p0]
-        u_array[p_lr + 1 : p_ur + p0 : 2] = 4.0 * values[p_lr + 1 : p_ur + p0 : 2]
-        u_array[p_lr + 2 : p_ur + p0 - 1 : 2] = 2.0 * values[p_lr + 2 : p_ur + p0 - 1 : 2]
-        return u_array
+        return self._math.simpson_weights(values, p_lr, p_ur, p0)
 
     def _calculate_convolution_fft(
         self, omega_array: np.ndarray, u_array: np.ndarray
     ) -> np.ndarray:
-        omega_array = np.asarray(omega_array).ravel()
-        u_array = np.asarray(u_array).ravel()
-        if len(omega_array) != len(u_array):
-            raise NumericalError("omega_array and u_array must have the same length.")
-        f_array = np.fft.ifft(np.fft.fft(omega_array) * np.fft.fft(u_array)).real
-        return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+        return self._math.convolution_fft(omega_array, u_array)
 
     def _select_simpson_indices(
         self, bound_lr: float, bound_ur: float
     ) -> tuple[int, int, int]:
-        p_lr = int(np.searchsorted(self.grid, bound_lr, side="left"))
-        p_ur = int(np.searchsorted(self.grid, bound_ur, side="right")) - 1
-        p_lr = max(0, min(p_lr, self.grid_x - 1))
-        p_ur = max(0, min(p_ur, self.grid_x - 1))
-        if p_ur <= p_lr:
-            p_ur = min(p_lr + 1, self.grid_x - 1)
-        p0 = (p_ur - p_lr) % 2
-        if p_ur + p0 >= self.grid_x:
-            p_ur -= 1
-            p0 = (p_ur - p_lr) % 2
-        return p_lr, p_ur, p0
+        return self._math.select_simpson_indices(bound_lr, bound_ur)
 
     def _calculate_tail_integral(
         self,

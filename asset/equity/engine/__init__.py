@@ -28,7 +28,7 @@ from .pde import (
     TimeGrid,
     SpatialGrid,
 )
-from .quad import EuropeanQuadEngine, BarrierQuadEngine, OneTouchQuadEngine
+from .quad import EuropeanQuadEngine, BarrierQuadEngine, OneTouchQuadEngine, SnowballQuadEngine
 
 __all__ = [
     # Base
@@ -61,4 +61,5 @@ __all__ = [
     "EuropeanQuadEngine",
     "BarrierQuadEngine",
     "OneTouchQuadEngine",
+    "SnowballQuadEngine",
 ]
