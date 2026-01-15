@@ -1,12 +1,12 @@
 """
-Snowball Quad vs MC sanity-check demo.
+Snowball Quad vs MC vs PDE sanity-check demo.
 
-This script compares the SnowballQuadEngine against the SnowballMCEngine on
-several snowball configurations to provide a quick reasonableness check.
+This script compares SnowballQuadEngine, SnowballMCEngine, and SnowballPDESolver
+across several snowball configurations. Results are printed in a table.
 
 Usage:
-    python example/snowball_quad_vs_mc_demo.py
-    python example/snowball_quad_vs_mc_demo.py --paths 20000 --grid 801 --method quasi
+    python example/snowball_quad_mc_pde_demo.py
+    python example/snowball_quad_mc_pde_demo.py --paths 30000 --grid 801 --pde-grid 200 --pde-steps 200
 """
 
 import argparse
@@ -19,8 +19,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, QuadParams
+from asset.equity.param import MCParams, PDEParams, QuadParams
 from asset.equity.product.option.snowball_helpers import create_standard_snowball
 from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from priceenv import PricingEnvironment
@@ -52,68 +53,130 @@ def create_pricing_env(
     )
 
 
+def format_money(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"${value:,.2f}"
+
+
+def format_pct(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.2f}%"
+
+
 def run_case(
     label: str,
     snowball,
     pricing_env: PricingEnvironment,
     quad_engine: SnowballQuadEngine,
+    pde_engine: SnowballPDESolver,
     mc_engine: SnowballMCEngine,
     ko_freq: str,
     ki_freq: str | None,
-) -> None:
+) -> dict:
+    quad_price = pde_price = mc_price = None
+    quad_time = pde_time = mc_time = None
+
     start = time.perf_counter()
     quad_price = quad_engine.price(snowball, pricing_env)
-    quad_elapsed = time.perf_counter() - start
+    quad_time = time.perf_counter() - start
+
+    start = time.perf_counter()
+    pde_price = pde_engine.price(snowball, pricing_env)
+    pde_time = time.perf_counter() - start
 
     start = time.perf_counter()
     mc_price = mc_engine.price(snowball, pricing_env)
-    mc_elapsed = time.perf_counter() - start
-    mc_result = mc_engine.get_last_result()
+    mc_time = time.perf_counter() - start
 
-    diff = quad_price - mc_price
-    rel = diff / mc_price if mc_price != 0.0 else float("nan")
+    quad_diff_pct = None
+    pde_diff_pct = None
+    if mc_price is not None and mc_price != 0.0:
+        quad_diff_pct = (quad_price - mc_price) / mc_price * 100.0
+        pde_diff_pct = (pde_price - mc_price) / mc_price * 100.0
 
-    print("\n" + "=" * 72)
-    print(label)
-    print("=" * 72)
-    print(f"Quad Price: {quad_price:,.2f}")
-    print(f"MC Price:   {mc_price:,.2f}")
-    if mc_result is not None:
-        print(f"MC StdErr:  {mc_result.std_error:,.4f}")
-        print(f"KO Prob:    {mc_result.ko_probability:.2%}")
-        print(f"V0 Prob:    {mc_result.v0_probability:.2%}")
-        print(f"V1 Prob:    {mc_result.v1_probability:.2%}")
-    ko_count = snowball.num_ko_observations
-    if ko_freq:
-        print(f"KO Obs:     {ko_freq} ({ko_count})")
-    else:
-        print(f"KO Obs:     {ko_count}")
+    ki_label = "continuous"
     if snowball.has_ki_barrier:
-        ki_continuous = (
+        ki_cont = (
             snowball.barrier_config.ki_continuous
             or snowball.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
         )
-        if ki_continuous:
-            print("KI Obs:     continuous")
-        else:
-            ki_count = snowball.num_ki_observations
-            if ki_freq:
-                print(f"KI Obs:     {ki_freq} ({ki_count})")
-            else:
-                print(f"KI Obs:     {ki_count}")
-    print(f"Quad Time:  {quad_elapsed:.4f}s (grid={quad_engine.params.grid_points})")
-    mc_paths = mc_engine.params.num_paths
-    mc_rate = mc_paths / mc_elapsed if mc_elapsed > 0.0 else float("inf")
-    print(f"MC Time:    {mc_elapsed:.4f}s ({mc_rate:,.0f} paths/s)")
-    print(f"Diff:       {diff:,.2f} ({rel:.2%})")
+        if not ki_cont:
+            ki_label = f"{ki_freq} ({snowball.num_ki_observations})" if ki_freq else str(
+                snowball.num_ki_observations
+            )
+    else:
+        ki_label = "none"
+
+    return {
+        "case": label,
+        "ki_mode": "Continuous" if ki_label == "continuous" else "Discrete",
+        "ko_obs": f"{ko_freq} ({snowball.num_ko_observations})" if ko_freq else str(snowball.num_ko_observations),
+        "ki_obs": ki_label,
+        "quad": quad_price,
+        "pde": pde_price,
+        "mc": mc_price,
+        "quad_diff_pct": quad_diff_pct,
+        "pde_diff_pct": pde_diff_pct,
+        "quad_time": quad_time,
+        "pde_time": pde_time,
+        "mc_time": mc_time,
+    }
+
+
+def print_table(rows: list[dict]) -> None:
+    headers = [
+        ("Case", 32, "<"),
+        ("KI Mode", 9, "<"),
+        ("KO Obs", 14, "<"),
+        ("KI Obs", 16, "<"),
+        ("Quad", 13, ">"),
+        ("PDE", 13, ">"),
+        ("MC", 13, ">"),
+        ("Quad %", 8, ">"),
+        ("PDE %", 8, ">"),
+        ("Quad t", 8, ">"),
+        ("PDE t", 8, ">"),
+        ("MC t", 8, ">"),
+    ]
+
+    fmt = "| " + " | ".join(f"{{:{align}{width}}}" for _, width, align in headers) + " |"
+    header_line = fmt.format(*[h[0] for h in headers])
+    sep_line = "| " + " | ".join("-" * h[1] for h in headers) + " |"
+
+    print(header_line)
+    print(sep_line)
+    for row in rows:
+        quad_t = f"{row['quad_time']:.4f}s" if row["quad_time"] is not None else "n/a"
+        pde_t = f"{row['pde_time']:.4f}s" if row["pde_time"] is not None else "n/a"
+        mc_t = f"{row['mc_time']:.4f}s" if row["mc_time"] is not None else "n/a"
+        print(
+            fmt.format(
+                row["case"],
+                row["ki_mode"],
+                row["ko_obs"],
+                row["ki_obs"],
+                format_money(row["quad"]),
+                format_money(row["pde"]),
+                format_money(row["mc"]),
+                format_pct(row["quad_diff_pct"]),
+                format_pct(row["pde_diff_pct"]),
+                quad_t,
+                pde_t,
+                mc_t,
+            )
+        )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sanity check: SnowballQuadEngine vs SnowballMCEngine."
+        description="Sanity check: Snowball Quad vs MC vs PDE."
     )
     parser.add_argument("--paths", type=int, default=20000, help="MC paths")
     parser.add_argument("--grid", type=int, default=801, help="Quad grid points (odd)")
+    parser.add_argument("--pde-grid", type=int, default=200, help="PDE grid size")
+    parser.add_argument("--pde-steps", type=int, default=200, help="PDE time steps")
     parser.add_argument(
         "--method",
         type=str,
@@ -122,21 +185,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    quad_params = QuadParams(grid_points=args.grid)
-    mc_params = MCParams(num_paths=args.paths, time_steps=252, seed=42)
-    mc_method = parse_mc_method(args.method)
-
-    quad_engine = SnowballQuadEngine(params=quad_params)
+    quad_engine = SnowballQuadEngine(params=QuadParams(grid_points=args.grid))
+    pde_engine = SnowballPDESolver(
+        params=PDEParams(grid_size=args.pde_grid, time_steps=args.pde_steps)
+    )
     mc_engine = SnowballMCEngine(
-        params=mc_params, method=EngineType.MONTE_CARLO(mc_method)
+        params=MCParams(num_paths=args.paths, time_steps=252, seed=42),
+        method=EngineType.MONTE_CARLO(parse_mc_method(args.method)),
     )
 
     base_env = create_pricing_env()
     quarterly_obs = [i / 4 for i in range(1, 5)]
+    daily_obs = [i / 252 for i in range(1, 253)]
 
     cases = [
         (
-            "Standard Snowball (continuous KI, monthly KO)",
+            "Standard (cont KI, monthly KO)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -153,7 +217,7 @@ def main() -> None:
             None,
         ),
         (
-            "Standard Snowball (discrete KI, quarterly KO)",
+            "Standard (disc KI, quarterly KO)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -173,7 +237,7 @@ def main() -> None:
             "quarterly",
         ),
         (
-            "Standard Snowball (daily KI, monthly KO)",
+            "Standard (daily KI, monthly KO)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -186,14 +250,14 @@ def main() -> None:
                 is_reverse=False,
                 ki_continuous=False,
                 ki_observation_type=ObservationType.DISCRETE,
-                ki_observation_dates=[i / 252 for i in range(1, 253)],
+                ki_observation_dates=daily_obs,
             ),
             base_env,
             "monthly",
             "daily",
         ),
         (
-            "Standard Snowball (high vol 35%)",
+            "Standard (high vol 35%)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -210,7 +274,7 @@ def main() -> None:
             None,
         ),
         (
-            "Standard Snowball (airbag 50% below 80)",
+            "Standard (airbag 50% below 80)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -230,7 +294,7 @@ def main() -> None:
             None,
         ),
         (
-            "Standard Snowball (call-rebate V0)",
+            "Standard (call-rebate V0)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -252,28 +316,7 @@ def main() -> None:
             None,
         ),
         (
-            "Standard Snowball (disable_ko_after_ki)",
-            create_standard_snowball(
-                initial_price=100.0,
-                strike=100.0,
-                maturity=1.0,
-                contract_multiplier=10_000.0,
-                ko_barrier=103.0,
-                ko_rate=0.15,
-                ki_barrier=85.0,
-                num_observations=4,
-                is_reverse=False,
-                ki_continuous=False,
-                ki_observation_type=ObservationType.DISCRETE,
-                ki_observation_dates=quarterly_obs,
-                disable_ko_after_ki=True,
-            ),
-            base_env,
-            "quarterly",
-            "quarterly",
-        ),
-        (
-            "Standard Snowball (spot near KO)",
+            "Standard (spot near KO)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -290,7 +333,7 @@ def main() -> None:
             None,
         ),
         (
-            "Standard Snowball (spot near KI)",
+            "Standard (spot near KI)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -307,7 +350,7 @@ def main() -> None:
             None,
         ),
         (
-            "Reverse Snowball (continuous KI)",
+            "Reverse (cont KI, monthly KO)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -324,7 +367,7 @@ def main() -> None:
             None,
         ),
         (
-            "Standard Snowball (2Y maturity, monthly KO)",
+            "Standard (2Y maturity, monthly KO)",
             create_standard_snowball(
                 initial_price=100.0,
                 strike=100.0,
@@ -342,8 +385,21 @@ def main() -> None:
         ),
     ]
 
-    for label, snowball, env, ko_freq, ki_freq in cases:
-        run_case(label, snowball, env, quad_engine, mc_engine, ko_freq, ki_freq)
+    rows = [
+        run_case(
+            label,
+            snowball,
+            env,
+            quad_engine,
+            pde_engine,
+            mc_engine,
+            ko_freq,
+            ki_freq,
+        )
+        for label, snowball, env, ko_freq, ki_freq in cases
+    ]
+
+    print_table(rows)
 
 
 if __name__ == "__main__":

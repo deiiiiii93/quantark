@@ -139,3 +139,9 @@ When `PDEEngine`/PDE solvers are used with default mesh settings, the system SHA
 - **WHEN** a user supplies custom mesh configuration (e.g., explicit `grid_size` / `time_steps` / `time_grid_type`) or sets `auto_grid=False`
 - **THEN** the PDE solver uses the user-provided mesh settings without overriding them
 
+### Requirement: Critical Point Resolution Extensibility
+The system SHALL allow PDE solvers to override critical point resolution, and cached grid construction SHALL use the same resolution path as uncached construction.
+
+#### Scenario: Custom critical points participate in cached grids
+- **WHEN** a PDE solver subclass overrides critical point resolution to add product-specific points
+- **THEN** both cached and uncached grid construction include the custom points

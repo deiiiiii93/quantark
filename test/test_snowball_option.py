@@ -28,6 +28,7 @@ from asset.equity.product.option.observation_schedule import (
 )
 from asset.equity.product.option.snowball_config import (
     AccrualConfig,
+    AirbagConfig,
     BarrierConfig,
     PayoffConfig,
 )
@@ -155,6 +156,97 @@ class TestSnowballCreation:
         assert snowball.maturity == 1.0
         assert snowball.is_reverse is True
         assert snowball.is_standard is False
+
+    def test_cache_key_stable_and_sensitive(self):
+        """Test cache_key consistency and sensitivity to config changes."""
+        ko_schedule = ObservationSchedule(
+            records=[
+                ObservationRecord(
+                    observation_time=0.5,
+                    barrier=1.02,
+                    return_rate=0.10,
+                    is_rate_annualized=False,
+                )
+            ]
+        )
+        ki_schedule = ObservationSchedule(
+            records=[
+                ObservationRecord(
+                    observation_time=0.5,
+                    barrier=0.8,
+                )
+            ]
+        )
+        barrier_config = BarrierConfig(
+            ko_barrier=1.02,
+            ko_rate=0.10,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=ko_schedule,
+            ki_barrier=0.8,
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_schedule=ki_schedule,
+        )
+        payoff_config = PayoffConfig(rebate_rate=0.05)
+        accrual_config = AccrualConfig()
+        airbag_config = AirbagConfig(airbag_barrier=0.6)
+
+        snowball_a = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            payoff_config=payoff_config,
+            accrual_config=accrual_config,
+            airbag_config=airbag_config,
+            maturity=1.0,
+            is_reverse=False,
+        )
+        snowball_b = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            payoff_config=payoff_config,
+            accrual_config=accrual_config,
+            airbag_config=airbag_config,
+            maturity=1.0,
+            is_reverse=False,
+        )
+
+        key_a = snowball_a.cache_key()
+        key_b = snowball_b.cache_key()
+        assert key_a == key_b
+
+        snowball_rebate = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            payoff_config=PayoffConfig(rebate_rate=0.06),
+            accrual_config=accrual_config,
+            airbag_config=airbag_config,
+            maturity=1.0,
+            is_reverse=False,
+        )
+        assert key_a != snowball_rebate.cache_key()
+
+        barrier_config_shifted = BarrierConfig(
+            ko_barrier=1.03,
+            ko_rate=0.10,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=ko_schedule,
+            ki_barrier=0.8,
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_schedule=ki_schedule,
+        )
+        snowball_shifted = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config_shifted,
+            payoff_config=payoff_config,
+            accrual_config=accrual_config,
+            airbag_config=airbag_config,
+            maturity=1.0,
+            is_reverse=False,
+        )
+        assert key_a != snowball_shifted.cache_key()
 
     def test_date_based_creation(self):
         """Test snowball creation with date-based specification."""

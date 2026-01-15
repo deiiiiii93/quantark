@@ -14,9 +14,13 @@ Convertible bonds are hybrid securities that combine:
 - Equity features (conversion option)
 - Credit risk (default possibility)
 - Embedded options (call/put provisions)
+
+Note:
+    Run from the project root or set PYTHONPATH=. to resolve local imports.
 """
 
 from datetime import datetime
+
 from asset.bond.product.convertible import (
     ConvertibleBond,
     CallScheduleEntry,

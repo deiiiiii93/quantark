@@ -97,7 +97,7 @@ BaseEquityProduct (abstract)
 **Engine Parameters** (`asset/equity/param/`)
 - `EngineParams`: Base configuration (bump size for FDM)
 - `MCParams`: Monte Carlo configuration (future use)
-- `PDEParams`: PDE solver configuration (future use)
+- `PDEParams`: PDE solver configuration (includes cache toggles and size limits)
 
 ### 7. Risk Measures Layer (`asset/equity/riskmeasures/`)
 
@@ -248,4 +248,3 @@ The QuantArk library provides a solid foundation for financial derivatives prici
 ✓ Easy extensibility
 
 The European vanilla option implementation demonstrates the complete workflow from market data setup through pricing and risk calculation, serving as a template for future derivative implementations.
-

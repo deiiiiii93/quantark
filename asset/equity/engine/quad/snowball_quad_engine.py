@@ -146,6 +146,8 @@ class SnowballQuadEngine(BaseEngine):
         full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
         omega_grid = math_utils.z_grid
 
+        disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
+
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
             ko_record = self._match_record(obs_time, ko_records)
@@ -160,8 +162,10 @@ class SnowballQuadEngine(BaseEngine):
                     rate, obs_time, ko_record.settlement_time
                 )
                 ko_value = ko_record.payoff * discount
-                v_in[ko_mask] = ko_value
+                # KO always applies to the not-yet-KI surface; KI surface only if enabled.
                 v_out[ko_mask] = ko_value
+                if not disable_ko_after_ki:
+                    v_in[ko_mask] = ko_value
 
             if ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
@@ -178,7 +182,7 @@ class SnowballQuadEngine(BaseEngine):
                         if product.is_reverse
                         else spot_grid <= ki_record.barrier
                     )
-                    if ko_mask is not None:
+                    if ko_mask is not None and not disable_ko_after_ki:
                         ki_mask = ki_mask & ~ko_mask
                     v_out[ki_mask] = v_in[ki_mask]
 
@@ -236,12 +240,7 @@ class SnowballQuadEngine(BaseEngine):
     def _validate_product(self, product: SnowballOption) -> None:
         if product.barrier_config.ko_observation_type != ObservationType.DISCRETE:
             raise PricingError("SnowballQuadEngine requires discrete KO monitoring.")
-        if product.barrier_config.disable_ko_after_ki:
-            raise PricingError("SnowballQuadEngine does not support disable_ko_after_ki.")
-        if product.airbag_config.airbag_barrier is not None:
-            raise PricingError("SnowballQuadEngine does not support airbag features.")
-        if product.payoff_config.call_rebate_enabled:
-            raise PricingError("SnowballQuadEngine does not support call-style rebates.")
+        # Airbag and call-rebate features are handled via product payoff functions.
 
     def _diffuse_fft(
         self,

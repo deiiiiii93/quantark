@@ -26,10 +26,12 @@ For each interval `(t_{m-1}, t_m)`:
    `V_out` into `V_in` inside the diffusion step.
 3. **Observation updates**:
    - **KO**: At KO observation dates, both states jump to the KO payoff when the
-     KO barrier is breached.
+     KO barrier is breached. If `disable_ko_after_ki=True`, only `V_out` is
+     overwritten.
    - **Discrete KI**: At KI observation dates, `V_out` switches to `V_in` when the
      KI barrier is breached.
-   - **KO precedence**: If KO and KI trigger together, KO overrides KI.
+   - **KO precedence**: If KO and KI trigger together, KO overrides KI unless
+     `disable_ko_after_ki=True`.
 
 The price is `V_out(S0, t0)`.
 
@@ -37,9 +39,9 @@ The price is `V_out(S0, t0)`.
 
 - Discrete KO observation schedules
 - Discrete or continuous KI monitoring (continuous uses Brownian-bridge transitions)
-- Fixed rebates (call-style rebates are not supported yet)
-- No airbag features yet
-- No `disable_ko_after_ki` logic
+- Fixed rebates or call-style rebates (via product V0 payoff)
+- Airbag features (via product V1 payoff)
+- Optional `disable_ko_after_ki` logic (KO only applies before KI)
 
 ## References
 

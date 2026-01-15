@@ -5,7 +5,7 @@ Snowball options are structured products with knock-in and knock-out barriers,
 coupon payments, and various protection/participation features.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 
@@ -1122,6 +1122,53 @@ class SnowballOption(BaseEquityOption):
             "payoffs": [rec.payoff for rec in records],
             "settlement_times": [rec.settlement_time for rec in records],
         }
+
+    def cache_key(self) -> Dict[str, object]:
+        def _serialize_dt(value: Optional[datetime]) -> Optional[str]:
+            return value.isoformat() if isinstance(value, datetime) else None
+
+        def _serialize_enum(value) -> Optional[str]:
+            return value.name if hasattr(value, "name") else None
+
+        def _serialize_schedule(
+            schedule: Optional[ObservationSchedule],
+        ) -> Optional[Dict[str, object]]:
+            if schedule is None:
+                return None
+            frequency = schedule.frequency
+            if hasattr(frequency, "name"):
+                frequency_value = frequency.name
+            else:
+                frequency_value = frequency
+            return {
+                "aggregation_mode": _serialize_enum(schedule.aggregation_mode),
+                "frequency": frequency_value,
+                "records": [_serialize_value(rec) for rec in schedule.records],
+            }
+
+        def _serialize_value(value):
+            if value is None or isinstance(value, (str, int, float, bool)):
+                return value
+            if isinstance(value, datetime):
+                return value.isoformat()
+            if hasattr(value, "name"):
+                return value.name
+            if isinstance(value, ObservationSchedule):
+                return _serialize_schedule(value)
+            if is_dataclass(value):
+                return {
+                    f.name: _serialize_value(getattr(value, f.name))
+                    for f in fields(value)
+                }
+            if isinstance(value, dict):
+                return {k: _serialize_value(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [_serialize_value(v) for v in value]
+            return repr(value)
+
+        key = {f.name: _serialize_value(getattr(self, f.name)) for f in fields(self)}
+        key["contract_multiplier"] = _serialize_value(self.contract_multiplier)
+        return key
 
     def __repr__(self) -> str:
         ko_barrier_str = (

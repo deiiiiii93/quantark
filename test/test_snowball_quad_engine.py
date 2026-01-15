@@ -10,12 +10,17 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from asset.equity.param import QuadParams
-from asset.equity.product.option.snowball_config import BarrierConfig
+from asset.equity.product.option.snowball_config import (
+    AirbagConfig,
+    BarrierConfig,
+    PayoffConfig,
+)
 from asset.equity.product.option.snowball_option import SnowballOption
 from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from priceenv import PricingEnvironment
@@ -43,6 +48,7 @@ def create_barrier_config(
     ki_continuous: bool,
     ko_observation_dates: list[float] = None,
     ki_observation_dates: list[float] = None,
+    disable_ko_after_ki: bool = False,
 ) -> BarrierConfig:
     if ko_observation_dates is None:
         ko_observation_dates = [0.25, 0.5, 0.75, 1.0]
@@ -57,6 +63,7 @@ def create_barrier_config(
         ),
         ki_observation_dates=ki_observation_dates,
         ki_continuous=ki_continuous,
+        disable_ko_after_ki=disable_ko_after_ki,
     )
 
 
@@ -123,3 +130,101 @@ def test_reverse_snowball_quad_price_positive():
     price = engine.price(snowball, env)
     assert np.isfinite(price)
     assert price > 0.0
+
+
+def test_airbag_snowball_prices_higher_than_standard():
+    env = create_pricing_env(spot=95.0, vol=0.30)
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0, ki_barrier=85.0, ki_continuous=True
+    )
+    airbag_config = AirbagConfig(
+        airbag_barrier=80.0,
+        airbag_participation_rate=0.5,
+        airbag_strike=90.0,
+    )
+    standard = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        contract_multiplier=10_000.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    airbag = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        airbag_config=airbag_config,
+        contract_multiplier=10_000.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    engine = SnowballQuadEngine(params=QuadParams(grid_points=301))
+    price_standard = engine.price(standard, env)
+    price_airbag = engine.price(airbag, env)
+    assert price_airbag > price_standard or price_airbag == pytest.approx(
+        price_standard, abs=1e-6
+    )
+
+
+def test_call_rebate_v0_supported():
+    env = create_pricing_env()
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0, ki_barrier=75.0, ki_continuous=True
+    )
+    no_rebate = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        payoff_config=PayoffConfig(rebate_rate=0.0, include_principal=True),
+        contract_multiplier=10_000.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    call_rebate = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        payoff_config=PayoffConfig(
+            rebate_rate=0.0,
+            include_principal=True,
+            call_rebate_enabled=True,
+            call_strike=90.0,
+            call_participation_rate=0.5,
+        ),
+        contract_multiplier=10_000.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    engine = SnowballQuadEngine(params=QuadParams(grid_points=301))
+    price_no_rebate = engine.price(no_rebate, env)
+    price_call_rebate = engine.price(call_rebate, env)
+    assert price_call_rebate > price_no_rebate or price_call_rebate == pytest.approx(
+        price_no_rebate, abs=1e-6
+    )
+
+
+def test_disable_ko_after_ki_reduces_value():
+    env = create_pricing_env(vol=0.30)
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=85.0,
+        ki_continuous=False,
+        ki_observation_dates=[0.5, 1.0],
+        disable_ko_after_ki=True,
+    )
+    barrier_config_enabled = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=85.0,
+        ki_continuous=False,
+        ki_observation_dates=[0.5, 1.0],
+        disable_ko_after_ki=False,
+    )
+    snowball_disabled = create_standard_snowball(barrier_config)
+    snowball_enabled = create_standard_snowball(barrier_config_enabled)
+    engine = SnowballQuadEngine(params=QuadParams(grid_points=301))
+    price_disabled = engine.price(snowball_disabled, env)
+    price_enabled = engine.price(snowball_enabled, env)
+    assert price_disabled < price_enabled or price_disabled == pytest.approx(
+        price_enabled, abs=1e-6
+    )

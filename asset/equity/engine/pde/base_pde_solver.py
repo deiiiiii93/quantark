@@ -6,6 +6,8 @@ backward in time, with support for Rannacher smoothing.
 """
 
 from abc import abstractmethod
+from collections import OrderedDict
+import threading
 from typing import Dict, Optional, Tuple, List, NamedTuple
 import numpy as np
 import scipy.sparse as sp
@@ -56,10 +58,198 @@ class BasePDESolver(BaseEngine):
 
     engine_type = EngineType.PDE
 
+    _shared_grid_cache: "OrderedDict[Tuple, Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
+    _grid_cache_max_entries: int = 128
+    _global_cache_enabled: bool = True
+    _global_cache_strategy: Optional[str] = None
+    _cache_lock = threading.Lock()
+
     def __init__(self, params: Optional[PDEParams] = None):
         """Initialize the PDE solver with configuration parameters."""
         super().__init__(params if params is not None else PDEParams())
         self._matrix_cache: Dict[Tuple[float, float], Tuple] = {}
+        self._grid_cache = self.__class__._shared_grid_cache
+        self._cache_enabled = bool(getattr(self.params, "cache_enabled", True))
+        self._cache_strategy = getattr(self.params, "cache_strategy", "standard")
+        cache_size = getattr(self.params, "grid_cache_max_entries", None)
+        if cache_size is not None:
+            self.set_grid_cache_max_entries(cache_size)
+        self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
+            OrderedDict()
+        )
+
+    @classmethod
+    def clear_grid_cache(cls) -> None:
+        """Clear the shared grid cache for this solver class."""
+        with cls._cache_lock:
+            cls._shared_grid_cache.clear()
+
+    @classmethod
+    def set_cache_enabled(cls, enabled: bool, clear: bool = False) -> None:
+        """Enable or disable cache usage for this solver class."""
+        cls._global_cache_enabled = bool(enabled)
+        if clear:
+            cls.clear_grid_cache()
+
+    @classmethod
+    def set_cache_strategy(cls, strategy: str, clear: bool = False) -> None:
+        """Set the cache strategy for this solver class."""
+        if strategy not in ("disable", "strict", "standard", "aggressive"):
+            raise PricingError(
+                "cache_strategy must be one of disable, strict, standard, aggressive, got "
+                f"{strategy}"
+            )
+        cls._global_cache_strategy = strategy
+        if clear:
+            cls.clear_grid_cache()
+
+    @classmethod
+    def set_grid_cache_max_entries(cls, max_entries: int) -> None:
+        """Set maximum number of grid entries to keep in cache."""
+        if max_entries <= 0:
+            raise PricingError(
+                f"Grid cache size must be positive, got {max_entries}"
+            )
+        with cls._cache_lock:
+            cls._grid_cache_max_entries = max_entries
+            while len(cls._shared_grid_cache) > cls._grid_cache_max_entries:
+                cls._shared_grid_cache.popitem(last=False)
+
+    def _is_cache_enabled(self) -> bool:
+        return self._resolve_cache_strategy() != "disable"
+
+    def _resolve_cache_strategy(self) -> str:
+        if not self.__class__._global_cache_enabled or not self._cache_enabled:
+            return "disable"
+        strategy = self.__class__._global_cache_strategy
+        if strategy is None:
+            strategy = self._cache_strategy
+        return strategy
+
+    def _freeze_cache_value(self, value):
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, (list, tuple)):
+            return tuple(self._freeze_cache_value(v) for v in value)
+        if isinstance(value, dict):
+            return tuple(
+                sorted(
+                    (self._freeze_cache_value(k), self._freeze_cache_value(v))
+                    for k, v in value.items()
+                )
+            )
+        return repr(value)
+
+    def _cache_value_is_simple(
+        self, value, depth: int, max_depth: int, max_len: int
+    ) -> bool:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return True
+        if depth >= max_depth:
+            return False
+        if isinstance(value, (list, tuple)):
+            if len(value) > max_len:
+                return False
+            return all(
+                self._cache_value_is_simple(v, depth + 1, max_depth, max_len)
+                for v in value
+            )
+        if isinstance(value, dict):
+            if len(value) > max_len:
+                return False
+            return all(
+                self._cache_value_is_simple(k, depth + 1, max_depth, max_len)
+                and self._cache_value_is_simple(v, depth + 1, max_depth, max_len)
+                for k, v in value.items()
+            )
+        return False
+
+    def _cache_dict_is_reasonable(
+        self, attrs: Dict, max_depth: int = 2, max_len: int = 64
+    ) -> bool:
+        if len(attrs) > max_len:
+            return False
+        for value in attrs.values():
+            if not self._cache_value_is_simple(value, 0, max_depth, max_len):
+                return False
+        return True
+
+    def _product_cache_token(self, product: BaseEquityProduct, strategy: str) -> Tuple[str, object]:
+        if strategy == "strict":
+            return ("id", id(product))
+        key_fn = getattr(product, "cache_key", None)
+        if callable(key_fn):
+            return ("key", self._freeze_cache_value(key_fn()))
+        if strategy in ("standard", "aggressive"):
+            attrs = getattr(product, "__dict__", None)
+            if attrs is not None and self._cache_dict_is_reasonable(attrs):
+                return ("dict", self._freeze_cache_value(attrs))
+            if strategy == "aggressive":
+                return ("repr", repr(product))
+        return ("id", id(product))
+
+    def _params_cache_key(self) -> Tuple:
+        params: PDEParams = self.params
+        return (
+            params.grid_size,
+            params.time_steps,
+            params.adaptive_grid,
+            params.grid_cache_max_entries,
+            params.auto_grid,
+            params.s_min,
+            params.s_max,
+            params.time_grid_type,
+            params.grade_exponent,
+            params.bus_days_in_year,
+            params.event_steps_per_day,
+            params.event_min_steps_per_interval,
+            params.max_time_steps,
+            params.log_dx_target,
+            params.max_grid_size,
+            params.include_spot_in_critical_points,
+            params.rannacher_at_events,
+            params.theta,
+            params.use_rannacher,
+            params.rannacher_steps,
+        )
+
+    def _grid_cache_key(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        sigma: float,
+        tau: float,
+        r: float,
+        q: float,
+    ) -> Tuple:
+        barriers = tuple(
+            sorted(
+                [
+                    round(b, 12)
+                    for b in self._get_barriers(product)
+                    if b is not None
+                ]
+            )
+        )
+        event_times = tuple(
+            sorted(
+                [round(t, 12) for t in (self._get_event_times(product, tau) or [])]
+            )
+        )
+        critical_points = self._get_cached_critical_points(product, pricing_env, spot)
+        return (
+            f"{product.__class__.__module__}.{product.__class__.__qualname__}",
+            round(spot, 12),
+            round(sigma, 12),
+            round(tau, 12),
+            round(r, 12),
+            round(q, 12),
+            barriers,
+            event_times,
+            critical_points,
+            self._params_cache_key(),
+        )
 
     @abstractmethod
     def set_terminal_condition(
@@ -208,9 +398,19 @@ class BasePDESolver(BaseEngine):
         q: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Construct the spatial and temporal grids for solving the PDE."""
-        barriers = self._get_barriers(product)
+        if not self._is_cache_enabled():
+            return self._build_grids_uncached(
+                product, pricing_env, spot, sigma, tau, r, q
+            )
 
-        # 1. Determine Spatial Bounds and Adaptive Features
+        cache_key = self._grid_cache_key(product, pricing_env, spot, sigma, tau, r, q)
+        with self.__class__._cache_lock:
+            cached = self._grid_cache.get(cache_key)
+            if cached is not None:
+                self._grid_cache.move_to_end(cache_key)
+                return cached
+
+        barriers = self._get_barriers(product)
         s_min, s_max = self._resolve_spatial_bounds(
             product, spot, sigma, tau, r, q, barriers
         )
@@ -222,7 +422,6 @@ class BasePDESolver(BaseEngine):
             barriers, critical_points, s_min, s_max
         )
 
-        # 2. Build Spatial Grid
         x_vec, s_vec, dx_vec = SpatialGrid.build(
             s_min,
             s_max,
@@ -231,9 +430,44 @@ class BasePDESolver(BaseEngine):
             use_adaptive=use_adaptive,
         )
 
-        # 3. Build Time Grid
         t_vec, dt_vec = self._resolve_time_grid(product, tau, barriers)
 
+        result = (x_vec, s_vec, dx_vec, t_vec, dt_vec)
+        with self.__class__._cache_lock:
+            self._grid_cache[cache_key] = result
+            self._grid_cache.move_to_end(cache_key)
+            if len(self._grid_cache) > self._grid_cache_max_entries:
+                self._grid_cache.popitem(last=False)
+        return result
+
+    def _build_grids_uncached(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        sigma: float,
+        tau: float,
+        r: float,
+        q: float,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        barriers = self._get_barriers(product)
+        s_min, s_max = self._resolve_spatial_bounds(
+            product, spot, sigma, tau, r, q, barriers
+        )
+        critical_points = self._resolve_critical_points(
+            product, pricing_env, spot, barriers
+        )
+        grid_size, use_adaptive = self._resolve_spatial_config(
+            barriers, critical_points, s_min, s_max
+        )
+        x_vec, s_vec, dx_vec = SpatialGrid.build(
+            s_min,
+            s_max,
+            grid_size,
+            critical_points=critical_points,
+            use_adaptive=use_adaptive,
+        )
+        t_vec, dt_vec = self._resolve_time_grid(product, tau, barriers)
         return x_vec, s_vec, dx_vec, t_vec, dt_vec
 
     def _resolve_spatial_bounds(
@@ -284,8 +518,15 @@ class BasePDESolver(BaseEngine):
         self, product, pricing_env, spot, barriers
     ) -> List[float]:
         """Aggregate all key price levels for grid concentration."""
+        raw_points = self._get_cached_critical_points(product, pricing_env, spot)
+        return self._merge_critical_points(raw_points, spot, barriers)
+
+    def _merge_critical_points(
+        self, raw_points: Tuple[float, ...], spot: float, barriers: List[float]
+    ) -> List[float]:
+        """Merge raw critical points with dynamic points (spot/barriers)."""
         params: PDEParams = self.params
-        points = self.get_critical_points(product, pricing_env)
+        points = list(raw_points)
 
         if params.auto_grid:
             if params.include_spot_in_critical_points and spot > 0:
@@ -513,7 +754,7 @@ class BasePDESolver(BaseEngine):
         # Round dt to avoid floating point comparison issues
         key = (round(dt, 12), round(theta, 6))
 
-        if key in self._matrix_cache:
+        if self._is_cache_enabled() and key in self._matrix_cache:
             return self._matrix_cache[key]
 
         # Build matrices
@@ -526,7 +767,8 @@ class BasePDESolver(BaseEngine):
         except Exception as e:
             raise NumericalError(f"Failed to factorize matrix: {e}")
 
-        self._matrix_cache[key] = (M1, M2_lu)
+        if self._is_cache_enabled():
+            self._matrix_cache[key] = (M1, M2_lu)
         return M1, M2_lu
 
     def _apply_step_modifications(
@@ -668,3 +910,56 @@ class BasePDESolver(BaseEngine):
                 if times:
                     return [t for t in times if 0 < t < tau]
         return None
+    def _critical_points_cache_key(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot: float,
+    ) -> Tuple:
+        strategy = self._resolve_cache_strategy()
+        return (
+            strategy,
+            f"{product.__class__.__module__}.{product.__class__.__qualname__}",
+            self._product_cache_token(product, strategy),
+            round(spot, 12),
+            pricing_env.valuation_date,
+            pricing_env.day_count_convention,
+            pricing_env.bus_days_in_year,
+        )
+
+    def _get_cached_critical_points(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot: float,
+    ) -> Tuple[float, ...]:
+        if not self._is_cache_enabled():
+            return tuple(
+                sorted(
+                    [
+                        round(p, 12)
+                        for p in self.get_critical_points(product, pricing_env)
+                        if p is not None
+                    ]
+                )
+            )
+        key = self._critical_points_cache_key(product, pricing_env, spot)
+        cached = self._critical_points_cache.get(key)
+        if cached is not None:
+            self._critical_points_cache.move_to_end(key)
+            return cached
+        points = tuple(
+            sorted(
+                [
+                    round(p, 12)
+                    for p in self.get_critical_points(product, pricing_env)
+                    if p is not None
+                ]
+            )
+        )
+        self._critical_points_cache[key] = points
+        self._critical_points_cache.move_to_end(key)
+        max_entries = max(1, self._grid_cache_max_entries)
+        if len(self._critical_points_cache) > max_entries:
+            self._critical_points_cache.popitem(last=False)
+        return points

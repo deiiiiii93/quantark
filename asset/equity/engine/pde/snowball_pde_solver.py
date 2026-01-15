@@ -12,11 +12,14 @@ The surfaces interact at barrier observation times:
 For detailed design, see: asset/equity/engine/docs/snowball_pde_engine.md
 """
 
+from collections import OrderedDict
+from time import perf_counter
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
+from scipy.linalg import solve_banded
 
 from asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
 from asset.equity.param import PDEParams
@@ -52,12 +55,15 @@ class SnowballPDESolver(BasePDESolver):
         5. Interpolate final price from V0 (or V1 if already knocked-in)
     """
 
-    def __init__(self, params: Optional[PDEParams] = None):
+    def __init__(
+        self, params: Optional[PDEParams] = None, enable_profiling: bool = False
+    ):
         """
         Initialize Snowball PDE solver.
 
         Args:
             params: PDE engine configuration parameters
+            enable_profiling: Enable timing breakdown for matrix, RHS, solve, barrier
         """
         super().__init__(params)
 
@@ -78,6 +84,30 @@ class SnowballPDESolver(BasePDESolver):
 
         # Time tracking
         self._total_tau: float = 0.0
+        self._banded_cache: "OrderedDict[Tuple[float, float], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
+        self._banded_cache_max_entries = self.params.banded_cache_max_entries
+        self._profile_enabled = enable_profiling
+        self._profile_stats: Dict[str, float] = {}
+        self._ko_records_cache: "OrderedDict[Tuple, List[ResolvedObservationRecord]]" = OrderedDict()
+        self._ki_profile_cache: "OrderedDict[Tuple, Dict[str, List[Optional[float]]]]" = OrderedDict()
+
+    def enable_profiling(self, enabled: bool = True) -> None:
+        """Toggle internal timing breakdown collection."""
+        self._profile_enabled = enabled
+
+    def get_profile_stats(self) -> Dict[str, float]:
+        """Return timing breakdown from the most recent solve."""
+        return dict(self._profile_stats)
+
+    def _reset_profile_stats(self) -> None:
+        self._profile_stats = {
+            "grid_build": 0.0,
+            "boundary": 0.0,
+            "matrix_build": 0.0,
+            "rhs": 0.0,
+            "solve": 0.0,
+            "barrier": 0.0,
+        }
 
     def _solve(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -132,10 +162,17 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
+        if self._profile_enabled:
+            self._reset_profile_stats()
+
         # Build grids
+        if self._profile_enabled:
+            t0 = perf_counter()
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
             product, pricing_env, spot, sigma, tau, r, q
         )
+        if self._profile_enabled:
+            self._profile_stats["grid_build"] += perf_counter() - t0
 
         # Initialize both grids
         num_x, num_t = len(x_vec), len(t_vec)
@@ -182,6 +219,7 @@ class SnowballPDESolver(BasePDESolver):
             self._grid_v1,
             A,
             l,
+            c,
             u,
             x_vec,
             s_vec,
@@ -492,7 +530,7 @@ class SnowballPDESolver(BasePDESolver):
         self._has_terminal_ko = False
 
         # Setup KO observation indices
-        ko_records = product.resolve_ko_observations(pricing_env)
+        ko_records = self._get_cached_ko_records(pricing_env, product)
         for rec in ko_records:
             obs_time = rec.observation_time
             if is_close(obs_time, 0.0):
@@ -506,7 +544,7 @@ class SnowballPDESolver(BasePDESolver):
 
         # Setup KI observation indices (if discrete)
         if product.has_ki_barrier and not self._ki_continuous:
-            ki_profile = product.get_ki_observation_profile(pricing_env)
+            ki_profile = self._get_cached_ki_profile(pricing_env, product)
             ki_times = ki_profile["observation_times"]
             for obs_time in ki_times:
                 if is_close(obs_time, 0.0):
@@ -697,6 +735,7 @@ class SnowballPDESolver(BasePDESolver):
         grid_v1: np.ndarray,
         A: sp.csc_matrix,
         l: np.ndarray,
+        c: np.ndarray,
         u: np.ndarray,
         x_vec: np.ndarray,
         s_vec: np.ndarray,
@@ -720,8 +759,13 @@ class SnowballPDESolver(BasePDESolver):
         """
         params: PDEParams = self.params
         num_t, num_x = len(t_vec), len(x_vec)
-        I_int = sp.eye(num_x - 2, format="csc")
+        profile = self._profile_enabled
+        timings = self._profile_stats
+        use_banded = params.use_banded_solver
+        n_int = num_x - 2
+        I_int = sp.eye(n_int, format="csc")
         self._matrix_cache.clear()
+        self._banded_cache.clear()
 
         # Rannacher smoothing indices
         smooth_js = set()
@@ -735,6 +779,14 @@ class SnowballPDESolver(BasePDESolver):
                             smooth_idx = idx - 1 - k
                             if smooth_idx >= 0:
                                 smooth_js.add(smooth_idx)
+
+        rhs = None
+        rhs_v0 = None
+        rhs_v1 = None
+        if use_banded and n_int > 2:
+            rhs = np.empty((n_int, 2))
+            rhs_v0 = rhs[:, 0]
+            rhs_v1 = rhs[:, 1]
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
@@ -750,30 +802,137 @@ class SnowballPDESolver(BasePDESolver):
                 else params.theta
             )
 
-            M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
-
             # Set boundary conditions for both surfaces
+            if profile:
+                t0 = perf_counter()
             self._set_boundary_conditions_v0(
                 grid_v0, x_vec, s_vec, j, tau_remaining, product, pricing_env
             )
             self._set_boundary_conditions_v1(
                 grid_v1, x_vec, s_vec, j, tau_remaining, product, pricing_env
             )
+            if profile:
+                timings["boundary"] += perf_counter() - t0
 
-            # Step V0 backward
-            rhs_v0 = M1 @ grid_v0[1:-1, j + 1]
-            self._inject_boundary_contributions(rhs_v0, grid_v0, l, u, j, dt, theta)
-            grid_v0[1:-1, j] = M2_lu.solve(rhs_v0)
+            if use_banded and n_int > 2:
+                if profile:
+                    t0 = perf_counter()
+                banded, lower1, main1, upper1 = self._get_banded_system(
+                    l, c, u, dt, theta
+                )
+                if profile:
+                    timings["matrix_build"] += perf_counter() - t0
 
-            # Step V1 backward
-            rhs_v1 = M1 @ grid_v1[1:-1, j + 1]
-            self._inject_boundary_contributions(rhs_v1, grid_v1, l, u, j, dt, theta)
-            grid_v1[1:-1, j] = M2_lu.solve(rhs_v1)
+                v0_next = grid_v0[1:-1, j + 1]
+                v1_next = grid_v1[1:-1, j + 1]
+
+                if profile:
+                    t0 = perf_counter()
+                np.multiply(main1, v0_next, out=rhs_v0)
+                rhs_v0[1:] += lower1 * v0_next[:-1]
+                rhs_v0[:-1] += upper1 * v0_next[1:]
+                self._inject_boundary_contributions(rhs_v0, grid_v0, l, u, j, dt, theta)
+
+                np.multiply(main1, v1_next, out=rhs_v1)
+                rhs_v1[1:] += lower1 * v1_next[:-1]
+                rhs_v1[:-1] += upper1 * v1_next[1:]
+                self._inject_boundary_contributions(rhs_v1, grid_v1, l, u, j, dt, theta)
+                if profile:
+                    timings["rhs"] += perf_counter() - t0
+
+                if profile:
+                    t0 = perf_counter()
+                sol = solve_banded(
+                    (1, 1),
+                    banded,
+                    rhs,
+                    overwrite_b=True,
+                    check_finite=False,
+                )
+                if profile:
+                    timings["solve"] += perf_counter() - t0
+                grid_v0[1:-1, j] = sol[:, 0]
+                grid_v1[1:-1, j] = sol[:, 1]
+            else:
+                if profile:
+                    t0 = perf_counter()
+                M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
+                if profile:
+                    timings["matrix_build"] += perf_counter() - t0
+
+                if profile:
+                    t0 = perf_counter()
+                rhs_v0 = M1 @ grid_v0[1:-1, j + 1]
+                self._inject_boundary_contributions(rhs_v0, grid_v0, l, u, j, dt, theta)
+
+                rhs_v1 = M1 @ grid_v1[1:-1, j + 1]
+                self._inject_boundary_contributions(rhs_v1, grid_v1, l, u, j, dt, theta)
+                if profile:
+                    timings["rhs"] += perf_counter() - t0
+
+                if profile:
+                    t0 = perf_counter()
+                grid_v0[1:-1, j] = M2_lu.solve(rhs_v0)
+                grid_v1[1:-1, j] = M2_lu.solve(rhs_v1)
+                if profile:
+                    timings["solve"] += perf_counter() - t0
 
             # Apply barrier modifications
+            if profile:
+                t0 = perf_counter()
             self._apply_step_modifications_two_surface(
                 grid_v0, grid_v1, x_vec, s_vec, j, tau_remaining, product, pricing_env
             )
+            if profile:
+                timings["barrier"] += perf_counter() - t0
+
+    def _get_banded_system(
+        self,
+        l: np.ndarray,
+        c: np.ndarray,
+        u: np.ndarray,
+        dt: float,
+        theta: float,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if not self._is_cache_enabled():
+            lower = -theta * dt * l[2:-1]
+            main = 1.0 - theta * dt * c[1:-1]
+            upper = -theta * dt * u[1:-2]
+
+            banded = np.zeros((3, len(main)))
+            banded[0, 1:] = upper
+            banded[1, :] = main
+            banded[2, :-1] = lower
+
+            lower1 = (1.0 - theta) * dt * l[2:-1]
+            main1 = 1.0 + (1.0 - theta) * dt * c[1:-1]
+            upper1 = (1.0 - theta) * dt * u[1:-2]
+            return banded, lower1, main1, upper1
+
+        key = (round(dt, 12), round(theta, 12))
+        cached = self._banded_cache.get(key)
+        if cached is not None:
+            self._banded_cache.move_to_end(key)
+            return cached
+
+        lower = -theta * dt * l[2:-1]
+        main = 1.0 - theta * dt * c[1:-1]
+        upper = -theta * dt * u[1:-2]
+
+        banded = np.zeros((3, len(main)))
+        banded[0, 1:] = upper
+        banded[1, :] = main
+        banded[2, :-1] = lower
+
+        lower1 = (1.0 - theta) * dt * l[2:-1]
+        main1 = 1.0 + (1.0 - theta) * dt * c[1:-1]
+        upper1 = (1.0 - theta) * dt * u[1:-2]
+
+        self._banded_cache[key] = (banded, lower1, main1, upper1)
+        self._banded_cache.move_to_end(key)
+        if len(self._banded_cache) > self._banded_cache_max_entries:
+            self._banded_cache.popitem(last=False)
+        return banded, lower1, main1, upper1
 
     def _set_boundary_conditions_v0(
         self,
@@ -1078,3 +1237,97 @@ class SnowballPDESolver(BasePDESolver):
 
     def __repr__(self) -> str:
         return "SnowballPDESolver()"
+
+    def _grid_cache_key(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        sigma: float,
+        tau: float,
+        r: float,
+        q: float,
+    ) -> Tuple:
+        base_key = super()._grid_cache_key(
+            product, pricing_env, spot, sigma, tau, r, q
+        )
+        if not hasattr(product, "barrier_config"):
+            return base_key
+
+        ko_records = self._get_cached_ko_records(pricing_env, product)
+        ko_key = tuple(
+            sorted(
+                (
+                    round(rec.observation_time, 12),
+                    round(rec.barrier if rec.barrier is not None else 0.0, 12),
+                )
+                for rec in ko_records
+            )
+        )
+
+        ki_key = ()
+        ki_continuous = (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        if product.has_ki_barrier:
+            ki_profile = self._get_cached_ki_profile(pricing_env, product)
+            ki_barriers = tuple(
+                round(float(b), 12) for b in (ki_profile.get("barriers") or [])
+            )
+            ki_times = tuple(
+                round(float(t), 12)
+                for t in (ki_profile.get("observation_times") or [])
+                if 0.0 <= float(t) <= tau
+            )
+            ki_key = (ki_continuous, ki_barriers, ki_times)
+
+        return base_key + (ko_key, ki_key)
+
+    def _observation_cache_key(
+        self, pricing_env: PricingEnvironment, product: SnowballOption, kind: str
+    ) -> Tuple:
+        strategy = self._resolve_cache_strategy()
+        return (
+            kind,
+            strategy,
+            f"{product.__class__.__module__}.{product.__class__.__qualname__}",
+            self._product_cache_token(product, strategy),
+            pricing_env.valuation_date,
+            pricing_env.day_count_convention,
+            pricing_env.bus_days_in_year,
+        )
+
+    def _get_cached_ko_records(
+        self, pricing_env: PricingEnvironment, product: SnowballOption
+    ) -> List[ResolvedObservationRecord]:
+        if not self._is_cache_enabled():
+            return product.resolve_ko_observations(pricing_env)
+        key = self._observation_cache_key(pricing_env, product, "ko")
+        cached = self._ko_records_cache.get(key)
+        if cached is not None:
+            self._ko_records_cache.move_to_end(key)
+            return cached
+        records = product.resolve_ko_observations(pricing_env)
+        self._ko_records_cache[key] = records
+        self._ko_records_cache.move_to_end(key)
+        if len(self._ko_records_cache) > self.params.grid_cache_max_entries:
+            self._ko_records_cache.popitem(last=False)
+        return records
+
+    def _get_cached_ki_profile(
+        self, pricing_env: PricingEnvironment, product: SnowballOption
+    ) -> Dict[str, List[Optional[float]]]:
+        if not self._is_cache_enabled():
+            return product.get_ki_observation_profile(pricing_env)
+        key = self._observation_cache_key(pricing_env, product, "ki")
+        cached = self._ki_profile_cache.get(key)
+        if cached is not None:
+            self._ki_profile_cache.move_to_end(key)
+            return cached
+        profile = product.get_ki_observation_profile(pricing_env)
+        self._ki_profile_cache[key] = profile
+        self._ki_profile_cache.move_to_end(key)
+        if len(self._ki_profile_cache) > self.params.grid_cache_max_entries:
+            self._ki_profile_cache.popitem(last=False)
+        return profile

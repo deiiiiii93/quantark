@@ -26,6 +26,9 @@ Key concepts demonstrated:
 
 Usage:
     python example/convertible_bond_term_structure_demo.py
+
+Note:
+    Run from the project root or set PYTHONPATH=. to resolve local imports.
 """
 
 from datetime import datetime

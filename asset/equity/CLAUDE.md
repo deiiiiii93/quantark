@@ -324,7 +324,11 @@ pde_params = PDEParams(
     grid_size=400,
     time_steps=200,
     adaptive_grid=False,
-    auto_grid=True
+    auto_grid=True,
+    cache_enabled=True,
+    grid_cache_max_entries=128,
+    use_banded_solver=True,
+    banded_cache_max_entries=512
 )
 ```
 
