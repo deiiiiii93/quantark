@@ -52,6 +52,7 @@ Claude should use this skill when:
 | Analytical (equity) | `BaseEngine` | `asset/equity/engine/base_engine.py` |
 | Monte Carlo (equity) | `BaseEngine` | Same |
 | PDE Solver (equity) | `BasePDESolver` | `asset/equity/engine/pde/base_pde_solver.py` |
+| Quadrature (equity) | `BaseEngine` | `asset/equity/engine/base_engine.py` |
 | Bond discount | `BaseEngine` | `asset/bond/engine/base_engine.py` |
 | Tree (bond) | Custom | `asset/bond/engine/tree/` |
 
@@ -78,6 +79,7 @@ asset/<asset_type>/engine/<engine_type>/
 | Equity | Analytical | `asset/equity/engine/analytical/` |
 | Equity | Monte Carlo | `asset/equity/engine/mc/` |
 | Equity | PDE | `asset/equity/engine/pde/` |
+| Equity | Quadrature | `asset/equity/engine/quad/` |
 | Bond | Discount | `asset/bond/engine/discount/` |
 | Bond | Tree | `asset/bond/engine/tree/` |
 | Bond | Convertible | `asset/bond/engine/convertible/` |

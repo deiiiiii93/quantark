@@ -46,6 +46,7 @@ Determine engine type from file path or name:
 - **Analytical**: `engine/analytical/*.py` or `*_analytical_engine.py`
 - **Monte Carlo**: `engine/mc/*.py` or `*_mc_engine.py`
 - **PDE**: `engine/pde/*.py` or `*_pde_solver.py`
+- **Quadrature**: `engine/quad/*.py` or `*_quad_engine.py`
 
 ---
 
@@ -434,7 +435,7 @@ Validation relies on boundary checks and process/payoff verification.
 
 ---
 
-### For ANALYTICAL Engines: Identify MC Benchmark
+### For ANALYTICAL, PDE, or QUADRATURE Engines: Identify MC Benchmark
 
 **Available MC Engines:**
 ```
@@ -445,12 +446,14 @@ asset/equity/engine/mc/
 ```
 
 **Mapping:**
-| Analytical Engine | MC Benchmark |
+| Engine to Validate | MC Benchmark |
 |-------------------|--------------|
 | `black_scholes_engine.py` | `euro_mc_engine.py` |
 | `asian_option_analytical_engine.py` | `asian_option_mc_engine.py` |
 | `barrier_analytical_engine.py` | *(May need creation)* |
 | `one_touch_analytical_engine.py` | *(May need creation)* |
+| `snowball_pde_solver.py` | `snowball_mc_engine.py` |
+| `snowball_quad_engine.py` | `snowball_mc_engine.py` |
 
 ### If No MC Engine Exists for Analytical Engine
 

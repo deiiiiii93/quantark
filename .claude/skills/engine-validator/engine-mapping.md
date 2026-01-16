@@ -32,6 +32,13 @@ Quick reference for engine recognition from user prompts.
 | "one touch pde" | `one_touch_pde_solver.py` | `OneTouchOption` |
 | "double barrier" | `double_barrier_pde_solver.py` | `DoubleBarrierOption` |
 | "double one touch" | `double_one_touch_pde_solver.py` | `DoubleOneTouchOption` |
+| "snowball pde" | `snowball_pde_solver.py` | `SnowballOption` |
+
+## Equity Quadrature Engines
+
+| User Prompt Keywords | Engine File | Product |
+|---------------------|-------------|---------|
+| "snowball quad", "snowball quadrature", "quad engine" | `snowball_quad_engine.py` | `SnowballOption` |
 
 ## Bond Engines
 
@@ -43,14 +50,16 @@ Quick reference for engine recognition from user prompts.
 
 ## MC Benchmark Availability
 
-| Analytical Engine | Has MC Benchmark? | MC Engine |
-|-------------------|-------------------|-----------|
+| Engine | Has MC Benchmark? | MC Engine |
+|--------|-------------------|-----------|
 | `black_scholes_engine.py` | **YES** | `euro_mc_engine.py` |
 | `asian_option_analytical_engine.py` | **YES** | `asian_option_mc_engine.py` |
 | `american_option_engine.py` | NO | *Consider PDE as benchmark* |
 | `barrier_analytical_engine.py` | NO | *Need to create* |
 | `one_touch_analytical_engine.py` | NO | *Need to create* |
 | `digital_option_engine.py` | NO | *Can use euro_mc with custom payoff* |
+| `snowball_pde_solver.py` | **YES** | `snowball_mc_engine.py` |
+| `snowball_quad_engine.py` | **YES** | `snowball_mc_engine.py` |
 
 ## MC Engine Validation (No Benchmark)
 
@@ -83,6 +92,11 @@ asset/equity/engine/mc/<engine_name>.py
 ### PDE Engines
 ```
 asset/equity/engine/pde/<solver_name>.py
+```
+
+### Quadrature Engines
+```
+asset/equity/engine/quad/<engine_name>.py
 ```
 
 ### Reference Docs
@@ -143,4 +157,8 @@ from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from asset.equity.engine.pde.european_pde_solver import EuropeanPDESolver
 from asset.equity.engine.pde.american_pde_solver import AmericanPDESolver
 from asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver
+from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+
+# Quadrature
+from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 ```

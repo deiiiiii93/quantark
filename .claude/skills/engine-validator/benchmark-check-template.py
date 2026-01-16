@@ -2,7 +2,8 @@
 Benchmark Check Template for Engine Validation
 ===============================================
 
-This template compares analytical engine prices against Monte Carlo benchmark.
+This template compares pricing engine prices against Monte Carlo benchmark.
+Supports Analytical, PDE, and Quadrature engines.
 Copy and customize for specific engine validation.
 
 Usage:
@@ -24,11 +25,21 @@ sys.path.insert(0, '.')
 # ==============================================================================
 # REPLACE THESE IMPORTS WITH ACTUAL ENGINE/PRODUCT IMPORTS
 # ==============================================================================
-# Analytical engine
+# Engine to validate (choose ONE based on engine type):
+#
+# For ANALYTICAL engines:
+# from asset.equity.engine.analytical.<engine> import <Engine>
+#
+# For PDE engines:
+# from asset.equity.engine.pde.<solver> import <Solver>
+#
+# For QUADRATURE engines:
+# from asset.equity.engine.quad.<engine> import <Engine>
+#
+# Product:
 # from asset.equity.product.option.<product> import <Product>
-# from asset.equity.engine.analytical.<engine> import <AnalyticalEngine>
-
-# Monte Carlo benchmark
+#
+# Monte Carlo benchmark:
 # from asset.equity.engine.mc.<mc_engine> import <MCEngine>
 
 from priceenv.pricing_environment import PricingEnvironment
@@ -432,25 +443,54 @@ def export_to_csv(results: BenchmarkResults, filepath: str):
 # ==============================================================================
 
 if __name__ == "__main__":
-    # REPLACE WITH ACTUAL IMPORTS
+    # EXAMPLE 1: Analytical Engine vs MC
     # from asset.equity.product.option.european_vanilla_option import EuropeanVanillaOption
     # from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
     # from asset.equity.engine.mc.euro_mc_engine import EuroMCEngine
-    
+    #
     # results = run_benchmark(
     #     AnalyticalEngine=BlackScholesEngine,
     #     MCEngine=EuroMCEngine,
     #     Product=EuropeanVanillaOption,
     #     tolerance=0.05
     # )
+
+    # EXAMPLE 2: PDE Engine vs MC
+    # from asset.equity.product.option.snowball_option import SnowballOption
+    # from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+    # from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+    #
+    # results = run_benchmark(
+    #     AnalyticalEngine=SnowballPDESolver,  # Parameter name is generic
+    #     MCEngine=SnowballMCEngine,
+    #     Product=SnowballOption,
+    #     tolerance=0.05
+    # )
+
+    # EXAMPLE 3: Quadrature Engine vs MC
+    # from asset.equity.product.option.snowball_option import SnowballOption
+    # from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+    # from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+    #
+    # results = run_benchmark(
+    #     AnalyticalEngine=SnowballQuadEngine,  # Parameter name is generic
+    #     MCEngine=SnowballMCEngine,
+    #     Product=SnowballOption,
+    #     tolerance=0.05
+    # )
+
     # success = results.summary()
-    
+
     print("This is a template file.")
     print("Please copy and customize for your specific engine validation.")
+    print("\nSupported Engine Types:")
+    print("  - Analytical: asset/equity/engine/analytical/<engine>.py")
+    print("  - PDE:        asset/equity/engine/pde/<solver>.py")
+    print("  - Quadrature: asset/equity/engine/quad/<engine>.py")
     print("\nUsage:")
     print("  1. Copy to: asset/<type>/engine/validation/script/benchmark_check_<engine>.py")
-    print("  2. Update imports for your analytical engine, MC engine, and product")
+    print("  2. Update imports for your engine, MC engine, and product")
     print("  3. Customize TEST_CASES as needed")
     print("  4. Run: python <path_to_script>")
-    
+
     sys.exit(0)
