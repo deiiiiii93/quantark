@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from math import isclose
 from typing import List, Optional, TYPE_CHECKING
+from copy import deepcopy
 
 from util.enum import ObservationAggregation, TenorEnd, ObservationFrequency
 from util.calendar import DayCountConvention
@@ -232,6 +233,55 @@ class ObservationSchedule:
                 times.append(rec.observation_time)
         if times and not self._is_sorted(times):
             raise ValidationError("Observation records must be ordered by observation_time.")
+
+    def uses_dates(self) -> bool:
+        """Return True if any record uses observation_date."""
+        return any(
+            getattr(rec, "observation_date", None) is not None for rec in self.records
+        )
+
+    def uses_times(self) -> bool:
+        """Return True if any record uses observation_time."""
+        return any(
+            getattr(rec, "observation_time", None) is not None for rec in self.records
+        )
+
+    def time_shift(
+        self, time_bump: float, bumped_date: Optional[datetime] = None
+    ) -> Optional["ObservationSchedule"]:
+        """
+        Shift observation schedule by time_bump and drop past records.
+
+        - observation_time is reduced by time_bump
+        - observation_date records are dropped if <= bumped_date
+        """
+        if not self.records:
+            return self
+
+        updated_records = []
+        for rec in self.records:
+            rec_copy = deepcopy(rec)
+
+            if getattr(rec_copy, "observation_date", None) is not None:
+                if bumped_date is not None and rec_copy.observation_date <= bumped_date:
+                    continue
+
+            if getattr(rec_copy, "observation_time", None) is not None:
+                adjusted_time = rec_copy.observation_time - time_bump
+                if adjusted_time <= 0:
+                    continue
+                rec_copy.observation_time = adjusted_time
+
+            updated_records.append(rec_copy)
+
+        if not updated_records:
+            return None
+
+        return ObservationSchedule(
+            records=updated_records,
+            aggregation_mode=self.aggregation_mode,
+            frequency=self.frequency,
+        )
 
     def resolve(
         self,
@@ -476,4 +526,3 @@ class ObservationSchedule:
     def _is_sorted(values: List[float]) -> bool:
         """Check if list is non-decreasing."""
         return all(values[i] <= values[i + 1] for i in range(len(values) - 1))
-

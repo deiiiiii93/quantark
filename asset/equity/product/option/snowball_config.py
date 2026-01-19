@@ -4,7 +4,7 @@ Configuration classes for Snowball (autocallable) options.
 These classes group related parameters to simplify the SnowballOption API.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import List, Optional, Union
 
@@ -66,6 +66,57 @@ class BarrierConfig:
             raise ValueError(f"ko_observation_type must be ObservationType, got {type(self.ko_observation_type)}")
         if not isinstance(self.ki_observation_type, ObservationType):
             raise ValueError(f"ki_observation_type must be ObservationType, got {type(self.ki_observation_type)}")
+
+    def time_shift(self, time_bump: float, bumped_date, pricing_env) -> tuple["BarrierConfig", bool]:
+        """
+        Shift KO/KI observation schedules and legacy dates for theta bumps.
+
+        Returns a new BarrierConfig and a flag indicating if all observations were dropped.
+        """
+        dropped_all = False
+
+        ko_schedule = self.ko_observation_schedule
+        if ko_schedule is not None:
+            if ko_schedule.uses_dates():
+                pricing_env.valuation_date = bumped_date
+            ko_schedule = ko_schedule.time_shift(time_bump, bumped_date)
+            if ko_schedule is None:
+                dropped_all = True
+
+        ki_schedule = self.ki_observation_schedule
+        if ki_schedule is not None:
+            if ki_schedule.uses_dates():
+                pricing_env.valuation_date = bumped_date
+            ki_schedule = ki_schedule.time_shift(time_bump, bumped_date)
+            if ki_schedule is None:
+                dropped_all = True
+
+        ko_dates = self.ko_observation_dates
+        if ko_schedule is not None and ko_schedule.uses_times():
+            ko_dates = ko_schedule.times
+        elif ko_schedule is None and ko_dates:
+            ko_dates = [t - time_bump for t in ko_dates if t - time_bump > 0]
+            if not ko_dates:
+                dropped_all = True
+
+        ki_dates = self.ki_observation_dates
+        if ki_schedule is not None and ki_schedule.uses_times():
+            ki_dates = ki_schedule.times
+        elif ki_schedule is None and ki_dates:
+            ki_dates = [t - time_bump for t in ki_dates if t - time_bump > 0]
+            if not ki_dates:
+                dropped_all = True
+
+        return (
+            replace(
+                self,
+                ko_observation_schedule=ko_schedule,
+                ki_observation_schedule=ki_schedule,
+                ko_observation_dates=ko_dates,
+                ki_observation_dates=ki_dates,
+            ),
+            dropped_all,
+        )
 
     @staticmethod
     def _validate_barrier_positive(barrier: Union[float, List[float]], name: str) -> None:

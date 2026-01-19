@@ -571,6 +571,20 @@ class SnowballOption(BaseEquityOption):
             ),
         )
 
+    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
+        """Shift barrier schedules for theta bumping."""
+        dropped_all = super().time_shift(time_bump, bumped_date, pricing_env)
+        if dropped_all:
+            return True
+
+        if self.barrier_config is not None:
+            new_config, dropped_all = self.barrier_config.time_shift(
+                time_bump, bumped_date, pricing_env
+            )
+            self.barrier_config = new_config
+
+        return dropped_all
+
     def get_maturity(self, pricing_env: PricingEnv = None) -> float:
         """
         Get time to maturity in years.

@@ -117,6 +117,10 @@ class Futures(BaseDeltaOneProduct):
         """
         if self.multiplier <= 0:
             raise ValidationError(f"Multiplier must be positive, got {self.multiplier}")
+
+    @property
+    def is_linear(self) -> bool:
+        return True
         
         if not math.isfinite(self.basis):
             raise ValidationError(f"Basis must be finite, got {self.basis}")
@@ -284,4 +288,3 @@ class Futures(BaseDeltaOneProduct):
         else:
             return (f"Futures({self.underlying}, mult={self.multiplier:.1f}, "
                    f"T={self.maturity:.4f}, basis={self.basis:.4f}{mtm_str})")
-

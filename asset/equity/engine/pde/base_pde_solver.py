@@ -880,12 +880,14 @@ class BasePDESolver(BaseEngine):
         Returns:
             Intrinsic delta
         """
+        multiplier = getattr(product, "contract_multiplier", 1.0)
         if hasattr(product, "is_call") and hasattr(product, "strike"):
             if product.is_call():
-                return 1.0 if spot > product.strike else 0.0
+                delta = 1.0 if spot > product.strike else 0.0
             else:
-                return -1.0 if spot < product.strike else 0.0
-        return 0.0
+                delta = -1.0 if spot < product.strike else 0.0
+            return delta * multiplier
+        return 0.0 * multiplier
 
     def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
         """Helper to collect barrier levels from known product attributes."""

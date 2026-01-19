@@ -29,21 +29,21 @@
 对于带趋势的权益现货动态，参数化形式遵循 GBM 解：
 
 $$
-S_t = S_0 \exp\left(\mu t + \sigma W_t\right)
+S_t = S_0 \exp(\mu t + \sigma W_t)
 $$
 
 其中：
-- \(\mu\) 是漂移（预期收益）
-- \(\sigma\) 是波动率
-- \(W_t\) 是维纳过程（布朗运动）
+- $\mu$ 是漂移（预期收益）
+- $\sigma$ 是波动率
+- $W_t$ 是维纳过程（布朗运动）
 
-在日步长 \(\Delta t = 1\) 的离散时间中：
+在日步长 $\Delta t = 1$ 的离散时间中：
 
 $$
-S_{t+1} = S_t \exp\left(\mu - \frac{1}{2}\sigma^2 + \sigma \sqrt{\Delta t} \, Z_t\right)
+S_{t+1} = S_t \exp(\mu - \frac{1}{2}\sigma^2 + \sigma \sqrt{\Delta t} \, Z_t)
 $$
 
-其中 \(Z_t \sim \mathcal{N}(0,1)\) 是独立的标准正态分布。
+其中 $Z_t \sim \mathcal{N}(0,1)$ 是独立的标准正态分布。
 
 #### 均值回归路径 (Ornstein-Uhlenbeck)
 
@@ -60,19 +60,19 @@ X_{t+1} = X_t + \kappa(\theta - X_t)\Delta t + \sigma\sqrt{\Delta t}\,Z_t
 $$
 
 其中：
-- \(\theta\) 是长期均值
-- \(\kappa\) 是均值回归速度
-- \(\sigma\) 是过程波动率
+- $\theta$ 是长期均值
+- $\kappa$ 是均值回归速度
+- $\sigma$ 是过程波动率
 
 #### 波动率机制转换
 
 对于建模波动率波动或突然的机制转换，动态可建模为：
 
 $$
-\sigma_t = \sigma_0 \cdot \exp\left(\alpha \cdot \mathbb{I}_{t > t_{\text{switch}}}\right)
+\sigma_t = \sigma_0 \cdot \exp(\alpha \cdot \mathbb{I}_{t > t_{\text{switch}}})
 $$
 
-其中 \(\mathbb{I}\) 是机制转换时间的指示函数。
+其中 $\mathbb{I}$ 是机制转换时间的指示函数。
 
 ### 2. 固定收益路径动态
 
@@ -82,7 +82,7 @@ $$
 df(t,T) = \alpha(t,T)dt + \sigma(t,T)dW_t
 $$
 
-其中 \(f(t,T)\) 是时刻 \(t\) 对到期日 \(T\) 的瞬时远期利率。
+其中 $f(t,T)$ 是时刻 $t$ 对到期日 $T$ 的瞬时远期利率。
 
 在实践中，情景通常聚焦于收益率曲线的前三个**主成分**：
 
@@ -104,16 +104,15 @@ $$
 *   **收益率曲线主成分 (Yield Curve Principal Components)**：建模利率的水平、斜率和曲率的独立运动。
 *   **期限结构 (Term Structure)**：远期利率的演变以及债券价格的“滚落”效应。
 
-**[图片占位符]**
-> **Prompt for Nanobanana**: /diagram prompt: "A 3D scientific surface plot of a 'Volatility Surface'. Use visual indicators like semi-transparent 'ghost' surfaces or directional arrows to depict the surface rippling and changing shape over time (Vol-of-Vol). Style: High-tech 3D data visualization, blue and purple gradient."
+![Volatility Surface Evolution](images/vol_surface.png)
 
 ## QuantArk 中的路径表达（DayPath / DayStep）
 
 在 QuantArk 中，动态情景由 **DayPath** 表示：它是按天顺序排列的 **DayStep** 列表。每个 DayStep 包含一个或多个 **ParameterChange**（现货/波动率/利率/股息等），并指定冲击类型：
 
-* **百分比（复利）**：\(X_t = X_{t-1}(1+\epsilon_t)\)
-* **绝对值（加法）**：\(X_t = X_{t-1}+\delta_t\)
-* **覆盖值（设定）**：\(X_t = \bar{X}_t\)
+* **百分比（复利）**：$X_t = X_{t-1}(1+\epsilon_t)$
+* **绝对值（加法）**：$X_t = X_{t-1}+\delta_t$
+* **覆盖值（设定）**：$X_t = \bar{X}_t$
 
 这种表示方式让情景在“每日粒度”上可审计：每一天发生了哪些变化、为什么发生、影响哪些对象（组合/标的/持仓）。
 
@@ -138,8 +137,7 @@ $$
 4. 若启用对冲：运行触发与头寸计算、执行对冲交易、必要时再重估
 5. 记录当日结果（价值、P&L、风险、交易与成本）
 
-**[图片占位符]**
-> **Prompt for Nanobanana**: /diagram prompt: "A flowchart diagram of the Dynamic Scenario Simulation Loop. Visual flow: Start -> [Update Market Data (t)] -> [Reprice Portfolio] -> [Check Hedge Triggers] -> [Execute Trades] -> [Record Results] -> [Advance Time (t+1)] -> Loop back. Style: Technical process diagram, circular cycle, modern UI elements."
+![Dynamic Scenario Simulation Loop](images/simulation_loop.png)
 
 ### 路径依赖分析
 
@@ -216,8 +214,7 @@ $$
 
 **滚落收益**是指债券在情景跨度内沿收益率曲线滚落所产生的收益。它计算为债券最终价格与初始价格之差，并调整期间收到的利息。
 
-**[图片占位符]**
-> **Prompt for Nanobanana**: /diagram prompt: "A 3D wireframe surface plot representing a Yield Curve evolving over time. Axes: X='Tenor' (1M-30Y), Y='Time' (Day 1-30), Z='Interest Rate'. The mesh surface should visibly twist and shift along the Time axis to demonstrate curve evolution. Style: Technical scientific plot, clean wireframe lines."
+![Yield Curve Evolution](images/yield_curve.png)
 
 ## 模型覆盖（QuantArk 实现）
 
@@ -248,9 +245,9 @@ $$
 
 在 QuantArk 中，动态情景由 **DayPath** 表示：它是按天顺序排列的 **DayStep** 列表。每个 DayStep 包含一个或多个 **ParameterChange**（现货/波动率/利率/股息等），并指定冲击类型：
 
-* **百分比（复利）**：\(X_t = X_{t-1}(1+\epsilon_t)\)
-* **绝对值（加法）**：\(X_t = X_{t-1}+\delta_t\)
-* **覆盖值（设定）**：\(X_t = \bar{X}_t\)
+* **百分比（复利）**：$X_t = X_{t-1}(1+\epsilon_t)$
+* **绝对值（加法）**：$X_t = X_{t-1}+\delta_t$
+* **覆盖值（设定）**：$X_t = \bar{X}_t$
 
 这种表示方式让情景定义具有确定性且易于审计："每一天发生了什么变化，为什么？"
 

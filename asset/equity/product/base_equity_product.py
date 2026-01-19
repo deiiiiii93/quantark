@@ -3,6 +3,11 @@ Base class for equity derivative products.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from priceenv import PricingEnvironment
 
 
 class BaseEquityProduct(ABC):
@@ -44,6 +49,24 @@ class BaseEquityProduct(ABC):
             ValidationError: If parameters are invalid
         """
         pass
+
+    @property
+    def is_linear(self) -> bool:
+        """Return True for linear (delta-one) products."""
+        return False
+
+    def time_shift(
+        self,
+        time_bump: float,
+        bumped_date: datetime,
+        pricing_env: "PricingEnvironment",
+    ) -> bool:
+        """
+        Shift product state for theta bumping.
+
+        Returns True if all observations were dropped.
+        """
+        return False
 
     def __repr__(self):
         return f"{self.__class__.__name__}()"

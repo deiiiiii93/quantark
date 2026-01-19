@@ -590,6 +590,32 @@ class BaseEquityOption(BaseEquityProduct):
 
         return intrinsic * self.contract_multiplier
 
+    def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:
+        """
+        Shift option state for theta bumping.
+
+        Returns True if all observations were dropped.
+        """
+        dropped_all = False
+        schedule = getattr(self, "observation_schedule", None)
+        if schedule is not None:
+            if schedule.uses_dates():
+                pricing_env.valuation_date = bumped_date
+            bumped_schedule = schedule.time_shift(time_bump, bumped_date)
+            if bumped_schedule is None:
+                return True
+            self.observation_schedule = bumped_schedule
+            if hasattr(self, "observation_dates") and bumped_schedule.uses_times():
+                self.observation_dates = bumped_schedule.times
+
+        if getattr(self, "exercise_date", None) is None:
+            if getattr(self, "maturity", None) is not None:
+                self.maturity -= time_bump
+        else:
+            pricing_env.valuation_date = bumped_date
+
+        return dropped_all
+
     # ==========================================================================
     # Abstract Methods
     # ==========================================================================

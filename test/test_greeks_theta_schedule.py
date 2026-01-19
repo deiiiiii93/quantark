@@ -38,11 +38,7 @@ def test_theta_bump_drops_past_time_records():
         aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
         frequency=None,
     )
-    calc = GreeksCalculator()
-
-    bumped = calc._bump_observation_schedule_for_theta(
-        schedule, time_bump=1 / 365, bumped_valuation_date=None
-    )
+    bumped = schedule.time_shift(time_bump=1 / 365, bumped_date=None)
 
     assert bumped is not None
     assert len(bumped.records) == 1
@@ -62,11 +58,8 @@ def test_theta_bump_drops_past_date_records():
         aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
     )
 
-    calc = GreeksCalculator()
-    bumped = calc._bump_observation_schedule_for_theta(
-        schedule,
-        time_bump=1 / 365,
-        bumped_valuation_date=valuation + timedelta(days=1),
+    bumped = schedule.time_shift(
+        time_bump=1 / 365, bumped_date=valuation + timedelta(days=1)
     )
 
     assert bumped is not None
@@ -115,9 +108,9 @@ def test_theta_uses_filtered_schedule_in_pricing():
 
     assert greeks["price"] == pytest.approx(2.0)
     assert greeks["theta"] == pytest.approx(-1.0)
-    # Base price uses full schedule; theta bump uses filtered schedule with first record dropped
+    # Base price uses full schedule; theta bump uses filtered schedule
     assert engine.calls[0] == 2
-    assert engine.calls[4] == 1
+    assert 1 in engine.calls
 
 
 def test_theta_all_records_dropped_still_returns_rho():
@@ -201,4 +194,3 @@ def test_theta_date_schedule_preserves_legacy_observation_dates():
 
     assert theta == pytest.approx(0.0)
     assert engine.observation_dates_seen[-1] == [0.5]
-

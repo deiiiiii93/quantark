@@ -20,17 +20,16 @@
 
 压力测试的核心价值在于回答这样一个问题：*"如果现在发生 [X] 事件，我会损失多少？"*
 
-价值变化 (ΔV) 计算如下：
-$$ \Delta V = V(S_{stressed}, \sigma_{stressed}, r_{stressed}, ...) - V(S_{0}, \sigma_{0}, r_{0}, ...) $$
+价值变化 ($\Delta V$) 计算如下：
+$$ \Delta V = V(S_{\text{stressed}}, \sigma_{\text{stressed}}, r_{\text{stressed}}, ...) - V(S_{0}, \sigma_{0}, r_{0}, ...) $$
 
 其中：
 *   $V(...)$ 是投资组合估值函数。
 *   $S, \sigma, r$ 分别代表现货价格、波动率和利率。
 *   下标 $0$ 表示当前市场状态。
-*   下标 $stressed$ 表示冲击后的状态。
+*   下标 $\text{stressed}$ 表示冲击后的状态。
 
-**[图片占位符]**
-> **Prompt for Nanobanana**: /diagram prompt: "A 3D risk surface plot (financial volatility plane). X-axis: 'Spot Price Change', Y-axis: 'Volatility Change', Z-axis: 'Portfolio P&L'. The surface features a dramatic 'cliff' or steep drop-off representing tail risk. Style: High-tech scientific visualization, heatmap coloring."
+![Risk Surface Plot](images/risk_surface.png)
 
 ## 全重估 vs. 希腊值近似
 
@@ -42,17 +41,13 @@ QuantArk 的压力测试采用**冲击后全重估**：引擎构造受冲击后�
 
 与之相对的是常见的希腊值近似（可作为快速诊断）：
 
-$$
-\Delta V \approx \Delta \,\Delta S + \frac{1}{2}\Gamma (\Delta S)^2 + \text{Vega}\,\Delta \sigma + \text{Rho}\,\Delta r + \cdots
-$$
+$$ \Delta V \approx \Delta \,\Delta S + \frac{1}{2}\Gamma (\Delta S)^2 + \text{Vega}\,\Delta \sigma + \text{Rho}\,\Delta r + \cdots $$
 
 ### 误差边界与选择标准
 
 泰勒近似的误差取决于冲击大小和高阶导数的幅度：
 
-$$
-\epsilon_{\text{Taylor}} = \mathcal{O}(|\Delta S|^3) + \mathcal{O}(|\Delta \sigma|^2) + \cdots
-$$
+$$ \epsilon_{\text{Taylor}} = \mathcal{O}(|\Delta S|^3) + \mathcal{O}(|\Delta \sigma|^2) + \cdots $$
 
 **方法选择指南：**
 
@@ -70,9 +65,7 @@ $$
 
 现实世界的压力事件在风险因子之间表现出强相关性。最显著的是市场危机期间观察到的**负现货-波动率相关性**：
 
-$$
-\rho_{S,\sigma} = \text{Corr}(\Delta S/S, \Delta \sigma) < 0 \quad \text{(危机期间)}
-$$
+$$ \rho_{S,\sigma} = \text{Corr}(\Delta S/S, \Delta \sigma) < 0 \quad \text{(危机期间)} $$
 
 这种"杠杆效应"产生的原因是：
 1. 股价下跌增加财务杠杆，提高违约风险
@@ -83,51 +76,38 @@ $$
 
 因此，现实主义的压力情景必须结合对相关因子的冲击。对于"市场崩盘"情景：
 
-$$
-\begin{aligned}
-\Delta S &= -20\% \\
-\Delta \sigma &= +50\% \\
-\Delta r &= -50\text{bps} \quad \text{(避险导致的利率下降)}
-\end{aligned}
-$$
+$$ \begin{aligned} \Delta S &= -20\% \\ \Delta \sigma &= +50\% \\ \Delta r &= -50\text{bps} \quad \text{(避险导致的利率下降)} \end{aligned} $$
 
 联合效应往往是**非加性的**，由于交叉 Gamma 项：
 
-$$
-\Delta V \approx \Delta \cdot \Delta S + \frac{1}{2}\Gamma (\Delta S)^2 + \text{Vega} \cdot \Delta \sigma + \text{Vanna} \cdot \Delta S \cdot \Delta \sigma + \cdots
-$$
+$$ \Delta V \approx \Delta \cdot \Delta S + \frac{1}{2}\Gamma (\Delta S)^2 + \text{Vega} \cdot \Delta \sigma + \text{Vanna} \cdot \Delta S \cdot \Delta \sigma + \cdots $$
 
-其中 **Vanna** = \(\frac{\partial^2 V}{\partial S \partial \sigma}\) 捕获了 Delta 对波动率变化的敏感度。
+其中 **Vanna** = $\frac{\partial^2 V}{\partial S \partial \sigma}$ 捕获了 Delta 对波动率变化的敏感度。
 
 ## 压力架构
 
-**[图片占位符]**
-> **Prompt for Nanobanana**: /diagram prompt: "A system workflow diagram for Stress Testing. Three stages: 1. Inputs (Portfolio, Base Market, Scenarios) -> 2. Processing (Apply Shocks, Generate Stressed Envs, Full Repricing) -> 3. Outputs (P&L Impact, Greek Sensitivities, Capital Report). Style: Professional block diagram, clear input-process-output flow."
+![Stress Test Workflow](images/stress_workflow.png)
 
 ### 1. 冲击类型 (Stress Types)
 
 为了提供灵活性，可以通过三种方式施加冲击：
 
 *   **百分比冲击 (Percentage)**：相对变化（例如，权益现货 -20%）。
-    $$ X_{new} = X_{old} \times (1 + \text{shock}) $$
+    $$ X_{\text{new}} = X_{\text{old}} \times (1 + \text{shock}) $$
 *   **绝对冲击 (Absolute)**：加法变化（例如，利率 +100bps）。
-    $$ X_{new} = X_{old} + \text{shock} $$
+    $$ X_{\text{new}} = X_{\text{old}} + \text{shock} $$
 *   **数值覆盖 (Value)**：设定特定水平（例如，波动率 = 80%）。
-    $$ X_{new} = \text{shock} $$
+    $$ X_{\text{new}} = \text{shock} $$
 
 #### 组合性质
 
 冲击类型的选择影响多个冲击如何组合。对于**百分比冲击**，顺序应用时：
 
-$$
-X_{n} = X_0 \prod_{i=1}^{n}(1 + \epsilon_i)
-$$
+$$ X_{n} = X_0 \prod_{i=1}^{n}(1 + \epsilon_i) $$
 
 这意味着对于大冲击，应用顺序很重要（不可交换）。对于**绝对冲击**：
 
-$$
-X_{n} = X_0 + \sum_{i=1}^{n}\delta_i
-$$
+$$ X_{n} = X_0 + \sum_{i=1}^{n}\delta_i $$
 
 这些与顺序无关。实际含义：
 - 对具有指数动态的变量使用**百分比冲击**（现货价格、波动率）
@@ -136,15 +116,13 @@ $$
 
 #### 加法 vs. 乘法冲击
 
-对于小冲击 \(|\epsilon| \ll 1\)，区别可以忽略：
+对于小冲击 $|\epsilon| \ll 1$，区别可以忽略：
 
-$$
-X(1+\epsilon) \approx X + X\epsilon
-$$
+$$ X(1+\epsilon) \approx X + X\epsilon $$
 
 但对于大压力情景（±20% 或更多），区别很重要：
-- 先下跌 20% 再上涨 20%：\(X \times 0.8 \times 1.2 = 0.96X\)（净损失 4%）
-- 对比绝对值：\((X - 0.2X) + 0.2X = X\)（无净损失）
+- 先下跌 20% 再上涨 20%：$X \times 0.8 \times 1.2 = 0.96X$（净损失 4%）
+- 对比绝对值：$(X - 0.2X) + 0.2X = X$（无净损失）
 
 这反映了市场的真实特征：乘法冲击捕捉了复利效应。
 
@@ -182,8 +160,7 @@ $$
 *   **2008 金融危机**：股市下跌与波动率爆发的结合。
 *   **COVID-19 (2020)**：快速崩盘后伴随高波动率机制。
 
-**[图片占位符]**
-> **Prompt for Nanobanana**: /diagram prompt: "A hierarchical structure diagram of a Stress Test Scenario. Top node: 'Scenario: Market Crash'. Middle layer (3 nodes): 'Stress 1: Spot Price -20%', 'Stress 2: Volatility +50%', 'Stress 3: Rates +100bps'. Bottom node: 'Portfolio Valuation Engine'. Arrows flow from Stresses to the Engine. Style: Clean professional flowchart."
+![Scenario Hierarchy](images/scenario_hierarchy.png)
 
 ## 模型覆盖（QuantArk 实现）
 
@@ -194,7 +171,7 @@ QuantArk 通过 `PricingEnvironment` 的参数适配器来施加冲击。默认�
 *   **spot**：要求环境中存在现货报价；冲击后价格必须为正。
 *   **volatility / vol**：仅支持平坦波动率曲面（`FlatVolSurface`）。
 *   **rate**：支持平坦利率曲线与插值曲线；以平行移动方式施加。
-*   **key_rate**：需要 `tenor_bucket` 元数据（如 `"5Y"`）；在插值曲线上对指定期限桶施加变化（平坦曲线会回退为平行移动）。
+*   **key_rate**：需要 `tenor_bucket` 元数据（如 "5Y"）；在插值曲线上对指定期限桶施加变化（平坦曲线会回退为平行移动）。
 *   **dividend_yield / div_yield / dividend**：支持平坦/连续股息率；冲击后股息率不能为负。
 *   **spread**：当前映射为与利率冲击相同的"平行移动代理"。
 

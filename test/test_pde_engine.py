@@ -18,6 +18,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import products
+from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option import (
     EuropeanVanillaOption,
     AmericanOption,
@@ -1174,6 +1175,42 @@ class TestGreeksConsistency:
         assert abs(greeks["price"] - 10.0) < 0.5
         # Delta should be close to 1 for deep ITM near expiry
         assert greeks["delta"] > 0.9
+
+    def test_expired_option_greeks_contract_multiplier(self, pde_params):
+        """Test expired-option delta scales with contract multiplier."""
+        pricing_env = PricingEnvironment(
+            spot_quote=SpotQuote(spot=110.0),
+            vol_surface=FlatVolSurface(volatility=0.20),
+            rate_curve=FlatRateCurve(rate=0.05),
+            div_yield=ContinuousDividendYield(div_yield=0.0),
+            valuation_date=datetime.now(),
+        )
+
+        class DummyCall(BaseEquityProduct):
+            def __init__(self, strike: float, contract_multiplier: float) -> None:
+                self.strike = strike
+                self.contract_multiplier = contract_multiplier
+
+            def is_call(self) -> bool:
+                return True
+
+            def get_payoff(self, spot: float) -> float:
+                return max(spot - self.strike, 0.0) * self.contract_multiplier
+
+            def get_maturity(self, pricing_env=None) -> float:
+                return 0.0
+
+            def validate(self) -> None:
+                return None
+
+        product = DummyCall(strike=100.0, contract_multiplier=100.0)
+        solver = EuropeanPDESolver(pde_params)
+        greeks = solver.calculate_greeks(product, pricing_env)
+
+        intrinsic = (pricing_env.spot - product.strike) * product.contract_multiplier
+        assert greeks["price"] == pytest.approx(intrinsic)
+        assert greeks["delta"] == pytest.approx(product.contract_multiplier)
+        assert greeks["gamma"] == 0.0
 
     def test_barrier_hit_greeks(self, pde_params):
         """Test Greeks when barrier is already hit."""

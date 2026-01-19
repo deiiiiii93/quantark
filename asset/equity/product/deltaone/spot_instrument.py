@@ -109,7 +109,10 @@ class SpotInstrument(BaseDeltaOneProduct):
         if spot < 0:
             raise ValidationError(f"Spot price must be non-negative, got {spot}")
         return spot
+
+    @property
+    def is_linear(self) -> bool:
+        return True
     
     def __repr__(self):
         return f"SpotInstrument({self.underlying}, {self.deltaone_type})"
-
