@@ -22,6 +22,7 @@ import scipy.sparse.linalg as spla
 from scipy.linalg import solve_banded
 
 from asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
+from asset.equity.engine.event_stats import AutocallableEventStats
 from asset.equity.param import PDEParams
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
@@ -295,6 +296,296 @@ class SnowballPDESolver(BasePDESolver):
         # Solve PDE and interpolate price
         result = self._solve(product, pricing_env)
         return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+
+    def calculate_event_stats(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Optional[AutocallableEventStats]:
+        """
+        Provide per-observation KO probabilities and expected discounted cashflows.
+
+        Native PDE implementation:
+        - Propagates stacked indicator surfaces through the same backward PDE stepping.
+        - Applies KO/KI jumps to all indicator surfaces at observation times.
+        - Returns KO per-observation probabilities (by dividing discounted indicators by
+          discount factors) and expected discounted KO cashflows.
+        """
+        if not isinstance(product, SnowballOption):
+            return None
+        if pricing_env is None:
+            return None
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+        if tau <= 0 or is_zero(tau):
+            return None
+
+        # Validate PDE compatibility
+        self._validate_product(product)
+
+        # Determine knocked-in state at valuation
+        ki_continuous = (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
+            product, spot, pricing_env, ki_continuous=ki_continuous
+        )
+
+        # Extract market data
+        r = pricing_env.get_rate(tau)
+        q = pricing_env.get_div_yield(tau)
+        sigma = pricing_env.get_vol(product.strike, tau)
+
+        # Store product properties needed by _build_grids
+        self._is_reverse = product.is_reverse
+        self._ki_continuous = ki_continuous
+        if product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            if isinstance(ki_barrier, list):
+                self._ki_barrier = ki_barrier[0]
+            else:
+                self._ki_barrier = ki_barrier
+
+        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+            product, pricing_env, spot, sigma, tau, r, q
+        )
+        num_x, num_t = len(x_vec), len(t_vec)
+
+        ko_records = product.resolve_ko_observations(pricing_env)
+        if not ko_records:
+            return None
+        ko_records = [rec for rec in ko_records if 0.0 <= rec.observation_time <= tau]
+        ko_records.sort(key=lambda rec: float(rec.observation_time))
+        n_ko = len(ko_records)
+
+        # Map time index -> ko record index.
+        ko_index_by_tidx: Dict[int, int] = {}
+        for k, rec in enumerate(ko_records):
+            obs_time = float(rec.observation_time)
+            if is_close(obs_time, 0.0):
+                t_idx = 0
+            elif is_close(obs_time, tau):
+                t_idx = num_t - 1
+            else:
+                t_idx = int(np.argmin(np.abs(t_vec - obs_time)))
+            if not is_close(float(t_vec[t_idx]), obs_time):
+                raise ValidationError(
+                    "Time grid must align with KO observation times for event stats."
+                )
+            ko_index_by_tidx[t_idx] = k
+
+        # Surface columns: [KO_0, ..., KO_{n_ko-1}, KI_indicator]
+        ki_col = n_ko
+        n_cols = n_ko + 1
+
+        # Terminal conditions at maturity (t = T):
+        # - KO indicators are zero at maturity (KO only at discrete observations via jumps)
+        # - KI indicator is 1 on the KI surface and 0 on the no-KI surface
+        v0_next = np.zeros((num_x, n_cols), dtype=float)
+        v1_next = np.zeros((num_x, n_cols), dtype=float)
+        v1_next[:, ki_col] = 1.0
+
+        # Apply terminal KO/KI events at maturity if observation schedules include t=T.
+        terminal_tidx = num_t - 1
+        terminal_ko_idx = ko_index_by_tidx.get(terminal_tidx)
+        if terminal_ko_idx is not None:
+            rec = ko_records[terminal_ko_idx]
+            barrier = float(rec.barrier) if rec.barrier is not None else 0.0
+            if product.is_reverse:
+                mask_ko = s_vec <= barrier
+            else:
+                mask_ko = s_vec >= barrier
+
+            v0_next[mask_ko, :] = 0.0
+            v1_next[mask_ko, :] = 0.0
+            df_delay = self._cashflow_value_at_time(
+                pricing_env=pricing_env,
+                cashflow=1.0,
+                current_time=float(t_vec[terminal_tidx]),
+                settlement_time=rec.settlement_time,
+            )
+            v0_next[mask_ko, terminal_ko_idx] = df_delay
+            v1_next[mask_ko, terminal_ko_idx] = df_delay
+
+        is_terminal_ki = product.has_ki_barrier and (
+            self._ki_continuous or terminal_tidx in self._ki_observation_indices
+        )
+        if is_terminal_ki:
+            ki_barrier = float(self._ki_barrier)
+            if product.is_reverse:
+                mask_ki = s_vec >= ki_barrier
+            else:
+                mask_ki = s_vec <= ki_barrier
+            v0_next[mask_ki, :] = v1_next[mask_ki, :]
+
+        # Operator coefficients and banded solver setup
+        params: PDEParams = self.params
+        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
+        use_banded = params.use_banded_solver and (num_x - 2) > 2
+        if not use_banded:
+            raise ValidationError("Event stats PDE currently requires banded solver path.")
+
+        # Rannacher smoothing indices (reuse the same rule as the pricing solver).
+        smooth_js: set[int] = set()
+        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
+            event_times = self._get_event_times(product, tau)
+            if event_times:
+                for et in event_times:
+                    idx = int(np.argmin(np.abs(t_vec - et)))
+                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
+                        for k in range(params.rannacher_steps):
+                            smooth_idx = idx - 1 - k
+                            if smooth_idx >= 0:
+                                smooth_js.add(smooth_idx)
+
+        n_int = num_x - 2
+        rhs = np.empty((n_int, 2 * n_cols), dtype=float)
+
+        for j in range(num_t - 2, -1, -1):
+            dt = float(dt_vec[j])
+            steps_from_end = num_t - 1 - j
+            theta = (
+                1.0
+                if params.use_rannacher
+                and (steps_from_end < params.rannacher_steps or j in smooth_js)
+                else params.theta
+            )
+
+            banded, lower1, main1, upper1 = self._get_banded_system(l, c, u, dt, theta)
+
+            # Initialize "current" with next boundaries (approximation); interior will be solved.
+            v0_cur = v0_next.copy()
+            v1_cur = v1_next.copy()
+
+            # Build RHS for all columns.
+            v0n = v0_next[1:-1, :]
+            v1n = v1_next[1:-1, :]
+
+            rhs_v0 = rhs[:, :n_cols]
+            rhs_v1 = rhs[:, n_cols:]
+
+            rhs_v0[:] = main1[:, None] * v0n
+            rhs_v0[1:, :] += lower1[:, None] * v0n[:-1, :]
+            rhs_v0[:-1, :] += upper1[:, None] * v0n[1:, :]
+
+            rhs_v1[:] = main1[:, None] * v1n
+            rhs_v1[1:, :] += lower1[:, None] * v1n[:-1, :]
+            rhs_v1[:-1, :] += upper1[:, None] * v1n[1:, :]
+
+            # Boundary contributions (Dirichlet terms).
+            if num_x > 2:
+                lhs_l = float(l[1])
+                lhs_u = float(u[-2])
+                rhs_v0[0, :] += dt * (
+                    (1.0 - theta) * lhs_l * v0_next[0, :] + theta * lhs_l * v0_cur[0, :]
+                )
+                rhs_v0[-1, :] += dt * (
+                    (1.0 - theta) * lhs_u * v0_next[-1, :] + theta * lhs_u * v0_cur[-1, :]
+                )
+                rhs_v1[0, :] += dt * (
+                    (1.0 - theta) * lhs_l * v1_next[0, :] + theta * lhs_l * v1_cur[0, :]
+                )
+                rhs_v1[-1, :] += dt * (
+                    (1.0 - theta) * lhs_u * v1_next[-1, :] + theta * lhs_u * v1_cur[-1, :]
+                )
+
+            sol = solve_banded(
+                (1, 1),
+                banded,
+                rhs,
+                overwrite_b=False,
+                check_finite=False,
+            )
+            v0_cur[1:-1, :] = sol[:, :n_cols]
+            v1_cur[1:-1, :] = sol[:, n_cols:]
+
+            # Apply KO jump (if observation time).
+            ko_idx = ko_index_by_tidx.get(j)
+            if ko_idx is not None:
+                rec = ko_records[ko_idx]
+                barrier = float(rec.barrier) if rec.barrier is not None else 0.0
+                if product.is_reverse:
+                    mask_ko = s_vec <= barrier
+                else:
+                    mask_ko = s_vec >= barrier
+
+                # Zero all event surfaces in KO region, then set the KO_i indicator.
+                v0_cur[mask_ko, :] = 0.0
+                v1_cur[mask_ko, :] = 0.0
+                df_delay = self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=1.0,
+                    current_time=float(t_vec[j]),
+                    settlement_time=rec.settlement_time,
+                )
+                v0_cur[mask_ko, ko_idx] = df_delay
+                v1_cur[mask_ko, ko_idx] = df_delay
+
+            # Apply KI jump (continuous or discrete at observation indices).
+            if product.has_ki_barrier:
+                should_apply_ki = self._ki_continuous or j in self._ki_observation_indices
+                if should_apply_ki:
+                    ki_barrier = float(self._ki_barrier)
+                    if product.is_reverse:
+                        mask_ki = s_vec >= ki_barrier
+                    else:
+                        mask_ki = s_vec <= ki_barrier
+                    v0_cur[mask_ki, :] = v1_cur[mask_ki, :]
+
+            # Enforce simple Neumann-like boundary (zero slope) for stability.
+            v0_cur[0, :] = v0_cur[1, :]
+            v0_cur[-1, :] = v0_cur[-2, :]
+            v1_cur[0, :] = v1_cur[1, :]
+            v1_cur[-1, :] = v1_cur[-2, :]
+
+            v0_next = v0_cur
+            v1_next = v1_cur
+
+        # Select initial regime based on knocked-in at valuation.
+        initial_grid = v1_next if knocked_in_at_valuation else v0_next
+        spot_log = float(np.log(spot))
+
+        ed_unit = np.array(
+            [float(np.interp(spot_log, x_vec, initial_grid[:, i])) for i in range(n_ko)],
+            dtype=float,
+        )
+        ko_times = np.array([float(rec.observation_time) for rec in ko_records], dtype=float)
+        ko_probability = np.zeros(n_ko, dtype=float)
+        ed_ko_cf = np.zeros(n_ko, dtype=float)
+
+        for i, rec in enumerate(ko_records):
+            obs_time = float(rec.observation_time)
+            settle = rec.settlement_time if rec.settlement_time is not None else obs_time
+            settle = float(settle)
+            df0 = pricing_env.get_discount_factor(settle)
+            if df0 > 0.0:
+                ko_probability[i] = float(ed_unit[i] / df0)
+            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
+            ed_ko_cf[i] = float(ed_unit[i] * payoff)
+
+        survival_probability = np.ones(n_ko, dtype=float)
+        cumulative = 0.0
+        for i in range(n_ko):
+            cumulative += ko_probability[i]
+            survival_probability[i] = max(0.0, 1.0 - cumulative)
+
+        ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
+        df_T = pricing_env.get_discount_factor(float(tau))
+        ki_probability = float(ed_ki / df_T) if df_T > 0.0 else 0.0
+
+        pv = float(self.price(product, pricing_env))
+        expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
+
+        return AutocallableEventStats(
+            pv=pv,
+            ko_times=ko_times,
+            ko_probability=ko_probability,
+            survival_probability=survival_probability,
+            expected_discounted_ko_cashflow=ed_ko_cf,
+            ki_probability=ki_probability,
+            expected_discounted_maturity_cashflow=expected_discounted_maturity_cf,
+            reconciliation_error=0.0,
+        )
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

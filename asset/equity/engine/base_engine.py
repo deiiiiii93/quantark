@@ -7,6 +7,7 @@ from typing import Dict, Optional
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from priceenv import PricingEnvironment
 from asset.equity.param import EngineParams
+from asset.equity.engine.event_stats import AutocallableEventStats
 from util.enum.engine_enums import EngineType
 
 
@@ -87,6 +88,20 @@ class BaseEngine(ABC):
         greeks["gamma"] = gamma
 
         return greeks
+
+    def calculate_event_stats(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Optional[AutocallableEventStats]:
+        """
+        Optionally provide per-observation event stats and cashflow decomposition.
+
+        Engines MAY override this method to provide per-observation probabilities and
+        expected discounted cashflows for autocallable products. This enables faster
+        reporting (especially for QUAD/PDE engines) compared to Monte Carlo analyzers.
+
+        Default behavior: return None (not supported).
+        """
+        return None
 
     def __repr__(self):
         return f"{self.__class__.__name__}()"

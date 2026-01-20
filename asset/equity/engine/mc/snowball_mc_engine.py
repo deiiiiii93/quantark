@@ -18,6 +18,7 @@ from typing import Dict, Optional, Tuple, Union
 import numpy as np
 
 from asset.equity.engine.base_engine import BaseEngine
+from asset.equity.engine.event_stats import AutocallableEventStats
 from asset.equity.param import MCParams
 from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
@@ -221,6 +222,158 @@ class SnowballMCEngine(BaseEngine):
             raise PricingError(f"Negative price computed: {result.price}")
 
         return result.price
+
+    def calculate_event_stats(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Optional[AutocallableEventStats]:
+        """
+        Provide per-observation event probabilities and expected discounted cashflows.
+
+        This is a Monte Carlo implementation for Snowball. QUAD/PDE engines can
+        optionally implement the same API later to provide faster risk-neutral
+        event stats without Monte Carlo.
+        """
+        if not isinstance(product, SnowballOption):
+            return None
+
+        S = pricing_env.spot
+        T = product.get_maturity(pricing_env)
+        r = pricing_env.get_rate(T)
+        q = pricing_env.get_div_yield(T)
+        sigma = pricing_env.get_vol(product.strike, T)
+        self._validate_inputs(S, T, r, q, sigma, product)
+
+        all_times, dt_array, ko_indices, ki_indices = self._build_time_grid(
+            product, pricing_env, T
+        )
+        generator = self._create_path_generator(S, r, q, sigma, T, dt_array)
+        paths, _ = generator.generate_paths(return_aux=False)
+
+        ko_profile = product.get_ko_observation_profile(pricing_env)
+        ko_times = np.array(ko_profile["observation_times"], dtype=float)
+        ko_barriers = np.array(ko_profile["barriers"], dtype=float)
+        ko_payoffs = np.array(ko_profile["payoffs"], dtype=float)
+        ko_settlement_times = np.array(ko_profile["settlement_times"], dtype=float)
+
+        ko_triggered, first_ko_idx = self._check_ko_barriers(
+            paths, ko_indices, ko_barriers, product.is_reverse
+        )
+
+        ki_triggered = np.zeros(len(paths), dtype=bool)
+        first_ki_idx = np.full(len(paths), -1, dtype=int)
+        if product.has_ki_barrier:
+            ki_continuous = (
+                product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+                or product.barrier_config.ki_continuous
+            )
+            ki_profile = product.get_ki_observation_profile(pricing_env)
+            ki_barriers_val = np.array(ki_profile["barriers"], dtype=float)
+            if ki_continuous:
+                if ki_barriers_val.shape not in ((), (1,)):
+                    raise ValidationError(
+                        "Continuous KI monitoring requires a scalar ki_barrier."
+                    )
+                ki_barrier_scalar = float(ki_barriers_val.reshape(-1)[0])
+                ki_triggered, first_ki_idx = (
+                    self._check_ki_barriers_continuous_with_bridge(
+                        paths=paths,
+                        all_times=all_times,
+                        ki_barrier=ki_barrier_scalar,
+                        sigma=float(sigma),
+                        is_reverse=product.is_reverse,
+                        rng_seed=int(self.params.seed) + 1337,
+                    )
+                )
+            else:
+                ki_triggered, first_ki_idx = self._check_ki_barriers(
+                    paths, ki_indices, ki_barriers_val, product.is_reverse
+                )
+
+        if product.barrier_config.disable_ko_after_ki and product.has_ki_barrier:
+            ko_trigger_times = np.where(
+                first_ko_idx >= 0, ko_times[first_ko_idx], np.inf
+            )
+            if len(ki_indices) > 0:
+                ki_obs_times = all_times[ki_indices]
+                ki_trigger_times = np.where(
+                    first_ki_idx >= 0, ki_obs_times[first_ki_idx], np.inf
+                )
+            else:
+                ki_trigger_times = np.full(len(paths), np.inf, dtype=float)
+            ko_valid = ko_triggered & (ko_trigger_times < ki_trigger_times)
+        else:
+            ko_valid = ko_triggered
+
+        is_ko = ko_valid
+        is_v0 = ~is_ko & ~ki_triggered
+        is_v1 = ~is_ko & ki_triggered
+
+        ko_probability = np.zeros(len(ko_times), dtype=float)
+        expected_discounted_ko_cashflow = np.zeros(len(ko_times), dtype=float)
+        for i in range(len(ko_times)):
+            hit_i = is_ko & (first_ko_idx == i)
+            p_i = float(np.mean(hit_i))
+            ko_probability[i] = p_i
+            if p_i > 0.0:
+                df = pricing_env.get_discount_factor(float(ko_settlement_times[i]))
+                expected_discounted_ko_cashflow[i] = p_i * float(ko_payoffs[i]) * df
+
+        survival_probability = np.ones(len(ko_times), dtype=float)
+        cumulative_ko = 0.0
+        for i in range(len(ko_times)):
+            cumulative_ko += ko_probability[i]
+            survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
+
+        maturity_spots = paths[:, -1]
+        maturity_df = pricing_env.get_discount_factor(float(T))
+        maturity_payoff_all = np.zeros(len(paths), dtype=float)
+        if is_v0.any():
+            maturity_payoff_all[is_v0] = np.array(
+                [
+                    product.get_maturity_payoff_v0(float(s), pricing_env)
+                    for s in maturity_spots[is_v0]
+                ],
+                dtype=float,
+            )
+        if is_v1.any():
+            maturity_payoff_all[is_v1] = np.array(
+                [
+                    product.get_maturity_payoff_v1(float(s), pricing_env)
+                    for s in maturity_spots[is_v1]
+                ],
+                dtype=float,
+            )
+        expected_discounted_maturity_cashflow = float(
+            np.mean(maturity_payoff_all * maturity_df)
+        )
+
+        # Total discounted payoff PV from the same simulation.
+        total_discounted = np.zeros(len(paths), dtype=float)
+        if is_ko.any():
+            payoff = ko_payoffs[first_ko_idx[is_ko]]
+            settle = ko_settlement_times[first_ko_idx[is_ko]]
+            dfs = np.array(
+                [pricing_env.get_discount_factor(float(t)) for t in settle], dtype=float
+            )
+            total_discounted[is_ko] = payoff * dfs
+        total_discounted[~is_ko] = maturity_payoff_all[~is_ko] * maturity_df
+
+        pv = float(np.mean(total_discounted))
+        pv_cashflows = float(
+            np.sum(expected_discounted_ko_cashflow) + expected_discounted_maturity_cashflow
+        )
+        reconciliation_error = pv - pv_cashflows
+
+        return AutocallableEventStats(
+            pv=pv,
+            ko_times=ko_times,
+            ko_probability=ko_probability,
+            survival_probability=survival_probability,
+            expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
+            ki_probability=float(np.mean(ki_triggered)) if product.has_ki_barrier else 0.0,
+            expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
+            reconciliation_error=float(reconciliation_error),
+        )
 
     def _validate_inputs(
         self,

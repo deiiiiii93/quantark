@@ -106,3 +106,11 @@ The system SHALL calculate correct Greeks for American options using PDE grid me
 - **AND** gamma > 0 (convexity)
 - **AND** theta < 0 (time decay)
 
+### Requirement: Numerical Greeks coverage
+The system SHALL provide numerical point Greeks for vanna (∂²V/∂S∂σ), volga (∂²V/∂σ²), and cross spot–dividend sensitivity dDelta/dq using explicit bump conventions.
+
+#### Scenario: Compute point Vanna/Volga/dDelta-dq
+- **GIVEN** a product, pricing environment, and engine
+- **WHEN** numerical Greeks are requested
+- **THEN** the result includes vanna, volga, and dDelta/dq with documented bump sizes
+

@@ -3,6 +3,7 @@ Dividend yield representations.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import numpy as np
 from util.exceptions import ValidationError
 
 
@@ -64,6 +65,41 @@ class ContinuousDividendYield(DividendYield):
 
 
 @dataclass
+class TermStructureDividendYield(DividendYield):
+    """
+    Term-structure dividend yield (by maturity).
+
+    Provides a time-dependent dividend yield via linear interpolation.
+    """
+
+    times: list[float]
+    yields: list[float]
+
+    def __post_init__(self) -> None:
+        if len(self.times) != len(self.yields):
+            raise ValidationError("times and yields must have the same length.")
+        if len(self.times) < 2:
+            raise ValidationError("times must have at least 2 points.")
+        if any(t <= 0 for t in self.times):
+            raise ValidationError("times must be positive.")
+        if any(self.times[i] >= self.times[i + 1] for i in range(len(self.times) - 1)):
+            raise ValidationError("times must be strictly increasing.")
+        if any(y < 0 for y in self.yields):
+            raise ValidationError("dividend yields must be non-negative.")
+
+    def get_yield(self, time_to_maturity: float) -> float:
+        t = float(time_to_maturity)
+        if t <= self.times[0]:
+            return float(self.yields[0])
+        if t >= self.times[-1]:
+            return float(self.yields[-1])
+        return float(np.interp(t, self.times, self.yields))
+
+    def __repr__(self):
+        return "TermStructureDividendYield(points=%d)" % len(self.times)
+
+
+@dataclass
 class NoDividend(DividendYield):
     """
     Zero dividend yield.
@@ -85,4 +121,3 @@ class NoDividend(DividendYield):
     
     def __repr__(self):
         return "NoDividend()"
-

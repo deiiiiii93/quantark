@@ -3,9 +3,14 @@ Market data parameters for derivative pricing.
 """
 
 from .quote import SpotQuote
-from .vol import VolatilitySurface, FlatVolSurface
+from .vol import VolatilitySurface, FlatVolSurface, TermStructureVolSurface
 from .rrf import RateCurve, FlatRateCurve
-from .div import DividendYield, ContinuousDividendYield, NoDividend
+from .div import (
+    DividendYield,
+    ContinuousDividendYield,
+    NoDividend,
+    TermStructureDividendYield,
+)
 from .index import (
     RateIndex,
     IndexFixing,
@@ -30,11 +35,13 @@ __all__ = [
     "SpotQuote",
     "VolatilitySurface",
     "FlatVolSurface",
+    "TermStructureVolSurface",
     "RateCurve",
     "FlatRateCurve",
     "DividendYield",
     "ContinuousDividendYield",
     "NoDividend",
+    "TermStructureDividendYield",
     # Rate indices
     "RateIndex",
     "IndexFixing",

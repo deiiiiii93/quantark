@@ -8,7 +8,14 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from priceenv import PricingEnvironment
-from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield, FlatVolSurface
+from param import (
+    SpotQuote,
+    VolatilitySurface,
+    RateCurve,
+    DividendYield,
+    FlatVolSurface,
+    TermStructureVolSurface,
+)
 from param.rrf.rate_curve import FlatRateCurve, InterpolatedRateCurve, LinearRateCurve
 from portfolio import Portfolio, Position
 from stresstest.stress.stress_types import StressType, StressLevel
@@ -194,12 +201,27 @@ class StressApplicator:
                 )
 
             env.vol_surface = FlatVolSurface(volatility=new_vol)
-        else:
-            # For complex vol surfaces, would need more sophisticated handling
-            raise ValidationError(
-                f"Stressing non-flat volatility surfaces not yet supported. "
-                f"Surface type: {type(env.vol_surface).__name__}"
+            return
+
+        if isinstance(env.vol_surface, TermStructureVolSurface):
+            new_vols = [
+                stress.stress_type.apply(float(v), stress.stress_value)
+                for v in env.vol_surface.vols
+            ]
+            if any(v <= 0 for v in new_vols):
+                raise ValidationError(
+                    "Stressed term-structure vol must be positive for all tenors."
+                )
+            env.vol_surface = TermStructureVolSurface(
+                times=list(env.vol_surface.times), vols=new_vols
             )
+            return
+
+        # For complex vol surfaces, would need more sophisticated handling
+        raise ValidationError(
+            f"Stressing non-flat volatility surfaces not yet supported. "
+            f"Surface type: {type(env.vol_surface).__name__}"
+        )
 
     @staticmethod
     def _stress_rate(env: PricingEnvironment, stress: "Stress") -> None:
@@ -266,7 +288,10 @@ class StressApplicator:
     def _stress_dividend(env: PricingEnvironment, stress: "Stress") -> None:
         """Stress dividend yield."""
         # If no dividend yield, create one with zero base
-        from param.div.dividend_yield import ContinuousDividendYield
+        from param.div.dividend_yield import (
+            ContinuousDividendYield,
+            TermStructureDividendYield,
+        )
 
         if env.div_yield is None:
             current_yield = 0.0
@@ -274,6 +299,19 @@ class StressApplicator:
             # Assume flat dividend yield
             if isinstance(env.div_yield, ContinuousDividendYield):
                 current_yield = env.div_yield.div_yield
+            elif isinstance(env.div_yield, TermStructureDividendYield):
+                new_yields = [
+                    stress.stress_type.apply(float(y), stress.stress_value)
+                    for y in env.div_yield.yields
+                ]
+                if any(y < 0 for y in new_yields):
+                    raise ValidationError(
+                        "Stressed term-structure dividend yield cannot be negative."
+                    )
+                env.div_yield = TermStructureDividendYield(
+                    times=list(env.div_yield.times), yields=new_yields
+                )
+                return
             else:
                 # For complex dividend structures, get 1-year rate
                 current_yield = env.div_yield.get_yield(1.0)

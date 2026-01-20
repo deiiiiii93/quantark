@@ -10,10 +10,11 @@ This guide is specifically for AI agents working with the QuantArk VaR module. I
 
 ```
 var/
-├── engines/               # Three VaR engine implementations
-│   ├── parametric.py     # ⚡ Fastest (variance-covariance)
-│   ├── historical.py     # ⚡⚡ Accurate (full revaluation)
-│   └── monte_carlo.py    # ⚡⚡⚡ Flexible (simulated scenarios)
+├── base.py               # VaR engine protocol
+├── engines/              # VaR engine implementations
+│   ├── parametric.py     # Fastest (variance-covariance)
+│   ├── historical.py     # Accurate (full revaluation)
+│   └── monte_carlo.py    # Flexible (simulated scenarios)
 ├── config.py             # VaRConfig and related classes
 ├── attribution.py        # Component, Marginal, Incremental VaR
 ├── results/              # Result classes and reporting
@@ -25,6 +26,7 @@ var/
 │   ├── equity_factors.py
 │   └── fi_factors.py
 ├── backtest/             # VaR backtesting framework
+├── doc/                  # Implementation notes and examples
 └── README.md             # User-facing documentation
 ```
 
@@ -34,7 +36,7 @@ var/
 # Main classes
 from var import VaRConfig, VaRMethod
 from var.engines import HistoricalVaREngine, ParametricVaREngine, MonteCarloVaREngine
-from var.results import VaRResult, IncrementalVaRResult
+from var.results import VaRResult, IncrementalVaRResult, VaRReportGenerator
 
 # Attribution
 from var.attribution import ComponentVaRCalculator, MarginalVaRCalculator

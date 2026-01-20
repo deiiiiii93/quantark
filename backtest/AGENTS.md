@@ -21,6 +21,10 @@ backtest/
 │   ├── delta_neutral_strategy.py   # Equity: Delta hedging
 │   ├── dv01_neutral_strategy.py    # FI: DV01 hedging
 │   └── convexity_neutral_strategy.py
+├── examples/                   # Backtest examples
+│   ├── basic_delta_hedge.py
+│   ├── advanced_backtest.py
+│   └── fi_dv01_hedge.py
 ├── equity/                     # Equity implementation
 │   ├── engine.py              # BacktestEngine
 │   ├── config.py              # BacktestConfig
@@ -28,13 +32,14 @@ backtest/
 │   ├── hedge_executor.py      # Spot/futures hedging
 │   ├── results.py             # BacktestResults
 │   └── metrics.py             # Performance metrics
-└── fi/                         # Fixed Income implementation
-    ├── engine.py              # FIBacktestEngine
-    ├── config.py              # FIBacktestConfig
-    ├── state.py               # FI state tracking
-    ├── hedge_executor.py      # Bond futures hedging
-    ├── results.py             # FIBacktestResults
-    └── metrics.py             # FI metrics
+├── fi/                         # Fixed Income implementation
+│   ├── engine.py              # FIBacktestEngine
+│   ├── config.py              # FIBacktestConfig
+│   ├── state.py               # FI state tracking
+│   ├── hedge_executor.py      # Bond futures hedging
+│   ├── results.py             # FIBacktestResults
+│   └── metrics.py             # FI metrics
+└── README.md                   # User-facing documentation
 ```
 
 ### Common Imports
@@ -58,8 +63,13 @@ from backtest.transaction_costs import (
     ZeroCostModel,
     FixedCostModel,
     ProportionalCostModel,
+    SlippageModel,
+    BidAskSpreadModel,
     CompleteCostModel
 )
+
+# Logging
+from backtest import BacktestLogger
 
 # Visualization and reporting
 from backtest import StaticVisualizer, InteractiveDashboard, ReportGenerator

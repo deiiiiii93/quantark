@@ -13,6 +13,8 @@ stresstest/
 ├── base.py                    # Protocol interfaces (shared)
 ├── config.py                  # Configuration (shared)
 ├── engine.py                  # Main engine (backward compatibility)
+├── README.md                  # User-facing documentation
+├── IMPLEMENTATION_SUMMARY.md  # Implementation notes
 ├── scenario/                  # Scenario management
 │   ├── scenario.py            # Core Scenario/Stress classes
 │   ├── scenario_builder.py    # Fluent builder API
