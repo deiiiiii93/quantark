@@ -317,5 +317,6 @@ All components use professional exception handling with a clear hierarchy:
 - engine-validator: Validate pricing engine scripts and generate validation reports
 - gh-address-comments: Address review or issue comments on the open GitHub PR using gh CLI
 - product-creator: Create new financial product classes in the asset/ directory following QuantArk patterns
+- risk-metric-analyzer: Analyze and report comprehensive risk metrics for financial products
 - skill-creator: Create or update Codex skills
 - skill-installer: Install Codex skills into $CODEX_HOME/skills
