@@ -9,7 +9,7 @@ observation where the coupon barrier condition is met.
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from asset.equity.product.option.base_equity_option import BaseEquityOption
 from util.calendar import calculate_year_fraction
@@ -25,7 +25,12 @@ from util.enum import (
 )
 from util.exceptions import ValidationError
 
-from .observation_schedule import ObservationSchedule, ObservationRecord, ObservationAggregation
+from .observation_schedule import (
+    ObservationAggregation,
+    ObservationRecord,
+    ObservationSchedule,
+    ResolvedObservationRecord,
+)
 from .phoenix_config import CouponBarrierConfig
 from .snowball_config import AccrualConfig, AirbagConfig, BarrierConfig, PayoffConfig
 
@@ -466,6 +471,177 @@ class PhoenixOption(BaseEquityOption):
                 raise ValidationError(
                     f"{name} observation dates must be strictly increasing"
                 )
+
+    def resolve_ko_observations(self, pricing_env) -> List[ResolvedObservationRecord]:
+        """
+        Resolve KO observation schedule to concrete times, barriers, and settlement times.
+
+        KO payoffs exclude Phoenix coupon payments, which are handled by pricing engines.
+        """
+        if self.barrier_config.ko_observation_type != ObservationType.DISCRETE:
+            raise ValidationError(
+                "resolve_ko_observations currently supports discrete KO monitoring."
+            )
+
+        schedule = self.barrier_config.ko_observation_schedule
+        if schedule is None:
+            raise ValidationError(
+                "KO observation schedule is required to resolve KO observations."
+            )
+
+        default_barrier = (
+            None
+            if isinstance(self.barrier_config.ko_barrier, list)
+            else self.barrier_config.ko_barrier
+        )
+        resolved_schedule = schedule.resolve(
+            pricing_env=pricing_env,
+            default_barrier=default_barrier,
+            default_payoff=0.0,
+            require_single=True,
+        )
+
+        annualized_ko = self._effective_annualized_flag(
+            self.accrual_config.is_annualized_ko
+        )
+        principal_component = (
+            self.initial_price * self.contract_multiplier
+            if self.payoff_config.include_principal
+            else 0.0
+        )
+        maturity_time: Optional[float] = None
+        bus_days_in_year = pricing_env.bus_days_in_year if pricing_env else 252
+
+        ko_records: List[ResolvedObservationRecord] = []
+        for idx, rec in enumerate(resolved_schedule):
+            rate = schedule.records[idx].return_rate
+            if rate is None:
+                rate = self.get_ko_rate_at(idx)
+
+            if annualized_ko:
+                schedule_record = schedule.records[idx]
+                accrual_start_date = self.initial_date
+                if schedule_record.observation_date is not None:
+                    if accrual_start_date is None:
+                        if pricing_env is None:
+                            raise ValidationError(
+                                "PricingEnvironment required to resolve KO accrual from observation_date."
+                            )
+                        accrual_start_date = pricing_env.valuation_date
+                    accrual_factor = calculate_year_fraction(
+                        accrual_start_date,
+                        schedule_record.observation_date,
+                        self.annualization_day_count,
+                        bus_days_in_year,
+                    )
+                else:
+                    if accrual_start_date is None:
+                        accrual_factor = rec.observation_time
+                    else:
+                        if pricing_env is None:
+                            raise ValidationError(
+                                "PricingEnvironment required to resolve KO accrual without observation_date."
+                            )
+                        if pricing_env.valuation_date < accrual_start_date:
+                            raise ValidationError(
+                                "valuation_date must be on or after initial_date to resolve KO accrual."
+                            )
+                        if pricing_env.valuation_date == accrual_start_date:
+                            initial_to_valuation = 0.0
+                        else:
+                            initial_to_valuation = calculate_year_fraction(
+                                accrual_start_date,
+                                pricing_env.valuation_date,
+                                self.annualization_day_count,
+                                pricing_env.bus_days_in_year,
+                            )
+                        accrual_factor = initial_to_valuation + rec.observation_time
+            else:
+                accrual_factor = 1.0
+
+            ko_coupon = (
+                self.initial_price * self.contract_multiplier * rate * accrual_factor
+            )
+            payoff = principal_component + ko_coupon
+
+            settlement_time = rec.settlement_time
+            if self.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
+                maturity_time = (
+                    maturity_time
+                    if maturity_time is not None
+                    else self.get_maturity(pricing_env)
+                )
+                settlement_time = maturity_time
+
+            ko_records.append(
+                ResolvedObservationRecord(
+                    observation_time=rec.observation_time,
+                    barrier=rec.barrier,
+                    payoff=payoff,
+                    settlement_time=settlement_time,
+                )
+            )
+        return ko_records
+
+    def resolve_ki_observations(self, pricing_env) -> List[ResolvedObservationRecord]:
+        """
+        Resolve KI observation schedule to times and barrier levels.
+        """
+        if self.barrier_config.ki_barrier is None:
+            raise ValidationError("KI barrier configuration is missing.")
+        if (
+            self.barrier_config.ki_observation_type != ObservationType.DISCRETE
+            or self.barrier_config.ki_continuous
+        ):
+            raise ValidationError(
+                "resolve_ki_observations currently supports discrete KI monitoring."
+            )
+
+        schedule = self.barrier_config.ki_observation_schedule
+        if schedule is None:
+            raise ValidationError(
+                "KI observation schedule is required to resolve KI observations."
+            )
+
+        default_barrier = (
+            None
+            if isinstance(self.barrier_config.ki_barrier, list)
+            else self.barrier_config.ki_barrier
+        )
+        resolved_schedule = schedule.resolve(
+            pricing_env=pricing_env,
+            default_barrier=default_barrier,
+            default_payoff=0.0,
+            require_single=True,
+        )
+
+        return [
+            ResolvedObservationRecord(
+                observation_time=rec.observation_time,
+                barrier=rec.barrier,
+                payoff=0.0,
+                settlement_time=rec.settlement_time,
+            )
+            for rec in resolved_schedule
+        ]
+
+    def get_ko_observation_profile(self, pricing_env) -> Dict[str, List[Optional[float]]]:
+        """Return KO observation attributes for engine consumption."""
+        records = self.resolve_ko_observations(pricing_env)
+        return {
+            "observation_times": [rec.observation_time for rec in records],
+            "barriers": [rec.barrier for rec in records],
+            "payoffs": [rec.payoff for rec in records],
+            "settlement_times": [rec.settlement_time for rec in records],
+        }
+
+    def get_ki_observation_profile(self, pricing_env) -> Dict[str, List[Optional[float]]]:
+        """Return KI observation attributes for engine consumption."""
+        records = self.resolve_ki_observations(pricing_env)
+        return {
+            "observation_times": [rec.observation_time for rec in records],
+            "barriers": [rec.barrier for rec in records],
+        }
 
     # ==================== Coupon Barrier Methods ====================
 

@@ -49,6 +49,8 @@ class BrownianBridge:
         times = np.asarray(times, dtype=float)
         if times.ndim != 1:
             raise ValueError("times must be a one-dimensional array")
+        if not np.all(np.isfinite(times)):
+            raise ValueError("times must be finite")
         if np.any(times <= 0.0):
             raise ValueError("times must be strictly positive")
         if np.any(np.diff(times) <= 0.0):
@@ -83,7 +85,8 @@ class BrownianBridge:
             t_r = times[r_idx]
             t_m = times[m_idx]
 
-            variances[cnt] = (t_m - t_l) * (t_r - t_m) / (t_r - t_l)
+            variance = (t_m - t_l) * (t_r - t_m) / (t_r - t_l)
+            variances[cnt] = max(variance, 0.0)
 
             cnt = build(l_idx, m_idx, cnt + 1)
             cnt = build(m_idx, r_idx, cnt)
@@ -150,7 +153,10 @@ class BrownianBridge:
             W_r = W[:, r]
 
             # Conditional mean and variance for the bridge
-            mean = ((t_r - t_m) * W_l + (t_m - t_l) * W_r) / (t_r - t_l)
+            denom = t_r - t_l
+            if denom <= 0.0:
+                raise ValueError("Invalid Brownian bridge interval length.")
+            mean = ((t_r - t_m) * W_l + (t_m - t_l) * W_r) / denom
             std = np.sqrt(self.variances[j])
 
             W[:, k] = mean + std * z[:, j]

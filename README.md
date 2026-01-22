@@ -145,6 +145,36 @@ print(f"Historical VaR (99%): ${historical_result.var:.2f}")
 print(f"CVaR: ${historical_result.cvar:.2f}")
 ```
 
+## Batch-Friendly Engine Params
+
+For QUAD/PDE batch pricing, you can use named presets, factory helpers, or YAML/JSON
+configs instead of tuning many individual parameters.
+
+```python
+from asset.equity.param import make_quad_params, make_pde_params
+
+quad_params = make_quad_params(profile="barrier_sensitive")
+pde_params = make_pde_params(profile="balanced")
+```
+
+See `docs/engine_param_guide.md` for the preset decision table, config schema, and examples.
+
+## RQMC Target Std Scaling (MC Benchmarking)
+
+Randomized QMC uses a target standard error for adaptive batching. For large
+notionals, prefer relative scaling to avoid overly strict absolute tolerances:
+
+```python
+from asset.equity.param import MCParams
+
+mc_params = MCParams(
+    num_paths=100000,
+    rqmc_target_std=1e-4,  # 1 bp relative
+    rqmc_target_std_mode="relative_notional",
+    rqmc_paths_mode="total",
+)
+```
+
 ## Running the Demo
 
 A comprehensive demonstration is provided:
@@ -288,4 +318,3 @@ QuantArk Development Team
 - Black-Scholes-Merton model from Fischer Black, Myron Scholes, and Robert Merton
 - Greeks formulas from standard derivatives textbooks
 - Design patterns inspired by QuantLib and similar professional libraries
-

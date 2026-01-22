@@ -1,0 +1,8 @@
+{
+  "engine": "pde",
+  "profile": "balanced",
+  "overrides": {
+    "grid_size": 300,
+    "time_steps": 150
+  }
+}

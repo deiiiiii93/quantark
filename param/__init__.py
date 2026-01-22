@@ -11,6 +11,13 @@ from .div import (
     NoDividend,
     TermStructureDividendYield,
 )
+from .basis import (
+    BasisYield,
+    FlatBasisYield,
+    TermStructureBasisYield,
+    ZeroBasis,
+    BasisRelationshipMode,
+)
 from .index import (
     RateIndex,
     IndexFixing,
@@ -42,6 +49,12 @@ __all__ = [
     "ContinuousDividendYield",
     "NoDividend",
     "TermStructureDividendYield",
+    # Basis yield
+    "BasisYield",
+    "FlatBasisYield",
+    "TermStructureBasisYield",
+    "ZeroBasis",
+    "BasisRelationshipMode",
     # Rate indices
     "RateIndex",
     "IndexFixing",

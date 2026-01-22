@@ -190,7 +190,13 @@ class EuropeanMCEngine(BaseEngine):
             raise ValidationError(f"Dividend yield must be non-negative, got {q}")
 
     def _create_path_generator(
-        self, S: float, r: float, q: float, sigma: float, T: float
+        self,
+        S: float,
+        r: float,
+        q: float,
+        sigma: float,
+        T: float,
+        num_paths: Optional[int] = None,
     ) -> GBMPathGenerator:
         """
         Create a GBMPathGenerator configured for the current method.
@@ -206,6 +212,11 @@ class EuropeanMCEngine(BaseEngine):
             Configured GBMPathGenerator
         """
         params = self.params
+        effective_num_paths = params.num_paths if num_paths is None else int(num_paths)
+        if effective_num_paths <= 0:
+            raise ValidationError(
+                f"num_paths must be positive, got {effective_num_paths}"
+            )
 
         if self.method == MonteCarloMethod.PSEUDO:
             random_stream = PseudoRandomNormalGenerator(seed=params.seed)
@@ -227,7 +238,7 @@ class EuropeanMCEngine(BaseEngine):
             div=q,
             maturity=T,
             time_steps=params.time_steps,
-            num_paths=params.num_paths,
+            num_paths=effective_num_paths,
             model="bsm",
             random_stream=random_stream,
             use_brownian_bridge=False,
@@ -327,8 +338,6 @@ class EuropeanMCEngine(BaseEngine):
         Returns:
             Tuple of (price, standard_error)
         """
-        generator = self._create_path_generator(S, r, q, sigma, T)
-
         discount_factor = math.exp(-r * T)
 
         def pricer_fn(paths, aux):
@@ -339,9 +348,26 @@ class EuropeanMCEngine(BaseEngine):
             return discounted_payoffs
 
         params = self.params
-        max_batches = getattr(params, 'max_batches', 32)
-        target_std = getattr(params, 'target_std', 1e-4)
-        min_batches = getattr(params, 'min_batches', 4)
+        max_batches = getattr(
+            params, "rqmc_max_batches", getattr(params, "max_batches", 32)
+        )
+        min_batches = getattr(
+            params, "rqmc_min_batches", getattr(params, "min_batches", 4)
+        )
+        if hasattr(params, "resolve_rqmc_target_std"):
+            target_std = params.resolve_rqmc_target_std(product=product)
+        else:
+            target_std = getattr(params, "target_std", 1e-4)
+        if hasattr(params, "resolve_rqmc_paths_per_batch"):
+            per_batch_paths = params.resolve_rqmc_paths_per_batch(
+                max_batches=max_batches
+            )
+        else:
+            per_batch_paths = params.num_paths
+
+        generator = self._create_path_generator(
+            S, r, q, sigma, T, num_paths=per_batch_paths
+        )
 
         result = run_rqmc(
             pricer_fn=pricer_fn,

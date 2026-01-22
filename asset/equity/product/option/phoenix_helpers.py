@@ -6,11 +6,11 @@ by providing sensible defaults for common market structures. Each helper accepts
 minimal required parameters and allows full customization via **kwargs.
 
 Available helpers:
-- create_standard_phoenix(): Basic phoenix with flat barriers, memory coupon
+- create_standard_phoenix(): Basic phoenix with flat barriers, non-memory by default
 - create_stepdown_phoenix(): KO and coupon barriers decrease each observation period
 - create_reverse_phoenix(): Reverse direction (down KO, up KI)
 - create_memory_phoenix(): Explicit memory coupon enabled
-- create_non_memory_phoenix(): Memory coupon disabled
+- create_non_memory_phoenix(): Memory coupon disabled (explicit)
 
 Utilities (reused from snowball_helpers):
 - generate_ko_observation_dates(): Create evenly spaced observation dates
@@ -138,20 +138,20 @@ def create_standard_phoenix(
     coupon_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
     num_observations: int = 12,
-    memory_coupon: bool = True,
+    memory_coupon: bool = False,
     day_count_convention: DayCountConvention = DayCountConvention.ACT_365,
     coupon_pay_type: CouponPayType = CouponPayType.INSTANT,
     is_reverse: bool = False,
     **kwargs,
 ) -> PhoenixOption:
     """
-    Create a standard phoenix with flat barriers and memory coupon.
+    Create a standard phoenix with flat barriers and optional memory coupon.
 
     This is the most common phoenix structure with:
     - Discrete KO observations (monthly by default)
     - Continuous KI monitoring
     - Flat (constant) KO and coupon barriers
-    - Memory coupon enabled by default
+    - Memory coupon disabled by default
     - Day count convention for coupon calculation
 
     Args:
@@ -165,7 +165,7 @@ def create_standard_phoenix(
         coupon_barrier: Coupon barrier (default: 85% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
         num_observations: Number of observations (default: 12 for monthly)
-        memory_coupon: If True, accumulate missed coupons (default: True)
+        memory_coupon: If True, accumulate missed coupons (default: False)
         day_count_convention: Day count for coupon calculation (default: ACT/365)
         coupon_pay_type: INSTANT or EXPIRY (default: INSTANT)
         is_reverse: If True, create reverse phoenix (default: False)
@@ -283,7 +283,7 @@ def create_stepdown_phoenix(
     ki_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
     num_observations: int = 12,
-    memory_coupon: bool = True,
+    memory_coupon: bool = False,
     day_count_convention: DayCountConvention = DayCountConvention.ACT_365,
     coupon_pay_type: CouponPayType = CouponPayType.INSTANT,
     is_reverse: bool = False,
@@ -308,7 +308,7 @@ def create_stepdown_phoenix(
         ki_barrier: Knock-in barrier (default: 75% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
         num_observations: Number of observations (default: 12)
-        memory_coupon: If True, accumulate missed coupons (default: True)
+        memory_coupon: If True, accumulate missed coupons (default: False)
         day_count_convention: Day count for coupon calculation (default: ACT/365)
         coupon_pay_type: INSTANT or EXPIRY (default: INSTANT)
         is_reverse: If True, create reverse phoenix (default: False)
@@ -440,7 +440,7 @@ def create_reverse_phoenix(
     coupon_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
     num_observations: int = 12,
-    memory_coupon: bool = True,
+    memory_coupon: bool = False,
     day_count_convention: DayCountConvention = DayCountConvention.ACT_365,
     coupon_pay_type: CouponPayType = CouponPayType.INSTANT,
     **kwargs,
@@ -465,7 +465,7 @@ def create_reverse_phoenix(
         coupon_barrier: Coupon barrier (default: 115% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
         num_observations: Number of observations (default: 12)
-        memory_coupon: If True, accumulate missed coupons (default: True)
+        memory_coupon: If True, accumulate missed coupons (default: False)
         day_count_convention: Day count for coupon calculation (default: ACT/365)
         coupon_pay_type: INSTANT or EXPIRY (default: INSTANT)
         **kwargs: Additional parameters passed to config objects

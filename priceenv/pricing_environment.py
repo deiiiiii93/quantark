@@ -5,7 +5,7 @@ Pricing environment that bundles all market data.
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
-from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield
+from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield, BasisYield
 from util.exceptions import MarketDataError
 from util.calendar import DayCountConvention
 from util.numerical import safe_sqrt
@@ -28,6 +28,7 @@ class PricingEnvironment:
         spot_quote: Current spot price of the underlying (optional, required for equity)
         vol_surface: Volatility surface (optional, required for equity derivatives)
         div_yield: Dividend yield (optional, defaults to zero)
+        basis_yield: Annualized basis yield for futures (optional, defaults to None)
         day_count_convention: Convention for calculating year fractions (default: CALENDAR_DAYS)
         bus_days_in_year: Number of business days per year for business day convention (default: 252)
     """
@@ -37,6 +38,7 @@ class PricingEnvironment:
     spot_quote: Optional[SpotQuote] = None
     vol_surface: Optional[VolatilitySurface] = None
     div_yield: Optional[DividendYield] = None
+    basis_yield: Optional[BasisYield] = None
     day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS
     bus_days_in_year: int = 252
 
@@ -161,6 +163,20 @@ class PricingEnvironment:
         if self.div_yield is None:
             return 0.0
         return self.div_yield.get_yield(time_to_maturity)
+
+    def get_basis_yield(self, time_to_maturity: float) -> float:
+        """
+        Get basis yield for given maturity.
+
+        Args:
+            time_to_maturity: Time to maturity in years
+
+        Returns:
+            Basis yield (0 if not specified)
+        """
+        if self.basis_yield is None:
+            return 0.0
+        return self.basis_yield.get_basis_yield(time_to_maturity)
 
     def __repr__(self):
         parts = [f"valuation_date={self.valuation_date.date()}"]

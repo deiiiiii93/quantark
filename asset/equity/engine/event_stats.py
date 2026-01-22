@@ -8,7 +8,7 @@ autocallable products (Snowball-first).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -38,3 +38,18 @@ class AutocallableEventStats:
     expected_discounted_maturity_cashflow: float
     reconciliation_error: float = 0.0
 
+
+@dataclass(frozen=True)
+class PhoenixEventStats(AutocallableEventStats):
+    """
+    Event stats for Phoenix options including coupon diagnostics.
+
+    Attributes:
+        coupon_probability: Coupon trigger probability at each observation time.
+        expected_discounted_coupon_cashflow: Expected discounted coupon cashflow per observation.
+    """
+
+    coupon_probability: np.ndarray = field(default_factory=lambda: np.array([]))
+    expected_discounted_coupon_cashflow: np.ndarray = field(
+        default_factory=lambda: np.array([])
+    )

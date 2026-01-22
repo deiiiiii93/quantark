@@ -169,6 +169,9 @@ class SobolNormalGenerator:
 
         # Use random_base2 to get exactly 2**m points
         u = engine.random_base2(m)  # shape: (n_total, dim)
+        # Guard against 0/1 values that map to +/-inf under ndtri
+        eps = 1e-12
+        u = np.clip(u, eps, 1.0 - eps)
 
         # Transform uniforms to standard normals using ndtri
         if special is None:

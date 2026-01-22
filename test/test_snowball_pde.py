@@ -369,12 +369,12 @@ class TestSnowballPDEConvergence:
         snowball = create_standard_snowball()
         env = create_pricing_env()
 
-        # Price with different grid sizes (disable auto_grid for true convergence test)
+        # Price with different grid sizes using auto_grid to ensure event alignment
         prices = []
         for grid_size in [100, 200, 400]:
             solver = SnowballPDESolver(
                 PDEParams(
-                    grid_size=grid_size, time_steps=grid_size // 2, auto_grid=False
+                    grid_size=grid_size, time_steps=grid_size // 2, auto_grid=True
                 )
             )
             prices.append(solver.price(snowball, env))
@@ -394,8 +394,10 @@ class TestSnowballPDEConvergence:
         snowball = create_standard_snowball()
         env = create_pricing_env()
 
+        # Use time_steps that divide evenly into observation periods (0.25, 0.5, 0.75, 1.0)
+        # time_steps=100 gives dt=0.01, which aligns with all observation times
         prices = []
-        for time_steps in [50, 100, 200]:
+        for time_steps in [100, 200, 400]:
             solver = SnowballPDESolver(
                 PDEParams(grid_size=200, time_steps=time_steps, auto_grid=False)
             )

@@ -641,12 +641,29 @@ class BarrierOptionMCEngine(BaseEngine):
                     product, paths, times, r, T, sigma
                 )
 
-        generator = self._create_path_generator(S, r, q, sigma, T, dt_array)
-
         params = self.params
-        max_batches = getattr(params, "max_batches", 32)
-        target_std = getattr(params, "target_std", 1e-4)
-        min_batches = getattr(params, "min_batches", 4)
+        max_batches = getattr(
+            params, "rqmc_max_batches", getattr(params, "max_batches", 32)
+        )
+        min_batches = getattr(
+            params, "rqmc_min_batches", getattr(params, "min_batches", 4)
+        )
+        if hasattr(params, "resolve_rqmc_target_std"):
+            target_std = params.resolve_rqmc_target_std(
+                product=product, pricing_env=pricing_env
+            )
+        else:
+            target_std = getattr(params, "target_std", 1e-4)
+        if hasattr(params, "resolve_rqmc_paths_per_batch"):
+            per_batch_paths = params.resolve_rqmc_paths_per_batch(
+                max_batches=max_batches
+            )
+        else:
+            per_batch_paths = params.num_paths
+
+        generator = self._create_path_generator(
+            S, r, q, sigma, T, dt_array, num_paths=per_batch_paths
+        )
 
         result = run_rqmc(
             pricer_fn=pricer_fn,

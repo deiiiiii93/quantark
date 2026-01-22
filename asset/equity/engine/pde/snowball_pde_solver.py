@@ -28,9 +28,9 @@ from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
 from asset.equity.product.option.snowball_option import SnowballOption
 from priceenv import PricingEnvironment
-from util.enum import ObservationType
+from util.enum import ObservationType, ProtectionType
 from util.exceptions import PricingError, ValidationError
-from util.numerical import is_close, is_zero, safe_divide
+from util.numerical import Tolerance, is_close, is_zero, safe_divide
 
 
 class SnowballPDESolver(BasePDESolver):
@@ -830,7 +830,7 @@ class SnowballPDESolver(BasePDESolver):
                 self._ko_terminal_record = rec
                 self._has_terminal_ko = True
             elif 0.0 < obs_time < tau:
-                idx = int(np.argmin(np.abs(t_vec - obs_time)))
+                idx = self._aligned_time_index(t_vec, obs_time, "KO observation")
                 self._ko_observation_indices[idx] = rec
 
         # Setup KI observation indices (if discrete)
@@ -841,10 +841,23 @@ class SnowballPDESolver(BasePDESolver):
                 if is_close(obs_time, 0.0):
                     self._ki_observation_indices.add(0)
                 elif 0.0 < obs_time <= tau:
-                    idx = int(np.argmin(np.abs(t_vec - obs_time)))
+                    idx = self._aligned_time_index(t_vec, obs_time, "KI observation")
                     self._ki_observation_indices.add(idx)
 
         return result
+
+    def _aligned_time_index(
+        self, t_vec: np.ndarray, obs_time: float, label: str
+    ) -> int:
+        for idx, t_val in enumerate(t_vec):
+            if is_close(float(t_val), float(obs_time), abs_tol=Tolerance.PRECISION):
+                return int(idx)
+        nearest = int(np.argmin(np.abs(t_vec - obs_time)))
+        nearest_time = float(t_vec[nearest])
+        raise ValidationError(
+            f"{label} time {obs_time} does not align with PDE time grid "
+            f"(nearest {nearest_time}). Use event-aligned time grid or increase time steps."
+        )
 
     def get_critical_points(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -1060,13 +1073,15 @@ class SnowballPDESolver(BasePDESolver):
 
         # Rannacher smoothing indices
         smooth_js = set()
+        event_theta = params.event_theta
+        event_steps = params.event_rannacher_steps
         if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
             event_times = self._get_event_times(product, tau)
-            if event_times:
+            if event_times and event_steps > 0:
                 for et in event_times:
                     idx = int(np.argmin(np.abs(t_vec - et)))
                     if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                        for k in range(params.rannacher_steps):
+                        for k in range(event_steps):
                             smooth_idx = idx - 1 - k
                             if smooth_idx >= 0:
                                 smooth_js.add(smooth_idx)
@@ -1086,12 +1101,11 @@ class SnowballPDESolver(BasePDESolver):
             tau_remaining = tau - current_time
 
             # Determine theta (Rannacher smoothing uses backward Euler)
-            theta = (
-                1.0
-                if params.use_rannacher
-                and (steps_from_end < params.rannacher_steps or j in smooth_js)
-                else params.theta
-            )
+            theta = params.theta
+            if params.use_rannacher and steps_from_end < params.rannacher_steps:
+                theta = 1.0
+            elif j in smooth_js:
+                theta = event_theta
 
             # Set boundary conditions for both surfaces
             if profile:
@@ -1268,8 +1282,39 @@ class SnowballPDESolver(BasePDESolver):
             )
             grid[-1, t_idx] = ko_payoff
         else:
-            # Deep OTM: principal + rebate (discounted)
-            grid[-1, t_idx] = (principal + rebate) * df_to_maturity
+            if (
+                self.params.boundary_mode == "asymptotic"
+                and product.payoff_config.call_rebate_enabled
+                and product.payoff_config.call_strike is not None
+            ):
+                tau_to_maturity = tau
+                r = pricing_env.get_rate(tau_to_maturity) if tau_to_maturity > 0 else 0.0
+                q = (
+                    pricing_env.get_div_yield(tau_to_maturity)
+                    if tau_to_maturity > 0
+                    else 0.0
+                )
+                df = np.exp(-r * tau_to_maturity) if tau_to_maturity > 0 else 1.0
+                df_div = np.exp(-q * tau_to_maturity) if tau_to_maturity > 0 else 1.0
+
+                participation = (
+                    product.payoff_config.call_participation_rate
+                    * product.contract_multiplier
+                )
+                tenor_factor = (
+                    product.get_contract_tenor(pricing_env)
+                    if product.accrual_config.is_annualized_rebate
+                    else 1.0
+                )
+                participation *= tenor_factor
+                strike = product.payoff_config.call_strike
+                grid[-1, t_idx] = (
+                    principal * df
+                    + participation * (s_vec[-1] * df_div - strike * df)
+                )
+            else:
+                # Deep OTM: principal + rebate (discounted)
+                grid[-1, t_idx] = (principal + rebate) * df_to_maturity
 
     def _set_boundary_conditions_v1(
         self,
@@ -1301,24 +1346,85 @@ class SnowballPDESolver(BasePDESolver):
             # Reverse: embedded call, S=0 means no loss
             grid[0, t_idx] = principal * df_to_maturity
         else:
-            # Standard: embedded put, S=0 means maximum loss
-            # Loss = participation × (-K/S0) × N
-            max_loss = participation * (-strike / initial_price) * principal_per_contract
-            # Apply protection floor if applicable
-            if product.payoff_config.protection_type.name == "FULL":
-                max_loss = 0.0
-            elif product.payoff_config.protection_type.name == "PARTIAL":
-                floor = -product.payoff_config.protection_rate * principal_per_contract
-                max_loss = max(max_loss, floor)
-            grid[0, t_idx] = (principal + max_loss) * df_to_maturity
+            if (
+                self.params.boundary_mode == "asymptotic"
+                and product.payoff_config.protection_type == ProtectionType.NONE
+            ):
+                tau_to_maturity = tau
+                r = pricing_env.get_rate(tau_to_maturity) if tau_to_maturity > 0 else 0.0
+                q = (
+                    pricing_env.get_div_yield(tau_to_maturity)
+                    if tau_to_maturity > 0
+                    else 0.0
+                )
+                df = np.exp(-r * tau_to_maturity) if tau_to_maturity > 0 else 1.0
+                df_div = np.exp(-q * tau_to_maturity) if tau_to_maturity > 0 else 1.0
+
+                effective_strike = strike
+                effective_participation = participation
+                airbag = product.airbag_config
+                if airbag.airbag_barrier is not None and s_vec[0] < airbag.airbag_barrier:
+                    effective_participation = airbag.airbag_participation_rate
+                    if airbag.airbag_strike is not None:
+                        effective_strike = airbag.airbag_strike
+
+                slope = effective_participation * product.contract_multiplier
+                grid[0, t_idx] = (
+                    principal * df
+                    + slope * (s_vec[0] * df_div - effective_strike * df)
+                )
+            else:
+                # Standard: embedded put, S=0 means maximum loss
+                # Loss = participation × (-K/S0) × N
+                max_loss = participation * (-strike / initial_price) * principal_per_contract
+                # Apply protection floor if applicable
+                if product.payoff_config.protection_type.name == "FULL":
+                    max_loss = 0.0
+                elif product.payoff_config.protection_type.name == "PARTIAL":
+                    floor = -product.payoff_config.protection_rate * principal_per_contract
+                    max_loss = max(max_loss, floor)
+                grid[0, t_idx] = (principal + max_loss) * df_to_maturity
 
         # Upper boundary (S -> ∞)
         # For standard: no loss (put is worthless)
         # For reverse: maximum loss (call is deep ITM)
         if product.is_reverse:
-            # For very high S, call loss could be large
-            # But typically bounded by participation
-            grid[-1, t_idx] = principal * df_to_maturity  # Simplified
+            # For very high S, reverse payoff depends on protection type.
+            protection = product.payoff_config.protection_type
+            if protection == ProtectionType.NONE:
+                tau_to_maturity = tau
+                r = pricing_env.get_rate(tau_to_maturity) if tau_to_maturity > 0 else 0.0
+                q = (
+                    pricing_env.get_div_yield(tau_to_maturity)
+                    if tau_to_maturity > 0
+                    else 0.0
+                )
+                df = np.exp(-r * tau_to_maturity) if tau_to_maturity > 0 else 1.0
+                df_div = np.exp(-q * tau_to_maturity) if tau_to_maturity > 0 else 1.0
+
+                participation = product.payoff_config.participation_rate
+                effective_strike = strike
+                airbag = product.airbag_config
+                if airbag.airbag_barrier is not None and s_vec[-1] > airbag.airbag_barrier:
+                    participation = airbag.airbag_participation_rate
+                    if airbag.airbag_strike is not None:
+                        effective_strike = airbag.airbag_strike
+
+                slope = participation * product.contract_multiplier
+                grid[-1, t_idx] = (
+                    (principal + slope * effective_strike) * df
+                    - slope * s_vec[-1] * df_div
+                )
+            else:
+                if protection == ProtectionType.PARTIAL:
+                    floor = (
+                        product.payoff_config.protection_rate
+                        * product.initial_price
+                        * product.contract_multiplier
+                    )
+                    grid[-1, t_idx] = (principal - floor) * df_to_maturity
+                else:
+                    grid[-1, t_idx] = principal * df_to_maturity
         else:
             # Put is worthless at high S
             grid[-1, t_idx] = principal * df_to_maturity

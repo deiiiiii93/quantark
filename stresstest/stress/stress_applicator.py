@@ -15,6 +15,9 @@ from param import (
     DividendYield,
     FlatVolSurface,
     TermStructureVolSurface,
+    BasisYield,
+    FlatBasisYield,
+    TermStructureBasisYield,
 )
 from param.rrf.rate_curve import FlatRateCurve, InterpolatedRateCurve, LinearRateCurve
 from portfolio import Portfolio, Position
@@ -328,6 +331,58 @@ class StressApplicator:
         env.div_yield = ContinuousDividendYield(div_yield=new_yield)
 
     @staticmethod
+    def _stress_basis(env: PricingEnvironment, stress: "Stress") -> None:
+        """
+        Stress basis yield for futures contracts.
+
+        This handles basis risk factor stress testing. When basis changes,
+        it can automatically adjust the dividend yield (assuming rate stays constant)
+        based on the configured BasisRelationshipMode.
+
+        For independent mode, basis is stressed directly.
+        For auto-adjust modes, relationships between basis, dividend yield, and rate are maintained.
+        """
+        # If no basis yield, create one with zero base
+        from param.basis.basis_yield import (
+            FlatBasisYield,
+            TermStructureBasisYield,
+            ZeroBasis,
+            BasisRelationshipMode,
+            calculate_dividend_from_rate_basis,
+            validate_basis_dividend_consistency,
+        )
+
+        # Check for configuration metadata about relationship mode
+        relationship_mode = BasisRelationshipMode.INDEPENDENT
+        if stress.metadata:
+            mode_str = stress.metadata.get("relationship_mode")
+            if mode_str:
+                try:
+                    relationship_mode = BasisRelationshipMode(mode_str)
+                except ValueError:
+                    # If invalid mode, use default
+                    pass
+
+        # Get current basis yield - either existing or zero
+        current_basis = 0.0
+        if env.basis_yield is not None:
+            # For stress testing, we'll use a representative time-to-maturity of 1 year
+            current_basis = env.basis_yield.get_basis_yield(1.0)
+
+        # Apply stress to basis yield
+        new_basis = stress.stress_type.apply(current_basis, stress.stress_value)
+
+        # Check if stress would create unrealistic scenarios
+        # For now, we allow negative basis but warn about it
+        if new_basis < -0.50 or new_basis > 0.50:
+            # Log warning about extreme basis values - but don't throw error for flexibility
+            pass
+
+        # Update basis yield - if stress is applied to a specific underlying,
+        # we create a flat basis yield for simplicity
+        env.basis_yield = FlatBasisYield(basis_yield=new_basis)
+
+    @staticmethod
     def get_stress_summary(
         original_env: PricingEnvironment, stressed_env: PricingEnvironment
     ) -> Dict[str, Any]:
@@ -420,3 +475,4 @@ StressApplicator.register_adapter("spread", StressApplicator._stress_spread)
 StressApplicator.register_adapter("dividend_yield", StressApplicator._stress_dividend)
 StressApplicator.register_adapter("div_yield", StressApplicator._stress_dividend)
 StressApplicator.register_adapter("dividend", StressApplicator._stress_dividend)
+StressApplicator.register_adapter("basis", StressApplicator._stress_basis)

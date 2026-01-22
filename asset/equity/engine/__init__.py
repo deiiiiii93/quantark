@@ -14,6 +14,7 @@ from .mc import (
     EuropeanMCEngine,
     AmericanOptionMCEngine,
     SnowballMCEngine,
+    PhoenixMCEngine,
     DigitalOptionMCEngine,
     BarrierOptionMCEngine,
 )
@@ -25,10 +26,17 @@ from .pde import (
     DoubleBarrierPDESolver,
     OneTouchPDESolver,
     DoubleOneTouchPDESolver,
+    PhoenixPDESolver,
     TimeGrid,
     SpatialGrid,
 )
-from .quad import EuropeanQuadEngine, BarrierQuadEngine, OneTouchQuadEngine, SnowballQuadEngine
+from .quad import (
+    EuropeanQuadEngine,
+    BarrierQuadEngine,
+    OneTouchQuadEngine,
+    SnowballQuadEngine,
+    PhoenixQuadEngine,
+)
 
 __all__ = [
     # Base
@@ -42,6 +50,7 @@ __all__ = [
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
     "SnowballMCEngine",
+    "PhoenixMCEngine",
     "DigitalOptionMCEngine",
     "BarrierOptionMCEngine",
     # Unified PDE Engine
@@ -54,6 +63,7 @@ __all__ = [
     "DoubleBarrierPDESolver",
     "OneTouchPDESolver",
     "DoubleOneTouchPDESolver",
+    "PhoenixPDESolver",
     # Grid utilities
     "TimeGrid",
     "SpatialGrid",
@@ -62,4 +72,5 @@ __all__ = [
     "BarrierQuadEngine",
     "OneTouchQuadEngine",
     "SnowballQuadEngine",
+    "PhoenixQuadEngine",
 ]

@@ -152,3 +152,36 @@ The system SHALL provide a standard error estimate for barrier MC pricing.
 - **WHEN** the barrier MC engine completes pricing
 - **THEN** the engine SHALL compute standard error as `std(discounted_payoffs) / sqrt(N)`
 
+### Requirement: RQMC Target Std Scaling
+The system SHALL allow RQMC target standard error to be specified in absolute
+terms or scaled relative to notional/price.
+
+#### Scenario: Absolute target std (default)
+- **GIVEN** `rqmc_target_std_mode="absolute"`
+- **WHEN** RQMC pricing is executed
+- **THEN** the target standard error is used as-is
+
+#### Scenario: Relative target std by notional
+- **GIVEN** `rqmc_target_std_mode="relative_notional"` and a product with notional
+- **WHEN** RQMC pricing is executed
+- **THEN** the target standard error is scaled by notional
+
+#### Scenario: Relative target std by price scale
+- **GIVEN** `rqmc_target_std_mode="relative_price"`
+- **WHEN** RQMC pricing is executed
+- **THEN** the target standard error is scaled by the configured price scale
+
+### Requirement: RQMC Total Paths Mode
+The system SHALL allow RQMC to interpret `num_paths` as a total expected path count
+when configured, and compute a Sobol-ideal per-batch path count automatically.
+
+#### Scenario: Per-batch mode (default)
+- **GIVEN** `rqmc_paths_mode="per_batch"`
+- **WHEN** RQMC pricing is executed
+- **THEN** the engine uses `num_paths` per batch without adjustment
+
+#### Scenario: Total paths mode
+- **GIVEN** `rqmc_paths_mode="total"` and `num_paths=100000` with `rqmc_max_batches=4`
+- **WHEN** RQMC pricing is executed
+- **THEN** per-batch paths are set to `next_power_of_two(ceil(100000 / 4))`
+

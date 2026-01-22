@@ -7,6 +7,7 @@ backward in time, with support for Rannacher smoothing.
 
 from abc import abstractmethod
 from collections import OrderedDict
+import math
 import threading
 from typing import Dict, Optional, Tuple, List, NamedTuple
 import numpy as np
@@ -208,6 +209,12 @@ class BasePDESolver(BaseEngine):
             params.max_grid_size,
             params.include_spot_in_critical_points,
             params.rannacher_at_events,
+            params.event_theta,
+            params.event_rannacher_steps,
+            params.barrier_refine_log_width,
+            params.barrier_refine_levels,
+            params.barrier_domain_expand,
+            params.boundary_mode,
             params.theta,
             params.use_rannacher,
             params.rannacher_steps,
@@ -512,6 +519,20 @@ class BasePDESolver(BaseEngine):
         if s_min >= s_max:
             raise PricingError(f"Invalid spatial bounds: [{s_min}, {s_max}]")
 
+        if params.barrier_domain_expand > 0.0 and barriers:
+            expand = params.barrier_domain_expand
+            for barrier in barriers:
+                if barrier is None or barrier <= 0:
+                    continue
+                if barrier >= spot:
+                    s_max = max(s_max, barrier * (1.0 + expand))
+                else:
+                    s_min = min(s_min, barrier * max(1.0 - expand, 1e-6))
+            if s_min >= s_max:
+                raise PricingError(
+                    f"Invalid spatial bounds after expansion: [{s_min}, {s_max}]"
+                )
+
         return s_min, s_max
 
     def _resolve_critical_points(
@@ -532,6 +553,12 @@ class BasePDESolver(BaseEngine):
             if params.include_spot_in_critical_points and spot > 0:
                 points.append(spot)
             points.extend([b for b in barriers if b is not None and b > 0])
+            if params.barrier_refine_log_width > 0.0 and params.barrier_refine_levels > 0:
+                for barrier in [b for b in barriers if b is not None and b > 0]:
+                    for level in range(1, params.barrier_refine_levels + 1):
+                        width = params.barrier_refine_log_width * level
+                        points.append(barrier * math.exp(width))
+                        points.append(barrier * math.exp(-width))
 
         return sorted(list(set([p for p in points if p is not None and p > 0])))
 

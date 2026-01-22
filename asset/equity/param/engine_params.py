@@ -2,9 +2,39 @@
 Engine configuration parameters.
 """
 
+import math
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from util.exceptions import ValidationError
+
+
+def _infer_target_scale(product: Optional[Any], pricing_env: Optional[Any]) -> float:
+    """
+    Infer a reasonable scale for relative RQMC target std error.
+    """
+    if product is not None:
+        for attr in (
+            "contract_multiplier",
+            "notional",
+            "notional_amount",
+            "notional_value",
+        ):
+            value = getattr(product, attr, None)
+            try:
+                if value is not None and float(value) > 0:
+                    return float(value)
+            except (TypeError, ValueError):
+                continue
+
+    if pricing_env is not None:
+        spot = getattr(pricing_env, "spot", None)
+        try:
+            if spot is not None and float(spot) > 0:
+                return float(spot)
+        except (TypeError, ValueError):
+            pass
+
+    return 1.0
 
 
 @dataclass
@@ -197,6 +227,13 @@ class MCParams(EngineParams):
         time_steps: Number of time steps per path
         use_qmc: Use quasi-Monte Carlo (default: False)
         use_antithetic: Use antithetic variates (default: False)
+        rqmc_target_std: RQMC target standard error (absolute or relative)
+        rqmc_target_std_mode: absolute|relative_notional|relative_price
+        rqmc_target_std_floor: Minimum absolute target std error
+        rqmc_min_batches: Minimum RQMC batches before stopping
+        rqmc_max_batches: Maximum RQMC batches to run
+        rqmc_target_std_scale: Optional explicit scale for relative modes
+        rqmc_paths_mode: per_batch (default) or total (interprets num_paths as total)
     """
 
     seed: int = 42
@@ -204,6 +241,13 @@ class MCParams(EngineParams):
     time_steps: int = 100
     use_qmc: bool = False
     use_antithetic: bool = False
+    rqmc_target_std: float = 1e-4
+    rqmc_target_std_mode: str = "absolute"
+    rqmc_target_std_floor: float = 0.0
+    rqmc_min_batches: int = 4
+    rqmc_max_batches: int = 32
+    rqmc_target_std_scale: Optional[float] = None
+    rqmc_paths_mode: str = "per_batch"
 
     def __post_init__(self):
         """Validate MC parameters."""
@@ -214,6 +258,105 @@ class MCParams(EngineParams):
             )
         if self.time_steps <= 0:
             raise ValidationError(f"Time steps must be positive, got {self.time_steps}")
+        if self.rqmc_target_std <= 0:
+            raise ValidationError(
+                f"rqmc_target_std must be positive, got {self.rqmc_target_std}"
+            )
+        if self.rqmc_target_std_floor < 0:
+            raise ValidationError(
+                f"rqmc_target_std_floor must be non-negative, got {self.rqmc_target_std_floor}"
+            )
+        if self.rqmc_target_std_mode not in (
+            "absolute",
+            "relative_notional",
+            "relative_price",
+        ):
+            raise ValidationError(
+                "rqmc_target_std_mode must be one of absolute, relative_notional, "
+                "relative_price"
+            )
+        if self.rqmc_min_batches <= 0:
+            raise ValidationError(
+                f"rqmc_min_batches must be positive, got {self.rqmc_min_batches}"
+            )
+        if self.rqmc_max_batches <= 0:
+            raise ValidationError(
+                f"rqmc_max_batches must be positive, got {self.rqmc_max_batches}"
+            )
+        if self.rqmc_min_batches > self.rqmc_max_batches:
+            raise ValidationError(
+                "rqmc_min_batches cannot exceed rqmc_max_batches"
+            )
+        if self.rqmc_target_std_scale is not None and self.rqmc_target_std_scale <= 0:
+            raise ValidationError(
+                "rqmc_target_std_scale must be positive when provided"
+            )
+        if self.rqmc_paths_mode not in ("per_batch", "total"):
+            raise ValidationError(
+                "rqmc_paths_mode must be one of per_batch, total"
+            )
+
+    def resolve_rqmc_target_std(
+        self,
+        product: Optional[Any] = None,
+        pricing_env: Optional[Any] = None,
+        scale: Optional[float] = None,
+    ) -> float:
+        """
+        Resolve RQMC target std error based on absolute or relative mode.
+
+        Args:
+            product: Optional product for inferring notional scale.
+            pricing_env: Optional pricing environment for scale hints.
+            scale: Explicit scale override for relative modes.
+
+        Returns:
+            Target standard error in price units.
+        """
+        mode = self.rqmc_target_std_mode
+        base = float(self.rqmc_target_std)
+        floor = float(self.rqmc_target_std_floor)
+
+        if mode == "absolute":
+            return max(base, floor)
+
+        resolved_scale = scale
+        if resolved_scale is None:
+            resolved_scale = self.rqmc_target_std_scale
+        if resolved_scale is None:
+            resolved_scale = _infer_target_scale(product, pricing_env)
+
+        target = base * float(resolved_scale)
+        return max(target, floor)
+
+    def resolve_rqmc_paths_per_batch(self, max_batches: Optional[int] = None) -> int:
+        """
+        Resolve per-batch path count for RQMC.
+
+        Args:
+            max_batches: Optional override for maximum batches (defaults to rqmc_max_batches).
+
+        Returns:
+            Per-batch path count (Sobol-ideal if rqmc_paths_mode=total).
+        """
+        total_paths = int(self.num_paths)
+        if total_paths <= 0:
+            raise ValidationError(f"num_paths must be positive, got {total_paths}")
+
+        if self.rqmc_paths_mode == "per_batch":
+            return total_paths
+
+        batches = int(max_batches if max_batches is not None else self.rqmc_max_batches)
+        batches = max(batches, 1)
+        per_batch_raw = int(math.ceil(total_paths / float(batches)))
+        return _next_power_of_two(per_batch_raw)
+
+
+def _next_power_of_two(n: int) -> int:
+    """Return the smallest power of two >= n."""
+    if n <= 1:
+        return 1
+    return 1 << (n - 1).bit_length()
 
 
 @dataclass
@@ -243,6 +386,12 @@ class PDEParams(EngineParams):
         max_grid_size: Upper bound for auto-generated spatial grid points (default: 2000)
         include_spot_in_critical_points: Include spot as a critical point when auto_grid is enabled (default: True)
         rannacher_at_events: Apply Rannacher smoothing after event times when auto_grid is enabled (default: True)
+        event_theta: Theta value applied immediately before event times (default: 1.0)
+        event_rannacher_steps: Number of event-adjacent steps using event_theta (default: 1)
+        barrier_refine_log_width: Log-space refinement half-width around barriers (default: 0.0 = disabled)
+        barrier_refine_levels: Number of refinement layers on each side of a barrier (default: 1)
+        barrier_domain_expand: Extra relative domain expansion around barriers (default: 0.0 = disabled)
+        boundary_mode: Boundary condition mode (asymptotic, default)
         theta: Finite difference scheme parameter (0.5 = Crank-Nicolson, 1.0 = Backward Euler)
         use_rannacher: Apply Rannacher smoothing for first steps (default: True)
         rannacher_steps: Number of backward Euler steps for smoothing (default: 1)
@@ -276,6 +425,12 @@ class PDEParams(EngineParams):
     max_grid_size: int = 2000
     include_spot_in_critical_points: bool = True
     rannacher_at_events: bool = True
+    event_theta: float = 1.0
+    event_rannacher_steps: int = 1
+    barrier_refine_log_width: float = 0.0
+    barrier_refine_levels: int = 1
+    barrier_domain_expand: float = 0.0
+    boundary_mode: str = "asymptotic"
 
     # Numerical scheme configuration
     theta: float = 0.5  # 0.5 = Crank-Nicolson, 1.0 = Backward Euler
@@ -346,6 +501,66 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 f"rannacher_steps must be non-negative, got {self.rannacher_steps}"
             )
+        if not 0.0 < self.event_theta <= 1.0:
+            raise ValidationError(
+                f"event_theta must be in (0, 1], got {self.event_theta}"
+            )
+        if self.event_rannacher_steps < 0:
+            raise ValidationError(
+                f"event_rannacher_steps must be non-negative, got {self.event_rannacher_steps}"
+            )
+        if self.barrier_refine_log_width < 0.0:
+            raise ValidationError(
+                f"barrier_refine_log_width must be non-negative, got {self.barrier_refine_log_width}"
+            )
+        if self.barrier_refine_levels < 0:
+            raise ValidationError(
+                f"barrier_refine_levels must be non-negative, got {self.barrier_refine_levels}"
+            )
+        if self.barrier_domain_expand < 0.0:
+            raise ValidationError(
+                f"barrier_domain_expand must be non-negative, got {self.barrier_domain_expand}"
+            )
+        if self.boundary_mode not in ("default", "asymptotic"):
+            raise ValidationError(
+                f"boundary_mode must be one of default, asymptotic, got {self.boundary_mode}"
+            )
+
+    @classmethod
+    def from_config(
+        cls,
+        config_or_path: Any,
+        profile: Optional[str] = None,
+        product: Optional[Any] = None,
+        reverse: Optional[bool] = None,
+        **overrides: Any,
+    ) -> "PDEParams":
+        """
+        Create PDEParams from a dict/YAML/JSON config and optional overrides.
+
+        Args:
+            config_or_path: Mapping or path to YAML/JSON file.
+            profile: Optional preset profile to use.
+            product: Optional product object for light auto-tuning.
+            reverse: Optional reverse flag (overrides config if provided).
+            **overrides: Explicit parameter overrides.
+
+        Returns:
+            PDEParams instance.
+        """
+        from .engine_param_profiles import make_pde_params, parse_profile_config
+
+        resolved_profile, config_overrides, reverse_flag = parse_profile_config(
+            config_or_path, engine="pde", profile=profile, reverse=reverse
+        )
+        if overrides:
+            config_overrides.update(overrides)
+        return make_pde_params(
+            profile=resolved_profile,
+            product=product,
+            reverse=reverse_flag,
+            **config_overrides,
+        )
 
 
 @dataclass
@@ -358,14 +573,51 @@ class QuadParams(EngineParams):
                      Must be odd for Simpson's rule.
         num_std_devs: Number of standard deviations for integration bounds (default: 10).
                       Larger values capture more of the distribution tail.
+        fft_padding_factor: Zero-padding factor for FFT-based convolution (default: 2).
+        fft_filter_alpha: Spectral filter strength (0 disables filtering).
+        fft_filter_power: Spectral filter power/exponent (higher = sharper cutoff).
+        stability_preset: Optional stability preset overriding FFT padding/filter defaults.
+                          Supported: conservative, balanced, aggressive.
+        align_priority: Barrier alignment priority (auto, ko, coupon, ki).
+        event_smoothing_cells: Half-width of smoothing window in grid cells (0 disables).
+        event_smoothing_mode: Smoothing mode (fixed, auto, reverse_aware).
+        event_smoothing_kernel: Smoothing kernel (cosine, tanh).
+        event_smoothing_log_width: Target log-space width for auto smoothing.
     """
 
     grid_points: int = 1001  # Odd number for Simpson's rule
     num_std_devs: float = 10.0
+    fft_padding_factor: int = 2
+    fft_filter_alpha: float = 12.0
+    fft_filter_power: int = 8
+    stability_preset: Optional[str] = None
+    align_priority: str = "auto"
+    event_smoothing_cells: int = 1
+    event_smoothing_mode: str = "fixed"
+    event_smoothing_kernel: str = "cosine"
+    event_smoothing_log_width: float = 0.002
 
     def __post_init__(self):
         """Validate quadrature parameters."""
         super().__post_init__()
+        if self.stability_preset is not None:
+            preset = str(self.stability_preset).lower()
+            if preset == "conservative":
+                self.fft_padding_factor = 2
+                self.fft_filter_alpha = 12.0
+                self.fft_filter_power = 8
+            elif preset == "balanced":
+                self.fft_padding_factor = 2
+                self.fft_filter_alpha = 18.0
+                self.fft_filter_power = 8
+            elif preset == "aggressive":
+                self.fft_padding_factor = 4
+                self.fft_filter_alpha = 24.0
+                self.fft_filter_power = 8
+            else:
+                raise ValidationError(
+                    "stability_preset must be one of conservative, balanced, aggressive"
+                )
         if self.grid_points <= 0:
             raise ValidationError(
                 f"grid_points must be positive, got {self.grid_points}"
@@ -385,3 +637,73 @@ class QuadParams(EngineParams):
             raise ValidationError(
                 f"num_std_devs should be at least 3 for accuracy, got {self.num_std_devs}"
             )
+        if self.fft_padding_factor < 1:
+            raise ValidationError(
+                f"fft_padding_factor must be >= 1, got {self.fft_padding_factor}"
+            )
+        if self.fft_filter_alpha < 0.0:
+            raise ValidationError(
+                f"fft_filter_alpha must be non-negative, got {self.fft_filter_alpha}"
+            )
+        if self.fft_filter_power < 1:
+            raise ValidationError(
+                f"fft_filter_power must be >= 1, got {self.fft_filter_power}"
+            )
+        if self.align_priority not in ("auto", "ko", "coupon", "ki"):
+            raise ValidationError(
+                f"align_priority must be one of auto, ko, coupon, ki, got {self.align_priority}"
+            )
+        if self.event_smoothing_cells < 0:
+            raise ValidationError(
+                f"event_smoothing_cells must be >= 0, got {self.event_smoothing_cells}"
+            )
+        if self.event_smoothing_mode not in ("fixed", "auto", "reverse_aware"):
+            raise ValidationError(
+                "event_smoothing_mode must be one of fixed, auto, reverse_aware, got "
+                f"{self.event_smoothing_mode}"
+            )
+        if self.event_smoothing_kernel not in ("cosine", "tanh"):
+            raise ValidationError(
+                "event_smoothing_kernel must be one of cosine, tanh, got "
+                f"{self.event_smoothing_kernel}"
+            )
+        if self.event_smoothing_log_width <= 0.0:
+            raise ValidationError(
+                f"event_smoothing_log_width must be positive, got {self.event_smoothing_log_width}"
+            )
+
+    @classmethod
+    def from_config(
+        cls,
+        config_or_path: Any,
+        profile: Optional[str] = None,
+        product: Optional[Any] = None,
+        reverse: Optional[bool] = None,
+        **overrides: Any,
+    ) -> "QuadParams":
+        """
+        Create QuadParams from a dict/YAML/JSON config and optional overrides.
+
+        Args:
+            config_or_path: Mapping or path to YAML/JSON file.
+            profile: Optional preset profile to use.
+            product: Optional product object for light auto-tuning.
+            reverse: Optional reverse flag (overrides config if provided).
+            **overrides: Explicit parameter overrides.
+
+        Returns:
+            QuadParams instance.
+        """
+        from .engine_param_profiles import make_quad_params, parse_profile_config
+
+        resolved_profile, config_overrides, reverse_flag = parse_profile_config(
+            config_or_path, engine="quad", profile=profile, reverse=reverse
+        )
+        if overrides:
+            config_overrides.update(overrides)
+        return make_quad_params(
+            profile=resolved_profile,
+            product=product,
+            reverse=reverse_flag,
+            **config_overrides,
+        )

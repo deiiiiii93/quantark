@@ -102,11 +102,19 @@ class SnowballQuadEngine(BaseEngine):
         if not times:
             raise PricingError("Observation time grid is empty for SnowballQuadEngine.")
 
+        align_log = self._select_alignment_log(spot, product)
+        fft_padding_factor = self._resolve_fft_padding_factor()
+        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         math_utils = QuadratureMath(
             grid_x=self.params.grid_points,
             spot=spot,
             maturity=maturity,
             vol_max=vol,
+            num_std_devs=self.params.num_std_devs,
+            align_log=align_log,
+            fft_padding_factor=fft_padding_factor,
+            fft_filter_alpha=fft_filter_alpha,
+            fft_filter_power=fft_filter_power,
         )
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
@@ -149,24 +157,36 @@ class SnowballQuadEngine(BaseEngine):
 
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
 
+        smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
+
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
             ko_record = self._match_record(obs_time, ko_records)
-            ko_mask = None
+            ko_weight = None
             if ko_record is not None:
-                ko_mask = (
-                    spot_grid <= ko_record.barrier
-                    if product.is_reverse
-                    else spot_grid >= ko_record.barrier
-                )
                 discount = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time
                 )
                 ko_value = ko_record.payoff * discount
+                ko_weight = self._smooth_step_weight(
+                    grid,
+                    ko_record.barrier,
+                    spot,
+                    smoothing_width,
+                    trigger_is_down=product.is_reverse,
+                )
+                if ko_weight is None:
+                    ko_mask = (
+                        spot_grid <= ko_record.barrier
+                        if product.is_reverse
+                        else spot_grid >= ko_record.barrier
+                    )
+                    ko_weight = ko_mask.astype(float)
+
                 # KO always applies to the not-yet-KI surface; KI surface only if enabled.
-                v_out[ko_mask] = ko_value
+                v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
                 if not disable_ko_after_ki:
-                    v_in[ko_mask] = ko_value
+                    v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
 
             if ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
@@ -178,14 +198,23 @@ class SnowballQuadEngine(BaseEngine):
             elif ki_records:
                 ki_record = self._match_record(obs_time, ki_records)
                 if ki_record is not None:
-                    ki_mask = (
-                        spot_grid >= ki_record.barrier
-                        if product.is_reverse
-                        else spot_grid <= ki_record.barrier
+                    ki_weight = self._smooth_step_weight(
+                        grid,
+                        ki_record.barrier,
+                        spot,
+                        smoothing_width,
+                        trigger_is_down=not product.is_reverse,
                     )
-                    if ko_mask is not None and not disable_ko_after_ki:
-                        ki_mask = ki_mask & ~ko_mask
-                    v_out[ki_mask] = v_in[ki_mask]
+                    if ki_weight is None:
+                        ki_mask = (
+                            spot_grid >= ki_record.barrier
+                            if product.is_reverse
+                            else spot_grid <= ki_record.barrier
+                        )
+                        ki_weight = ki_mask.astype(float)
+                    if ko_weight is not None and not disable_ko_after_ki:
+                        ki_weight = ki_weight * (1.0 - ko_weight)
+                    v_out = (1.0 - ki_weight) * v_out + ki_weight * v_in
 
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
@@ -289,11 +318,19 @@ class SnowballQuadEngine(BaseEngine):
         )
         dt = self._build_dt(times)
 
+        align_log = self._select_alignment_log(spot, product)
+        fft_padding_factor = self._resolve_fft_padding_factor()
+        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         math_utils = QuadratureMath(
             grid_x=self.params.grid_points,
             spot=spot,
             maturity=maturity,
             vol_max=vol,
+            num_std_devs=self.params.num_std_devs,
+            align_log=align_log,
+            fft_padding_factor=fft_padding_factor,
+            fft_filter_alpha=fft_filter_alpha,
+            fft_filter_power=fft_filter_power,
         )
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
@@ -709,6 +746,147 @@ class SnowballQuadEngine(BaseEngine):
             if is_close(target_time, rec.observation_time, abs_tol=Tolerance.PRECISION):
                 return rec
         return None
+
+    def _resolve_fft_padding_factor(self) -> int:
+        factor = getattr(self.params, "fft_padding_factor", None)
+        if factor is None or int(factor) <= 0:
+            return 2
+        return int(factor)
+
+    def _resolve_fft_filter(self) -> tuple[float, int]:
+        alpha = getattr(self.params, "fft_filter_alpha", None)
+        power = getattr(self.params, "fft_filter_power", None)
+
+        if alpha is None:
+            alpha = 12.0
+        if power is None:
+            power = 8
+
+        return float(alpha), int(power)
+
+    def _resolve_align_priority(self) -> str:
+        priority = getattr(self.params, "align_priority", None)
+        if priority is None:
+            return "auto"
+        return str(priority).lower()
+
+    def _select_alignment_log(
+        self, spot: float, product: SnowballOption
+    ) -> Optional[float]:
+        ko_candidates: list[float] = []
+        ki_candidates: list[float] = []
+
+        ko_barrier = product.barrier_config.ko_barrier
+        if isinstance(ko_barrier, list):
+            ko_candidates.extend([float(b) for b in ko_barrier if b > 0])
+        elif ko_barrier is not None and ko_barrier > 0:
+            ko_candidates.append(float(ko_barrier))
+
+        if product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            if isinstance(ki_barrier, list):
+                ki_candidates.extend([float(b) for b in ki_barrier if b > 0])
+            elif ki_barrier is not None and ki_barrier > 0:
+                ki_candidates.append(float(ki_barrier))
+
+        def to_logs(candidates: list[float]) -> list[float]:
+            logs = []
+            for b in candidates:
+                try:
+                    logs.append(safe_log(b / spot))
+                except Exception:
+                    continue
+            return logs
+
+        ko_logs = to_logs(ko_candidates)
+        ki_logs = to_logs(ki_candidates)
+
+        if not ko_logs and not ki_logs:
+            return None
+
+        def closest(logs: list[float]) -> Optional[float]:
+            if not logs:
+                return None
+            idx = int(np.argmin(np.abs(np.asarray(logs))))
+            return float(logs[idx])
+
+        priority = self._resolve_align_priority()
+        if priority == "ko":
+            return closest(ko_logs) or closest(ki_logs)
+        if priority == "ki":
+            return closest(ki_logs) or closest(ko_logs)
+        if priority == "coupon":
+            return closest(ko_logs) or closest(ki_logs)
+
+        # auto: prefer KO near spot for reverse, else closest overall
+        if product.is_reverse:
+            ko_near = closest(ko_logs)
+            if ko_near is not None and abs(ko_near) <= 0.05:
+                return ko_near
+            return closest(ko_logs + ki_logs)
+
+        return closest(ko_logs + ki_logs)
+
+    def _resolve_event_smoothing_width(
+        self, math_utils: QuadratureMath, product: SnowballOption
+    ) -> float:
+        mode = getattr(self.params, "event_smoothing_mode", "fixed")
+        cells = getattr(self.params, "event_smoothing_cells", 0)
+        kernel_width = getattr(self.params, "event_smoothing_log_width", 0.002)
+
+        try:
+            cells = int(cells)
+        except (TypeError, ValueError):
+            cells = 0
+
+        if str(mode).lower() == "reverse_aware" and product.is_reverse:
+            cells = 0
+        elif str(mode).lower() == "auto":
+            h = float(math_utils.h)
+            cells = max(1, int(0.5 + float(kernel_width) / h))
+
+        if cells <= 0:
+            return 0.0
+        return float(cells) * float(math_utils.h)
+
+    def _smooth_step_weight(
+        self,
+        grid: np.ndarray,
+        barrier: float,
+        spot: float,
+        width: float,
+        *,
+        trigger_is_down: bool,
+    ) -> Optional[np.ndarray]:
+        if width <= 0.0:
+            return None
+        if barrier is None or barrier <= 0.0 or spot <= 0.0:
+            return None
+        barrier_log = safe_log(barrier / spot)
+        return self._smooth_step_weight_log(
+            grid, barrier_log, width, trigger_is_down=trigger_is_down
+        )
+
+    def _smooth_step_weight_log(
+        self,
+        grid: np.ndarray,
+        barrier_log: float,
+        width: float,
+        *,
+        trigger_is_down: bool,
+    ) -> Optional[np.ndarray]:
+        if width <= 0.0:
+            return None
+        x = grid - float(barrier_log)
+        kernel = str(getattr(self.params, "event_smoothing_kernel", "cosine")).lower()
+        if kernel == "tanh":
+            base = 0.5 * (1.0 + np.tanh(x / width))
+        else:
+            t = np.clip((x + width) / (2.0 * width), 0.0, 1.0)
+            base = 0.5 - 0.5 * np.cos(np.pi * t)
+        if trigger_is_down:
+            return 1.0 - base
+        return base
 
     def __repr__(self) -> str:
         return "SnowballQuadEngine()"

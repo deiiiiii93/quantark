@@ -524,6 +524,51 @@ class PathBuilder:
         """
         return self._apply_values("dividend_yield", values, underlying)
 
+    def basis_stress(
+        self,
+        daily_change: float,
+        stress_type: StressType = StressType.PERCENTAGE,
+        underlying: Optional[str] = None,
+        start_day: int = 0,
+        end_day: Optional[int] = None,
+    ) -> "PathBuilder":
+        """
+        Add a consistent basis stress trend across days.
+
+        Args:
+            daily_change: Daily change amount
+            stress_type: Type of change (default: PERCENTAGE)
+            underlying: Optional specific underlying
+            start_day: First day to apply (default: 0)
+            end_day: Last day to apply (default: all days)
+
+        Returns:
+            Self for chaining
+        """
+        return self._apply_trend(
+            parameter="basis",
+            daily_change=daily_change,
+            stress_type=stress_type,
+            underlying=underlying,
+            start_day=start_day,
+            end_day=end_day,
+        )
+
+    def basis_values(
+        self, values: List[float], underlying: Optional[str] = None
+    ) -> "PathBuilder":
+        """
+        Set specific basis values for each day.
+
+        Args:
+            values: List of basis values (one per day)
+            underlying: Optional specific underlying
+
+        Returns:
+            Self for chaining
+        """
+        return self._apply_values("basis", values, underlying)
+
     def add_change(self, day_index: int, change: ParameterChange) -> "PathBuilder":
         """
         Add a pre-built ParameterChange to a specific day.

@@ -4,6 +4,12 @@ This file provides guidance to Codex when working with code in this repository.
 
 ## Quick Commands
 
+## Slash Commands
+
+- `/pro-impl-report [path]`: Generate a professional implementation report in a
+  Methods/Results/Discussion layout. If `path` is omitted, write to
+  `IMPLEMENTATION_REPORT.md`. Template: `commands/pro-impl-report.md`.
+
 ### Testing
 ```bash
 # Run all tests

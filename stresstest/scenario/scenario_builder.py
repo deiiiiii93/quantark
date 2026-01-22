@@ -242,6 +242,35 @@ class ScenarioBuilder:
             "dividend_yield", stress_value, stress_type, level, target
         )
 
+    def basis_stress(
+        self,
+        stress_value: float,
+        stress_type: StressType = StressType.PERCENTAGE,
+        underlying: Optional[str] = None,
+        position_id: Optional[str] = None,
+        relationship_mode: Optional[str] = None,
+    ) -> "ScenarioBuilder":
+        """
+        Add a basis stress for futures contracts.
+
+        Args:
+            stress_value: Stress magnitude
+            stress_type: Type of stress (default: PERCENTAGE)
+            underlying: Target underlying (if None, applies to portfolio)
+            position_id: Target position (if specified, overrides underlying)
+            relationship_mode: Optional relationship mode ("independent", "auto_adjust_dividend", "auto_adjust_basis")
+
+        Returns:
+            Self for chaining
+        """
+        level, target = self._determine_level_target(underlying, position_id)
+        metadata = {}
+        if relationship_mode:
+            metadata["relationship_mode"] = relationship_mode
+        return self.add_stress(
+            "basis", stress_value, stress_type, level, target, metadata=metadata
+        )
+
     def _determine_level_target(
         self, underlying: Optional[str], position_id: Optional[str]
     ) -> tuple[StressLevel, Optional[str]]:

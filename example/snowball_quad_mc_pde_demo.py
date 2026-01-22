@@ -7,6 +7,17 @@ across several snowball configurations. Results are printed in a table.
 Usage:
     python example/snowball_quad_mc_pde_demo.py
     python example/snowball_quad_mc_pde_demo.py --paths 30000 --grid 801 --pde-grid 200 --pde-steps 200
+    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --rqmc-paths-mode total --rqmc-max-batches 4
+
+RQMC examples:
+    # Total paths across batches (Sobol-ideal per batch)
+    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --paths 100000 --rqmc-paths-mode total --rqmc-min-batches 4 --rqmc-max-batches 4
+
+    # Per-batch paths (legacy behavior)
+    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --paths 25000 --rqmc-paths-mode per_batch --rqmc-min-batches 4 --rqmc-max-batches 4
+
+    # Absolute target std (price units)
+    python example/snowball_quad_mc_pde_demo.py --method randomized_quasi --rqmc-target-std 0.5 --rqmc-target-std-mode absolute
 """
 
 import argparse
@@ -21,7 +32,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
+from asset.equity.param import (
+    MCParams,
+    PDEParams,
+    QuadParams,
+    make_pde_params,
+    make_quad_params,
+)
 from asset.equity.product.option.snowball_helpers import create_standard_snowball
 from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from priceenv import PricingEnvironment
@@ -69,14 +86,17 @@ def run_case(
     label: str,
     snowball,
     pricing_env: PricingEnvironment,
-    quad_engine: SnowballQuadEngine,
-    pde_engine: SnowballPDESolver,
+    quad_params: QuadParams,
+    pde_params: PDEParams,
     mc_engine: SnowballMCEngine,
     ko_freq: str,
     ki_freq: str | None,
 ) -> dict:
     quad_price = pde_price = mc_price = None
     quad_time = pde_time = mc_time = None
+
+    quad_engine = SnowballQuadEngine(params=quad_params)
+    pde_engine = SnowballPDESolver(params=pde_params)
 
     start = time.perf_counter()
     quad_price = quad_engine.price(snowball, pricing_env)
@@ -173,24 +193,68 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Sanity check: Snowball Quad vs MC vs PDE."
     )
-    parser.add_argument("--paths", type=int, default=20000, help="MC paths")
+    parser.add_argument("--paths", type=int, default=100000, help="MC paths")
     parser.add_argument("--grid", type=int, default=801, help="Quad grid points (odd)")
     parser.add_argument("--pde-grid", type=int, default=200, help="PDE grid size")
     parser.add_argument("--pde-steps", type=int, default=200, help="PDE time steps")
     parser.add_argument(
         "--method",
         type=str,
-        default="quasi",
+        default="randomized_quasi",
         help="MC method: pseudo, quasi, randomized_quasi",
+    )
+    parser.add_argument(
+        "--rqmc-paths-mode",
+        type=str,
+        default="total",
+        choices=["per_batch", "total"],
+        help="RQMC paths interpretation: per_batch or total",
+    )
+    parser.add_argument(
+        "--rqmc-min-batches",
+        type=int,
+        default=4,
+        help="Minimum RQMC batches",
+    )
+    parser.add_argument(
+        "--rqmc-max-batches",
+        type=int,
+        default=4,
+        help="Maximum RQMC batches",
+    )
+    parser.add_argument(
+        "--rqmc-target-std",
+        type=float,
+        default=1e-4,
+        help="RQMC target standard error",
+    )
+    parser.add_argument(
+        "--rqmc-target-std-mode",
+        type=str,
+        default="relative_notional",
+        choices=["absolute", "relative_notional", "relative_price"],
+        help="RQMC target std scaling mode",
+    )
+    parser.add_argument(
+        "--rqmc-target-std-scale",
+        type=float,
+        default=None,
+        help="Optional scale override for relative target std",
     )
     args = parser.parse_args()
 
-    quad_engine = SnowballQuadEngine(params=QuadParams(grid_points=args.grid))
-    pde_engine = SnowballPDESolver(
-        params=PDEParams(grid_size=args.pde_grid, time_steps=args.pde_steps)
-    )
     mc_engine = SnowballMCEngine(
-        params=MCParams(num_paths=args.paths, time_steps=252, seed=42),
+        params=MCParams(
+            num_paths=args.paths,
+            time_steps=252,
+            seed=42,
+            rqmc_target_std=args.rqmc_target_std,
+            rqmc_target_std_mode=args.rqmc_target_std_mode,
+            rqmc_target_std_scale=args.rqmc_target_std_scale,
+            rqmc_paths_mode=args.rqmc_paths_mode,
+            rqmc_min_batches=args.rqmc_min_batches,
+            rqmc_max_batches=args.rqmc_max_batches,
+        ),
         method=EngineType.MONTE_CARLO(parse_mc_method(args.method)),
     )
 
@@ -385,19 +449,61 @@ def main() -> None:
         ),
     ]
 
-    rows = [
-        run_case(
-            label,
-            snowball,
-            env,
-            quad_engine,
-            pde_engine,
-            mc_engine,
-            ko_freq,
-            ki_freq,
+    def resolve_case_params(label: str) -> tuple[QuadParams, PDEParams]:
+        quad_params = QuadParams(grid_points=args.grid)
+        pde_params = PDEParams(grid_size=args.pde_grid, time_steps=args.pde_steps)
+
+        if label == "Standard (daily KI, monthly KO)":
+            pde_params = make_pde_params(
+                profile="barrier_sensitive",
+                time_steps=max(args.pde_steps, 300),
+                event_steps_per_day=6,
+            )
+        elif label == "Standard (high vol 35%)":
+            pde_params = make_pde_params(profile="accurate")
+        elif label == "Standard (spot near KO)":
+            pde_params = make_pde_params(
+                profile="barrier_sensitive",
+                barrier_refine_levels=3,
+                log_dx_target=0.0015,
+            )
+        elif label == "Reverse (cont KI, monthly KO)":
+            quad_params = make_quad_params(
+                profile="reverse_sensitive",
+                num_std_devs=12.0,
+            )
+            pde_params = make_pde_params(
+                profile="reverse_sensitive",
+                barrier_domain_expand=0.2,
+            )
+        elif label == "Standard (2Y maturity, monthly KO)":
+            quad_params = make_quad_params(
+                profile="accurate",
+                grid_points=max(args.grid, 1601),
+            )
+            pde_params = make_pde_params(
+                profile="accurate",
+                grid_size=max(args.pde_grid, 800),
+                time_steps=max(args.pde_steps, 400) * 2,
+            )
+
+        return quad_params, pde_params
+
+    rows = []
+    for label, snowball, env, ko_freq, ki_freq in cases:
+        quad_params, pde_params = resolve_case_params(label)
+        rows.append(
+            run_case(
+                label,
+                snowball,
+                env,
+                quad_params,
+                pde_params,
+                mc_engine,
+                ko_freq,
+                ki_freq,
+            )
         )
-        for label, snowball, env, ko_freq, ki_freq in cases
-    ]
 
     print_table(rows)
 

@@ -19,6 +19,7 @@ from asset.equity.product.option import (
     EuropeanVanillaOption,
     OneTouchOption,
     SnowballOption,
+    PhoenixOption,
 )
 from priceenv import PricingEnvironment
 from util.enum.engine_enums import EngineType, PDEMethod
@@ -33,6 +34,7 @@ from .pde import (
     EuropeanPDESolver,
     OneTouchPDESolver,
     SnowballPDESolver,
+    PhoenixPDESolver,
 )
 
 
@@ -54,6 +56,7 @@ class PDEEngine(BaseEngine):
         - OneTouchOption → OneTouchPDESolver
         - DoubleOneTouchOption → DoubleOneTouchPDESolver
         - SnowballOption → SnowballPDESolver
+        - PhoenixOption → PhoenixPDESolver
 
     Usage:
         # Basic usage
@@ -84,6 +87,7 @@ class PDEEngine(BaseEngine):
         OneTouchOption: OneTouchPDESolver,
         DoubleOneTouchOption: DoubleOneTouchPDESolver,
         SnowballOption: SnowballPDESolver,
+        PhoenixOption: PhoenixPDESolver,
     }
 
     DEFAULT_METHOD = PDEMethod.CRANK_NICOLSON

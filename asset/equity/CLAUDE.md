@@ -127,7 +127,7 @@ asset/equity/
 | `OneTouchOption` | Pays if barrier touched | Analytical, PDE |
 | `DoubleOneTouchOption` | Pays if either barrier touched | PDE |
 | `SnowballOption` | Autocallable with KO/KI | MC, PDE |
-| `PhoenixOption` | Autocallable with periodic coupons | MC, PDE |
+| `PhoenixOption` | Autocallable with periodic coupons | MC, PDE, QUAD |
 
 ### Delta-One Products (`product/deltaone/`)
 
@@ -213,7 +213,9 @@ price = engine.price(option, pricing_env)
 ```python
 from asset.equity.product.option import SnowballOption
 from asset.equity.product.option.snowball_config import BarrierConfig
-from asset.equity.engine.mc import SnowballMCEngine
+from asset.equity.engine.mc import PhoenixMCEngine
+from asset.equity.engine.pde import PhoenixPDESolver
+from asset.equity.engine.quad import PhoenixQuadEngine
 
 barrier_config = BarrierConfig(
     ko_barrier=103.0,
@@ -242,7 +244,10 @@ from asset.equity.product.option import (
     create_standard_phoenix,
 )
 from asset.equity.product.option.phoenix_config import CouponBarrierConfig
-from asset.equity.engine.mc import SnowballMCEngine
+from asset.equity.engine.mc import PhoenixMCEngine
+from asset.equity.engine.pde import PhoenixPDESolver
+from asset.equity.engine.quad import PhoenixQuadEngine
+from asset.equity.param import MCParams, PDEParams
 from util.calendar.day_counter import DayCountConvention
 from util.enum import CouponPayType
 
@@ -288,10 +293,22 @@ phoenix = PhoenixOption(
     contract_multiplier=10_000.0,
 )
 
-# Pricing (reuses SnowballMC engine)
-engine = SnowballMCEngine(params=MCParams(num_paths=100000))
-price = engine.price(phoenix, pricing_env)
+# Pricing with dedicated Phoenix engines
+mc_engine = PhoenixMCEngine(params=MCParams(num_paths=100000))
+pde_engine = PhoenixPDESolver(params=PDEParams(grid_size=300, time_steps=150))
+quad_engine = PhoenixQuadEngine()
+
+mc_price = mc_engine.price(phoenix, pricing_env)
+pde_price = pde_engine.price(phoenix, pricing_env)
+quad_price = quad_engine.price(phoenix, pricing_env)
 ```
+
+**Phoenix Engine Comparison:**
+| Engine | Strength | Notes |
+| --- | --- | --- |
+| MC | Most flexible | Best for complex path features |
+| PDE | Deterministic baseline | Stable greeks from grids |
+| QUAD | Fast deterministic | Good for calibration runs |
 
 **Phoenix vs Snowball:**
 - **Snowball**: Coupon paid only on knock-out event

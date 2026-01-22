@@ -5,7 +5,7 @@ Shared quadrature math utilities for grid setup and convolution.
 from __future__ import annotations
 
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -21,11 +21,22 @@ class QuadratureMath:
         spot: float,
         maturity: float,
         vol_max: float,
+        num_std_devs: float = 10.0,
+        *,
+        align_log: Optional[float] = None,
+        fft_padding_factor: int = 1,
+        fft_filter_alpha: float = 0.0,
+        fft_filter_power: int = 8,
     ) -> None:
         self.grid_x = int(grid_x)
         self.spot = float(spot)
         self.maturity = float(maturity)
         self.vol_max = float(vol_max)
+        self.num_std_devs = float(num_std_devs)
+        self.align_log = float(align_log) if align_log is not None else None
+        self.fft_padding_factor = int(fft_padding_factor)
+        self.fft_filter_alpha = float(fft_filter_alpha)
+        self.fft_filter_power = int(fft_filter_power)
 
         if self.grid_x < 3:
             raise ValidationError("grid_points must be at least 3.")
@@ -35,17 +46,49 @@ class QuadratureMath:
             raise ValidationError(f"maturity must be positive, got {self.maturity}.")
         if self.vol_max <= 0.0:
             raise ValidationError(f"volatility must be positive, got {self.vol_max}.")
+        if self.num_std_devs <= 0.0:
+            raise ValidationError(
+                f"num_std_devs must be positive, got {self.num_std_devs}."
+            )
+        if self.num_std_devs < 3.0:
+            raise ValidationError(
+                f"num_std_devs should be at least 3, got {self.num_std_devs}."
+            )
+
+        if self.fft_padding_factor < 1:
+            raise ValidationError(
+                f"fft_padding_factor must be >= 1, got {self.fft_padding_factor}."
+            )
+        if self.fft_filter_alpha < 0.0:
+            raise ValidationError(
+                f"fft_filter_alpha must be non-negative, got {self.fft_filter_alpha}."
+            )
+        if self.fft_filter_power < 1:
+            raise ValidationError(
+                f"fft_filter_power must be >= 1, got {self.fft_filter_power}."
+            )
 
         self.constant_c = math.exp(self._factor_c())
         log_c = math.log(self.constant_c)
-        self.grid = np.linspace(-log_c, log_c, self.grid_x)
         self.h = 2.0 * log_c / (self.grid_x - 1)
+        grid_shift = 0.0
+        if (
+            self.align_log is not None
+            and math.isfinite(self.align_log)
+            and -log_c <= self.align_log <= log_c
+        ):
+            idx = int(round((self.align_log + log_c) / self.h))
+            idx = max(0, min(idx, self.grid_x - 1))
+            grid_shift = self.align_log - (-log_c + idx * self.h)
+
+        self.grid = np.linspace(-log_c, log_c, self.grid_x) + grid_shift
         self.z_grid = -2.0 * log_c + np.arange(2 * self.grid_x - 1) * self.h
         self._weights: np.ndarray | None = None
+        self._fft_filter_cache: dict[int, np.ndarray] = {}
 
     def _factor_c(self) -> float:
         return (
-            10.0 * self.vol_max * math.sqrt(self.maturity)
+            self.num_std_devs * self.vol_max * math.sqrt(self.maturity)
             + (1.0 + 0.5 * self.vol_max * self.vol_max) * self.maturity
         )
 
@@ -85,8 +128,31 @@ class QuadratureMath:
         u_array = np.asarray(u_array).ravel()
         if len(omega_array) != len(u_array):
             raise NumericalError("omega_array and u_array must have the same length.")
-        f_array = np.fft.ifft(np.fft.fft(omega_array) * np.fft.fft(u_array)).real
+        base_len = len(u_array)
+        fft_len = base_len if self.fft_padding_factor <= 1 else int(self.fft_padding_factor * base_len)
+        omega_fft = np.fft.fft(omega_array, n=fft_len)
+        u_fft = np.fft.fft(u_array, n=fft_len)
+        product = omega_fft * u_fft
+        fft_filter = self._get_fft_filter(fft_len)
+        if fft_filter is not None:
+            product *= fft_filter
+        f_array = np.fft.ifft(product).real
         return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+
+    def _get_fft_filter(self, length: int) -> Optional[np.ndarray]:
+        if self.fft_filter_alpha <= 0.0:
+            return None
+        cached = self._fft_filter_cache.get(length)
+        if cached is not None:
+            return cached
+        freq = np.fft.fftfreq(length)
+        max_freq = np.max(np.abs(freq))
+        if max_freq <= 0.0:
+            return None
+        scaled = np.abs(freq) / max_freq
+        filt = np.exp(-self.fft_filter_alpha * (scaled ** self.fft_filter_power))
+        self._fft_filter_cache[length] = filt
+        return filt
 
     def interpolate(self, values: np.ndarray, x: float = 0.0) -> float:
         return float(np.interp(x, self.grid, values))
