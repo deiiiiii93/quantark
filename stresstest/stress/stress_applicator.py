@@ -21,7 +21,11 @@ from param import (
 )
 from param.rrf.rate_curve import FlatRateCurve, InterpolatedRateCurve, LinearRateCurve
 from portfolio import Portfolio, Position
-from stresstest.stress.stress_types import StressType, StressLevel
+from stresstest.stress.stress_types import (
+    StressType,
+    StressLevel,
+    BasisDividendRelationshipMode,
+)
 from util.exceptions import ValidationError
 
 if TYPE_CHECKING:
@@ -136,6 +140,7 @@ class StressApplicator:
             spot_quote=deepcopy(env.spot_quote) if env.spot_quote else None,
             vol_surface=deepcopy(env.vol_surface) if env.vol_surface else None,
             div_yield=deepcopy(env.div_yield) if env.div_yield else None,
+            basis_yield=deepcopy(env.basis_yield) if env.basis_yield else None,
             day_count_convention=env.day_count_convention,
             bus_days_in_year=env.bus_days_in_year,
         )
@@ -295,40 +300,85 @@ class StressApplicator:
             ContinuousDividendYield,
             TermStructureDividendYield,
         )
+        from param.basis.basis_yield import (
+            FlatBasisYield,
+            calculate_basis_from_rate_dividend,
+        )
 
-        if env.div_yield is None:
-            current_yield = 0.0
-        else:
-            # Assume flat dividend yield
-            if isinstance(env.div_yield, ContinuousDividendYield):
-                current_yield = env.div_yield.div_yield
-            elif isinstance(env.div_yield, TermStructureDividendYield):
-                new_yields = [
-                    stress.stress_type.apply(float(y), stress.stress_value)
-                    for y in env.div_yield.yields
-                ]
-                if any(y < 0 for y in new_yields):
-                    raise ValidationError(
-                        "Stressed term-structure dividend yield cannot be negative."
-                    )
-                env.div_yield = TermStructureDividendYield(
-                    times=list(env.div_yield.times), yields=new_yields
-                )
-                return
-            else:
-                # For complex dividend structures, get 1-year rate
-                current_yield = env.div_yield.get_yield(1.0)
-
-        new_yield = stress.stress_type.apply(current_yield, stress.stress_value)
-
-        if new_yield < 0:
+        time_to_maturity = 1.0
+        if stress.metadata and "time_to_maturity" in stress.metadata:
+            time_to_maturity = float(stress.metadata.get("time_to_maturity", 1.0))
+        if time_to_maturity <= 0:
             raise ValidationError(
-                f"Stressed dividend yield cannot be negative, got {new_yield} "
-                f"(original: {current_yield}, stress: {stress.stress_value})"
+                f"time_to_maturity must be positive, got {time_to_maturity}"
             )
 
-        # Update dividend yield
-        env.div_yield = ContinuousDividendYield(div_yield=new_yield)
+        if isinstance(env.div_yield, TermStructureDividendYield):
+            new_yields = [
+                stress.stress_type.apply(float(y), stress.stress_value)
+                for y in env.div_yield.yields
+            ]
+            new_yields = [max(0.0, y) for y in new_yields]
+            env.div_yield = TermStructureDividendYield(
+                times=list(env.div_yield.times), yields=new_yields
+            )
+        else:
+            current_yield = 0.0
+            if env.div_yield is not None:
+                if isinstance(env.div_yield, ContinuousDividendYield):
+                    current_yield = env.div_yield.div_yield
+                else:
+                    # For complex dividend structures, get representative rate
+                    current_yield = env.div_yield.get_yield(time_to_maturity)
+
+            new_yield = stress.stress_type.apply(current_yield, stress.stress_value)
+
+            if new_yield < 0:
+                new_yield = 0.0
+
+            # Update dividend yield
+            env.div_yield = ContinuousDividendYield(div_yield=new_yield)
+
+        # Handle relationship modes where dividend stress drives basis
+        relationship_mode = BasisDividendRelationshipMode.INDEPENDENT
+        if stress.metadata:
+            mode_str = stress.metadata.get("relationship_mode")
+            if mode_str:
+                try:
+                    relationship_mode = BasisDividendRelationshipMode.from_string(mode_str)
+                except ValueError:
+                    relationship_mode = BasisDividendRelationshipMode.INDEPENDENT
+
+        if relationship_mode in {
+            BasisDividendRelationshipMode.AUTO_ADJUST_BASIS,
+            BasisDividendRelationshipMode.SYNCHRONIZED,
+        }:
+            rate = env.rate_curve.get_rate(time_to_maturity)
+            div_for_basis = env.div_yield.get_yield(time_to_maturity)
+            if relationship_mode == BasisDividendRelationshipMode.AUTO_ADJUST_BASIS:
+                new_basis = calculate_basis_from_rate_dividend(rate, div_for_basis)
+            else:
+                # SYNCHRONIZED: apply the same stress to basis
+                current_basis = (
+                    env.basis_yield.get_basis_yield(time_to_maturity)
+                    if env.basis_yield is not None
+                    else 0.0
+                )
+                new_basis = stress.stress_type.apply(current_basis, stress.stress_value)
+
+            if isinstance(env.basis_yield, TermStructureBasisYield):
+                current_basis = env.basis_yield.get_basis_yield(time_to_maturity)
+                shift = new_basis - current_basis
+                new_yields = [float(y) + shift for y in env.basis_yield.yields]
+                if any(abs(y) > 0.50 for y in new_yields):
+                    raise ValidationError(
+                        "Stressed term-structure basis yields must be within +/-50%."
+                    )
+                env.basis_yield = TermStructureBasisYield(
+                    times=list(env.basis_yield.times), yields=new_yields
+                )
+            else:
+                env.basis_yield = FlatBasisYield(basis_yield=new_basis)
 
     @staticmethod
     def _stress_basis(env: PricingEnvironment, stress: "Stress") -> None:
@@ -337,50 +387,101 @@ class StressApplicator:
 
         This handles basis risk factor stress testing. When basis changes,
         it can automatically adjust the dividend yield (assuming rate stays constant)
-        based on the configured BasisRelationshipMode.
+        based on the configured relationship mode.
 
         For independent mode, basis is stressed directly.
         For auto-adjust modes, relationships between basis, dividend yield, and rate are maintained.
         """
-        # If no basis yield, create one with zero base
         from param.basis.basis_yield import (
             FlatBasisYield,
-            TermStructureBasisYield,
-            ZeroBasis,
-            BasisRelationshipMode,
             calculate_dividend_from_rate_basis,
-            validate_basis_dividend_consistency,
+        )
+        from param.div.dividend_yield import (
+            ContinuousDividendYield,
+            TermStructureDividendYield,
         )
 
         # Check for configuration metadata about relationship mode
-        relationship_mode = BasisRelationshipMode.INDEPENDENT
+        relationship_mode = BasisDividendRelationshipMode.INDEPENDENT
         if stress.metadata:
             mode_str = stress.metadata.get("relationship_mode")
             if mode_str:
                 try:
-                    relationship_mode = BasisRelationshipMode(mode_str)
+                    relationship_mode = BasisDividendRelationshipMode.from_string(mode_str)
                 except ValueError:
-                    # If invalid mode, use default
-                    pass
+                    relationship_mode = BasisDividendRelationshipMode.INDEPENDENT
+
+        # Determine time to maturity for annualization
+        # Check if T is provided in metadata (e.g., from a specific futures contract)
+        time_to_maturity = 1.0
+        if stress.metadata and "time_to_maturity" in stress.metadata:
+            time_to_maturity = float(stress.metadata.get("time_to_maturity", 1.0))
+        if time_to_maturity <= 0:
+            raise ValidationError(
+                f"time_to_maturity must be positive, got {time_to_maturity}"
+            )
 
         # Get current basis yield - either existing or zero
         current_basis = 0.0
         if env.basis_yield is not None:
-            # For stress testing, we'll use a representative time-to-maturity of 1 year
-            current_basis = env.basis_yield.get_basis_yield(1.0)
+            current_basis = env.basis_yield.get_basis_yield(time_to_maturity)
 
         # Apply stress to basis yield
         new_basis = stress.stress_type.apply(current_basis, stress.stress_value)
 
         # Check if stress would create unrealistic scenarios
-        # For now, we allow negative basis but warn about it
-        if new_basis < -0.50 or new_basis > 0.50:
-            # Log warning about extreme basis values - but don't throw error for flexibility
-            pass
+        # Update basis yield
+        if isinstance(env.basis_yield, TermStructureBasisYield):
+            new_yields = [
+                stress.stress_type.apply(float(y), stress.stress_value)
+                for y in env.basis_yield.yields
+            ]
+            if any(abs(y) > 0.50 for y in new_yields):
+                raise ValidationError(
+                    "Stressed term-structure basis yields must be within +/-50%."
+                )
+            env.basis_yield = TermStructureBasisYield(
+                times=list(env.basis_yield.times), yields=new_yields
+            )
+        else:
+            env.basis_yield = FlatBasisYield(basis_yield=new_basis)
 
-        # Update basis yield - if stress is applied to a specific underlying,
-        # we create a flat basis yield for simplicity
-        env.basis_yield = FlatBasisYield(basis_yield=new_basis)
+        # Handle relationship modes
+        if relationship_mode == BasisDividendRelationshipMode.AUTO_ADJUST_DIVIDEND:
+            # When basis changes, adjust dividend yield to maintain r - q = b
+            # Assuming rate stays constant: q_new = r - b_new
+            rate = env.rate_curve.get_rate(time_to_maturity)
+            new_div_yield = calculate_dividend_from_rate_basis(rate, new_basis)
+            if isinstance(env.div_yield, TermStructureDividendYield):
+                current_div = env.div_yield.get_yield(time_to_maturity)
+                shift = new_div_yield - current_div
+                new_yields = [max(0.0, float(y) + shift) for y in env.div_yield.yields]
+                env.div_yield = TermStructureDividendYield(
+                    times=list(env.div_yield.times), yields=new_yields
+                )
+            else:
+                if new_div_yield < 0:
+                    new_div_yield = 0.0
+                env.div_yield = ContinuousDividendYield(div_yield=new_div_yield)
+
+        elif relationship_mode == BasisDividendRelationshipMode.SYNCHRONIZED:
+            # Apply the same stress to dividend yield
+            current_div = (
+                env.div_yield.get_yield(time_to_maturity)
+                if env.div_yield is not None
+                else 0.0
+            )
+            new_div_yield = stress.stress_type.apply(current_div, stress.stress_value)
+            if isinstance(env.div_yield, TermStructureDividendYield):
+                shift = new_div_yield - current_div
+                new_yields = [max(0.0, float(y) + shift) for y in env.div_yield.yields]
+                env.div_yield = TermStructureDividendYield(
+                    times=list(env.div_yield.times), yields=new_yields
+                )
+            else:
+                if new_div_yield < 0:
+                    new_div_yield = 0.0
+                env.div_yield = ContinuousDividendYield(div_yield=new_div_yield)
 
     @staticmethod
     def get_stress_summary(
@@ -443,6 +544,17 @@ class StressApplicator:
                 "stressed": new_div,
                 "change_abs": new_div - orig_div,
                 "change_bps": (new_div - orig_div) * 10000,
+            }
+
+        # Basis yield
+        if original_env.basis_yield and stressed_env.basis_yield:
+            orig_basis = original_env.basis_yield.get_basis_yield(1.0)
+            new_basis = stressed_env.basis_yield.get_basis_yield(1.0)
+            summary["basis_yield"] = {
+                "original": orig_basis,
+                "stressed": new_basis,
+                "change_abs": new_basis - orig_basis,
+                "change_bps": (new_basis - orig_basis) * 10000,
             }
 
         return summary

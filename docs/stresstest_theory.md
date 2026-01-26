@@ -195,7 +195,7 @@ QuantArk applies stresses through parameter-specific adapters on `PricingEnviron
 *   **volatility / vol**: Supported for flat volatility surfaces (`FlatVolSurface`) only.
 *   **rate**: Supported for flat curves and interpolated curves; applied as a parallel shift.
 *   **key_rate**: Requires `tenor_bucket` metadata (e.g., `"5Y"`); applies bucketed changes on interpolated curves (falls back to parallel shift for flat curves).
-*   **dividend_yield / div_yield / dividend**: Supported for flat/continuous dividend yield; stressed dividend yield cannot be negative.
+*   **dividend_yield / div_yield / dividend**: Supported for flat/continuous dividend yield; stressed dividend yield is clamped at 0.0 if it would go negative.
 *   **spread**: Currently mapped to the same mechanism as a rate shock (parallel shift proxy).
 
 If a parameter is not supported, the engine raises an error unless a custom adapter is registered.

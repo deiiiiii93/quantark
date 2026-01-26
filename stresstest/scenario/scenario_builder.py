@@ -2,9 +2,13 @@
 Fluent API for building stress test scenarios.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from stresstest.scenario.scenario import Scenario, Stress
-from stresstest.stress.stress_types import StressType, StressLevel
+from stresstest.stress.stress_types import (
+    StressType,
+    StressLevel,
+    BasisDividendRelationshipMode,
+)
 
 
 class ScenarioBuilder:
@@ -224,6 +228,8 @@ class ScenarioBuilder:
         stress_type: StressType = StressType.PERCENTAGE,
         underlying: Optional[str] = None,
         position_id: Optional[str] = None,
+        relationship_mode: Union[BasisDividendRelationshipMode, str, None] = None,
+        time_to_maturity: Optional[float] = None,
     ) -> "ScenarioBuilder":
         """
         Add a dividend yield stress.
@@ -233,13 +239,34 @@ class ScenarioBuilder:
             stress_type: Type of stress (default: PERCENTAGE)
             underlying: Target underlying (if None, applies to portfolio)
             position_id: Target position (if specified, overrides underlying)
+            relationship_mode: Optional relationship mode for basis-dividend interaction.
+                Can be a BasisDividendRelationshipMode enum or string.
+                Relationship handling is applied during stress application.
+            time_to_maturity: Optional time to maturity in years for relationship handling.
 
         Returns:
             Self for chaining
+
+        Raises:
+            ValueError: If relationship_mode is not a valid mode
         """
         level, target = self._determine_level_target(underlying, position_id)
+        metadata = {}
+
+        if relationship_mode is not None:
+            # Convert enum to string if needed
+            if isinstance(relationship_mode, BasisDividendRelationshipMode):
+                mode_value = relationship_mode.value
+            else:
+                # Validate string value
+                mode_value = BasisDividendRelationshipMode.from_string(relationship_mode).value
+
+            metadata["relationship_mode"] = mode_value
+        if time_to_maturity is not None:
+            metadata["time_to_maturity"] = time_to_maturity
+
         return self.add_stress(
-            "dividend_yield", stress_value, stress_type, level, target
+            "dividend_yield", stress_value, stress_type, level, target, metadata=metadata
         )
 
     def basis_stress(
@@ -248,7 +275,8 @@ class ScenarioBuilder:
         stress_type: StressType = StressType.PERCENTAGE,
         underlying: Optional[str] = None,
         position_id: Optional[str] = None,
-        relationship_mode: Optional[str] = None,
+        relationship_mode: Union[BasisDividendRelationshipMode, str, None] = None,
+        time_to_maturity: Optional[float] = None,
     ) -> "ScenarioBuilder":
         """
         Add a basis stress for futures contracts.
@@ -258,15 +286,33 @@ class ScenarioBuilder:
             stress_type: Type of stress (default: PERCENTAGE)
             underlying: Target underlying (if None, applies to portfolio)
             position_id: Target position (if specified, overrides underlying)
-            relationship_mode: Optional relationship mode ("independent", "auto_adjust_dividend", "auto_adjust_basis")
+            relationship_mode: Optional relationship mode for basis-dividend interaction.
+                Can be a BasisDividendRelationshipMode enum or string.
+                Options: "independent" (default), "auto_adjust_dividend",
+                        "auto_adjust_basis", "synchronized"
+            time_to_maturity: Optional time to maturity in years for relationship handling.
 
         Returns:
             Self for chaining
+
+        Raises:
+            ValueError: If relationship_mode is not a valid mode
         """
         level, target = self._determine_level_target(underlying, position_id)
         metadata = {}
-        if relationship_mode:
-            metadata["relationship_mode"] = relationship_mode
+
+        if relationship_mode is not None:
+            # Convert enum to string if needed
+            if isinstance(relationship_mode, BasisDividendRelationshipMode):
+                mode_value = relationship_mode.value
+            else:
+                # Validate string value
+                mode_value = BasisDividendRelationshipMode.from_string(relationship_mode).value
+
+            metadata["relationship_mode"] = mode_value
+        if time_to_maturity is not None:
+            metadata["time_to_maturity"] = time_to_maturity
+
         return self.add_stress(
             "basis", stress_value, stress_type, level, target, metadata=metadata
         )
@@ -281,6 +327,14 @@ class ScenarioBuilder:
             return StressLevel.UNDERLYING, underlying
         else:
             return StressLevel.PORTFOLIO, None
+
+    def _apply_relationship_modes(self) -> List[Stress]:
+        """
+        Return the current stresses.
+
+        Relationship modes are handled dynamically in the StressApplicator.
+        """
+        return list(self._stresses)
 
     def build(self) -> Scenario:
         """
@@ -298,9 +352,12 @@ class ScenarioBuilder:
         if not self._stresses:
             raise ValueError("At least one stress is required")
 
+        # Apply relationship modes to generate additional stresses
+        final_stresses = self._apply_relationship_modes()
+
         return Scenario(
             name=self._name,
-            stresses=self._stresses,
+            stresses=final_stresses,
             description=self._description,
             metadata=self._metadata,
         )

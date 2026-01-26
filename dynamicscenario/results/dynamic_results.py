@@ -94,11 +94,13 @@ class MarketState:
         volatility: Implied volatility (by underlying)
         rate: Risk-free rate
         div_yield: Dividend yield (by underlying)
+        basis_yield: Basis yield (by underlying)
     """
     spot: Dict[str, float] = field(default_factory=dict)
     volatility: Dict[str, float] = field(default_factory=dict)
     rate: float = 0.0
     div_yield: Dict[str, float] = field(default_factory=dict)
+    basis_yield: Dict[str, float] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -107,6 +109,7 @@ class MarketState:
             'volatility': self.volatility,
             'rate': self.rate,
             'div_yield': self.div_yield,
+            'basis_yield': self.basis_yield,
         }
 
 
@@ -449,6 +452,8 @@ class DynamicScenarioResults:
                         row['volatility'] = result.market_state.volatility[underlying]
                     if underlying in result.market_state.div_yield:
                         row['div_yield'] = result.market_state.div_yield[underlying]
+                    if underlying in result.market_state.basis_yield:
+                        row['basis_yield'] = result.market_state.basis_yield[underlying]
                 else:
                     # Use first underlying
                     if result.market_state.spot:
@@ -456,6 +461,7 @@ class DynamicScenarioResults:
                         row['spot'] = result.market_state.spot[first_und]
                         row['volatility'] = result.market_state.volatility.get(first_und, 0)
                         row['div_yield'] = result.market_state.div_yield.get(first_und, 0)
+                        row['basis_yield'] = result.market_state.basis_yield.get(first_und, 0)
                 
                 row['rate'] = result.market_state.rate
                 data.append(row)
@@ -566,4 +572,3 @@ class DynamicScenarioResults:
             f"days={self.num_days}, "
             f"pnl=${self.total_pnl:,.2f})"
         )
-

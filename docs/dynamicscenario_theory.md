@@ -223,7 +223,7 @@ The **roll-down return** is the return on a bond that rolls down the yield curve
 
 Dynamic scenario engines are implemented for both **equity** and **fixed income** portfolios:
 
-* **Equity engine** (`DynamicScenarioEngine`): Applies day-by-day changes to spot, flat volatility, flat rate, and dividend yield; optionally runs a backtest strategy (e.g., delta-neutral) and charges transaction costs.
+* **Equity engine** (`DynamicScenarioEngine`): Applies day-by-day changes to spot, flat volatility, flat rate, dividend yield (clamped at 0.0 if negative), and basis yield for futures; optionally runs a backtest strategy (e.g., delta-neutral) and charges transaction costs.
 * **FI engine** (`FIDynamicScenarioEngine`): Applies day-by-day rate curve changes (including parallel and simple twist components via the path library); tracks DV01/duration/convexity and optionally performs DV01-based hedging.
 
 ### Scenario Construction

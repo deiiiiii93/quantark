@@ -5,7 +5,7 @@ This module provides an intuitive builder pattern for constructing
 multi-day market evolution scenarios.
 """
 
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict, Any
 from datetime import datetime
 from dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
 from stresstest.stress.stress_types import StressType, StressLevel
@@ -137,6 +137,7 @@ class PathBuilder:
         value: float,
         stress_type: StressType = StressType.PERCENTAGE,
         underlying: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> "PathBuilder":
         """
         Set a parameter change for a specific day.
@@ -147,6 +148,7 @@ class PathBuilder:
             value: Change value
             stress_type: Type of change (default: PERCENTAGE)
             underlying: Optional specific underlying (default: portfolio-wide)
+            metadata: Optional metadata for advanced parameter handling
 
         Returns:
             Self for chaining
@@ -160,6 +162,7 @@ class PathBuilder:
             stress_value=value,
             level=level,
             target=target,
+            metadata=metadata or {},
         )
         self._steps[day_index].add_change(change)
         return self
@@ -486,6 +489,7 @@ class PathBuilder:
         underlying: Optional[str] = None,
         start_day: int = 0,
         end_day: Optional[int] = None,
+        time_to_maturity: Optional[float] = None,
     ) -> "PathBuilder":
         """
         Add a consistent dividend yield trend across days.
@@ -496,6 +500,7 @@ class PathBuilder:
             underlying: Optional specific underlying
             start_day: First day to apply
             end_day: Last day to apply
+            time_to_maturity: Optional time to maturity in years for relationship handling
 
         Returns:
             Self for chaining
@@ -507,10 +512,16 @@ class PathBuilder:
             underlying=underlying,
             start_day=start_day,
             end_day=end_day,
+            metadata=(
+                {"time_to_maturity": time_to_maturity} if time_to_maturity is not None else None
+            ),
         )
 
     def div_yield_values(
-        self, values: List[float], underlying: Optional[str] = None
+        self,
+        values: List[float],
+        underlying: Optional[str] = None,
+        time_to_maturity: Optional[float] = None,
     ) -> "PathBuilder":
         """
         Set specific dividend yield values for each day.
@@ -518,11 +529,19 @@ class PathBuilder:
         Args:
             values: List of dividend yield values (one per day)
             underlying: Optional specific underlying
+            time_to_maturity: Optional time to maturity in years for relationship handling
 
         Returns:
             Self for chaining
         """
-        return self._apply_values("dividend_yield", values, underlying)
+        return self._apply_values(
+            "dividend_yield",
+            values,
+            underlying,
+            metadata=(
+                {"time_to_maturity": time_to_maturity} if time_to_maturity is not None else None
+            ),
+        )
 
     def basis_stress(
         self,
@@ -531,6 +550,7 @@ class PathBuilder:
         underlying: Optional[str] = None,
         start_day: int = 0,
         end_day: Optional[int] = None,
+        time_to_maturity: Optional[float] = None,
     ) -> "PathBuilder":
         """
         Add a consistent basis stress trend across days.
@@ -541,6 +561,7 @@ class PathBuilder:
             underlying: Optional specific underlying
             start_day: First day to apply (default: 0)
             end_day: Last day to apply (default: all days)
+            time_to_maturity: Optional time to maturity in years for relationship handling
 
         Returns:
             Self for chaining
@@ -552,10 +573,16 @@ class PathBuilder:
             underlying=underlying,
             start_day=start_day,
             end_day=end_day,
+            metadata=(
+                {"time_to_maturity": time_to_maturity} if time_to_maturity is not None else None
+            ),
         )
 
     def basis_values(
-        self, values: List[float], underlying: Optional[str] = None
+        self,
+        values: List[float],
+        underlying: Optional[str] = None,
+        time_to_maturity: Optional[float] = None,
     ) -> "PathBuilder":
         """
         Set specific basis values for each day.
@@ -563,11 +590,19 @@ class PathBuilder:
         Args:
             values: List of basis values (one per day)
             underlying: Optional specific underlying
+            time_to_maturity: Optional time to maturity in years for relationship handling
 
         Returns:
             Self for chaining
         """
-        return self._apply_values("basis", values, underlying)
+        return self._apply_values(
+            "basis",
+            values,
+            underlying,
+            metadata=(
+                {"time_to_maturity": time_to_maturity} if time_to_maturity is not None else None
+            ),
+        )
 
     def add_change(self, day_index: int, change: ParameterChange) -> "PathBuilder":
         """
@@ -592,6 +627,7 @@ class PathBuilder:
         underlying: Optional[str],
         start_day: int,
         end_day: Optional[int],
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> "PathBuilder":
         """Apply a trend to a parameter across days."""
         if end_day is None:
@@ -609,13 +645,18 @@ class PathBuilder:
                 stress_value=daily_change,
                 level=level,
                 target=target,
+                metadata=metadata or {},
             )
             self._steps[day].add_change(change)
 
         return self
 
     def _apply_values(
-        self, parameter: str, values: List[float], underlying: Optional[str]
+        self,
+        parameter: str,
+        values: List[float],
+        underlying: Optional[str],
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> "PathBuilder":
         """Apply specific values to a parameter."""
         if len(values) != self._num_days:
@@ -632,6 +673,7 @@ class PathBuilder:
                 stress_value=value,
                 level=level,
                 target=target,
+                metadata=metadata or {},
             )
             self._steps[day].add_change(change)
 

@@ -4,6 +4,7 @@ Configuration for dynamic scenario analysis.
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
+from stresstest.stress.stress_types import BasisDividendRelationshipMode
 from util.exceptions import ValidationError
 
 
@@ -49,6 +50,9 @@ class DynamicScenarioConfig:
     
     # Additional settings
     metadata: Dict[str, Any] = field(default_factory=dict)
+    basis_dividend_relationship_mode: BasisDividendRelationshipMode = (
+        BasisDividendRelationshipMode.INDEPENDENT
+    )
     
     def __post_init__(self):
         """Validate configuration."""
@@ -74,6 +78,20 @@ class DynamicScenarioConfig:
                     f"Invalid export format '{fmt}'. "
                     f"Valid formats: {valid_formats}"
                 )
+
+        if isinstance(self.basis_dividend_relationship_mode, str):
+            self.basis_dividend_relationship_mode = (
+                BasisDividendRelationshipMode.from_string(
+                    self.basis_dividend_relationship_mode
+                )
+            )
+        elif not isinstance(
+            self.basis_dividend_relationship_mode, BasisDividendRelationshipMode
+        ):
+            raise ValidationError(
+                "basis_dividend_relationship_mode must be a BasisDividendRelationshipMode "
+                "or valid string."
+            )
     
     def get_summary(self) -> Dict[str, Any]:
         """
@@ -92,6 +110,7 @@ class DynamicScenarioConfig:
             'generate_report': self.generate_report,
             'include_charts': self.include_charts,
             'metadata': self.metadata,
+            'basis_dividend_relationship_mode': self.basis_dividend_relationship_mode.value,
         }
     
     def __repr__(self) -> str:
@@ -101,4 +120,3 @@ class DynamicScenarioConfig:
             f"formats={self.export_formats}, "
             f"output_dir='{self.output_dir}')"
         )
-

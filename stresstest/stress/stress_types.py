@@ -73,7 +73,7 @@ class StressLevel(Enum):
 class StressableParameter(Enum):
     """
     Parameters that can be stressed in a PricingEnvironment.
-    
+
     This is a reference enum - the actual stressing is flexible and can
     target any parameter in PricingEnvironment.
     """
@@ -81,11 +81,62 @@ class StressableParameter(Enum):
     VOLATILITY = "volatility"
     RATE = "rate"
     DIVIDEND_YIELD = "dividend_yield"
-    
+    BASIS = "basis"
+
     # For more complex scenarios
     VOL_SURFACE = "vol_surface"
     RATE_CURVE = "rate_curve"
-    
+
     def __str__(self):
         return self.value
 
+
+class BasisDividendRelationshipMode(Enum):
+    """
+    Defines how basis and dividend yield stresses interact.
+
+    In equity index futures, the annualized basis yield is tied to cost of carry:
+        F = S * exp((r - q + b) * T)
+    where:
+        r = risk-free rate
+        q = dividend yield
+        b = basis yield (extra carry component)
+
+    Attributes:
+        INDEPENDENT: Basis and dividend yield are stressed independently (default)
+        AUTO_ADJUST_DIVIDEND: When basis is stressed, automatically adjust dividend
+                              yield to maintain carry arbitrage relationship
+        AUTO_ADJUST_BASIS: When dividend yield is stressed, automatically adjust
+                          basis to maintain carry arbitrage relationship
+        SYNCHRONIZED: Apply the same relative stress to both basis and dividend yield
+    """
+    INDEPENDENT = "independent"
+    AUTO_ADJUST_DIVIDEND = "auto_adjust_dividend"
+    AUTO_ADJUST_BASIS = "auto_adjust_basis"
+    SYNCHRONIZED = "synchronized"
+
+    def __str__(self):
+        return self.value
+
+    @classmethod
+    def from_string(cls, value: str) -> "BasisDividendRelationshipMode":
+        """
+        Convert string to enum value, with validation.
+
+        Args:
+            value: String representation of the mode
+
+        Returns:
+            Corresponding enum value
+
+        Raises:
+            ValueError: If value is not a valid mode
+        """
+        try:
+            return cls(value)
+        except ValueError:
+            valid_modes = [m.value for m in cls]
+            raise ValueError(
+                f"Invalid relationship mode '{value}'. "
+                f"Must be one of: {valid_modes}"
+            )

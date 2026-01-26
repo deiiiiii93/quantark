@@ -172,7 +172,7 @@ QuantArk 通过 `PricingEnvironment` 的参数适配器来施加冲击。默认�
 *   **volatility / vol**：仅支持平坦波动率曲面（`FlatVolSurface`）。
 *   **rate**：支持平坦利率曲线与插值曲线；以平行移动方式施加。
 *   **key_rate**：需要 `tenor_bucket` 元数据（如 "5Y"）；在插值曲线上对指定期限桶施加变化（平坦曲线会回退为平行移动）。
-*   **dividend_yield / div_yield / dividend**：支持平坦/连续股息率；冲击后股息率不能为负。
+*   **dividend_yield / div_yield / dividend**：支持平坦/连续股息率；若冲击后为负则钳制为 0.0。
 *   **spread**：当前映射为与利率冲击相同的"平行移动代理"。
 
 若参数未被支持，引擎会报错；也可注册自定义适配器以扩展可冲击的风险因子。

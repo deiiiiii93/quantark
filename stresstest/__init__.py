@@ -44,7 +44,11 @@ from stresstest.engine import StressTestEngine
 from stresstest.fi import FIStressConfig, FIStressEngine
 from stresstest.scenario.scenario import Scenario, Stress
 from stresstest.scenario.scenario_builder import ScenarioBuilder
-from stresstest.stress.stress_types import StressType, StressLevel
+from stresstest.stress.stress_types import (
+    StressType,
+    StressLevel,
+    BasisDividendRelationshipMode,
+)
 
 __version__ = "0.1.0"
 
@@ -58,5 +62,6 @@ __all__ = [
     "ScenarioBuilder",
     "StressType",
     "StressLevel",
+    "BasisDividendRelationshipMode",
 ]
 

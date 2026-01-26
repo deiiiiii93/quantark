@@ -26,6 +26,7 @@ class ParameterChange:
         stress_value: Magnitude of change
         level: Level to apply (PORTFOLIO, UNDERLYING, POSITION)
         target: Target identifier if level is UNDERLYING or POSITION
+        metadata: Optional metadata for advanced parameter handling
 
     Examples:
         >>> # Spot up 2% for entire portfolio
@@ -41,6 +42,7 @@ class ParameterChange:
     stress_value: float
     level: StressLevel = StressLevel.PORTFOLIO
     target: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """Validate parameter change."""
@@ -58,6 +60,7 @@ class ParameterChange:
             "dividend_yield",
             "div_yield",
             "dividend",
+            "basis",
         ]
         # FI/rate parameters
         rate_params = ["rate", "rate_parallel", "rate_short", "rate_long", "rate_curve"]
@@ -77,6 +80,9 @@ class ParameterChange:
 
         if self.level == StressLevel.PORTFOLIO and self.target:
             raise ValidationError("Target should not be specified for PORTFOLIO level")
+
+        if not isinstance(self.metadata, dict):
+            raise ValidationError("ParameterChange metadata must be a dictionary")
 
     def apply(self, current_value: float) -> float:
         """
@@ -98,6 +104,7 @@ class ParameterChange:
             "stress_value": self.stress_value,
             "level": self.level.value,
             "target": self.target,
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -109,6 +116,7 @@ class ParameterChange:
             stress_value=data["stress_value"],
             level=StressLevel(data.get("level", "portfolio")),
             target=data.get("target"),
+            metadata=data.get("metadata", {}),
         )
 
     def __repr__(self) -> str:

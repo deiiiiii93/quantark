@@ -12,9 +12,21 @@ from copy import deepcopy
 
 from portfolio import Portfolio
 from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from param import (
+    SpotQuote,
+    FlatVolSurface,
+    FlatRateCurve,
+    ContinuousDividendYield,
+    FlatBasisYield,
+    TermStructureDividendYield,
+    TermStructureBasisYield,
+)
+from param.basis.basis_yield import (
+    calculate_basis_from_rate_dividend,
+    calculate_dividend_from_rate_basis,
+)
 from asset.equity.riskmeasures import GreeksCalculator
-from asset.equity.product.deltaone import SpotInstrument
+from asset.equity.product.deltaone import SpotInstrument, Futures
 from asset.equity.engine.analytical import DeltaOneEngine
 
 from backtest.strategy.base_strategy import BaseStrategy
@@ -26,7 +38,11 @@ from dynamicscenario.results.dynamic_results import (
     DynamicScenarioResults, DayResult, PositionSnapshot, 
     TradeSnapshot, MarketState
 )
-from stresstest.stress.stress_types import StressType, StressLevel
+from stresstest.stress.stress_types import (
+    StressType,
+    StressLevel,
+    BasisDividendRelationshipMode,
+)
 from util.exceptions import ValidationError
 
 
@@ -285,6 +301,7 @@ class DynamicScenarioEngine:
                 spot_quote=deepcopy(env.spot_quote) if env.spot_quote else None,
                 vol_surface=deepcopy(env.vol_surface) if env.vol_surface else None,
                 div_yield=deepcopy(env.div_yield) if env.div_yield else None,
+                basis_yield=deepcopy(env.basis_yield) if env.basis_yield else None,
                 day_count_convention=env.day_count_convention,
                 bus_days_in_year=env.bus_days_in_year,
             )
@@ -309,21 +326,27 @@ class DynamicScenarioEngine:
                 for underlying in portfolio.pricing_environments.keys():
                     self._apply_parameter_change(
                         portfolio.pricing_environments[underlying],
-                        change
+                        change,
+                        portfolio,
+                        underlying,
                     )
             elif change.level == StressLevel.UNDERLYING:
                 # Apply to specific underlying
                 if change.target in portfolio.pricing_environments:
                     self._apply_parameter_change(
                         portfolio.pricing_environments[change.target],
-                        change
+                        change,
+                        portfolio,
+                        change.target,
                     )
             # POSITION level would need position-specific environments
     
     def _apply_parameter_change(
-        self, 
-        env: PricingEnvironment, 
-        change: ParameterChange
+        self,
+        env: PricingEnvironment,
+        change: ParameterChange,
+        portfolio: Portfolio,
+        underlying: str,
     ) -> None:
         """Apply a single parameter change to a pricing environment."""
         param = change.parameter.lower()
@@ -367,6 +390,33 @@ class DynamicScenarioEngine:
                 if new_value < 0:
                     new_value = 0.0
                 env.div_yield = ContinuousDividendYield(div_yield=new_value)
+            time_to_maturity = self._infer_time_to_maturity(
+                change, portfolio, underlying, env
+            )
+            self._apply_basis_dividend_relationship(
+                env,
+                change,
+                source_param="dividend",
+                time_to_maturity=time_to_maturity,
+            )
+
+        elif param == "basis":
+            time_to_maturity = self._infer_time_to_maturity(
+                change, portfolio, underlying, env
+            )
+            current = (
+                env.basis_yield.get_basis_yield(time_to_maturity)
+                if env.basis_yield
+                else 0.0
+            )
+            new_value = change.apply(current)
+            env.basis_yield = FlatBasisYield(basis_yield=new_value)
+            self._apply_basis_dividend_relationship(
+                env,
+                change,
+                source_param="basis",
+                time_to_maturity=time_to_maturity,
+            )
     
     def _get_market_data(self, portfolio: Portfolio) -> Dict[str, float]:
         """Get current market data from portfolio for strategy."""
@@ -379,6 +429,7 @@ class DynamicScenarioEngine:
             'volatility': env.vol_surface.volatility if isinstance(env.vol_surface, FlatVolSurface) else 0.0,
             'rate': env.rate_curve.get_rate(1.0) if env.rate_curve else 0.0,
             'div_yield': env.div_yield.div_yield if isinstance(env.div_yield, ContinuousDividendYield) else 0.0,
+            'basis_yield': env.basis_yield.get_basis_yield(1.0) if env.basis_yield else 0.0,
         }
     
     def _execute_hedge(
@@ -507,6 +558,7 @@ class DynamicScenarioEngine:
         spot = {}
         volatility = {}
         div_yield = {}
+        basis_yield = {}
         rate = 0.0
         
         for underlying, env in portfolio.pricing_environments.items():
@@ -518,6 +570,9 @@ class DynamicScenarioEngine:
             
             if isinstance(env.div_yield, ContinuousDividendYield):
                 div_yield[underlying] = env.div_yield.div_yield
+
+            if env.basis_yield is not None:
+                basis_yield[underlying] = env.basis_yield.get_basis_yield(1.0)
             
             # Use rate from first environment
             if env.rate_curve and rate == 0.0:
@@ -528,8 +583,120 @@ class DynamicScenarioEngine:
             volatility=volatility,
             rate=rate,
             div_yield=div_yield,
+            basis_yield=basis_yield,
         )
+
+    def _apply_basis_dividend_relationship(
+        self,
+        env: PricingEnvironment,
+        change: ParameterChange,
+        source_param: str,
+        time_to_maturity: float,
+    ) -> None:
+        """Apply basis-dividend relationship adjustments based on config."""
+        relationship_mode = self.config.basis_dividend_relationship_mode
+        if time_to_maturity <= 0:
+            raise ValidationError(
+                f"time_to_maturity must be positive, got {time_to_maturity}"
+            )
+
+        rate = env.rate_curve.get_rate(time_to_maturity)
+
+        if source_param == "basis":
+            if relationship_mode == BasisDividendRelationshipMode.AUTO_ADJUST_DIVIDEND:
+                basis_val = env.basis_yield.get_basis_yield(time_to_maturity)
+                new_div = calculate_dividend_from_rate_basis(rate, basis_val)
+                if isinstance(env.div_yield, TermStructureDividendYield):
+                    current_div = env.div_yield.get_yield(time_to_maturity)
+                    shift = new_div - current_div
+                    new_yields = [max(0.0, float(y) + shift) for y in env.div_yield.yields]
+                    env.div_yield = TermStructureDividendYield(
+                        times=list(env.div_yield.times), yields=new_yields
+                    )
+                else:
+                    if new_div < 0:
+                        new_div = 0.0
+                    env.div_yield = ContinuousDividendYield(div_yield=new_div)
+            elif relationship_mode == BasisDividendRelationshipMode.SYNCHRONIZED:
+                current_div = env.div_yield.get_yield(time_to_maturity) if env.div_yield else 0.0
+                new_div = change.apply(current_div)
+                if isinstance(env.div_yield, TermStructureDividendYield):
+                    shift = new_div - current_div
+                    new_yields = [max(0.0, float(y) + shift) for y in env.div_yield.yields]
+                    env.div_yield = TermStructureDividendYield(
+                        times=list(env.div_yield.times), yields=new_yields
+                    )
+                else:
+                    if new_div < 0:
+                        new_div = 0.0
+                    env.div_yield = ContinuousDividendYield(div_yield=new_div)
+        elif source_param == "dividend":
+            if relationship_mode == BasisDividendRelationshipMode.AUTO_ADJUST_BASIS:
+                div_val = env.div_yield.get_yield(time_to_maturity) if env.div_yield else 0.0
+                new_basis = calculate_basis_from_rate_dividend(rate, div_val)
+                if isinstance(env.basis_yield, TermStructureBasisYield):
+                    current_basis = env.basis_yield.get_basis_yield(time_to_maturity)
+                    shift = new_basis - current_basis
+                    new_yields = [float(y) + shift for y in env.basis_yield.yields]
+                    if any(abs(y) > 0.50 for y in new_yields):
+                        raise ValidationError(
+                            "Stressed term-structure basis yields must be within +/-50%."
+                        )
+                    env.basis_yield = TermStructureBasisYield(
+                        times=list(env.basis_yield.times), yields=new_yields
+                    )
+                else:
+                    env.basis_yield = FlatBasisYield(basis_yield=new_basis)
+            elif relationship_mode == BasisDividendRelationshipMode.SYNCHRONIZED:
+                current_basis = env.basis_yield.get_basis_yield(time_to_maturity) if env.basis_yield else 0.0
+                new_basis = change.apply(current_basis)
+                if isinstance(env.basis_yield, TermStructureBasisYield):
+                    shift = new_basis - current_basis
+                    new_yields = [float(y) + shift for y in env.basis_yield.yields]
+                    if any(abs(y) > 0.50 for y in new_yields):
+                        raise ValidationError(
+                            "Stressed term-structure basis yields must be within +/-50%."
+                        )
+                    env.basis_yield = TermStructureBasisYield(
+                        times=list(env.basis_yield.times), yields=new_yields
+                    )
+                else:
+                    env.basis_yield = FlatBasisYield(basis_yield=new_basis)
+
+    def _infer_time_to_maturity(
+        self,
+        change: ParameterChange,
+        portfolio: Portfolio,
+        underlying: str,
+        env: PricingEnvironment,
+    ) -> float:
+        """Infer time to maturity from metadata or futures positions."""
+        if change.metadata and "time_to_maturity" in change.metadata:
+            time_to_maturity = float(change.metadata.get("time_to_maturity", 1.0))
+            if time_to_maturity <= 0:
+                raise ValidationError(
+                    f"time_to_maturity must be positive, got {time_to_maturity}"
+                )
+            return time_to_maturity
+
+        if hasattr(portfolio, "get_positions_by_underlying"):
+            positions = portfolio.get_positions_by_underlying(underlying)
+        else:
+            positions = [
+                pos for pos in portfolio.positions.values()
+                if pos.underlying == underlying
+            ]
+        for position in positions:
+            product = position.product
+            if isinstance(product, Futures):
+                try:
+                    time_to_maturity = product.get_maturity(env)
+                except Exception:
+                    continue
+                if time_to_maturity is not None and time_to_maturity > 0:
+                    return float(time_to_maturity)
+
+        return 1.0
     
     def __repr__(self) -> str:
         return f"DynamicScenarioEngine(config={self.config})"
-
