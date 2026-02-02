@@ -33,6 +33,10 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     - V1 surface uses post-KI KO schedule
     """
 
+    # Override class attributes for product type checking
+    _supported_product_type: type = KnockOutResetSnowballOption
+    _solver_name: str = "KOResetSnowballPDESolver"
+
     def __init__(self, params=None):
         super().__init__(params=params)
         self._pre_ko_records_cache: "OrderedDict[Tuple, List[ResolvedObservationRecord]]" = (
@@ -48,35 +52,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._has_pre_terminal_ko: bool = False
         self._has_post_terminal_ko: bool = False
 
-    def price(
-        self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment
-    ) -> float:
-        if not isinstance(product, KnockOutResetSnowballOption):
-            raise PricingError(
-                "KOResetSnowballPDESolver only supports KnockOutResetSnowballOption, "
-                f"got {type(product).__name__}"
-            )
-        if pricing_env is None:
-            raise ValidationError(
-                "PricingEnvironment is required for KOResetSnowballPDESolver"
-            )
-
-        self._validate_product(product)
-
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        if tau <= 0 or is_zero(tau):
-            return self._calculate_terminal_value(product, spot, pricing_env)
-
-        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
-            product, spot, pricing_env
-        )
-        if knocked_out_at_valuation:
-            return self._get_immediate_ko_payoff(product, pricing_env)
-
-        result = self._solve(product, pricing_env)
-        return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+    # price() is inherited from SnowballPDESolver using _check_product_type()
 
     def calculate_event_stats(
         self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment
@@ -213,11 +189,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._post_ko_terminal_record = None
         self._has_post_terminal_ko = False
 
-        post_records = self._get_cached_post_ko_records(pricing_env, product)
-        post_records = [
-            rec for rec in post_records if 0.0 <= rec.observation_time <= tau
-        ]
-        post_records.sort(key=lambda rec: float(rec.observation_time))
+        post_records = self._filter_observations_by_tau(
+            self._get_cached_post_ko_records(pricing_env, product), tau
+        )
 
         for rec in post_records:
             obs_time = rec.observation_time
@@ -476,10 +450,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
-        if product.is_reverse:
-            mask = s_vec <= barrier
-        else:
-            mask = s_vec >= barrier
+        mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
         grid[mask, t_idx] = cashflow_value
 
     def _apply_terminal_ko_single(
@@ -499,10 +470,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
-        if product.is_reverse:
-            mask = s_vec <= barrier
-        else:
-            mask = s_vec >= barrier
+        mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
         grid[mask, -1] = cashflow_value
 
     def __repr__(self) -> str:

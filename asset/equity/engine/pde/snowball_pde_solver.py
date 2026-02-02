@@ -56,6 +56,10 @@ class SnowballPDESolver(BasePDESolver):
         5. Interpolate final price from V0 (or V1 if already knocked-in)
     """
 
+    # Subclasses can override this to specify their supported product type
+    _supported_product_type: type = SnowballOption
+    _solver_name: str = "SnowballPDESolver"
+
     def __init__(
         self, params: Optional[PDEParams] = None, enable_profiling: bool = False
     ):
@@ -248,6 +252,22 @@ class SnowballPDESolver(BasePDESolver):
             spot_log=spot_log,
         )
 
+    def _check_product_type(self, product: BaseEquityProduct) -> None:
+        """
+        Check that the product is of the supported type for this solver.
+
+        Subclasses can override _supported_product_type and _solver_name class
+        attributes to customize the type check.
+
+        Raises:
+            PricingError: If product is not of the supported type
+        """
+        if not isinstance(product, self._supported_product_type):
+            raise PricingError(
+                f"{self._solver_name} only supports {self._supported_product_type.__name__}, "
+                f"got {type(product).__name__}"
+            )
+
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
@@ -265,15 +285,11 @@ class SnowballPDESolver(BasePDESolver):
             PricingError: If product is not a SnowballOption
             ValidationError: If product configuration is incompatible with PDE
         """
-        if not isinstance(product, SnowballOption):
-            raise PricingError(
-                f"SnowballPDESolver only supports SnowballOption, "
-                f"got {type(product).__name__}"
-            )
+        self._check_product_type(product)
 
         if pricing_env is None:
             raise ValidationError(
-                "PricingEnvironment is required for SnowballPDESolver"
+                f"PricingEnvironment is required for {self._solver_name}"
             )
 
         # Validate PDE compatibility
@@ -351,11 +367,11 @@ class SnowballPDESolver(BasePDESolver):
         )
         num_x, num_t = len(x_vec), len(t_vec)
 
-        ko_records = product.resolve_ko_observations(pricing_env)
+        ko_records = self._filter_observations_by_tau(
+            product.resolve_ko_observations(pricing_env), tau
+        )
         if not ko_records:
             return None
-        ko_records = [rec for rec in ko_records if 0.0 <= rec.observation_time <= tau]
-        ko_records.sort(key=lambda rec: float(rec.observation_time))
         n_ko = len(ko_records)
 
         # Map time index -> ko record index.
@@ -391,10 +407,7 @@ class SnowballPDESolver(BasePDESolver):
         if terminal_ko_idx is not None:
             rec = ko_records[terminal_ko_idx]
             barrier = float(rec.barrier) if rec.barrier is not None else 0.0
-            if product.is_reverse:
-                mask_ko = s_vec <= barrier
-            else:
-                mask_ko = s_vec >= barrier
+            mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
             v0_next[mask_ko, :] = 0.0
             v1_next[mask_ko, :] = 0.0
@@ -412,10 +425,7 @@ class SnowballPDESolver(BasePDESolver):
         )
         if is_terminal_ki:
             ki_barrier = float(self._ki_barrier)
-            if product.is_reverse:
-                mask_ki = s_vec >= ki_barrier
-            else:
-                mask_ki = s_vec <= ki_barrier
+            mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
             v0_next[mask_ki, :] = v1_next[mask_ki, :]
 
         # Operator coefficients and banded solver setup
@@ -504,10 +514,7 @@ class SnowballPDESolver(BasePDESolver):
             if ko_idx is not None:
                 rec = ko_records[ko_idx]
                 barrier = float(rec.barrier) if rec.barrier is not None else 0.0
-                if product.is_reverse:
-                    mask_ko = s_vec <= barrier
-                else:
-                    mask_ko = s_vec >= barrier
+                mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
                 # Zero all event surfaces in KO region, then set the KO_i indicator.
                 v0_cur[mask_ko, :] = 0.0
@@ -526,10 +533,7 @@ class SnowballPDESolver(BasePDESolver):
                 should_apply_ki = self._ki_continuous or j in self._ki_observation_indices
                 if should_apply_ki:
                     ki_barrier = float(self._ki_barrier)
-                    if product.is_reverse:
-                        mask_ki = s_vec >= ki_barrier
-                    else:
-                        mask_ki = s_vec <= ki_barrier
+                    mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
                     v0_cur[mask_ki, :] = v1_cur[mask_ki, :]
 
             # Enforce simple Neumann-like boundary (zero slope) for stability.
@@ -604,15 +608,11 @@ class SnowballPDESolver(BasePDESolver):
             PricingError: If product is not a SnowballOption
             ValidationError: If product configuration is incompatible with PDE
         """
-        if not isinstance(product, SnowballOption):
-            raise PricingError(
-                f"SnowballPDESolver only supports SnowballOption, "
-                f"got {type(product).__name__}"
-            )
+        self._check_product_type(product)
 
         if pricing_env is None:
             raise ValidationError(
-                "PricingEnvironment is required for SnowballPDESolver"
+                f"PricingEnvironment is required for {self._solver_name}"
             )
 
         # Validate PDE compatibility
@@ -675,6 +675,66 @@ class SnowballPDESolver(BasePDESolver):
                     "Continuous KI monitoring requires scalar ki_barrier. "
                     "Use discrete monitoring for time-varying KI barriers."
                 )
+
+    @staticmethod
+    def _filter_observations_by_tau(
+        records: List[ResolvedObservationRecord], tau: float
+    ) -> List[ResolvedObservationRecord]:
+        """
+        Filter and sort observation records within [0, tau] range.
+
+        This utility consolidates the repeated observation filtering pattern.
+
+        Args:
+            records: List of resolved observation records
+            tau: Time to maturity (upper bound for filtering)
+
+        Returns:
+            Sorted list of records with observation_time in [0, tau]
+        """
+        filtered = [
+            rec for rec in records
+            if rec.observation_time is not None and 0.0 <= rec.observation_time <= tau
+        ]
+        filtered.sort(key=lambda rec: float(rec.observation_time))
+        return filtered
+
+    @staticmethod
+    def _get_barrier_mask(
+        s_vec: np.ndarray, barrier: float, is_reverse: bool, is_up_barrier: bool = True
+    ) -> np.ndarray:
+        """
+        Get boolean mask for grid points that breach a barrier.
+
+        This helper consolidates the barrier mask logic used throughout the solver.
+
+        Args:
+            s_vec: Array of spot prices on the grid
+            barrier: Barrier level
+            is_reverse: True for reverse snowball (inverts barrier direction)
+            is_up_barrier: True for UP barrier (KO), False for DOWN barrier (KI)
+
+        Returns:
+            Boolean mask where True indicates barrier is breached
+
+        Logic:
+            - Standard UP KO: mask = s_vec >= barrier
+            - Reverse UP KO: mask = s_vec <= barrier (inverted)
+            - Standard DOWN KI: mask = s_vec <= barrier
+            - Reverse DOWN KI: mask = s_vec >= barrier (inverted)
+        """
+        if is_up_barrier:
+            # UP barrier (typically KO)
+            if is_reverse:
+                return s_vec <= barrier  # DOWN for reverse
+            else:
+                return s_vec >= barrier  # UP for standard
+        else:
+            # DOWN barrier (typically KI)
+            if is_reverse:
+                return s_vec >= barrier  # UP for reverse
+            else:
+                return s_vec <= barrier  # DOWN for standard
 
     @staticmethod
     def _record_is_non_negative_time(record: ResolvedObservationRecord) -> bool:
@@ -1022,13 +1082,8 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
-        # Apply to breached region
-        if product.is_reverse:
-            # DOWN KO for reverse
-            mask = s_vec <= barrier
-        else:
-            # UP KO for standard
-            mask = s_vec >= barrier
+        # Apply to breached region (KO is an UP barrier)
+        mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
         grid_v0[mask, -1] = cashflow_value
         grid_v1[mask, -1] = cashflow_value
@@ -1287,16 +1342,7 @@ class SnowballPDESolver(BasePDESolver):
                 and product.payoff_config.call_rebate_enabled
                 and product.payoff_config.call_strike is not None
             ):
-                tau_to_maturity = tau
-                r = pricing_env.get_rate(tau_to_maturity) if tau_to_maturity > 0 else 0.0
-                q = (
-                    pricing_env.get_div_yield(tau_to_maturity)
-                    if tau_to_maturity > 0
-                    else 0.0
-                )
-                df = np.exp(-r * tau_to_maturity) if tau_to_maturity > 0 else 1.0
-                df_div = np.exp(-q * tau_to_maturity) if tau_to_maturity > 0 else 1.0
-
+                df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
                 participation = (
                     product.payoff_config.call_participation_rate
                     * product.contract_multiplier
@@ -1350,16 +1396,7 @@ class SnowballPDESolver(BasePDESolver):
                 self.params.boundary_mode == "asymptotic"
                 and product.payoff_config.protection_type == ProtectionType.NONE
             ):
-                tau_to_maturity = tau
-                r = pricing_env.get_rate(tau_to_maturity) if tau_to_maturity > 0 else 0.0
-                q = (
-                    pricing_env.get_div_yield(tau_to_maturity)
-                    if tau_to_maturity > 0
-                    else 0.0
-                )
-                df = np.exp(-r * tau_to_maturity) if tau_to_maturity > 0 else 1.0
-                df_div = np.exp(-q * tau_to_maturity) if tau_to_maturity > 0 else 1.0
-
+                df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
                 effective_strike = strike
                 effective_participation = participation
                 airbag = product.airbag_config
@@ -1392,16 +1429,7 @@ class SnowballPDESolver(BasePDESolver):
             # For very high S, reverse payoff depends on protection type.
             protection = product.payoff_config.protection_type
             if protection == ProtectionType.NONE:
-                tau_to_maturity = tau
-                r = pricing_env.get_rate(tau_to_maturity) if tau_to_maturity > 0 else 0.0
-                q = (
-                    pricing_env.get_div_yield(tau_to_maturity)
-                    if tau_to_maturity > 0
-                    else 0.0
-                )
-                df = np.exp(-r * tau_to_maturity) if tau_to_maturity > 0 else 1.0
-                df_div = np.exp(-q * tau_to_maturity) if tau_to_maturity > 0 else 1.0
-
+                df, df_div = self._get_asymptotic_discount_factors(pricing_env, tau)
                 participation = product.payoff_config.participation_rate
                 effective_strike = strike
                 airbag = product.airbag_config
@@ -1496,13 +1524,8 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
-        # Determine breached region
-        if product.is_reverse:
-            # DOWN KO for reverse
-            mask = s_vec <= barrier
-        else:
-            # UP KO for standard
-            mask = s_vec >= barrier
+        # Determine breached region (KO is an UP barrier)
+        mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
         # Apply to both surfaces
         grid_v0[mask, t_idx] = cashflow_value
@@ -1524,13 +1547,8 @@ class SnowballPDESolver(BasePDESolver):
         """
         ki_barrier = self._ki_barrier
 
-        # Determine breached region
-        if product.is_reverse:
-            # UP KI for reverse
-            mask = s_vec >= ki_barrier
-        else:
-            # DOWN KI for standard
-            mask = s_vec <= ki_barrier
+        # Determine breached region (KI is a DOWN barrier)
+        mask = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
 
         # V0 transitions to V1 in breached region
         grid_v0[mask, t_idx] = grid_v1[mask, t_idx]
@@ -1593,6 +1611,31 @@ class SnowballPDESolver(BasePDESolver):
         df_end = pricing_env.get_discount_factor(end_time)
         df_start = pricing_env.get_discount_factor(start_time)
         return float(safe_divide(df_end, df_start, fallback=1.0))
+
+    @staticmethod
+    def _get_asymptotic_discount_factors(
+        pricing_env: PricingEnvironment, tau_to_maturity: float
+    ) -> Tuple[float, float]:
+        """
+        Get risk-free and dividend discount factors for asymptotic boundary conditions.
+
+        This helper consolidates the repeated pattern of computing discount factors
+        for boundary conditions when using asymptotic mode.
+
+        Args:
+            pricing_env: Pricing environment with rate curves
+            tau_to_maturity: Time to maturity
+
+        Returns:
+            Tuple of (risk_free_df, dividend_df)
+        """
+        if tau_to_maturity <= 0:
+            return 1.0, 1.0
+        r = pricing_env.get_rate(tau_to_maturity)
+        q = pricing_env.get_div_yield(tau_to_maturity)
+        df = np.exp(-r * tau_to_maturity)
+        df_div = np.exp(-q * tau_to_maturity)
+        return float(df), float(df_div)
 
     def _cashflow_value_at_time(
         self,

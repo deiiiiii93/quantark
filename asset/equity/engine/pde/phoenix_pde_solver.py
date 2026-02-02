@@ -32,6 +32,10 @@ class PhoenixPDESolver(SnowballPDESolver):
     observation times based on the coupon barrier.
     """
 
+    # Override class attributes for product type checking
+    _supported_product_type: type = PhoenixOption
+    _solver_name: str = "PhoenixPDESolver"
+
     def __init__(self, params=None):
         super().__init__(params=params)
         self._coupon_observation_indices: Dict[int, int] = {}
@@ -39,86 +43,10 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._coupon_amounts: np.ndarray = np.array([])
         self._coupon_cumulative: np.ndarray = np.array([])
 
-    def price(
-        self, product: PhoenixOption, pricing_env: PricingEnvironment
-    ) -> float:
-        if not isinstance(product, PhoenixOption):
-            raise PricingError(
-                f"PhoenixPDESolver only supports PhoenixOption, got {type(product).__name__}"
-            )
-        if pricing_env is None:
-            raise ValidationError(
-                "PricingEnvironment is required for PhoenixPDESolver"
-            )
+    # price() and calculate_greeks() are inherited from SnowballPDESolver
+    # The _check_product_type() method uses _supported_product_type to validate
 
-        self._validate_product(product)
-
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-        if tau <= 0 or is_zero(tau):
-            return self._calculate_terminal_value(product, spot, pricing_env)
-
-        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
-            product, spot, pricing_env
-        )
-        if knocked_out_at_valuation:
-            return self._get_immediate_ko_payoff(product, pricing_env)
-
-        result = self._solve(product, pricing_env)
-        return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
-
-    def calculate_greeks(
-        self, product: PhoenixOption, pricing_env: PricingEnvironment
-    ) -> Dict[str, float]:
-        if not isinstance(product, PhoenixOption):
-            raise PricingError(
-                f"PhoenixPDESolver only supports PhoenixOption, got {type(product).__name__}"
-            )
-
-        if pricing_env is None:
-            raise ValidationError(
-                "PricingEnvironment is required for PhoenixPDESolver"
-            )
-
-        self._validate_product(product)
-
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-
-        if tau <= 0 or is_zero(tau):
-            return {
-                "price": self._calculate_terminal_value(product, spot, pricing_env),
-                "delta": 0.0,
-                "gamma": 0.0,
-            }
-
-        knocked_out_at_valuation = self._is_knocked_out_at_valuation(
-            product, spot, pricing_env
-        )
-        if knocked_out_at_valuation:
-            return {
-                "price": self._get_immediate_ko_payoff(product, pricing_env),
-                "delta": 0.0,
-                "gamma": 0.0,
-            }
-
-        result = self._solve(product, pricing_env)
-        greeks = self._calculate_delta_gamma(result.solution_vec, result.x_vec)
-        price = self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
-        greeks["price"] = price
-        return greeks
-
-    def _validate_product(self, product: PhoenixOption) -> None:
-        ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        if ki_continuous and product.has_ki_barrier:
-            if isinstance(product.barrier_config.ki_barrier, list):
-                raise ValidationError(
-                    "Continuous KI monitoring requires scalar ki_barrier. "
-                    "Use discrete monitoring for time-varying KI barriers."
-                )
+    # _validate_product is identical to parent, so we inherit it
 
     def get_critical_points(
         self, product: PhoenixOption, pricing_env: PricingEnvironment
@@ -602,10 +530,8 @@ class PhoenixPDESolver(SnowballPDESolver):
         )
         coupon_discount = self._df_between_times(pricing_env, current_time, settlement_time)
 
-        if product.is_reverse:
-            pay_mask = s_vec <= barrier
-        else:
-            pay_mask = s_vec >= barrier
+        # Coupon barrier behaves like KO (UP barrier) - pay when above
+        pay_mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
         
         max_k = obs_idx if use_memory else 0
         diffused_v0_0 = grid_v0_list[0][:, t_idx].copy()
@@ -646,10 +572,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         barrier = ko_record.barrier
         base_payoff = float(ko_record.payoff or 0.0)
         
-        if product.is_reverse:
-            ko_mask = s_vec <= barrier
-        else:
-            ko_mask = s_vec >= barrier
+        ko_mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
             
         coupon_amt = 0.0
         obs_idx = self._coupon_observation_indices.get(t_idx)
@@ -661,10 +584,7 @@ class PhoenixPDESolver(SnowballPDESolver):
 
         if obs_idx is not None:
             coupon_barrier = float(self._coupon_barriers[obs_idx])
-            if product.is_reverse:
-                pay_mask = s_vec <= coupon_barrier
-            else:
-                pay_mask = s_vec >= coupon_barrier
+            pay_mask = self._get_barrier_mask(s_vec, coupon_barrier, product.is_reverse, is_up_barrier=True)
         else:
             pay_mask = np.zeros_like(s_vec, dtype=bool)
         
