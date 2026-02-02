@@ -141,3 +141,5 @@ result/
 docs/images/
 docs/*.docx
 docs/*.pdf
+tmp/
+docs/strategyindex
