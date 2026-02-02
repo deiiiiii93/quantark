@@ -138,6 +138,7 @@ Thumbs.db
 *.dat
 data/
 result/
+example/output/
 docs/images/
 docs/*.docx
 docs/*.pdf
