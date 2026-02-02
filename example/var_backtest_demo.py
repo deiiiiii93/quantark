@@ -129,7 +129,7 @@ def create_portfolio_for_backtesting():
     return portfolio
 
 
-def generate_historical_data_extended(num_days=300):
+def generate_historical_data_extended(num_days=800):
     """Generate extended historical market data for backtesting."""
     np.random.seed(42)
     dates = pd.date_range(start=datetime(2021, 1, 1), periods=num_days, freq="D")
