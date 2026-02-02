@@ -26,6 +26,7 @@ from .pde import (
     DoubleBarrierPDESolver,
     OneTouchPDESolver,
     DoubleOneTouchPDESolver,
+    KOResetSnowballPDESolver,
     PhoenixPDESolver,
     TimeGrid,
     SpatialGrid,
@@ -35,6 +36,7 @@ from .quad import (
     BarrierQuadEngine,
     OneTouchQuadEngine,
     SnowballQuadEngine,
+    KOResetSnowballQuadEngine,
     PhoenixQuadEngine,
 )
 
@@ -63,6 +65,7 @@ __all__ = [
     "DoubleBarrierPDESolver",
     "OneTouchPDESolver",
     "DoubleOneTouchPDESolver",
+    "KOResetSnowballPDESolver",
     "PhoenixPDESolver",
     # Grid utilities
     "TimeGrid",
@@ -72,5 +75,6 @@ __all__ = [
     "BarrierQuadEngine",
     "OneTouchQuadEngine",
     "SnowballQuadEngine",
+    "KOResetSnowballQuadEngine",
     "PhoenixQuadEngine",
 ]

@@ -15,6 +15,7 @@ from .double_barrier_pde_solver import DoubleBarrierPDESolver
 from .one_touch_pde_solver import OneTouchPDESolver
 from .double_one_touch_pde_solver import DoubleOneTouchPDESolver
 from .snowball_pde_solver import SnowballPDESolver
+from .ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
 from .phoenix_pde_solver import PhoenixPDESolver
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     'OneTouchPDESolver',
     'DoubleOneTouchPDESolver',
     'SnowballPDESolver',
+    'KOResetSnowballPDESolver',
     'PhoenixPDESolver',
 ]

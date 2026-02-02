@@ -17,6 +17,7 @@ from .observation_schedule import (
     ResolvedObservationRecord,
 )
 from .snowball_option import SnowballOption
+from .ko_reset_snowball_option import KnockOutResetSnowballOption
 from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig
 from .snowball_helpers import (
     create_standard_snowball,
@@ -24,6 +25,7 @@ from .snowball_helpers import (
     create_european_ki_snowball,
     create_parachute_snowball,
     create_airbag_snowball,
+    create_ko_reset_snowball,
     generate_ko_observation_dates,
     generate_stepdown_barriers,
 )
@@ -52,6 +54,7 @@ __all__ = [
     "ObservationSchedule",
     "ResolvedObservationRecord",
     "SnowballOption",
+    "KnockOutResetSnowballOption",
     "BarrierConfig",
     "PayoffConfig",
     "AccrualConfig",
@@ -61,6 +64,7 @@ __all__ = [
     "create_european_ki_snowball",
     "create_parachute_snowball",
     "create_airbag_snowball",
+    "create_ko_reset_snowball",
     "generate_ko_observation_dates",
     "generate_stepdown_barriers",
     # Phoenix option

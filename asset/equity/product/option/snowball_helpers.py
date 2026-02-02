@@ -31,9 +31,10 @@ from dataclasses import fields
 from typing import List, Optional
 
 from util.exceptions import ValidationError
-from util.enum import ObservationType, CouponPayType
+from util.enum import ObservationType, CouponPayType, PostKOScheduleMode
 
 from .snowball_option import SnowballOption
+from .ko_reset_snowball_option import KnockOutResetSnowballOption
 from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig, AirbagConfig
 
 
@@ -831,6 +832,131 @@ def create_airbag_snowball(
         accrual_config=accrual_config,
         airbag_config=airbag_config,
         is_reverse=is_reverse,
+    )
+
+
+def create_ko_reset_snowball(
+    initial_price: float,
+    strike: float,
+    maturity_pre: float,
+    maturity_post: float,
+    contract_multiplier: float = 1.0,
+    pre_ko_barrier: Optional[float] = None,
+    pre_ko_rate: float = 0.15,
+    post_ko_barrier: Optional[float] = None,
+    post_ko_rate: float = 0.03,
+    ki_barrier: Optional[float] = None,
+    pre_frequency: str = "monthly",
+    post_frequency: str = "monthly",
+    ki_frequency: str = "daily",
+    pre_lockout: int = 0,
+    post_lockout: int = 0,
+    ki_continuous: bool = False,
+    post_ko_mode: PostKOScheduleMode = PostKOScheduleMode.ABSOLUTE,
+    **kwargs,
+) -> KnockOutResetSnowballOption:
+    """
+    Create a KO-reset snowball with pre/post KO schedules and KI monitoring.
+
+    Args:
+        initial_price: Reference price for payoff calculations
+        strike: Strike price for embedded option
+        maturity_pre: Pre-KI schedule horizon in years
+        maturity_post: Post-KI schedule horizon in years (absolute or offset)
+        contract_multiplier: Underlying units represented by one contract
+        pre_ko_barrier: Pre-KI KO barrier (default: 103% of initial_price)
+        pre_ko_rate: Pre-KI KO rate (annualized)
+        post_ko_barrier: Post-KI KO barrier (default: 95% of initial_price)
+        post_ko_rate: Post-KI KO rate (annualized)
+        ki_barrier: KI barrier (default: 80% of initial_price)
+        pre_frequency: Observation frequency for pre-KI KO schedule
+        post_frequency: Observation frequency for post-KI KO schedule
+        ki_frequency: Observation frequency for discrete KI monitoring
+        pre_lockout: Number of initial pre-KI KO observations to skip
+        post_lockout: Number of initial post-KI KO observations to skip
+        ki_continuous: If True, use continuous KI monitoring (ABSOLUTE mode only)
+        post_ko_mode: ABSOLUTE or REBASED post-KI schedule mode
+        **kwargs: Additional parameters passed to config objects or option
+    """
+    _validate_core_params(
+        initial_price=initial_price,
+        strike=strike,
+        maturity=maturity_pre,
+        contract_multiplier=contract_multiplier,
+        func_name="create_ko_reset_snowball",
+    )
+    if maturity_post <= 0:
+        raise ValidationError(
+            f"create_ko_reset_snowball: maturity_post must be positive, got {maturity_post}"
+        )
+
+    pre_ko_barrier = (
+        pre_ko_barrier if pre_ko_barrier is not None else 1.03 * initial_price
+    )
+    post_ko_barrier = (
+        post_ko_barrier if post_ko_barrier is not None else 0.95 * initial_price
+    )
+    ki_barrier = ki_barrier if ki_barrier is not None else 0.80 * initial_price
+
+    if post_ko_mode == PostKOScheduleMode.REBASED and ki_continuous:
+        raise ValidationError(
+            "Rebased post-KO schedule requires discrete KI monitoring."
+        )
+
+    pre_obs = generate_ko_observation_dates(
+        maturity=maturity_pre, frequency=pre_frequency, skip_first=pre_lockout
+    )
+    post_obs = generate_ko_observation_dates(
+        maturity=maturity_post, frequency=post_frequency, skip_first=post_lockout
+    )
+
+    ki_observation_dates = None
+    ki_observation_type = (
+        ObservationType.CONTINUOUS if ki_continuous else ObservationType.DISCRETE
+    )
+    if not ki_continuous:
+        ki_observation_dates = generate_ko_observation_dates(
+            maturity=maturity_pre, frequency=ki_frequency, skip_first=0
+        )
+
+    barrier_kwargs, payoff_kwargs, accrual_kwargs, airbag_kwargs = _extract_config_kwargs(
+        kwargs
+    )
+
+    pre_barrier_config = BarrierConfig(
+        ko_barrier=pre_ko_barrier,
+        ko_rate=pre_ko_rate,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=pre_obs,
+        ki_barrier=ki_barrier,
+        ki_observation_type=ki_observation_type,
+        ki_observation_dates=ki_observation_dates,
+        ki_continuous=ki_continuous,
+        **barrier_kwargs,
+    )
+
+    post_barrier_config = BarrierConfig(
+        ko_barrier=post_ko_barrier,
+        ko_rate=post_ko_rate,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=post_obs,
+    )
+
+    payoff_config = PayoffConfig(**payoff_kwargs) if payoff_kwargs else None
+    accrual_config = AccrualConfig(**accrual_kwargs) if accrual_kwargs else None
+    airbag_config = AirbagConfig(**airbag_kwargs) if airbag_kwargs else None
+
+    return KnockOutResetSnowballOption(
+        initial_price=initial_price,
+        strike=strike,
+        barrier_config=pre_barrier_config,
+        post_barrier_config=post_barrier_config,
+        payoff_config=payoff_config,
+        accrual_config=accrual_config,
+        airbag_config=airbag_config,
+        contract_multiplier=contract_multiplier,
+        maturity=max(maturity_pre, maturity_post),
+        post_ko_mode=post_ko_mode,
     )
 
 

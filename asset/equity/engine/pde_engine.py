@@ -19,6 +19,7 @@ from asset.equity.product.option import (
     EuropeanVanillaOption,
     OneTouchOption,
     SnowballOption,
+    KnockOutResetSnowballOption,
     PhoenixOption,
 )
 from priceenv import PricingEnvironment
@@ -34,6 +35,7 @@ from .pde import (
     EuropeanPDESolver,
     OneTouchPDESolver,
     SnowballPDESolver,
+    KOResetSnowballPDESolver,
     PhoenixPDESolver,
 )
 
@@ -56,6 +58,7 @@ class PDEEngine(BaseEngine):
         - OneTouchOption → OneTouchPDESolver
         - DoubleOneTouchOption → DoubleOneTouchPDESolver
         - SnowballOption → SnowballPDESolver
+        - KnockOutResetSnowballOption → KOResetSnowballPDESolver
         - PhoenixOption → PhoenixPDESolver
 
     Usage:
@@ -87,6 +90,7 @@ class PDEEngine(BaseEngine):
         OneTouchOption: OneTouchPDESolver,
         DoubleOneTouchOption: DoubleOneTouchPDESolver,
         SnowballOption: SnowballPDESolver,
+        KnockOutResetSnowballOption: KOResetSnowballPDESolver,
         PhoenixOption: PhoenixPDESolver,
     }
 

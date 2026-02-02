@@ -15,6 +15,7 @@ from .option_enums import (
     ProtectionType,
     TenorEnd,
     ObservationFrequency,
+    PostKOScheduleMode,
     AveragingType,
     AsianStrikeType,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "ProtectionType",
     "TenorEnd",
     "ObservationFrequency",
+    "PostKOScheduleMode",
     "AveragingType",
     "AsianStrikeType",
     # Engine enums

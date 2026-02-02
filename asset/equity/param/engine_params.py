@@ -225,6 +225,7 @@ class MCParams(EngineParams):
         seed: Random seed for reproducibility
         num_paths: Number of simulation paths
         time_steps: Number of time steps per path
+        use_business_day_grid: Use daily business-day grid for schedule-based engines
         use_qmc: Use quasi-Monte Carlo (default: False)
         use_antithetic: Use antithetic variates (default: False)
         rqmc_target_std: RQMC target standard error (absolute or relative)
@@ -239,6 +240,7 @@ class MCParams(EngineParams):
     seed: int = 42
     num_paths: int = 10000
     time_steps: int = 100
+    use_business_day_grid: bool = False
     use_qmc: bool = False
     use_antithetic: bool = False
     rqmc_target_std: float = 1e-4

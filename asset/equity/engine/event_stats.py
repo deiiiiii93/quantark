@@ -53,3 +53,27 @@ class PhoenixEventStats(AutocallableEventStats):
     expected_discounted_coupon_cashflow: np.ndarray = field(
         default_factory=lambda: np.array([])
     )
+
+
+@dataclass(frozen=True)
+class KOResetEventStats(AutocallableEventStats):
+    """
+    Event stats for KO-reset snowball options.
+
+    Attributes:
+        pre_ko_times: Pre-KI KO observation times (absolute).
+        pre_ko_probability: KO probability per pre-KI observation.
+        post_ko_times: Post-KI KO observation times (absolute or offsets for REBASED).
+        post_ko_probability: KO probability per post-KI observation (or offset).
+        pre_ko_probability_total: Total probability of pre-KI KO.
+        post_ko_probability_total: Total probability of post-KI KO.
+        expected_discounted_post_ko_cashflow: Total expected discounted KO cashflow after KI.
+    """
+
+    pre_ko_times: np.ndarray = field(default_factory=lambda: np.array([]))
+    pre_ko_probability: np.ndarray = field(default_factory=lambda: np.array([]))
+    post_ko_times: np.ndarray = field(default_factory=lambda: np.array([]))
+    post_ko_probability: np.ndarray = field(default_factory=lambda: np.array([]))
+    pre_ko_probability_total: float = 0.0
+    post_ko_probability_total: float = 0.0
+    expected_discounted_post_ko_cashflow: float = 0.0

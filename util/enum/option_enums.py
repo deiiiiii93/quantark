@@ -191,6 +191,16 @@ class ObservationFrequency(Enum):
         raise ValueError(f"Unknown ObservationFrequency: {self}")
 
 
+class PostKOScheduleMode(Enum):
+    """Mode for applying post-KI KO schedules."""
+
+    ABSOLUTE = auto()
+    REBASED = auto()
+
+    def __str__(self):
+        return self.name.capitalize()
+
+
 class AveragingType(Enum):
     """Averaging method for Asian options."""
 
@@ -209,4 +219,3 @@ class AsianStrikeType(Enum):
 
     def __str__(self):
         return self.name.capitalize()
-
