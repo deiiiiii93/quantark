@@ -428,9 +428,8 @@ class GreeksCalculator:
                 greeks_out.setdefault(extra, 0.0)
             return {key: greeks_out[key] for key in greeks_out if key in requested}
 
-        base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         greeks_out: Dict[str, float] = {}
-        if "price" in requested:
+        if "price" in requested and base_price is not None:
             greeks_out["price"] = base_price
 
         delta = None
@@ -443,6 +442,11 @@ class GreeksCalculator:
             greeks_out["delta"] = delta
         if gamma is not None and "gamma" in requested:
             greeks_out["gamma"] = gamma
+
+        if base_price is None:
+            base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
+        if "price" in requested and "price" not in greeks_out:
+            greeks_out["price"] = base_price
 
         # Other Greeks always use bump method
         if "vega" in requested:
@@ -743,6 +747,7 @@ class GreeksCalculator:
             bumped_date,
             pricing_env.day_count_convention,
             pricing_env.bus_days_in_year,
+            calendar=getattr(pricing_env, "calendar", None),
         )
 
         if current_maturity <= time_bump:

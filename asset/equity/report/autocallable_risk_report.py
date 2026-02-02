@@ -900,7 +900,7 @@ def generate_snowball_risk_report(
         pricing_env=pricing_env,
         product=product,
     )
-    barrier_watch = "\n".join(
+    barrier_watch = "Barrier Watch:\n" + "\n".join(
         [
             _format_barrier_watch("Next KO", ko_level, ko_time, ko_pct, ko_sigma),
             _format_barrier_watch("Next KI", ki_level, ki_time, ki_pct, ki_sigma),
@@ -1391,6 +1391,7 @@ def generate_snowball_risk_report(
             f"- PV reconciliation error (MC cashflows - MC engine price): {rn_stats.reconciliation_error:.6g}\n\n"
             f"{event_table_md}"
         )
+    surface_mode = "point-greeks" if greeks_calculator is not None else "finite-difference"
     content = f"""# Autocallable Risk Profile Report (Snowball)
 
 **Generated**: {datetime.now().isoformat(timespec="seconds")}
@@ -1410,7 +1411,7 @@ def generate_snowball_risk_report(
 - **Dividend q0**: {base_q:.6f}
 - **Vol σ0**: {base_vol:.6f}
 
-## 3. Barrier Risk (Zoom Analysis)
+## 3. Barrier Risk (Zoom)
 *Goal: Understand "cliff-edge" effects near barriers.*
 
 - Barrier zoom grid: ±2% around KO/KI level, spot nodes=21
@@ -1421,6 +1422,7 @@ def generate_snowball_risk_report(
 ## 4. Required Surfaces & Greeks
 *Goal: Visualize sensitivities across the spot/vol/dividend space.*
 
+- Surface mode: {surface_mode}
 - **Dividend / Basis Risk**: {basis_rho_note}
 - **DividendRho surfaces**: `plots/rhoq_spot_div.png`, `plots/rhoq_spot_vol.png`
 - **Delta & Cross-Gamma**: `plots/delta_spot_div.png`, `plots/cross_s_q.png`
@@ -1454,6 +1456,7 @@ def generate_snowball_risk_report(
 ## 7. Risk-Neutral Event Stats & Cashflow
 *Goal: Expected lifecycle and cashflow timing.*
 
+### Lifecycle Context
 {lifecycle_context}
 
 {event_block}
