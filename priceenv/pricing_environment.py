@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime
 from param import SpotQuote, VolatilitySurface, RateCurve, DividendYield, BasisYield
 from util.exceptions import MarketDataError
-from util.calendar import DayCountConvention
+from util.calendar import Calendar, DayCountConvention
 from util.numerical import safe_sqrt
 
 
@@ -31,6 +31,7 @@ class PricingEnvironment:
         basis_yield: Annualized basis yield for futures (optional, defaults to None)
         day_count_convention: Convention for calculating year fractions (default: CALENDAR_DAYS)
         bus_days_in_year: Number of business days per year for business day convention (default: 252)
+        calendar: Optional business day calendar (used when day_count_convention is BUSINESS_DAYS)
     """
 
     rate_curve: RateCurve
@@ -41,6 +42,7 @@ class PricingEnvironment:
     basis_yield: Optional[BasisYield] = None
     day_count_convention: DayCountConvention = DayCountConvention.CALENDAR_DAYS
     bus_days_in_year: int = 252
+    calendar: Optional[Calendar] = None
 
     def __post_init__(self):
         """Validate pricing environment."""

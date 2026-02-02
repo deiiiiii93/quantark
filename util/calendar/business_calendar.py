@@ -4,7 +4,9 @@ Business day calendar for settlement date adjustments.
 
 from enum import Enum
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Set, Optional
+import csv
 from util.exceptions import ValidationError
 
 
@@ -34,7 +36,8 @@ class CalendarType(Enum):
     US = "us"  # US holidays (Federal Reserve)
     UK = "uk"  # UK holidays
     TARGET = "target"  # Trans-European Automated Real-time Gross settlement (ECB)
-    CHINA = "china"  # China holidays (PBOC/SSE)
+    CHINA = "china"  # China holidays (national)
+    CHINA_SSE = "china_sse"  # China holidays (SSE)
     NONE = "none"  # No holidays, only weekends
 
 
@@ -214,6 +217,41 @@ class Calendar:
 
         return current
 
+    def count_business_days(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        include_start: bool = True,
+        include_end: bool = True,
+    ) -> int:
+        """
+        Count business days between two dates.
+
+        Args:
+            start_date: Start date (inclusive by default)
+            end_date: End date (inclusive by default)
+            include_start: Whether to include start_date if business day
+            include_end: Whether to include end_date if business day
+
+        Returns:
+            Number of business days in the range
+        """
+        if end_date < start_date:
+            return 0
+
+        count = 0
+        current = start_date
+        while current <= end_date:
+            if self.is_business_day(current):
+                if current == start_date and not include_start:
+                    pass
+                elif current == end_date and not include_end:
+                    pass
+                else:
+                    count += 1
+            current += timedelta(days=1)
+        return count
+
     def __repr__(self):
         return f"Calendar(name={self.name}, holidays={len(self.holidays)})"
 
@@ -245,6 +283,9 @@ def create_calendar(
 
     if calendar_type == CalendarType.CHINA:
         return _create_china_calendar(year_range)
+
+    if calendar_type == CalendarType.CHINA_SSE:
+        return _create_china_sse_calendar(year_range)
 
     raise ValidationError(f"Unsupported calendar type: {calendar_type}")
 
@@ -363,18 +404,56 @@ def _create_target_calendar(year_range: tuple) -> Calendar:
     return Calendar(holidays=holidays, name="TARGET")
 
 
+def _load_holidays_from_csv(
+    calendar_name: str, year_range: tuple
+) -> Optional[Set[datetime]]:
+    start_year, end_year = year_range
+    repo_root = Path(__file__).resolve().parents[2]
+    csv_path = (
+        repo_root
+        / "util"
+        / "calendar"
+        / "holidayfile"
+        / f"{calendar_name}.csv"
+    )
+    if not csv_path.exists():
+        return None
+
+    holidays: Set[datetime] = set()
+    try:
+        with csv_path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                date_str = (row.get("date") or row.get("Date") or "").strip()
+                if not date_str:
+                    continue
+                try:
+                    parsed = datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+                if start_year <= parsed.year <= end_year:
+                    holidays.add(datetime(parsed.year, parsed.month, parsed.day))
+    except Exception:
+        return None
+
+    return holidays or None
+
+
 def _create_china_calendar(year_range: tuple) -> Calendar:
     """
-    Create China holiday calendar (PBOC/SSE).
+    Create China holiday calendar (national).
 
-    Note: China holidays are complex with lunar calendar festivals.
-    This provides a simplified version with fixed dates.
-    For production use, consider loading exact dates from a data source.
+    Note: Uses util/calendar/holidayfile/china.csv when available.
+    Falls back to a simplified fixed-date set if the CSV is missing.
 
     Includes: New Year's Day, Spring Festival (approximate), Qingming,
     Labour Day, Dragon Boat Festival (approximate), Mid-Autumn Festival (approximate),
     National Day
     """
+    holidays = _load_holidays_from_csv("china", year_range)
+    if holidays:
+        return Calendar(holidays=holidays, name="China")
+
     holidays = set()
     start_year, end_year = year_range
 
@@ -412,6 +491,22 @@ def _create_china_calendar(year_range: tuple) -> Calendar:
             holidays.add(datetime(year, 10, day))
 
     return Calendar(holidays=holidays, name="China")
+
+
+def _create_china_sse_calendar(year_range: tuple) -> Calendar:
+    """
+    Create China SSE holiday calendar.
+
+    Note: Uses util/calendar/holidayfile/china_sse.csv when available.
+    Falls back to the national China calendar when the CSV is missing.
+    """
+    holidays = _load_holidays_from_csv("china_sse", year_range)
+    if holidays:
+        return Calendar(holidays=holidays, name="China (SSE)")
+
+    fallback = _create_china_calendar(year_range)
+    fallback.name = "China (SSE)"
+    return fallback
 
 
 def _nth_weekday(year: int, month: int, weekday: int, n: int) -> datetime:

@@ -35,9 +35,9 @@ Implemented 6+ day count conventions:
 
 Full calendar system with:
 - **BusinessDayConvention enum**: Following, Modified Following, Preceding, Modified Preceding, Unadjusted
-- **CalendarType enum**: US, UK, TARGET, NONE
+- **CalendarType enum**: US, UK, TARGET, CHINA, CHINA_SSE, NONE
 - **Calendar class**: Holiday storage, business day checks, date adjustments
-- **Predefined calendars**: US Federal Reserve, UK, TARGET (ECB)
+- **Predefined calendars**: US Federal Reserve, UK, TARGET (ECB), China (national), China (SSE)
 
 **Key Features**:
 - Holiday generation for major markets (US, UK, European)

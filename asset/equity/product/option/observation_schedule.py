@@ -83,6 +83,7 @@ class ObservationRecord:
                 self.observation_date,
                 pricing_env.day_count_convention,
                 pricing_env.bus_days_in_year,
+                calendar=getattr(pricing_env, "calendar", None),
             )
         raise ValidationError("ObservationRecord requires observation_time or observation_date.")
 
@@ -319,6 +320,7 @@ class ObservationSchedule:
                         rec.settlement_date,
                         pricing_env.day_count_convention,
                         pricing_env.bus_days_in_year,
+                        calendar=getattr(pricing_env, "calendar", None),
                     )
                 except Exception:
                     # If calculation fails, default to observation time

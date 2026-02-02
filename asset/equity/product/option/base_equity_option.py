@@ -290,6 +290,7 @@ class BaseEquityOption(BaseEquityProduct):
                 self.exercise_date,
                 pricing_env.day_count_convention,
                 pricing_env.bus_days_in_year,
+                calendar=getattr(pricing_env, "calendar", None),
             )
         else:
             if self.maturity is None:
@@ -395,6 +396,7 @@ class BaseEquityOption(BaseEquityProduct):
             target_date,
             pricing_env.day_count_convention,
             getattr(pricing_env, "bus_days_in_year", 252),
+            calendar=getattr(pricing_env, "calendar", None),
         )
 
     # ==========================================================================

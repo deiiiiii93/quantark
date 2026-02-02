@@ -1000,6 +1000,7 @@ class SnowballOption(BaseEquityOption):
                         schedule_record.observation_date,
                         self.annualization_day_count,
                         bus_days_in_year,
+                        calendar=getattr(pricing_env, "calendar", None),
                     )
                 else:
                     if accrual_start_date is None:
@@ -1021,6 +1022,7 @@ class SnowballOption(BaseEquityOption):
                                 pricing_env.valuation_date,
                                 self.annualization_day_count,
                                 pricing_env.bus_days_in_year,
+                                calendar=getattr(pricing_env, "calendar", None),
                             )
                         accrual_factor = initial_to_valuation + rec.observation_time
             else:

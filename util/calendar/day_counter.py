@@ -3,7 +3,7 @@ Day count conventions and year fraction calculations.
 """
 
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timedelta
 from util.exceptions import ValidationError
 
 
@@ -49,6 +49,7 @@ def calculate_year_fraction(
     period_start: datetime = None,
     period_end: datetime = None,
     frequency: int = None,
+    calendar=None,
 ) -> float:
     """
     Calculate year fraction between two dates using specified convention.
@@ -61,6 +62,7 @@ def calculate_year_fraction(
         period_start: Optional coupon period start (for ISMA/ICMA/BOND/CHINABOND)
         period_end: Optional coupon period end (for ISMA/ICMA/BOND/CHINABOND)
         frequency: Optional coupon frequency per year (for ISMA/ICMA/BOND/CHINABOND)
+        calendar: Optional business day calendar for BUSINESS_DAYS convention
 
     Returns:
         Year fraction as a float
@@ -103,6 +105,20 @@ def calculate_year_fraction(
             raise ValidationError(
                 f"bus_days_in_year must be positive, got {bus_days_in_year}"
             )
+        if calendar is not None:
+            if hasattr(calendar, "count_business_days"):
+                business_days = calendar.count_business_days(
+                    start_date, end_date, include_start=False, include_end=True
+                )
+            else:
+                # Fallback: iterate using calendar.is_business_day
+                current = start_date + timedelta(days=1)
+                business_days = 0
+                while current <= end_date:
+                    if calendar.is_business_day(current):
+                        business_days += 1
+                    current += timedelta(days=1)
+            return business_days / float(bus_days_in_year)
         # Approximate: assume 5/7 of calendar days are business days
         # More accurate would require a business day calendar
         business_days = num_days * (bus_days_in_year / 365.0)

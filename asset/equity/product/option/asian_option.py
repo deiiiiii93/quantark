@@ -80,6 +80,7 @@ class AsianObservationRecord:
                     self.observation_date,
                     pricing_env.day_count_convention,
                     pricing_env.bus_days_in_year,
+                    calendar=getattr(pricing_env, "calendar", None),
                 )
             else:
                 # Past date: negative year fraction
@@ -89,6 +90,7 @@ class AsianObservationRecord:
                     pricing_env.valuation_date,
                     pricing_env.day_count_convention,
                     pricing_env.bus_days_in_year,
+                    calendar=getattr(pricing_env, "calendar", None),
                 )
         raise ValidationError(
             "AsianObservationRecord requires observation_time or observation_date."

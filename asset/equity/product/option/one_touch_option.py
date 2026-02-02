@@ -196,7 +196,8 @@ class OneTouchOption(BaseEquityProduct):
                 pricing_env.valuation_date,
                 self.exercise_date,
                 pricing_env.day_count_convention,
-                pricing_env.bus_days_in_year
+                pricing_env.bus_days_in_year,
+                calendar=getattr(pricing_env, "calendar", None),
             )
         else:
             return self.maturity

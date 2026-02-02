@@ -98,7 +98,8 @@ class BaseDeltaOneProduct(BaseEquityProduct):
                 pricing_env.valuation_date,
                 self.maturity_date,
                 pricing_env.day_count_convention,
-                pricing_env.bus_days_in_year
+                pricing_env.bus_days_in_year,
+                calendar=getattr(pricing_env, "calendar", None),
             )
         else:
             # Float-based maturity
@@ -144,4 +145,3 @@ class BaseDeltaOneProduct(BaseEquityProduct):
             return f"{self.__class__.__name__}({self.underlying}, {self.deltaone_type}, T={self.maturity:.4f})"
         else:
             return f"{self.__class__.__name__}({self.underlying}, {self.deltaone_type})"
-

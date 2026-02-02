@@ -91,11 +91,25 @@ class TestBusinessCalendar(unittest.TestCase):
     def test_us_holidays(self):
         """Test US holiday calendar."""
         calendar = create_calendar(CalendarType.US, year_range=(2024, 2024))
-        
+
         # New Year's Day 2024
         new_year = datetime(2024, 1, 1)
         self.assertTrue(calendar.is_holiday(new_year))
         self.assertFalse(calendar.is_business_day(new_year))
+
+    def test_china_sse_holiday_file(self):
+        """Test China SSE holiday file resolution."""
+        calendar = create_calendar(CalendarType.CHINA_SSE, year_range=(2020, 2020))
+
+        new_year = datetime(2020, 1, 1)
+        self.assertTrue(calendar.is_holiday(new_year))
+
+    def test_china_sse_fallback_to_national(self):
+        """Test fallback to national calendar when exchange CSV is missing."""
+        calendar = create_calendar(CalendarType.CHINA_SSE, year_range=(1900, 1900))
+
+        new_year = datetime(1900, 1, 1)
+        self.assertTrue(calendar.is_holiday(new_year))
 
 
 class TestRateCurveInterpolation(unittest.TestCase):
