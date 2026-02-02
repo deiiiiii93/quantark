@@ -47,7 +47,7 @@ class CouponBarrierConfig:
     day_count_convention: DayCountConvention = DayCountConvention.ACT_365
 
     # Memory coupon feature
-    memory_coupon: bool = False
+    memory_coupon: bool = True
 
     def __post_init__(self):
         """Validate configuration after initialization."""

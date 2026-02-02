@@ -138,7 +138,7 @@ def create_standard_phoenix(
     coupon_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
     num_observations: int = 12,
-    memory_coupon: bool = False,
+    memory_coupon: bool = True,
     day_count_convention: DayCountConvention = DayCountConvention.ACT_365,
     coupon_pay_type: CouponPayType = CouponPayType.INSTANT,
     is_reverse: bool = False,
@@ -165,7 +165,7 @@ def create_standard_phoenix(
         coupon_barrier: Coupon barrier (default: 85% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
         num_observations: Number of observations (default: 12 for monthly)
-        memory_coupon: If True, accumulate missed coupons (default: False)
+        memory_coupon: If True, accumulate missed coupons (default: True)
         day_count_convention: Day count for coupon calculation (default: ACT/365)
         coupon_pay_type: INSTANT or EXPIRY (default: INSTANT)
         is_reverse: If True, create reverse phoenix (default: False)
@@ -283,7 +283,7 @@ def create_stepdown_phoenix(
     ki_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
     num_observations: int = 12,
-    memory_coupon: bool = False,
+    memory_coupon: bool = True,
     day_count_convention: DayCountConvention = DayCountConvention.ACT_365,
     coupon_pay_type: CouponPayType = CouponPayType.INSTANT,
     is_reverse: bool = False,
@@ -308,7 +308,7 @@ def create_stepdown_phoenix(
         ki_barrier: Knock-in barrier (default: 75% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
         num_observations: Number of observations (default: 12)
-        memory_coupon: If True, accumulate missed coupons (default: False)
+        memory_coupon: If True, accumulate missed coupons (default: True)
         day_count_convention: Day count for coupon calculation (default: ACT/365)
         coupon_pay_type: INSTANT or EXPIRY (default: INSTANT)
         is_reverse: If True, create reverse phoenix (default: False)
@@ -440,7 +440,7 @@ def create_reverse_phoenix(
     coupon_barrier: Optional[float] = None,
     coupon_rate: float = 0.01,
     num_observations: int = 12,
-    memory_coupon: bool = False,
+    memory_coupon: bool = True,
     day_count_convention: DayCountConvention = DayCountConvention.ACT_365,
     coupon_pay_type: CouponPayType = CouponPayType.INSTANT,
     **kwargs,
@@ -465,7 +465,7 @@ def create_reverse_phoenix(
         coupon_barrier: Coupon barrier (default: 115% of initial_price)
         coupon_rate: Per-period coupon rate (default: 1%)
         num_observations: Number of observations (default: 12)
-        memory_coupon: If True, accumulate missed coupons (default: False)
+        memory_coupon: If True, accumulate missed coupons (default: True)
         day_count_convention: Day count for coupon calculation (default: ACT/365)
         coupon_pay_type: INSTANT or EXPIRY (default: INSTANT)
         **kwargs: Additional parameters passed to config objects
