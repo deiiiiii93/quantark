@@ -233,7 +233,7 @@ def test_near_expiry(results: BoundaryCheckResults):
         price = solver.price(snowball, env)
         # Near expiry, price should be close to terminal V0 payoff
         # (spot is between KI and KO barriers)
-        terminal_v0 = snowball.get_maturity_payoff_v0(spot, env)
+        terminal_v0 = snowball.get_maturity_payoff_v0(spot, pricing_env=env)
         passed = abs(price - terminal_v0) < snowball.initial_price * snowball.contract_multiplier * 0.05
         results.add_result(
             "Near Expiry",

@@ -8,6 +8,7 @@ This document describes the KO-reset snowball PDE solver implemented in:
 - **V0** applies the **pre-KI** KO schedule.
 - **V1** applies the **post-KI** KO schedule.
 - V0 and V1 share the same time grid, aligned to all relevant event times.
+- If no KI happens, **V0 settles at the end of the pre-KO schedule** (pre-maturity).
 
 ## Supported Features
 - Discrete KO observations (pre and post schedules).

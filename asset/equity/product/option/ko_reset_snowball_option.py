@@ -356,7 +356,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         return max(base_maturity, pre_maturity, post_max)
 
     def get_maturity_payoff_v0(
-        self, spot: float, pricing_env: PricingEnv = None
+        self, spot: float, accumulated_coupons: float = 0.0, pricing_env: PricingEnv = None
     ) -> float:
         """
         KO-reset V0 payoff uses pre-KI contract tenor when annualized.
@@ -404,7 +404,9 @@ class KnockOutResetSnowballOption(SnowballOption):
                     * self.contract_multiplier
                 )
 
-        return principal + rebate
+        # Note: accumulated_coupons is typically 0 for KO reset as they don't have coupons
+        # but added for interface compatibility.
+        return principal + rebate + accumulated_coupons
 
     def get_maturity_payoff_v1(
         self, spot: float, pricing_env: PricingEnv = None

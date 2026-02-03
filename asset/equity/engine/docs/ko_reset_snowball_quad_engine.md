@@ -7,6 +7,7 @@ This document describes the KO-reset snowball quadrature engine implemented in:
 - Extends the Snowball quadrature recursion with two schedules:
   - **V_out** uses **pre-KI** KO observations.
   - **V_in** uses **post-KI** KO observations.
+- If no KI happens, **V_out settles at the end of the pre-KO schedule** (pre-maturity).
 
 ## Supported Features
 - Discrete KO observations for both pre/post schedules.

@@ -183,7 +183,10 @@ class AutocallablePathAnalyzer:
         maturity_payoff_all = np.zeros(len(paths), dtype=float)
         if is_v0.any():
             maturity_payoff_all[is_v0] = np.array(
-                [product.get_maturity_payoff_v0(float(s), pricing_env) for s in maturity_spots[is_v0]],
+                [
+                    product.get_maturity_payoff_v0(float(s), pricing_env=pricing_env)
+                    for s in maturity_spots[is_v0]
+                ],
                 dtype=float,
             )
         if is_v1.any():

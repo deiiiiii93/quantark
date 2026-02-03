@@ -157,6 +157,21 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             dtype=float,
         )
 
+        pre_maturity = product.get_pre_maturity_time(pricing_env)
+        v0_maturity_values: Optional[np.ndarray] = None
+        if pre_maturity < maturity and not is_close(
+            pre_maturity, maturity, abs_tol=Tolerance.PRECISION
+        ):
+            v0_maturity_values = np.array(
+                [
+                    product.get_maturity_payoff_v0(
+                        spot_value, pricing_env=pricing_env
+                    )
+                    for spot_value in spot_grid
+                ],
+                dtype=float,
+            )
+
         log_ki_barrier = None
         if product.has_ki_barrier:
             if ki_continuous:
@@ -175,6 +190,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
+
+            if v0_maturity_values is not None and is_close(
+                obs_time, pre_maturity, abs_tol=Tolerance.PRECISION
+            ):
+                v_out = v0_maturity_values.copy()
 
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
             if pre_ko_record is not None:

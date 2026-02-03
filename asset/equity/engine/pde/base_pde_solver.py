@@ -13,6 +13,7 @@ from typing import Dict, Optional, Tuple, List, NamedTuple
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
+from scipy.linalg import solve_banded
 
 from asset.equity.engine.base_engine import BaseEngine
 from asset.equity.product.base_equity_product import BaseEquityProduct
@@ -69,12 +70,16 @@ class BasePDESolver(BaseEngine):
         """Initialize the PDE solver with configuration parameters."""
         super().__init__(params if params is not None else PDEParams())
         self._matrix_cache: Dict[Tuple[float, float], Tuple] = {}
+        self._banded_cache: "OrderedDict[Tuple[float, float], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
         self._grid_cache = self.__class__._shared_grid_cache
         self._cache_enabled = bool(getattr(self.params, "cache_enabled", True))
         self._cache_strategy = getattr(self.params, "cache_strategy", "standard")
         cache_size = getattr(self.params, "grid_cache_max_entries", None)
         if cache_size is not None:
             self.set_grid_cache_max_entries(cache_size)
+        
+        self._banded_cache_max_entries = getattr(self.params, "banded_cache_max_entries", 512)
+        
         self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
             OrderedDict()
         )
@@ -704,8 +709,16 @@ class BasePDESolver(BaseEngine):
         """Backward time stepping using the Crank-Nicolson scheme."""
         params: PDEParams = self.params
         num_t, num_x = len(t_vec), len(x_vec)
-        I_int = sp.eye(num_x - 2, format="csc")
+        
+        # Check if we can use the banded solver (requires num_x > 2)
+        use_banded = getattr(params, "use_banded_solver", True) and (num_x - 2) > 2
+        
+        I_int = None
+        if not use_banded:
+            I_int = sp.eye(num_x - 2, format="csc")
+            
         self._matrix_cache.clear()
+        self._banded_cache.clear()
 
         # Rannacher smoothing at events
         smooth_js = set()
@@ -721,6 +734,11 @@ class BasePDESolver(BaseEngine):
                         ]
                     )
 
+        # Pre-allocate RHS buffer for banded solver if needed
+        rhs_buffer = None
+        if use_banded:
+            rhs_buffer = np.empty(num_x - 2, dtype=float)
+
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
             steps_from_end = num_t - 1 - j
@@ -733,31 +751,139 @@ class BasePDESolver(BaseEngine):
                 else params.theta
             )
 
-            M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
             self.set_boundary_conditions(
                 grid, x_vec, s_vec, j, tau - t_vec[j], product, pricing_env
             )
 
-            # Solve system for interior points
-            rhs = M1 @ grid[1:-1, j + 1]
-            self._inject_boundary_contributions(rhs, grid, l, u, j, dt, theta)
-            grid[1:-1, j] = M2_lu.solve(rhs)
+            v_next = grid[1:-1, j + 1]
+
+            if use_banded:
+                # O(N) Banded Solver Path
+                banded, lower1, main1, upper1 = self._get_banded_system(
+                    l, c=None, u=None, dt=dt, theta=theta, full_coeffs=(l, self._extract_diag(A), u)
+                )
+                
+                # Explicit step: RHS = M1 * V_next
+                # M1 is tridiagonal with rows (upper1, main1, lower1)
+                np.multiply(main1, v_next, out=rhs_buffer)
+                rhs_buffer[1:] += lower1 * v_next[:-1]
+                rhs_buffer[:-1] += upper1 * v_next[1:]
+                
+                # Add boundary contributions
+                self._inject_boundary_contributions(rhs_buffer, grid, l, u, j, dt, theta)
+                
+                # Implicit step: Solve M2 * V_curr = RHS
+                grid[1:-1, j] = solve_banded(
+                    (1, 1),
+                    banded,
+                    rhs_buffer,
+                    overwrite_b=True,
+                    check_finite=False,
+                )
+            else:
+                # Sparse LU Path
+                M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
+                rhs = M1 @ v_next
+                self._inject_boundary_contributions(rhs, grid, l, u, j, dt, theta)
+                grid[1:-1, j] = M2_lu.solve(rhs)
 
             self._apply_step_modifications(
                 grid, x_vec, s_vec, j, tau - t_vec[j], product, pricing_env
             )
 
+    def _extract_diag(self, A: sp.csc_matrix) -> np.ndarray:
+        """Helper to extract main diagonal from operator matrix A."""
+        # A is tridiagonal: diagonals are [l[2:-1], c[1:-1], u[1:-2]]
+        # A.diagonal() returns the main diagonal
+        return A.diagonal()
+
+    def _get_banded_system(
+        self,
+        l: np.ndarray,
+        c: Optional[np.ndarray],
+        u: Optional[np.ndarray],
+        dt: float,
+        theta: float,
+        full_coeffs: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Get or compute banded matrices for time stepping (LAPACK format).
+
+        Args:
+            l, c, u: Coefficients of the spatial operator A.
+                     If full_coeffs is provided, these can be None.
+            dt: Time step size.
+            theta: Scheme parameter.
+            full_coeffs: Optional tuple (l, c, u) where c is the main diagonal of A.
+                         Useful because 'c' passed to _build_operator_matrix was the full vector,
+                         but here we need the interior part or consistent usage.
+
+        Returns:
+            Tuple (banded_lhs, lower_rhs, main_rhs, upper_rhs)
+            - banded_lhs: (3, N) matrix for solve_banded (M2)
+            - lower_rhs, main_rhs, upper_rhs: Diagonals of M1 matrix
+        """
+        key = (round(dt, 12), round(theta, 6))
+        
+        if self._is_cache_enabled() and key in self._banded_cache:
+            return self._banded_cache[key]
+            
+        if full_coeffs:
+            l_full, c_val, u_full = full_coeffs
+            op_lower = l_full[2:-1]
+            op_upper = u_full[1:-2]
+            if len(c_val) == len(l_full):
+                op_main = c_val[1:-1]
+            else:
+                op_main = c_val
+        else:
+            raise NumericalError("full_coeffs required for _get_banded_system in BasePDESolver")
+
+        # M2 = I - theta * dt * A (LHS)
+        lhs_lower = -theta * dt * op_lower
+        lhs_main = 1.0 - theta * dt * op_main
+        lhs_upper = -theta * dt * op_upper
+        
+        # M1 = I + (1 - theta) * dt * A (RHS)
+        rhs_lower = (1.0 - theta) * dt * op_lower
+        rhs_main = 1.0 + (1.0 - theta) * dt * op_main
+        rhs_upper = (1.0 - theta) * dt * op_upper
+
+        banded = np.zeros((3, len(lhs_main)))
+        banded[0, 1:] = lhs_upper
+        banded[1, :] = lhs_main
+        banded[2, :-1] = lhs_lower
+        
+        result = (banded, rhs_lower, rhs_main, rhs_upper)
+        
+        if self._is_cache_enabled():
+            self._banded_cache[key] = result
+            if len(self._banded_cache) > self._banded_cache_max_entries:
+                self._banded_cache.popitem(last=False)
+                
+        return result
+
     def _inject_boundary_contributions(self, rhs, grid, l, u, j, dt, theta) -> None:
         """Add Dirichlet boundary terms to the RHS of the reduced interior system."""
+        # Handle both 2D (Standard) and 3D (Multi-State) grids
+        is_multistate = grid.ndim == 3
+        
         if len(grid) > 2:
-            # Terms from V[0]
-            rhs[0] += dt * (
-                (1.0 - theta) * l[1] * grid[0, j + 1] + theta * l[1] * grid[0, j]
-            )
-            # Terms from V[-1]
-            rhs[-1] += dt * (
-                (1.0 - theta) * u[-2] * grid[-1, j + 1] + theta * u[-2] * grid[-1, j]
-            )
+            if is_multistate:
+                # grid shape: (num_x, num_t, num_states)
+                # rhs shape: (num_x-2, num_states)
+                v0_next = grid[0, j + 1, :]
+                v0_curr = grid[0, j, :]
+                vN_next = grid[-1, j + 1, :]
+                vN_curr = grid[-1, j, :]
+                
+                rhs[0, :] += dt * ((1.0 - theta) * l[1] * v0_next + theta * l[1] * v0_curr)
+                rhs[-1, :] += dt * ((1.0 - theta) * u[-2] * vN_next + theta * u[-2] * vN_curr)
+            else:
+                # grid shape: (num_x, num_t)
+                # rhs shape: (num_x-2,)
+                rhs[0] += dt * ((1.0 - theta) * l[1] * grid[0, j + 1] + theta * l[1] * grid[0, j])
+                rhs[-1] += dt * ((1.0 - theta) * u[-2] * grid[-1, j + 1] + theta * u[-2] * grid[-1, j])
 
     def _get_matrices(
         self, I: sp.csc_matrix, A: sp.csc_matrix, dt: float, theta: float
@@ -992,3 +1118,18 @@ class BasePDESolver(BaseEngine):
         if len(self._critical_points_cache) > max_entries:
             self._critical_points_cache.popitem(last=False)
         return points
+
+    @staticmethod
+    def _get_asymptotic_discount_factors(
+        pricing_env: PricingEnvironment, tau_to_maturity: float
+    ) -> Tuple[float, float]:
+        """
+        Get risk-free and dividend discount factors for asymptotic boundary conditions.
+        """
+        if tau_to_maturity <= 0:
+            return 1.0, 1.0
+        r = pricing_env.get_rate(tau_to_maturity)
+        q = pricing_env.get_div_yield(tau_to_maturity)
+        df = np.exp(-r * tau_to_maturity)
+        df_div = np.exp(-q * tau_to_maturity)
+        return float(df), float(df_div)

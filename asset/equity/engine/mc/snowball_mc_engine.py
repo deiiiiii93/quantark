@@ -358,7 +358,7 @@ class SnowballMCEngine(BaseEngine):
         if is_v0.any():
             maturity_payoff_all[is_v0] = np.array(
                 [
-                    product.get_maturity_payoff_v0(float(s), pricing_env)
+                    product.get_maturity_payoff_v0(float(s), pricing_env=pricing_env)
                     for s in maturity_spots[is_v0]
                 ],
                 dtype=float,
@@ -1196,7 +1196,7 @@ class SnowballMCEngine(BaseEngine):
             terminal_spots = paths[is_v0, -1]
             v0_payoffs = np.array(
                 [
-                    product.get_maturity_payoff_v0(spot, pricing_env)
+                    product.get_maturity_payoff_v0(spot, pricing_env=pricing_env)
                     for spot in terminal_spots
                 ]
             )
@@ -1505,10 +1505,14 @@ class SnowballMCEngine(BaseEngine):
                     settlement_times[idx] = ki_time[idx] + post_max_offset
 
         if is_v0.any():
-            terminal_spots = paths[is_v0, -1]
+            if len(pre_indices) > 0:
+                pre_idx = int(pre_indices[-1]) + 1
+                terminal_spots = paths[is_v0, pre_idx]
+            else:
+                terminal_spots = paths[is_v0, -1]
             v0_payoffs = np.array(
                 [
-                    product.get_maturity_payoff_v0(spot, pricing_env)
+                    product.get_maturity_payoff_v0(spot, pricing_env=pricing_env)
                     for spot in terminal_spots
                 ],
                 dtype=float,
