@@ -40,7 +40,7 @@ from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQu
 from priceenv import PricingEnvironment
 from util.calendar import CalendarType, DayCountConvention, create_calendar
 from util.enum import ObservationType, PostKOScheduleMode
-from util.enum.engine_enums import EngineType, MonteCarloMethod
+from util.enum.engine_enums import EngineType, GreeksCalculationMode, MonteCarloMethod
 
 
 def build_observation_schedule_from_days(
@@ -345,7 +345,8 @@ def main():
     doc_vega_1pct = 210_951.6748
     position = -1.0  # Seller (short) position
     greeks_calc = GreeksCalculator(
-        params=EngineParams(bump_config=BumpConfig(spot_bump=0.01, vol_bump=0.01))
+        params=EngineParams(bump_config=BumpConfig(spot_bump=0.01, vol_bump=0.01)),
+        greeks_mode=GreeksCalculationMode.AUTO,
     )
     results = []
 
@@ -379,24 +380,28 @@ def main():
             }
         )
 
-    def compute_greeks(engine):
-        greeks = greeks_calc.calculate(
-            product, pricing_env, engine, method="numerical", greeks=["delta", "vega"]
+    def compute_price_and_greeks(engine):
+        greeks = greeks_calc.calculate_numerical_greeks(
+            product,
+            pricing_env,
+            engine,
+            base_price=None,
+            greeks=["price", "delta", "vega"],
         )
+        price = greeks.get("price", 0.0)
         delta = greeks.get("delta", 0.0)
         vega = greeks.get("vega", 0.0)
         delta_cash = position * delta * pricing_env.spot
         vega_1pct = position * vega  # vega is per 1% vol bump
-        return delta_cash, vega_1pct
+        return price, delta_cash, vega_1pct
 
     def run_engine(label, method, params=None):
         engine = SnowballMCEngine(params=params or base_params, method=method)
         start = time.perf_counter()
-        price = engine.price(product, pricing_env)
+        price, delta_cash, vega_1pct = compute_price_and_greeks(engine)
         seller_pv = position * price
         diff = seller_pv - doc_value
         diff_pct = diff / doc_value if doc_value != 0 else 0.0
-        delta_cash, vega_1pct = compute_greeks(engine)
         elapsed = time.perf_counter() - start
         add_row(label, seller_pv, diff, diff_pct, delta_cash, vega_1pct, elapsed)
 
@@ -411,11 +416,10 @@ def main():
     def run_pde(label: str, params: PDEParams) -> None:
         solver = KOResetSnowballPDESolver(params=params)
         start = time.perf_counter()
-        price = solver.price(product, pricing_env)
+        price, delta_cash, vega_1pct = compute_price_and_greeks(solver)
         seller_pv = position * price
         diff = seller_pv - doc_value
         diff_pct = diff / doc_value if doc_value != 0 else 0.0
-        delta_cash, vega_1pct = compute_greeks(solver)
         elapsed = time.perf_counter() - start
         add_row(label, seller_pv, diff, diff_pct, delta_cash, vega_1pct, elapsed)
 
@@ -433,11 +437,10 @@ def main():
     def run_quad(label: str, params: QuadParams) -> None:
         engine = KOResetSnowballQuadEngine(params=params)
         start = time.perf_counter()
-        price = engine.price(product, pricing_env)
+        price, delta_cash, vega_1pct = compute_price_and_greeks(engine)
         seller_pv = position * price
         diff = seller_pv - doc_value
         diff_pct = diff / doc_value if doc_value != 0 else 0.0
-        delta_cash, vega_1pct = compute_greeks(engine)
         elapsed = time.perf_counter() - start
         add_row(label, seller_pv, diff, diff_pct, delta_cash, vega_1pct, elapsed)
 

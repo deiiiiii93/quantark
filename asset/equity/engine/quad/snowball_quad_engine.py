@@ -219,21 +219,23 @@ class SnowballQuadEngine(BaseEngine):
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
-
-            v_in = self._diffuse_fft(
-                v_in,
-                math_utils,
-                omega_array,
-                prefactor,
-                full_p_lr,
-                full_p_ur,
-                full_p0,
-                alpha,
-                beta,
-                tau_step,
-            )
+            omega_fft, fft_len = math_utils.prepare_omega_fft(omega_array)
 
             if ki_continuous:
+                v_in = self._diffuse_fft(
+                    v_in,
+                    math_utils,
+                    omega_array,
+                    prefactor,
+                    full_p_lr,
+                    full_p_ur,
+                    full_p0,
+                    alpha,
+                    beta,
+                    tau_step,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
+                )
                 v_out = self._diffuse_with_bridge(
                     v_out,
                     v_in,
@@ -250,10 +252,13 @@ class SnowballQuadEngine(BaseEngine):
                     dt[step_index],
                     tau_step,
                     product.is_reverse,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
                 )
             else:
-                v_out = self._diffuse_fft(
-                    v_out,
+                stacked = np.vstack([v_in, v_out])
+                stacked = self._diffuse_fft(
+                    stacked,
                     math_utils,
                     omega_array,
                     prefactor,
@@ -263,7 +268,10 @@ class SnowballQuadEngine(BaseEngine):
                     alpha,
                     beta,
                     tau_step,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
                 )
+                v_in, v_out = stacked[0], stacked[1]
 
         return math_utils.interpolate(v_out, x=0.0)
 
@@ -398,6 +406,7 @@ class SnowballQuadEngine(BaseEngine):
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
+            omega_fft, fft_len = math_utils.prepare_omega_fft(omega_array)
 
             v_in = self._diffuse_fft(
                 v_in,
@@ -410,6 +419,8 @@ class SnowballQuadEngine(BaseEngine):
                 alpha,
                 beta,
                 tau_step,
+                omega_fft=omega_fft,
+                fft_len=fft_len,
             )
 
             if ki_continuous:
@@ -434,6 +445,8 @@ class SnowballQuadEngine(BaseEngine):
                     dt[step_index],
                     tau_step,
                     product.is_reverse,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
                 )
             else:
                 v_out = self._diffuse_fft(
@@ -447,6 +460,8 @@ class SnowballQuadEngine(BaseEngine):
                     alpha,
                     beta,
                     tau_step,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
                 )
 
         ed_unit = np.array(
@@ -510,19 +525,22 @@ class SnowballQuadEngine(BaseEngine):
                 omega_array = np.exp(
                     -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
                 )
-                v_in_ki = self._diffuse_fft(
-                    v_in_ki,
-                    math_utils,
-                    omega_array,
-                    prefactor,
-                    full_p_lr,
-                    full_p_ur,
-                    full_p0,
-                    alpha,
-                    beta,
-                    tau_step,
-                )
+                omega_fft, fft_len = math_utils.prepare_omega_fft(omega_array)
                 if ki_continuous:
+                    v_in_ki = self._diffuse_fft(
+                        v_in_ki,
+                        math_utils,
+                        omega_array,
+                        prefactor,
+                        full_p_lr,
+                        full_p_ur,
+                        full_p0,
+                        alpha,
+                        beta,
+                        tau_step,
+                        omega_fft=omega_fft,
+                        fft_len=fft_len,
+                    )
                     if product.barrier_config.ki_barrier is None:
                         raise PricingError("KI barrier configuration is missing.")
                     if isinstance(product.barrier_config.ki_barrier, list):
@@ -544,10 +562,13 @@ class SnowballQuadEngine(BaseEngine):
                         dt[step_index],
                         tau_step,
                         product.is_reverse,
+                        omega_fft=omega_fft,
+                        fft_len=fft_len,
                     )
                 else:
-                    v_out_ki = self._diffuse_fft(
-                        v_out_ki,
+                    stacked = np.vstack([v_in_ki, v_out_ki])
+                    stacked = self._diffuse_fft(
+                        stacked,
                         math_utils,
                         omega_array,
                         prefactor,
@@ -557,7 +578,10 @@ class SnowballQuadEngine(BaseEngine):
                         alpha,
                         beta,
                         tau_step,
+                        omega_fft=omega_fft,
+                        fft_len=fft_len,
                     )
+                    v_in_ki, v_out_ki = stacked[0], stacked[1]
 
             df_T = math.exp(-rate * maturity)
             pv_ki_no_ko = float(math_utils.interpolate(v_out_ki, x=0.0))
@@ -592,28 +616,23 @@ class SnowballQuadEngine(BaseEngine):
         alpha: float,
         beta: float,
         tau_step: float,
+        omega_fft: np.ndarray | None = None,
+        fft_len: int | None = None,
     ) -> np.ndarray:
         if values.ndim == 1:
             u_array = math_utils.simpson_weights(values, p_lr, p_ur, p0)
-            conv = math_utils.convolution_fft(omega_array, u_array)
+            conv = math_utils.convolution_fft(
+                omega_array, u_array, omega_fft=omega_fft, fft_len=fft_len
+            )
             base = prefactor * conv
             return base + self._tail_correction(values, math_utils, alpha, beta, tau_step)
 
-        out = np.zeros_like(values, dtype=float)
-        for i in range(values.shape[0]):
-            out[i] = self._diffuse_fft(
-                values[i],
-                math_utils,
-                omega_array,
-                prefactor,
-                p_lr,
-                p_ur,
-                p0,
-                alpha,
-                beta,
-                tau_step,
-            )
-        return out
+        u_array = math_utils.simpson_weights_matrix(values, p_lr, p_ur, p0)
+        conv = math_utils.convolution_fft(
+            omega_array, u_array, omega_fft=omega_fft, fft_len=fft_len
+        )
+        base = prefactor * conv
+        return base + self._tail_correction(values, math_utils, alpha, beta, tau_step)
 
     def _diffuse_with_bridge(
         self,
@@ -632,6 +651,8 @@ class SnowballQuadEngine(BaseEngine):
         dt: float,
         tau_step: float,
         is_reverse: bool,
+        omega_fft: np.ndarray | None = None,
+        fft_len: int | None = None,
     ) -> np.ndarray:
         grid = math_utils.grid
         weights = math_utils.simpson_weight_vector()
@@ -646,6 +667,8 @@ class SnowballQuadEngine(BaseEngine):
             alpha,
             beta,
             tau_step,
+            omega_fft=omega_fft,
+            fft_len=fft_len,
         )
 
         delta = v_in - v_out

@@ -115,6 +115,23 @@ class QuadratureMath:
         u_array[p_lr + 2 : p_ur + p0 - 1 : 2] = 2.0 * values[p_lr + 2 : p_ur + p0 - 1 : 2]
         return u_array
 
+    def simpson_weights_matrix(
+        self, values: np.ndarray, p_lr: int, p_ur: int, p0: int
+    ) -> np.ndarray:
+        values = np.asarray(values)
+        if values.ndim != 2:
+            raise ValidationError("values must be a 2D array for simpson_weights_matrix.")
+        if values.shape[1] != self.grid_x:
+            raise ValidationError("values shape does not match grid_x for Simpson weights.")
+
+        u_array = np.zeros((values.shape[0], 2 * self.grid_x - 1), dtype=float)
+        upper = p_ur + p0
+        u_array[:, p_lr] = values[:, p_lr]
+        u_array[:, upper] = values[:, upper]
+        u_array[:, p_lr + 1 : upper : 2] = 4.0 * values[:, p_lr + 1 : upper : 2]
+        u_array[:, p_lr + 2 : upper - 1 : 2] = 2.0 * values[:, p_lr + 2 : upper - 1 : 2]
+        return u_array
+
     def simpson_weight_vector(self) -> np.ndarray:
         if self._weights is None:
             weights = np.ones(self.grid_x)
@@ -123,21 +140,52 @@ class QuadratureMath:
             self._weights = weights * self.h / 3.0
         return self._weights
 
-    def convolution_fft(self, omega_array: np.ndarray, u_array: np.ndarray) -> np.ndarray:
+    def prepare_omega_fft(self, omega_array: np.ndarray) -> Tuple[np.ndarray, int]:
         omega_array = np.asarray(omega_array).ravel()
-        u_array = np.asarray(u_array).ravel()
-        if len(omega_array) != len(u_array):
-            raise NumericalError("omega_array and u_array must have the same length.")
-        base_len = len(u_array)
-        fft_len = base_len if self.fft_padding_factor <= 1 else int(self.fft_padding_factor * base_len)
+        base_len = len(omega_array)
+        fft_len = (
+            base_len
+            if self.fft_padding_factor <= 1
+            else int(self.fft_padding_factor * base_len)
+        )
         omega_fft = np.fft.fft(omega_array, n=fft_len)
-        u_fft = np.fft.fft(u_array, n=fft_len)
-        product = omega_fft * u_fft
         fft_filter = self._get_fft_filter(fft_len)
         if fft_filter is not None:
-            product *= fft_filter
-        f_array = np.fft.ifft(product).real
-        return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+            omega_fft = omega_fft * fft_filter
+        return omega_fft, fft_len
+
+    def convolution_fft(
+        self,
+        omega_array: np.ndarray,
+        u_array: np.ndarray,
+        *,
+        omega_fft: Optional[np.ndarray] = None,
+        fft_len: Optional[int] = None,
+    ) -> np.ndarray:
+        omega_array = np.asarray(omega_array).ravel()
+        u_array = np.asarray(u_array)
+        if u_array.ndim == 1:
+            base_len = len(u_array)
+        else:
+            base_len = u_array.shape[-1]
+        if len(omega_array) != base_len:
+            raise NumericalError("omega_array and u_array must have the same length.")
+
+        if omega_fft is None:
+            omega_fft, fft_len = self.prepare_omega_fft(omega_array)
+        elif fft_len is None:
+            fft_len = len(omega_fft)
+
+        if u_array.ndim == 1:
+            u_fft = np.fft.fft(u_array, n=fft_len)
+            product = omega_fft * u_fft
+            f_array = np.fft.ifft(product).real
+            return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+
+        u_fft = np.fft.fft(u_array, n=fft_len, axis=-1)
+        product = omega_fft * u_fft
+        f_array = np.fft.ifft(product, axis=-1).real
+        return f_array[:, self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
 
     def _get_fft_filter(self, length: int) -> Optional[np.ndarray]:
         if self.fft_filter_alpha <= 0.0:

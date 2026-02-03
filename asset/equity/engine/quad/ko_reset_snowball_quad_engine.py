@@ -264,21 +264,23 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
-
-            v_in = self._diffuse_fft(
-                v_in,
-                math_utils,
-                omega_array,
-                prefactor,
-                full_p_lr,
-                full_p_ur,
-                full_p0,
-                alpha,
-                beta,
-                tau_step,
-            )
+            omega_fft, fft_len = math_utils.prepare_omega_fft(omega_array)
 
             if ki_continuous and log_ki_barrier is not None:
+                v_in = self._diffuse_fft(
+                    v_in,
+                    math_utils,
+                    omega_array,
+                    prefactor,
+                    full_p_lr,
+                    full_p_ur,
+                    full_p0,
+                    alpha,
+                    beta,
+                    tau_step,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
+                )
                 v_out = self._diffuse_with_bridge(
                     v_out,
                     v_in,
@@ -295,10 +297,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     dt[step_index],
                     tau_step,
                     product.is_reverse,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
                 )
             else:
-                v_out = self._diffuse_fft(
-                    v_out,
+                stacked = np.vstack([v_in, v_out])
+                stacked = self._diffuse_fft(
+                    stacked,
                     math_utils,
                     omega_array,
                     prefactor,
@@ -308,7 +313,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     alpha,
                     beta,
                     tau_step,
+                    omega_fft=omega_fft,
+                    fft_len=fft_len,
                 )
+                v_in, v_out = stacked[0], stacked[1]
 
         return math_utils.interpolate(v_out, x=0.0)
 
