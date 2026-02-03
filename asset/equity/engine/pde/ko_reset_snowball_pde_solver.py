@@ -5,7 +5,7 @@ Applies the pre-KI KO schedule to the V0 surface and the post-KI KO schedule
 to the V1 surface (ABSOLUTE post-KO mode only).
 """
 
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from time import perf_counter
 from typing import Dict, List, Optional, Tuple
 
@@ -14,6 +14,7 @@ import numpy as np
 from asset.equity.engine.pde.base_pde_solver import PDESolutionResult
 from asset.equity.engine.pde.core import (
     PDESystemState,
+    PDEEvent,
     KnockOutEvent,
     KnockInEvent,
     MaturityEvent,
@@ -76,11 +77,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._set_terminal_condition_v1(state.get_slice(num_t - 1)[:, 1], x_vec, s_vec, product, pricing_env)
 
         # 4. Build Events
-        events_by_step = self._build_ko_reset_events(t_vec, product, pricing_env, tau, ki_continuous)
+        events_by_step = self._build_ko_reset_events(
+            t_vec, product, pricing_env, tau, ki_continuous
+        )
         
-        if (num_t - 1) in events_by_step:
-            for event in events_by_step[num_t - 1]:
-                event.apply(state, num_t - 1, t_vec[num_t - 1], s_vec, pricing_env)
+        for event in events_by_step[num_t - 1]:
+            event.apply(state, num_t - 1, t_vec[num_t - 1], s_vec, pricing_env)
 
         # 5. Matrices
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
@@ -94,6 +96,18 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 idx = int(np.argmin(np.abs(t_vec - et)))
                 if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
                     smooth_js.update([idx - 1 - k for k in range(params.rannacher_steps) if idx - 1 - k >= 0])
+
+        ki_mask = None
+        if ki_continuous and product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            if isinstance(ki_barrier, list):
+                ki_barrier = ki_barrier[0]
+            if product.is_reverse:
+                ki_mask = s_vec >= float(ki_barrier)
+            else:
+                ki_mask = s_vec <= float(ki_barrier)
+
+        rhs_buffer = np.empty((num_x - 2, state.num_states), dtype=float)
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
@@ -110,18 +124,21 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             banded, lower1, main1, upper1 = self._get_banded_system(l, c, u, dt, theta, full_coeffs=(l,c,u))
             def injector(rhs_buffer, t_idx):
                 self._inject_boundary_contributions(rhs_buffer, state.grids[:, :, :], l, u, t_idx, dt, theta)
-            state.solve_step_banded(j, j + 1, banded, (lower1, main1, upper1), injector)
+            state.solve_step_banded(
+                j,
+                j + 1,
+                banded,
+                (lower1, main1, upper1),
+                injector,
+                rhs_buffer=rhs_buffer,
+            )
             
             # Apply Events
-            if j in events_by_step:
-                for event in events_by_step[j]:
-                    event.apply(state, j, t_vec[j], s_vec, pricing_env)
-                    
-            if ki_continuous and product.has_ki_barrier:
-                ki_barrier = product.barrier_config.ki_barrier
-                if isinstance(ki_barrier, list): ki_barrier = ki_barrier[0]
-                event = KnockInEvent(float(ki_barrier), product.is_reverse, source_idx=1, target_idx=0)
+            for event in events_by_step[j]:
                 event.apply(state, j, t_vec[j], s_vec, pricing_env)
+                    
+            if ki_mask is not None:
+                state.grids[ki_mask, j, 0] = state.grids[ki_mask, j, 1]
 
         # 7. Result
         spot_log = np.log(spot)
@@ -130,7 +147,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         return PDESolutionResult(solution_vec, x_vec, s_vec, spot_log)
 
     def _build_ko_reset_events(self, t_vec, product, pricing_env, tau, ki_continuous):
-        events = defaultdict(list)
+        events: List[List[PDEEvent]] = [[] for _ in range(len(t_vec))]
         
         # Pre-KI KO Events (Target V0 only)
         pre_records = self._get_cached_pre_ko_records(pricing_env, product)

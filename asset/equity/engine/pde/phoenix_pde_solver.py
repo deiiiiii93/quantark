@@ -4,14 +4,19 @@ PDE solver for Phoenix options using the unified PDESystemState.
 Handles memory coupons via N-state vectorization.
 """
 
-from collections import defaultdict
 from time import perf_counter
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from asset.equity.engine.pde.base_pde_solver import PDESolutionResult
-from asset.equity.engine.pde.core import PDESystemState, KnockOutEvent, KnockInEvent, PhoenixCouponEvent
+from asset.equity.engine.pde.core import (
+    PDESystemState,
+    PDEEvent,
+    KnockOutEvent,
+    KnockInEvent,
+    PhoenixCouponEvent,
+)
 from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.product.option.phoenix_option import PhoenixOption
@@ -85,9 +90,8 @@ class PhoenixPDESolver(SnowballPDESolver):
             t_vec, product, pricing_env, tau, ki_continuous, v0_indices, v1_indices, ko_records
         )
         
-        if (num_t - 1) in events_by_step:
-            for event in events_by_step[num_t - 1]:
-                event.apply(state, num_t - 1, t_vec[num_t - 1], s_vec, pricing_env)
+        for event in events_by_step[num_t - 1]:
+            event.apply(state, num_t - 1, t_vec[num_t - 1], s_vec, pricing_env)
 
         # 5. Matrices
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
@@ -104,6 +108,18 @@ class PhoenixPDESolver(SnowballPDESolver):
                         for k in range(params.rannacher_steps):
                             smooth_idx = idx - 1 - k
                             if smooth_idx >= 0: smooth_js.add(smooth_idx)
+
+        ki_mask = None
+        if ki_continuous and product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            if isinstance(ki_barrier, list):
+                ki_barrier = ki_barrier[0]
+            if product.is_reverse:
+                ki_mask = s_vec >= float(ki_barrier)
+            else:
+                ki_mask = s_vec <= float(ki_barrier)
+
+        rhs_buffer = np.empty((num_x - 2, state.num_states), dtype=float)
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
@@ -122,19 +138,24 @@ class PhoenixPDESolver(SnowballPDESolver):
             banded, lower1, main1, upper1 = self._get_banded_system(l, c, u, dt, theta, full_coeffs=(l,c,u))
             def injector(rhs_buffer, t_idx):
                 self._inject_boundary_contributions(rhs_buffer, state.grids[:, :, :], l, u, t_idx, dt, theta)
-            state.solve_step_banded(j, j+1, banded, (lower1, main1, upper1), injector)
+            state.solve_step_banded(
+                j,
+                j + 1,
+                banded,
+                (lower1, main1, upper1),
+                injector,
+                rhs_buffer=rhs_buffer,
+            )
             
             # Apply Events
-            if j in events_by_step:
-                for event in events_by_step[j]:
-                    event.apply(state, j, t_vec[j], s_vec, pricing_env)
+            for event in events_by_step[j]:
+                event.apply(state, j, t_vec[j], s_vec, pricing_env)
                     
-            if ki_continuous and product.has_ki_barrier:
-                ki_barrier = product.barrier_config.ki_barrier
-                if isinstance(ki_barrier, list): ki_barrier = ki_barrier[0]
+            if ki_mask is not None:
                 for k in range(num_memory_states):
-                    event = KnockInEvent(float(ki_barrier), product.is_reverse, source_idx=v1_indices[k], target_idx=v0_indices[k])
-                    event.apply(state, j, t_vec[j], s_vec, pricing_env)
+                    state.grids[ki_mask, j, v0_indices[k]] = state.grids[
+                        ki_mask, j, v1_indices[k]
+                    ]
 
         # 7. Result
         spot_log = np.log(spot)
@@ -143,7 +164,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         return PDESolutionResult(solution_vec, x_vec, s_vec, spot_log)
 
     def _build_phoenix_events(self, t_vec, product, pricing_env, tau, ki_continuous, v0_idx, v1_idx, ko_records):
-        events = defaultdict(list)
+        events: List[List[PDEEvent]] = [[] for _ in range(len(t_vec))]
         ko_times = [rec.observation_time for rec in ko_records]
         num_obs = len(ko_times)
         

@@ -47,16 +47,30 @@ class KnockOutEvent(PDEEvent):
         self.record = record
         self.is_reverse = is_reverse
         self.state_indices = state_indices # If None, apply to all states
+        self._mask_cache: Optional[np.ndarray] = None
+        self._mask_ref_id: Optional[int] = None
+        self._mask_len: Optional[int] = None
         
     def apply(self, state, t_idx, current_time, s_vec, pricing_env):
         barrier = float(self.record.barrier)
         payoff = float(self.record.payoff or 0.0)
         
         # UP barrier for standard KO
-        if self.is_reverse:
-            mask = s_vec <= barrier
+        s_vec_id = id(s_vec)
+        if (
+            self._mask_cache is None
+            or self._mask_ref_id != s_vec_id
+            or self._mask_len != len(s_vec)
+        ):
+            if self.is_reverse:
+                mask = s_vec <= barrier
+            else:
+                mask = s_vec >= barrier
+            self._mask_cache = mask
+            self._mask_ref_id = s_vec_id
+            self._mask_len = len(s_vec)
         else:
-            mask = s_vec >= barrier
+            mask = self._mask_cache
             
         df = self._get_df(pricing_env, current_time, self.record.settlement_time)
         value = payoff * df
@@ -77,13 +91,27 @@ class KnockInEvent(PDEEvent):
         self.is_reverse = is_reverse
         self.source = source_idx
         self.target = target_idx
+        self._mask_cache: Optional[np.ndarray] = None
+        self._mask_ref_id: Optional[int] = None
+        self._mask_len: Optional[int] = None
         
     def apply(self, state, t_idx, current_time, s_vec, pricing_env):
         # DOWN barrier for standard KI
-        if self.is_reverse:
-            mask = s_vec >= self.barrier
+        s_vec_id = id(s_vec)
+        if (
+            self._mask_cache is None
+            or self._mask_ref_id != s_vec_id
+            or self._mask_len != len(s_vec)
+        ):
+            if self.is_reverse:
+                mask = s_vec >= self.barrier
+            else:
+                mask = s_vec <= self.barrier
+            self._mask_cache = mask
+            self._mask_ref_id = s_vec_id
+            self._mask_len = len(s_vec)
         else:
-            mask = s_vec <= self.barrier
+            mask = self._mask_cache
             
         state.grids[mask, t_idx, self.target] = state.grids[mask, t_idx, self.source]
 

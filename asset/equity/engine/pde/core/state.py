@@ -52,7 +52,8 @@ class PDESystemState:
         t_idx_next: int,
         banded_lhs: np.ndarray,
         rhs_coeffs: Tuple[np.ndarray, np.ndarray, np.ndarray],
-        boundary_injector: Callable[[np.ndarray, int], None]
+        boundary_injector: Callable[[np.ndarray, int], None],
+        rhs_buffer: Optional[np.ndarray] = None,
     ) -> None:
         """
         Perform one backward time step using vectorized banded solver.
@@ -76,7 +77,14 @@ class PDESystemState:
         # Vectorized calculation using broadcasting
         # lower: (N-2,), v_next: (N-2, K) -> broadcasts column-wise
         # Equivalent to matrix multiplication for tridiagonal M1
-        rhs = main[:, None] * v_next
+        rhs = rhs_buffer
+        if rhs is None:
+            rhs = np.empty_like(v_next)
+        elif rhs.shape != v_next.shape:
+            raise ValueError(
+                f"rhs_buffer shape {rhs.shape} does not match v_next shape {v_next.shape}"
+            )
+        rhs[:] = main[:, None] * v_next
         rhs[1:] += lower[:, None] * v_next[:-1]
         rhs[:-1] += upper[:, None] * v_next[1:]
         

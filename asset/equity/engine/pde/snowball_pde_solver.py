@@ -10,14 +10,19 @@ The surfaces interact at barrier observation times via PDEEvents:
 - KI Event: Copies value from State 1 to State 0
 """
 
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from time import perf_counter
 from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
 from asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
-from asset.equity.engine.pde.core import PDESystemState, KnockOutEvent, KnockInEvent
+from asset.equity.engine.pde.core import (
+    PDESystemState,
+    PDEEvent,
+    KnockOutEvent,
+    KnockInEvent,
+)
 from asset.equity.engine.event_stats import AutocallableEventStats
 from asset.equity.param import PDEParams
 from asset.equity.product.base_equity_product import BaseEquityProduct
@@ -122,9 +127,8 @@ class SnowballPDESolver(BasePDESolver):
         )
         
         # Apply terminal events (if any at t=T)
-        if (num_t - 1) in events_by_step:
-            for event in events_by_step[num_t - 1]:
-                event.apply(state, num_t - 1, t_vec[num_t - 1], s_vec, pricing_env)
+        for event in events_by_step[num_t - 1]:
+            event.apply(state, num_t - 1, t_vec[num_t - 1], s_vec, pricing_env)
 
         # 5. Build Operator Matrices
         if self._profile_enabled: t0 = perf_counter()
@@ -139,6 +143,18 @@ class SnowballPDESolver(BasePDESolver):
                 idx = int(np.argmin(np.abs(t_vec - et)))
                 if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
                     smooth_js.update([idx - 1 - k for k in range(params.rannacher_steps) if idx - 1 - k >= 0])
+
+        ki_mask = None
+        if ki_continuous and product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            if isinstance(ki_barrier, list):
+                ki_barrier = ki_barrier[0]
+            if product.is_reverse:
+                ki_mask = s_vec >= float(ki_barrier)
+            else:
+                ki_mask = s_vec <= float(ki_barrier)
+
+        rhs_buffer = np.empty((num_x - 2, state.num_states), dtype=float)
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
@@ -172,23 +188,26 @@ class SnowballPDESolver(BasePDESolver):
             def injector(rhs_buffer, t_idx):
                 self._inject_boundary_contributions(rhs_buffer, state.grids[:, :, :], l, u, t_idx, dt, theta)
             
-            state.solve_step_banded(j, j + 1, banded, (lower1, main1, upper1), injector)
+            state.solve_step_banded(
+                j,
+                j + 1,
+                banded,
+                (lower1, main1, upper1),
+                injector,
+                rhs_buffer=rhs_buffer,
+            )
             
             if self._profile_enabled: self._profile_stats["solve"] += perf_counter() - t0
 
             # Apply Events
-            if j in events_by_step:
-                if self._profile_enabled: t0 = perf_counter()
-                for event in events_by_step[j]:
-                    event.apply(state, j, current_time, s_vec, pricing_env)
-                if self._profile_enabled: self._profile_stats["barrier"] += perf_counter() - t0
+            if self._profile_enabled: t0 = perf_counter()
+            for event in events_by_step[j]:
+                event.apply(state, j, current_time, s_vec, pricing_env)
+            if self._profile_enabled: self._profile_stats["barrier"] += perf_counter() - t0
                 
             # Apply Continuous KI if needed
-            if ki_continuous and product.has_ki_barrier:
-                ki_barrier = product.barrier_config.ki_barrier
-                if isinstance(ki_barrier, list): ki_barrier = ki_barrier[0]
-                event = KnockInEvent(float(ki_barrier), product.is_reverse, source_idx=1, target_idx=0)
-                event.apply(state, j, current_time, s_vec, pricing_env)
+            if ki_mask is not None:
+                state.grids[ki_mask, j, 0] = state.grids[ki_mask, j, 1]
 
         # 7. Result
         spot_log = np.log(spot)
@@ -215,7 +234,7 @@ class SnowballPDESolver(BasePDESolver):
         return None
 
     def _build_events_map(self, t_vec, product, pricing_env, tau, ki_continuous):
-        events = defaultdict(list)
+        events: List[List[PDEEvent]] = [[] for _ in range(len(t_vec))]
         
         # KO Events
         ko_records = self._get_cached_ko_records(pricing_env, product)

@@ -340,6 +340,13 @@ def main():
         use_business_day_grid=False,
         seed=100,
     )
+    rqmc_params = MCParams(
+        num_paths=200_000,
+        time_steps=244,
+        use_business_day_grid=False,
+        seed=100,
+        rqmc_paths_mode="total",
+    )
     doc_value = 689_803.6242
     doc_delta_cash = -27_467_316.0375
     doc_vega_1pct = 210_951.6748
@@ -411,7 +418,11 @@ def main():
         params=pseudo_params,
     )
     run_engine("QMC", EngineType.MONTE_CARLO(MonteCarloMethod.QUASI))
-    run_engine("RQMC", EngineType.MONTE_CARLO(MonteCarloMethod.RANDOMIZED_QUASI))
+    run_engine(
+        "RQMC",
+        EngineType.MONTE_CARLO(MonteCarloMethod.RANDOMIZED_QUASI),
+        params=rqmc_params,
+    )
 
     def run_pde(label: str, params: PDEParams) -> None:
         solver = KOResetSnowballPDESolver(params=params)
