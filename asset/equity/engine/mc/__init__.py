@@ -9,6 +9,7 @@ from .phoenix_mc_engine import PhoenixMCEngine, PhoenixMCResult
 from .asian_option_mc_engine import AsianOptionMCEngine, AsianMCResult
 from .digital_option_mc_engine import DigitalOptionMCEngine
 from .barrier_option_mc_engine import BarrierOptionMCEngine
+from .range_accrual_mc_engine import RangeAccrualMCEngine, RangeAccrualMCResult
 
 __all__ = [
     "EuropeanMCEngine",
@@ -21,4 +22,6 @@ __all__ = [
     "AsianMCResult",
     "DigitalOptionMCEngine",
     "BarrierOptionMCEngine",
+    "RangeAccrualMCEngine",
+    "RangeAccrualMCResult",
 ]

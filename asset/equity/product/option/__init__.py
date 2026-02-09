@@ -38,6 +38,15 @@ from .phoenix_helpers import (
     create_memory_phoenix,
     create_non_memory_phoenix,
 )
+from .range_accrual_option import RangeAccrualOption
+from .range_accrual_config import RangeAccrualConfig, RangeAccrualObservationRecord
+from .range_accrual_helpers import (
+    create_standard_range_accrual,
+    create_reverse_range_accrual,
+    create_stepdown_range_accrual,
+    generate_range_observation_records,
+    assign_calendar_day_weights,
+)
 
 __all__ = [
     "BaseEquityOption",
@@ -76,4 +85,14 @@ __all__ = [
     "create_reverse_phoenix",
     "create_memory_phoenix",
     "create_non_memory_phoenix",
+    # Range Accrual option
+    "RangeAccrualOption",
+    "RangeAccrualConfig",
+    "RangeAccrualObservationRecord",
+    # Range Accrual helpers
+    "create_standard_range_accrual",
+    "create_reverse_range_accrual",
+    "create_stepdown_range_accrual",
+    "generate_range_observation_records",
+    "assign_calendar_day_weights",
 ]

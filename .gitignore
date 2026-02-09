@@ -144,3 +144,4 @@ docs/*.docx
 docs/*.pdf
 tmp/
 docs/strategyindex
+external/
