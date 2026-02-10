@@ -83,6 +83,7 @@ class SnowballPDESolver(BasePDESolver):
 
         # KI observation tracking
         self._ki_observation_indices: Set[int] = set()
+        self._ki_barrier_by_tidx: Dict[int, float] = {}
         self._ki_continuous: bool = False
         self._ki_barrier: float = 0.0
         self._is_reverse: bool = False
@@ -424,7 +425,7 @@ class SnowballPDESolver(BasePDESolver):
             self._ki_continuous or terminal_tidx in self._ki_observation_indices
         )
         if is_terminal_ki:
-            ki_barrier = float(self._ki_barrier)
+            ki_barrier = self._resolve_ki_barrier_at_tidx(terminal_tidx)
             mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
             v0_next[mask_ki, :] = v1_next[mask_ki, :]
 
@@ -532,7 +533,7 @@ class SnowballPDESolver(BasePDESolver):
             if product.has_ki_barrier:
                 should_apply_ki = self._ki_continuous or j in self._ki_observation_indices
                 if should_apply_ki:
-                    ki_barrier = float(self._ki_barrier)
+                    ki_barrier = self._resolve_ki_barrier_at_tidx(j)
                     mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
                     v0_cur[mask_ki, :] = v1_cur[mask_ki, :]
 
@@ -877,6 +878,7 @@ class SnowballPDESolver(BasePDESolver):
         # Clear previous observation tracking
         self._ko_observation_indices.clear()
         self._ki_observation_indices.clear()
+        self._ki_barrier_by_tidx.clear()
         self._ko_terminal_record = None
         self._has_terminal_ko = False
 
@@ -897,14 +899,32 @@ class SnowballPDESolver(BasePDESolver):
         if product.has_ki_barrier and not self._ki_continuous:
             ki_profile = self._get_cached_ki_profile(pricing_env, product)
             ki_times = ki_profile["observation_times"]
-            for obs_time in ki_times:
+            ki_barriers = ki_profile.get("barriers") or []
+            for obs_idx, obs_time in enumerate(ki_times):
+                if obs_time is None:
+                    continue
+                barrier = None
+                if obs_idx < len(ki_barriers):
+                    barrier = ki_barriers[obs_idx]
+                if barrier is None:
+                    barrier = self._ki_barrier
                 if is_close(obs_time, 0.0):
                     self._ki_observation_indices.add(0)
+                    self._ki_barrier_by_tidx[0] = float(barrier)
                 elif 0.0 < obs_time <= tau:
                     idx = self._aligned_time_index(t_vec, obs_time, "KI observation")
                     self._ki_observation_indices.add(idx)
+                    self._ki_barrier_by_tidx[idx] = float(barrier)
 
         return result
+
+    def _resolve_ki_barrier_at_tidx(self, t_idx: int) -> float:
+        """Resolve KI barrier for a specific PDE time index."""
+        if not self._ki_continuous:
+            mapped = self._ki_barrier_by_tidx.get(t_idx)
+            if mapped is not None:
+                return float(mapped)
+        return float(self._ki_barrier)
 
     def _aligned_time_index(
         self, t_vec: np.ndarray, obs_time: float, label: str
@@ -1545,7 +1565,7 @@ class SnowballPDESolver(BasePDESolver):
         When the KI barrier is hit, the "not knocked-in" value becomes
         the "knocked-in" value at that spot.
         """
-        ki_barrier = self._ki_barrier
+        ki_barrier = self._resolve_ki_barrier_at_tidx(t_idx)
 
         # Determine breached region (KI is a DOWN barrier)
         mask = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)

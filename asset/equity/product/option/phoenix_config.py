@@ -32,6 +32,9 @@ class CouponBarrierConfig:
                              Supported: ACT_365, THIRTY_360_US, THIRTY_360_EUROPEAN, etc.
         memory_coupon: If True, missed coupons accumulate and are paid when barrier
                       is hit later. If False, only current period coupon is paid.
+        fixed_coupon_year_fraction: Optional fixed year fraction used for each coupon
+                      period (e.g., 1/12 for equal monthly coupons). If None, engines
+                      use observation-time differences.
     """
 
     # Coupon barrier level(s)
@@ -48,6 +51,9 @@ class CouponBarrierConfig:
 
     # Memory coupon feature
     memory_coupon: bool = True
+
+    # Optional fixed accrual per coupon period (e.g. 1/12)
+    fixed_coupon_year_fraction: Optional[float] = None
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -80,6 +86,19 @@ class CouponBarrierConfig:
             raise ValidationError(
                 f"memory_coupon must be boolean, got {type(self.memory_coupon)}"
             )
+
+        # Validate fixed coupon accrual if provided
+        if self.fixed_coupon_year_fraction is not None:
+            if not isinstance(self.fixed_coupon_year_fraction, (int, float)):
+                raise ValidationError(
+                    "fixed_coupon_year_fraction must be numeric when provided, "
+                    f"got {type(self.fixed_coupon_year_fraction)}"
+                )
+            if self.fixed_coupon_year_fraction <= 0:
+                raise ValidationError(
+                    "fixed_coupon_year_fraction must be positive, "
+                    f"got {self.fixed_coupon_year_fraction}"
+                )
 
     @staticmethod
     def _validate_barrier_positive(

@@ -726,6 +726,28 @@ class PhoenixOption(BaseEquityOption):
             start_date, end_date, self.coupon_config.day_count_convention
         )
 
+    def get_coupon_period_year_fractions(
+        self, observation_times: List[float]
+    ) -> List[float]:
+        """
+        Resolve coupon period accrual fractions for each observation.
+
+        If fixed_coupon_year_fraction is configured, use that value for every
+        coupon period (e.g., 1/12 for equal monthly coupons). Otherwise, derive
+        period fractions from successive observation times.
+        """
+        if not observation_times:
+            return []
+
+        fixed = self.coupon_config.fixed_coupon_year_fraction
+        if fixed is not None:
+            return [float(fixed) for _ in observation_times]
+
+        yfs: List[float] = [float(observation_times[0])]
+        for idx in range(1, len(observation_times)):
+            yfs.append(float(observation_times[idx] - observation_times[idx - 1]))
+        return yfs
+
     # ==================== KO/KI Barrier Methods ====================
 
     def is_ko_triggered(self, spot: float, observation_idx: int = 0) -> bool:

@@ -312,10 +312,10 @@ class PhoenixPDESolver(SnowballPDESolver):
         else:
             self._coupon_barriers = np.full(num_obs, float(coupon_barrier))
 
-        period_year_fractions = np.empty(num_obs, dtype=float)
-        period_year_fractions[0] = ko_times[0]
-        if num_obs > 1:
-            period_year_fractions[1:] = np.diff(ko_times)
+        period_year_fractions = np.array(
+            product.get_coupon_period_year_fractions(ko_times),
+            dtype=float,
+        )
         self._coupon_amounts = np.array(
             [
                 product.get_coupon_payoff(i, year_fraction=period_year_fractions[i])

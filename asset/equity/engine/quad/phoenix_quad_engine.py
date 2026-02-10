@@ -150,10 +150,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             log_ki_barrier = safe_log(product.barrier_config.ki_barrier / spot)
 
         ko_times = np.array([rec.observation_time for rec in ko_records], dtype=float)
-        period_year_fractions = np.empty(len(ko_records), dtype=float)
-        period_year_fractions[0] = ko_times[0]
-        if len(ko_records) > 1:
-            period_year_fractions[1:] = np.diff(ko_times)
+        period_year_fractions = np.array(
+            product.get_coupon_period_year_fractions(ko_times.tolist()),
+            dtype=float,
+        )
         coupon_amounts = np.array(
             [
                 product.get_coupon_payoff(i, year_fraction=period_year_fractions[i])

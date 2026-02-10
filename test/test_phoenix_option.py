@@ -309,6 +309,17 @@ class TestCouponPayoff:
         expected = get_principal(phoenix) * 0.01 * 0.25  # 2,500
         assert payoff == expected
 
+    def test_fixed_coupon_year_fraction(self):
+        """Test fixed per-period accrual fraction for equal monthly coupons."""
+        coupon_config = CouponBarrierConfig(
+            coupon_barrier=85.0,
+            coupon_rate=0.12,
+            fixed_coupon_year_fraction=1.0 / 12.0,
+        )
+        phoenix = create_test_phoenix(coupon_config=coupon_config)
+        yfs = phoenix.get_coupon_period_year_fractions([0.1, 0.2, 0.35])
+        assert yfs == [1.0 / 12.0, 1.0 / 12.0, 1.0 / 12.0]
+
     def test_coupon_payoff_with_dates(self):
         """Test coupon payoff calculation with dates."""
         phoenix = create_test_phoenix()

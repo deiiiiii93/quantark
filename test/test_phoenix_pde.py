@@ -14,6 +14,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from asset.equity.engine.pde_engine import PDEEngine
 from asset.equity.param import PDEParams
+from asset.equity.product.option.observation_schedule import (
+    ObservationRecord,
+    ObservationSchedule,
+)
 from asset.equity.product.option.phoenix_config import CouponBarrierConfig
 from asset.equity.product.option.phoenix_option import PhoenixOption
 from asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
@@ -247,3 +251,65 @@ def test_phoenix_pde_reverse_boundary_unbounded():
     principal = phoenix.initial_price * phoenix.contract_multiplier
     expected = (principal + phoenix.strike) * df - s_vec[-1] * df_div
     assert abs(grid[-1, 0] - expected) <= 1e-6
+
+
+def test_phoenix_pde_variable_discrete_ki_barrier_uses_time_varying_levels():
+    """
+    Regression test: PDE KI jump must use the KI barrier at each observation time.
+
+    If PDE incorrectly uses only the first KI barrier for all KI observations, both
+    prices below become nearly identical (and often near zero) because KI almost
+    never triggers. With correct time-varying KI handling, participation changes the
+    V1 downside and therefore price.
+    """
+    env = create_pricing_env(vol=0.10, rate=0.02, div_yield=0.0)
+
+    def build_product(participation_rate: float) -> PhoenixOption:
+        ki_schedule = ObservationSchedule(
+            records=[
+                ObservationRecord(observation_time=0.5, barrier=1.0e-6),
+                ObservationRecord(observation_time=1.0, barrier=120.0),
+            ]
+        )
+        barrier_config = BarrierConfig(
+            ko_barrier=1.0e9,
+            ko_rate=0.0,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.5, 1.0],
+            ki_barrier=[1.0e-6, 120.0],  # First KI never hits; second KI should hit often
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_schedule=ki_schedule,
+            ki_continuous=False,
+        )
+        coupon_config = CouponBarrierConfig(
+            coupon_barrier=[1.0e9, 1.0e9],  # disable coupon effects
+            coupon_rate=0.0,
+            coupon_pay_type=CouponPayType.INSTANT,
+            day_count_convention=DayCountConvention.ACT_365,
+            memory_coupon=False,
+        )
+        payoff_config = PayoffConfig(
+            rebate_rate=0.0,
+            include_principal=False,
+            participation_rate=participation_rate,
+            protection_type=ProtectionType.NONE,
+        )
+        return PhoenixOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            coupon_config=coupon_config,
+            payoff_config=payoff_config,
+            contract_multiplier=1.0,
+            maturity=1.0,
+        )
+
+    high_participation = build_product(participation_rate=1.0)
+    low_participation = build_product(participation_rate=0.2)
+
+    engine = PhoenixPDESolver(params=PDEParams(grid_size=180, time_steps=120))
+    price_high = engine.price(high_participation, env)
+    price_low = engine.price(low_participation, env)
+
+    # Lower KI participation should reduce downside and increase price.
+    assert price_low > price_high + 1e-3
