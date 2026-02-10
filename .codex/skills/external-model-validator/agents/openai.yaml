@@ -1,0 +1,4 @@
+interface:
+  display_name: "External Model Validation"
+  short_description: "Validate engines against external case docs"
+  default_prompt: "Use $external-model-validator to validate model outputs against an external case document."
