@@ -9,6 +9,10 @@ from .digital_option_engine import DigitalOptionAnalyticalEngine
 from .barrier_analytical_engine import BarrierAnalyticalEngine
 from .one_touch_analytical_engine import OneTouchAnalyticalEngine
 from .asian_option_analytical_engine import AsianOptionAnalyticalEngine
+from .range_accrual_analytical_engine import (
+    RangeAccrualAnalyticalEngine,
+    RangeAccrualAnalyticalResult,
+)
 
 __all__ = [
     "BlackScholesEngine",
@@ -18,4 +22,6 @@ __all__ = [
     "BarrierAnalyticalEngine",
     "OneTouchAnalyticalEngine",
     "AsianOptionAnalyticalEngine",
+    "RangeAccrualAnalyticalEngine",
+    "RangeAccrualAnalyticalResult",
 ]
