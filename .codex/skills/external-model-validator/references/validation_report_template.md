@@ -4,6 +4,7 @@
 - Source document:
 - Product(s):
 - Engines compared:
+- Metrics compared:
 - Validation date:
 
 ## 2. Case Summary
@@ -14,14 +15,14 @@
 ## 3. Assumptions Applied
 - Sign convention:
 - Day-count and calendar:
-- KI/KO observation semantics:
-- Coupon accrual interpretation:
+- Product event semantics (exercise/barriers/callability/default/coupon triggers):
+- Accrual or carry interpretation:
 - Numerical settings (paths/grids/steps):
 
 ## 4. Comparison Table
-| Case | Engine | Actual | External | Abs Diff | Rel Diff | StdErr | In-Sigma |
-|---|---:|---:|---:|---:|---:|---:|---:|
-|  |  |  |  |  |  |  |  |
+| Case | Engine | Metric | Actual | External | Abs Diff | Rel Diff | StdErr | In-Sigma |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+|  |  |  |  |  |  |  |  |  |
 
 ## 5. Findings
 - Main mismatch:

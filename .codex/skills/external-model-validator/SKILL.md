@@ -5,15 +5,15 @@ description: Validate pricing models against external benchmark cases from .docx
 
 # External Model Validation
 
-Run a repeatable workflow for validating local model outputs against external case documents.
+Run a repeatable workflow for validating local model outputs against external case documents across products (equity options, autocallables, exotics, rates, fixed income).
 
 ## Quick Start
 
 1. Extract benchmark targets from external input:
 ```bash
 python .codex/skills/external-model-validator/scripts/extract_external_targets.py \
-  --input external/ki_variant_phx/phoenix_example.txt \
-  --output external/ki_variant_phx/expected_targets.json
+  --input external/case_document.md \
+  --output external/expected_targets.json
 ```
 2. Run or update the local pricing/validation script to generate actual outputs.
 3. Compare expected vs actual by case and engine.
@@ -26,6 +26,8 @@ python .codex/skills/external-model-validator/scripts/extract_external_targets.p
 Accept `.docx`, `.txt`, or `.md`.
 
 - Use `scripts/extract_external_targets.py` first for automatic extraction.
+- The extractor supports generic engine aliases (`MC/QMC/RQMC/PDE/QUAD/TREE/ANALYTICAL`) and model labels (`EXTERNAL_MODEL/INTERNAL_MODEL/BENCHMARK`) in English and Chinese.
+- The extractor supports generic metrics (`price`, `delta_cash`, `gamma_cash`, `vega_1pct`, `theta_1d`, `rho_1pct`, `std_error`, `probability`).
 - If extraction misses fields, read the source directly and patch assumptions manually.
 - Normalize signs and units before any comparison:
   - Holder-side vs issuer-side sign convention.
@@ -38,7 +40,7 @@ Construct a machine-readable case spec:
 - Product parameters.
 - Monitoring conventions.
 - Engine settings (paths, grids, steps, seeds).
-- External benchmark values by case and engine.
+- External benchmark values by case, engine, and metric.
 
 Keep each assumption explicit and traceable to source lines.
 
@@ -60,7 +62,7 @@ When gaps are material, isolate causes in this order:
 1. Sign convention and payoff perspective.
 2. Observation schedule/day-count details.
 3. Coupon accrual interpretation.
-4. KI/KO state transition semantics.
+4. Product event semantics (exercise/callability/barriers/default/coupon triggers).
 5. Numerical discretization and boundary settings.
 
 ### 5) Produce Validation Report
@@ -75,7 +77,7 @@ Use `references/validation_report_template.md` and fill:
 ## Resource Notes
 
 - Script: `scripts/extract_external_targets.py`
-  - Parse case blocks and benchmark targets from `.docx/.txt/.md`.
+  - Parse case blocks and benchmark targets from `.docx/.txt/.md` for multiple products.
   - Emit normalized JSON for downstream comparison scripts.
 - Template: `references/validation_report_template.md`
   - Keep report structure consistent across validations.
