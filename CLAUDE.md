@@ -51,36 +51,40 @@ python -m pytest --cov=.
 
 ### Running Examples
 ```bash
-# European option pricing demo
+# Vanilla options
 python example/european_option_demo.py
-
-# American option pricing demo
 python example/american_option_demo.py
+python example/asian_option_demo.py
+python example/barrier_analytical_demo.py
 
-# Monte Carlo pricing demo
-python example/european_mc_demo.py
+# Autocallable products
+python example/snowball_mc_demo.py
+python example/phoenix_option_demo.py
+python example/ko_reset_snowball_demo.py
 
-# PDE pricing demo
-python example/pde_pricing_demo.py
+# Engine comparisons
+python example/european_mc_demo.py           # Monte Carlo
+python example/pde_engine_demo.py            # PDE
+python example/european_quad_demo.py         # Quadrature
+python example/phoenix_engine_compare_demo.py
 
-# Bond pricing demos
+# Fixed income
 python example/fixed_bond_demo.py
 python example/bond_option_demo.py
+python example/bond_forward_futures_demo.py
+python example/convertible_bond_demo.py
 python example/frn_demo.py
 python example/irs_demo.py
 
-# VaR calculation demos
+# Risk & portfolio
 python example/parametric_var_demo.py
-python example/historical_var_demo.py
-python example/monte_carlo_var_demo.py
+python example/portfolio_var_demo.py
 python example/var_backtest_demo.py
-
-# Portfolio and backtesting demos
 python example/portfolio_demo.py
 python example/dynamic_scenario_demo.py
 python example/stress_test_demo.py
 
-# List all available examples: ls example/*.py
+# List all 50+ available examples: ls example/*.py
 ```
 
 ### OpenSpec Workflow (Specification-Driven Development)
@@ -118,11 +122,14 @@ QuantArk is a professional-grade financial derivatives pricing library with a mo
 The library separates concerns across independent, composable components:
 
 1. **Products** (`asset/*/product/`) - Define instrument specifications (strike, maturity, type)
-   - Examples: `EuropeanVanillaOption`, `FixedBond`, `InterestRateSwap`
+   - Vanilla: `EuropeanVanillaOption`, `AmericanOption`, `AsianOption`
+   - Exotic: `BarrierOption`, `OneTouchOption`, `CashOrNothingDigitalOption`
+   - Autocallable: `SnowballOption`, `PhoenixOption`, `KOResetSnowballOption`, `RangeAccrualOption`
+   - Fixed Income: `FixedBond`, `ConvertibleBond`, `BondForward`, `BondFutures`, `InterestRateSwap`
 2. **Processes** (`asset/*/process/`) - Stochastic models (BSM, Heston, Local Vol)
    - Examples: `GeometricBrownianMotion`, `HestonProcess`
 3. **Engines** (`asset/*/engine/`) - Pricing algorithms (Analytical, PDE, Monte Carlo, Quadrature)
-   - Examples: `BlackScholesEngine`, `AmericanOptionAnalyticalEngine`, `MonteCarloEngine`
+   - Examples: `BlackScholesEngine`, `MonteCarloEngine`, `SnowballPDESolver`, `PhoenixQuadEngine`
 4. **Parameters** (`param/`) - Market data (spot, vol surface, rate curve, dividends)
    - Examples: `SpotQuote`, `FlatVolSurface`, `FlatRateCurve`, `ContinuousDividendYield`
 5. **PriceEnv** (`priceenv/`) - Unified pricing environment bundling all market data
@@ -159,9 +166,11 @@ Always follow this two-level enum pattern (EngineType.ANALYTICAL(method)) for ne
 
 Each asset class (`asset/equity/`, `asset/bond/`, `asset/rate/`) follows the same internal structure:
 - `product/` - Instrument definitions
-- `engine/` - Pricing engines (analytical/, mc/, pde/, quad/)
+- `engine/` - Pricing engines (analytical/, mc/, pde/, quad/, tree/)
 - `process/` - Stochastic processes
 - `riskmeasures/` - Risk calculations
+- `analysis/` - Path analysis tools (equity autocallables)
+- `report/` - Risk reporting and visualization
 
 ### Product vs Position Sizing
 
@@ -171,13 +180,13 @@ Products represent one contract/unit, while positions carry quantity:
 
 ### Supporting Modules
 
-- **VaR** (`var/`) - Portfolio Value-at-Risk calculations (parametric, historical, Monte Carlo)
+- **VaR** (`var/`) - Portfolio Value-at-Risk calculations (parametric, historical, Monte Carlo) with attribution
 - **SIMM** (`simm/`) - ISDA SIMM v2.6 initial margin calculations
 - **Portfolio** (`portfolio/`) - Portfolio management with position tracking (equity and fixed income)
-- **Backtest** (`backtest/`) - Framework for testing hedging strategies (delta-neutral, DV01-neutral)
-- **Dynamic Scenario** (`dynamicscenario/`) - Multi-day scenario simulation
-- **Stress Test** (`stresstest/`) - Stress testing framework with scenario definitions
-- **Utilities** (`util/`) - Exceptions, enums, calendar, market data utilities
+- **Backtest** (`backtest/`) - Framework for testing hedging strategies (delta-neutral, DV01-neutral, convexity-neutral)
+- **Dynamic Scenario** (`dynamicscenario/`) - Multi-day scenario simulation (equity and FI)
+- **Stress Test** (`stresstest/`) - Stress testing framework with scenario definitions (equity and FI)
+- **Utilities** (`util/`) - Exceptions, enums, calendar (China holidays/business-day), market data adapter framework, numerical utilities
 
 ### Exception Hierarchy
 
@@ -299,7 +308,8 @@ confidence = validate_probability(confidence_level, "confidence_level")
 - `AGENTS.md` - Detailed guidance for AI assistants with architecture overview
 - `openspec/AGENTS.md` - OpenSpec instructions for spec-driven development
 - `openspec/project.md` - Project conventions, tech stack, domain context
-- `docs/` - Technical implementation details
+- `docs/` - Technical implementation details (backtest theory, stress test theory, quad engines, convertible bonds, engine param guide)
+- Module-level `CLAUDE.md` - Detailed guides in `asset/equity/`, `var/`, `backtest/`, `stresstest/`, `dynamicscenario/`, `simm/`
 
 ## Important Notes
 

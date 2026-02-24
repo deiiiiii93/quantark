@@ -43,6 +43,7 @@ dynamicscenario/
 ├── base.py                          # Base protocols, factory function
 ├── config.py                        # DynamicScenarioConfig (equity)
 ├── engine.py                        # DynamicScenarioEngine (equity)
+├── equity/                          # Equity subpackage (module wrapper)
 ├── fi/                              # Fixed Income subpackage
 │   ├── config.py                    # FIDynamicScenarioConfig
 │   ├── engine.py                    # FIDynamicScenarioEngine

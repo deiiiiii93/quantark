@@ -50,6 +50,7 @@ simm/
 ├── taxonomy.py                 # Risk classes, buckets, tenors, enums
 ├── sensitivity.py              # Sensitivity dataclasses & protocols
 ├── calibration/                # Risk weights, correlations, HVR
+│   ├── version.py             # SIMM version definitions
 │   ├── ir.py                  # IR risk weights & correlations
 │   ├── equity.py              # Equity risk weights & correlations
 │   ├── credit_qualifying.py   # Credit Q risk weights
@@ -71,6 +72,7 @@ simm/
 │   └── aggregation/           # Margin aggregation
 │       ├── simm_calculator.py # Main SIMM calculator
 │       ├── concentration.py   # Concentration risk
+│       ├── weighted_sensitivity.py
 │       ├── bucket_aggregator.py
 │       ├── risk_class_aggregator.py
 │       ├── product_class_aggregator.py

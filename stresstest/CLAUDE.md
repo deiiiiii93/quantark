@@ -31,10 +31,14 @@ stresstest/
 ├── equity/                    # Equity implementation
 │   ├── engine.py             # EquityStressEngine
 │   ├── config.py             # EquityStressTestConfig
-│   └── results.py            # EquityStressResults
+│   ├── results.py            # EquityStressResults
+│   └── report/               # Equity-specific reporting
+│       ├── report_generator.py
+│       └── visualizer.py
 └── fi/                        # Fixed Income implementation
     ├── engine.py             # FIStressEngine
     ├── config.py             # FIStressConfig
+    ├── metrics.py            # FI-specific metrics
     └── results.py            # FIStressResults
 ```
 

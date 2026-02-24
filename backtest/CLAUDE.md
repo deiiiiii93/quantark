@@ -21,6 +21,10 @@ backtest/
 │   ├── delta_neutral_strategy.py   # Equity: delta hedging
 │   ├── dv01_neutral_strategy.py    # FI: DV01 hedging
 │   └── convexity_neutral_strategy.py # FI: convexity hedging
+├── examples/                  # Built-in example scripts
+│   ├── basic_delta_hedge.py
+│   ├── advanced_backtest.py
+│   └── fi_dv01_hedge.py
 ├── equity/                    # Equity-specific implementation
 │   ├── engine.py             # BacktestEngine
 │   ├── config.py             # BacktestConfig

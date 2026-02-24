@@ -9,41 +9,48 @@ The Equity Derivatives module (`asset/equity/`) is a comprehensive framework for
 ### Core Design Pattern: Product-Engine Separation
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                       Products Layer                           │
-│  product/option/           product/deltaone/                   │
-│  ├── EuropeanVanillaOption ├── SpotInstrument                  │
-│  ├── AmericanOption        └── Futures                         │
-│  ├── AsianOption                                               │
-│  ├── BarrierOption, DoubleBarrierOption                        │
-│  ├── OneTouchOption, DoubleOneTouchOption                      │
-│  ├── CashOrNothingDigitalOption                                │
-│  ├── SnowballOption                                            │
-│  └── PhoenixOption                                             │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│                        Engine Layer                            │
-│  engine/analytical/    engine/mc/          engine/pde/         │
-│  ├── BlackScholes      ├── EuropeanMC      ├── EuropeanPDE     │
-│  ├── American (BS93,   ├── AmericanMC      ├── AmericanPDE     │
-│  │   BS02, BAW)        ├── AsianMC         ├── BarrierPDE      │
-│  ├── Asian             ├── DigitalMC       ├── DoubleBarrierPDE│
-│  ├── Digital           ├── BarrierMC       ├── OneTouchPDE     │
-│  ├── Barrier           └── SnowballMC      ├── DoubleOneTouchPDE
-│  ├── OneTouch                              └── SnowballPDE     │
-│  └── DeltaOne                                                  │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│                       Process Layer                            │
-│  process/bsm/                                                  │
-│  ├── BSMProcess          (Geometric Brownian Motion)           │
-│  ├── GBMPathGenerator    (QMC path generation)                 │
-│  └── qmc_* utilities     (Sobol, Brownian bridge, variance red)│
-└────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Products Layer                            │
+│  product/option/              product/deltaone/                   │
+│  ├── EuropeanVanillaOption    ├── SpotInstrument                  │
+│  ├── AmericanOption           └── Futures                         │
+│  ├── AsianOption                                                  │
+│  ├── BarrierOption, DoubleBarrierOption                           │
+│  ├── OneTouchOption, DoubleOneTouchOption                         │
+│  ├── CashOrNothingDigitalOption                                   │
+│  ├── SnowballOption                                               │
+│  ├── PhoenixOption                                                │
+│  ├── KOResetSnowballOption                                        │
+│  └── RangeAccrualOption                                           │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Engine Layer                              │
+│  engine/analytical/  engine/mc/        engine/pde/                │
+│  ├── BlackScholes    ├── EuropeanMC    ├── EuropeanPDE            │
+│  ├── American        ├── AmericanMC    ├── AmericanPDE            │
+│  ├── Asian           ├── AsianMC       ├── BarrierPDE             │
+│  ├── Digital         ├── DigitalMC     ├── DoubleBarrierPDE       │
+│  ├── Barrier         ├── BarrierMC     ├── OneTouchPDE            │
+│  ├── OneTouch        ├── SnowballMC    ├── DoubleOneTouchPDE      │
+│  ├── RangeAccrual    ├── PhoenixMC     ├── SnowballPDE            │
+│  └── DeltaOne        └── RangeAccrualMC├── PhoenixPDE             │
+│                                        └── KOResetSnowballPDE     │
+│  engine/quad/                                                     │
+│  ├── QuadCore, QuadAdapters, QuadMath  (shared infrastructure)    │
+│  ├── EuropeanQuad, SnowballQuad, PhoenixQuad, KOResetSnowballQuad│
+│  └── DiscreteQuadEngine                                           │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Process Layer                              │
+│  process/bsm/                                                     │
+│  ├── BSMProcess          (Geometric Brownian Motion)              │
+│  ├── GBMPathGenerator    (QMC path generation)                    │
+│  └── qmc_* utilities     (Sobol, Brownian bridge, RQMC, var red) │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Module Structure
@@ -61,18 +68,17 @@ asset/equity/
 │   │   ├── double_barrier_option.py
 │   │   ├── one_touch_option.py
 │   │   ├── double_one_touch_option.py
-│   │   ├── snowball_option.py
-│   │   ├── snowball_config.py
-│   │   ├── snowball_helpers.py
-│   │   ├── phoenix_option.py
-│   │   ├── phoenix_config.py
-│   │   ├── phoenix_helpers.py
+│   │   ├── snowball_option.py, snowball_config.py, snowball_helpers.py
+│   │   ├── phoenix_option.py, phoenix_config.py, phoenix_helpers.py
+│   │   ├── ko_reset_snowball_option.py
+│   │   ├── range_accrual_option.py, range_accrual_config.py, range_accrual_helpers.py
 │   │   └── observation_schedule.py
 │   └── deltaone/
 │       ├── spot_instrument.py
 │       └── futures.py
 ├── engine/
 │   ├── base_engine.py
+│   ├── event_stats.py             # Pricing event tracking
 │   ├── analytical/
 │   │   ├── black_scholes_engine.py
 │   │   ├── american_option_engine.py
@@ -80,6 +86,7 @@ asset/equity/
 │   │   ├── digital_option_engine.py
 │   │   ├── barrier_analytical_engine.py
 │   │   ├── one_touch_analytical_engine.py
+│   │   ├── range_accrual_analytical_engine.py
 │   │   └── deltaone_engine.py
 │   ├── mc/
 │   │   ├── euro_mc_engine.py
@@ -87,29 +94,39 @@ asset/equity/
 │   │   ├── asian_option_mc_engine.py
 │   │   ├── digital_option_mc_engine.py
 │   │   ├── barrier_option_mc_engine.py
-│   │   └── snowball_mc_engine.py
-│   └── pde/
-│       ├── base_pde_solver.py
-│       ├── european_pde_solver.py
-│       ├── american_pde_solver.py
-│       ├── barrier_pde_solver.py
-│       ├── double_barrier_pde_solver.py
-│       ├── one_touch_pde_solver.py
-│       ├── double_one_touch_pde_solver.py
-│       ├── snowball_pde_solver.py
-│       ├── time_grid.py
-│       └── spatial_grid.py
+│   │   ├── snowball_mc_engine.py
+│   │   ├── phoenix_mc_engine.py
+│   │   └── range_accrual_mc_engine.py
+│   ├── pde/
+│   │   ├── base_pde_solver.py
+│   │   ├── european_pde_solver.py, american_pde_solver.py
+│   │   ├── barrier_pde_solver.py, double_barrier_pde_solver.py
+│   │   ├── one_touch_pde_solver.py, double_one_touch_pde_solver.py
+│   │   ├── snowball_pde_solver.py, phoenix_pde_solver.py
+│   │   ├── ko_reset_snowball_pde_solver.py
+│   │   ├── time_grid.py, spatial_grid.py
+│   │   └── core/                  # PDE grid caching, banded solvers
+│   └── quad/                      # Quadrature engines
+│       ├── quad_core.py, quad_adapters.py, quad_math.py
+│       ├── discrete_quad_engine.py, european_quad_engine.py
+│       ├── snowball_quad_engine.py, phoenix_quad_engine.py
+│       └── ko_reset_snowball_quad_engine.py
 ├── process/bsm/
 │   ├── bsm_process.py
 │   ├── qmc_path_generator.py
-│   ├── qmc_sobol.py
-│   ├── qmc_brownian_bridge.py
+│   ├── qmc_sobol.py, qmc_brownian_bridge.py
 │   ├── qmc_rqmc_driver.py
 │   └── qmc_variance_reduction.py
+├── analysis/                      # Path analysis tools
+│   └── autocallable_path_analyzer.py
+├── report/                        # Risk reporting
+│   ├── autocallable_risk_report.py
+│   ├── plotting.py, surfaces.py, term_structure.py
 ├── riskmeasures/
 │   └── greeks_calculator.py
 └── param/
-    └── engine_params.py
+    ├── engine_params.py
+    └── engine_param_profiles.py
 ```
 
 ## Products
@@ -126,8 +143,10 @@ asset/equity/
 | `DoubleBarrierOption` | Two barriers | PDE |
 | `OneTouchOption` | Pays if barrier touched | Analytical, PDE |
 | `DoubleOneTouchOption` | Pays if either barrier touched | PDE |
-| `SnowballOption` | Autocallable with KO/KI | MC, PDE |
-| `PhoenixOption` | Autocallable with periodic coupons | MC, PDE, QUAD |
+| `SnowballOption` | Autocallable with KO/KI | MC, PDE, Quad |
+| `PhoenixOption` | Autocallable with periodic coupons | MC, PDE, Quad |
+| `KOResetSnowballOption` | Snowball with KO-reset mechanics | MC, PDE, Quad |
+| `RangeAccrualOption` | Accrual based on range observation | Analytical, MC |
 
 ### Delta-One Products (`product/deltaone/`)
 
@@ -310,10 +329,15 @@ quad_price = quad_engine.price(phoenix, pricing_env)
 | PDE | Deterministic baseline | Stable greeks from grids |
 | QUAD | Fast deterministic | Good for calibration runs |
 
-**Phoenix vs Snowball:**
-- **Snowball**: Coupon paid only on knock-out event
-- **Phoenix**: Coupons paid at each observation where coupon barrier is hit
-- **Memory Coupon**: Both support accumulating missed coupons when barrier is eventually hit
+**Autocallable Product Comparison:**
+| Product | Coupon | KO Reset | Range |
+|---------|--------|----------|-------|
+| **Snowball** | On KO only | No | N/A |
+| **Phoenix** | Per-observation if barrier hit | No | N/A |
+| **KO-Reset Snowball** | On KO, with reset mechanics | Yes | N/A |
+| **Range Accrual** | Accrues daily in range | No | Upper/lower bounds |
+
+All autocallable products support memory coupons (accumulate missed coupons).
 
 ## Parameters
 
@@ -428,7 +452,8 @@ if is_zero(time_to_expiry):
 
 ## Summary
 
-- **Products**: 11 option types + 2 delta-one types
-- **Engines**: 7 analytical, 6 Monte Carlo, 8 PDE solvers
-- **Features**: 3 pricing methods, QMC variance reduction, American exercise (analytical + LSM), full Greeks suite
-- **Autocallables**: Snowball (KO coupon only) and Phoenix (periodic coupons) with memory coupon support
+- **Products**: 13 option types + 2 delta-one types
+- **Engines**: 8 analytical, 8 Monte Carlo, 10 PDE solvers, 5 quadrature engines
+- **Features**: 4 pricing methods (analytical, MC, PDE, quad), QMC/RQMC variance reduction, American exercise (analytical + LSM), full Greeks suite, event stats tracking
+- **Autocallables**: Snowball, Phoenix, KO-Reset Snowball, Range Accrual - with memory coupon support
+- **Analysis**: Autocallable path analyzer, risk reporting, surface/term structure visualization

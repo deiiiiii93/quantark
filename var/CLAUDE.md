@@ -20,13 +20,14 @@ var/
 │   └── monte_carlo.py       # MonteCarloVaREngine
 ├── risk_factors/             # Risk factor modeling
 │   ├── base.py              # RiskFactor base class
-│   ├── equity.py            # SpotReturnFactor, VolChangeFactor
-│   └── fi.py                # ParallelShiftFactor, KeyRateFactor
+│   ├── equity_factors.py    # SpotReturnFactor, VolChangeFactor
+│   └── fi_factors.py        # ParallelShiftFactor, KeyRateFactor
 ├── results/                  # Results and reporting
 │   ├── var_result.py        # VaRResult, IncrementalVaRResult
 │   └── var_report.py        # VaRReportGenerator
-└── backtest/                 # Backtesting framework
-    └── var_backtester.py    # VaRBacktester, Kupiec test
+├── backtest/                 # Backtesting framework
+│   └── var_backtester.py    # VaRBacktester, Kupiec test
+└── doc/                      # Module documentation
 ```
 
 ### Exports
