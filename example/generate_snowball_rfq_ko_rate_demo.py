@@ -48,37 +48,93 @@ from util.enum import ObservationType, ProtectionType
 OUTPUT_PATH = ROOT / "output" / "snowball_rfq_ko_rate_demo.html"
 CSV_OUTPUT_PATH = ROOT / "output" / "snowball_rfq_ko_rate_scenarios.csv"
 
-R_GRID = [0.01, 0.03, 0.05]
-Q_GRID = [0.08, 0.115, 0.15]
-VOL_GRID = [0.15, 0.25, 0.35]
+
+def _linspace(start: float, stop: float, num_points: int) -> list[float]:
+    if num_points < 2:
+        return [start]
+    step = (stop - start) / (num_points - 1)
+    return [round(start + i * step, 6) for i in range(num_points)]
+
+
+R_GRID = _linspace(0.01, 0.05, 4)
+Q_GRID = _linspace(0.05, 0.15, 4)
+VOL_GRID = _linspace(0.15, 0.35, 4)
+TENOR_GRID = _linspace(2.0, 3.0, 4)
+KO_GRID = _linspace(95.0, 110.0, 4)
+KI_GRID = _linspace(60.0, 85.0, 4)
 
 DEFAULT_R = 0.03
 DEFAULT_Q = 0.10
 DEFAULT_VOL = 0.20
+DEFAULT_TENOR = 2.0
+PDE_GRID_SIZE = 400
+PDE_TIME_STEPS = 400
+DEMO_BUSINESS_DAYS_PER_YEAR = 244
+R_IMPACT_BUMP = 0.01
 KO_RATE_BOUNDS = (0.0, 5.0)
 AFFINE_KO_RATE_PAIR = (0.0, 2.0)
 PREPAYMENT = 100.0
 BASE_KO_BARRIER = 103.0
 BASE_KI_BARRIER = 75.0
-KO_BARRIER_BUMP = 1.0
-KI_BARRIER_BUMP = 1.0
+KO_BARRIER_BUMP = 0.25
+KI_BARRIER_BUMP = 0.25
 DEFAULT_VARIANT = "standard"
 VARIANTS = {
     "standard": {
+        "family": "standard",
         "label": "Standard",
         "description": "Monthly 103 KO with daily 75 KI.",
+        "product_protection_type": "NONE",
+        "interest_protection_type": "FULL",
     },
     "european_ki": {
+        "family": "european_ki",
         "label": "European KI",
         "description": "Monthly 103 KO with KI observed only at maturity.",
+        "product_protection_type": "NONE",
+        "interest_protection_type": "FULL",
     },
     "parachute": {
+        "family": "parachute",
         "label": "Parachute",
         "description": "Monthly 103 KO that drops to 75 on the final KO observation.",
+        "product_protection_type": "NONE",
+        "interest_protection_type": "FULL",
     },
     "stepdown": {
+        "family": "stepdown",
         "label": "Stepdown",
         "description": "Monthly KO barrier steps down from 103 toward 75 over the 2Y life.",
+        "product_protection_type": "NONE",
+        "interest_protection_type": "FULL",
+    },
+    "standard_partial": {
+        "family": "standard",
+        "label": "Standard Partial-Protected",
+        "description": "Standard Snowball with partial protection tied to the KI level.",
+        "product_protection_type": "PARTIAL",
+        "interest_protection_type": "PARTIAL",
+    },
+    "european_ki_partial": {
+        "family": "european_ki",
+        "label": "European KI Partial-Protected",
+        "description": "European KI Snowball with partial protection tied to the KI level.",
+        "product_protection_type": "PARTIAL",
+        "interest_protection_type": "PARTIAL",
+    },
+    "parachute_partial": {
+        "family": "parachute",
+        "label": "Parachute Partial-Protected",
+        "description": "Parachute Snowball with partial protection tied to the KI level.",
+        "product_protection_type": "PARTIAL",
+        "interest_protection_type": "PARTIAL",
+    },
+    "stepdown_partial": {
+        "family": "stepdown",
+        "label": "Stepdown Partial-Protected",
+        "description": "Stepdown Snowball with partial protection tied to the KI level.",
+        "product_protection_type": "PARTIAL",
+        "interest_protection_type": "PARTIAL",
     },
 }
 
@@ -97,86 +153,136 @@ def build_product(ko_rate: float, variant: str) -> SnowballOption:
     return build_product_with_barriers(
         ko_rate=ko_rate,
         variant=variant,
+        maturity=DEFAULT_TENOR,
         ko_barrier=BASE_KO_BARRIER,
         ki_barrier=BASE_KI_BARRIER,
     )
+
+
+def get_variant_config(variant: str) -> dict[str, str]:
+    try:
+        return VARIANTS[variant]
+    except KeyError as exc:
+        raise ValueError(f"Unknown variant: {variant}") from exc
+
+
+def get_partial_protection_rate(ki_barrier: float) -> float:
+    return max(0.0, min(1.0, 1.0 - ki_barrier / 100.0))
+
+
+def get_num_monthly_observations(maturity: float) -> int:
+    return max(1, int(round(maturity * 12)))
+
+
+def get_num_daily_ki_observations(maturity: float) -> int:
+    return max(1, int(round(maturity * DEMO_BUSINESS_DAYS_PER_YEAR)))
+
+
+def generate_daily_ki_observation_dates(maturity: float) -> list[float]:
+    """Generate evenly spaced KI dates using the demo's 244 business-day convention."""
+    num_observations = get_num_daily_ki_observations(maturity)
+    return [(i + 1) / num_observations * maturity for i in range(num_observations)]
 
 
 def build_product_with_barriers(
     ko_rate: float,
     variant: str,
     *,
+    maturity: float,
     ko_barrier: float,
     ki_barrier: float,
 ) -> SnowballOption:
+    variant_config = get_variant_config(variant)
+    product_protection = ProtectionType[variant_config["product_protection_type"]]
+    protection_rate = (
+        get_partial_protection_rate(ki_barrier)
+        if product_protection == ProtectionType.PARTIAL
+        else 0.0
+    )
+    num_observations = get_num_monthly_observations(maturity)
     common = {
         "initial_price": 100.0,
         "strike": 100.0,
-        "maturity": 2.0,
+        "maturity": maturity,
         "contract_multiplier": 1.0,
-        "ko_barrier": ko_barrier,
         "ko_rate": ko_rate,
         "ki_barrier": ki_barrier,
         "is_reverse": False,
         "rebate_rate": ko_rate,
         "include_principal": False,
+        "protection_type": product_protection,
+        "protection_rate": protection_rate,
     }
-    stepdown_rate = (ko_barrier - ki_barrier) / (23 * 100.0)
+    stepdown_rate = (ko_barrier - ki_barrier) / (max(num_observations - 1, 1) * 100.0)
+    daily_ki_dates = generate_daily_ki_observation_dates(maturity)
 
-    if variant == "standard":
+    if variant_config["family"] == "standard":
         return create_standard_snowball(
             **common,
-            num_observations=24,
+            ko_barrier=ko_barrier,
+            num_observations=num_observations,
             ki_continuous=False,
             ki_observation_type=ObservationType.DISCRETE,
-            ki_observation_dates=generate_ko_observation_dates(2.0, "daily"),
+            ki_observation_dates=daily_ki_dates,
         )
-    if variant == "european_ki":
+    if variant_config["family"] == "european_ki":
         return create_european_ki_snowball(
             **common,
-            num_ko_observations=24,
+            ko_barrier=ko_barrier,
+            num_ko_observations=num_observations,
         )
-    if variant == "parachute":
+    if variant_config["family"] == "parachute":
         return create_parachute_snowball(
             **common,
-            num_observations=24,
+            ko_barrier=ko_barrier,
+            num_observations=num_observations,
             ki_continuous=False,
             ki_observation_type=ObservationType.DISCRETE,
-            ki_observation_dates=generate_ko_observation_dates(2.0, "daily"),
+            ki_observation_dates=daily_ki_dates,
         )
-    if variant == "stepdown":
+    if variant_config["family"] == "stepdown":
         return create_stepdown_snowball(
             **common,
-            num_observations=24,
+            num_observations=num_observations,
             initial_ko_barrier=ko_barrier,
             stepdown_rate=stepdown_rate,
             ki_continuous=False,
             ki_observation_type=ObservationType.DISCRETE,
-            ki_observation_dates=generate_ko_observation_dates(2.0, "daily"),
+            ki_observation_dates=daily_ki_dates,
         )
 
-    raise ValueError(f"Unknown variant: {variant}")
+    raise ValueError(f"Unknown variant family for {variant}")
 
 
-def build_full_protected_product(variant: str):
-    return build_full_protected_product_with_barriers(
+def build_protected_product(variant: str):
+    return build_protected_product_with_barriers(
         variant=variant,
+        maturity=DEFAULT_TENOR,
         ko_barrier=BASE_KO_BARRIER,
         ki_barrier=BASE_KI_BARRIER,
     )
 
 
-def build_full_protected_product_with_barriers(
+def build_protected_product_with_barriers(
     variant: str,
     *,
+    maturity: float,
     ko_barrier: float,
     ki_barrier: float,
 ):
-    if variant == "parachute":
-        ko_barrier_value = [ko_barrier] * 23 + [ki_barrier]
-    elif variant == "stepdown":
-        stepdown_amount = (ko_barrier - ki_barrier) / 23
-        ko_barrier_value = [ko_barrier - i * stepdown_amount for i in range(24)]
+    variant_config = get_variant_config(variant)
+    interest_protection = ProtectionType[variant_config["interest_protection_type"]]
+    protection_rate = (
+        get_partial_protection_rate(ki_barrier)
+        if interest_protection == ProtectionType.PARTIAL
+        else 0.0
+    )
+    num_observations = get_num_monthly_observations(maturity)
+    if variant_config["family"] == "parachute":
+        ko_barrier_value = [ko_barrier] * (num_observations - 1) + [ki_barrier]
+    elif variant_config["family"] == "stepdown":
+        stepdown_amount = (ko_barrier - ki_barrier) / max(num_observations - 1, 1)
+        ko_barrier_value = [ko_barrier - i * stepdown_amount for i in range(num_observations)]
     else:
         ko_barrier_value = ko_barrier
 
@@ -187,16 +293,17 @@ def build_full_protected_product_with_barriers(
             ko_barrier=ko_barrier_value,
             ko_rate=1.0,
             ko_observation_type=ObservationType.DISCRETE,
-            ko_observation_dates=generate_ko_observation_dates(2.0, "monthly"),
+            ko_observation_dates=generate_ko_observation_dates(maturity, "monthly"),
             ki_barrier=None,
         ),
         payoff_config=PayoffConfig(
             rebate_rate=1.0,
             include_principal=False,
-            protection_type=ProtectionType.FULL,
+            protection_type=interest_protection,
+            protection_rate=protection_rate,
         ),
         accrual_config=AccrualConfig(is_annualized=False),
-        maturity=2.0,
+        maturity=maturity,
         contract_multiplier=1.0,
         is_reverse=False,
     )
@@ -216,6 +323,7 @@ def solve_fair_ko_rate(
     rate: float,
     div_yield: float,
     vol: float,
+    tenor: float,
     variant: str,
     *,
     ko_barrier: float = BASE_KO_BARRIER,
@@ -225,8 +333,9 @@ def solve_fair_ko_rate(
     env = build_env(rate=rate, div_yield=div_yield, vol=vol)
     engine = SnowballPDESolver(params=pde_params)
     protected_pv = engine.price(
-        build_full_protected_product_with_barriers(
+        build_protected_product_with_barriers(
             variant=variant,
+            maturity=tenor,
             ko_barrier=ko_barrier,
             ki_barrier=ki_barrier,
         ),
@@ -239,6 +348,7 @@ def solve_fair_ko_rate(
         build_product_with_barriers(
             ko_rate=k0,
             variant=variant,
+            maturity=tenor,
             ko_barrier=ko_barrier,
             ki_barrier=ki_barrier,
         ),
@@ -248,6 +358,7 @@ def solve_fair_ko_rate(
         build_product_with_barriers(
             ko_rate=k1,
             variant=variant,
+            maturity=tenor,
             ko_barrier=ko_barrier,
             ki_barrier=ki_barrier,
         ),
@@ -269,70 +380,143 @@ def solve_fair_ko_rate(
     }
 
 
+def apply_barrier_adjustment(
+    base_value: float | None,
+    ko_sensitivity: float | None,
+    ki_sensitivity: float | None,
+    ko_barrier: float,
+    ki_barrier: float,
+) -> float | None:
+    """Apply first-order KO/KI barrier adjustment around the base anchor."""
+    if base_value is None:
+        return None
+    adjusted = base_value
+    if ko_sensitivity is not None:
+        adjusted += ko_sensitivity * (ko_barrier - BASE_KO_BARRIER)
+    if ki_sensitivity is not None:
+        adjusted += ki_sensitivity * (ki_barrier - BASE_KI_BARRIER)
+    return adjusted
+
+
+def expand_scenario_rows_with_barriers(
+    anchor_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expand base-barrier rows onto an explicit KO/KI CSV export grid."""
+    rows: list[dict[str, Any]] = []
+    scenario_id = 0
+    for row in anchor_rows:
+        for ko_barrier in KO_GRID:
+            for ki_barrier in KI_GRID:
+                scenario_id += 1
+                expanded = dict(row)
+                expanded["scenario_id"] = scenario_id
+                expanded["ko_barrier"] = ko_barrier
+                expanded["ki_barrier"] = ki_barrier
+                if row["product_protection_type"] == "PARTIAL":
+                    expanded["product_protection_rate"] = get_partial_protection_rate(ki_barrier)
+                if row["interest_protection_type"] == "PARTIAL":
+                    expanded["interest_protection_rate"] = get_partial_protection_rate(ki_barrier)
+                expanded["quoted_ko_rate"] = apply_barrier_adjustment(
+                    row["quoted_ko_rate"],
+                    row["quote_ko_sensitivity"],
+                    row["quote_ki_sensitivity"],
+                    ko_barrier,
+                    ki_barrier,
+                )
+                expanded["interest_pv"] = apply_barrier_adjustment(
+                    row["interest_pv"],
+                    row["interest_ko_sensitivity"],
+                    row["interest_ki_sensitivity"],
+                    ko_barrier,
+                    ki_barrier,
+                )
+                if expanded["interest_pv"] is not None:
+                    expanded["combined_pv"] = 0.0
+                    expanded["product_pv"] = expanded["interest_pv"]
+                else:
+                    expanded["combined_pv"] = None
+                    expanded["product_pv"] = None
+                # Keep the protected-leg anchor explicit so downstream users know what changed exactly.
+                expanded["protected_snowball_pv"] = row["protected_snowball_pv"]
+                rows.append(expanded)
+    return rows
+
+
 def build_cube(
     *, pde_params: PDEParams
-) -> tuple[dict[str, dict[str, list[list[list[float | None]]]]], list[dict[str, Any]]]:
-    variant_cubes: dict[str, dict[str, list[list[list[float | None]]]]] = {}
-    scenario_rows: list[dict[str, Any]] = []
+) -> tuple[dict[str, dict[str, list[list[list[list[float | None]]]]]], list[dict[str, Any]]]:
+    variant_cubes: dict[str, dict[str, list[list[list[list[float | None]]]]]] = {}
+    anchor_rows: list[dict[str, Any]] = []
     bump_params = PDEParams(
         grid_size=max(50, pde_params.grid_size // 2),
         time_steps=max(80, pde_params.time_steps // 2),
     )
-    total = len(VARIANTS) * len(R_GRID) * len(Q_GRID) * len(VOL_GRID)
+    total = len(VARIANTS) * len(TENOR_GRID) * len(R_GRID) * len(Q_GRID) * len(VOL_GRID)
     done = 0
     for variant in VARIANTS:
-        quote_cube: list[list[list[float | None]]] = []
-        interest_cube: list[list[list[float | None]]] = []
-        protected_cube: list[list[list[float | None]]] = []
-        target_cube: list[list[list[float | None]]] = []
-        quote_ko_sens_cube: list[list[list[float | None]]] = []
-        quote_ki_sens_cube: list[list[list[float | None]]] = []
-        interest_ko_sens_cube: list[list[list[float | None]]] = []
-        interest_ki_sens_cube: list[list[list[float | None]]] = []
-        for rate in R_GRID:
-            quote_q_slice: list[list[float | None]] = []
-            interest_q_slice: list[list[float | None]] = []
-            protected_q_slice: list[list[float | None]] = []
-            target_q_slice: list[list[float | None]] = []
-            quote_ko_sens_q_slice: list[list[float | None]] = []
-            quote_ki_sens_q_slice: list[list[float | None]] = []
-            interest_ko_sens_q_slice: list[list[float | None]] = []
-            interest_ki_sens_q_slice: list[list[float | None]] = []
-            for div_yield in Q_GRID:
-                quote_vol_slice: list[float | None] = []
-                interest_vol_slice: list[float | None] = []
-                protected_vol_slice: list[float | None] = []
-                target_vol_slice: list[float | None] = []
-                quote_ko_sens_vol_slice: list[float | None] = []
-                quote_ki_sens_vol_slice: list[float | None] = []
-                interest_ko_sens_vol_slice: list[float | None] = []
-                interest_ki_sens_vol_slice: list[float | None] = []
-                for vol in VOL_GRID:
-                    done += 1
-                    print(
-                        f"[{done:02d}/{total}] {variant} fair ko_rate for "
-                        f"r={rate:.4f}, q={div_yield:.4f}, vol={vol:.4f}"
-                    )
-                    try:
-                        result = solve_fair_ko_rate(
-                            rate=rate,
-                            div_yield=div_yield,
-                            vol=vol,
-                            variant=variant,
-                            ko_barrier=BASE_KO_BARRIER,
-                            ki_barrier=BASE_KI_BARRIER,
-                            pde_params=pde_params,
+        variant_config = get_variant_config(variant)
+        quote_cube: list[list[list[list[float | None]]]] = []
+        interest_cube: list[list[list[list[float | None]]]] = []
+        protected_cube: list[list[list[list[float | None]]]] = []
+        target_cube: list[list[list[list[float | None]]]] = []
+        quote_ko_sens_cube: list[list[list[list[float | None]]]] = []
+        quote_ki_sens_cube: list[list[list[list[float | None]]]] = []
+        interest_ko_sens_cube: list[list[list[list[float | None]]]] = []
+        interest_ki_sens_cube: list[list[list[list[float | None]]]] = []
+        for tenor in TENOR_GRID:
+            quote_r_slice: list[list[list[float | None]]] = []
+            interest_r_slice: list[list[list[float | None]]] = []
+            protected_r_slice: list[list[list[float | None]]] = []
+            target_r_slice: list[list[list[float | None]]] = []
+            quote_ko_sens_r_slice: list[list[list[float | None]]] = []
+            quote_ki_sens_r_slice: list[list[list[float | None]]] = []
+            interest_ko_sens_r_slice: list[list[list[float | None]]] = []
+            interest_ki_sens_r_slice: list[list[list[float | None]]] = []
+            for rate in R_GRID:
+                quote_q_slice: list[list[float | None]] = []
+                interest_q_slice: list[list[float | None]] = []
+                protected_q_slice: list[list[float | None]] = []
+                target_q_slice: list[list[float | None]] = []
+                quote_ko_sens_q_slice: list[list[float | None]] = []
+                quote_ki_sens_q_slice: list[list[float | None]] = []
+                interest_ko_sens_q_slice: list[list[float | None]] = []
+                interest_ki_sens_q_slice: list[list[float | None]] = []
+                for div_yield in Q_GRID:
+                    quote_vol_slice: list[float | None] = []
+                    interest_vol_slice: list[float | None] = []
+                    protected_vol_slice: list[float | None] = []
+                    target_vol_slice: list[float | None] = []
+                    quote_ko_sens_vol_slice: list[float | None] = []
+                    quote_ki_sens_vol_slice: list[float | None] = []
+                    interest_ko_sens_vol_slice: list[float | None] = []
+                    interest_ki_sens_vol_slice: list[float | None] = []
+                    for vol in VOL_GRID:
+                        done += 1
+                        print(
+                            f"[{done:03d}/{total}] {variant} fair ko_rate for "
+                            f"T={tenor:.2f}, r={rate:.4f}, q={div_yield:.4f}, vol={vol:.4f}"
                         )
-                        quote_vol_slice.append(result["quoted_ko_rate"])
-                        interest_vol_slice.append(result["interest_component_pv"])
-                        protected_vol_slice.append(result["protected_snowball_pv"])
-                        target_vol_slice.append(result["snowball_target_pv"])
-                        if variant == DEFAULT_VARIANT:
+                        try:
+                            result = solve_fair_ko_rate(
+                                rate=rate,
+                                div_yield=div_yield,
+                                vol=vol,
+                                tenor=tenor,
+                                variant=variant,
+                                ko_barrier=BASE_KO_BARRIER,
+                                ki_barrier=BASE_KI_BARRIER,
+                                pde_params=pde_params,
+                            )
+                            quote_vol_slice.append(result["quoted_ko_rate"])
+                            interest_vol_slice.append(result["interest_component_pv"])
+                            protected_vol_slice.append(result["protected_snowball_pv"])
+                            target_vol_slice.append(result["snowball_target_pv"])
                             try:
                                 ko_up = solve_fair_ko_rate(
                                     rate=rate,
                                     div_yield=div_yield,
                                     vol=vol,
+                                    tenor=tenor,
                                     variant=variant,
                                     ko_barrier=BASE_KO_BARRIER + KO_BARRIER_BUMP,
                                     ki_barrier=BASE_KI_BARRIER,
@@ -355,6 +539,7 @@ def build_cube(
                                     rate=rate,
                                     div_yield=div_yield,
                                     vol=vol,
+                                    tenor=tenor,
                                     variant=variant,
                                     ko_barrier=BASE_KO_BARRIER,
                                     ki_barrier=BASE_KI_BARRIER + KI_BARRIER_BUMP,
@@ -371,76 +556,105 @@ def build_cube(
                             except Exception:
                                 quote_ki_sens_vol_slice.append(None)
                                 interest_ki_sens_vol_slice.append(None)
-                        else:
+                            anchor_rows.append(
+                                {
+                                    "scenario_id": done,
+                                    "variant": variant,
+                                    "tenor": tenor,
+                                    "r": rate,
+                                    "q": div_yield,
+                                    "vol": vol,
+                                    "ko_barrier": BASE_KO_BARRIER,
+                                    "ki_barrier": BASE_KI_BARRIER,
+                                    "product_protection_type": variant_config["product_protection_type"],
+                                    "product_protection_rate": (
+                                        get_partial_protection_rate(BASE_KI_BARRIER)
+                                        if variant_config["product_protection_type"] == "PARTIAL"
+                                        else 0.0
+                                    ),
+                                    "interest_protection_type": variant_config["interest_protection_type"],
+                                    "interest_protection_rate": (
+                                        get_partial_protection_rate(BASE_KI_BARRIER)
+                                        if variant_config["interest_protection_type"] == "PARTIAL"
+                                        else 0.0
+                                    ),
+                                    "quoted_ko_rate": result["quoted_ko_rate"],
+                                    "product_pv": result["snowball_target_pv"],
+                                    "interest_pv": result["interest_component_pv"],
+                                    "combined_pv": result["combined_pv"],
+                                    "protected_snowball_pv": result["protected_snowball_pv"],
+                                    "quote_ko_sensitivity": quote_ko_sens_vol_slice[-1],
+                                    "quote_ki_sensitivity": quote_ki_sens_vol_slice[-1],
+                                    "interest_ko_sensitivity": interest_ko_sens_vol_slice[-1],
+                                    "interest_ki_sensitivity": interest_ki_sens_vol_slice[-1],
+                                }
+                            )
+                        except Exception:
+                            quote_vol_slice.append(None)
+                            interest_vol_slice.append(None)
+                            protected_vol_slice.append(None)
+                            target_vol_slice.append(None)
                             quote_ko_sens_vol_slice.append(None)
-                            interest_ko_sens_vol_slice.append(None)
                             quote_ki_sens_vol_slice.append(None)
+                            interest_ko_sens_vol_slice.append(None)
                             interest_ki_sens_vol_slice.append(None)
-                        scenario_rows.append(
-                            {
-                                "scenario_id": done,
-                                "variant": variant,
-                                "r": rate,
-                                "q": div_yield,
-                                "vol": vol,
-                                "ko_barrier": BASE_KO_BARRIER,
-                                "ki_barrier": BASE_KI_BARRIER,
-                                "quoted_ko_rate": result["quoted_ko_rate"],
-                                "product_pv": result["snowball_target_pv"],
-                                "interest_pv": result["interest_component_pv"],
-                                "combined_pv": result["combined_pv"],
-                                "protected_snowball_pv": result["protected_snowball_pv"],
-                                "quote_ko_sensitivity": quote_ko_sens_vol_slice[-1],
-                                "quote_ki_sensitivity": quote_ki_sens_vol_slice[-1],
-                                "interest_ko_sensitivity": interest_ko_sens_vol_slice[-1],
-                                "interest_ki_sensitivity": interest_ki_sens_vol_slice[-1],
-                            }
-                        )
-                    except Exception:
-                        quote_vol_slice.append(None)
-                        interest_vol_slice.append(None)
-                        protected_vol_slice.append(None)
-                        target_vol_slice.append(None)
-                        quote_ko_sens_vol_slice.append(None)
-                        quote_ki_sens_vol_slice.append(None)
-                        interest_ko_sens_vol_slice.append(None)
-                        interest_ki_sens_vol_slice.append(None)
-                        scenario_rows.append(
-                            {
-                                "scenario_id": done,
-                                "variant": variant,
-                                "r": rate,
-                                "q": div_yield,
-                                "vol": vol,
-                                "ko_barrier": BASE_KO_BARRIER,
-                                "ki_barrier": BASE_KI_BARRIER,
-                                "quoted_ko_rate": None,
-                                "product_pv": None,
-                                "interest_pv": None,
-                                "combined_pv": None,
-                                "protected_snowball_pv": None,
-                                "quote_ko_sensitivity": None,
-                                "quote_ki_sensitivity": None,
-                                "interest_ko_sensitivity": None,
-                                "interest_ki_sensitivity": None,
-                            }
-                        )
-                quote_q_slice.append(quote_vol_slice)
-                interest_q_slice.append(interest_vol_slice)
-                protected_q_slice.append(protected_vol_slice)
-                target_q_slice.append(target_vol_slice)
-                quote_ko_sens_q_slice.append(quote_ko_sens_vol_slice)
-                quote_ki_sens_q_slice.append(quote_ki_sens_vol_slice)
-                interest_ko_sens_q_slice.append(interest_ko_sens_vol_slice)
-                interest_ki_sens_q_slice.append(interest_ki_sens_vol_slice)
-            quote_cube.append(quote_q_slice)
-            interest_cube.append(interest_q_slice)
-            protected_cube.append(protected_q_slice)
-            target_cube.append(target_q_slice)
-            quote_ko_sens_cube.append(quote_ko_sens_q_slice)
-            quote_ki_sens_cube.append(quote_ki_sens_q_slice)
-            interest_ko_sens_cube.append(interest_ko_sens_q_slice)
-            interest_ki_sens_cube.append(interest_ki_sens_q_slice)
+                            anchor_rows.append(
+                                {
+                                    "scenario_id": done,
+                                    "variant": variant,
+                                    "tenor": tenor,
+                                    "r": rate,
+                                    "q": div_yield,
+                                    "vol": vol,
+                                    "ko_barrier": BASE_KO_BARRIER,
+                                    "ki_barrier": BASE_KI_BARRIER,
+                                    "product_protection_type": variant_config["product_protection_type"],
+                                    "product_protection_rate": (
+                                        get_partial_protection_rate(BASE_KI_BARRIER)
+                                        if variant_config["product_protection_type"] == "PARTIAL"
+                                        else 0.0
+                                    ),
+                                    "interest_protection_type": variant_config["interest_protection_type"],
+                                    "interest_protection_rate": (
+                                        get_partial_protection_rate(BASE_KI_BARRIER)
+                                        if variant_config["interest_protection_type"] == "PARTIAL"
+                                        else 0.0
+                                    ),
+                                    "quoted_ko_rate": None,
+                                    "product_pv": None,
+                                    "interest_pv": None,
+                                    "combined_pv": None,
+                                    "protected_snowball_pv": None,
+                                    "quote_ko_sensitivity": None,
+                                    "quote_ki_sensitivity": None,
+                                    "interest_ko_sensitivity": None,
+                                    "interest_ki_sensitivity": None,
+                                }
+                            )
+                    quote_q_slice.append(quote_vol_slice)
+                    interest_q_slice.append(interest_vol_slice)
+                    protected_q_slice.append(protected_vol_slice)
+                    target_q_slice.append(target_vol_slice)
+                    quote_ko_sens_q_slice.append(quote_ko_sens_vol_slice)
+                    quote_ki_sens_q_slice.append(quote_ki_sens_vol_slice)
+                    interest_ko_sens_q_slice.append(interest_ko_sens_vol_slice)
+                    interest_ki_sens_q_slice.append(interest_ki_sens_vol_slice)
+                quote_r_slice.append(quote_q_slice)
+                interest_r_slice.append(interest_q_slice)
+                protected_r_slice.append(protected_q_slice)
+                target_r_slice.append(target_q_slice)
+                quote_ko_sens_r_slice.append(quote_ko_sens_q_slice)
+                quote_ki_sens_r_slice.append(quote_ki_sens_q_slice)
+                interest_ko_sens_r_slice.append(interest_ko_sens_q_slice)
+                interest_ki_sens_r_slice.append(interest_ki_sens_q_slice)
+            quote_cube.append(quote_r_slice)
+            interest_cube.append(interest_r_slice)
+            protected_cube.append(protected_r_slice)
+            target_cube.append(target_r_slice)
+            quote_ko_sens_cube.append(quote_ko_sens_r_slice)
+            quote_ki_sens_cube.append(quote_ki_sens_r_slice)
+            interest_ko_sens_cube.append(interest_ko_sens_r_slice)
+            interest_ki_sens_cube.append(interest_ki_sens_r_slice)
         variant_cubes[variant] = {
             "quote": quote_cube,
             "interest": interest_cube,
@@ -451,7 +665,7 @@ def build_cube(
             "interestKoSens": interest_ko_sens_cube,
             "interestKiSens": interest_ki_sens_cube,
         }
-    return (variant_cubes, scenario_rows)
+    return (variant_cubes, expand_scenario_rows_with_barriers(anchor_rows))
 
 
 def write_scenario_csv(rows: list[dict[str, Any]]) -> None:
@@ -459,11 +673,16 @@ def write_scenario_csv(rows: list[dict[str, Any]]) -> None:
     fieldnames = [
         "scenario_id",
         "variant",
+        "tenor",
         "r",
         "q",
         "vol",
         "ko_barrier",
         "ki_barrier",
+        "product_protection_type",
+        "product_protection_rate",
+        "interest_protection_type",
+        "interest_protection_rate",
         "quoted_ko_rate",
         "product_pv",
         "interest_pv",
@@ -918,11 +1137,11 @@ def render_html(data: dict[str, Any]) -> str:
         </div>
         <h1 id="lang-hero-title">How <em>r</em>, <em>q</em>, and vol reprice a Snowball quote.</h1>
         <p id="lang-hero-body">
-          This demo solves the <strong>fair KO rate</strong> for a standard Snowball under a
+          This demo solves the <strong>fair KO rate</strong> for Snowball variants under a
           Chinese-market <strong>integrated financing quote convention</strong>. The dealer quotes
           one KO coupon that makes the PV of the <strong>ex-principal Snowball</strong>
-          match the <strong>interest component</strong> implied by a full-protected
-          Snowball financing leg.
+          match the <strong>interest component</strong> implied by the selected protected
+          financing leg.
         </p>
       </div>
       <div class="hero-grid">
@@ -932,7 +1151,7 @@ def render_html(data: dict[str, Any]) -> str:
         </div>
         <div class="chip">
           <div class="chip-label" id="lang-chip-tenor-label">Tenor</div>
-          <div class="chip-value" id="lang-chip-tenor-value">2.0Y, spot = 100, strike = 100</div>
+          <div class="chip-value" id="lang-chip-tenor-value">2.0Y selected, spot = 100, strike = 100</div>
         </div>
         <div class="chip">
           <div class="chip-label" id="lang-chip-quote-label">Quote Convention</div>
@@ -962,6 +1181,10 @@ def render_html(data: dict[str, Any]) -> str:
               <option value="european_ki">European KI</option>
               <option value="parachute">Parachute</option>
               <option value="stepdown">Stepdown</option>
+              <option value="standard_partial">Standard Partial-Protected</option>
+              <option value="european_ki_partial">European KI Partial-Protected</option>
+              <option value="parachute_partial">Parachute Partial-Protected</option>
+              <option value="stepdown_partial">Stepdown Partial-Protected</option>
             </select>
             <div class="control-foot"><span id="variant-caption">--</span><span id="lang-variant-foot">structure</span></div>
           </div>
@@ -978,15 +1201,24 @@ def render_html(data: dict[str, Any]) -> str:
             <div class="quote-label" id="lang-financing-label">Financing Leg</div>
             <div class="quote-value">
               <strong id="interest-pv-value">--</strong>
-              <small id="interest-pv-caption">Prepayment minus full-protected, ex-principal, unannualized-100% Snowball PV.</small>
+              <small id="interest-pv-caption">Prepayment minus protected, ex-principal, unannualized-100% Snowball PV.</small>
             </div>
           </div>
 
           <div class="formula" id="lang-formula">
-            <strong>Interest PV</strong> = Prepayment − PV(Full-Protected Snowball, principal excluded, KO rate = 100% unannualized)<br />
+            <strong>Interest PV</strong> = Prepayment − PV(Protected Snowball, principal excluded, KO rate = 100% unannualized)<br />
             Solve <strong>ko_rate</strong> such that<br />
             <strong>V<sub>snowball, exN</sub>(r, q, σ; ko_rate) − Interest PV = 0.0</strong><br />
-            with monthly KO observations, daily KI observations, and 2Y tenor.
+            with monthly KO observations, daily KI observations, and a selectable 2Y-3Y tenor.
+          </div>
+
+          <div class="control">
+            <div class="control-head">
+              <label for="tenor-slider" id="lang-tenor-label">Tenor</label>
+              <div class="control-value" id="tenor-value">--</div>
+            </div>
+            <input id="tenor-slider" type="range" min="2.0" max="3.0" step="0.01" value="2.0" />
+            <div class="control-foot"><span>2.0Y</span><span>3.0Y</span></div>
           </div>
 
           <div class="control">
@@ -994,7 +1226,7 @@ def render_html(data: dict[str, Any]) -> str:
               <label for="r-slider" id="lang-r-label">Risk-free rate <em>r</em></label>
               <div class="control-value" id="r-value">--</div>
             </div>
-            <input id="r-slider" type="range" min="0.01" max="0.05" step="0.001" value="0.03" />
+            <input id="r-slider" type="range" min="0.01" max="0.05" step="0.0005" value="0.03" />
             <div class="control-foot"><span>1.0%</span><span>5.0%</span></div>
           </div>
 
@@ -1003,8 +1235,8 @@ def render_html(data: dict[str, Any]) -> str:
               <label for="q-slider" id="lang-q-label">Dividend yield <em>q</em></label>
               <div class="control-value" id="q-value">--</div>
             </div>
-            <input id="q-slider" type="range" min="0.08" max="0.15" step="0.001" value="0.10" />
-            <div class="control-foot"><span>8.0%</span><span>15.0%</span></div>
+            <input id="q-slider" type="range" min="0.05" max="0.15" step="0.0005" value="0.10" />
+            <div class="control-foot"><span>5.0%</span><span>15.0%</span></div>
           </div>
 
           <div class="control">
@@ -1024,7 +1256,7 @@ def render_html(data: dict[str, Any]) -> str:
               <label for="vol-slider" id="lang-vol-label">Flat vol <em>σ</em></label>
               <div class="control-value" id="vol-value">--</div>
             </div>
-            <input id="vol-slider" type="range" min="0.15" max="0.35" step="0.005" value="0.20" />
+            <input id="vol-slider" type="range" min="0.15" max="0.35" step="0.0025" value="0.20" />
             <div class="control-foot"><span>15.0%</span><span>35.0%</span></div>
           </div>
 
@@ -1033,7 +1265,7 @@ def render_html(data: dict[str, Any]) -> str:
               <label for="ko-slider" id="lang-ko-label">KO barrier</label>
               <div class="control-value" id="ko-value">--</div>
             </div>
-            <input id="ko-slider" type="range" min="95" max="110" step="0.5" value="103" />
+            <input id="ko-slider" type="range" min="95" max="110" step="0.25" value="103" />
             <div class="control-foot"><span>95</span><span>110</span></div>
           </div>
 
@@ -1042,7 +1274,7 @@ def render_html(data: dict[str, Any]) -> str:
               <label for="ki-slider" id="lang-ki-label">KI barrier</label>
               <div class="control-value" id="ki-value">--</div>
             </div>
-            <input id="ki-slider" type="range" min="60" max="85" step="0.5" value="75" />
+            <input id="ki-slider" type="range" min="60" max="85" step="0.25" value="75" />
             <div class="control-foot"><span>60</span><span>85</span></div>
           </div>
         </div>
@@ -1055,7 +1287,7 @@ def render_html(data: dict[str, Any]) -> str:
         </div>
         <div class="impact-grid">
           <article class="impact-card">
-            <h3 id="lang-impact-r-title">If <em>r</em> moves +50bp</h3>
+            <h3 id="lang-impact-r-title">If <em>r</em> moves +100bp</h3>
             <div class="impact-main" id="impact-r">--</div>
             <p id="impact-r-text"></p>
           </article>
@@ -1108,8 +1340,8 @@ def render_html(data: dict[str, Any]) -> str:
       <div class="note-block">
         <h3 id="lang-note-build">Build Notes</h3>
         <ul id="lang-note-list">
-          <li>Daily KI is modeled as 504 discrete business-day observations over 2 years.</li>
-          <li>The interest leg is valued as a full-protected, principal-excluded Snowball with KO rate fixed at 100% unannualized.</li>
+          <li>Daily KI is modeled as 252 discrete business-day observations per year and scales with tenor.</li>
+          <li>The interest leg is valued as the selected protected, principal-excluded Snowball with KO rate fixed at 100% unannualized.</li>
           <li>The HTML embeds a coarse PDE-solved cube and interpolates between nodes in-browser.</li>
           <li>This is a pricing explainer, not a production quoting front-end.</li>
         </ul>
@@ -1120,6 +1352,7 @@ def render_html(data: dict[str, Any]) -> str:
   <script>
     const DATA = __DATA__;
 
+    const tenorSlider = document.getElementById("tenor-slider");
     const rSlider = document.getElementById("r-slider");
     const qSlider = document.getElementById("q-slider");
     const rqLinkToggle = document.getElementById("rq-link-toggle");
@@ -1138,6 +1371,7 @@ def render_html(data: dict[str, Any]) -> str:
     const interestPvValue = document.getElementById("interest-pv-value");
     const interestPvCaption = document.getElementById("interest-pv-caption");
 
+    const tenorValue = document.getElementById("tenor-value");
     const rValue = document.getElementById("r-value");
     const qValue = document.getElementById("q-value");
     const volValue = document.getElementById("vol-value");
@@ -1166,11 +1400,11 @@ def render_html(data: dict[str, Any]) -> str:
         toggleLabel: "Language",
         eyebrow: "PDE-backed RFQ explainer",
         heroTitle: "How <em>r</em>, <em>q</em>, and vol reprice a Snowball quote.",
-        heroBody: "This demo solves the <strong>fair KO rate</strong> for a standard Snowball under a Chinese-market <strong>integrated financing quote convention</strong>. The dealer quotes one KO coupon that makes the PV of the <strong>ex-principal Snowball</strong> match the <strong>interest component</strong> implied by a full-protected Snowball financing leg.",
+        heroBody: "This demo solves the <strong>fair KO rate</strong> for Snowball variants under a Chinese-market <strong>integrated financing quote convention</strong>. The dealer quotes one KO coupon that makes the PV of the <strong>ex-principal Snowball</strong> match the <strong>interest component</strong> implied by the selected protected financing leg.",
         chipStructureLabel: "Structure",
         chipStructureValue: "103 monthly KO / 75 daily KI",
         chipTenorLabel: "Tenor",
-        chipTenorValue: "2.0Y, spot = 100, strike = 100",
+        chipTenorValue: (tenor) => `${tenor} selected, spot = 100, strike = 100`,
         chipQuoteLabel: "Quote Convention",
         chipQuoteValue: "Solve <code>Snowball PV − Interest PV = 0</code>",
         chipEngineLabel: "Engine",
@@ -1181,7 +1415,8 @@ def render_html(data: dict[str, Any]) -> str:
         variantFoot: "structure",
         quoteLabel: "Quoted KO Rate",
         financingLabel: "Financing Leg",
-        formula: "<strong>Interest PV</strong> = Prepayment − PV(Full-Protected Snowball, principal excluded, KO rate = 100% unannualized)<br />Solve <strong>ko_rate</strong> such that<br /><strong>V<sub>snowball, exN</sub>(r, q, σ; ko_rate) − Interest PV = 0.0</strong><br />with monthly KO observations, daily KI observations, and 2Y tenor.",
+        formula: "<strong>Interest PV</strong> = Prepayment − PV(Protected Snowball, principal excluded, KO rate = 100% unannualized)<br />Solve <strong>ko_rate</strong> such that<br /><strong>V<sub>snowball, exN</sub>(T, r, q, σ; ko_rate) − Interest PV = 0.0</strong><br />with monthly KO observations, daily KI observations, and a selectable 2Y-3Y tenor.",
+        tenorLabel: "Tenor <em>T</em>",
         rLabel: "Risk-free rate <em>r</em>",
         qLabel: "Dividend yield <em>q</em>",
         rqLabel: "r-q link",
@@ -1191,7 +1426,7 @@ def render_html(data: dict[str, Any]) -> str:
         kiLabel: "KI barrier",
         impactTitle: "Local Impact",
         impactTag: "first-order intuition",
-        impactRTitle: "If <em>r</em> moves +50bp",
+        impactRTitle: "If <em>r</em> moves +100bp",
         impactQTitle: "If <em>q</em> moves +50bp",
         impactVolTitle: "If vol moves +1 vol pt",
         surfaceTitle: "Response Surfaces",
@@ -1199,8 +1434,8 @@ def render_html(data: dict[str, Any]) -> str:
         noteInterpretation: "Interpretation",
         noteBuild: "Build Notes",
         notesList: [
-          "Daily KI is modeled as 504 discrete business-day observations over 2 years.",
-          "The interest leg is valued as a full-protected, principal-excluded Snowball with KO rate fixed at 100% unannualized.",
+          "Daily KI is modeled as 244 discrete business-day observations per year and scales with tenor.",
+          "The interest leg is valued as the selected protected, principal-excluded Snowball with KO rate fixed at 100% unannualized.",
           "The HTML embeds a coarse PDE-solved cube and interpolates between nodes in-browser.",
           "This is a pricing explainer, not a production quoting front-end."
         ],
@@ -1210,7 +1445,7 @@ def render_html(data: dict[str, Any]) -> str:
         rqHolding: (spread) => `Holding q-r spread = ${spread}`,
         variantActive: (desc) => `${desc} Barrier sliders active.`,
         variantPassive: (desc) => `${desc} Barrier sliders shown for standard reference only.`,
-        quoteCaption: "Fair KO coupon needed to make Snowball PV match the embedded interest leg.",
+        quoteCaption: "Fair KO coupon needed to make Snowball PV match the embedded protected financing leg.",
         noQuoteCaption: "No positive fair KO rate available inside the embedded quote range.",
         noCombined: "Combined convention not available at this market point.",
         interestCaption: (prepayment, pv) => `Prepayment ${prepayment} minus protected ex-principal Snowball PV ${pv}.`,
@@ -1223,24 +1458,28 @@ def render_html(data: dict[str, Any]) -> str:
         highQDown: "Higher q slightly reduces the required coupon in this slice.",
         highVolUp: "Higher vol demands more coupon to compensate for fatter downside KI risk.",
         highVolDown: "Higher vol slightly relaxes the quote in this slice.",
-        summary: (variant, r, q, vol, ko, ki, quote, interestPv, targetPv, tail) =>
-          `${variant}: at r=${r}, q=${q}, vol=${vol}, KO=${ko}, and KI=${ki}, the locally adjusted fair KO rate is ${quote}. The embedded interest leg contributes ${interestPv} of PV, computed as prepayment minus a full-protected ex-principal Snowball priced with unannualized 100% KO rate, so the quoted Snowball itself must also price to ${targetPv} for the quote to clear. ${tail}`,
+        summary: (variant, tenor, r, q, vol, ko, ki, quote, interestPv, targetPv, tail) =>
+          `${variant}: at T=${tenor}, r=${r}, q=${q}, vol=${vol}, KO=${ko}, and KI=${ki}, the locally adjusted fair KO rate is ${quote}. The embedded interest leg contributes ${interestPv} of PV, computed as prepayment minus the selected protected ex-principal Snowball priced with unannualized 100% KO rate, so the quoted Snowball itself must also price to ${targetPv} for the quote to clear. ${tail}`,
         variantNames: {
           standard: "Standard",
           european_ki: "European KI",
           parachute: "Parachute",
-          stepdown: "Stepdown"
+          stepdown: "Stepdown",
+          standard_partial: "Standard Partial-Protected",
+          european_ki_partial: "European KI Partial-Protected",
+          parachute_partial: "Parachute Partial-Protected",
+          stepdown_partial: "Stepdown Partial-Protected"
         }
       },
       cn: {
         toggleLabel: "语言",
         eyebrow: "PDE 驱动 RFQ 解释器",
         heroTitle: "看懂 <em>r</em>、<em>q</em> 与波动率如何重定价雪球报价。",
-        heroBody: "这个演示在中国市场常见的<strong>融资一体化报价口径</strong>下，求解标准雪球的<strong>公平 KO 票息</strong>。交易员报价的单一 KO 票息，需要让<strong>不含本金雪球</strong>的 PV 与由<strong>全保本雪球融资腿</strong>隐含出来的<strong>利息成分</strong>相匹配。",
+        heroBody: "这个演示在中国市场常见的<strong>融资一体化报价口径</strong>下，求解雪球各变体的<strong>公平 KO 票息</strong>。交易员报价的单一 KO 票息，需要让<strong>不含本金雪球</strong>的 PV 与由所选<strong>保本融资腿</strong>隐含出来的<strong>利息成分</strong>相匹配。",
         chipStructureLabel: "结构",
         chipStructureValue: "103 月度敲出 / 75 日度敲入",
         chipTenorLabel: "期限",
-        chipTenorValue: "2.0 年，现价 = 100，行权价 = 100",
+        chipTenorValue: (tenor) => `${tenor}，现价 = 100，行权价 = 100`,
         chipQuoteLabel: "报价口径",
         chipQuoteValue: "求解 <code>雪球PV − 利息PV = 0</code>",
         chipEngineLabel: "引擎",
@@ -1251,7 +1490,8 @@ def render_html(data: dict[str, Any]) -> str:
         variantFoot: "结构",
         quoteLabel: "KO 报价票息",
         financingLabel: "融资腿",
-        formula: "<strong>利息 PV</strong> = 预付金 − PV(全保本雪球，去本金，KO 票息 = 100% 非年化)<br />求解 <strong>ko_rate</strong> 使得<br /><strong>V<sub>snowball, exN</sub>(r, q, σ; ko_rate) − Interest PV = 0.0</strong><br />结构为月度 KO、日度 KI、2 年期限。",
+        formula: "<strong>利息 PV</strong> = 预付金 − PV(保本雪球，去本金，KO 票息 = 100% 非年化)<br />求解 <strong>ko_rate</strong> 使得<br /><strong>V<sub>snowball, exN</sub>(T, r, q, σ; ko_rate) − Interest PV = 0.0</strong><br />结构为月度 KO、日度 KI，期限可在 2 年到 3 年间切换。",
+        tenorLabel: "期限 <em>T</em>",
         rLabel: "无风险利率 <em>r</em>",
         qLabel: "分红率 <em>q</em>",
         rqLabel: "r-q 联动",
@@ -1261,7 +1501,7 @@ def render_html(data: dict[str, Any]) -> str:
         kiLabel: "KI 障碍",
         impactTitle: "局部影响",
         impactTag: "一阶直觉",
-        impactRTitle: "<em>r</em> 上移 50bp",
+        impactRTitle: "<em>r</em> 上移 100bp",
         impactQTitle: "<em>q</em> 上移 50bp",
         impactVolTitle: "波动率上移 1 个 vol 点",
         surfaceTitle: "响应曲面",
@@ -1269,8 +1509,8 @@ def render_html(data: dict[str, Any]) -> str:
         noteInterpretation: "解读",
         noteBuild: "构建说明",
         notesList: [
-          "日度 KI 采用 2 年 504 个离散交易日观察。",
-          "利息腿按全保本、去本金、KO=100% 非年化的雪球估值。",
+          "日度 KI 按每年 244 个离散交易日建模，并随期限缩放。",
+          "利息腿按所选保本、去本金、KO=100% 非年化的雪球估值。",
           "页面内嵌较粗 PDE 曲面，并在浏览器端做插值。",
           "这是一个定价解释器，不是生产级报价前端。"
         ],
@@ -1280,7 +1520,7 @@ def render_html(data: dict[str, Any]) -> str:
         rqHolding: (spread) => `保持 q-r 利差 = ${spread}`,
         variantActive: (desc) => `${desc} 障碍滑块已启用。`,
         variantPassive: (desc) => `${desc} 障碍滑块仅作标准结构参考。`,
-        quoteCaption: "使雪球 PV 与内嵌利息腿相匹配所需的公平 KO 票息。",
+        quoteCaption: "使雪球 PV 与内嵌保本融资腿相匹配所需的公平 KO 票息。",
         noQuoteCaption: "在当前内嵌区间内没有正的公平 KO 票息。",
         noCombined: "当前市场点下无法得到有效组合结果。",
         interestCaption: (prepayment, pv) => `预付金 ${prepayment} 减去去本金保本雪球 PV ${pv}。`,
@@ -1293,13 +1533,17 @@ def render_html(data: dict[str, Any]) -> str:
         highQDown: "在这个切片里，更高的 q 略微降低所需票息。",
         highVolUp: "更高波动会放大下敲风险，因此需要更高票息补偿。",
         highVolDown: "在这个切片里，更高波动略微放松报价。",
-        summary: (variant, r, q, vol, ko, ki, quote, interestPv, targetPv, tail) =>
-          `${variant}：在 r=${r}、q=${q}、vol=${vol}、KO=${ko}、KI=${ki} 下，局部调整后的公平 KO 票息为 ${quote}。内嵌利息腿 PV 为 ${interestPv}，它来自“预付金减去 KO=100% 非年化的去本金保本雪球 PV”，因此报价雪球自身也必须定价到 ${targetPv} 才能满足当前口径。${tail}`,
+        summary: (variant, tenor, r, q, vol, ko, ki, quote, interestPv, targetPv, tail) =>
+          `${variant}：在 T=${tenor}、r=${r}、q=${q}、vol=${vol}、KO=${ko}、KI=${ki} 下，局部调整后的公平 KO 票息为 ${quote}。内嵌利息腿 PV 为 ${interestPv}，它来自“预付金减去所选保本、KO=100% 非年化的去本金雪球 PV”，因此报价雪球自身也必须定价到 ${targetPv} 才能满足当前口径。${tail}`,
         variantNames: {
           standard: "标准型",
           european_ki: "欧式 KI",
           parachute: "降落伞",
-          stepdown: "递减敲出"
+          stepdown: "递减敲出",
+          standard_partial: "标准部分保本",
+          european_ki_partial: "欧式 KI 部分保本",
+          parachute_partial: "降落伞部分保本",
+          stepdown_partial: "递减敲出部分保本"
         }
       }
     };
@@ -1317,7 +1561,7 @@ def render_html(data: dict[str, Any]) -> str:
       document.getElementById("lang-chip-structure-label").textContent = t("chipStructureLabel");
       document.getElementById("lang-chip-structure-value").textContent = t("chipStructureValue");
       document.getElementById("lang-chip-tenor-label").textContent = t("chipTenorLabel");
-      document.getElementById("lang-chip-tenor-value").textContent = t("chipTenorValue");
+      document.getElementById("lang-chip-tenor-value").textContent = t("chipTenorValue", formatTenor(activeTenor()));
       document.getElementById("lang-chip-quote-label").textContent = t("chipQuoteLabel");
       document.getElementById("lang-chip-quote-value").innerHTML = t("chipQuoteValue");
       document.getElementById("lang-chip-engine-label").textContent = t("chipEngineLabel");
@@ -1329,6 +1573,7 @@ def render_html(data: dict[str, Any]) -> str:
       document.getElementById("lang-quote-label").textContent = t("quoteLabel");
       document.getElementById("lang-financing-label").textContent = t("financingLabel");
       document.getElementById("lang-formula").innerHTML = t("formula");
+      document.getElementById("lang-tenor-label").innerHTML = t("tenorLabel");
       document.getElementById("lang-r-label").innerHTML = t("rLabel");
       document.getElementById("lang-q-label").innerHTML = t("qLabel");
       document.getElementById("lang-rq-label").textContent = t("rqLabel");
@@ -1363,6 +1608,11 @@ def render_html(data: dict[str, Any]) -> str:
 
     function lerp(a, b, t) {
       return a + (b - a) * t;
+    }
+
+    function formatTenor(value) {
+      const text = value.toFixed(2).replace(/\\.00$/, ".0").replace(/(\\.\\d)0$/, "$1");
+      return `${text}Y`;
     }
 
     function formatPct(value, digits = 2) {
@@ -1431,28 +1681,32 @@ def render_html(data: dict[str, Any]) -> str:
       return variantSelect.value;
     }
 
+    function activeTenor() {
+      return parseFloat(tenorSlider.value);
+    }
+
     function activeVariantData() {
       return DATA.variants[activeVariantKey()];
     }
 
-    function cubeValue(cube, i, j, k) {
-      return cube[i][j][k];
+    function cubeValue(cube, tenorIndex, i, j, k) {
+      return cube[tenorIndex][i][j][k];
     }
 
-    function trilinear(cube, rate, divYield, vol) {
+    function trilinearAtTenorIndex(cube, tenorIndex, rate, divYield, vol) {
       const rLoc = locate(DATA.rGrid, rate);
       const qLoc = locate(DATA.qGrid, divYield);
       const vLoc = locate(DATA.volGrid, vol);
 
       const corners = [
-        cubeValue(cube, rLoc.i, qLoc.i, vLoc.i),
-        cubeValue(cube, rLoc.i + 1, qLoc.i, vLoc.i),
-        cubeValue(cube, rLoc.i, qLoc.i + 1, vLoc.i),
-        cubeValue(cube, rLoc.i + 1, qLoc.i + 1, vLoc.i),
-        cubeValue(cube, rLoc.i, qLoc.i, vLoc.i + 1),
-        cubeValue(cube, rLoc.i + 1, qLoc.i, vLoc.i + 1),
-        cubeValue(cube, rLoc.i, qLoc.i + 1, vLoc.i + 1),
-        cubeValue(cube, rLoc.i + 1, qLoc.i + 1, vLoc.i + 1),
+        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i, vLoc.i),
+        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i, vLoc.i),
+        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i + 1, vLoc.i),
+        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i + 1, vLoc.i),
+        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i, vLoc.i + 1),
+        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i, vLoc.i + 1),
+        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i + 1, vLoc.i + 1),
+        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i + 1, vLoc.i + 1),
       ];
 
       if (corners.some((value) => value === null)) {
@@ -1468,8 +1722,18 @@ def render_html(data: dict[str, Any]) -> str:
       return lerp(c0, c1, vLoc.t);
     }
 
+    function quadlinear(cube, tenor, rate, divYield, vol) {
+      const tenorLoc = locate(DATA.tenorGrid, tenor);
+      const lower = trilinearAtTenorIndex(cube, tenorLoc.i, rate, divYield, vol);
+      const upper = trilinearAtTenorIndex(cube, tenorLoc.i + 1, rate, divYield, vol);
+      if (lower === null || upper === null) {
+        return null;
+      }
+      return lerp(lower, upper, tenorLoc.t);
+    }
+
     function currentRange() {
-      const flatValues = activeVariantData().quote.flat(2).filter((value) => value !== null);
+      const flatValues = activeVariantData().quote.flat(3).filter((value) => value !== null);
       return {
         min: Math.min(...flatValues),
         max: Math.max(...flatValues),
@@ -1512,8 +1776,8 @@ def render_html(data: dict[str, Any]) -> str:
       const margin = { top: 18, right: 18, bottom: 34, left: 40 };
       const innerWidth = width - margin.left - margin.right;
       const innerHeight = height - margin.top - margin.bottom;
-      const cols = 34;
-      const rows = 28;
+      const cols = 52;
+      const rows = 40;
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = "rgba(255, 255, 255, 0.84)";
@@ -1579,6 +1843,7 @@ def render_html(data: dict[str, Any]) -> str:
     }
 
     function update() {
+      const tenor = activeTenor();
       const rate = parseFloat(rSlider.value);
       const divYield = parseFloat(qSlider.value);
       const vol = parseFloat(volSlider.value);
@@ -1588,22 +1853,24 @@ def render_html(data: dict[str, Any]) -> str:
       const variantData = activeVariantData();
       const variantMeta = DATA.variantMeta[variant];
       const quote = applyBarrierAdjustment(
-        trilinear(variantData.quote, rate, divYield, vol),
-        trilinear(variantData.quoteKoSens, rate, divYield, vol),
-        trilinear(variantData.quoteKiSens, rate, divYield, vol),
+        quadlinear(variantData.quote, tenor, rate, divYield, vol),
+        quadlinear(variantData.quoteKoSens, tenor, rate, divYield, vol),
+        quadlinear(variantData.quoteKiSens, tenor, rate, divYield, vol),
         koBarrier,
         kiBarrier,
       );
       const interestPv = applyBarrierAdjustment(
-        trilinear(variantData.interest, rate, divYield, vol),
-        trilinear(variantData.interestKoSens, rate, divYield, vol),
-        trilinear(variantData.interestKiSens, rate, divYield, vol),
+        quadlinear(variantData.interest, tenor, rate, divYield, vol),
+        quadlinear(variantData.interestKoSens, tenor, rate, divYield, vol),
+        quadlinear(variantData.interestKiSens, tenor, rate, divYield, vol),
         koBarrier,
         kiBarrier,
       );
-      const protectedPv = trilinear(variantData.protected, rate, divYield, vol);
+      const protectedPv = quadlinear(variantData.protected, tenor, rate, divYield, vol);
       const snowballTargetPv = interestPv;
 
+      tenorValue.textContent = formatTenor(tenor);
+      document.getElementById("lang-chip-tenor-value").textContent = t("chipTenorValue", formatTenor(tenor));
       rValue.textContent = formatPct(rate);
       qValue.textContent = formatPct(divYield);
       volValue.textContent = formatPct(vol);
@@ -1634,23 +1901,23 @@ def render_html(data: dict[str, Any]) -> str:
       );
 
       const rUp = applyBarrierAdjustment(
-        trilinear(variantData.quote, clamp(rate + 0.005, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
-        trilinear(variantData.quoteKoSens, clamp(rate + 0.005, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
-        trilinear(variantData.quoteKiSens, clamp(rate + 0.005, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
+        quadlinear(variantData.quote, tenor, clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
+        quadlinear(variantData.quoteKoSens, tenor, clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
+        quadlinear(variantData.quoteKiSens, tenor, clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
         koBarrier,
         kiBarrier,
       );
       const qUp = applyBarrierAdjustment(
-        trilinear(variantData.quote, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        trilinear(variantData.quoteKoSens, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        trilinear(variantData.quoteKiSens, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quote, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quoteKoSens, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quoteKiSens, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
         koBarrier,
         kiBarrier,
       );
       const volUp = applyBarrierAdjustment(
-        trilinear(variantData.quote, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
-        trilinear(variantData.quoteKoSens, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
-        trilinear(variantData.quoteKiSens, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
+        quadlinear(variantData.quote, tenor, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
+        quadlinear(variantData.quoteKoSens, tenor, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
+        quadlinear(variantData.quoteKiSens, tenor, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
         koBarrier,
         kiBarrier,
       );
@@ -1690,9 +1957,9 @@ def render_html(data: dict[str, Any]) -> str:
       drawHeatmap(
         heatmapRQ,
         (x, y) => applyBarrierAdjustment(
-          trilinear(variantData.quote, x, y, vol),
-          trilinear(variantData.quoteKoSens, x, y, vol),
-          trilinear(variantData.quoteKiSens, x, y, vol),
+          quadlinear(variantData.quote, tenor, x, y, vol),
+          quadlinear(variantData.quoteKoSens, tenor, x, y, vol),
+          quadlinear(variantData.quoteKiSens, tenor, x, y, vol),
           koBarrier,
           kiBarrier,
         ),
@@ -1706,9 +1973,9 @@ def render_html(data: dict[str, Any]) -> str:
       drawHeatmap(
         heatmapRV,
         (x, y) => applyBarrierAdjustment(
-          trilinear(variantData.quote, x, divYield, y),
-          trilinear(variantData.quoteKoSens, x, divYield, y),
-          trilinear(variantData.quoteKiSens, x, divYield, y),
+          quadlinear(variantData.quote, tenor, x, divYield, y),
+          quadlinear(variantData.quoteKoSens, tenor, x, divYield, y),
+          quadlinear(variantData.quoteKiSens, tenor, x, divYield, y),
           koBarrier,
           kiBarrier,
         ),
@@ -1722,9 +1989,9 @@ def render_html(data: dict[str, Any]) -> str:
       drawHeatmap(
         heatmapQV,
         (x, y) => applyBarrierAdjustment(
-          trilinear(variantData.quote, rate, x, y),
-          trilinear(variantData.quoteKoSens, rate, x, y),
-          trilinear(variantData.quoteKiSens, rate, x, y),
+          quadlinear(variantData.quote, tenor, rate, x, y),
+          quadlinear(variantData.quoteKoSens, tenor, rate, x, y),
+          quadlinear(variantData.quoteKiSens, tenor, rate, x, y),
           koBarrier,
           kiBarrier,
         ),
@@ -1746,6 +2013,7 @@ def render_html(data: dict[str, Any]) -> str:
         t(
           "summary",
           (t("variantNames")[variant] || variantMeta.label),
+          formatTenor(tenor),
           formatPct(rate),
           formatPct(divYield),
           formatPct(vol),
@@ -1795,7 +2063,7 @@ def render_html(data: dict[str, Any]) -> str:
       update();
     });
 
-    [volSlider, koSlider, kiSlider, variantSelect].forEach((slider) => {
+    [tenorSlider, volSlider, koSlider, kiSlider, variantSelect].forEach((slider) => {
       slider.addEventListener("input", update);
     });
 
@@ -1809,13 +2077,15 @@ def render_html(data: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    pde_params = PDEParams(grid_size=100, time_steps=150)
+    pde_params = PDEParams(grid_size=PDE_GRID_SIZE, time_steps=PDE_TIME_STEPS)
     cubes, scenario_rows = build_cube(pde_params=pde_params)
     data = {
+        "tenorGrid": TENOR_GRID,
         "rGrid": R_GRID,
         "qGrid": Q_GRID,
         "volGrid": VOL_GRID,
         "defaults": {
+            "tenor": DEFAULT_TENOR,
             "r": DEFAULT_R,
             "q": DEFAULT_Q,
             "vol": DEFAULT_VOL,
@@ -1833,7 +2103,10 @@ def main() -> None:
                 structure={
                     "spot": 100.0,
                     "strike": 100.0,
-                    "maturity_years": 2.0,
+                    "maturity_years": DEFAULT_TENOR,
+                    "tenor_years": TENOR_GRID,
+                    "ko_barrier_grid": KO_GRID,
+                    "ki_barrier_grid": KI_GRID,
                     "base_ko_barrier": 103.0,
                     "base_ki_barrier": 75.0,
                     "base_ko_frequency": "monthly",
@@ -1842,11 +2115,18 @@ def main() -> None:
                     "target_pv": 0.0,
                     "prepayment": PREPAYMENT,
                     "protected_leg_ko_rate": 1.0,
-                    "protected_leg_protection": "FULL",
+                    "protected_leg_protection": "VARIANT_SPECIFIC",
                     "protected_leg_include_principal": False,
                     "protected_leg_annualized": False,
                 },
-                ranges={"r": R_GRID, "q": Q_GRID, "vol": VOL_GRID},
+                ranges={
+                    "tenor": TENOR_GRID,
+                    "r": R_GRID,
+                    "q": Q_GRID,
+                    "vol": VOL_GRID,
+                    "ko": KO_GRID,
+                    "ki": KI_GRID,
+                },
             )
         ),
     }
