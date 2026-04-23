@@ -64,7 +64,8 @@ def test_daily_ki_schedule_uses_244_business_day_convention() -> None:
 def test_build_cube_includes_tenor_axis_and_tenor_rows(monkeypatch) -> None:
     """The embedded data cube should now be keyed by tenor as the first axis."""
 
-    def fake_solve_fair_ko_rate(
+    def fake_solve_fair_ko_rate_with_engine(
+        engine: object,
         rate: float,
         div_yield: float,
         vol: float,
@@ -72,6 +73,7 @@ def test_build_cube_includes_tenor_axis_and_tenor_rows(monkeypatch) -> None:
         variant: str,
         **_: object,
     ) -> dict[str, float]:
+        del engine
         base = tenor + rate + div_yield + vol + len(variant) * 0.001
         return {
             "quoted_ko_rate": base,
@@ -81,7 +83,11 @@ def test_build_cube_includes_tenor_axis_and_tenor_rows(monkeypatch) -> None:
             "combined_pv": 0.0,
         }
 
-    monkeypatch.setattr(demo, "solve_fair_ko_rate", fake_solve_fair_ko_rate)
+    monkeypatch.setattr(
+        demo,
+        "solve_fair_ko_rate_with_engine",
+        fake_solve_fair_ko_rate_with_engine,
+    )
 
     cubes, rows = demo.build_cube(pde_params=demo.PDEParams(grid_size=10, time_steps=20))
 
@@ -137,3 +143,22 @@ def test_expand_scenario_rows_with_barriers_changes_exported_barriers() -> None:
     assert {row["ki_barrier"] for row in rows} == set(demo.KI_GRID)
     assert any(row["ko_barrier"] != demo.BASE_KO_BARRIER for row in rows)
     assert any(row["ki_barrier"] != demo.BASE_KI_BARRIER for row in rows)
+
+
+def test_render_html_allows_engine_copy_override() -> None:
+    """Engine-specific HTML copy should be swappable for alternate demos."""
+    html = demo.render_html(
+        {"meta": {"engine": "SnowballQuadEngine"}},
+        ui_copy={
+            "eyebrow_en": "Quad (1001) RFQ explainer",
+            "chip_engine_en": "Snowball quadrature cube (1001 points) + interpolation",
+            "cube_note_en": "The HTML embeds a quadrature-solved cube using a 1001-point grid and interpolates between nodes in-browser.",
+            "eyebrow_cn": "Quad（1001）驱动 RFQ 解释器",
+            "chip_engine_cn": "雪球 Quad 立方体（1001 点）+ 插值",
+            "cube_note_cn": "页面内嵌基于 1001 点 Quad 求解的立方体，并在浏览器端做插值。",
+        },
+    )
+
+    assert "Quad (1001) RFQ explainer" in html
+    assert "Snowball quadrature cube (1001 points) + interpolation" in html
+    assert "PDE-backed RFQ explainer" not in html

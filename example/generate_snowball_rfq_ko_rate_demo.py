@@ -13,9 +13,9 @@ Structure:
 
 from __future__ import annotations
 
+import csv
 import json
 import sys
-import csv
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +71,7 @@ PDE_GRID_SIZE = 400
 PDE_TIME_STEPS = 400
 DEMO_BUSINESS_DAYS_PER_YEAR = 244
 R_IMPACT_BUMP = 0.01
+Q_IMPACT_BUMP = 0.01
 KO_RATE_BOUNDS = (0.0, 5.0)
 AFFINE_KO_RATE_PAIR = (0.0, 2.0)
 PREPAYMENT = 100.0
@@ -143,10 +144,20 @@ VARIANTS = {
 class DemoMeta:
     generated_at: str
     engine: str
-    solver_grid_size: int
-    solver_time_steps: int
+    solver_grid_size: int | None
+    solver_time_steps: int | None
     structure: dict[str, Any]
     ranges: dict[str, list[float]]
+
+
+DEFAULT_HTML_UI_COPY = {
+    "eyebrow_en": "PDE-backed RFQ explainer",
+    "chip_engine_en": "Snowball PDE surface + interpolation",
+    "cube_note_en": "The HTML embeds a coarse PDE-solved cube and interpolates between nodes in-browser.",
+    "eyebrow_cn": "PDE 驱动 RFQ 解释器",
+    "chip_engine_cn": "雪球 PDE 曲面 + 插值",
+    "cube_note_cn": "页面内嵌较粗 PDE 曲面，并在浏览器端做插值。",
+}
 
 
 def build_product(ko_rate: float, variant: str) -> SnowballOption:
@@ -319,19 +330,19 @@ def build_env(rate: float, div_yield: float, vol: float) -> PricingEnvironment:
     )
 
 
-def solve_fair_ko_rate(
+def solve_fair_ko_rate_with_engine(
+    engine: Any,
+    *,
     rate: float,
     div_yield: float,
     vol: float,
     tenor: float,
     variant: str,
-    *,
     ko_barrier: float = BASE_KO_BARRIER,
     ki_barrier: float = BASE_KI_BARRIER,
-    pde_params: PDEParams,
 ) -> dict[str, float]:
+    """Solve the fair KO rate using the supplied pricing engine."""
     env = build_env(rate=rate, div_yield=div_yield, vol=vol)
-    engine = SnowballPDESolver(params=pde_params)
     protected_pv = engine.price(
         build_protected_product_with_barriers(
             variant=variant,
@@ -378,6 +389,30 @@ def solve_fair_ko_rate(
         "protected_snowball_pv": protected_pv,
         "combined_pv": combined_pv,
     }
+
+
+def solve_fair_ko_rate(
+    rate: float,
+    div_yield: float,
+    vol: float,
+    tenor: float,
+    variant: str,
+    *,
+    ko_barrier: float = BASE_KO_BARRIER,
+    ki_barrier: float = BASE_KI_BARRIER,
+    pde_params: PDEParams,
+) -> dict[str, float]:
+    engine = SnowballPDESolver(params=pde_params)
+    return solve_fair_ko_rate_with_engine(
+        engine,
+        rate=rate,
+        div_yield=div_yield,
+        vol=vol,
+        tenor=tenor,
+        variant=variant,
+        ko_barrier=ko_barrier,
+        ki_barrier=ki_barrier,
+    )
 
 
 def apply_barrier_adjustment(
@@ -442,15 +477,15 @@ def expand_scenario_rows_with_barriers(
     return rows
 
 
-def build_cube(
-    *, pde_params: PDEParams
+def build_cube_with_engines(
+    *,
+    engine: Any,
+    bump_engine: Any,
+    progress_label: str | None = None,
 ) -> tuple[dict[str, dict[str, list[list[list[list[float | None]]]]]], list[dict[str, Any]]]:
     variant_cubes: dict[str, dict[str, list[list[list[list[float | None]]]]]] = {}
     anchor_rows: list[dict[str, Any]] = []
-    bump_params = PDEParams(
-        grid_size=max(50, pde_params.grid_size // 2),
-        time_steps=max(80, pde_params.time_steps // 2),
-    )
+    engine_label = progress_label or type(engine).__name__
     total = len(VARIANTS) * len(TENOR_GRID) * len(R_GRID) * len(Q_GRID) * len(VOL_GRID)
     done = 0
     for variant in VARIANTS:
@@ -493,11 +528,12 @@ def build_cube(
                     for vol in VOL_GRID:
                         done += 1
                         print(
-                            f"[{done:03d}/{total}] {variant} fair ko_rate for "
+                            f"[{done:03d}/{total}] {variant} fair ko_rate via {engine_label} for "
                             f"T={tenor:.2f}, r={rate:.4f}, q={div_yield:.4f}, vol={vol:.4f}"
                         )
                         try:
-                            result = solve_fair_ko_rate(
+                            result = solve_fair_ko_rate_with_engine(
+                                engine,
                                 rate=rate,
                                 div_yield=div_yield,
                                 vol=vol,
@@ -505,14 +541,14 @@ def build_cube(
                                 variant=variant,
                                 ko_barrier=BASE_KO_BARRIER,
                                 ki_barrier=BASE_KI_BARRIER,
-                                pde_params=pde_params,
                             )
                             quote_vol_slice.append(result["quoted_ko_rate"])
                             interest_vol_slice.append(result["interest_component_pv"])
                             protected_vol_slice.append(result["protected_snowball_pv"])
                             target_vol_slice.append(result["snowball_target_pv"])
                             try:
-                                ko_up = solve_fair_ko_rate(
+                                ko_up = solve_fair_ko_rate_with_engine(
+                                    bump_engine,
                                     rate=rate,
                                     div_yield=div_yield,
                                     vol=vol,
@@ -520,7 +556,6 @@ def build_cube(
                                     variant=variant,
                                     ko_barrier=BASE_KO_BARRIER + KO_BARRIER_BUMP,
                                     ki_barrier=BASE_KI_BARRIER,
-                                    pde_params=bump_params,
                                 )
                                 quote_ko_sens_vol_slice.append(
                                     (ko_up["quoted_ko_rate"] - result["quoted_ko_rate"])
@@ -535,7 +570,8 @@ def build_cube(
                                 interest_ko_sens_vol_slice.append(None)
 
                             try:
-                                ki_up = solve_fair_ko_rate(
+                                ki_up = solve_fair_ko_rate_with_engine(
+                                    bump_engine,
                                     rate=rate,
                                     div_yield=div_yield,
                                     vol=vol,
@@ -543,7 +579,6 @@ def build_cube(
                                     variant=variant,
                                     ko_barrier=BASE_KO_BARRIER,
                                     ki_barrier=BASE_KI_BARRIER + KI_BARRIER_BUMP,
-                                    pde_params=bump_params,
                                 )
                                 quote_ki_sens_vol_slice.append(
                                     (ki_up["quoted_ko_rate"] - result["quoted_ko_rate"])
@@ -668,7 +703,25 @@ def build_cube(
     return (variant_cubes, expand_scenario_rows_with_barriers(anchor_rows))
 
 
-def write_scenario_csv(rows: list[dict[str, Any]]) -> None:
+def build_cube(
+    *, pde_params: PDEParams
+) -> tuple[dict[str, dict[str, list[list[list[list[float | None]]]]]], list[dict[str, Any]]]:
+    """Build the demo cube with the legacy PDE engine configuration."""
+    bump_params = PDEParams(
+        grid_size=max(50, pde_params.grid_size // 2),
+        time_steps=max(80, pde_params.time_steps // 2),
+    )
+    return build_cube_with_engines(
+        engine=SnowballPDESolver(params=pde_params),
+        bump_engine=SnowballPDESolver(params=bump_params),
+        progress_label="SnowballPDESolver",
+    )
+
+
+def write_scenario_csv(
+    rows: list[dict[str, Any]],
+    csv_output_path: Path = CSV_OUTPUT_PATH,
+) -> None:
     """Write scenario PV table for downstream analysis."""
     fieldnames = [
         "scenario_id",
@@ -693,14 +746,75 @@ def write_scenario_csv(rows: list[dict[str, Any]]) -> None:
         "interest_ko_sensitivity",
         "interest_ki_sensitivity",
     ]
-    CSV_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with CSV_OUTPUT_PATH.open("w", newline="", encoding="utf-8") as handle:
+    csv_output_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
 
-def render_html(data: dict[str, Any]) -> str:
+def build_demo_data(
+    *,
+    cubes: dict[str, dict[str, list[list[list[list[float | None]]]]]],
+    engine_name: str,
+    solver_grid_size: int | None,
+    solver_time_steps: int | None,
+) -> dict[str, Any]:
+    """Build the embedded payload for one engine configuration."""
+    return {
+        "tenorGrid": TENOR_GRID,
+        "rGrid": R_GRID,
+        "qGrid": Q_GRID,
+        "volGrid": VOL_GRID,
+        "defaults": {
+            "tenor": DEFAULT_TENOR,
+            "r": DEFAULT_R,
+            "q": DEFAULT_Q,
+            "vol": DEFAULT_VOL,
+            "variant": DEFAULT_VARIANT,
+        },
+        "koRateBounds": list(KO_RATE_BOUNDS),
+        "variants": cubes,
+        "variantMeta": VARIANTS,
+        "meta": asdict(
+            DemoMeta(
+                generated_at=datetime.utcnow().isoformat() + "Z",
+                engine=engine_name,
+                solver_grid_size=solver_grid_size,
+                solver_time_steps=solver_time_steps,
+                structure={
+                    "spot": 100.0,
+                    "strike": 100.0,
+                    "maturity_years": DEFAULT_TENOR,
+                    "tenor_years": TENOR_GRID,
+                    "ko_barrier_grid": KO_GRID,
+                    "ki_barrier_grid": KI_GRID,
+                    "base_ko_barrier": 103.0,
+                    "base_ki_barrier": 75.0,
+                    "base_ko_frequency": "monthly",
+                    "base_ki_frequency": "daily",
+                    "include_principal": False,
+                    "target_pv": 0.0,
+                    "prepayment": PREPAYMENT,
+                    "protected_leg_ko_rate": 1.0,
+                    "protected_leg_protection": "VARIANT_SPECIFIC",
+                    "protected_leg_include_principal": False,
+                    "protected_leg_annualized": False,
+                },
+                ranges={
+                    "tenor": TENOR_GRID,
+                    "r": R_GRID,
+                    "q": Q_GRID,
+                    "vol": VOL_GRID,
+                    "ko": KO_GRID,
+                    "ki": KI_GRID,
+                },
+            )
+        ),
+    }
+
+
+def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> str:
     template = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1292,7 +1406,7 @@ def render_html(data: dict[str, Any]) -> str:
             <p id="impact-r-text"></p>
           </article>
           <article class="impact-card">
-            <h3 id="lang-impact-q-title">If <em>q</em> moves +50bp</h3>
+            <h3 id="lang-impact-q-title">If <em>q</em> moves +100bp</h3>
             <div class="impact-main" id="impact-q">--</div>
             <p id="impact-q-text"></p>
           </article>
@@ -1427,7 +1541,7 @@ def render_html(data: dict[str, Any]) -> str:
         impactTitle: "Local Impact",
         impactTag: "first-order intuition",
         impactRTitle: "If <em>r</em> moves +100bp",
-        impactQTitle: "If <em>q</em> moves +50bp",
+        impactQTitle: "If <em>q</em> moves +100bp",
         impactVolTitle: "If vol moves +1 vol pt",
         surfaceTitle: "Response Surfaces",
         surfaceTag: "same convention, different slices",
@@ -1502,7 +1616,7 @@ def render_html(data: dict[str, Any]) -> str:
         impactTitle: "局部影响",
         impactTag: "一阶直觉",
         impactRTitle: "<em>r</em> 上移 100bp",
-        impactQTitle: "<em>q</em> 上移 50bp",
+        impactQTitle: "<em>q</em> 上移 100bp",
         impactVolTitle: "波动率上移 1 个 vol 点",
         surfaceTitle: "响应曲面",
         surfaceTag: "同一口径，不同切片",
@@ -1894,10 +2008,12 @@ def render_html(data: dict[str, Any]) -> str:
       koRateValue.textContent = formatPct(quote, 2);
       koRateCaption.textContent = t("quoteCaption");
       interestPvValue.textContent = `${interestPv >= 0 ? "+" : ""}${interestPv.toFixed(2)}`;
+      const adjustedProtectedPv =
+        interestPv === null ? protectedPv : DATA.meta.structure.prepayment - interestPv;
       interestPvCaption.textContent = t(
         "interestCaption",
         DATA.meta.structure.prepayment.toFixed(2),
-        protectedPv.toFixed(2)
+        adjustedProtectedPv.toFixed(2)
       );
 
       const rUp = applyBarrierAdjustment(
@@ -1908,9 +2024,9 @@ def render_html(data: dict[str, Any]) -> str:
         kiBarrier,
       );
       const qUp = applyBarrierAdjustment(
-        quadlinear(variantData.quote, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        quadlinear(variantData.quoteKoSens, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        quadlinear(variantData.quoteKiSens, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quote, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quoteKoSens, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quoteKiSens, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
         koBarrier,
         kiBarrier,
       );
@@ -2073,67 +2189,46 @@ def render_html(data: dict[str, Any]) -> str:
 </html>
 """
 
+    resolved_ui_copy = dict(DEFAULT_HTML_UI_COPY)
+    if ui_copy:
+        resolved_ui_copy.update(ui_copy)
+    replacements = {
+        DEFAULT_HTML_UI_COPY["eyebrow_en"]: resolved_ui_copy["eyebrow_en"],
+        DEFAULT_HTML_UI_COPY["chip_engine_en"]: resolved_ui_copy["chip_engine_en"],
+        DEFAULT_HTML_UI_COPY["cube_note_en"]: resolved_ui_copy["cube_note_en"],
+        DEFAULT_HTML_UI_COPY["eyebrow_cn"]: resolved_ui_copy["eyebrow_cn"],
+        DEFAULT_HTML_UI_COPY["chip_engine_cn"]: resolved_ui_copy["chip_engine_cn"],
+        DEFAULT_HTML_UI_COPY["cube_note_cn"]: resolved_ui_copy["cube_note_cn"],
+    }
+    for source, target in replacements.items():
+        template = template.replace(source, target)
     return template.replace("__DATA__", json.dumps(data, separators=(",", ":")))
+
+
+def write_demo_files(
+    data: dict[str, Any],
+    scenario_rows: list[dict[str, Any]],
+    *,
+    output_path: Path = OUTPUT_PATH,
+    csv_output_path: Path = CSV_OUTPUT_PATH,
+    ui_copy: dict[str, str] | None = None,
+) -> None:
+    """Write the demo HTML artifact and companion scenario CSV."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_html(data, ui_copy=ui_copy), encoding="utf-8")
+    write_scenario_csv(scenario_rows, csv_output_path=csv_output_path)
 
 
 def main() -> None:
     pde_params = PDEParams(grid_size=PDE_GRID_SIZE, time_steps=PDE_TIME_STEPS)
     cubes, scenario_rows = build_cube(pde_params=pde_params)
-    data = {
-        "tenorGrid": TENOR_GRID,
-        "rGrid": R_GRID,
-        "qGrid": Q_GRID,
-        "volGrid": VOL_GRID,
-        "defaults": {
-            "tenor": DEFAULT_TENOR,
-            "r": DEFAULT_R,
-            "q": DEFAULT_Q,
-            "vol": DEFAULT_VOL,
-            "variant": DEFAULT_VARIANT,
-        },
-        "koRateBounds": list(KO_RATE_BOUNDS),
-        "variants": cubes,
-        "variantMeta": VARIANTS,
-        "meta": asdict(
-            DemoMeta(
-                generated_at=datetime.utcnow().isoformat() + "Z",
-                engine="SnowballPDESolver",
-                solver_grid_size=pde_params.grid_size,
-                solver_time_steps=pde_params.time_steps,
-                structure={
-                    "spot": 100.0,
-                    "strike": 100.0,
-                    "maturity_years": DEFAULT_TENOR,
-                    "tenor_years": TENOR_GRID,
-                    "ko_barrier_grid": KO_GRID,
-                    "ki_barrier_grid": KI_GRID,
-                    "base_ko_barrier": 103.0,
-                    "base_ki_barrier": 75.0,
-                    "base_ko_frequency": "monthly",
-                    "base_ki_frequency": "daily",
-                    "include_principal": False,
-                    "target_pv": 0.0,
-                    "prepayment": PREPAYMENT,
-                    "protected_leg_ko_rate": 1.0,
-                    "protected_leg_protection": "VARIANT_SPECIFIC",
-                    "protected_leg_include_principal": False,
-                    "protected_leg_annualized": False,
-                },
-                ranges={
-                    "tenor": TENOR_GRID,
-                    "r": R_GRID,
-                    "q": Q_GRID,
-                    "vol": VOL_GRID,
-                    "ko": KO_GRID,
-                    "ki": KI_GRID,
-                },
-            )
-        ),
-    }
-
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(render_html(data), encoding="utf-8")
-    write_scenario_csv(scenario_rows)
+    data = build_demo_data(
+        cubes=cubes,
+        engine_name="SnowballPDESolver",
+        solver_grid_size=pde_params.grid_size,
+        solver_time_steps=pde_params.time_steps,
+    )
+    write_demo_files(data, scenario_rows)
     print(f"Wrote demo HTML to {OUTPUT_PATH}")
     print(f"Wrote scenario CSV to {CSV_OUTPUT_PATH}")
 

@@ -589,7 +589,7 @@
             <p id="impact-r-text"></p>
           </article>
           <article class="impact-card">
-            <h3 id="lang-impact-q-title">If <em>q</em> moves +50bp</h3>
+            <h3 id="lang-impact-q-title">If <em>q</em> moves +100bp</h3>
             <div class="impact-main" id="impact-q">--</div>
             <p id="impact-q-text"></p>
           </article>
@@ -724,7 +724,7 @@
         impactTitle: "Local Impact",
         impactTag: "first-order intuition",
         impactRTitle: "If <em>r</em> moves +100bp",
-        impactQTitle: "If <em>q</em> moves +50bp",
+        impactQTitle: "If <em>q</em> moves +100bp",
         impactVolTitle: "If vol moves +1 vol pt",
         surfaceTitle: "Response Surfaces",
         surfaceTag: "same convention, different slices",
@@ -799,7 +799,7 @@
         impactTitle: "局部影响",
         impactTag: "一阶直觉",
         impactRTitle: "<em>r</em> 上移 100bp",
-        impactQTitle: "<em>q</em> 上移 50bp",
+        impactQTitle: "<em>q</em> 上移 100bp",
         impactVolTitle: "波动率上移 1 个 vol 点",
         surfaceTitle: "响应曲面",
         surfaceTag: "同一口径，不同切片",
@@ -1191,10 +1191,12 @@
       koRateValue.textContent = formatPct(quote, 2);
       koRateCaption.textContent = t("quoteCaption");
       interestPvValue.textContent = `${interestPv >= 0 ? "+" : ""}${interestPv.toFixed(2)}`;
+      const adjustedProtectedPv =
+        interestPv === null ? protectedPv : DATA.meta.structure.prepayment - interestPv;
       interestPvCaption.textContent = t(
         "interestCaption",
         DATA.meta.structure.prepayment.toFixed(2),
-        protectedPv.toFixed(2)
+        adjustedProtectedPv.toFixed(2)
       );
 
       const rUp = applyBarrierAdjustment(
@@ -1205,9 +1207,9 @@
         kiBarrier,
       );
       const qUp = applyBarrierAdjustment(
-        quadlinear(variantData.quote, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        quadlinear(variantData.quoteKoSens, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        quadlinear(variantData.quoteKiSens, tenor, rate, clamp(divYield + 0.005, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quote, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quoteKoSens, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+        quadlinear(variantData.quoteKiSens, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
         koBarrier,
         kiBarrier,
       );

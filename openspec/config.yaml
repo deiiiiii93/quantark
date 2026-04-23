@@ -1,0 +1,28 @@
+# OpenSpec Configuration
+# This file provides project context for OpenSpec AI assistants
+
+# Project context - included in every OpenSpec request
+context: |
+  QuantArk is a professional-grade Python library for pricing and risk management of financial derivatives.
+  It provides modular, extensible components for pricing various derivative instruments (options, swaps, bonds)
+  using multiple numerical methods (analytical, Monte Carlo, PDE, quadrature), calculating risk measures (Greeks),
+  and running strategy backtests.
+
+  Tech Stack:
+  - Language: Python 3.10+
+  - Numerical Computing: NumPy, SciPy, Pandas
+  - Visualization: Matplotlib, Seaborn, Plotly
+  - Testing: pytest
+
+  Architecture:
+  - asset/equity/, asset/bond/, asset/rate/ - derivative types
+  - Each asset class has: product/, engine/, process/, riskmeasures/
+  - backtest/, dynamicscenario/, stresstest/, portfolio/ - additional modules
+  - var/, simm/ - risk management modules
+
+  Key Conventions:
+  - Classes: PascalCase (EuropeanVanillaOption, BlackScholesEngine)
+  - Functions: snake_case (calculate_greeks, get_spot_price)
+  - Type hints: Use dataclasses and type hints extensively
+  - Input validation at every level
+  - Numerical stability for edge cases (near-expiry, deep ITM/OTM)
