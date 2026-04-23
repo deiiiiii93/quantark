@@ -67,7 +67,7 @@ class SnowballRiskComparisonConfig:
     bilingual_layout: str = "english_then_chinese"
     initial_price: float = 100.0
     strike: float = 100.0
-    tenor_months: int = 12
+    tenor_months: int = 36
     ko_start_month: int = 3
     ko_barrier: float = 103.0
     ki_barrier: float = 70.0
@@ -79,12 +79,14 @@ class SnowballRiskComparisonConfig:
     calendar_type: CalendarType = CalendarType.CHINA
     protection_rate: float = 0.20
     contract_multiplier: float = 1.0
-    num_paths: int = 20000
+    num_paths: int = 50000
     seed: int = 42
-    mc_method: MonteCarloMethod = MonteCarloMethod.PSEUDO
-    engine_preference: Sequence[str] = ("quad", "pde", "mc")
+    mc_method: MonteCarloMethod = MonteCarloMethod.QUASI
+    mc_use_parallel: bool = True
+    mc_num_batches: int = 8
+    engine_preference: Sequence[str] = ("quad",)
     quad_params: Optional[QuadParams] = field(
-        default_factory=lambda: QuadParams(grid_points=301)
+        default_factory=lambda: QuadParams(grid_points=1001)
     )
     pde_params: Optional[PDEParams] = field(default_factory=PDEParams)
     stress_spot_shocks: Sequence[float] = (
@@ -441,6 +443,85 @@ def _get_principal(product: SnowballOption) -> float:
     return product.initial_price * product.contract_multiplier
 
 
+def _build_mc_engine(
+    config: SnowballRiskComparisonConfig,
+) -> SnowballMCEngine:
+    return SnowballMCEngine(
+        params=MCParams(
+            num_paths=int(config.num_paths),
+            seed=int(config.seed),
+            bus_days_in_year=int(config.business_days_in_year),
+        ),
+        method=EngineType.MONTE_CARLO(config.mc_method),
+        use_dask=bool(config.mc_use_parallel),
+        num_batches=int(config.mc_num_batches),
+    )
+
+
+def _generate_shared_paths(
+    *,
+    config: SnowballRiskComparisonConfig,
+    pricing_env: PricingEnvironment,
+    all_times: np.ndarray,
+) -> np.ndarray:
+    dt_array = np.diff(np.concatenate([[0.0], all_times]))
+    mc_engine = _build_mc_engine(config)
+    maturity = float(all_times[-1])
+    spot = float(pricing_env.spot)
+    rate = float(pricing_env.get_rate(maturity))
+    div = float(pricing_env.get_div_yield(maturity))
+    vol = float(pricing_env.get_vol(config.strike, maturity))
+
+    if mc_engine.use_dask and mc_engine.num_batches > 1:
+        from dask import compute, delayed
+
+        total_paths_target = int(config.num_paths)
+        base = total_paths_target // mc_engine.num_batches
+        remainder = total_paths_target % mc_engine.num_batches
+        batch_sizes = [
+            (base + 1 if i < remainder else base)
+            for i in range(mc_engine.num_batches)
+        ]
+
+        def _generate_batch(batch_id: int, batch_num_paths: int) -> np.ndarray:
+            generator = mc_engine._create_path_generator(
+                spot,
+                rate,
+                div,
+                vol,
+                maturity,
+                dt_array,
+                batch_id=batch_id,
+                num_paths=batch_num_paths,
+            )
+            paths, _ = generator.generate_paths(
+                return_aux=False,
+                batch_id=batch_id,
+            )
+            return np.asarray(paths, dtype=float)
+
+        tasks = [
+            delayed(_generate_batch)(batch_id, batch_num_paths)
+            for batch_id, batch_num_paths in enumerate(batch_sizes)
+            if batch_num_paths > 0
+        ]
+        results = compute(*tasks)
+        return np.concatenate(results, axis=0)
+
+    generator = mc_engine._create_path_generator(
+        spot,
+        rate,
+        div,
+        vol,
+        maturity,
+        dt_array,
+        batch_id=0,
+        num_paths=int(config.num_paths),
+    )
+    paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
+    return np.asarray(paths, dtype=float)
+
+
 def _compute_ko_cashflow_table(
     discounted_payoff: np.ndarray,
     is_ko: np.ndarray,
@@ -602,24 +683,12 @@ def _simulate_common_paths(
         ki_profile = product.get_ki_observation_profile(pricing_env)
         all_times_set.update(float(t) for t in ki_profile["observation_times"])
     all_times = np.array(sorted(all_times_set), dtype=float)
-    dt_array = np.diff(np.concatenate([[0.0], all_times]))
-    mc_engine = SnowballMCEngine(
-        params=MCParams(
-            num_paths=config.num_paths,
-            seed=config.seed,
-            bus_days_in_year=config.business_days_in_year,
-        ),
-        method=EngineType.MONTE_CARLO(config.mc_method),
+    mc_engine = _build_mc_engine(config)
+    paths = _generate_shared_paths(
+        config=config,
+        pricing_env=pricing_env,
+        all_times=all_times,
     )
-    generator = mc_engine._create_path_generator(
-        S=pricing_env.spot,
-        r=pricing_env.get_rate(float(all_times[-1])),
-        q=pricing_env.get_div_yield(float(all_times[-1])),
-        sigma=pricing_env.get_vol(config.strike, float(all_times[-1])),
-        T=float(all_times[-1]),
-        dt_array=dt_array,
-    )
-    paths, _ = generator.generate_paths(return_aux=False)
 
     snapshots: Dict[str, _PathSnapshot] = {}
     for idx, (label, product) in enumerate(products.items()):
