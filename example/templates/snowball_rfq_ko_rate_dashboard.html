@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Snowball RFQ KO-Rate Dashboard</title>
+  <style>
+    :root {
+      --bg: #f3f1ec;
+      --panel: #fbfaf7;
+      --panel-muted: #f6f4ef;
+      --line: #d7d3ca;
+      --line-strong: #bcb6aa;
+      --ink: #1d2329;
+      --muted: #5f6770;
+      --accent: #245b78;
+      --accent-soft: #dbe7ef;
+      --danger: #8b3d36;
+      --ok: #2f6b52;
+      --radius: 12px;
+      --shadow: 0 1px 2px rgba(29, 35, 41, 0.06);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--sans);
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    .page {
+      width: min(1440px, calc(100vw - 32px));
+      margin: 18px auto 28px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .topbar {
+      padding: 18px 20px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(340px, 0.9fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font: 700 11px/1 var(--mono);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.8rem, 3vw, 2.7rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      color: var(--muted);
+      line-height: 1.55;
+      max-width: 72ch;
+      font-size: 0.96rem;
+    }
+
+    .meta-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.92rem;
+    }
+
+    .meta-row:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .meta-label {
+      color: var(--muted);
+      font: 700 11px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      padding-top: 3px;
+    }
+
+    .meta-value {
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .lang-toggle {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      overflow: hidden;
+      justify-self: end;
+      background: var(--panel-muted);
+    }
+
+    .lang-toggle button {
+      border: 0;
+      padding: 9px 12px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: 700 11px/1 var(--mono);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      transition: background-color 120ms ease, color 120ms ease;
+    }
+
+    .lang-toggle button.active {
+      background: var(--ink);
+      color: #ffffff;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .structure-strip {
+      padding: 16px 20px 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .structure-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .structure-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-muted);
+      padding: 14px 16px;
+      min-width: 0;
+    }
+
+    .structure-card .control-group {
+      padding: 0;
+      border: 0;
+    }
+
+    .controls,
+    .workspace {
+      min-width: 0;
+    }
+
+    .controls {
+      padding: 18px 18px 10px;
+      position: sticky;
+      top: 12px;
+    }
+
+    .workspace {
+      display: grid;
+      gap: 14px;
+    }
+
+    .section {
+      padding: 18px 20px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: baseline;
+      margin-bottom: 16px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 1.02rem;
+      letter-spacing: 0.01em;
+    }
+
+    .section-tag {
+      color: var(--muted);
+      font: 700 11px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      white-space: nowrap;
+    }
+
+    .control-group {
+      padding: 13px 0 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .control-group:first-of-type {
+      padding-top: 0;
+    }
+
+    .control-group:last-of-type {
+      border-bottom: 0;
+      padding-bottom: 8px;
+    }
+
+    .control-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+
+    .control-head label {
+      font-size: 0.94rem;
+      font-weight: 700;
+    }
+
+    .control-value {
+      color: var(--accent);
+      font: 700 12px/1 var(--mono);
+      letter-spacing: 0.08em;
+    }
+
+    .control-caption {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+
+    .control-foot {
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font: 700 10px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    select,
+    input[type="range"] {
+      width: 100%;
+    }
+
+    select {
+      appearance: none;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      padding: 11px 12px;
+      background: #ffffff;
+      color: var(--ink);
+      font: 600 0.95rem/1.2 var(--sans);
+    }
+
+    input[type="range"] {
+      margin: 0;
+      accent-color: var(--accent);
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+
+    .checkbox-row input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+      flex: 0 0 auto;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: 1.2fr repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .kpi {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel-muted);
+      padding: 14px 16px;
+      min-height: 120px;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+
+    .kpi:hover,
+    .shock:hover {
+      border-color: var(--line-strong);
+      transform: translateY(-1px);
+    }
+
+    .kpi-label {
+      color: var(--muted);
+      font: 700 11px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 14px;
+    }
+
+    .kpi-value {
+      font-size: 2.4rem;
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .kpi.primary .kpi-value {
+      color: var(--accent);
+      font-size: clamp(2.8rem, 4vw, 4.2rem);
+    }
+
+    .kpi-note {
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.5;
+    }
+
+    .formula-block {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #ffffff;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+
+    .formula-title {
+      color: var(--muted);
+      font: 700 11px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 10px;
+    }
+
+    .formula-body {
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      line-height: 1.7;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+
+    .table-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .table-block {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+
+    .table-block h3 {
+      margin: 0;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      background: var(--panel-muted);
+      border-bottom: 1px solid var(--line);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      font-size: 0.9rem;
+    }
+
+    tbody tr:last-child th,
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    th {
+      width: 48%;
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      background: #fcfbf8;
+    }
+
+    td {
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .shock-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .shock {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #ffffff;
+      padding: 14px 16px;
+      min-height: 154px;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+
+    .shock h3 {
+      margin: 0 0 12px;
+      font-size: 0.95rem;
+      line-height: 1.35;
+    }
+
+    .shock-value {
+      font-size: 1.7rem;
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 10px;
+    }
+
+    .shock-value.positive {
+      color: var(--danger);
+    }
+
+    .shock-value.negative {
+      color: var(--ok);
+    }
+
+    .shock-note {
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
+    .summary {
+      margin: 0;
+      color: var(--ink);
+      font-size: 0.92rem;
+      line-height: 1.65;
+    }
+
+    .summary.is-empty {
+      color: var(--muted);
+    }
+
+    .assumption-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .note-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.65;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font: 700 11px/1 var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      background: var(--panel-muted);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--accent);
+      flex: 0 0 auto;
+    }
+
+    .empty-state {
+      padding: 16px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 10px;
+      background: #ffffff;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    @media (max-width: 1180px) {
+      .topbar,
+      .layout,
+      .kpi-grid,
+      .shock-grid,
+      .table-grid,
+      .assumption-grid,
+      .structure-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .controls {
+        position: static;
+      }
+
+      .meta-grid {
+        order: 2;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        width: min(100vw - 18px, 1440px);
+        margin: 10px auto 18px;
+      }
+
+      .topbar,
+      .section,
+      .controls {
+        padding: 14px;
+      }
+
+      .section-head,
+      .control-head,
+      .meta-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .meta-value,
+      td {
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="panel topbar">
+      <div>
+        <div class="eyebrow" id="header-overline"></div>
+        <h1 id="page-title"></h1>
+        <p class="subtitle" id="page-subtitle"></p>
+      </div>
+      <div class="meta-grid">
+        <div class="lang-toggle" aria-label="Language switch">
+          <button id="lang-en" type="button">EN</button>
+          <button id="lang-cn" type="button">CN</button>
+        </div>
+        <div class="meta-row">
+          <div class="meta-label" id="engine-tag-label"></div>
+          <div class="meta-value" id="engine-tag-value"></div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-label" id="generated-label"></div>
+          <div class="meta-value" id="generated-value"></div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-label" id="data-note-label"></div>
+          <div class="meta-value" id="data-note-value"></div>
+        </div>
+      </div>
+    </header>
+
+    <section class="panel structure-strip">
+      <div class="section-head">
+        <h2 id="structure-controls-title"></h2>
+        <span class="section-tag" id="structure-controls-tag"></span>
+      </div>
+      <div class="structure-grid">
+        <div class="structure-card">
+          <div class="control-group">
+            <div class="control-head">
+              <label for="variant-select" id="variant-label"></label>
+              <div class="control-value" id="variant-badge"></div>
+            </div>
+            <select id="variant-select">
+              <option value="standard">Standard</option>
+              <option value="european_ki">European KI</option>
+              <option value="standard_partial">Standard Partial-Protected</option>
+              <option value="european_ki_partial">European KI Partial-Protected</option>
+            </select>
+            <div class="control-caption" id="variant-caption"></div>
+          </div>
+        </div>
+
+        <div class="structure-card">
+          <div class="control-group">
+            <div class="control-head">
+              <label for="tenor-slider" id="tenor-label"></label>
+              <div class="control-value" id="tenor-value"></div>
+            </div>
+            <select id="tenor-select" hidden></select>
+            <input id="tenor-slider" type="range" min="2.0" max="3.0" step="0.01" value="2.0" />
+            <div class="control-foot" id="tenor-foot"><span>2.0Y</span><span>3.0Y</span></div>
+            <div class="control-caption" id="tenor-mode-caption" hidden></div>
+          </div>
+        </div>
+
+        <div class="structure-card">
+          <div class="control-group">
+            <div class="control-head">
+              <label for="ko-slider" id="ko-label"></label>
+              <div class="control-value" id="ko-value"></div>
+            </div>
+            <select id="ko-select" hidden></select>
+            <input id="ko-slider" type="range" min="95" max="110" step="0.25" value="103" />
+            <div class="control-foot" id="ko-foot"><span>95</span><span>110</span></div>
+            <div class="control-caption" id="ko-mode-caption" hidden></div>
+          </div>
+        </div>
+
+        <div class="structure-card">
+          <div class="control-group">
+            <div class="control-head">
+              <label for="ki-slider" id="ki-label"></label>
+              <div class="control-value" id="ki-value"></div>
+            </div>
+            <select id="ki-select" hidden></select>
+            <input id="ki-slider" type="range" min="60" max="85" step="0.25" value="75" />
+            <div class="control-foot" id="ki-foot"><span>60</span><span>85</span></div>
+            <div class="control-caption" id="ki-mode-caption" hidden></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="layout">
+      <aside class="panel controls">
+        <div class="section-head">
+          <h2 id="controls-title"></h2>
+          <span class="section-tag" id="controls-tag"></span>
+        </div>
+
+        <div class="control-group">
+          <div class="control-head">
+            <label for="r-slider" id="r-label"></label>
+            <div class="control-value" id="r-value"></div>
+          </div>
+          <input id="r-slider" type="range" min="0.01" max="0.05" step="0.0005" value="0.03" />
+          <div class="control-foot"><span>1.0%</span><span>5.0%</span></div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-head">
+            <label for="q-slider" id="q-label"></label>
+            <div class="control-value" id="q-value"></div>
+          </div>
+          <input id="q-slider" type="range" min="0.05" max="0.15" step="0.0005" value="0.10" />
+          <div class="control-foot"><span>5.0%</span><span>15.0%</span></div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-head">
+            <label for="rq-link-toggle" id="rq-link-label"></label>
+            <div class="control-value" id="rq-link-value"></div>
+          </div>
+          <label class="checkbox-row">
+            <input id="rq-link-toggle" type="checkbox" />
+            <span id="rq-link-copy"></span>
+          </label>
+          <div class="control-caption" id="rq-link-caption"></div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-head">
+            <label for="vol-slider" id="vol-label"></label>
+            <div class="control-value" id="vol-value"></div>
+          </div>
+          <input id="vol-slider" type="range" min="0.15" max="0.35" step="0.0025" value="0.20" />
+          <div class="control-foot"><span>15.0%</span><span>35.0%</span></div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="panel section">
+          <div class="section-head">
+            <h2 id="quote-title"></h2>
+            <span class="status-pill"><span class="status-dot"></span><span id="quote-status"></span></span>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi primary">
+              <div class="kpi-label" id="quote-kpi-label"></div>
+              <div class="kpi-value" id="quote-kpi-value">--</div>
+              <div class="kpi-note" id="quote-kpi-note"></div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label" id="interest-kpi-label"></div>
+              <div class="kpi-value" id="interest-kpi-value">--</div>
+              <div class="kpi-note" id="interest-kpi-note"></div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label" id="protected-kpi-label"></div>
+              <div class="kpi-value" id="protected-kpi-value">--</div>
+              <div class="kpi-note" id="protected-kpi-note"></div>
+            </div>
+          </div>
+
+          <div class="formula-block">
+            <div class="formula-title" id="formula-title"></div>
+            <div class="formula-body" id="formula-body"></div>
+          </div>
+
+          <div id="quote-empty" class="empty-state" hidden></div>
+
+          <div class="table-grid">
+            <div class="table-block">
+              <h3 id="selected-state-title"></h3>
+              <table>
+                <tbody>
+                  <tr><th id="row-variant"></th><td id="selected-variant"></td></tr>
+                  <tr><th id="row-tenor"></th><td id="selected-tenor"></td></tr>
+                  <tr><th id="row-r"></th><td id="selected-r"></td></tr>
+                  <tr><th id="row-q"></th><td id="selected-q"></td></tr>
+                  <tr><th id="row-vol"></th><td id="selected-vol"></td></tr>
+                  <tr><th id="row-ko"></th><td id="selected-ko"></td></tr>
+                  <tr><th id="row-ki"></th><td id="selected-ki"></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="table-block">
+              <h3 id="valuation-breakdown-title"></h3>
+              <table>
+                <tbody>
+                  <tr><th id="row-target-snowball"></th><td id="target-snowball-value"></td></tr>
+                  <tr><th id="row-protected-snowball"></th><td id="protected-snowball-value"></td></tr>
+                  <tr><th id="row-prepayment"></th><td id="prepayment-value"></td></tr>
+                  <tr><th id="row-residual"></th><td id="residual-value"></td></tr>
+                  <tr><th id="row-grid-mode"></th><td id="grid-mode-value"></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel section">
+          <div class="section-head">
+            <h2 id="shock-title"></h2>
+            <span class="section-tag" id="shock-tag"></span>
+          </div>
+
+          <div class="shock-grid">
+            <article class="shock">
+              <h3 id="shock-r-title"></h3>
+              <div class="shock-value" id="shock-r-value">--</div>
+              <div class="shock-note" id="shock-r-note"></div>
+            </article>
+            <article class="shock">
+              <h3 id="shock-q-title"></h3>
+              <div class="shock-value" id="shock-q-value">--</div>
+              <div class="shock-note" id="shock-q-note"></div>
+            </article>
+            <article class="shock">
+              <h3 id="shock-vol-title"></h3>
+              <div class="shock-value" id="shock-vol-value">--</div>
+              <div class="shock-note" id="shock-vol-note"></div>
+            </article>
+          </div>
+
+          <p class="summary" id="summary-text"></p>
+        </section>
+
+        <section class="panel section">
+          <div class="section-head">
+            <h2 id="assumptions-title"></h2>
+            <span class="section-tag" id="assumptions-tag"></span>
+          </div>
+
+          <div class="assumption-grid">
+            <div class="table-block">
+              <h3 id="structure-table-title"></h3>
+              <table>
+                <tbody>
+                  <tr><th id="structure-spot-label"></th><td id="structure-spot-value"></td></tr>
+                  <tr><th id="structure-strike-label"></th><td id="structure-strike-value"></td></tr>
+                  <tr><th id="structure-base-tenor-label"></th><td id="structure-base-tenor-value"></td></tr>
+                  <tr><th id="structure-base-ko-label"></th><td id="structure-base-ko-value"></td></tr>
+                  <tr><th id="structure-base-ki-label"></th><td id="structure-base-ki-value"></td></tr>
+                  <tr><th id="structure-freq-label"></th><td id="structure-freq-value"></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="table-block">
+              <h3 id="runtime-table-title"></h3>
+              <table>
+                <tbody>
+                  <tr><th id="runtime-engine-label"></th><td id="runtime-engine-value"></td></tr>
+                  <tr><th id="runtime-grid-label"></th><td id="runtime-grid-value"></td></tr>
+                  <tr><th id="runtime-time-label"></th><td id="runtime-time-value"></td></tr>
+                  <tr><th id="runtime-quote-label"></th><td id="runtime-quote-value"></td></tr>
+                  <tr><th id="runtime-ranges-label"></th><td id="runtime-ranges-value"></td></tr>
+                  <tr><th id="runtime-data-note-label"></th><td id="runtime-data-note-value"></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="table-block">
+            <h3 id="notes-title"></h3>
+            <div style="padding: 14px 16px;">
+              <ul class="note-list" id="notes-list"></ul>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const DATA = __DATA__;
+    const I18N = __I18N__;
+
+    const variantSelect = document.getElementById("variant-select");
+    const tenorSlider = document.getElementById("tenor-slider");
+    const tenorSelect = document.getElementById("tenor-select");
+    const rSlider = document.getElementById("r-slider");
+    const qSlider = document.getElementById("q-slider");
+    const rqLinkToggle = document.getElementById("rq-link-toggle");
+    const volSlider = document.getElementById("vol-slider");
+    const koSlider = document.getElementById("ko-slider");
+    const koSelect = document.getElementById("ko-select");
+    const kiSlider = document.getElementById("ki-slider");
+    const kiSelect = document.getElementById("ki-select");
+    const langEnButton = document.getElementById("lang-en");
+    const langCnButton = document.getElementById("lang-cn");
+    const exactStructureMode = Boolean(DATA.meta.structure.exact_barrier_grid);
+
+    let currentLang = "en";
+    let updateQueued = false;
+    let rqLinkedSpread = parseFloat(qSlider.value) - parseFloat(rSlider.value);
+
+    function t(key) {
+      const langTable = I18N[currentLang] || I18N.en;
+      return langTable[key];
+    }
+
+    function tt(key, params = {}) {
+      const raw = t(key);
+      if (typeof raw !== "string") {
+        return raw;
+      }
+      return raw.replace(/\{([a-z_]+)\}/gi, (_, token) => {
+        return Object.prototype.hasOwnProperty.call(params, token) ? params[token] : `{${token}}`;
+      });
+    }
+
+    function clamp(value, low, high) {
+      return Math.max(low, Math.min(high, value));
+    }
+
+    function lerp(a, b, weight) {
+      return a + (b - a) * weight;
+    }
+
+    function locate(grid, value) {
+      if (value <= grid[0]) {
+        return { i: 0, t: 0 };
+      }
+      if (value >= grid[grid.length - 1]) {
+        return { i: grid.length - 2, t: 1 };
+      }
+      for (let i = 0; i < grid.length - 1; i += 1) {
+        if (value >= grid[i] && value <= grid[i + 1]) {
+          const span = grid[i + 1] - grid[i];
+          return { i, t: span === 0 ? 0 : (value - grid[i]) / span };
+        }
+      }
+      return { i: grid.length - 2, t: 1 };
+    }
+
+    function sampleNested(node, locations, depth = 0) {
+      const loc = locations[depth];
+      const lowerNode = node[loc.i];
+      const upperNode = node[loc.i + 1];
+
+      if (depth === locations.length - 1) {
+        if (lowerNode === null || upperNode === null) {
+          return null;
+        }
+        return lerp(lowerNode, upperNode, loc.t);
+      }
+
+      if (lowerNode === null || upperNode === null) {
+        return null;
+      }
+
+      const lowerValue = sampleNested(lowerNode, locations, depth + 1);
+      const upperValue = sampleNested(upperNode, locations, depth + 1);
+      if (lowerValue === null || upperValue === null) {
+        return null;
+      }
+      return lerp(lowerValue, upperValue, loc.t);
+    }
+
+    function sampleCube(cube, tenor, rate, divYield, vol, koBarrier = null, kiBarrier = null) {
+      const locations = [
+        locate(DATA.tenorGrid, tenor),
+        locate(DATA.rGrid, rate),
+        locate(DATA.qGrid, divYield),
+        locate(DATA.volGrid, vol),
+      ];
+      if (DATA.meta.structure.exact_barrier_grid) {
+        locations.push(locate(DATA.meta.structure.ko_barrier_grid, koBarrier));
+        locations.push(locate(DATA.meta.structure.ki_barrier_grid, kiBarrier));
+      }
+      return sampleNested(cube, locations);
+    }
+
+    function sampleBarrierAware(baseCube, koSensCube, kiSensCube, tenor, rate, divYield, vol, koBarrier, kiBarrier) {
+      const base = sampleCube(baseCube, tenor, rate, divYield, vol, koBarrier, kiBarrier);
+      if (DATA.meta.structure.exact_barrier_grid || base === null) {
+        return base;
+      }
+      let adjusted = base;
+      const koDelta = koBarrier - DATA.meta.structure.base_ko_barrier;
+      const kiDelta = kiBarrier - DATA.meta.structure.base_ki_barrier;
+      const koSens = sampleCube(koSensCube, tenor, rate, divYield, vol);
+      const kiSens = sampleCube(kiSensCube, tenor, rate, divYield, vol);
+      if (koSens !== null) {
+        adjusted += koSens * koDelta;
+      }
+      if (kiSens !== null) {
+        adjusted += kiSens * kiDelta;
+      }
+      return adjusted;
+    }
+
+    function activeVariantKey() {
+      return variantSelect.value;
+    }
+
+    function activeVariantMeta() {
+      return DATA.variantMeta[activeVariantKey()];
+    }
+
+    function activeVariantData() {
+      return DATA.variants[activeVariantKey()];
+    }
+
+    function activeTenor() {
+      return parseFloat(exactStructureMode ? tenorSelect.value : tenorSlider.value);
+    }
+
+    function activeKoBarrier() {
+      return parseFloat(exactStructureMode ? koSelect.value : koSlider.value);
+    }
+
+    function activeKiBarrier() {
+      return parseFloat(exactStructureMode ? kiSelect.value : kiSlider.value);
+    }
+
+    function formatPct(value, digits = 2) {
+      if (value === null || Number.isNaN(value)) {
+        return "N/A";
+      }
+      return `${(value * 100).toFixed(digits)}%`;
+    }
+
+    function isOnGrid(value, grid, tolerance = 1e-6) {
+      return grid.some((point) => Math.abs(point - value) <= tolerance);
+    }
+
+    function formatSignedNumber(value, digits = 2) {
+      if (value === null || Number.isNaN(value)) {
+        return "N/A";
+      }
+      const sign = value >= 0 ? "+" : "";
+      return `${sign}${value.toFixed(digits)}`;
+    }
+
+    function formatSignedBpsFromRate(deltaRate) {
+      if (deltaRate === null || Number.isNaN(deltaRate)) {
+        return "N/A";
+      }
+      const bps = deltaRate * 10000;
+      const sign = bps >= 0 ? "+" : "";
+      return `${sign}${bps.toFixed(1)} bp`;
+    }
+
+    function formatTenor(value) {
+      const text = value.toFixed(2).replace(/\.00$/, ".0").replace(/(\.\d)0$/, "$1");
+      return `${text}Y`;
+    }
+
+    function formatBarrier(value) {
+      return value.toFixed(1);
+    }
+
+    function nearestGridValue(value, grid) {
+      let best = grid[0];
+      let bestDistance = Math.abs(grid[0] - value);
+      for (let i = 1; i < grid.length; i += 1) {
+        const distance = Math.abs(grid[i] - value);
+        if (distance < bestDistance) {
+          best = grid[i];
+          bestDistance = distance;
+        }
+      }
+      return best;
+    }
+
+    function populateExactSelect(selectElement, grid, formatter, currentValue) {
+      selectElement.innerHTML = grid
+        .map((point) => `<option value="${point}">${formatter(point)}</option>`)
+        .join("");
+      selectElement.value = String(nearestGridValue(currentValue, grid));
+    }
+
+    function sliderBounds(slider) {
+      return { min: parseFloat(slider.min), max: parseFloat(slider.max) };
+    }
+
+    function syncQFromR() {
+      const qBounds = sliderBounds(qSlider);
+      const linkedQ = clamp(parseFloat(rSlider.value) + rqLinkedSpread, qBounds.min, qBounds.max);
+      qSlider.value = linkedQ.toFixed(3);
+    }
+
+    function syncRFromQ() {
+      const rBounds = sliderBounds(rSlider);
+      const linkedR = clamp(parseFloat(qSlider.value) - rqLinkedSpread, rBounds.min, rBounds.max);
+      rSlider.value = linkedR.toFixed(3);
+    }
+
+    function describeDirection(delta, positiveText, negativeText) {
+      if (delta === null || Number.isNaN(delta)) {
+        return t("shockUnavailable");
+      }
+      if (delta > 0) {
+        return positiveText;
+      }
+      if (delta < 0) {
+        return negativeText;
+      }
+      return t("shockFlat");
+    }
+
+    function formatGeneratedAt(isoString) {
+      const locale = currentLang === "cn" ? "zh-CN" : "en-US";
+      const date = new Date(isoString);
+      if (Number.isNaN(date.getTime())) {
+        return isoString;
+      }
+      return new Intl.DateTimeFormat(locale, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+        timeZoneName: "short",
+      }).format(date);
+    }
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function setHtml(id, value) {
+      document.getElementById(id).innerHTML = value;
+    }
+
+    function configureStructureControls() {
+      if (!exactStructureMode) {
+        tenorSelect.hidden = true;
+        koSelect.hidden = true;
+        kiSelect.hidden = true;
+        document.getElementById("tenor-mode-caption").hidden = true;
+        document.getElementById("ko-mode-caption").hidden = true;
+        document.getElementById("ki-mode-caption").hidden = true;
+        return;
+      }
+
+      populateExactSelect(tenorSelect, DATA.tenorGrid, formatTenor, DATA.defaults.tenor);
+      populateExactSelect(
+        koSelect,
+        DATA.meta.structure.ko_barrier_grid,
+        formatBarrier,
+        DATA.meta.structure.base_ko_barrier
+      );
+      populateExactSelect(
+        kiSelect,
+        DATA.meta.structure.ki_barrier_grid,
+        formatBarrier,
+        DATA.meta.structure.base_ki_barrier
+      );
+
+      tenorSlider.hidden = true;
+      koSlider.hidden = true;
+      kiSlider.hidden = true;
+      document.getElementById("tenor-foot").hidden = true;
+      document.getElementById("ko-foot").hidden = true;
+      document.getElementById("ki-foot").hidden = true;
+      tenorSelect.hidden = false;
+      koSelect.hidden = false;
+      kiSelect.hidden = false;
+      document.getElementById("tenor-mode-caption").hidden = false;
+      document.getElementById("ko-mode-caption").hidden = false;
+      document.getElementById("ki-mode-caption").hidden = false;
+    }
+
+    function updateStaticText() {
+      setText("header-overline", t("headerOverline"));
+      setText("page-title", t("pageTitle"));
+      setText("page-subtitle", t("pageSubtitle"));
+      setText("engine-tag-label", t("engineTag"));
+      setText("generated-label", t("generatedTag"));
+      setText("data-note-label", t("dataNoteTag"));
+      setText("data-note-value", t("dataNote"));
+      setText("structure-controls-title", t("structureControlsTitle"));
+      setText("structure-controls-tag", t("structureControlsTag"));
+      setText("controls-title", t("controlsTitle"));
+      setText("controls-tag", exactStructureMode ? t("controlsTagExact") : t("controlsTag"));
+      setText("variant-label", t("variantLabel"));
+      setText("tenor-label", t("tenorLabel"));
+      setText("r-label", t("rLabel"));
+      setText("q-label", t("qLabel"));
+      setText("rq-link-label", t("rqLinkLabel"));
+      setText("rq-link-copy", t("rqLinkCopy"));
+      setText("vol-label", t("volLabel"));
+      setText("ko-label", t("koLabel"));
+      setText("ki-label", t("kiLabel"));
+      setText("quote-title", t("quoteTitle"));
+      setText("quote-status", exactStructureMode ? t("quoteStatusExact") : t("quoteStatus"));
+      setText("quote-kpi-label", t("quoteKpiLabel"));
+      setText("interest-kpi-label", t("interestKpiLabel"));
+      setText("protected-kpi-label", t("protectedKpiLabel"));
+      setText("formula-title", t("formulaTitle"));
+      setHtml("formula-body", t("formulaHtml"));
+      setText("selected-state-title", t("selectedStateTitle"));
+      setText("valuation-breakdown-title", t("valuationBreakdownTitle"));
+      setText("row-variant", t("variantRow"));
+      setText("row-tenor", t("tenorRow"));
+      setText("row-r", t("rRow"));
+      setText("row-q", t("qRow"));
+      setText("row-vol", t("volRow"));
+      setText("row-ko", t("koRow"));
+      setText("row-ki", t("kiRow"));
+      setText("row-target-snowball", t("targetSnowballRow"));
+      setText("row-protected-snowball", t("protectedSnowballRow"));
+      setText("row-prepayment", t("prepaymentRow"));
+      setText("row-residual", t("residualRow"));
+      setText("row-grid-mode", t("gridModeRow"));
+      setText("shock-title", t("shockTitle"));
+      setText("shock-tag", t("shockTag"));
+      setText("shock-r-title", t("shockRTitle"));
+      setText("shock-q-title", t("shockQTitle"));
+      setText("shock-vol-title", t("shockVolTitle"));
+      setText("assumptions-title", t("assumptionsTitle"));
+      setText("assumptions-tag", t("assumptionsTag"));
+      setText("structure-table-title", t("structureTableTitle"));
+      setText("runtime-table-title", t("runtimeTableTitle"));
+      setText("notes-title", t("notesTitle"));
+      setText("structure-spot-label", t("structureSpotLabel"));
+      setText("structure-strike-label", t("structureStrikeLabel"));
+      setText("structure-base-tenor-label", t("structureBaseTenorLabel"));
+      setText("structure-base-ko-label", t("structureBaseKoLabel"));
+      setText("structure-base-ki-label", t("structureBaseKiLabel"));
+      setText("structure-freq-label", t("structureFreqLabel"));
+      setText("runtime-engine-label", t("runtimeEngineLabel"));
+      setText("runtime-grid-label", t("runtimeGridLabel"));
+      setText("runtime-time-label", t("runtimeTimeLabel"));
+      setText("runtime-quote-label", t("runtimeQuoteLabel"));
+      setText("runtime-ranges-label", t("runtimeRangesLabel"));
+      setText("runtime-data-note-label", t("runtimeDataNoteLabel"));
+
+      const options = Array.from(variantSelect.options);
+      options.forEach((option) => {
+        option.textContent = t("variantNames")[option.value] || option.textContent;
+      });
+
+      const notesList = document.getElementById("notes-list");
+      notesList.innerHTML = t("notes").map((item) => `<li>${item}</li>`).join("");
+
+      setText("engine-tag-value", t("engineLabel"));
+      setText("generated-value", formatGeneratedAt(DATA.meta.generated_at));
+
+      langEnButton.classList.toggle("active", currentLang === "en");
+      langCnButton.classList.toggle("active", currentLang === "cn");
+      if (exactStructureMode) {
+        const exactCaption = t("exactNodeControlCaption");
+        setText("tenor-mode-caption", exactCaption);
+        setText("ko-mode-caption", exactCaption);
+        setText("ki-mode-caption", exactCaption);
+      }
+      updateRQLinkText();
+    }
+
+    function updateRQLinkText() {
+      setText("rq-link-value", rqLinkToggle.checked ? t("rqLinked") : t("rqIndependent"));
+      setText(
+        "rq-link-caption",
+        rqLinkToggle.checked
+          ? tt("rqHolding", { spread: formatPct(rqLinkedSpread, 2) })
+          : t("rqIndependentCaption")
+      );
+    }
+
+    function update() {
+      const tenor = activeTenor();
+      const rate = parseFloat(rSlider.value);
+      const divYield = parseFloat(qSlider.value);
+      const vol = parseFloat(volSlider.value);
+      const koBarrier = activeKoBarrier();
+      const kiBarrier = activeKiBarrier();
+      const variant = activeVariantKey();
+      const variantMeta = activeVariantMeta();
+      const variantData = activeVariantData();
+      const offGridExactQuote =
+        DATA.meta.structure.exact_barrier_grid &&
+        ![
+          isOnGrid(tenor, DATA.tenorGrid),
+          isOnGrid(koBarrier, DATA.meta.structure.ko_barrier_grid),
+          isOnGrid(kiBarrier, DATA.meta.structure.ki_barrier_grid),
+        ].every(Boolean);
+
+      const quote = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        rate,
+        divYield,
+        vol,
+        koBarrier,
+        kiBarrier
+      );
+      const interestPv = sampleBarrierAware(
+        variantData.interest,
+        variantData.interestKoSens,
+        variantData.interestKiSens,
+        tenor,
+        rate,
+        divYield,
+        vol,
+        koBarrier,
+        kiBarrier
+      );
+      const protectedPv = sampleCube(
+        variantData.protected,
+        tenor,
+        rate,
+        divYield,
+        vol,
+        koBarrier,
+        kiBarrier
+      );
+
+      const quoteEmpty = document.getElementById("quote-empty");
+      const summary = document.getElementById("summary-text");
+
+      setText("variant-badge", t("variantNames")[variant] || variantMeta.label);
+      setText("variant-caption", t("variantDescriptions")[variant] || variantMeta.description);
+      setText("tenor-value", formatTenor(tenor));
+      setText("r-value", formatPct(rate));
+      setText("q-value", formatPct(divYield));
+      setText("vol-value", formatPct(vol));
+      setText("ko-value", koBarrier.toFixed(1));
+      setText("ki-value", kiBarrier.toFixed(1));
+
+      setText("selected-variant", t("variantNames")[variant] || variantMeta.label);
+      setText("selected-tenor", formatTenor(tenor));
+      setText("selected-r", formatPct(rate));
+      setText("selected-q", formatPct(divYield));
+      setText("selected-vol", formatPct(vol));
+      setText("selected-ko", koBarrier.toFixed(1));
+      setText("selected-ki", kiBarrier.toFixed(1));
+      setText("prepayment-value", formatSignedNumber(DATA.meta.structure.prepayment));
+      setText("grid-mode-value", DATA.meta.structure.exact_barrier_grid ? t("gridModeExact") : t("gridModeApprox"));
+
+      setText("structure-spot-value", String(DATA.meta.structure.spot));
+      setText("structure-strike-value", String(DATA.meta.structure.strike));
+      setText("structure-base-tenor-value", `${DATA.meta.structure.maturity_years.toFixed(1)}Y`);
+      setText("structure-base-ko-value", String(DATA.meta.structure.base_ko_barrier));
+      setText("structure-base-ki-value", String(DATA.meta.structure.base_ki_barrier));
+      setText(
+        "structure-freq-value",
+        `${DATA.meta.structure.base_ko_frequency} KO / ${DATA.meta.structure.base_ki_frequency} KI`
+      );
+      setText("runtime-engine-value", DATA.meta.engine);
+      setText("runtime-grid-value", DATA.meta.solver_grid_size === null ? "N/A" : String(DATA.meta.solver_grid_size));
+      setText("runtime-time-value", DATA.meta.solver_time_steps === null ? "N/A" : String(DATA.meta.solver_time_steps));
+      setText("runtime-quote-value", t("runtimeQuoteValue"));
+      setText(
+        "runtime-ranges-value",
+        `T ${formatTenor(DATA.meta.ranges.tenor[0])}-${formatTenor(DATA.meta.ranges.tenor[DATA.meta.ranges.tenor.length - 1])}, r ${formatPct(DATA.meta.ranges.r[0])}-${formatPct(DATA.meta.ranges.r[DATA.meta.ranges.r.length - 1])}, q ${formatPct(DATA.meta.ranges.q[0])}-${formatPct(DATA.meta.ranges.q[DATA.meta.ranges.q.length - 1])}, vol ${formatPct(DATA.meta.ranges.vol[0])}-${formatPct(DATA.meta.ranges.vol[DATA.meta.ranges.vol.length - 1])}`
+      );
+      setText("runtime-data-note-value", t("dataNote"));
+
+      if (quote === null || interestPv === null || protectedPv === null) {
+        setText("quote-kpi-value", "N/A");
+        setText("interest-kpi-value", "N/A");
+        setText("protected-kpi-value", "N/A");
+        setText("quote-kpi-note", t("noQuoteCaption"));
+        setText("interest-kpi-note", t("noDataCaption"));
+        setText("protected-kpi-note", t("noDataCaption"));
+        setText("target-snowball-value", "N/A");
+        setText("protected-snowball-value", "N/A");
+        setText("residual-value", "N/A");
+        setText("shock-r-value", "N/A");
+        setText("shock-q-value", "N/A");
+        setText("shock-vol-value", "N/A");
+        setText("shock-r-note", t("shockUnavailable"));
+        setText("shock-q-note", t("shockUnavailable"));
+        setText("shock-vol-note", t("shockUnavailable"));
+        summary.textContent = t("noCombined");
+        summary.classList.add("is-empty");
+        quoteEmpty.hidden = false;
+        quoteEmpty.textContent = t("noCombined");
+        return;
+      }
+
+      summary.classList.remove("is-empty");
+      quoteEmpty.hidden = true;
+      setText("interest-kpi-value", formatSignedNumber(interestPv));
+      setText("protected-kpi-value", formatSignedNumber(protectedPv));
+      setText(
+        "interest-kpi-note",
+        tt("interestCaption", {
+          prepayment: DATA.meta.structure.prepayment.toFixed(2),
+          protected_pv: protectedPv.toFixed(2),
+        })
+      );
+      setText("protected-kpi-note", t("protectedCaption"));
+      setText("target-snowball-value", formatSignedNumber(interestPv));
+      setText("protected-snowball-value", formatSignedNumber(protectedPv));
+      setText("residual-value", formatSignedNumber(interestPv - interestPv, 4));
+
+      if (offGridExactQuote) {
+        setText("quote-kpi-value", "N/A");
+        setText("quote-kpi-note", t("offGridExactQuoteCaption"));
+        setText("shock-r-value", "N/A");
+        setText("shock-q-value", "N/A");
+        setText("shock-vol-value", "N/A");
+        document.getElementById("shock-r-value").className = "shock-value";
+        document.getElementById("shock-q-value").className = "shock-value";
+        document.getElementById("shock-vol-value").className = "shock-value";
+        setText("shock-r-note", t("shockUnavailable"));
+        setText("shock-q-note", t("shockUnavailable"));
+        setText("shock-vol-note", t("shockUnavailable"));
+        quoteEmpty.hidden = false;
+        quoteEmpty.textContent = t("offGridExactNoQuote");
+        summary.textContent = t("offGridExactNoQuote");
+        return;
+      }
+
+      setText("quote-kpi-value", formatPct(quote));
+      setText("quote-kpi-note", t("quoteCaption"));
+
+      const rUp = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid[DATA.rGrid.length - 1]),
+        divYield,
+        vol,
+        koBarrier,
+        kiBarrier
+      );
+      const qUp = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        rate,
+        clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid[DATA.qGrid.length - 1]),
+        vol,
+        koBarrier,
+        kiBarrier
+      );
+      const volUp = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        rate,
+        divYield,
+        clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid[DATA.volGrid.length - 1]),
+        koBarrier,
+        kiBarrier
+      );
+
+      const dR = rUp === null ? null : rUp - quote;
+      const dQ = qUp === null ? null : qUp - quote;
+      const dVol = volUp === null ? null : volUp - quote;
+
+      setText("shock-r-value", formatSignedBpsFromRate(dR));
+      setText("shock-q-value", formatSignedBpsFromRate(dQ));
+      setText("shock-vol-value", formatSignedBpsFromRate(dVol));
+
+      document.getElementById("shock-r-value").className = `shock-value ${dR !== null && dR >= 0 ? "positive" : "negative"}`;
+      document.getElementById("shock-q-value").className = `shock-value ${dQ !== null && dQ >= 0 ? "positive" : "negative"}`;
+      document.getElementById("shock-vol-value").className = `shock-value ${dVol !== null && dVol >= 0 ? "positive" : "negative"}`;
+
+      setText("shock-r-note", describeDirection(dR, t("highRUp"), t("highRDown")));
+      setText("shock-q-note", describeDirection(dQ, t("highQUp"), t("highQDown")));
+      setText("shock-vol-note", describeDirection(dVol, t("highVolUp"), t("highVolDown")));
+
+      summary.textContent = tt("summary", {
+        variant: t("variantNames")[variant] || variantMeta.label,
+        tenor: formatTenor(tenor),
+        r: formatPct(rate),
+        q: formatPct(divYield),
+        vol: formatPct(vol),
+        ko: koBarrier.toFixed(1),
+        ki: kiBarrier.toFixed(1),
+        quote: formatPct(quote),
+        interest_pv: formatSignedNumber(interestPv),
+        protected_pv: formatSignedNumber(protectedPv),
+      });
+    }
+
+    function scheduleUpdate() {
+      if (updateQueued) {
+        return;
+      }
+      updateQueued = true;
+      requestAnimationFrame(() => {
+        updateQueued = false;
+        update();
+      });
+    }
+
+    variantSelect.value = DATA.defaults.variant;
+    configureStructureControls();
+
+    langEnButton.addEventListener("click", () => {
+      currentLang = "en";
+      updateStaticText();
+      scheduleUpdate();
+    });
+
+    langCnButton.addEventListener("click", () => {
+      currentLang = "cn";
+      updateStaticText();
+      scheduleUpdate();
+    });
+
+    rSlider.addEventListener("input", () => {
+      if (rqLinkToggle.checked) {
+        syncQFromR();
+      }
+      scheduleUpdate();
+    });
+
+    qSlider.addEventListener("input", () => {
+      if (rqLinkToggle.checked) {
+        syncRFromQ();
+      }
+      scheduleUpdate();
+    });
+
+    rqLinkToggle.addEventListener("change", () => {
+      if (rqLinkToggle.checked) {
+        rqLinkedSpread = parseFloat(qSlider.value) - parseFloat(rSlider.value);
+      }
+      updateRQLinkText();
+      scheduleUpdate();
+    });
+
+    [tenorSlider, tenorSelect, volSlider, koSlider, koSelect, kiSlider, kiSelect, variantSelect].forEach((element) => {
+      element.addEventListener("input", scheduleUpdate);
+      element.addEventListener("change", scheduleUpdate);
+    });
+
+    updateStaticText();
+    scheduleUpdate();
+  </script>
+</body>
+</html>

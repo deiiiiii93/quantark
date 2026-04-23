@@ -1,9 +1,5 @@
 """
-Generate the PDE-backed Snowball RFQ KO-rate demo end to end.
-
-Workflow:
-1. Calculate the embedded pricing payload and scenario CSV.
-2. Render the standalone HTML dashboard from that payload.
+Calculate the PDE-backed Snowball RFQ KO-rate demo payload and CSV export.
 """
 
 from __future__ import annotations
@@ -22,7 +18,7 @@ from example import snowball_rfq_ko_rate_demo_workflow as workflow
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate the PDE Snowball RFQ KO-rate dashboard.",
+        description="Calculate the PDE Snowball RFQ KO-rate demo payload.",
     )
     parser.add_argument(
         "--grid-size",
@@ -41,12 +37,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=max(1, os.cpu_count() or 1),
         help="Parallel worker count for the PDE anchor grid build.",
-    )
-    parser.add_argument(
-        "--html-output",
-        type=Path,
-        default=workflow.PDE_HTML_OUTPUT_PATH,
-        help="Output path for the rendered HTML dashboard.",
     )
     parser.add_argument(
         "--data-output",
@@ -73,11 +63,9 @@ def main() -> None:
     workflow.write_demo_artifacts(
         data,
         scenario_rows,
-        html_output_path=args.html_output,
         data_output_path=args.data_output,
         csv_output_path=args.csv_output,
     )
-    print(f"Wrote PDE demo HTML to {args.html_output}")
     print(f"Wrote PDE demo data JSON to {args.data_output}")
     print(f"Wrote PDE scenario CSV to {args.csv_output}")
 
