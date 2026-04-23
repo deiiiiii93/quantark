@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -139,6 +141,14 @@ VARIANTS = {
     },
 }
 
+DEMO_VARIANT_KEYS = (
+    "standard",
+    "european_ki",
+    "standard_partial",
+    "european_ki_partial",
+)
+DEMO_VARIANTS = {key: VARIANTS[key] for key in DEMO_VARIANT_KEYS}
+
 
 @dataclass(frozen=True)
 class DemoMeta:
@@ -148,6 +158,24 @@ class DemoMeta:
     solver_time_steps: int | None
     structure: dict[str, Any]
     ranges: dict[str, list[float]]
+
+
+@dataclass(frozen=True)
+class ExactBarrierTask:
+    scenario_id: int
+    variant: str
+    tenor_idx: int
+    rate_idx: int
+    q_idx: int
+    vol_idx: int
+    ko_idx: int
+    ki_idx: int
+    tenor: float
+    rate: float
+    div_yield: float
+    vol: float
+    ko_barrier: float
+    ki_barrier: float
 
 
 DEFAULT_HTML_UI_COPY = {
@@ -415,6 +443,78 @@ def solve_fair_ko_rate(
     )
 
 
+def serialize_engine(engine: Any) -> dict[str, Any]:
+    """Serialize supported engine settings for worker-process construction."""
+    if isinstance(engine, SnowballPDESolver):
+        return {
+            "engine_type": "pde",
+            "params": {
+                "grid_size": engine.params.grid_size,
+                "time_steps": engine.params.time_steps,
+            },
+        }
+    if type(engine).__name__ == "SnowballQuadEngine":
+        return {
+            "engine_type": "quad",
+            "params": {
+                "grid_points": engine.params.grid_points,
+            },
+        }
+    raise ValueError(f"Unsupported engine for parallel exact-grid build: {type(engine).__name__}")
+
+
+def build_engine_from_config(engine_config: dict[str, Any]) -> Any:
+    """Construct a pricing engine from its serialized config."""
+    engine_type = engine_config["engine_type"]
+    params = engine_config["params"]
+    if engine_type == "pde":
+        return SnowballPDESolver(
+            params=PDEParams(
+                grid_size=params["grid_size"],
+                time_steps=params["time_steps"],
+            )
+        )
+    if engine_type == "quad":
+        from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+        from asset.equity.param import QuadParams
+
+        return SnowballQuadEngine(
+            params=QuadParams(
+                grid_points=params["grid_points"],
+            )
+        )
+    raise ValueError(f"Unknown engine_type: {engine_type}")
+
+
+_EXACT_BARRIER_WORKER_ENGINE: Any | None = None
+
+
+def init_exact_barrier_worker(engine_config: dict[str, Any]) -> None:
+    """Initialize one pricing engine per worker process."""
+    global _EXACT_BARRIER_WORKER_ENGINE
+    _EXACT_BARRIER_WORKER_ENGINE = build_engine_from_config(engine_config)
+
+
+def solve_exact_barrier_task(task: ExactBarrierTask) -> tuple[ExactBarrierTask, dict[str, float] | None]:
+    """Solve one exact KO/KI scenario inside a worker process."""
+    if _EXACT_BARRIER_WORKER_ENGINE is None:
+        raise RuntimeError("Exact barrier worker engine is not initialized.")
+    try:
+        result = solve_fair_ko_rate_with_engine(
+            _EXACT_BARRIER_WORKER_ENGINE,
+            rate=task.rate,
+            div_yield=task.div_yield,
+            vol=task.vol,
+            tenor=task.tenor,
+            variant=task.variant,
+            ko_barrier=task.ko_barrier,
+            ki_barrier=task.ki_barrier,
+        )
+    except Exception:
+        result = None
+    return (task, result)
+
+
 def apply_barrier_adjustment(
     base_value: float | None,
     ko_sensitivity: float | None,
@@ -477,230 +577,462 @@ def expand_scenario_rows_with_barriers(
     return rows
 
 
+def build_scenario_row(
+    *,
+    scenario_id: int,
+    variant: str,
+    tenor: float,
+    rate: float,
+    div_yield: float,
+    vol: float,
+    ko_barrier: float,
+    ki_barrier: float,
+    variant_config: dict[str, str],
+    result: dict[str, float] | None,
+    quote_ko_sensitivity: float | None = None,
+    quote_ki_sensitivity: float | None = None,
+    interest_ko_sensitivity: float | None = None,
+    interest_ki_sensitivity: float | None = None,
+) -> dict[str, Any]:
+    """Build one exported scenario row."""
+    return {
+        "scenario_id": scenario_id,
+        "variant": variant,
+        "tenor": tenor,
+        "r": rate,
+        "q": div_yield,
+        "vol": vol,
+        "ko_barrier": ko_barrier,
+        "ki_barrier": ki_barrier,
+        "product_protection_type": variant_config["product_protection_type"],
+        "product_protection_rate": (
+            get_partial_protection_rate(ki_barrier)
+            if variant_config["product_protection_type"] == "PARTIAL"
+            else 0.0
+        ),
+        "interest_protection_type": variant_config["interest_protection_type"],
+        "interest_protection_rate": (
+            get_partial_protection_rate(ki_barrier)
+            if variant_config["interest_protection_type"] == "PARTIAL"
+            else 0.0
+        ),
+        "quoted_ko_rate": None if result is None else result["quoted_ko_rate"],
+        "product_pv": None if result is None else result["snowball_target_pv"],
+        "interest_pv": None if result is None else result["interest_component_pv"],
+        "combined_pv": None if result is None else result["combined_pv"],
+        "protected_snowball_pv": None if result is None else result["protected_snowball_pv"],
+        "quote_ko_sensitivity": quote_ko_sensitivity,
+        "quote_ki_sensitivity": quote_ki_sensitivity,
+        "interest_ko_sensitivity": interest_ko_sensitivity,
+        "interest_ki_sensitivity": interest_ki_sensitivity,
+    }
+
+
+def build_exact_barrier_tasks() -> list[ExactBarrierTask]:
+    """Enumerate exact KO/KI scenario tasks in deterministic export order."""
+    tasks: list[ExactBarrierTask] = []
+    scenario_id = 0
+    for variant in DEMO_VARIANTS:
+        for tenor_idx, tenor in enumerate(TENOR_GRID):
+            for rate_idx, rate in enumerate(R_GRID):
+                for q_idx, div_yield in enumerate(Q_GRID):
+                    for vol_idx, vol in enumerate(VOL_GRID):
+                        for ko_idx, ko_barrier in enumerate(KO_GRID):
+                            for ki_idx, ki_barrier in enumerate(KI_GRID):
+                                scenario_id += 1
+                                tasks.append(
+                                    ExactBarrierTask(
+                                        scenario_id=scenario_id,
+                                        variant=variant,
+                                        tenor_idx=tenor_idx,
+                                        rate_idx=rate_idx,
+                                        q_idx=q_idx,
+                                        vol_idx=vol_idx,
+                                        ko_idx=ko_idx,
+                                        ki_idx=ki_idx,
+                                        tenor=tenor,
+                                        rate=rate,
+                                        div_yield=div_yield,
+                                        vol=vol,
+                                        ko_barrier=ko_barrier,
+                                        ki_barrier=ki_barrier,
+                                    )
+                                )
+    return tasks
+
+
+def make_nested_none(dimensions: list[int]) -> Any:
+    """Create a nested list filled with None for the requested dimensions."""
+    if len(dimensions) == 1:
+        return [None] * dimensions[0]
+    return [make_nested_none(dimensions[1:]) for _ in range(dimensions[0])]
+
+
+def build_exact_barrier_cube_parallel(
+    *,
+    engine: Any,
+    progress_label: str,
+    parallel_workers: int | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build the exact 6D KO/KI cube using all available worker processes."""
+    worker_count = parallel_workers or max(1, os.cpu_count() or 1)
+    tasks = build_exact_barrier_tasks()
+    total = len(tasks)
+    engine_config = serialize_engine(engine)
+    variant_cubes: dict[str, Any] = {}
+    dimensions = [
+        len(TENOR_GRID),
+        len(R_GRID),
+        len(Q_GRID),
+        len(VOL_GRID),
+        len(KO_GRID),
+        len(KI_GRID),
+    ]
+    for variant in DEMO_VARIANTS:
+        variant_cubes[variant] = {
+            "quote": make_nested_none(dimensions),
+            "interest": make_nested_none(dimensions),
+            "protected": make_nested_none(dimensions),
+            "snowballTarget": make_nested_none(dimensions),
+        }
+
+    rows: list[dict[str, Any] | None] = [None] * total
+    done = 0
+    with ProcessPoolExecutor(
+        max_workers=worker_count,
+        initializer=init_exact_barrier_worker,
+        initargs=(engine_config,),
+    ) as executor:
+        futures = [executor.submit(solve_exact_barrier_task, task) for task in tasks]
+        for future in as_completed(futures):
+            task, result = future.result()
+            done += 1
+            print(
+                f"[{done:05d}/{total}] {task.variant} fair ko_rate via {progress_label} for "
+                f"T={task.tenor:.2f}, r={task.rate:.4f}, q={task.div_yield:.4f}, vol={task.vol:.4f}, "
+                f"ko={task.ko_barrier:.1f}, ki={task.ki_barrier:.1f}"
+            )
+            variant_cube = variant_cubes[task.variant]
+            idx = (
+                task.tenor_idx,
+                task.rate_idx,
+                task.q_idx,
+                task.vol_idx,
+                task.ko_idx,
+                task.ki_idx,
+            )
+            if result is not None:
+                variant_cube["quote"][idx[0]][idx[1]][idx[2]][idx[3]][idx[4]][idx[5]] = result["quoted_ko_rate"]
+                variant_cube["interest"][idx[0]][idx[1]][idx[2]][idx[3]][idx[4]][idx[5]] = result["interest_component_pv"]
+                variant_cube["protected"][idx[0]][idx[1]][idx[2]][idx[3]][idx[4]][idx[5]] = result["protected_snowball_pv"]
+                variant_cube["snowballTarget"][idx[0]][idx[1]][idx[2]][idx[3]][idx[4]][idx[5]] = result["snowball_target_pv"]
+
+            rows[task.scenario_id - 1] = build_scenario_row(
+                scenario_id=task.scenario_id,
+                variant=task.variant,
+                tenor=task.tenor,
+                rate=task.rate,
+                div_yield=task.div_yield,
+                vol=task.vol,
+                ko_barrier=task.ko_barrier,
+                ki_barrier=task.ki_barrier,
+                variant_config=get_variant_config(task.variant),
+                result=result,
+            )
+
+    return (variant_cubes, [row for row in rows if row is not None])
+
+
 def build_cube_with_engines(
     *,
     engine: Any,
     bump_engine: Any,
     progress_label: str | None = None,
-) -> tuple[dict[str, dict[str, list[list[list[list[float | None]]]]]], list[dict[str, Any]]]:
-    variant_cubes: dict[str, dict[str, list[list[list[list[float | None]]]]]] = {}
+    exact_barrier_grid: bool = False,
+    parallel_workers: int | None = 1,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    variant_cubes: dict[str, Any] = {}
     anchor_rows: list[dict[str, Any]] = []
     engine_label = progress_label or type(engine).__name__
-    total = len(VARIANTS) * len(TENOR_GRID) * len(R_GRID) * len(Q_GRID) * len(VOL_GRID)
+    if exact_barrier_grid and (parallel_workers or 1) > 1:
+        return build_exact_barrier_cube_parallel(
+            engine=engine,
+            progress_label=engine_label,
+            parallel_workers=parallel_workers,
+        )
+    barrier_points = len(KO_GRID) * len(KI_GRID) if exact_barrier_grid else 1
+    total = (
+        len(DEMO_VARIANTS)
+        * len(TENOR_GRID)
+        * len(R_GRID)
+        * len(Q_GRID)
+        * len(VOL_GRID)
+        * barrier_points
+    )
     done = 0
-    for variant in VARIANTS:
+    for variant in DEMO_VARIANTS:
         variant_config = get_variant_config(variant)
-        quote_cube: list[list[list[list[float | None]]]] = []
-        interest_cube: list[list[list[list[float | None]]]] = []
-        protected_cube: list[list[list[list[float | None]]]] = []
-        target_cube: list[list[list[list[float | None]]]] = []
-        quote_ko_sens_cube: list[list[list[list[float | None]]]] = []
-        quote_ki_sens_cube: list[list[list[list[float | None]]]] = []
-        interest_ko_sens_cube: list[list[list[list[float | None]]]] = []
-        interest_ki_sens_cube: list[list[list[list[float | None]]]] = []
+        quote_cube: list[Any] = []
+        interest_cube: list[Any] = []
+        protected_cube: list[Any] = []
+        target_cube: list[Any] = []
+        quote_ko_sens_cube: list[Any] = []
+        quote_ki_sens_cube: list[Any] = []
+        interest_ko_sens_cube: list[Any] = []
+        interest_ki_sens_cube: list[Any] = []
         for tenor in TENOR_GRID:
-            quote_r_slice: list[list[list[float | None]]] = []
-            interest_r_slice: list[list[list[float | None]]] = []
-            protected_r_slice: list[list[list[float | None]]] = []
-            target_r_slice: list[list[list[float | None]]] = []
-            quote_ko_sens_r_slice: list[list[list[float | None]]] = []
-            quote_ki_sens_r_slice: list[list[list[float | None]]] = []
-            interest_ko_sens_r_slice: list[list[list[float | None]]] = []
-            interest_ki_sens_r_slice: list[list[list[float | None]]] = []
+            quote_r_slice: list[Any] = []
+            interest_r_slice: list[Any] = []
+            protected_r_slice: list[Any] = []
+            target_r_slice: list[Any] = []
+            quote_ko_sens_r_slice: list[Any] = []
+            quote_ki_sens_r_slice: list[Any] = []
+            interest_ko_sens_r_slice: list[Any] = []
+            interest_ki_sens_r_slice: list[Any] = []
             for rate in R_GRID:
-                quote_q_slice: list[list[float | None]] = []
-                interest_q_slice: list[list[float | None]] = []
-                protected_q_slice: list[list[float | None]] = []
-                target_q_slice: list[list[float | None]] = []
-                quote_ko_sens_q_slice: list[list[float | None]] = []
-                quote_ki_sens_q_slice: list[list[float | None]] = []
-                interest_ko_sens_q_slice: list[list[float | None]] = []
-                interest_ki_sens_q_slice: list[list[float | None]] = []
+                quote_q_slice: list[Any] = []
+                interest_q_slice: list[Any] = []
+                protected_q_slice: list[Any] = []
+                target_q_slice: list[Any] = []
+                quote_ko_sens_q_slice: list[Any] = []
+                quote_ki_sens_q_slice: list[Any] = []
+                interest_ko_sens_q_slice: list[Any] = []
+                interest_ki_sens_q_slice: list[Any] = []
                 for div_yield in Q_GRID:
-                    quote_vol_slice: list[float | None] = []
-                    interest_vol_slice: list[float | None] = []
-                    protected_vol_slice: list[float | None] = []
-                    target_vol_slice: list[float | None] = []
-                    quote_ko_sens_vol_slice: list[float | None] = []
-                    quote_ki_sens_vol_slice: list[float | None] = []
-                    interest_ko_sens_vol_slice: list[float | None] = []
-                    interest_ki_sens_vol_slice: list[float | None] = []
+                    quote_vol_slice: list[Any] = []
+                    interest_vol_slice: list[Any] = []
+                    protected_vol_slice: list[Any] = []
+                    target_vol_slice: list[Any] = []
+                    quote_ko_sens_vol_slice: list[Any] = []
+                    quote_ki_sens_vol_slice: list[Any] = []
+                    interest_ko_sens_vol_slice: list[Any] = []
+                    interest_ki_sens_vol_slice: list[Any] = []
                     for vol in VOL_GRID:
-                        done += 1
-                        print(
-                            f"[{done:03d}/{total}] {variant} fair ko_rate via {engine_label} for "
-                            f"T={tenor:.2f}, r={rate:.4f}, q={div_yield:.4f}, vol={vol:.4f}"
-                        )
-                        try:
-                            result = solve_fair_ko_rate_with_engine(
-                                engine,
-                                rate=rate,
-                                div_yield=div_yield,
-                                vol=vol,
-                                tenor=tenor,
-                                variant=variant,
-                                ko_barrier=BASE_KO_BARRIER,
-                                ki_barrier=BASE_KI_BARRIER,
+                        if exact_barrier_grid:
+                            quote_ko_slice: list[list[float | None]] = []
+                            interest_ko_slice: list[list[float | None]] = []
+                            protected_ko_slice: list[list[float | None]] = []
+                            target_ko_slice: list[list[float | None]] = []
+                            for ko_barrier in KO_GRID:
+                                quote_ki_slice: list[float | None] = []
+                                interest_ki_slice: list[float | None] = []
+                                protected_ki_slice: list[float | None] = []
+                                target_ki_slice: list[float | None] = []
+                                for ki_barrier in KI_GRID:
+                                    done += 1
+                                    print(
+                                        f"[{done:03d}/{total}] {variant} fair ko_rate via {engine_label} for "
+                                        f"T={tenor:.2f}, r={rate:.4f}, q={div_yield:.4f}, vol={vol:.4f}, "
+                                        f"ko={ko_barrier:.1f}, ki={ki_barrier:.1f}"
+                                    )
+                                    try:
+                                        result = solve_fair_ko_rate_with_engine(
+                                            engine,
+                                            rate=rate,
+                                            div_yield=div_yield,
+                                            vol=vol,
+                                            tenor=tenor,
+                                            variant=variant,
+                                            ko_barrier=ko_barrier,
+                                            ki_barrier=ki_barrier,
+                                        )
+                                        quote_ki_slice.append(result["quoted_ko_rate"])
+                                        interest_ki_slice.append(result["interest_component_pv"])
+                                        protected_ki_slice.append(result["protected_snowball_pv"])
+                                        target_ki_slice.append(result["snowball_target_pv"])
+                                        anchor_rows.append(
+                                            build_scenario_row(
+                                                scenario_id=done,
+                                                variant=variant,
+                                                tenor=tenor,
+                                                rate=rate,
+                                                div_yield=div_yield,
+                                                vol=vol,
+                                                ko_barrier=ko_barrier,
+                                                ki_barrier=ki_barrier,
+                                                variant_config=variant_config,
+                                                result=result,
+                                            )
+                                        )
+                                    except Exception:
+                                        quote_ki_slice.append(None)
+                                        interest_ki_slice.append(None)
+                                        protected_ki_slice.append(None)
+                                        target_ki_slice.append(None)
+                                        anchor_rows.append(
+                                            build_scenario_row(
+                                                scenario_id=done,
+                                                variant=variant,
+                                                tenor=tenor,
+                                                rate=rate,
+                                                div_yield=div_yield,
+                                                vol=vol,
+                                                ko_barrier=ko_barrier,
+                                                ki_barrier=ki_barrier,
+                                                variant_config=variant_config,
+                                                result=None,
+                                            )
+                                        )
+                                quote_ko_slice.append(quote_ki_slice)
+                                interest_ko_slice.append(interest_ki_slice)
+                                protected_ko_slice.append(protected_ki_slice)
+                                target_ko_slice.append(target_ki_slice)
+                            quote_vol_slice.append(quote_ko_slice)
+                            interest_vol_slice.append(interest_ko_slice)
+                            protected_vol_slice.append(protected_ko_slice)
+                            target_vol_slice.append(target_ko_slice)
+                        else:
+                            done += 1
+                            print(
+                                f"[{done:03d}/{total}] {variant} fair ko_rate via {engine_label} for "
+                                f"T={tenor:.2f}, r={rate:.4f}, q={div_yield:.4f}, vol={vol:.4f}"
                             )
-                            quote_vol_slice.append(result["quoted_ko_rate"])
-                            interest_vol_slice.append(result["interest_component_pv"])
-                            protected_vol_slice.append(result["protected_snowball_pv"])
-                            target_vol_slice.append(result["snowball_target_pv"])
                             try:
-                                ko_up = solve_fair_ko_rate_with_engine(
-                                    bump_engine,
-                                    rate=rate,
-                                    div_yield=div_yield,
-                                    vol=vol,
-                                    tenor=tenor,
-                                    variant=variant,
-                                    ko_barrier=BASE_KO_BARRIER + KO_BARRIER_BUMP,
-                                    ki_barrier=BASE_KI_BARRIER,
-                                )
-                                quote_ko_sens_vol_slice.append(
-                                    (ko_up["quoted_ko_rate"] - result["quoted_ko_rate"])
-                                    / KO_BARRIER_BUMP
-                                )
-                                interest_ko_sens_vol_slice.append(
-                                    (ko_up["interest_component_pv"] - result["interest_component_pv"])
-                                    / KO_BARRIER_BUMP
-                                )
-                            except Exception:
-                                quote_ko_sens_vol_slice.append(None)
-                                interest_ko_sens_vol_slice.append(None)
-
-                            try:
-                                ki_up = solve_fair_ko_rate_with_engine(
-                                    bump_engine,
+                                result = solve_fair_ko_rate_with_engine(
+                                    engine,
                                     rate=rate,
                                     div_yield=div_yield,
                                     vol=vol,
                                     tenor=tenor,
                                     variant=variant,
                                     ko_barrier=BASE_KO_BARRIER,
-                                    ki_barrier=BASE_KI_BARRIER + KI_BARRIER_BUMP,
+                                    ki_barrier=BASE_KI_BARRIER,
                                 )
-                                quote_ki_sens_vol_slice.append(
-                                    (ki_up["quoted_ko_rate"] - result["quoted_ko_rate"])
-                                    / KI_BARRIER_BUMP
-                                )
-                                interest_ki_sens_vol_slice.append(
-                                    (ki_up["interest_component_pv"] - result["interest_component_pv"])
-                                    / KI_BARRIER_BUMP
+                                quote_vol_slice.append(result["quoted_ko_rate"])
+                                interest_vol_slice.append(result["interest_component_pv"])
+                                protected_vol_slice.append(result["protected_snowball_pv"])
+                                target_vol_slice.append(result["snowball_target_pv"])
+                                try:
+                                    ko_up = solve_fair_ko_rate_with_engine(
+                                        bump_engine,
+                                        rate=rate,
+                                        div_yield=div_yield,
+                                        vol=vol,
+                                        tenor=tenor,
+                                        variant=variant,
+                                        ko_barrier=BASE_KO_BARRIER + KO_BARRIER_BUMP,
+                                        ki_barrier=BASE_KI_BARRIER,
+                                    )
+                                    quote_ko_sens_vol_slice.append(
+                                        (ko_up["quoted_ko_rate"] - result["quoted_ko_rate"])
+                                        / KO_BARRIER_BUMP
+                                    )
+                                    interest_ko_sens_vol_slice.append(
+                                        (ko_up["interest_component_pv"] - result["interest_component_pv"])
+                                        / KO_BARRIER_BUMP
+                                    )
+                                except Exception:
+                                    quote_ko_sens_vol_slice.append(None)
+                                    interest_ko_sens_vol_slice.append(None)
+
+                                try:
+                                    ki_up = solve_fair_ko_rate_with_engine(
+                                        bump_engine,
+                                        rate=rate,
+                                        div_yield=div_yield,
+                                        vol=vol,
+                                        tenor=tenor,
+                                        variant=variant,
+                                        ko_barrier=BASE_KO_BARRIER,
+                                        ki_barrier=BASE_KI_BARRIER + KI_BARRIER_BUMP,
+                                    )
+                                    quote_ki_sens_vol_slice.append(
+                                        (ki_up["quoted_ko_rate"] - result["quoted_ko_rate"])
+                                        / KI_BARRIER_BUMP
+                                    )
+                                    interest_ki_sens_vol_slice.append(
+                                        (ki_up["interest_component_pv"] - result["interest_component_pv"])
+                                        / KI_BARRIER_BUMP
+                                    )
+                                except Exception:
+                                    quote_ki_sens_vol_slice.append(None)
+                                    interest_ki_sens_vol_slice.append(None)
+                                anchor_rows.append(
+                                    build_scenario_row(
+                                        scenario_id=done,
+                                        variant=variant,
+                                        tenor=tenor,
+                                        rate=rate,
+                                        div_yield=div_yield,
+                                        vol=vol,
+                                        ko_barrier=BASE_KO_BARRIER,
+                                        ki_barrier=BASE_KI_BARRIER,
+                                        variant_config=variant_config,
+                                        result=result,
+                                        quote_ko_sensitivity=quote_ko_sens_vol_slice[-1],
+                                        quote_ki_sensitivity=quote_ki_sens_vol_slice[-1],
+                                        interest_ko_sensitivity=interest_ko_sens_vol_slice[-1],
+                                        interest_ki_sensitivity=interest_ki_sens_vol_slice[-1],
+                                    )
                                 )
                             except Exception:
+                                quote_vol_slice.append(None)
+                                interest_vol_slice.append(None)
+                                protected_vol_slice.append(None)
+                                target_vol_slice.append(None)
+                                quote_ko_sens_vol_slice.append(None)
                                 quote_ki_sens_vol_slice.append(None)
+                                interest_ko_sens_vol_slice.append(None)
                                 interest_ki_sens_vol_slice.append(None)
-                            anchor_rows.append(
-                                {
-                                    "scenario_id": done,
-                                    "variant": variant,
-                                    "tenor": tenor,
-                                    "r": rate,
-                                    "q": div_yield,
-                                    "vol": vol,
-                                    "ko_barrier": BASE_KO_BARRIER,
-                                    "ki_barrier": BASE_KI_BARRIER,
-                                    "product_protection_type": variant_config["product_protection_type"],
-                                    "product_protection_rate": (
-                                        get_partial_protection_rate(BASE_KI_BARRIER)
-                                        if variant_config["product_protection_type"] == "PARTIAL"
-                                        else 0.0
-                                    ),
-                                    "interest_protection_type": variant_config["interest_protection_type"],
-                                    "interest_protection_rate": (
-                                        get_partial_protection_rate(BASE_KI_BARRIER)
-                                        if variant_config["interest_protection_type"] == "PARTIAL"
-                                        else 0.0
-                                    ),
-                                    "quoted_ko_rate": result["quoted_ko_rate"],
-                                    "product_pv": result["snowball_target_pv"],
-                                    "interest_pv": result["interest_component_pv"],
-                                    "combined_pv": result["combined_pv"],
-                                    "protected_snowball_pv": result["protected_snowball_pv"],
-                                    "quote_ko_sensitivity": quote_ko_sens_vol_slice[-1],
-                                    "quote_ki_sensitivity": quote_ki_sens_vol_slice[-1],
-                                    "interest_ko_sensitivity": interest_ko_sens_vol_slice[-1],
-                                    "interest_ki_sensitivity": interest_ki_sens_vol_slice[-1],
-                                }
-                            )
-                        except Exception:
-                            quote_vol_slice.append(None)
-                            interest_vol_slice.append(None)
-                            protected_vol_slice.append(None)
-                            target_vol_slice.append(None)
-                            quote_ko_sens_vol_slice.append(None)
-                            quote_ki_sens_vol_slice.append(None)
-                            interest_ko_sens_vol_slice.append(None)
-                            interest_ki_sens_vol_slice.append(None)
-                            anchor_rows.append(
-                                {
-                                    "scenario_id": done,
-                                    "variant": variant,
-                                    "tenor": tenor,
-                                    "r": rate,
-                                    "q": div_yield,
-                                    "vol": vol,
-                                    "ko_barrier": BASE_KO_BARRIER,
-                                    "ki_barrier": BASE_KI_BARRIER,
-                                    "product_protection_type": variant_config["product_protection_type"],
-                                    "product_protection_rate": (
-                                        get_partial_protection_rate(BASE_KI_BARRIER)
-                                        if variant_config["product_protection_type"] == "PARTIAL"
-                                        else 0.0
-                                    ),
-                                    "interest_protection_type": variant_config["interest_protection_type"],
-                                    "interest_protection_rate": (
-                                        get_partial_protection_rate(BASE_KI_BARRIER)
-                                        if variant_config["interest_protection_type"] == "PARTIAL"
-                                        else 0.0
-                                    ),
-                                    "quoted_ko_rate": None,
-                                    "product_pv": None,
-                                    "interest_pv": None,
-                                    "combined_pv": None,
-                                    "protected_snowball_pv": None,
-                                    "quote_ko_sensitivity": None,
-                                    "quote_ki_sensitivity": None,
-                                    "interest_ko_sensitivity": None,
-                                    "interest_ki_sensitivity": None,
-                                }
-                            )
+                                anchor_rows.append(
+                                    build_scenario_row(
+                                        scenario_id=done,
+                                        variant=variant,
+                                        tenor=tenor,
+                                        rate=rate,
+                                        div_yield=div_yield,
+                                        vol=vol,
+                                        ko_barrier=BASE_KO_BARRIER,
+                                        ki_barrier=BASE_KI_BARRIER,
+                                        variant_config=variant_config,
+                                        result=None,
+                                    )
+                                )
                     quote_q_slice.append(quote_vol_slice)
                     interest_q_slice.append(interest_vol_slice)
                     protected_q_slice.append(protected_vol_slice)
                     target_q_slice.append(target_vol_slice)
-                    quote_ko_sens_q_slice.append(quote_ko_sens_vol_slice)
-                    quote_ki_sens_q_slice.append(quote_ki_sens_vol_slice)
-                    interest_ko_sens_q_slice.append(interest_ko_sens_vol_slice)
-                    interest_ki_sens_q_slice.append(interest_ki_sens_vol_slice)
+                    if not exact_barrier_grid:
+                        quote_ko_sens_q_slice.append(quote_ko_sens_vol_slice)
+                        quote_ki_sens_q_slice.append(quote_ki_sens_vol_slice)
+                        interest_ko_sens_q_slice.append(interest_ko_sens_vol_slice)
+                        interest_ki_sens_q_slice.append(interest_ki_sens_vol_slice)
                 quote_r_slice.append(quote_q_slice)
                 interest_r_slice.append(interest_q_slice)
                 protected_r_slice.append(protected_q_slice)
                 target_r_slice.append(target_q_slice)
-                quote_ko_sens_r_slice.append(quote_ko_sens_q_slice)
-                quote_ki_sens_r_slice.append(quote_ki_sens_q_slice)
-                interest_ko_sens_r_slice.append(interest_ko_sens_q_slice)
-                interest_ki_sens_r_slice.append(interest_ki_sens_q_slice)
+                if not exact_barrier_grid:
+                    quote_ko_sens_r_slice.append(quote_ko_sens_q_slice)
+                    quote_ki_sens_r_slice.append(quote_ki_sens_q_slice)
+                    interest_ko_sens_r_slice.append(interest_ko_sens_q_slice)
+                    interest_ki_sens_r_slice.append(interest_ki_sens_q_slice)
             quote_cube.append(quote_r_slice)
             interest_cube.append(interest_r_slice)
             protected_cube.append(protected_r_slice)
             target_cube.append(target_r_slice)
-            quote_ko_sens_cube.append(quote_ko_sens_r_slice)
-            quote_ki_sens_cube.append(quote_ki_sens_r_slice)
-            interest_ko_sens_cube.append(interest_ko_sens_r_slice)
-            interest_ki_sens_cube.append(interest_ki_sens_r_slice)
-        variant_cubes[variant] = {
+            if not exact_barrier_grid:
+                quote_ko_sens_cube.append(quote_ko_sens_r_slice)
+                quote_ki_sens_cube.append(quote_ki_sens_r_slice)
+                interest_ko_sens_cube.append(interest_ko_sens_r_slice)
+                interest_ki_sens_cube.append(interest_ki_sens_r_slice)
+        variant_cube = {
             "quote": quote_cube,
             "interest": interest_cube,
             "protected": protected_cube,
             "snowballTarget": target_cube,
-            "quoteKoSens": quote_ko_sens_cube,
-            "quoteKiSens": quote_ki_sens_cube,
-            "interestKoSens": interest_ko_sens_cube,
-            "interestKiSens": interest_ki_sens_cube,
         }
-    return (variant_cubes, expand_scenario_rows_with_barriers(anchor_rows))
+        if not exact_barrier_grid:
+            variant_cube.update(
+                {
+                    "quoteKoSens": quote_ko_sens_cube,
+                    "quoteKiSens": quote_ki_sens_cube,
+                    "interestKoSens": interest_ko_sens_cube,
+                    "interestKiSens": interest_ki_sens_cube,
+                }
+            )
+        variant_cubes[variant] = variant_cube
+    rows = anchor_rows if exact_barrier_grid else expand_scenario_rows_with_barriers(anchor_rows)
+    return (variant_cubes, rows)
 
 
 def build_cube(
@@ -753,12 +1085,31 @@ def write_scenario_csv(
         writer.writerows(rows)
 
 
+def write_demo_data_json(
+    data: dict[str, Any],
+    *,
+    data_output_path: Path,
+) -> None:
+    """Write the embedded demo payload to a standalone JSON file."""
+    data_output_path.parent.mkdir(parents=True, exist_ok=True)
+    data_output_path.write_text(
+        json.dumps(data, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
+def read_demo_data_json(data_input_path: Path) -> dict[str, Any]:
+    """Read a standalone demo payload JSON file."""
+    return json.loads(data_input_path.read_text(encoding="utf-8"))
+
+
 def build_demo_data(
     *,
     cubes: dict[str, dict[str, list[list[list[list[float | None]]]]]],
     engine_name: str,
     solver_grid_size: int | None,
     solver_time_steps: int | None,
+    exact_barrier_grid: bool = False,
 ) -> dict[str, Any]:
     """Build the embedded payload for one engine configuration."""
     return {
@@ -775,7 +1126,7 @@ def build_demo_data(
         },
         "koRateBounds": list(KO_RATE_BOUNDS),
         "variants": cubes,
-        "variantMeta": VARIANTS,
+        "variantMeta": DEMO_VARIANTS,
         "meta": asdict(
             DemoMeta(
                 generated_at=datetime.utcnow().isoformat() + "Z",
@@ -793,6 +1144,7 @@ def build_demo_data(
                     "base_ki_barrier": 75.0,
                     "base_ko_frequency": "monthly",
                     "base_ki_frequency": "daily",
+                    "exact_barrier_grid": exact_barrier_grid,
                     "include_principal": False,
                     "target_pv": 0.0,
                     "prepayment": PREPAYMENT,
@@ -1293,12 +1645,8 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
             <select id="variant-select" style="width:100%;padding:12px 14px;border-radius:14px;border:1px solid rgba(23,33,38,0.12);background:rgba(255,255,255,0.72);font:600 0.95rem/1 var(--sans);color:var(--ink);">
               <option value="standard">Standard</option>
               <option value="european_ki">European KI</option>
-              <option value="parachute">Parachute</option>
-              <option value="stepdown">Stepdown</option>
               <option value="standard_partial">Standard Partial-Protected</option>
               <option value="european_ki_partial">European KI Partial-Protected</option>
-              <option value="parachute_partial">Parachute Partial-Protected</option>
-              <option value="stepdown_partial">Stepdown Partial-Protected</option>
             </select>
             <div class="control-foot"><span id="variant-caption">--</span><span id="lang-variant-foot">structure</span></div>
           </div>
@@ -1417,32 +1765,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
           </article>
         </div>
 
-        <div class="panel-title" style="margin-top: 24px;">
-          <h2 id="lang-surface-title">Response Surfaces</h2>
-          <span id="lang-surface-tag">same convention, different slices</span>
-        </div>
-        <div class="heatmap-grid">
-          <article class="heatmap-card">
-            <h3><em>r</em> vs <em>q</em></h3>
-            <p id="heatmap-rq-caption"></p>
-            <canvas id="heatmap-rq" width="360" height="300"></canvas>
-          </article>
-          <article class="heatmap-card">
-            <h3><em>r</em> vs vol</h3>
-            <p id="heatmap-rv-caption"></p>
-            <canvas id="heatmap-rv" width="360" height="300"></canvas>
-          </article>
-          <article class="heatmap-card">
-            <h3><em>q</em> vs vol</h3>
-            <p id="heatmap-qv-caption"></p>
-            <canvas id="heatmap-qv" width="360" height="300"></canvas>
-          </article>
-        </div>
-        <div class="legend">
-          <span>lower quote</span>
-          <div class="legend-bar"></div>
-          <span>higher quote</span>
-        </div>
       </div>
     </section>
 
@@ -1492,10 +1814,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
     const koValue = document.getElementById("ko-value");
     const kiValue = document.getElementById("ki-value");
 
-    const heatmapRQ = document.getElementById("heatmap-rq");
-    const heatmapRV = document.getElementById("heatmap-rv");
-    const heatmapQV = document.getElementById("heatmap-qv");
-
     const impactR = document.getElementById("impact-r");
     const impactQ = document.getElementById("impact-q");
     const impactVol = document.getElementById("impact-vol");
@@ -1504,10 +1822,8 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
     const impactVolText = document.getElementById("impact-vol-text");
     const summaryText = document.getElementById("summary-text");
 
-    const heatmapRQCaption = document.getElementById("heatmap-rq-caption");
-    const heatmapRVCaption = document.getElementById("heatmap-rv-caption");
-    const heatmapQVCaption = document.getElementById("heatmap-qv-caption");
     let currentLang = "en";
+    let updateQueued = false;
 
     const I18N = {
       en: {
@@ -1543,8 +1859,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         impactRTitle: "If <em>r</em> moves +100bp",
         impactQTitle: "If <em>q</em> moves +100bp",
         impactVolTitle: "If vol moves +1 vol pt",
-        surfaceTitle: "Response Surfaces",
-        surfaceTag: "same convention, different slices",
         noteInterpretation: "Interpretation",
         noteBuild: "Build Notes",
         notesList: [
@@ -1563,9 +1877,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         noQuoteCaption: "No positive fair KO rate available inside the embedded quote range.",
         noCombined: "Combined convention not available at this market point.",
         interestCaption: (prepayment, pv) => `Prepayment ${prepayment} minus protected ex-principal Snowball PV ${pv}.`,
-        heatmapVol: (v) => `Slice at vol = ${v}.`,
-        heatmapQ: (q) => `Slice at q = ${q}.`,
-        heatmapR: (r) => `Slice at r = ${r}.`,
         highRUp: "Higher r is lifting the fair coupon in this slice.",
         highRDown: "Higher r is easing the fair coupon because forward drift improves KO odds.",
         highQUp: "Higher q demands more coupon because forward carry deteriorates.",
@@ -1618,8 +1929,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         impactRTitle: "<em>r</em> 上移 100bp",
         impactQTitle: "<em>q</em> 上移 100bp",
         impactVolTitle: "波动率上移 1 个 vol 点",
-        surfaceTitle: "响应曲面",
-        surfaceTag: "同一口径，不同切片",
         noteInterpretation: "解读",
         noteBuild: "构建说明",
         notesList: [
@@ -1638,9 +1947,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         noQuoteCaption: "在当前内嵌区间内没有正的公平 KO 票息。",
         noCombined: "当前市场点下无法得到有效组合结果。",
         interestCaption: (prepayment, pv) => `预付金 ${prepayment} 减去去本金保本雪球 PV ${pv}。`,
-        heatmapVol: (v) => `固定 vol = ${v} 的切片。`,
-        heatmapQ: (q) => `固定 q = ${q} 的切片。`,
-        heatmapR: (r) => `固定 r = ${r} 的切片。`,
         highRUp: "在这个切片里，更高的 r 会抬升公平票息。",
         highRDown: "在这个切片里，更高的 r 会通过改善向 103 KO 漂移而压低公平票息。",
         highQUp: "更高的 q 会恶化远期漂移，因此需要更高票息。",
@@ -1700,8 +2006,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
       document.getElementById("lang-impact-r-title").innerHTML = t("impactRTitle");
       document.getElementById("lang-impact-q-title").innerHTML = t("impactQTitle");
       document.getElementById("lang-impact-vol-title").textContent = t("impactVolTitle");
-      document.getElementById("lang-surface-title").textContent = t("surfaceTitle");
-      document.getElementById("lang-surface-tag").textContent = t("surfaceTag");
       document.getElementById("lang-note-interpretation").textContent = t("noteInterpretation");
       document.getElementById("lang-note-build").textContent = t("noteBuild");
       const notes = t("notesList");
@@ -1803,56 +2107,68 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
       return DATA.variants[activeVariantKey()];
     }
 
-    function cubeValue(cube, tenorIndex, i, j, k) {
-      return cube[tenorIndex][i][j][k];
+    function sampleNested(node, locations, depth = 0) {
+      const loc = locations[depth];
+      const lowerNode = node[loc.i];
+      const upperNode = node[loc.i + 1];
+
+      if (depth === locations.length - 1) {
+        if (lowerNode === null || upperNode === null) {
+          return null;
+        }
+        return lerp(lowerNode, upperNode, loc.t);
+      }
+
+      if (lowerNode === null || upperNode === null) {
+        return null;
+      }
+      const lowerValue = sampleNested(lowerNode, locations, depth + 1);
+      const upperValue = sampleNested(upperNode, locations, depth + 1);
+      if (lowerValue === null || upperValue === null) {
+        return null;
+      }
+      return lerp(lowerValue, upperValue, loc.t);
     }
 
-    function trilinearAtTenorIndex(cube, tenorIndex, rate, divYield, vol) {
-      const rLoc = locate(DATA.rGrid, rate);
-      const qLoc = locate(DATA.qGrid, divYield);
-      const vLoc = locate(DATA.volGrid, vol);
-
-      const corners = [
-        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i, vLoc.i),
-        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i, vLoc.i),
-        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i + 1, vLoc.i),
-        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i + 1, vLoc.i),
-        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i, vLoc.i + 1),
-        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i, vLoc.i + 1),
-        cubeValue(cube, tenorIndex, rLoc.i, qLoc.i + 1, vLoc.i + 1),
-        cubeValue(cube, tenorIndex, rLoc.i + 1, qLoc.i + 1, vLoc.i + 1),
+    function sampleCube(cube, tenor, rate, divYield, vol, koBarrier = null, kiBarrier = null) {
+      const locations = [
+        locate(DATA.tenorGrid, tenor),
+        locate(DATA.rGrid, rate),
+        locate(DATA.qGrid, divYield),
+        locate(DATA.volGrid, vol),
       ];
-
-      if (corners.some((value) => value === null)) {
-        return null;
+      if (DATA.meta.structure.exact_barrier_grid) {
+        locations.push(locate(DATA.meta.structure.ko_barrier_grid, koBarrier));
+        locations.push(locate(DATA.meta.structure.ki_barrier_grid, kiBarrier));
       }
-
-      const c00 = lerp(corners[0], corners[1], rLoc.t);
-      const c10 = lerp(corners[2], corners[3], rLoc.t);
-      const c01 = lerp(corners[4], corners[5], rLoc.t);
-      const c11 = lerp(corners[6], corners[7], rLoc.t);
-      const c0 = lerp(c00, c10, qLoc.t);
-      const c1 = lerp(c01, c11, qLoc.t);
-      return lerp(c0, c1, vLoc.t);
+      return sampleNested(cube, locations);
     }
 
-    function quadlinear(cube, tenor, rate, divYield, vol) {
-      const tenorLoc = locate(DATA.tenorGrid, tenor);
-      const lower = trilinearAtTenorIndex(cube, tenorLoc.i, rate, divYield, vol);
-      const upper = trilinearAtTenorIndex(cube, tenorLoc.i + 1, rate, divYield, vol);
-      if (lower === null || upper === null) {
-        return null;
+    function collectNonNullValues(node, values = []) {
+      if (Array.isArray(node)) {
+        node.forEach((child) => collectNonNullValues(child, values));
+      } else if (node !== null) {
+        values.push(node);
       }
-      return lerp(lower, upper, tenorLoc.t);
+      return values;
     }
 
     function currentRange() {
-      const flatValues = activeVariantData().quote.flat(3).filter((value) => value !== null);
-      return {
-        min: Math.min(...flatValues),
-        max: Math.max(...flatValues),
-      };
+      return VARIANT_RANGES[activeVariantKey()];
     }
+
+    const VARIANT_RANGES = Object.fromEntries(
+      Object.entries(DATA.variants).map(([variantKey, variantData]) => {
+        const flatValues = collectNonNullValues(variantData.quote);
+        return [
+          variantKey,
+          {
+            min: Math.min(...flatValues),
+            max: Math.max(...flatValues),
+          },
+        ];
+      })
+    );
 
     function colorFor(value) {
       if (value === null) {
@@ -1867,13 +2183,19 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
       return `hsl(${hue}, ${sat}%, ${light}%)`;
     }
 
-    function applyBarrierAdjustment(base, koSens, kiSens, koBarrier, kiBarrier) {
+    function sampleBarrierAware(baseCube, koSensCube, kiSensCube, tenor, rate, divYield, vol, koBarrier, kiBarrier) {
+      const base = sampleCube(baseCube, tenor, rate, divYield, vol, koBarrier, kiBarrier);
+      if (DATA.meta.structure.exact_barrier_grid) {
+        return base;
+      }
       if (base === null) {
         return null;
       }
       let adjusted = base;
       const koDelta = koBarrier - DATA.meta.structure.base_ko_barrier;
       const kiDelta = kiBarrier - DATA.meta.structure.base_ki_barrier;
+      const koSens = sampleCube(koSensCube, tenor, rate, divYield, vol);
+      const kiSens = sampleCube(kiSensCube, tenor, rate, divYield, vol);
       if (koSens !== null) {
         adjusted += koSens * koDelta;
       }
@@ -1881,69 +2203,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         adjusted += kiSens * kiDelta;
       }
       return adjusted;
-    }
-
-    function drawHeatmap(canvas, sampleFn, xLabel, yLabel, xCurrent, yCurrent, xRange, yRange) {
-      const ctx = canvas.getContext("2d");
-      const width = canvas.width;
-      const height = canvas.height;
-      const margin = { top: 18, right: 18, bottom: 34, left: 40 };
-      const innerWidth = width - margin.left - margin.right;
-      const innerHeight = height - margin.top - margin.bottom;
-      const cols = 52;
-      const rows = 40;
-
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = "rgba(255, 255, 255, 0.84)";
-      ctx.fillRect(0, 0, width, height);
-
-      for (let row = 0; row < rows; row += 1) {
-        for (let col = 0; col < cols; col += 1) {
-          const x = xRange[0] + (col / (cols - 1)) * (xRange[1] - xRange[0]);
-          const y = yRange[0] + ((rows - 1 - row) / (rows - 1)) * (yRange[1] - yRange[0]);
-          const value = sampleFn(x, y);
-          ctx.fillStyle = colorFor(value);
-          const px = margin.left + (col / cols) * innerWidth;
-          const py = margin.top + (row / rows) * innerHeight;
-          ctx.fillRect(px, py, innerWidth / cols + 1, innerHeight / rows + 1);
-        }
-      }
-
-      ctx.strokeStyle = "rgba(23, 33, 38, 0.18)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(margin.left, margin.top, innerWidth, innerHeight);
-
-      const crossX = margin.left + ((xCurrent - xRange[0]) / (xRange[1] - xRange[0])) * innerWidth;
-      const crossY = margin.top + (1 - (yCurrent - yRange[0]) / (yRange[1] - yRange[0])) * innerHeight;
-
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.moveTo(crossX, margin.top);
-      ctx.lineTo(crossX, margin.top + innerHeight);
-      ctx.moveTo(margin.left, crossY);
-      ctx.lineTo(margin.left + innerWidth, crossY);
-      ctx.stroke();
-
-      ctx.fillStyle = "#172126";
-      ctx.font = "11px var(--mono)";
-      ctx.textAlign = "center";
-      ctx.fillText(xLabel, margin.left + innerWidth / 2, height - 8);
-      ctx.save();
-      ctx.translate(12, margin.top + innerHeight / 2);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillText(yLabel, 0, 0);
-      ctx.restore();
-
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(23, 33, 38, 0.72)";
-      ctx.fillText(formatPct(xRange[0]), margin.left, height - 18);
-      ctx.textAlign = "right";
-      ctx.fillText(formatPct(xRange[1]), margin.left + innerWidth, height - 18);
-
-      ctx.textAlign = "left";
-      ctx.fillText(formatPct(yRange[0]), 6, margin.top + innerHeight);
-      ctx.fillText(formatPct(yRange[1]), 6, margin.top + 10);
     }
 
     function describeDirection(delta, positiveDriverText, negativeDriverText) {
@@ -1966,21 +2225,37 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
       const variant = activeVariantKey();
       const variantData = activeVariantData();
       const variantMeta = DATA.variantMeta[variant];
-      const quote = applyBarrierAdjustment(
-        quadlinear(variantData.quote, tenor, rate, divYield, vol),
-        quadlinear(variantData.quoteKoSens, tenor, rate, divYield, vol),
-        quadlinear(variantData.quoteKiSens, tenor, rate, divYield, vol),
+      const quote = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        rate,
+        divYield,
+        vol,
         koBarrier,
         kiBarrier,
       );
-      const interestPv = applyBarrierAdjustment(
-        quadlinear(variantData.interest, tenor, rate, divYield, vol),
-        quadlinear(variantData.interestKoSens, tenor, rate, divYield, vol),
-        quadlinear(variantData.interestKiSens, tenor, rate, divYield, vol),
+      const interestPv = sampleBarrierAware(
+        variantData.interest,
+        variantData.interestKoSens,
+        variantData.interestKiSens,
+        tenor,
+        rate,
+        divYield,
+        vol,
         koBarrier,
         kiBarrier,
       );
-      const protectedPv = quadlinear(variantData.protected, tenor, rate, divYield, vol);
+      const protectedPv = sampleCube(
+        variantData.protected,
+        tenor,
+        rate,
+        divYield,
+        vol,
+        koBarrier,
+        kiBarrier,
+      );
       const snowballTargetPv = interestPv;
 
       tenorValue.textContent = formatTenor(tenor);
@@ -2016,24 +2291,36 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         adjustedProtectedPv.toFixed(2)
       );
 
-      const rUp = applyBarrierAdjustment(
-        quadlinear(variantData.quote, tenor, clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
-        quadlinear(variantData.quoteKoSens, tenor, clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
-        quadlinear(variantData.quoteKiSens, tenor, clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid.at(-1)), divYield, vol),
+      const rUp = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        clamp(rate + 0.01, DATA.rGrid[0], DATA.rGrid.at(-1)),
+        divYield,
+        vol,
         koBarrier,
         kiBarrier,
       );
-      const qUp = applyBarrierAdjustment(
-        quadlinear(variantData.quote, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        quadlinear(variantData.quoteKoSens, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
-        quadlinear(variantData.quoteKiSens, tenor, rate, clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)), vol),
+      const qUp = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        rate,
+        clamp(divYield + 0.01, DATA.qGrid[0], DATA.qGrid.at(-1)),
+        vol,
         koBarrier,
         kiBarrier,
       );
-      const volUp = applyBarrierAdjustment(
-        quadlinear(variantData.quote, tenor, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
-        quadlinear(variantData.quoteKoSens, tenor, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
-        quadlinear(variantData.quoteKiSens, tenor, rate, divYield, clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1))),
+      const volUp = sampleBarrierAware(
+        variantData.quote,
+        variantData.quoteKoSens,
+        variantData.quoteKiSens,
+        tenor,
+        rate,
+        divYield,
+        clamp(vol + 0.01, DATA.volGrid[0], DATA.volGrid.at(-1)),
         koBarrier,
         kiBarrier,
       );
@@ -2066,59 +2353,6 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         t("highVolDown")
       );
 
-      heatmapRQCaption.textContent = t("heatmapVol", formatPct(vol));
-      heatmapRVCaption.textContent = t("heatmapQ", formatPct(divYield));
-      heatmapQVCaption.textContent = t("heatmapR", formatPct(rate));
-
-      drawHeatmap(
-        heatmapRQ,
-        (x, y) => applyBarrierAdjustment(
-          quadlinear(variantData.quote, tenor, x, y, vol),
-          quadlinear(variantData.quoteKoSens, tenor, x, y, vol),
-          quadlinear(variantData.quoteKiSens, tenor, x, y, vol),
-          koBarrier,
-          kiBarrier,
-        ),
-        "r",
-        "q",
-        rate,
-        divYield,
-        [DATA.rGrid[0], DATA.rGrid.at(-1)],
-        [DATA.qGrid[0], DATA.qGrid.at(-1)]
-      );
-      drawHeatmap(
-        heatmapRV,
-        (x, y) => applyBarrierAdjustment(
-          quadlinear(variantData.quote, tenor, x, divYield, y),
-          quadlinear(variantData.quoteKoSens, tenor, x, divYield, y),
-          quadlinear(variantData.quoteKiSens, tenor, x, divYield, y),
-          koBarrier,
-          kiBarrier,
-        ),
-        "r",
-        "σ",
-        rate,
-        vol,
-        [DATA.rGrid[0], DATA.rGrid.at(-1)],
-        [DATA.volGrid[0], DATA.volGrid.at(-1)]
-      );
-      drawHeatmap(
-        heatmapQV,
-        (x, y) => applyBarrierAdjustment(
-          quadlinear(variantData.quote, tenor, rate, x, y),
-          quadlinear(variantData.quoteKoSens, tenor, rate, x, y),
-          quadlinear(variantData.quoteKiSens, tenor, rate, x, y),
-          koBarrier,
-          kiBarrier,
-        ),
-        "q",
-        "σ",
-        divYield,
-        vol,
-        [DATA.qGrid[0], DATA.qGrid.at(-1)],
-        [DATA.volGrid[0], DATA.volGrid.at(-1)]
-      );
-
       const directionalText = [
         dR < 0 ? "Higher r tends to lower the quote by improving risk-neutral carry toward the 103 KO." : "Higher r is not helping the quote much in this slice.",
         dQ > 0 ? "Higher q tends to raise the quote because forward drift softens and KO becomes harder." : "q is muted here.",
@@ -2142,6 +2376,17 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         );
     }
 
+    function scheduleUpdate() {
+      if (updateQueued) {
+        return;
+      }
+      updateQueued = true;
+      requestAnimationFrame(() => {
+        updateQueued = false;
+        update();
+      });
+    }
+
     variantSelect.value = DATA.defaults.variant;
     applyLanguage();
 
@@ -2149,14 +2394,14 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
       if (rqLinkToggle.checked) {
         syncQFromR();
       }
-      update();
+      scheduleUpdate();
     });
 
     qSlider.addEventListener("input", () => {
       if (rqLinkToggle.checked) {
         syncRFromQ();
       }
-      update();
+      scheduleUpdate();
     });
 
     rqLinkToggle.addEventListener("change", () => {
@@ -2164,26 +2409,26 @@ def render_html(data: dict[str, Any], ui_copy: dict[str, str] | None = None) -> 
         rqLinkedSpread = parseFloat(qSlider.value) - parseFloat(rSlider.value);
       }
       refreshRQLinkUI();
-      update();
+      scheduleUpdate();
     });
 
     langEnButton.addEventListener("click", () => {
       currentLang = "en";
       applyLanguage();
-      update();
+      scheduleUpdate();
     });
 
     langCnButton.addEventListener("click", () => {
       currentLang = "cn";
       applyLanguage();
-      update();
+      scheduleUpdate();
     });
 
     [tenorSlider, volSlider, koSlider, kiSlider, variantSelect].forEach((slider) => {
-      slider.addEventListener("input", update);
+      slider.addEventListener("input", scheduleUpdate);
     });
 
-    update();
+    scheduleUpdate();
   </script>
 </body>
 </html>

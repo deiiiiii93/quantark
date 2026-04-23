@@ -96,7 +96,7 @@ def test_build_cube_includes_tenor_axis_and_tenor_rows(monkeypatch) -> None:
     assert len(cubes["standard"]["quote"][0][0]) == len(demo.Q_GRID)
     assert len(cubes["standard"]["quote"][0][0][0]) == len(demo.VOL_GRID)
     assert len(rows) == (
-        len(demo.VARIANTS)
+        len(demo.DEMO_VARIANTS)
         * len(demo.TENOR_GRID)
         * len(demo.R_GRID)
         * len(demo.Q_GRID)
@@ -162,3 +162,57 @@ def test_render_html_allows_engine_copy_override() -> None:
     assert "Quad (1001) RFQ explainer" in html
     assert "Snowball quadrature cube (1001 points) + interpolation" in html
     assert "PDE-backed RFQ explainer" not in html
+
+
+def test_build_cube_with_exact_barrier_grid_uses_real_barrier_axes(monkeypatch) -> None:
+    """Exact barrier mode should build a 6D cube and export exact KO/KI rows."""
+
+    def fake_solve_fair_ko_rate_with_engine(
+        engine: object,
+        rate: float,
+        div_yield: float,
+        vol: float,
+        tenor: float,
+        variant: str,
+        ko_barrier: float,
+        ki_barrier: float,
+    ) -> dict[str, float]:
+        del engine
+        base = tenor + rate + div_yield + vol + ko_barrier * 0.001 + ki_barrier * 0.0001
+        return {
+            "quoted_ko_rate": base,
+            "snowball_target_pv": base + 1.0,
+            "interest_component_pv": base + 2.0,
+            "protected_snowball_pv": 100.0 - base,
+            "combined_pv": 0.0,
+        }
+
+    monkeypatch.setattr(
+        demo,
+        "solve_fair_ko_rate_with_engine",
+        fake_solve_fair_ko_rate_with_engine,
+    )
+
+    cubes, rows = demo.build_cube_with_engines(
+        engine=object(),
+        bump_engine=object(),
+        progress_label="fake",
+        exact_barrier_grid=True,
+        parallel_workers=1,
+    )
+
+    exact_quote = cubes["standard"]["quote"]
+    assert len(exact_quote) == len(demo.TENOR_GRID)
+    assert len(exact_quote[0][0][0][0]) == len(demo.KO_GRID)
+    assert len(exact_quote[0][0][0][0][0]) == len(demo.KI_GRID)
+    assert len(rows) == (
+        len(demo.DEMO_VARIANTS)
+        * len(demo.TENOR_GRID)
+        * len(demo.R_GRID)
+        * len(demo.Q_GRID)
+        * len(demo.VOL_GRID)
+        * len(demo.KO_GRID)
+        * len(demo.KI_GRID)
+    )
+    assert rows[0]["quote_ko_sensitivity"] is None
+    assert rows[0]["quote_ki_sensitivity"] is None
