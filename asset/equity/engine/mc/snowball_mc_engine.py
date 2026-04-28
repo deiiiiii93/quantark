@@ -289,6 +289,7 @@ class SnowballMCEngine(BaseEngine):
 
         ki_triggered = np.zeros(len(paths), dtype=bool)
         first_ki_idx = np.full(len(paths), -1, dtype=int)
+        ki_event_times = np.array([], dtype=float)
         if product.has_ki_barrier:
             ki_continuous = (
                 product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
@@ -297,6 +298,7 @@ class SnowballMCEngine(BaseEngine):
             ki_profile = product.get_ki_observation_profile(pricing_env)
             ki_barriers_val = np.array(ki_profile["barriers"], dtype=float)
             if ki_continuous:
+                ki_event_times = np.array(all_times, dtype=float)
                 if ki_barriers_val.shape not in ((), (1,)):
                     raise ValidationError(
                         "Continuous KI monitoring requires a scalar ki_barrier."
@@ -313,22 +315,30 @@ class SnowballMCEngine(BaseEngine):
                     )
                 )
             else:
+                ki_event_times = np.array(ki_profile["observation_times"], dtype=float)
                 ki_triggered, first_ki_idx = self._check_ki_barriers(
                     paths, ki_indices, ki_barriers_val, product.is_reverse
                 )
 
+        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        if already_knocked_in and product.has_ki_barrier:
+            ki_triggered[:] = True
+            first_ki_idx[:] = 0
+
         if product.barrier_config.disable_ko_after_ki and product.has_ki_barrier:
-            ko_trigger_times = np.where(
-                first_ko_idx >= 0, ko_times[first_ko_idx], np.inf
-            )
-            if len(ki_indices) > 0:
-                ki_obs_times = all_times[ki_indices]
-                ki_trigger_times = np.where(
-                    first_ki_idx >= 0, ki_obs_times[first_ki_idx], np.inf
-                )
+            if already_knocked_in:
+                ko_valid = np.zeros_like(ko_triggered)
             else:
-                ki_trigger_times = np.full(len(paths), np.inf, dtype=float)
-            ko_valid = ko_triggered & (ko_trigger_times < ki_trigger_times)
+                ko_trigger_times = np.where(
+                    first_ko_idx >= 0, ko_times[first_ko_idx], np.inf
+                )
+                if len(ki_event_times) > 0:
+                    ki_trigger_times = np.where(
+                        first_ki_idx >= 0, ki_event_times[first_ki_idx], np.inf
+                    )
+                else:
+                    ki_trigger_times = np.full(len(paths), np.inf, dtype=float)
+                ko_valid = ko_triggered & (ko_trigger_times < ki_trigger_times)
         else:
             ko_valid = ko_triggered
 
@@ -351,6 +361,23 @@ class SnowballMCEngine(BaseEngine):
         for i in range(len(ko_times)):
             cumulative_ko += ko_probability[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
+
+        ki_event_probability = np.array([], dtype=float)
+        ki_survival_probability = np.array([], dtype=float)
+        if product.has_ki_barrier:
+            if already_knocked_in:
+                ki_event_times = np.array([0.0], dtype=float)
+                ki_event_probability = np.array([1.0], dtype=float)
+                ki_survival_probability = np.array([0.0], dtype=float)
+            elif ki_event_times.size:
+                ki_event_probability = np.zeros(len(ki_event_times), dtype=float)
+                for i in range(len(ki_event_times)):
+                    ki_event_probability[i] = float(
+                        np.mean(ki_triggered & (first_ki_idx == i))
+                    )
+                ki_survival_probability = np.maximum(
+                    0.0, 1.0 - np.cumsum(ki_event_probability)
+                )
 
         maturity_spots = paths[:, -1]
         maturity_df = pricing_env.get_discount_factor(float(T))
@@ -401,6 +428,9 @@ class SnowballMCEngine(BaseEngine):
             ki_probability=float(np.mean(ki_triggered)) if product.has_ki_barrier else 0.0,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
             reconciliation_error=float(reconciliation_error),
+            ki_times=ki_event_times,
+            ki_event_probability=ki_event_probability,
+            ki_survival_probability=ki_survival_probability,
         )
 
     def _calculate_event_stats_ko_reset(
@@ -539,8 +569,8 @@ class SnowballMCEngine(BaseEngine):
             raise ValidationError(f"Time to maturity must be non-negative, got {T}")
         if sigma <= 0:
             raise ValidationError(f"Volatility must be positive, got {sigma}")
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
+        if not np.isfinite(q):
+            raise ValidationError(f"Dividend yield must be finite, got {q}")
 
         if isinstance(product, SnowballOption):
             # Validate observation schedule exists
@@ -1152,23 +1182,33 @@ class SnowballMCEngine(BaseEngine):
                     paths, ki_indices, ki_barriers_val, product.is_reverse
                 )
 
+        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        if already_knocked_in and product.has_ki_barrier:
+            ki_triggered[:] = True
+            first_ki_idx[:] = 0
+
         # Handle disable_ko_after_ki logic
         if product.barrier_config.disable_ko_after_ki and ki_barriers_val is not None:
-            # Get times for comparison
-            ko_trigger_times = np.where(
-                first_ko_idx >= 0,
-                ko_times[first_ko_idx],
-                np.inf,
-            )
-            ki_trigger_times = np.where(
-                first_ki_idx >= 0,
-                all_times[ki_indices[first_ki_idx]] if len(ki_indices) > 0 else np.inf,
-                np.inf,
-            )
+            if already_knocked_in:
+                ko_valid = np.zeros_like(ko_triggered)
+            else:
+                # Get times for comparison
+                ko_trigger_times = np.where(
+                    first_ko_idx >= 0,
+                    ko_times[first_ko_idx],
+                    np.inf,
+                )
+                ki_trigger_times = np.where(
+                    first_ki_idx >= 0,
+                    all_times[ki_indices[first_ki_idx]]
+                    if len(ki_indices) > 0
+                    else np.inf,
+                    np.inf,
+                )
 
-            # KO is only valid if it happens before KI
-            ko_before_ki = ko_trigger_times < ki_trigger_times
-            ko_valid = ko_triggered & ko_before_ki
+                # KO is only valid if it happens before KI
+                ko_before_ki = ko_trigger_times < ki_trigger_times
+                ko_valid = ko_triggered & ko_before_ki
         else:
             ko_valid = ko_triggered
 

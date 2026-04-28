@@ -27,6 +27,9 @@ class AutocallableEventStats:
         ki_probability: Probability that KI occurred at least once before maturity (if applicable).
         expected_discounted_maturity_cashflow: Expected discounted maturity cashflow (conditional on no KO).
         reconciliation_error: pv minus sum(expected discounted cashflows) if computed, else 0.0.
+        ki_times: KI observation/monitoring times where event probabilities are available.
+        ki_event_probability: Probability of first KI occurring at each KI time.
+        ki_survival_probability: Probability of surviving without KI up to each KI time.
     """
 
     pv: float
@@ -37,6 +40,9 @@ class AutocallableEventStats:
     ki_probability: float
     expected_discounted_maturity_cashflow: float
     reconciliation_error: float = 0.0
+    ki_times: np.ndarray = field(default_factory=lambda: np.array([]))
+    ki_event_probability: np.ndarray = field(default_factory=lambda: np.array([]))
+    ki_survival_probability: np.ndarray = field(default_factory=lambda: np.array([]))
 
 
 @dataclass(frozen=True)

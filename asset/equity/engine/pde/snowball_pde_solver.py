@@ -783,6 +783,8 @@ class SnowballPDESolver(BasePDESolver):
         """
         if not product.has_ki_barrier:
             return False
+        if getattr(product, "_otc_lifecycle_knocked_in", False):
+            return True
 
         if ki_continuous:
             return self._is_already_knocked_in(product, spot)

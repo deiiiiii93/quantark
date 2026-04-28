@@ -57,8 +57,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         vol = pricing_env.get_vol(product.strike, maturity)
         if vol <= 0:
             raise ValidationError(f"Volatility must be positive, got {vol}")
-        if div < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {div}")
+        if not np.isfinite(div):
+            raise ValidationError(f"Dividend yield must be finite, got {div}")
         if vol > 5.0:
             raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
 
@@ -443,8 +443,13 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         tau_step,
                     )
 
-        # Final result is value at t=0 with 0 accumulated coupons
-        return math_utils.interpolate(v_out_list[0], x=0.0)
+        # Final result is value at t=0 with 0 accumulated coupons.
+        value_surface = (
+            v_in_list[0]
+            if getattr(product, "_otc_lifecycle_knocked_in", False)
+            else v_out_list[0]
+        )
+        return math_utils.interpolate(value_surface, x=0.0)
 
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

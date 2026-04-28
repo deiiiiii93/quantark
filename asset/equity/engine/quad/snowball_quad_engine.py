@@ -28,7 +28,6 @@ from util.numerical import (
     is_zero,
     safe_exp,
     safe_log,
-    validate_non_negative,
     validate_positive,
 )
 
@@ -76,7 +75,8 @@ class SnowballQuadEngine(BaseEngine):
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(product.strike, maturity)
         validate_positive(vol, "volatility")
-        validate_non_negative(div, "dividend_yield")
+        if not np.isfinite(div):
+            raise ValidationError(f"Dividend yield must be finite, got {div}")
         if vol > 5.0:
             raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
 
@@ -265,7 +265,10 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
 
-        return math_utils.interpolate(v_out, x=0.0)
+        value_surface = (
+            v_in if getattr(product, "_otc_lifecycle_knocked_in", False) else v_out
+        )
+        return math_utils.interpolate(value_surface, x=0.0)
 
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -295,7 +298,8 @@ class SnowballQuadEngine(BaseEngine):
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(product.strike, maturity)
         validate_positive(vol, "volatility")
-        validate_non_negative(div, "dividend_yield")
+        if not np.isfinite(div):
+            raise ValidationError(f"Dividend yield must be finite, got {div}")
         if vol > 5.0:
             raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
 

@@ -176,6 +176,20 @@ class PhoenixMCEngine(BaseEngine):
         all_times, dt_array, ko_indices, ki_indices = self._build_time_grid(
             product, pricing_env, T
         )
+        ki_continuous = product.has_ki_barrier and (
+            product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+            or product.barrier_config.ki_continuous
+        )
+        ki_event_times = np.array([], dtype=float)
+        if product.has_ki_barrier:
+            if ki_continuous:
+                ki_event_times = np.array(all_times, dtype=float)
+            else:
+                ki_profile = product.get_ki_observation_profile(pricing_env)
+                ki_event_times = np.array(
+                    ki_profile["observation_times"], dtype=float
+                )
+        generator = self._create_path_generator(S, r, q, sigma, T, dt_array)
         paths, _ = generator.generate_paths(return_aux=False)
 
         (
@@ -265,6 +279,24 @@ class PhoenixMCEngine(BaseEngine):
             + coupon_cf_total
         )
         reconciliation_error = pv - pv_cashflows
+        ki_event_probability = np.array([], dtype=float)
+        ki_survival_probability = np.array([], dtype=float)
+        if product.has_ki_barrier:
+            if bool(getattr(product, "_otc_lifecycle_knocked_in", False)):
+                ki_event_times = np.array([0.0], dtype=float)
+                ki_event_probability = np.array([1.0], dtype=float)
+                ki_survival_probability = np.array([0.0], dtype=float)
+            elif ki_event_times.size and "first_ki_idx" in stats:
+                first_ki_idx = stats["first_ki_idx"]
+                ki_triggered = stats["ki_triggered"]
+                ki_event_probability = np.zeros(len(ki_event_times), dtype=float)
+                for i in range(len(ki_event_times)):
+                    ki_event_probability[i] = float(
+                        np.mean(ki_triggered & (first_ki_idx == i))
+                    )
+                ki_survival_probability = np.maximum(
+                    0.0, 1.0 - np.cumsum(ki_event_probability)
+                )
 
         return PhoenixEventStats(
             pv=pv,
@@ -277,6 +309,9 @@ class PhoenixMCEngine(BaseEngine):
             else 0.0,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
             reconciliation_error=float(reconciliation_error),
+            ki_times=ki_event_times,
+            ki_event_probability=ki_event_probability,
+            ki_survival_probability=ki_survival_probability,
             coupon_probability=coupon_probabilities,
             expected_discounted_coupon_cashflow=coupon_cashflows,
         )
@@ -296,8 +331,8 @@ class PhoenixMCEngine(BaseEngine):
             raise ValidationError(f"Time to maturity must be non-negative, got {T}")
         if sigma <= 0:
             raise ValidationError(f"Volatility must be positive, got {sigma}")
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
+        if not np.isfinite(q):
+            raise ValidationError(f"Dividend yield must be finite, got {q}")
 
         if product.barrier_config.ko_observation_type == ObservationType.DISCRETE:
             if (
@@ -661,24 +696,32 @@ class PhoenixMCEngine(BaseEngine):
                     paths, ki_indices, ki_barriers_val, product.is_reverse
                 )
 
+        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        if already_knocked_in and product.has_ki_barrier:
+            ki_triggered[:] = True
+            first_ki_idx[:] = 0
+
         if product.barrier_config.disable_ko_after_ki and product.has_ki_barrier:
-            ko_trigger_times = np.where(
-                first_ko_idx >= 0, ko_times[first_ko_idx], np.inf
-            )
-            if product.has_ki_barrier:
-                if ki_continuous:
-                    ki_obs_times = all_times
-                else:
-                    ki_obs_times = ki_times
-                if ki_obs_times.size > 0:
-                    ki_trigger_times = np.where(
-                        first_ki_idx >= 0, ki_obs_times[first_ki_idx], np.inf
-                    )
+            if already_knocked_in:
+                ko_valid = np.zeros_like(ko_triggered)
+            else:
+                ko_trigger_times = np.where(
+                    first_ko_idx >= 0, ko_times[first_ko_idx], np.inf
+                )
+                if product.has_ki_barrier:
+                    if ki_continuous:
+                        ki_obs_times = all_times
+                    else:
+                        ki_obs_times = ki_times
+                    if ki_obs_times.size > 0:
+                        ki_trigger_times = np.where(
+                            first_ki_idx >= 0, ki_obs_times[first_ki_idx], np.inf
+                        )
+                    else:
+                        ki_trigger_times = np.full(num_paths, np.inf, dtype=float)
                 else:
                     ki_trigger_times = np.full(num_paths, np.inf, dtype=float)
-            else:
-                ki_trigger_times = np.full(num_paths, np.inf, dtype=float)
-            ko_valid = ko_triggered & (ko_trigger_times < ki_trigger_times)
+                ko_valid = ko_triggered & (ko_trigger_times < ki_trigger_times)
         else:
             ko_valid = ko_triggered
 
@@ -801,6 +844,7 @@ class PhoenixMCEngine(BaseEngine):
             "is_v1": is_v1,
             "first_ko_idx": first_ko_idx,
             "ki_triggered": ki_triggered,
+            "first_ki_idx": first_ki_idx,
         }
 
         if is_ko.any():

@@ -57,6 +57,25 @@ from backtest.transaction_costs import (
     CompleteCostModel,
 )
 
+# OTC autocallable backtests
+from backtest.otc import (
+    AKShareAutocallableDataAdapter,
+    AutocallableBacktestConfig,
+    AutocallableBacktestEngine,
+    AutocallableBacktestResults,
+    AutocallableDeltaHedgeStrategy,
+    AutocallableEngineConfig,
+    AutocallableLifecycleState,
+    AutocallableMarketDataSet,
+    FuturesHedgePosition,
+    FuturesRollPolicy,
+    ImpliedBasisYield,
+    SignedDividendYield,
+    SurfaceGridConfig,
+    calculate_basis_yield,
+    derive_implied_dividend_yield,
+)
+
 # Logging (shared)
 from backtest.logger import BacktestLogger
 
@@ -93,6 +112,22 @@ __all__ = [
     "FixedCostModel",
     "ProportionalCostModel",
     "CompleteCostModel",
+    # OTC autocallables
+    "AKShareAutocallableDataAdapter",
+    "AutocallableBacktestConfig",
+    "AutocallableBacktestEngine",
+    "AutocallableBacktestResults",
+    "AutocallableDeltaHedgeStrategy",
+    "AutocallableEngineConfig",
+    "AutocallableLifecycleState",
+    "AutocallableMarketDataSet",
+    "FuturesHedgePosition",
+    "FuturesRollPolicy",
+    "ImpliedBasisYield",
+    "SignedDividendYield",
+    "SurfaceGridConfig",
+    "calculate_basis_yield",
+    "derive_implied_dividend_yield",
     # Shared utilities
     "BacktestLogger",
     "StaticVisualizer",
