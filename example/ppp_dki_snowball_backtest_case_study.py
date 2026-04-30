@@ -1814,6 +1814,8 @@ def write_html_dashboard(
         "#17345d", "#087443", "#a63838", "#9a6500", "#4267ac",
         "#7a4bd9", "#008b9a", "#c4507a", "#667085", "#d17a00"
       ];
+      const rootStyle = getComputedStyle(document.documentElement);
+      const plotFont = rootStyle.getPropertyValue("--font-body").trim() || "Aptos, Segoe UI, sans-serif";
 
       const fmt = (value) => {
         const number = Number(value);
@@ -1992,6 +1994,7 @@ def write_html_dashboard(
 
       const layoutBase = (title, yTitle) => ({
         template: "plotly_white",
+        font: { family: plotFont, size: 12, color: palette.ink },
         dragmode: "zoom",
         hovermode: "x unified",
         margin: { l: 58, r: 24, t: 42, b: 44 },
@@ -2135,6 +2138,7 @@ def write_html_dashboard(
         const metricColors = [palette.blue, palette.green, palette.amber, palette.red, "#667085"];
         const layout = {
           template: "plotly_white",
+          font: { family: plotFont, size: 12, color: palette.ink },
           margin: { l: 70, r: 20, t: 64, b: 96 },
           paper_bgcolor: "rgba(0,0,0,0)",
           plot_bgcolor: palette.soft,
@@ -2215,6 +2219,7 @@ def write_html_dashboard(
       const tableBody = document.getElementById("detailTableBody");
       const kpiHost = document.getElementById("detailKpis");
       const plotHost = document.getElementById("detailPlot");
+      const plotFont = getComputedStyle(document.documentElement).getPropertyValue("--font-body").trim() || "Aptos, Segoe UI, sans-serif";
       const columns = [
         ["date", "Date", "text"],
         ["spot", "Spot", "number"],
@@ -2289,6 +2294,7 @@ def write_html_dashboard(
           { x, y: selected.map((row) => row.post_hedge_delta_cash_1pct), name: "Delta Cash 1%", type: "scatter", mode: "lines", line: { color: "#9a6500", width: 1.5, dash: "dot" } }
         ], {
           template: "plotly_white",
+          font: { family: plotFont, size: 12, color: "#172033" },
           margin: { l: 58, r: 58, t: 36, b: 42 },
           paper_bgcolor: "rgba(0,0,0,0)",
           plot_bgcolor: "rgba(250,252,255,0.94)",
@@ -2359,11 +2365,19 @@ def write_html_dashboard(
       --green: #087443;
       --red: #a63838;
       --amber: #9a6500;
+      --font-body: "IBM Plex Sans", "Source Sans 3", Aptos, "Segoe UI Variable", "Segoe UI", sans-serif;
+      --font-display: "Source Sans 3", "IBM Plex Sans", "Aptos Display", Aptos, "Segoe UI Variable", "Segoe UI", sans-serif;
+      --font-number: "IBM Plex Mono", "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: Aptos, "Segoe UI", sans-serif;
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.5;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "kern" 1;
       color: var(--ink);
       background: linear-gradient(180deg, #eef3f9 0%, #f8fafc 48%, #eef2f6 100%);
     }}
@@ -2375,9 +2389,10 @@ def write_html_dashboard(
     }}
     header h1 {{
       margin: 0 0 8px;
+      font-family: var(--font-display);
       font-size: 30px;
       letter-spacing: 0;
-      font-weight: 720;
+      font-weight: 760;
     }}
     header p {{ margin: 0; color: #d9e4f2; max-width: 1180px; line-height: 1.45; }}
     nav {{
@@ -2396,16 +2411,29 @@ def write_html_dashboard(
       color: var(--navy);
       text-decoration: none;
       font-size: 13px;
-      font-weight: 650;
+      font-weight: 680;
       padding: 7px 10px;
       border: 1px solid transparent;
     }}
     nav a:hover {{ border-color: var(--line); background: #fff; }}
     main {{ padding: 24px 34px 44px; }}
     section {{ margin: 0 auto 28px; max-width: 1480px; }}
-    h2 {{ margin: 0 0 12px; font-size: 22px; }}
-    h3 {{ margin: 0 0 10px; font-size: 15px; color: var(--navy); }}
-    .subtle {{ color: var(--muted); font-size: 13px; line-height: 1.45; margin: 0 0 14px; }}
+    h2 {{
+      margin: 0 0 12px;
+      font-family: var(--font-display);
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 760;
+    }}
+    h3 {{
+      margin: 0 0 10px;
+      font-family: var(--font-display);
+      font-size: 15px;
+      line-height: 1.25;
+      font-weight: 720;
+      color: var(--navy);
+    }}
+    .subtle {{ color: var(--muted); font-size: 13.5px; line-height: 1.55; margin: 0 0 14px; }}
     .metrics {{
       display: grid;
       grid-template-columns: repeat(6, minmax(150px, 1fr));
@@ -2418,9 +2446,16 @@ def write_html_dashboard(
       padding: 14px 14px 12px;
       min-height: 98px;
     }}
-    .metric span {{ display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }}
-    .metric strong {{ display: block; font-size: 24px; line-height: 1.05; }}
-    .metric small {{ display: block; color: var(--muted); margin-top: 8px; line-height: 1.25; }}
+    .metric span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 680; margin-bottom: 8px; }}
+    .metric strong {{
+      display: block;
+      font-family: var(--font-number);
+      font-size: 23px;
+      line-height: 1.12;
+      font-weight: 720;
+      font-variant-numeric: tabular-nums;
+    }}
+    .metric small {{ display: block; color: var(--muted); margin-top: 8px; line-height: 1.35; }}
     .metric.good strong {{ color: var(--green); }}
     .metric.bad strong {{ color: var(--red); }}
     .metric.warn strong {{ color: var(--amber); }}
@@ -2454,7 +2489,7 @@ def write_html_dashboard(
       gap: 5px;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 650;
+      font-weight: 680;
     }}
     .chart-toolbar .filter-label {{
       min-width: 210px;
@@ -2467,7 +2502,7 @@ def write_html_dashboard(
       background: #fff;
       color: var(--ink);
       font: inherit;
-      font-size: 13px;
+      font-size: 13.5px;
     }}
     .chart-toolbar select[multiple] {{
       position: absolute;
@@ -2489,8 +2524,8 @@ def write_html_dashboard(
       gap: 10px;
       padding: 8px 10px;
       font: inherit;
-      font-size: 13px;
-      font-weight: 650;
+      font-size: 13.5px;
+      font-weight: 680;
       cursor: pointer;
       text-align: left;
     }}
@@ -2540,7 +2575,7 @@ def write_html_dashboard(
       padding: 4px 8px;
       font: inherit;
       font-size: 11px;
-      font-weight: 720;
+      font-weight: 760;
       cursor: pointer;
     }}
     .multi-option {{
@@ -2549,8 +2584,8 @@ def write_html_dashboard(
       gap: 7px;
       padding: 6px 5px;
       color: var(--ink);
-      font-size: 12px;
-      font-weight: 620;
+      font-size: 12.5px;
+      font-weight: 640;
       cursor: pointer;
     }}
     .multi-option:hover {{ background: #eef3f8; }}
@@ -2571,7 +2606,7 @@ def write_html_dashboard(
       color: var(--navy);
       font: inherit;
       font-size: 12px;
-      font-weight: 720;
+      font-weight: 760;
       cursor: pointer;
     }}
     .chart-kind-button {{
@@ -2587,8 +2622,8 @@ def write_html_dashboard(
     .trade-plot {{ min-height: 390px; }}
     .chart-caption {{
       color: var(--muted);
-      font-size: 12px;
-      line-height: 1.35;
+      font-size: 12.5px;
+      line-height: 1.45;
       min-height: 18px;
     }}
     .detail-controls {{
@@ -2606,7 +2641,7 @@ def write_html_dashboard(
       gap: 5px;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 650;
+      font-weight: 680;
     }}
     .detail-controls select {{
       min-width: 210px;
@@ -2615,21 +2650,21 @@ def write_html_dashboard(
       background: #fff;
       color: var(--ink);
       font: inherit;
-      font-size: 13px;
+      font-size: 13.5px;
     }}
     .metric.compact {{
       min-height: 72px;
       padding: 12px;
     }}
     .metric.compact strong {{
-      font-size: 17px;
-      line-height: 1.18;
+      font-size: 16px;
+      line-height: 1.22;
       overflow-wrap: anywhere;
     }}
     .detail-plot {{ min-height: 360px; margin: 8px 0 14px; }}
     .detail-scroll {{ max-height: 560px; }}
     #detailTable th {{ top: 0; }}
-    #detailTable td {{ font-size: 11px; }}
+    #detailTable td {{ font-size: 11.5px; }}
     table {{
       border-collapse: collapse;
       width: 100%;
@@ -2638,8 +2673,9 @@ def write_html_dashboard(
     }}
     th, td {{
       border-bottom: 1px solid #e4e9f2;
-      padding: 7px 8px;
-      font-size: 12px;
+      padding: 7px 9px;
+      font-size: 12.5px;
+      line-height: 1.35;
       text-align: left;
       vertical-align: top;
       white-space: nowrap;
@@ -2647,12 +2683,18 @@ def write_html_dashboard(
     th {{
       background: #eef3f8;
       color: #33415c;
-      font-weight: 720;
+      font-family: var(--font-display);
+      font-weight: 760;
       position: sticky;
       top: 42px;
     }}
     .table-scroll {{ max-height: 430px; overflow: auto; border: 1px solid var(--line); }}
-    .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+    .num {{
+      text-align: right;
+      font-family: var(--font-number);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0;
+    }}
     .pos {{ color: var(--green); }}
     .neg {{ color: var(--red); }}
     .empty-state {{ color: var(--muted); padding: 14px; border: 1px dashed var(--line); background: #fff; }}
