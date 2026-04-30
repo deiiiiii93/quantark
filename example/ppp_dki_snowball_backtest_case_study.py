@@ -1801,6 +1801,7 @@ def write_html_dashboard(
       const scenarios = [...new Set(rows.map((row) => row.scenario).filter(Boolean))].sort();
       const products = [...new Set(rows.map((row) => row.product).filter(Boolean))].sort();
       const freqLabels = { D: "Day", W: "Week", M: "Month" };
+      const chartKindLabels = { candle: "Candle", line: "Line" };
       const palette = {
         ink: "#17345d",
         green: "#087443",
@@ -1809,6 +1810,10 @@ def write_html_dashboard(
         blue: "#4267ac",
         soft: "rgba(250,252,255,0.94)"
       };
+      const seriesColors = [
+        "#17345d", "#087443", "#a63838", "#9a6500", "#4267ac",
+        "#7a4bd9", "#008b9a", "#c4507a", "#667085", "#d17a00"
+      ];
 
       const fmt = (value) => {
         const number = Number(value);
@@ -1816,11 +1821,133 @@ def write_html_dashboard(
         return number.toLocaleString(undefined, { maximumFractionDigits: 0 });
       };
 
+      const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[char]);
+
       const setOptions = (select, values, preferred) => {
         if (!select) return;
-        select.innerHTML = values.map((value) => `<option value="${value}">${value}</option>`).join("");
-        if (values.includes(preferred)) select.value = preferred;
+        select.innerHTML = values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
+        const preferredValues = Array.isArray(preferred) ? preferred : [preferred];
+        [...select.options].forEach((option) => {
+          option.selected = preferredValues.includes(option.value);
+        });
+        if (!select.selectedOptions.length && select.options.length) select.options[0].selected = true;
       };
+
+      const selectedValuesRaw = (select) => {
+        if (!select) return [];
+        return [...select.selectedOptions].map((option) => option.value).filter(Boolean);
+      };
+
+      const selectedValues = (select, fallbackValues) => {
+        if (!select) return fallbackValues;
+        const values = selectedValuesRaw(select);
+        return values.length ? values : fallbackValues;
+      };
+
+      const filterLabel = (values, allValues) => {
+        if (!values.length) return "None";
+        if (values.length === allValues.length) return "All";
+        if (values.length <= 2) return values.join(", ");
+        return `${values.slice(0, 2).join(", ")} +${values.length - 2}`;
+      };
+
+      const updateMultiSelectControl = (select, allValues) => {
+        const control = select?.closest("label")?.querySelector(".multi-select");
+        if (!control) return;
+        const selected = selectedValuesRaw(select);
+        const effective = selected.length ? selected : allValues;
+        const button = control.querySelector(".multi-select-button");
+        if (button) button.querySelector(".multi-select-text").textContent = filterLabel(effective, allValues);
+        control.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+          const option = [...select.options].find((item) => item.value === checkbox.value);
+          checkbox.checked = Boolean(option?.selected);
+        });
+      };
+
+      const installMultiSelectControl = (select, allValues) => {
+        const host = select?.closest("label");
+        if (!host) return;
+        host.classList.add("filter-label");
+        if (host.querySelector(".multi-select")) {
+          updateMultiSelectControl(select, allValues);
+          return;
+        }
+        const control = document.createElement("div");
+        control.className = "multi-select";
+        control.innerHTML = `
+          <button class="multi-select-button" type="button" aria-expanded="false">
+            <span class="multi-select-text"></span>
+          </button>
+          <div class="multi-select-menu">
+            <div class="multi-select-actions">
+              <button class="multi-select-action" type="button" data-action="all">All</button>
+            </div>
+            ${allValues.map((value) => `
+              <div class="multi-option">
+                <input type="checkbox" value="${escapeHtml(value)}">
+                <span>${escapeHtml(value)}</span>
+              </div>
+            `).join("")}
+          </div>
+        `;
+        host.appendChild(control);
+        const button = control.querySelector(".multi-select-button");
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          document.querySelectorAll(".multi-select.open").forEach((other) => {
+            if (other !== control) {
+              other.classList.remove("open");
+              other.querySelector(".multi-select-button")?.setAttribute("aria-expanded", "false");
+            }
+          });
+          const isOpen = control.classList.toggle("open");
+          button.setAttribute("aria-expanded", String(isOpen));
+        });
+        control.querySelector('[data-action="all"]')?.addEventListener("click", (event) => {
+          event.preventDefault();
+          [...select.options].forEach((option) => {
+            option.selected = true;
+          });
+          updateMultiSelectControl(select, allValues);
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        control.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+          checkbox.addEventListener("change", () => {
+            const option = [...select.options].find((item) => item.value === checkbox.value);
+            if (option) option.selected = checkbox.checked;
+            if (![...select.options].some((item) => item.selected)) {
+              if (option) option.selected = true;
+              checkbox.checked = true;
+            }
+            updateMultiSelectControl(select, allValues);
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+          });
+        });
+        updateMultiSelectControl(select, allValues);
+      };
+
+      document.addEventListener("click", (event) => {
+        if (event.target.closest(".multi-select")) return;
+        document.querySelectorAll(".multi-select.open").forEach((control) => {
+          control.classList.remove("open");
+          control.querySelector(".multi-select-button")?.setAttribute("aria-expanded", "false");
+        });
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        document.querySelectorAll(".multi-select.open").forEach((control) => {
+          control.classList.remove("open");
+          control.querySelector(".multi-select-button")?.setAttribute("aria-expanded", "false");
+        });
+      });
 
       const isoDate = (date) => new Date(date).toISOString().slice(0, 10);
       const bucketKey = (dateText, freq) => {
@@ -1886,41 +2013,98 @@ def write_html_dashboard(
           button.classList.toggle("active", button.dataset.freq === freq);
         });
       };
+      const activeChartKind = (panel) => panel.querySelector(".chart-kind-button.active")?.dataset.kind || panel.dataset.defaultKind || "candle";
+      const updateChartKindState = (panel, kind) => {
+        panel.querySelectorAll(".chart-kind-button").forEach((button) => {
+          button.classList.toggle("active", button.dataset.kind === kind);
+        });
+      };
+
+      const deDuplicateByDate = (series) => {
+        const byDate = new Map();
+        series
+          .filter((row) => row.date)
+          .sort((a, b) => new Date(a.date) - new Date(b.date))
+          .forEach((row) => {
+            if (!byDate.has(row.date)) byDate.set(row.date, row);
+          });
+        return [...byDate.values()];
+      };
+
+      const buildSeriesSpecs = (scenarioValues, productValues, valueKey) => {
+        if (valueKey === "spot") {
+          return scenarioValues
+            .map((scenario) => ({
+              name: scenario,
+              rows: deDuplicateByDate(rows.filter((row) => row.scenario === scenario && productValues.includes(row.product)))
+            }))
+            .filter((spec) => spec.rows.length);
+        }
+        const specs = [];
+        scenarioValues.forEach((scenario) => {
+          productValues.forEach((product) => {
+            const seriesRows = rows.filter((row) => row.scenario === scenario && row.product === product);
+            if (seriesRows.length) specs.push({ name: `${scenario} / ${product}`, rows: seriesRows });
+          });
+        });
+        return specs;
+      };
 
       const renderTradingChart = (panel) => {
         const plot = panel.querySelector(".trade-plot");
-        const scenario = panel.querySelector('[data-role="scenario"]')?.value;
-        const product = panel.querySelector('[data-role="product"]')?.value;
+        const scenarioValues = selectedValues(panel.querySelector('[data-role="scenario"]'), scenarios);
+        const productValues = selectedValues(panel.querySelector('[data-role="product"]'), products);
         const valueKey = panel.dataset.value;
-        const chartKind = panel.dataset.chartKind || "ohlc";
+        const chartKind = activeChartKind(panel);
         const freq = activeFreq(panel);
-        const selected = rows.filter((row) => row.scenario === scenario && row.product === product);
-        const ohlc = aggregateOhlc(selected, valueKey, freq);
-        const title = `${panel.dataset.title} - ${scenario} / ${product} (${freqLabels[freq]})`;
+        const selected = rows.filter((row) => scenarioValues.includes(row.scenario) && productValues.includes(row.product));
+        const seriesSpecs = buildSeriesSpecs(scenarioValues, productValues, valueKey);
+        const title = `${panel.dataset.title} - ${filterLabel(scenarioValues, scenarios)} / ${filterLabel(productValues, products)} (${freqLabels[freq]}, ${chartKindLabels[chartKind] || chartKind})`;
         const yTitle = panel.dataset.ytitle || valueKey;
-        const empty = !ohlc.length;
-        const trace = chartKind === "step"
-          ? {
+        const lineShape = panel.dataset.lineShape || "linear";
+        const traces = seriesSpecs.map((spec, idx) => {
+          const ohlc = aggregateOhlc(spec.rows, valueKey, freq);
+          if (!ohlc.length) return null;
+          const color = seriesColors[idx % seriesColors.length];
+          if (chartKind === "line") {
+            return {
               type: "scatter",
+              name: spec.name,
               mode: "lines",
-              line: { color: palette.ink, width: 1.8, shape: "hv" },
+              line: { color, width: 1.8, shape: lineShape },
               x: ohlc.map((bar) => bar.x),
               y: ohlc.map((bar) => bar.close),
-              hovertemplate: "%{x|%Y-%m-%d}<br>Value=%{y:,.0f}<extra></extra>"
-            }
-          : {
+              hovertemplate: "%{x|%Y-%m-%d}<br>%{fullData.name}<br>Value=%{y:,.0f}<extra></extra>"
+            };
+          }
+          return {
               type: "candlestick",
+              name: spec.name,
               x: ohlc.map((bar) => bar.x),
               open: ohlc.map((bar) => bar.open),
               high: ohlc.map((bar) => bar.high),
               low: ohlc.map((bar) => bar.low),
               close: ohlc.map((bar) => bar.close),
+              opacity: seriesSpecs.length > 1 ? 0.72 : 1,
               increasing: { line: { color: palette.green, width: 1.2 }, fillcolor: "rgba(8,116,67,0.2)" },
               decreasing: { line: { color: palette.red, width: 1.2 }, fillcolor: "rgba(166,56,56,0.2)" },
-              hovertemplate: "%{x|%Y-%m-%d}<br>O=%{open:,.0f}<br>H=%{high:,.0f}<br>L=%{low:,.0f}<br>C=%{close:,.0f}<extra></extra>"
-            };
-        const traces = empty ? [] : [trace];
+              hovertemplate: "%{x|%Y-%m-%d}<br>%{fullData.name}<br>O=%{open:,.0f}<br>H=%{high:,.0f}<br>L=%{low:,.0f}<br>C=%{close:,.0f}<extra></extra>"
+          };
+        }).filter(Boolean);
+        const empty = !traces.length;
         const layout = layoutBase(empty ? `${title} - no data` : title, yTitle);
+        layout.showlegend = traces.length > 1;
+        if (traces.length > 1) {
+          layout.margin.r = 190;
+          layout.legend = {
+            orientation: "v",
+            x: 1.02,
+            xanchor: "left",
+            y: 1,
+            yanchor: "top",
+            font: { size: 10 }
+          };
+        }
         if (panel.dataset.levels === "barriers") {
           layout.shapes = [];
           layout.annotations = [];
@@ -1936,48 +2120,80 @@ def write_html_dashboard(
         }
         if (plot && window.Plotly) Plotly.react(plot, traces, layout, { responsive: true, displaylogo: false, scrollZoom: true });
         const caption = panel.querySelector(".chart-caption");
-        if (caption) caption.textContent = `${selected.length.toLocaleString()} daily rows, ${ohlc.length.toLocaleString()} ${freqLabels[freq].toLowerCase()} bars. Drag to zoom, double-click to reset.`;
+        const barCount = traces.reduce((count, trace) => count + (trace.x?.length || 0), 0);
+        if (caption) caption.textContent = `${selected.length.toLocaleString()} daily rows, ${barCount.toLocaleString()} ${freqLabels[freq].toLowerCase()} bars across ${traces.length.toLocaleString()} series. Drag to zoom, double-click to reset.`;
       };
 
       const renderSummaryBars = (panel) => {
         const plot = panel.querySelector(".trade-plot");
-        const scenario = panel.querySelector('[data-role="scenario"]')?.value;
-        const product = panel.querySelector('[data-role="product"]')?.value;
-        const selected = summaries.filter((row) => row.scenario === scenario && row.product === product);
-        const row = selected[0] || {};
+        const scenarioValues = selectedValues(panel.querySelector('[data-role="scenario"]'), scenarios);
+        const productValues = selectedValues(panel.querySelector('[data-role="product"]'), products);
+        const selected = summaries.filter((row) => scenarioValues.includes(row.scenario) && productValues.includes(row.product));
         const metricKeys = (panel.dataset.metrics || "").split(",").filter(Boolean);
-        const x = metricKeys.map((key) => key.replaceAll("_", " "));
-        const y = metricKeys.map((key) => Number(row[key] || 0));
-        const colors = y.map((value) => value < 0 ? palette.red : value > 0 ? palette.green : "#667085");
+        const labels = selected.map((row) => `${row.scenario} / ${row.product}`);
+        const metricNames = metricKeys.map((key) => key.replaceAll("_", " "));
+        const metricColors = [palette.blue, palette.green, palette.amber, palette.red, "#667085"];
         const layout = {
           template: "plotly_white",
-          margin: { l: 70, r: 20, t: 42, b: 78 },
+          margin: { l: 70, r: 20, t: 64, b: 96 },
           paper_bgcolor: "rgba(0,0,0,0)",
           plot_bgcolor: palette.soft,
-          title: { text: `${panel.dataset.title} - ${scenario} / ${product}`, x: 0, xanchor: "left", font: { size: 15 } },
-          showlegend: false,
-          xaxis: { tickangle: -18 },
+          title: { text: `${panel.dataset.title} - ${filterLabel(scenarioValues, scenarios)} / ${filterLabel(productValues, products)}`, x: 0, xanchor: "left", font: { size: 15 } },
+          showlegend: metricKeys.length > 1,
+          legend: { orientation: "h", y: 1.12, x: 0, xanchor: "left", font: { size: 10 } },
+          barmode: "group",
+          xaxis: { tickangle: -30, automargin: true },
           yaxis: { zeroline: true, zerolinecolor: "#95a3b8" }
         };
-        const traces = [{ type: "bar", x, y, marker: { color: colors }, hovertemplate: "%{x}<br>%{y:,.0f}<extra></extra>" }];
+        const traces = selected.length
+          ? metricKeys.map((key, idx) => ({
+              type: "bar",
+              name: metricNames[idx],
+              x: labels,
+              y: selected.map((row) => Number(row[key] || 0)),
+              marker: { color: metricColors[idx % metricColors.length] },
+              hovertemplate: "%{x}<br>%{fullData.name}: %{y:,.0f}<extra></extra>"
+            }))
+          : [];
         if (plot && window.Plotly) Plotly.react(plot, traces, layout, { responsive: true, displaylogo: false });
         const caption = panel.querySelector(".chart-caption");
-        if (caption) caption.textContent = metricKeys.map((key, idx) => `${x[idx]}: ${fmt(y[idx])}`).join(" | ");
+        if (caption) {
+          if (selected.length === 1) {
+            caption.textContent = metricKeys.map((key, idx) => `${metricNames[idx]}: ${fmt(selected[0][key])}`).join(" | ");
+          } else {
+            caption.textContent = `${selected.length.toLocaleString()} runs selected across ${filterLabel(scenarioValues, scenarios)} / ${filterLabel(productValues, products)}.`;
+          }
+        }
       };
 
       document.querySelectorAll(".trade-chart").forEach((panel) => {
-        setOptions(panel.querySelector('[data-role="scenario"]'), scenarios, "historical");
-        setOptions(panel.querySelector('[data-role="product"]'), products, "PPP-DKI");
+        const scenarioSelect = panel.querySelector('[data-role="scenario"]');
+        const productSelect = panel.querySelector('[data-role="product"]');
+        setOptions(scenarioSelect, scenarios, "historical");
+        setOptions(productSelect, products, "PPP-DKI");
         panel.querySelectorAll("select").forEach((select) => {
-          select.addEventListener("change", () => panel.dataset.panel === "summary" ? renderSummaryBars(panel) : renderTradingChart(panel));
+          select.addEventListener("change", () => {
+            const values = select.dataset.role === "scenario" ? scenarios : products;
+            updateMultiSelectControl(select, values);
+            panel.dataset.panel === "summary" ? renderSummaryBars(panel) : renderTradingChart(panel);
+          });
         });
+        installMultiSelectControl(scenarioSelect, scenarios);
+        installMultiSelectControl(productSelect, products);
         panel.querySelectorAll(".freq-button").forEach((button) => {
           button.addEventListener("click", () => {
             updateButtonState(panel, button.dataset.freq);
             renderTradingChart(panel);
           });
         });
+        panel.querySelectorAll(".chart-kind-button").forEach((button) => {
+          button.addEventListener("click", () => {
+            updateChartKindState(panel, button.dataset.kind);
+            renderTradingChart(panel);
+          });
+        });
         updateButtonState(panel, "D");
+        updateChartKindState(panel, panel.dataset.defaultKind || "candle");
         if (panel.dataset.panel === "summary") renderSummaryBars(panel);
         else renderTradingChart(panel);
       });
@@ -2240,6 +2456,10 @@ def write_html_dashboard(
       font-size: 12px;
       font-weight: 650;
     }}
+    .chart-toolbar .filter-label {{
+      min-width: 210px;
+      position: relative;
+    }}
     .chart-toolbar select {{
       min-width: 190px;
       padding: 8px 10px;
@@ -2249,13 +2469,100 @@ def write_html_dashboard(
       font: inherit;
       font-size: 13px;
     }}
+    .chart-toolbar select[multiple] {{
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }}
+    .multi-select {{ position: relative; min-width: 210px; }}
+    .multi-select-button {{
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid #bcc8d9;
+      background: #fff;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 650;
+      cursor: pointer;
+      text-align: left;
+    }}
+    .multi-select-button::after {{
+      content: "";
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid currentColor;
+      flex: 0 0 auto;
+    }}
+    .multi-select.open .multi-select-button::after {{
+      transform: rotate(180deg);
+    }}
+    .multi-select-text {{
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }}
+    .multi-select-menu {{
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 40;
+      width: 100%;
+      max-height: 245px;
+      overflow: auto;
+      border: 1px solid #a9b8cd;
+      background: #fff;
+      box-shadow: 0 18px 36px rgba(25, 42, 70, 0.18);
+      padding: 6px;
+    }}
+    .multi-select.open .multi-select-menu {{ display: grid; gap: 2px; }}
+    .multi-select-actions {{
+      display: flex;
+      gap: 6px;
+      padding: 0 0 6px;
+      margin-bottom: 4px;
+      border-bottom: 1px solid #e1e7f0;
+    }}
+    .multi-select-action {{
+      border: 1px solid #c7d2e2;
+      background: #f6f8fb;
+      color: var(--navy);
+      padding: 4px 8px;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 720;
+      cursor: pointer;
+    }}
+    .multi-option {{
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 5px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 620;
+      cursor: pointer;
+    }}
+    .multi-option:hover {{ background: #eef3f8; }}
+    .multi-option input {{ margin: 0; }}
     .segmented {{
       display: inline-grid;
       grid-auto-flow: column;
       border: 1px solid #bcc8d9;
       background: #fff;
     }}
-    .freq-button {{
+    .freq-button,
+    .chart-kind-button {{
       min-width: 42px;
       border: 0;
       border-right: 1px solid #d9e1ee;
@@ -2267,8 +2574,13 @@ def write_html_dashboard(
       font-weight: 720;
       cursor: pointer;
     }}
-    .freq-button:last-child {{ border-right: 0; }}
-    .freq-button.active {{
+    .chart-kind-button {{
+      min-width: 62px;
+    }}
+    .freq-button:last-child,
+    .chart-kind-button:last-child {{ border-right: 0; }}
+    .freq-button.active,
+    .chart-kind-button.active {{
       background: var(--navy);
       color: #fff;
     }}
@@ -2379,12 +2691,16 @@ def write_html_dashboard(
       <div class="grid-2" style="margin-top:16px;">
         <div class="panel trade-chart" data-value="total_pnl" data-title="Total PnL K-Line" data-ytitle="Total PnL">
           <div class="chart-toolbar">
-            <label>Scenario<select data-role="scenario"></select></label>
-            <label>Product<select data-role="product"></select></label>
+            <label>Scenario<select data-role="scenario" multiple size="5" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
+            <label>Product<select data-role="product" multiple size="3" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
             <div class="segmented">
               <button class="freq-button active" type="button" data-freq="D">D</button>
               <button class="freq-button" type="button" data-freq="W">W</button>
               <button class="freq-button" type="button" data-freq="M">M</button>
+            </div>
+            <div class="segmented">
+              <button class="chart-kind-button active" type="button" data-kind="candle">Candle</button>
+              <button class="chart-kind-button" type="button" data-kind="line">Line</button>
             </div>
           </div>
           <div class="trade-plot"></div>
@@ -2392,8 +2708,8 @@ def write_html_dashboard(
         </div>
         <div class="panel trade-chart" data-panel="summary" data-title="Final Product vs Hedge PnL" data-metrics="final_product_pnl,final_hedge_pnl,final_total_pnl,worst_drawdown">
           <div class="chart-toolbar">
-            <label>Scenario<select data-role="scenario"></select></label>
-            <label>Product<select data-role="product"></select></label>
+            <label>Scenario<select data-role="scenario" multiple size="5" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
+            <label>Product<select data-role="product" multiple size="3" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
           </div>
           <div class="trade-plot"></div>
           <div class="chart-caption"></div>
@@ -2409,12 +2725,16 @@ def write_html_dashboard(
       <p class="subtle">Underlying spot paths for the historical, rapid-up, rapid-down, high-oscillation, and low-oscillation scenarios, with initial spot, KO, and KI reference levels.</p>
       <div class="panel trade-chart" data-value="spot" data-title="Underlying Price K-Line" data-ytitle="000852.SH spot" data-levels="barriers">
         <div class="chart-toolbar">
-          <label>Scenario<select data-role="scenario"></select></label>
-          <label>Product<select data-role="product"></select></label>
+          <label>Scenario<select data-role="scenario" multiple size="5" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
+          <label>Product<select data-role="product" multiple size="3" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
           <div class="segmented">
             <button class="freq-button active" type="button" data-freq="D">D</button>
             <button class="freq-button" type="button" data-freq="W">W</button>
             <button class="freq-button" type="button" data-freq="M">M</button>
+          </div>
+          <div class="segmented">
+            <button class="chart-kind-button active" type="button" data-kind="candle">Candle</button>
+            <button class="chart-kind-button" type="button" data-kind="line">Line</button>
           </div>
         </div>
         <div class="trade-plot"></div>
@@ -2425,14 +2745,18 @@ def write_html_dashboard(
       <h2>Trader View</h2>
       <p class="subtle">Hedge inventory, turnover, roll load, and data-quality exceptions that directly affect desk execution and explain realized hedge PnL.</p>
       <div class="grid-2">
-        <div class="panel trade-chart" data-value="futures_contracts" data-title="Futures Inventory K-Line" data-ytitle="Contracts" data-chart-kind="step">
+        <div class="panel trade-chart" data-value="futures_contracts" data-title="Futures Inventory K-Line" data-ytitle="Contracts" data-default-kind="line" data-line-shape="hv">
           <div class="chart-toolbar">
-            <label>Scenario<select data-role="scenario"></select></label>
-            <label>Product<select data-role="product"></select></label>
+            <label>Scenario<select data-role="scenario" multiple size="5" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
+            <label>Product<select data-role="product" multiple size="3" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
             <div class="segmented">
               <button class="freq-button active" type="button" data-freq="D">D</button>
               <button class="freq-button" type="button" data-freq="W">W</button>
               <button class="freq-button" type="button" data-freq="M">M</button>
+            </div>
+            <div class="segmented">
+              <button class="chart-kind-button" type="button" data-kind="candle">Candle</button>
+              <button class="chart-kind-button active" type="button" data-kind="line">Line</button>
             </div>
           </div>
           <div class="trade-plot"></div>
@@ -2440,8 +2764,8 @@ def write_html_dashboard(
         </div>
         <div class="panel trade-chart" data-panel="summary" data-title="Hedge Workload" data-metrics="gross_trade_notional,max_trade_notional,num_trades,roll_count">
           <div class="chart-toolbar">
-            <label>Scenario<select data-role="scenario"></select></label>
-            <label>Product<select data-role="product"></select></label>
+            <label>Scenario<select data-role="scenario" multiple size="5" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
+            <label>Product<select data-role="product" multiple size="3" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
           </div>
           <div class="trade-plot"></div>
           <div class="chart-caption"></div>
@@ -2465,12 +2789,16 @@ def write_html_dashboard(
       <div class="grid-2">
         <div class="panel trade-chart" data-value="post_hedge_delta_cash_1pct" data-title="Residual Delta Cash K-Line" data-ytitle="Cash PnL / 1%">
           <div class="chart-toolbar">
-            <label>Scenario<select data-role="scenario"></select></label>
-            <label>Product<select data-role="product"></select></label>
+            <label>Scenario<select data-role="scenario" multiple size="5" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
+            <label>Product<select data-role="product" multiple size="3" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
             <div class="segmented">
               <button class="freq-button active" type="button" data-freq="D">D</button>
               <button class="freq-button" type="button" data-freq="W">W</button>
               <button class="freq-button" type="button" data-freq="M">M</button>
+            </div>
+            <div class="segmented">
+              <button class="chart-kind-button active" type="button" data-kind="candle">Candle</button>
+              <button class="chart-kind-button" type="button" data-kind="line">Line</button>
             </div>
           </div>
           <div class="trade-plot"></div>
@@ -2478,12 +2806,16 @@ def write_html_dashboard(
         </div>
         <div class="panel trade-chart" data-value="post_hedge_gamma_cash_1pct" data-title="Gamma Cash K-Line" data-ytitle="Cash Gamma / 1%">
           <div class="chart-toolbar">
-            <label>Scenario<select data-role="scenario"></select></label>
-            <label>Product<select data-role="product"></select></label>
+            <label>Scenario<select data-role="scenario" multiple size="5" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
+            <label>Product<select data-role="product" multiple size="3" title="Use Ctrl/Cmd-click for multiple selections"></select></label>
             <div class="segmented">
               <button class="freq-button active" type="button" data-freq="D">D</button>
               <button class="freq-button" type="button" data-freq="W">W</button>
               <button class="freq-button" type="button" data-freq="M">M</button>
+            </div>
+            <div class="segmented">
+              <button class="chart-kind-button active" type="button" data-kind="candle">Candle</button>
+              <button class="chart-kind-button" type="button" data-kind="line">Line</button>
             </div>
           </div>
           <div class="trade-plot"></div>

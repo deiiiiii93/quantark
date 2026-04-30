@@ -370,6 +370,10 @@ def test_case_study_runner_smoke_creates_all_final_artifacts(tmp_path: Path):
     assert "Total PnL K-Line" in dashboard
     assert "trade-chart-data" in dashboard
     assert "freq-button" in dashboard
+    assert "chart-kind-button" in dashboard
+    assert "multi-select-button" in dashboard
+    assert 'data-role="scenario" multiple' in dashboard
+    assert 'data-role="product" multiple' in dashboard
     assert "Daily Detail" in dashboard
     assert "daily-detail-data" in dashboard
     assert "Lifecycle Event Timeline" in dashboard
