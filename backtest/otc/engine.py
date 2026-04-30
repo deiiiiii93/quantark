@@ -225,20 +225,60 @@ class AutocallableBacktestEngine:
             isinstance(self.pricing_engine, BaseEngine)
             and type(self.pricing_engine).calculate_greeks is BaseEngine.calculate_greeks
         )
-        bump = float(getattr(params, "bump_size", 1e-4)) if params is not None else 0.0
-        if uses_base_greeks and bump > 0.0 and np.isfinite(price):
+        engine_bump = (
+            float(getattr(params, "bump_size", 1e-4)) if params is not None else 0.0
+        )
+        delta_bump = (
+            float(self.config.delta_bump_size)
+            if self.config.delta_bump_size is not None
+            else engine_bump
+        )
+        gamma_bump = (
+            float(self.config.gamma_bump_size)
+            if self.config.gamma_bump_size is not None
+            else engine_bump
+        )
+        if (
+            uses_base_greeks
+            and delta_bump > 0.0
+            and gamma_bump > 0.0
+            and np.isfinite(price)
+        ):
             try:
+                spot = float(env.spot)
                 env_up = deepcopy(env)
-                env_up.spot_quote.spot *= 1.0 + bump
-                price_up = float(self.pricing_engine.price(product, env_up))
+                env_up.spot_quote.spot *= 1.0 + delta_bump
+                delta_price_up = float(self.pricing_engine.price(product, env_up))
 
                 env_down = deepcopy(env)
-                env_down.spot_quote.spot *= 1.0 - bump
-                price_down = float(self.pricing_engine.price(product, env_down))
+                env_down.spot_quote.spot *= 1.0 - delta_bump
+                delta_price_down = float(self.pricing_engine.price(product, env_down))
 
-                spot_bump = float(env.spot) * bump
-                delta = (price_up - price_down) / (2.0 * spot_bump)
-                gamma = (price_up - 2.0 * float(price) + price_down) / (spot_bump**2)
+                delta_spot_bump = spot * delta_bump
+                delta = (delta_price_up - delta_price_down) / (
+                    2.0 * delta_spot_bump
+                )
+
+                if np.isclose(delta_bump, gamma_bump):
+                    gamma_price_up = delta_price_up
+                    gamma_price_down = delta_price_down
+                else:
+                    env_gamma_up = deepcopy(env)
+                    env_gamma_up.spot_quote.spot *= 1.0 + gamma_bump
+                    gamma_price_up = float(
+                        self.pricing_engine.price(product, env_gamma_up)
+                    )
+
+                    env_gamma_down = deepcopy(env)
+                    env_gamma_down.spot_quote.spot *= 1.0 - gamma_bump
+                    gamma_price_down = float(
+                        self.pricing_engine.price(product, env_gamma_down)
+                    )
+
+                gamma_spot_bump = spot * gamma_bump
+                gamma = (gamma_price_up - 2.0 * float(price) + gamma_price_down) / (
+                    gamma_spot_bump**2
+                )
                 return {"price": float(price), "delta": delta, "gamma": gamma}
             except Exception:
                 pass

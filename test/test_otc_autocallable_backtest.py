@@ -6,12 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from asset.equity.engine.base_engine import BaseEngine
 from asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from asset.equity.engine.pde_engine import PDEEngine
 from asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
+from asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
 from asset.equity.product.option import (
     create_standard_phoenix,
     create_standard_snowball,
@@ -109,6 +110,17 @@ def _market_data() -> AutocallableMarketDataSet:
     )
 
 
+class QuadraticRecordingEngine(BaseEngine):
+    def __init__(self) -> None:
+        super().__init__(EngineParams(bump_size=0.001))
+        self.spot_calls: list[float] = []
+
+    def price(self, product, pricing_env: PricingEnvironment) -> float:
+        spot = float(pricing_env.spot)
+        self.spot_calls.append(spot)
+        return spot**2
+
+
 def test_basis_implied_q_uses_simple_basis_and_q_floor():
     basis_yield, implied_q = derive_implied_dividend_yield(
         rate=0.02,
@@ -173,6 +185,39 @@ def test_engine_factory_selects_snowball_and_phoenix_engines():
     assert isinstance(create_pricing_engine(snowball, quad_config), SnowballQuadEngine)
     assert isinstance(create_pricing_engine(phoenix, quad_config), PhoenixQuadEngine)
     assert isinstance(create_surface_engine(snowball, mc_config), SnowballQuadEngine)
+
+
+def test_gamma_bump_config_is_independent_from_delta_bump():
+    product = _snowball_product()
+    config = AutocallableBacktestConfig(
+        product=product,
+        market_data=_market_data(),
+        engine_config=AutocallableEngineConfig(
+            pricing_engine_type=EngineType.QUADRATURE,
+            quad_params=QuadParams(grid_points=101),
+        ),
+        gamma_bump_size=0.01,
+        calculate_surfaces=False,
+        calculate_event_probabilities=False,
+    )
+    backtest = AutocallableBacktestEngine(config)
+    recording_engine = QuadraticRecordingEngine()
+    backtest.pricing_engine = recording_engine
+    env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0, asset_name="CSI500"),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.02),
+        div_yield=SignedDividendYield(0.0),
+        valuation_date=datetime(2024, 1, 2),
+    )
+
+    greeks = backtest._calculate_greeks(product, env, price=10_000.0)
+
+    assert greeks["delta"] == pytest.approx(200.0)
+    assert greeks["gamma"] == pytest.approx(2.0)
+    assert recording_engine.spot_calls == pytest.approx(
+        [100.1, 99.9, 101.0, 99.0]
+    )
 
 
 def test_delta_hedge_contract_sizing_uses_futures_multiplier():

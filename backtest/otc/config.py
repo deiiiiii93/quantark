@@ -147,6 +147,8 @@ class AutocallableBacktestConfig:
     end_date: Optional[datetime] = None
     initial_product_price: Optional[float] = None
     fixed_dividend_yield: Optional[float] = None
+    delta_bump_size: Optional[float] = None
+    gamma_bump_size: Optional[float] = None
     surface_config: SurfaceGridConfig = field(default_factory=SurfaceGridConfig)
     calculate_surfaces: bool = True
     calculate_event_probabilities: bool = True
@@ -163,3 +165,10 @@ class AutocallableBacktestConfig:
             float(self.fixed_dividend_yield)
         ):
             raise ValidationError("fixed_dividend_yield must be finite")
+        for field_name in ("delta_bump_size", "gamma_bump_size"):
+            bump = getattr(self, field_name)
+            if bump is None:
+                continue
+            bump_value = float(bump)
+            if not math.isfinite(bump_value) or bump_value <= 0.0:
+                raise ValidationError(f"{field_name} must be a positive finite value")

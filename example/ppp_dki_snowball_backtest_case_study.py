@@ -129,6 +129,18 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--ppp-protection", type=float, default=0.25)
     parser.add_argument("--quad-grid", type=int, default=1001)
     parser.add_argument("--quad-std-devs", type=float, default=6.0)
+    parser.add_argument(
+        "--gamma-bump-size",
+        type=float,
+        default=0.01,
+        help="Relative spot bump for reported finite-difference gamma; default 0.01 = 1%%.",
+    )
+    parser.add_argument(
+        "--delta-bump-size",
+        type=float,
+        default=None,
+        help="Relative spot bump for delta and hedging; default matches --gamma-bump-size.",
+    )
     parser.add_argument("--pde-grid", type=int, default=140)
     parser.add_argument("--pde-steps", type=int, default=140)
     parser.add_argument("--mc-paths", type=int, default=2000)
@@ -140,6 +152,23 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     if args.output_dir is None:
         args.output_dir = DEFAULT_OUTPUT_ROOT / f"ppp_dki_snowball_backtest_{today}"
     return args
+
+
+def resolve_greek_bump_sizes(args: argparse.Namespace) -> tuple[float, float]:
+    """Return validated delta and gamma finite-difference bump sizes."""
+    gamma_bump_size = float(args.gamma_bump_size)
+    delta_bump_size = (
+        float(args.delta_bump_size)
+        if args.delta_bump_size is not None
+        else gamma_bump_size
+    )
+    for label, value in (
+        ("delta-bump-size", delta_bump_size),
+        ("gamma-bump-size", gamma_bump_size),
+    ):
+        if not math.isfinite(value) or value <= 0.0:
+            raise CaseStudyError(f"{label} must be a positive finite value")
+    return delta_bump_size, gamma_bump_size
 
 
 def load_akshare():
@@ -832,6 +861,7 @@ def build_backtest_config(
     product_label: str,
 ) -> AutocallableBacktestConfig:
     dates = market_data.dates
+    delta_bump_size, gamma_bump_size = resolve_greek_bump_sizes(args)
     return AutocallableBacktestConfig(
         product=product,
         market_data=market_data,
@@ -848,7 +878,14 @@ def build_backtest_config(
         end_date=pd.Timestamp(dates[-1]).to_pydatetime(),
         initial_product_price=0.0,
         fixed_dividend_yield=float(terms.dividend_yield),
-        surface_config=SurfaceGridConfig(spot_nodes=5, spot_width=0.05, q_nodes=3, q_width=0.005),
+        delta_bump_size=delta_bump_size,
+        gamma_bump_size=gamma_bump_size,
+        surface_config=SurfaceGridConfig(
+            spot_nodes=5,
+            spot_width=0.05,
+            q_nodes=3,
+            q_width=0.005,
+        ),
         calculate_surfaces=bool(args.surfaces),
         calculate_event_probabilities=bool(args.event_probabilities),
         metadata={
@@ -990,6 +1027,8 @@ def terms_frame(
     coupon_results: Optional[dict[str, FairCouponResult]] = None,
     issue_date: Optional[pd.Timestamp] = None,
     dates: Optional[pd.Series] = None,
+    delta_bump_size: Optional[float] = None,
+    gamma_bump_size: Optional[float] = None,
 ) -> pd.DataFrame:
     normalized_issue_date = pd.Timestamp(issue_date).normalize() if issue_date is not None else None
     normalized_dates = pd.Series(dtype="datetime64[ns]")
@@ -1107,6 +1146,8 @@ def terms_frame(
         {"term": "rate", "value": terms.rate},
         {"term": "dividend_yield", "value": terms.dividend_yield},
         {"term": "volatility", "value": terms.volatility},
+        {"term": "reported_delta_bump_size", "value": delta_bump_size},
+        {"term": "reported_gamma_bump_size", "value": gamma_bump_size},
         {"term": "futures_multiplier", "value": FUTURES_MULTIPLIER},
     ]
     for product_label in ["PPP-DKI", "NPP-DKI", "PPP-EKI-Parachute"]:
@@ -3318,6 +3359,7 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
         raise CaseStudyError("notional must be positive")
     if not 0 <= terms.ppp_protection_rate <= 1:
         raise CaseStudyError("ppp-protection must be in [0, 1]")
+    delta_bump_size, gamma_bump_size = resolve_greek_bump_sizes(args)
 
     output_dir = Path(args.output_dir)
     cache_dir = output_dir / "cache"
@@ -3388,7 +3430,9 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
                 output_dir=output_dir,
             )
             run_results[(scenario, product_label)] = results
-            summaries.append({key: _excel_safe_value(value) for key, value in summary.items()})
+            summaries.append(
+                {key: _excel_safe_value(value) for key, value in summary.items()}
+            )
 
     consolidated = build_consolidated_frames(run_results)
     term_table = terms_frame(
@@ -3398,6 +3442,8 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
         coupon_results,
         issue_date=issue_date,
         dates=base_spot["date"],
+        delta_bump_size=delta_bump_size,
+        gamma_bump_size=gamma_bump_size,
     )
     write_csv_outputs(output_dir, summaries, consolidated)
     workbook_path = output_dir / "case_study_results.xlsx"
