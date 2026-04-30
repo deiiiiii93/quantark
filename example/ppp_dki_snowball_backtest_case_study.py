@@ -22,6 +22,7 @@ import os
 import sys
 import warnings
 from calendar import FRIDAY, monthcalendar
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -65,6 +66,14 @@ UNDERLYING_NAME = "CSI1000"
 FUTURES_PREFIX = "IM"
 FUTURES_MULTIPLIER = 200.0
 DEFAULT_NOTIONAL = 10_000_000.0
+PRODUCT_LABELS = ("PPP-DKI", "NPP-DKI", "PPP-EKI-Parachute")
+NUMERIC_THREAD_ENV_VARS = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
 
 
 class CaseStudyError(RuntimeError):
@@ -104,6 +113,38 @@ class FairCouponResult:
     pv_upper: float
     iterations: int
     solved: bool
+
+
+@dataclass(frozen=True)
+class CaseStudyBacktestTask:
+    """Serializable unit of independent product/scenario backtest work."""
+
+    scenario: str
+    product_label: str
+    spot_data: pd.DataFrame
+    futures_data: pd.DataFrame
+    base_dates: pd.Series
+    initial_spot: float
+    issue_date: pd.Timestamp
+    terms: CaseStudyTerms
+    coupons: dict[str, float]
+    engine_config: AutocallableEngineConfig
+    args: argparse.Namespace
+    output_dir: Path
+
+
+@dataclass
+class CaseStudyRunResult:
+    """Compact run result returned by sequential or parallel execution."""
+
+    scenario: str
+    product_label: str
+    summary: dict[str, Any]
+    states_df: pd.DataFrame
+    greeks_df: pd.DataFrame
+    rebalance_df: pd.DataFrame
+    trades_df: pd.DataFrame
+    actions_df: pd.DataFrame
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -148,6 +189,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--mc-seed", type=int, default=42)
     parser.add_argument("--event-probabilities", action="store_true")
     parser.add_argument("--surfaces", action="store_true")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel product/scenario workers. Use 1 for sequential execution.",
+    )
     args = parser.parse_args(argv)
     if args.output_dir is None:
         args.output_dir = DEFAULT_OUTPUT_ROOT / f"ppp_dki_snowball_backtest_{today}"
@@ -169,6 +216,22 @@ def resolve_greek_bump_sizes(args: argparse.Namespace) -> tuple[float, float]:
         if not math.isfinite(value) or value <= 0.0:
             raise CaseStudyError(f"{label} must be a positive finite value")
     return delta_bump_size, gamma_bump_size
+
+
+def resolve_worker_count(args: argparse.Namespace, num_tasks: int) -> int:
+    """Return a validated worker count capped at the number of tasks."""
+    workers = int(getattr(args, "workers", 1))
+    if workers <= 0:
+        raise CaseStudyError("workers must be a positive integer")
+    if num_tasks <= 0:
+        return 1
+    return min(workers, num_tasks)
+
+
+def configure_numeric_threads_for_parallel() -> None:
+    """Prevent process-level parallelism from oversubscribing numeric libraries."""
+    for env_var in NUMERIC_THREAD_ENV_VARS:
+        os.environ.setdefault(env_var, "1")
 
 
 def load_akshare():
@@ -829,8 +892,7 @@ def solve_case_study_coupons(
 
     coupons: dict[str, float] = {}
     results: dict[str, FairCouponResult] = {}
-    labels = ["PPP-DKI", "NPP-DKI", "PPP-EKI-Parachute"]
-    for label in labels:
+    for label in PRODUCT_LABELS:
         def builder(coupon: float, label: str = label) -> SnowballOption:
             return build_case_study_products(
                 initial_spot=initial_spot,
@@ -954,6 +1016,92 @@ def run_single_backtest(
     return results, summary
 
 
+def _compact_run_result(
+    scenario: str,
+    product_label: str,
+    results: Any,
+    summary: dict[str, Any],
+) -> CaseStudyRunResult:
+    return CaseStudyRunResult(
+        scenario=scenario,
+        product_label=product_label,
+        summary={key: _excel_safe_value(value) for key, value in summary.items()},
+        states_df=results.states_df,
+        greeks_df=results.greeks_df,
+        rebalance_df=results.rebalance_df,
+        trades_df=results.trades_df,
+        actions_df=results.actions_df,
+    )
+
+
+def run_backtest_task(task: CaseStudyBacktestTask) -> CaseStudyRunResult:
+    """Run one product/scenario task in the current process."""
+    configure_numeric_threads_for_parallel()
+    market_data = build_market_dataset(task.spot_data, task.futures_data, task.terms)
+    product = build_case_study_products(
+        initial_spot=task.initial_spot,
+        issue_date=task.issue_date,
+        dates=task.base_dates,
+        terms=task.terms,
+        coupons=task.coupons,
+    )[task.product_label]
+    results, summary = run_single_backtest(
+        product_label=task.product_label,
+        product=product,
+        scenario=task.scenario,
+        market_data=market_data,
+        terms=task.terms,
+        engine_config=task.engine_config,
+        args=task.args,
+        output_dir=task.output_dir,
+    )
+    return _compact_run_result(task.scenario, task.product_label, results, summary)
+
+
+def execute_backtest_tasks(
+    tasks: list[CaseStudyBacktestTask],
+    *,
+    workers: int,
+) -> list[CaseStudyRunResult]:
+    """Execute independent backtest tasks sequentially or with a process pool."""
+    if not tasks:
+        return []
+
+    worker_count = int(workers)
+    if worker_count <= 0:
+        raise CaseStudyError("workers must be a positive integer")
+    worker_count = min(worker_count, len(tasks))
+    task_keys = [(task.scenario, task.product_label) for task in tasks]
+    if worker_count == 1:
+        results: list[CaseStudyRunResult] = []
+        for task in tasks:
+            print(f"[run] {task.scenario} / {task.product_label}", flush=True)
+            results.append(run_backtest_task(task))
+        return results
+
+    configure_numeric_threads_for_parallel()
+    print(
+        f"[parallel] running {len(tasks)} product/scenario tasks with {worker_count} workers",
+        flush=True,
+    )
+    completed: dict[tuple[str, str], CaseStudyRunResult] = {}
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        future_to_key = {
+            executor.submit(run_backtest_task, task): (task.scenario, task.product_label)
+            for task in tasks
+        }
+        for future in as_completed(future_to_key):
+            scenario, product_label = future_to_key[future]
+            try:
+                completed[(scenario, product_label)] = future.result()
+            except Exception as exc:
+                raise CaseStudyError(
+                    f"Backtest failed for {scenario} / {product_label}: {exc}"
+                ) from exc
+            print(f"[done] {scenario} / {product_label}", flush=True)
+    return [completed[key] for key in task_keys]
+
+
 def calculate_drawdown(series: pd.Series) -> pd.Series:
     running_max = series.cummax()
     return series - running_max
@@ -1029,6 +1177,7 @@ def terms_frame(
     dates: Optional[pd.Series] = None,
     delta_bump_size: Optional[float] = None,
     gamma_bump_size: Optional[float] = None,
+    workers: Optional[int] = None,
 ) -> pd.DataFrame:
     normalized_issue_date = pd.Timestamp(issue_date).normalize() if issue_date is not None else None
     normalized_dates = pd.Series(dtype="datetime64[ns]")
@@ -1148,9 +1297,10 @@ def terms_frame(
         {"term": "volatility", "value": terms.volatility},
         {"term": "reported_delta_bump_size", "value": delta_bump_size},
         {"term": "reported_gamma_bump_size", "value": gamma_bump_size},
+        {"term": "parallel_workers", "value": workers},
         {"term": "futures_multiplier", "value": FUTURES_MULTIPLIER},
     ]
-    for product_label in ["PPP-DKI", "NPP-DKI", "PPP-EKI-Parachute"]:
+    for product_label in PRODUCT_LABELS:
         rows.extend(_date_schedule_rows(f"ko_observation_dates.{product_label}", ko_dates))
     for product_label in ["PPP-DKI", "NPP-DKI"]:
         rows.extend(_date_schedule_rows(f"ki_observation_dates.{product_label}", dki_dates, chunk_size=18))
@@ -3345,6 +3495,51 @@ def _excel_safe_value(value: Any) -> Any:
     return value
 
 
+def build_backtest_tasks(
+    *,
+    scenarios: dict[str, pd.DataFrame],
+    futures_history: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    base_dates: pd.Series,
+    initial_spot: float,
+    issue_date: pd.Timestamp,
+    terms: CaseStudyTerms,
+    coupons: dict[str, float],
+    engine_config: AutocallableEngineConfig,
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> list[CaseStudyBacktestTask]:
+    """Build independent product/scenario tasks for sequential or parallel execution."""
+    tasks: list[CaseStudyBacktestTask] = []
+    for scenario, spot_data in scenarios.items():
+        futures = (
+            restrict_window(futures_history, start, end)
+            if scenario == "historical" and not futures_history.empty
+            else synthetic_futures_chain(spot_data, terms.rate, terms.dividend_yield)
+        )
+        if args.scenario_days and int(args.scenario_days) > 0:
+            futures = futures[futures["date"].isin(spot_data["date"])].reset_index(drop=True)
+        for product_label in PRODUCT_LABELS:
+            tasks.append(
+                CaseStudyBacktestTask(
+                    scenario=scenario,
+                    product_label=product_label,
+                    spot_data=spot_data,
+                    futures_data=futures,
+                    base_dates=base_dates,
+                    initial_spot=initial_spot,
+                    issue_date=issue_date,
+                    terms=terms,
+                    coupons=coupons,
+                    engine_config=engine_config,
+                    args=args,
+                    output_dir=output_dir,
+                )
+            )
+    return tasks
+
+
 def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
     terms = CaseStudyTerms(
         notional=float(args.notional),
@@ -3360,6 +3555,9 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
     if not 0 <= terms.ppp_protection_rate <= 1:
         raise CaseStudyError("ppp-protection must be in [0, 1]")
     delta_bump_size, gamma_bump_size = resolve_greek_bump_sizes(args)
+    requested_workers = int(getattr(args, "workers", 1))
+    if requested_workers <= 0:
+        raise CaseStudyError("workers must be a positive integer")
 
     output_dir = Path(args.output_dir)
     cache_dir = output_dir / "cache"
@@ -3399,40 +3597,26 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
         engine_config=engine_config,
     )
 
-    run_results: dict[tuple[str, str], Any] = {}
-    summaries: list[dict[str, Any]] = []
-    for scenario, spot_data in scenarios.items():
-        futures = (
-            restrict_window(frames.futures_data, start, end)
-            if scenario == "historical" and not frames.futures_data.empty
-            else synthetic_futures_chain(spot_data, terms.rate, terms.dividend_yield)
-        )
-        if args.scenario_days and int(args.scenario_days) > 0:
-            futures = futures[futures["date"].isin(spot_data["date"])].reset_index(drop=True)
-        market_data = build_market_dataset(spot_data, futures, terms)
-        products = build_case_study_products(
-            initial_spot=initial_spot,
-            issue_date=issue_date,
-            dates=base_spot["date"],
-            terms=terms,
-            coupons=coupons,
-        )
-        for product_label, product in products.items():
-            print(f"[run] {scenario} / {product_label}")
-            results, summary = run_single_backtest(
-                product_label=product_label,
-                product=product,
-                scenario=scenario,
-                market_data=market_data,
-                terms=terms,
-                engine_config=engine_config,
-                args=args,
-                output_dir=output_dir,
-            )
-            run_results[(scenario, product_label)] = results
-            summaries.append(
-                {key: _excel_safe_value(value) for key, value in summary.items()}
-            )
+    tasks = build_backtest_tasks(
+        scenarios=scenarios,
+        futures_history=frames.futures_data,
+        start=start,
+        end=end,
+        base_dates=base_spot["date"],
+        initial_spot=initial_spot,
+        issue_date=issue_date,
+        terms=terms,
+        coupons=coupons,
+        engine_config=engine_config,
+        args=args,
+        output_dir=output_dir,
+    )
+    worker_count = resolve_worker_count(args, len(tasks))
+    run_payloads = execute_backtest_tasks(tasks, workers=worker_count)
+    run_results: dict[tuple[str, str], Any] = {
+        (payload.scenario, payload.product_label): payload for payload in run_payloads
+    }
+    summaries = [payload.summary for payload in run_payloads]
 
     consolidated = build_consolidated_frames(run_results)
     term_table = terms_frame(
@@ -3444,6 +3628,7 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
         dates=base_spot["date"],
         delta_bump_size=delta_bump_size,
         gamma_bump_size=gamma_bump_size,
+        workers=worker_count,
     )
     write_csv_outputs(output_dir, summaries, consolidated)
     workbook_path = output_dir / "case_study_results.xlsx"
@@ -3463,6 +3648,7 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
         "initial_spot": initial_spot,
         "pv_convention": "principal_excluded_zero_upfront",
         "num_runs": len(summaries),
+        "workers": worker_count,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "manifest.json").write_text(
@@ -3480,6 +3666,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     print("\nPPP/NPP Snowball Backtest Case Study")
     print("=" * 72)
     print(f"Runs:     {manifest['num_runs']}")
+    print(f"Workers:  {manifest['workers']}")
     print(f"Output:   {manifest['output_dir']}")
     print(f"Workbook: {manifest['workbook']}")
     print(f"DOCX:     {manifest['docx']}")

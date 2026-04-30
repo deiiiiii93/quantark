@@ -364,6 +364,8 @@ def test_case_study_runner_smoke_creates_all_final_artifacts(tmp_path: Path):
             "8",
             "--quad-grid",
             "101",
+            "--workers",
+            "2",
             "--output-dir",
             str(tmp_path / "case_study"),
         ]
@@ -372,6 +374,7 @@ def test_case_study_runner_smoke_creates_all_final_artifacts(tmp_path: Path):
     manifest = case_study.run_case_study(args)
 
     assert manifest["num_runs"] == 15
+    assert manifest["workers"] == 2
     assert Path(manifest["workbook"]).exists()
     assert Path(manifest["docx"]).exists()
     assert Path(manifest["html"]).exists()
@@ -400,3 +403,22 @@ def test_case_study_runner_smoke_creates_all_final_artifacts(tmp_path: Path):
     assert (tmp_path / "case_study" / "data" / "daily_greeks.csv").exists()
     assert (tmp_path / "case_study" / "data" / "daily_pnl.csv").exists()
     assert (tmp_path / "case_study" / "data" / "hedge_actions.csv").exists()
+
+
+def test_case_study_rejects_non_positive_workers(tmp_path: Path):
+    args = case_study.parse_args(
+        [
+            "--synthetic-only",
+            "--scenario-days",
+            "8",
+            "--quad-grid",
+            "101",
+            "--workers",
+            "0",
+            "--output-dir",
+            str(tmp_path / "case_study"),
+        ]
+    )
+
+    with pytest.raises(case_study.CaseStudyError, match="workers"):
+        case_study.run_case_study(args)
