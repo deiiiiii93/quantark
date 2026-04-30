@@ -93,6 +93,9 @@ class SnowballQuadEngine(BaseEngine):
             ki_records = product.resolve_ki_observations(pricing_env)
             if not ki_records:
                 raise PricingError("KI observation schedule is empty for SnowballQuadEngine.")
+            if self._treat_dense_discrete_ki_as_continuous(product, ki_records):
+                ki_continuous = True
+                ki_records = []
 
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],
@@ -314,6 +317,9 @@ class SnowballQuadEngine(BaseEngine):
         ki_records = []
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
+            if self._treat_dense_discrete_ki_as_continuous(product, ki_records):
+                ki_continuous = True
+                ki_records = []
 
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],
@@ -584,6 +590,30 @@ class SnowballQuadEngine(BaseEngine):
             raise PricingError("SnowballQuadEngine requires discrete KO monitoring.")
         # Airbag and call-rebate features are handled via product payoff functions.
 
+    def _treat_dense_discrete_ki_as_continuous(
+        self, product: SnowballOption, ki_records: Sequence
+    ) -> bool:
+        """
+        Use bridge monitoring for dense discrete KI schedules.
+
+        Daily DKI schedules over multi-year tenors create hundreds of tiny
+        quadrature steps and can accumulate numerical noise in the two-surface
+        recursion. The continuous bridge is the stable approximation used only
+        for pricing; lifecycle handling in the OTC backtest still uses the
+        product's explicit observation schedule.
+        """
+        threshold = int(
+            getattr(self.params, "dense_discrete_ki_as_continuous_threshold", 120)
+            or 0
+        )
+        if threshold <= 0 or len(ki_records) <= threshold:
+            return False
+        if product.barrier_config.ki_barrier is None:
+            return False
+        if isinstance(product.barrier_config.ki_barrier, list):
+            return False
+        return True
+
     def _diffuse_fft(
         self,
         values: np.ndarray,
@@ -732,6 +762,13 @@ class SnowballQuadEngine(BaseEngine):
     ) -> list[float]:
         merged = []
         for t in sorted(list(ko_times) + list(ki_times)):
+            t = float(t)
+            if t <= Tolerance.ZERO:
+                continue
+            if t > maturity and not is_close(t, maturity, abs_tol=Tolerance.PRECISION):
+                continue
+            if is_close(t, maturity, abs_tol=Tolerance.PRECISION):
+                t = float(maturity)
             if not merged or not is_close(t, merged[-1], abs_tol=Tolerance.PRECISION):
                 merged.append(t)
         if not merged or not is_close(merged[-1], maturity, abs_tol=Tolerance.PRECISION):

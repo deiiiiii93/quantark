@@ -8,6 +8,7 @@ from .config import (
     FuturesRollPolicy,
     SurfaceGridConfig,
 )
+from .dashboard import AutocallableBacktestDashboard, AutocallableDashboardConfig
 from .engine import AutocallableBacktestEngine
 from .engine_factory import (
     create_autocallable_engine,
@@ -36,6 +37,8 @@ from .state import (
 __all__ = [
     "AKShareAutocallableDataAdapter",
     "AutocallableBacktestConfig",
+    "AutocallableBacktestDashboard",
+    "AutocallableDashboardConfig",
     "AutocallableBacktestEngine",
     "AutocallableBacktestResults",
     "AutocallableDeltaHedgeStrategy",

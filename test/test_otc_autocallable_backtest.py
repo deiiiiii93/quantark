@@ -248,7 +248,57 @@ def test_synthetic_snowball_backtest_outputs_daily_records_and_events():
     assert not results.daily_event_summary_df.empty
     assert not results.surfaces_df.empty
     assert results.surfaces_df["q_node"].min() >= 0.0
+    assert {"delta_cash_1pct", "gamma_cash_1pct"}.issubset(
+        results.surfaces_df.columns
+    )
+    expected_surface_delta_cash = (
+        results.surfaces_df["delta"]
+        * results.surfaces_df["spot_node"]
+        * 0.01
+    )
+    expected_surface_gamma_cash = (
+        results.surfaces_df["gamma"]
+        * results.surfaces_df["spot_node"] ** 2
+        / 100.0
+    )
+    assert np.allclose(
+        results.surfaces_df["delta_cash_1pct"],
+        expected_surface_delta_cash,
+        equal_nan=True,
+    )
+    assert np.allclose(
+        results.surfaces_df["gamma_cash_1pct"],
+        expected_surface_gamma_cash,
+        equal_nan=True,
+    )
     assert {"KO", "KI"}.issubset(set(results.event_probability_df["event_type"]))
     assert set(results.actions_df["action_type"]) == {"KI", "KO"}
     assert results.states_df["implied_q"].iloc[0] == 0.0
     assert results.states_df["active_contract"].iloc[0] == "IF2402"
+
+    expected_greek_columns = {
+        "pre_hedge_delta",
+        "post_hedge_delta",
+        "pre_hedge_gamma",
+        "post_hedge_gamma",
+        "pre_hedge_delta_cash_1pct",
+        "post_hedge_delta_cash_1pct",
+        "pre_hedge_gamma_cash_1pct",
+        "post_hedge_gamma_cash_1pct",
+        "delta_cash_1pct",
+        "gamma_cash_1pct",
+    }
+    assert expected_greek_columns.issubset(results.greeks_df.columns)
+    spot = results.states_df.loc[results.greeks_df.index, "spot"]
+    expected_delta_cash = results.greeks_df["post_hedge_delta"] * spot * 0.01
+    expected_gamma_cash = results.greeks_df["post_hedge_gamma"] * spot**2 / 100.0
+    assert np.allclose(
+        results.greeks_df["post_hedge_delta_cash_1pct"],
+        expected_delta_cash,
+        equal_nan=True,
+    )
+    assert np.allclose(
+        results.greeks_df["post_hedge_gamma_cash_1pct"],
+        expected_gamma_cash,
+        equal_nan=True,
+    )

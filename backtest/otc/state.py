@@ -16,8 +16,10 @@ class AutocallableLifecycleState:
     alive: bool = True
     knocked_in: bool = False
     knocked_out: bool = False
+    matured: bool = False
     ki_date: Optional[datetime] = None
     ko_date: Optional[datetime] = None
+    maturity_date: Optional[datetime] = None
     coupon_memory_count: int = 0
     realized_cashflows: float = 0.0
     observed_ko_indices: set[int] = field(default_factory=set)
@@ -32,11 +34,20 @@ class AutocallableLifecycleState:
         return True
 
     def mark_ko(self, timestamp: datetime, cashflow: float = 0.0) -> bool:
-        if self.knocked_out:
+        if self.knocked_out or self.matured:
             return False
         self.knocked_out = True
         self.alive = False
         self.ko_date = timestamp
+        self.realized_cashflows += float(cashflow)
+        return True
+
+    def mark_maturity(self, timestamp: datetime, cashflow: float = 0.0) -> bool:
+        if self.knocked_out or self.matured:
+            return False
+        self.matured = True
+        self.alive = False
+        self.maturity_date = timestamp
         self.realized_cashflows += float(cashflow)
         return True
 
@@ -153,4 +164,3 @@ class FuturesHedgePosition:
         self.quantity = new_qty
         self.contract = contract
         self.multiplier = multiplier
-

@@ -170,6 +170,7 @@ def test_demo_smoke_run_creates_expected_outputs(monkeypatch, tmp_path: Path):
         "surfaces.parquet",
         "results.xlsx",
         "summary.json",
+        "dashboard.html",
     }
     assert expected.issubset({path.name for path in tmp_path.iterdir()})
     assert (tmp_path / "cache" / "csi500_spot.csv").exists()
@@ -178,6 +179,7 @@ def test_demo_smoke_run_creates_expected_outputs(monkeypatch, tmp_path: Path):
     assert not results.greeks_df.empty
     assert not results.daily_event_summary_df.empty
     assert summary["engine"] == "quad"
+    assert summary["dashboard_html"] == str(tmp_path / "dashboard.html")
     assert "IC2401" in fake_ak.futures_calls
 
     workbook = pd.ExcelFile(tmp_path / "results.xlsx")
@@ -192,6 +194,17 @@ def test_demo_smoke_run_creates_expected_outputs(monkeypatch, tmp_path: Path):
         "Active_Futures",
     }
     assert expected_sheets.issubset(set(workbook.sheet_names))
+    greeks_sheet = pd.read_excel(workbook, sheet_name="Greeks")
+    assert {
+        "pre_hedge_delta_cash_1pct",
+        "post_hedge_delta_cash_1pct",
+        "pre_hedge_gamma_cash_1pct",
+        "post_hedge_gamma_cash_1pct",
+    }.issubset(greeks_sheet.columns)
+    surfaces_sheet = pd.read_excel(workbook, sheet_name="Surfaces")
+    assert {"delta_cash_1pct", "gamma_cash_1pct"}.issubset(
+        surfaces_sheet.columns
+    )
 
     terms = pd.read_excel(workbook, sheet_name="OTC_Contract_Terms").set_index("term")
     assert terms.loc["product_type", "value"] == "SnowballOption"

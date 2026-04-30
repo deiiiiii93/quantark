@@ -4,6 +4,7 @@ Configuration objects for OTC autocallable backtests.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+import math
 from typing import Any, Optional
 
 from asset.equity.param import MCParams, PDEParams, QuadParams
@@ -145,6 +146,7 @@ class AutocallableBacktestConfig:
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     initial_product_price: Optional[float] = None
+    fixed_dividend_yield: Optional[float] = None
     surface_config: SurfaceGridConfig = field(default_factory=SurfaceGridConfig)
     calculate_surfaces: bool = True
     calculate_event_probabilities: bool = True
@@ -157,3 +159,7 @@ class AutocallableBacktestConfig:
             raise ValidationError("market_data is required")
         if self.product_quantity == 0:
             raise ValidationError("product_quantity must be non-zero")
+        if self.fixed_dividend_yield is not None and not math.isfinite(
+            float(self.fixed_dividend_yield)
+        ):
+            raise ValidationError("fixed_dividend_yield must be finite")

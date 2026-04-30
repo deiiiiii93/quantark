@@ -12,10 +12,11 @@ from __future__ import annotations
 import argparse
 import copy
 import importlib.util
+import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -809,6 +810,559 @@ def _render_pnl_summary(title: str, dist: ShockPnLDistribution) -> str:
         f"- std: {s['std']:.6f}\n"
         f"- p01/p05/p50/p95/p99: {s['p01']:.6f}, {s['p05']:.6f}, {s['p50']:.6f}, {s['p95']:.6f}, {s['p99']:.6f}\n"
     )
+
+
+def _surface_payload(
+    *,
+    key: str,
+    label: str,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    x_label: str,
+    y_label: str,
+    z_label: str,
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "label": label,
+        "x": [_payload_value(v) for v in x],
+        "y": [_payload_value(v) for v in y],
+        "z": [
+            [_payload_value(v) for v in row]
+            for row in np.asarray(z, dtype=float).tolist()
+        ],
+        "x_label": x_label,
+        "y_label": y_label,
+        "z_label": z_label,
+    }
+
+
+def _payload_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        return None if pd.isna(value) else value.isoformat()
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, np.generic):
+        return _payload_value(value.item())
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, int | str | bool):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return value
+
+
+def _records_payload(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+    rows = df.reset_index(drop=True).to_dict(orient="records")
+    return [
+        {str(key): _payload_value(value) for key, value in row.items()}
+        for row in rows
+    ]
+
+
+def _compute_simple_stress_table(
+    *,
+    product: SnowballOption,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    base_pv: float,
+    base_q: float,
+    base_div_yield: DividendYield,
+) -> pd.DataFrame:
+    if pricing_env.vol_surface is None:
+        return pd.DataFrame()
+
+    scenarios = [
+        StressScenario(
+            name="Black Monday",
+            spot_shock=-0.20,
+            vol_shock=0.50,
+            q_shift=max(-0.02, -base_q + 1e-6),
+        ),
+        StressScenario(
+            name="Slow Bleed",
+            spot_shock=-0.05,
+            vol_shock=-0.10,
+            q_shift=0.0,
+        ),
+        StressScenario(
+            name="Vol Spike",
+            spot_shock=-0.03,
+            vol_shock=0.30,
+            q_shift=0.005,
+        ),
+        StressScenario(
+            name="Relief Rally",
+            spot_shock=0.08,
+            vol_shock=-0.15,
+            q_shift=0.0,
+        ),
+    ]
+    rows: list[dict[str, Any]] = []
+    for scenario in scenarios:
+        shocked_spot = pricing_env.spot * (1.0 + scenario.spot_shock)
+        div_yield = _shift_dividend_yield(base_div_yield, scenario.q_shift)
+        vol_surface = _scale_vol_surface(
+            pricing_env.vol_surface, 1.0 + scenario.vol_shock
+        )
+        env = _clone_env(
+            pricing_env,
+            spot=shocked_spot,
+            vol_surface=vol_surface,
+            div_yield=div_yield,
+        )
+        pv = float(engine.price(product, env))
+        rows.append(
+            {
+                "scenario": scenario.name,
+                "spot_shock": scenario.spot_shock,
+                "vol_shock": scenario.vol_shock,
+                "q_shift": scenario.q_shift,
+                "pv": pv,
+                "pnl": pv - base_pv,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_snowball_risk_snapshot(
+    *,
+    product: SnowballOption,
+    pricing_env: PricingEnvironment,
+    engine: BaseEngine,
+    label: str,
+    grid_spec: Optional[GridSpec] = None,
+    high_accuracy_surfaces: bool = False,
+) -> dict[str, Any]:
+    """Build serializable full-suite risk surfaces for a Snowball snapshot."""
+    if grid_spec is None:
+        grid_spec = GridSpec(spot_nodes=9, q_nodes=7, vol_nodes=7)
+
+    maturity = product.get_maturity(pricing_env)
+    if maturity < 0:
+        raise ValidationError(f"Product maturity must be non-negative, got {maturity}")
+
+    base_spot = pricing_env.spot
+    base_q = pricing_env.get_div_yield(maturity)
+    base_vol = pricing_env.get_vol(product.strike, maturity)
+    base_div_yield: DividendYield
+    if pricing_env.div_yield is None:
+        base_div_yield = ContinuousDividendYield(div_yield=0.0)
+    else:
+        base_div_yield = pricing_env.div_yield
+
+    spot_grid = build_spot_grid(base_spot, grid_spec)
+    q_grid = build_q_grid(base_q, grid_spec)
+    vol_grid = build_vol_grid(base_vol, grid_spec)
+    greeks_calculator = (
+        GreeksCalculator(params=engine.params) if high_accuracy_surfaces else None
+    )
+
+    if greeks_calculator is None:
+        pv_sq = _compute_pv_surface_sq(
+            product=product,
+            pricing_env=pricing_env,
+            engine=engine,
+            spot_grid=spot_grid,
+            q_grid=q_grid,
+            base_div_yield=base_div_yield,
+            base_q=base_q,
+        )
+        pv_sv = _compute_pv_surface_sv(
+            product=product,
+            pricing_env=pricing_env,
+            engine=engine,
+            spot_grid=spot_grid,
+            vol_grid=vol_grid,
+            q=base_q,
+            base_vol=base_vol,
+            base_div_yield=base_div_yield,
+            base_q=base_q,
+        )
+        pv_sv_q_up = _compute_pv_surface_sv(
+            product=product,
+            pricing_env=pricing_env,
+            engine=engine,
+            spot_grid=spot_grid,
+            vol_grid=vol_grid,
+            q=base_q + grid_spec.q_bump_for_rho,
+            base_vol=base_vol,
+            base_div_yield=base_div_yield,
+            base_q=base_q,
+        )
+        surfaces = compute_surfaces_from_pv(
+            spot_grid=spot_grid,
+            q_grid=q_grid,
+            vol_grid=vol_grid,
+            pv_sq=pv_sq,
+            pv_sv=pv_sv,
+            pv_sv_q_up=pv_sv_q_up,
+            q_bump_for_rho=grid_spec.q_bump_for_rho,
+        )
+        vanna_sv, volga_sv = _compute_vanna_volga(pv_sv, spot_grid, vol_grid)
+    else:
+        pv_sq, delta_sq, rhoq_sq, v_sq = _compute_point_surfaces_sq(
+            product=product,
+            pricing_env=pricing_env,
+            engine=engine,
+            greeks_calculator=greeks_calculator,
+            spot_grid=spot_grid,
+            q_grid=q_grid,
+            base_div_yield=base_div_yield,
+            base_q=base_q,
+        )
+        pv_sv, rhoq_sv, vanna_sv, volga_sv = _compute_point_surfaces_sv(
+            product=product,
+            pricing_env=pricing_env,
+            engine=engine,
+            greeks_calculator=greeks_calculator,
+            spot_grid=spot_grid,
+            vol_grid=vol_grid,
+            q=base_q,
+            base_vol=base_vol,
+            base_div_yield=base_div_yield,
+            base_q=base_q,
+        )
+        surfaces = SurfaceSet(
+            spot_grid=spot_grid,
+            q_grid=q_grid,
+            vol_grid=vol_grid,
+            pv_sq=pv_sq,
+            delta_sq=delta_sq,
+            rhoq_sq=rhoq_sq,
+            v_sq=v_sq,
+            pv_sv=pv_sv,
+            rhoq_sv=rhoq_sv,
+        )
+
+    gamma_sq = derivative_1d(surfaces.delta_sq, spot_grid, axis=0)
+    vega_sv = derivative_1d(surfaces.pv_sv, vol_grid, axis=1)
+
+    charm_sq = None
+    color_sq = None
+    theta_base = None
+    time_bump = float(grid_spec.time_bump_years)
+    if time_bump > 0.0:
+        bumped_date = pricing_env.valuation_date + timedelta(days=int(time_bump * 365))
+        bumped_env = _clone_env(pricing_env, valuation_date=bumped_date)
+        bumped_product = copy.deepcopy(product)
+        dropped_all = bumped_product.time_shift(time_bump, bumped_date, bumped_env)
+        if not dropped_all and bumped_product.get_maturity(bumped_env) > 0.0:
+            pv_bumped = float(engine.price(bumped_product, bumped_env))
+            theta_base = (pv_bumped - float(engine.price(product, pricing_env))) / time_bump
+            bumped_div_yield = (
+                ContinuousDividendYield(div_yield=0.0)
+                if bumped_env.div_yield is None
+                else bumped_env.div_yield
+            )
+            bumped_q = bumped_env.get_div_yield(bumped_product.get_maturity(bumped_env))
+            if greeks_calculator is None:
+                pv_sq_bumped = _compute_pv_surface_sq(
+                    product=bumped_product,
+                    pricing_env=bumped_env,
+                    engine=engine,
+                    spot_grid=spot_grid,
+                    q_grid=q_grid,
+                    base_div_yield=bumped_div_yield,
+                    base_q=bumped_q,
+                )
+                delta_bumped = derivative_1d(pv_sq_bumped, spot_grid, axis=0)
+            else:
+                delta_bumped = _compute_delta_surface_sq(
+                    product=bumped_product,
+                    pricing_env=bumped_env,
+                    engine=engine,
+                    greeks_calculator=greeks_calculator,
+                    spot_grid=spot_grid,
+                    q_grid=q_grid,
+                    base_div_yield=bumped_div_yield,
+                    base_q=bumped_q,
+                )
+            gamma_bumped = derivative_1d(delta_bumped, spot_grid, axis=0)
+            charm_sq = (delta_bumped - surfaces.delta_sq) / time_bump
+            color_sq = (gamma_bumped - gamma_sq) / time_bump
+
+    base_pv = float(engine.price(product, pricing_env))
+    spot_idx = _nearest_index(spot_grid, base_spot)
+    q_idx = _nearest_index(q_grid, base_q)
+    vol_idx = _nearest_index(vol_grid, base_vol)
+    base_metrics = {
+        "pv": base_pv,
+        "spot": base_spot,
+        "q": base_q,
+        "vol": base_vol,
+        "delta": float(surfaces.delta_sq[spot_idx, q_idx]),
+        "gamma": float(gamma_sq[spot_idx, q_idx]),
+        "vega": float(vega_sv[spot_idx, vol_idx]),
+        "rhoq": float(surfaces.rhoq_sq[spot_idx, q_idx]),
+        "rhob": float(-surfaces.rhoq_sq[spot_idx, q_idx]),
+        "theta": theta_base,
+    }
+
+    ko_barriers, ko_times = _extract_barrier_profile(
+        product=product, pricing_env=pricing_env, barrier_type="ko"
+    )
+    ki_barriers, ki_times = _extract_barrier_profile(
+        product=product, pricing_env=pricing_env, barrier_type="ki"
+    )
+    ko_level, ko_time = _next_barrier_snapshot(
+        barriers=ko_barriers,
+        observation_times=ko_times,
+        fallback_barrier=_first_barrier_value(product.barrier_config.ko_barrier),
+        fallback_time=maturity,
+    )
+    ki_level, ki_time = _next_barrier_snapshot(
+        barriers=ki_barriers,
+        observation_times=ki_times,
+        fallback_barrier=_first_barrier_value(product.barrier_config.ki_barrier),
+        fallback_time=maturity,
+    )
+    _, ko_pct, ko_sigma = _barrier_distance_metrics(
+        spot=base_spot,
+        barrier=ko_level,
+        time_to_barrier=ko_time,
+        pricing_env=pricing_env,
+        product=product,
+    )
+    _, ki_pct, ki_sigma = _barrier_distance_metrics(
+        spot=base_spot,
+        barrier=ki_level,
+        time_to_barrier=ki_time,
+        pricing_env=pricing_env,
+        product=product,
+    )
+
+    ladder_spot_shocks = [-0.20, -0.10, -0.05, 0.0, 0.05, 0.10]
+    ladder_vol_shocks = [-0.05, 0.0, 0.05]
+    ladder_df, ladder_worst_pnl, ladder_worst_cell = _compute_scenario_ladder(
+        product,
+        pricing_env,
+        engine,
+        ladder_spot_shocks,
+        ladder_vol_shocks,
+    )
+    bucketed_df = _compute_bucketed_greeks(product, pricing_env, engine)
+    stress_df = _compute_simple_stress_table(
+        product=product,
+        pricing_env=pricing_env,
+        engine=engine,
+        base_pv=base_pv,
+        base_q=base_q,
+        base_div_yield=base_div_yield,
+    )
+
+    surface_payloads = [
+        _surface_payload(
+            key="pv_spot_div",
+            label="PV vs Spot x Dividend",
+            x=q_grid,
+            y=spot_grid,
+            z=surfaces.pv_sq,
+            x_label="Dividend yield q",
+            y_label="Spot",
+            z_label="PV",
+        ),
+        _surface_payload(
+            key="delta_spot_div",
+            label="Delta vs Spot x Dividend",
+            x=q_grid,
+            y=spot_grid,
+            z=surfaces.delta_sq,
+            x_label="Dividend yield q",
+            y_label="Spot",
+            z_label="Delta",
+        ),
+        _surface_payload(
+            key="gamma_spot_div",
+            label="Gamma vs Spot x Dividend",
+            x=q_grid,
+            y=spot_grid,
+            z=gamma_sq,
+            x_label="Dividend yield q",
+            y_label="Spot",
+            z_label="Gamma",
+        ),
+        _surface_payload(
+            key="rhoq_spot_div",
+            label="Dividend Rho vs Spot x Dividend",
+            x=q_grid,
+            y=spot_grid,
+            z=surfaces.rhoq_sq,
+            x_label="Dividend yield q",
+            y_label="Spot",
+            z_label="RhoQ",
+        ),
+        _surface_payload(
+            key="rhob_spot_div",
+            label="Basis Rho vs Spot x Dividend",
+            x=q_grid,
+            y=spot_grid,
+            z=-surfaces.rhoq_sq,
+            x_label="Dividend yield q",
+            y_label="Spot",
+            z_label="RhoB",
+        ),
+        _surface_payload(
+            key="cross_s_q",
+            label="Spot-Dividend Cross Sensitivity",
+            x=q_grid,
+            y=spot_grid,
+            z=surfaces.v_sq,
+            x_label="Dividend yield q",
+            y_label="Spot",
+            z_label="d2V/dSdq",
+        ),
+        _surface_payload(
+            key="rhoq_spot_vol",
+            label="Dividend Rho vs Spot x Vol",
+            x=vol_grid,
+            y=spot_grid,
+            z=surfaces.rhoq_sv,
+            x_label="Volatility",
+            y_label="Spot",
+            z_label="RhoQ",
+        ),
+        _surface_payload(
+            key="vanna_spot_vol",
+            label="Vanna vs Spot x Vol",
+            x=vol_grid,
+            y=spot_grid,
+            z=vanna_sv,
+            x_label="Volatility",
+            y_label="Spot",
+            z_label="Vanna",
+        ),
+        _surface_payload(
+            key="volga_spot_vol",
+            label="Volga vs Spot x Vol",
+            x=vol_grid,
+            y=spot_grid,
+            z=volga_sv,
+            x_label="Volatility",
+            y_label="Spot",
+            z_label="Volga",
+        ),
+    ]
+    if charm_sq is not None and color_sq is not None:
+        surface_payloads.extend(
+            [
+                _surface_payload(
+                    key="charm_spot_div",
+                    label="Charm vs Spot x Dividend",
+                    x=q_grid,
+                    y=spot_grid,
+                    z=charm_sq,
+                    x_label="Dividend yield q",
+                    y_label="Spot",
+                    z_label="Charm",
+                ),
+                _surface_payload(
+                    key="color_spot_div",
+                    label="Color vs Spot x Dividend",
+                    x=q_grid,
+                    y=spot_grid,
+                    z=color_sq,
+                    x_label="Dividend yield q",
+                    y_label="Spot",
+                    z_label="Color",
+                ),
+            ]
+        )
+
+    barrier_surfaces: list[dict[str, Any]] = []
+    for barrier_key, barrier_label, barrier_level in [
+        ("ko", "KO", ko_level),
+        ("ki", "KI", ki_level),
+    ]:
+        if barrier_level is None:
+            continue
+        zoom_spot, zoom_vol, zoom_gamma, zoom_vega = _compute_barrier_zoom_surfaces(
+            product=product,
+            pricing_env=pricing_env,
+            engine=engine,
+            barrier_level=barrier_level,
+            vol_grid=vol_grid,
+            base_vol=base_vol,
+            base_div_yield=base_div_yield,
+        )
+        barrier_surfaces.extend(
+            [
+                _surface_payload(
+                    key=f"barrier_{barrier_key}_gamma",
+                    label=f"{barrier_label} Barrier Zoom Gamma",
+                    x=zoom_vol,
+                    y=zoom_spot,
+                    z=zoom_gamma,
+                    x_label="Volatility",
+                    y_label="Spot",
+                    z_label="Gamma",
+                ),
+                _surface_payload(
+                    key=f"barrier_{barrier_key}_vega",
+                    label=f"{barrier_label} Barrier Zoom Vega",
+                    x=zoom_vol,
+                    y=zoom_spot,
+                    z=zoom_vega,
+                    x_label="Volatility",
+                    y_label="Spot",
+                    z_label="Vega",
+                ),
+            ]
+        )
+
+    engine_stats = engine.calculate_event_stats(product, pricing_env)
+    conditional_cashflows: list[dict[str, Any]] = []
+    if engine_stats is not None:
+        conditional_cashflows = _records_payload(
+            _render_conditional_cashflow_table(
+                engine_stats.ko_times,
+                engine_stats.ko_probability,
+                engine_stats.expected_discounted_ko_cashflow,
+            )
+        )
+
+    return {
+        "label": label,
+        "valuation_date": pricing_env.valuation_date.isoformat(),
+        "surface_mode": "point-greeks" if high_accuracy_surfaces else "finite-difference",
+        "base": base_metrics,
+        "barrier_watch": {
+            "ko_level": ko_level,
+            "ko_time": ko_time,
+            "ko_pct_distance": ko_pct,
+            "ko_sigma_distance": ko_sigma,
+            "ki_level": ki_level,
+            "ki_time": ki_time,
+            "ki_pct_distance": ki_pct,
+            "ki_sigma_distance": ki_sigma,
+        },
+        "surfaces": surface_payloads,
+        "barrier_surfaces": barrier_surfaces,
+        "scenario_ladder": {
+            "spot_shocks": [_format_shock_label(v) for v in ladder_spot_shocks],
+            "vol_shocks": [_format_shock_label(v) for v in ladder_vol_shocks],
+            "z": ladder_df.astype(float).values.tolist(),
+            "rows": list(ladder_df.index),
+            "columns": list(ladder_df.columns),
+            "worst_pnl": ladder_worst_pnl,
+            "worst_cell": {
+                "spot_shock": _format_shock_label(ladder_worst_cell[0]),
+                "vol_shock": _format_shock_label(ladder_worst_cell[1]),
+            },
+        },
+        "stress_table": _records_payload(stress_df),
+        "bucketed_greeks": _records_payload(bucketed_df),
+        "conditional_cashflows": conditional_cashflows,
+    }
 
 
 def generate_snowball_risk_report(

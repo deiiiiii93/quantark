@@ -1,6 +1,19 @@
+from datetime import datetime
+
 import numpy as np
 
-from asset.equity.report.surfaces import compute_surfaces_from_pv
+from asset.equity.engine.base_engine import BaseEngine
+from asset.equity.product.option.snowball_helpers import create_standard_snowball
+from asset.equity.report.autocallable_risk_report import build_snowball_risk_snapshot
+from asset.equity.report.surfaces import GridSpec, compute_surfaces_from_pv
+from param import FlatRateCurve, FlatVolSurface, SpotQuote
+from param.div import ContinuousDividendYield
+from priceenv import PricingEnvironment
+
+
+class DummyEngine(BaseEngine):
+    def price(self, product, pricing_env) -> float:
+        return float(pricing_env.spot) * 0.01
 
 
 def test_surface_derivatives_match_known_function():
@@ -39,3 +52,44 @@ def test_surface_derivatives_match_known_function():
     # Spot-vol rhoq should be zero for q-independent PV
     assert np.max(np.abs(surfaces.rhoq_sv)) < 1e-12
 
+
+def test_snowball_risk_snapshot_serializes_full_surface_suite():
+    product = create_standard_snowball(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        ko_barrier=103.0,
+        ko_rate=0.15,
+        ki_barrier=75.0,
+        num_observations=4,
+        include_principal=False,
+    )
+    env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.2),
+        rate_curve=FlatRateCurve(rate=0.02),
+        div_yield=ContinuousDividendYield(div_yield=0.01),
+        valuation_date=datetime(2024, 1, 1),
+    )
+
+    snapshot = build_snowball_risk_snapshot(
+        product=product,
+        pricing_env=env,
+        engine=DummyEngine(),
+        label="2024-01-01",
+        grid_spec=GridSpec(spot_nodes=5, q_nodes=5, vol_nodes=5),
+    )
+
+    surface_keys = {surface["key"] for surface in snapshot["surfaces"]}
+    assert "rhoq_spot_div" in surface_keys
+    assert "rhob_spot_div" in surface_keys
+    assert "cross_s_q" in surface_keys
+    assert "vanna_spot_vol" in surface_keys
+    assert "volga_spot_vol" in surface_keys
+    rhoq_surface = next(
+        surface for surface in snapshot["surfaces"] if surface["key"] == "rhoq_spot_div"
+    )
+    assert len(rhoq_surface["z"]) == 5
+    assert len(rhoq_surface["z"][0]) == 5
+    assert snapshot["scenario_ladder"]["worst_pnl"] is not None
+    assert len(snapshot["bucketed_greeks"]) > 0

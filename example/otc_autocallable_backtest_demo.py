@@ -32,6 +32,8 @@ from asset.equity.param import MCParams, PDEParams, QuadParams
 from asset.equity.product.option import create_standard_snowball
 from backtest.otc import (
     AutocallableBacktestConfig,
+    AutocallableBacktestDashboard,
+    AutocallableDashboardConfig,
     AutocallableBacktestEngine,
     AutocallableDeltaHedgeStrategy,
     AutocallableEngineConfig,
@@ -86,6 +88,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--mc-steps", type=int, default=252)
     parser.add_argument("--mc-seed", type=int, default=42)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Skip static dashboard.html generation.",
+    )
     return parser.parse_args(argv)
 
 
@@ -862,6 +869,12 @@ def write_outputs(results, output_dir: Path, args: argparse.Namespace) -> dict[s
     workbook_path = output_dir / "results.xlsx"
     results.export_to_excel(str(workbook_path))
     append_workbook_metadata(results, workbook_path, args)
+    dashboard_path = None
+    if not bool(getattr(args, "no_dashboard", False)):
+        dashboard_path = AutocallableBacktestDashboard(
+            results,
+            AutocallableDashboardConfig(),
+        ).write_html(output_dir / "dashboard.html")
 
     states = results.states_df
     actions = results.actions_df
@@ -890,6 +903,7 @@ def write_outputs(results, output_dir: Path, args: argparse.Namespace) -> dict[s
             "last_implied_q": None
             if states.empty
             else float(states["implied_q"].iloc[-1]),
+            "dashboard_html": None if dashboard_path is None else str(dashboard_path),
         }
     )
     with (output_dir / "summary.json").open("w", encoding="utf-8") as fh:

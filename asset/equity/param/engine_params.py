@@ -585,6 +585,9 @@ class QuadParams(EngineParams):
         event_smoothing_mode: Smoothing mode (fixed, auto, reverse_aware).
         event_smoothing_kernel: Smoothing kernel (cosine, tanh).
         event_smoothing_log_width: Target log-space width for auto smoothing.
+        dense_discrete_ki_as_continuous_threshold: Discrete KI schedules with more
+            observations than this threshold are priced with the continuous KI
+            bridge approximation for numerical stability. Set to 0 to disable.
     """
 
     grid_points: int = 1001  # Odd number for Simpson's rule
@@ -598,6 +601,7 @@ class QuadParams(EngineParams):
     event_smoothing_mode: str = "fixed"
     event_smoothing_kernel: str = "cosine"
     event_smoothing_log_width: float = 0.002
+    dense_discrete_ki_as_continuous_threshold: int = 120
 
     def __post_init__(self):
         """Validate quadrature parameters."""
@@ -672,6 +676,11 @@ class QuadParams(EngineParams):
         if self.event_smoothing_log_width <= 0.0:
             raise ValidationError(
                 f"event_smoothing_log_width must be positive, got {self.event_smoothing_log_width}"
+            )
+        if self.dense_discrete_ki_as_continuous_threshold < 0:
+            raise ValidationError(
+                "dense_discrete_ki_as_continuous_threshold must be non-negative, "
+                f"got {self.dense_discrete_ki_as_continuous_threshold}"
             )
 
     @classmethod

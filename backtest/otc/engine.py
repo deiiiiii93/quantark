@@ -13,6 +13,7 @@ import pandas as pd
 
 from asset.equity.product.option.phoenix_option import PhoenixOption
 from asset.equity.product.option.snowball_option import SnowballOption
+from asset.equity.engine.base_engine import BaseEngine
 from param import FlatRateCurve, FlatVolSurface, SpotQuote
 from priceenv import PricingEnvironment
 from util.exceptions import ValidationError
@@ -91,9 +92,22 @@ class AutocallableBacktestEngine:
             env, basis_yield, implied_q, futures_ttm = self._build_env(
                 date, market, selected
             )
-            lifecycle_product = self._product_for_lifecycle()
             product = self._product_for_date(date, env)
+
+            if self._initial_product_value is None:
+                initial_price = (
+                    float(self.config.initial_product_price)
+                    if self.config.initial_product_price is not None
+                    else float(self.pricing_engine.price(product, env))
+                )
+                self._initial_product_value = (
+                    self.config.product_quantity * initial_price
+                )
+
+            lifecycle_product = self._product_for_lifecycle()
             self._apply_lifecycle_events(date, lifecycle_product, env, market["spot"])
+            self._settle_maturity_if_due(date, lifecycle_product, env, market["spot"])
+            product = self._product_for_date(date, env)
 
             price = 0.0
             greeks = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
@@ -101,22 +115,19 @@ class AutocallableBacktestEngine:
                 price = float(self.pricing_engine.price(product, env))
                 greeks = self._calculate_greeks(product, env, price)
 
-            if self._initial_product_value is None:
-                initial_price = (
-                    float(self.config.initial_product_price)
-                    if self.config.initial_product_price is not None
-                    else price
-                )
-                self._initial_product_value = (
-                    self.config.product_quantity * initial_price
-                )
-
             if self.config.calculate_event_probabilities and self.lifecycle.alive:
                 self._record_event_probabilities(date, product, env)
 
             if self.config.calculate_surfaces and self.lifecycle.alive:
-                self._record_surfaces(date, product, env, market["spot"], implied_q)
+                self._record_surfaces(
+                    date,
+                    product,
+                    env,
+                    market["spot"],
+                    self._pricing_dividend_yield(implied_q),
+                )
 
+            pre_hedge_contracts = self.hedge_position.quantity
             self._rebalance(date, selected, greeks)
             self._record_day(
                 date=date,
@@ -124,9 +135,11 @@ class AutocallableBacktestEngine:
                 market=market,
                 basis_yield=basis_yield,
                 implied_q=implied_q,
+                pricing_q=self._pricing_dividend_yield(implied_q),
                 futures_ttm=futures_ttm,
                 price=price,
                 greeks=greeks,
+                pre_hedge_contracts=pre_hedge_contracts,
             )
 
         return AutocallableBacktestResults(
@@ -188,19 +201,47 @@ class AutocallableBacktestEngine:
             futures_price=float(selected["futures_price"]),
             time_to_maturity=futures_ttm,
         )
+        pricing_q = self._pricing_dividend_yield(implied_q)
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=market["spot"], asset_name=self.config.underlying),
             vol_surface=FlatVolSurface(volatility=market["volatility"]),
             rate_curve=FlatRateCurve(rate=market["rate"]),
-            div_yield=SignedDividendYield(implied_q),
+            div_yield=SignedDividendYield(pricing_q),
             basis_yield=ImpliedBasisYield(basis_yield),
             valuation_date=date.to_pydatetime(),
         )
         return env, basis_yield, implied_q, futures_ttm
 
+    def _pricing_dividend_yield(self, implied_q: float) -> float:
+        if self.config.fixed_dividend_yield is not None:
+            return float(self.config.fixed_dividend_yield)
+        return float(implied_q)
+
     def _calculate_greeks(
         self, product: Any, env: PricingEnvironment, price: float
     ) -> dict[str, float]:
+        params = getattr(self.pricing_engine, "params", None)
+        uses_base_greeks = (
+            isinstance(self.pricing_engine, BaseEngine)
+            and type(self.pricing_engine).calculate_greeks is BaseEngine.calculate_greeks
+        )
+        bump = float(getattr(params, "bump_size", 1e-4)) if params is not None else 0.0
+        if uses_base_greeks and bump > 0.0 and np.isfinite(price):
+            try:
+                env_up = deepcopy(env)
+                env_up.spot_quote.spot *= 1.0 + bump
+                price_up = float(self.pricing_engine.price(product, env_up))
+
+                env_down = deepcopy(env)
+                env_down.spot_quote.spot *= 1.0 - bump
+                price_down = float(self.pricing_engine.price(product, env_down))
+
+                spot_bump = float(env.spot) * bump
+                delta = (price_up - price_down) / (2.0 * spot_bump)
+                gamma = (price_up - 2.0 * float(price) + price_down) / (spot_bump**2)
+                return {"price": float(price), "delta": delta, "gamma": gamma}
+            except Exception:
+                pass
         try:
             greeks = dict(self.pricing_engine.calculate_greeks(product, env))
         except Exception:
@@ -212,7 +253,8 @@ class AutocallableBacktestEngine:
 
     def _rebalance(self, date: pd.Timestamp, selected, greeks: dict[str, float]) -> None:
         target = 0.0
-        should_rebalance = False
+        reason = "inside_band"
+        trade_type = "hedge_rebalance"
         if self.lifecycle.alive:
             target = self.strategy.target_contracts(
                 product_delta=float(greeks.get("delta", 0.0)),
@@ -222,6 +264,13 @@ class AutocallableBacktestEngine:
             should_rebalance = self.strategy.should_rebalance(
                 self.hedge_position.quantity, target
             )
+            if should_rebalance:
+                reason = "delta_rebalance"
+        else:
+            should_rebalance = abs(self.hedge_position.quantity) > 1e-12
+            if should_rebalance:
+                reason = "product_terminated"
+                trade_type = "hedge_close"
 
         trade_contracts = target - self.hedge_position.quantity
         if should_rebalance and abs(trade_contracts) > 1e-12:
@@ -229,8 +278,8 @@ class AutocallableBacktestEngine:
                 date=date,
                 selected=selected,
                 quantity_delta=trade_contracts,
-                trade_type="hedge_rebalance",
-                reason="delta_rebalance",
+                trade_type=trade_type,
+                reason=reason,
             )
 
         self._rebalances.append(
@@ -245,7 +294,7 @@ class AutocallableBacktestEngine:
                     "outside_band" if should_rebalance else "inside_band"
                 ),
                 "no_trade_reason": None if should_rebalance else "inside_band",
-                "reason": "delta_rebalance" if should_rebalance else "inside_band",
+                "reason": reason,
             }
         )
 
@@ -256,26 +305,33 @@ class AutocallableBacktestEngine:
         futures_slice: pd.DataFrame,
         current_contract: Optional[str],
     ) -> None:
-        if current_contract is None or abs(self.hedge_position.quantity) < 1e-12:
+        if abs(self.hedge_position.quantity) < 1e-12:
             return
-        old_rows = futures_slice[futures_slice["contract"] == current_contract]
+        old_contract = self.hedge_position.contract or current_contract
+        if old_contract is None:
+            return
+        old_rows = futures_slice[futures_slice["contract"] == old_contract]
+        close_reason = "futures_roll"
         if old_rows.empty:
-            return
-        old = old_rows.iloc[0]
+            old = selected.copy()
+            old["contract"] = old_contract
+            close_reason = "futures_roll_missing_old_contract"
+        else:
+            old = old_rows.iloc[0]
         qty = self.hedge_position.quantity
         self._execute_futures_trade(
             date=date,
             selected=old,
             quantity_delta=-qty,
             trade_type="roll_close",
-            reason="futures_roll",
+            reason=close_reason,
         )
         self._execute_futures_trade(
             date=date,
             selected=selected,
             quantity_delta=qty,
             trade_type="roll_open",
-            reason="futures_roll",
+            reason=close_reason,
         )
 
     def _execute_futures_trade(
@@ -323,11 +379,15 @@ class AutocallableBacktestEngine:
         market: dict[str, float],
         basis_yield: float,
         implied_q: float,
+        pricing_q: float,
         futures_ttm: float,
         price: float,
         greeks: dict[str, float],
+        pre_hedge_contracts: float,
     ) -> None:
         futures_price = float(selected["futures_price"])
+        spot = float(market["spot"])
+        multiplier = float(selected["multiplier"])
         hedge_mtm = self.hedge_position.mark_to_market(futures_price)
         product_mtm = (
             self.config.product_quantity * price if self.lifecycle.alive else 0.0
@@ -340,6 +400,21 @@ class AutocallableBacktestEngine:
         total_pnl = product_pnl + hedge_mtm - self._transaction_costs
         cash = self.lifecycle.realized_cashflows - self._transaction_costs
         portfolio_value = product_mtm + hedge_mtm + cash
+        product_delta = float(greeks.get("delta", 0.0))
+        product_gamma = float(greeks.get("gamma", 0.0))
+        product_position_delta = product_delta * self.config.product_quantity
+        product_position_gamma = product_gamma * self.config.product_quantity
+        pre_hedge_futures_delta = float(pre_hedge_contracts) * multiplier
+        post_hedge_futures_delta = self.hedge_position.quantity * multiplier
+        pre_hedge_delta = product_position_delta + pre_hedge_futures_delta
+        post_hedge_delta = product_position_delta + post_hedge_futures_delta
+        pre_hedge_gamma = product_position_gamma
+        post_hedge_gamma = product_position_gamma
+        one_percent_spot_move = spot * 0.01
+        pre_hedge_delta_cash_1pct = pre_hedge_delta * one_percent_spot_move
+        post_hedge_delta_cash_1pct = post_hedge_delta * one_percent_spot_move
+        pre_hedge_gamma_cash_1pct = pre_hedge_gamma * spot**2 / 100.0
+        post_hedge_gamma_cash_1pct = post_hedge_gamma * spot**2 / 100.0
 
         self._states.append(
             {
@@ -358,13 +433,16 @@ class AutocallableBacktestEngine:
                 "rate": market["rate"],
                 "basis_yield": basis_yield,
                 "implied_q": implied_q,
+                "pricing_q": pricing_q,
                 "active_contract": str(selected["contract"]),
                 "futures_price": futures_price,
                 "futures_ttm": futures_ttm,
+                "futures_multiplier": multiplier,
                 "futures_contracts": self.hedge_position.quantity,
                 "alive": self.lifecycle.alive,
                 "knocked_in": self.lifecycle.knocked_in,
                 "knocked_out": self.lifecycle.knocked_out,
+                "matured": self.lifecycle.matured,
             }
         )
         self._greeks.append(
@@ -373,6 +451,25 @@ class AutocallableBacktestEngine:
                 "price": float(greeks.get("price", price)),
                 "delta": float(greeks.get("delta", 0.0)),
                 "gamma": float(greeks.get("gamma", 0.0)),
+                "product_delta": product_delta,
+                "product_gamma": product_gamma,
+                "product_position_delta": product_position_delta,
+                "product_position_gamma": product_position_gamma,
+                "pre_hedge_contracts": float(pre_hedge_contracts),
+                "post_hedge_contracts": self.hedge_position.quantity,
+                "futures_multiplier": multiplier,
+                "pre_hedge_futures_delta": pre_hedge_futures_delta,
+                "post_hedge_futures_delta": post_hedge_futures_delta,
+                "pre_hedge_delta": pre_hedge_delta,
+                "post_hedge_delta": post_hedge_delta,
+                "pre_hedge_gamma": pre_hedge_gamma,
+                "post_hedge_gamma": post_hedge_gamma,
+                "pre_hedge_delta_cash_1pct": pre_hedge_delta_cash_1pct,
+                "post_hedge_delta_cash_1pct": post_hedge_delta_cash_1pct,
+                "pre_hedge_gamma_cash_1pct": pre_hedge_gamma_cash_1pct,
+                "post_hedge_gamma_cash_1pct": post_hedge_gamma_cash_1pct,
+                "delta_cash_1pct": post_hedge_delta_cash_1pct,
+                "gamma_cash_1pct": post_hedge_gamma_cash_1pct,
                 "vega": float(greeks.get("vega", np.nan)),
                 "theta": float(greeks.get("theta", np.nan)),
                 "rho": float(greeks.get("rho", np.nan)),
@@ -389,7 +486,7 @@ class AutocallableBacktestEngine:
         product: Any,
         env: PricingEnvironment,
         spot: float,
-        implied_q: float,
+        q_center: float,
     ) -> None:
         spec = self.config.surface_config
         spot_grid = np.linspace(
@@ -398,10 +495,10 @@ class AutocallableBacktestEngine:
             spec.spot_nodes,
         )
         if spec.q_nodes == 1:
-            q_grid = np.array([implied_q], dtype=float)
+            q_grid = np.array([q_center], dtype=float)
         else:
-            q_lower = max(0.0, implied_q - spec.q_width)
-            q_upper = max(0.0, implied_q + spec.q_width)
+            q_lower = max(0.0, q_center - spec.q_width)
+            q_upper = max(0.0, q_center + spec.q_width)
             q_grid = np.linspace(
                 q_lower, q_upper, spec.q_nodes
             )
@@ -413,14 +510,20 @@ class AutocallableBacktestEngine:
                 surf_env.div_yield = SignedDividendYield(float(q))
                 try:
                     greeks = self.surface_engine.calculate_greeks(product, surf_env)
+                    delta = float(greeks.get("delta", np.nan))
+                    gamma = float(greeks.get("gamma", np.nan))
+                    spot_node = float(s)
+                    one_percent_node_move = spot_node * 0.01
                     row = {
                         "date": date,
                         "surface_type": "spot_q",
                         "spot_node": float(s),
                         "q_node": float(q),
                         "price": float(greeks.get("price", np.nan)),
-                        "delta": float(greeks.get("delta", np.nan)),
-                        "gamma": float(greeks.get("gamma", np.nan)),
+                        "delta": delta,
+                        "gamma": gamma,
+                        "delta_cash_1pct": delta * one_percent_node_move,
+                        "gamma_cash_1pct": gamma * spot_node**2 / 100.0,
                     }
                 except Exception:
                     row = {
@@ -431,6 +534,8 @@ class AutocallableBacktestEngine:
                         "price": np.nan,
                         "delta": np.nan,
                         "gamma": np.nan,
+                        "delta_cash_1pct": np.nan,
+                        "gamma_cash_1pct": np.nan,
                     }
                 self._surfaces.append(row)
 
@@ -526,32 +631,122 @@ class AutocallableBacktestEngine:
         except Exception:
             return None
 
+    def _lifecycle_snapshot(self) -> dict[str, Any]:
+        return {
+            "alive": self.lifecycle.alive,
+            "knocked_in": self.lifecycle.knocked_in,
+            "knocked_out": self.lifecycle.knocked_out,
+            "matured": self.lifecycle.matured,
+        }
+
+    def _append_action(
+        self,
+        *,
+        before_state: dict[str, Any],
+        action_type: str,
+        date: pd.Timestamp,
+        observation_index: Optional[int],
+        spot: float,
+        barrier: Optional[float],
+        cashflow: float,
+        **extra: Any,
+    ) -> None:
+        after_state = self._lifecycle_snapshot()
+        row = {
+            "date": date,
+            "action_type": action_type,
+            "observation_index": observation_index,
+            "spot": spot,
+            "barrier": barrier,
+            "cashflow": cashflow,
+            "alive_before": before_state["alive"],
+            "knocked_in_before": before_state["knocked_in"],
+            "knocked_out_before": before_state["knocked_out"],
+            "matured_before": before_state["matured"],
+            "alive_after": after_state["alive"],
+            "knocked_in_after": after_state["knocked_in"],
+            "knocked_out_after": after_state["knocked_out"],
+            "matured_after": after_state["matured"],
+        }
+        row.update(extra)
+        self._actions.append(row)
+
+    def _maturity_market_date(self, product: Any, env: PricingEnvironment) -> pd.Timestamp:
+        explicit = (
+            getattr(product, "maturity_date", None)
+            or getattr(product, "exercise_date", None)
+        )
+        if explicit is not None:
+            return self._next_available_market_date(pd.Timestamp(explicit).normalize())
+
+        maturity = float(product.get_maturity(env))
+        base_date = pd.Timestamp(getattr(product, "initial_date", None) or self._start_date)
+        maturity_date = (
+            base_date + timedelta(days=int(round(maturity * 365.0)))
+        ).normalize()
+        return self._next_available_market_date(maturity_date)
+
+    def _settle_maturity_if_due(
+        self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
+    ) -> None:
+        if not self.lifecycle.alive:
+            return
+        if date < self._maturity_market_date(product, env):
+            return
+
+        before = self._lifecycle_snapshot()
+        payoff = float(
+            product.get_payoff(
+                spot,
+                env,
+                knocked_in=self.lifecycle.knocked_in,
+            )
+        )
+        cashflow = self.config.product_quantity * payoff
+        if self.lifecycle.mark_maturity(date.to_pydatetime(), cashflow):
+            self._append_action(
+                before_state=before,
+                action_type="MATURITY",
+                date=date,
+                observation_index=None,
+                spot=spot,
+                barrier=None,
+                cashflow=cashflow,
+                payoff=payoff,
+            )
+
     def _apply_lifecycle_events(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
         if not self.lifecycle.alive:
             return
         ko_records = self._scheduled_records(product, env, "ko")
-        for idx, rec in enumerate(ko_records):
-            if idx in self.lifecycle.observed_ko_indices:
-                continue
-            if date < rec["date"]:
-                continue
-            self.lifecycle.observed_ko_indices.add(idx)
-            if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=True):
-                cashflow = self.config.product_quantity * float(rec.get("payoff", 0.0))
-                if self.lifecycle.mark_ko(date.to_pydatetime(), cashflow):
-                    self._actions.append(
-                        {
-                            "date": date,
-                            "action_type": "KO",
-                            "observation_index": idx,
-                            "spot": spot,
-                            "barrier": rec["barrier"],
-                            "cashflow": cashflow,
-                        }
-                    )
-                return
+        ko_disabled_after_ki = bool(
+            self.lifecycle.knocked_in
+            and getattr(product.barrier_config, "disable_ko_after_ki", False)
+        )
+        if not ko_disabled_after_ki:
+            for idx, rec in enumerate(ko_records):
+                if idx in self.lifecycle.observed_ko_indices:
+                    continue
+                if date < rec["date"]:
+                    continue
+                self.lifecycle.observed_ko_indices.add(idx)
+                if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=True):
+                    before = self._lifecycle_snapshot()
+                    cashflow = self.config.product_quantity * float(rec.get("payoff", 0.0))
+                    if self.lifecycle.mark_ko(date.to_pydatetime(), cashflow):
+                        self._append_action(
+                            before_state=before,
+                            action_type="KO",
+                            date=date,
+                            observation_index=idx,
+                            spot=spot,
+                            barrier=rec["barrier"],
+                            cashflow=cashflow,
+                            payoff=float(rec.get("payoff", 0.0)),
+                        )
+                    return
 
         ki_records = self._scheduled_records(product, env, "ki")
         ki_observation_type = getattr(product.barrier_config, "ki_observation_type", None)
@@ -564,17 +759,17 @@ class AutocallableBacktestEngine:
             if isinstance(barrier, list):
                 barrier = barrier[0]
             if self._barrier_hit(spot, float(barrier), product.is_reverse, is_ko=False):
+                before = self._lifecycle_snapshot()
                 if self.lifecycle.mark_ki(date.to_pydatetime()):
-                    self._actions.append(
-                        {
-                            "date": date,
-                            "action_type": "KI",
-                            "observation_index": None,
-                            "spot": spot,
-                            "barrier": float(barrier),
-                            "cashflow": 0.0,
-                            "monitoring": "daily_close",
-                        }
+                    self._append_action(
+                        before_state=before,
+                        action_type="KI",
+                        date=date,
+                        observation_index=None,
+                        spot=spot,
+                        barrier=float(barrier),
+                        cashflow=0.0,
+                        monitoring="daily_close",
                     )
         else:
             for idx, rec in enumerate(ki_records):
@@ -584,16 +779,16 @@ class AutocallableBacktestEngine:
                     continue
                 self.lifecycle.observed_ki_indices.add(idx)
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=False):
+                    before = self._lifecycle_snapshot()
                     if self.lifecycle.mark_ki(date.to_pydatetime()):
-                        self._actions.append(
-                            {
-                                "date": date,
-                                "action_type": "KI",
-                                "observation_index": idx,
-                                "spot": spot,
-                                "barrier": rec["barrier"],
-                                "cashflow": 0.0,
-                            }
+                        self._append_action(
+                            before_state=before,
+                            action_type="KI",
+                            date=date,
+                            observation_index=idx,
+                            spot=spot,
+                            barrier=rec["barrier"],
+                            cashflow=0.0,
                         )
 
         if isinstance(product, PhoenixOption):
@@ -604,32 +799,45 @@ class AutocallableBacktestEngine:
                     continue
                 self.lifecycle.observed_coupon_indices.add(idx)
                 if product.is_coupon_triggered(spot, idx):
+                    before = self._lifecycle_snapshot()
                     coupon = self.config.product_quantity * product.get_coupon_payoff(idx)
                     self.lifecycle.add_cashflow(coupon)
                     self.lifecycle.coupon_memory_count = 0
-                    self._actions.append(
-                        {
-                            "date": date,
-                            "action_type": "COUPON",
-                            "observation_index": idx,
-                            "spot": spot,
-                            "barrier": product.get_coupon_barrier_at(idx),
-                            "cashflow": coupon,
-                        }
+                    self._append_action(
+                        before_state=before,
+                        action_type="COUPON",
+                        date=date,
+                        observation_index=idx,
+                        spot=spot,
+                        barrier=product.get_coupon_barrier_at(idx),
+                        cashflow=coupon,
                     )
                 elif product.has_memory_coupon:
                     self.lifecycle.coupon_memory_count += 1
 
+    def _schedule_resolution_env(
+        self, product: Any, env: PricingEnvironment
+    ) -> PricingEnvironment:
+        """Resolve lifecycle schedules from the contract issue date."""
+        base_date = getattr(product, "initial_date", None) or self._start_date
+        if base_date is None:
+            return env
+
+        schedule_env = deepcopy(env)
+        schedule_env.valuation_date = pd.Timestamp(base_date).to_pydatetime()
+        return schedule_env
+
     def _scheduled_records(
         self, product: Any, env: PricingEnvironment, kind: str
     ) -> list[dict[str, Any]]:
+        schedule_env = self._schedule_resolution_env(product, env)
         if kind == "ko":
-            profile = product.get_ko_observation_profile(env)
+            profile = product.get_ko_observation_profile(schedule_env)
             schedule = getattr(product.barrier_config, "ko_observation_schedule", None)
         else:
             if not getattr(product, "has_ki_barrier", False):
                 return []
-            profile = product.get_ki_observation_profile(env)
+            profile = product.get_ki_observation_profile(schedule_env)
             schedule = getattr(product.barrier_config, "ki_observation_schedule", None)
 
         times = list(profile.get("observation_times", []))
