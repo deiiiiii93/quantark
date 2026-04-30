@@ -988,23 +988,138 @@ def terms_frame(
     coupons: dict[str, float],
     initial_spot: float,
     coupon_results: Optional[dict[str, FairCouponResult]] = None,
+    issue_date: Optional[pd.Timestamp] = None,
+    dates: Optional[pd.Series] = None,
 ) -> pd.DataFrame:
+    normalized_issue_date = pd.Timestamp(issue_date).normalize() if issue_date is not None else None
+    normalized_dates = pd.Series(dtype="datetime64[ns]")
+    if dates is not None:
+        normalized_dates = pd.to_datetime(pd.Series(dates), errors="coerce").dropna().dt.normalize()
+    if normalized_issue_date is None and not normalized_dates.empty:
+        normalized_issue_date = pd.Timestamp(normalized_dates.iloc[0]).normalize()
+
+    maturity = 3.0
+    if normalized_issue_date is not None and not normalized_dates.empty:
+        maturity = max(
+            (pd.Timestamp(normalized_dates.iloc[-1]).normalize() - normalized_issue_date).days
+            / 365.0,
+            1.0 / 365.0,
+        )
+
+    ko_times = ko_observation_times(maturity)
+    maturity_date = (
+        pd.Timestamp(normalized_dates.iloc[-1]).normalize()
+        if not normalized_dates.empty
+        else (
+            normalized_issue_date + pd.Timedelta(days=int(round(maturity * 365.0)))
+            if normalized_issue_date is not None
+            else None
+        )
+    )
+
+    def _date_text(date: Optional[pd.Timestamp]) -> str:
+        if date is None or pd.isna(date):
+            return "n/a"
+        return pd.Timestamp(date).strftime("%Y-%m-%d")
+
+    def _schedule_date_from_time(time: float) -> Optional[pd.Timestamp]:
+        if normalized_issue_date is None:
+            return None
+        target = normalized_issue_date + pd.Timedelta(days=int(round(time * 365.0)))
+        if normalized_dates.empty:
+            return target
+        candidates = normalized_dates[normalized_dates >= target]
+        return pd.Timestamp(candidates.iloc[0]).normalize() if not candidates.empty else maturity_date
+
+    ko_dates = [_schedule_date_from_time(time) for time in ko_times]
+    dki_dates = (
+        normalized_dates[normalized_dates > normalized_issue_date]
+        if normalized_issue_date is not None and not normalized_dates.empty
+        else pd.Series(dtype="datetime64[ns]")
+    )
+
+    def _date_schedule_rows(
+        term_prefix: str,
+        schedule_dates: list[Optional[pd.Timestamp]] | pd.Series,
+        *,
+        chunk_size: int = 18,
+    ) -> list[dict[str, Any]]:
+        date_texts = [_date_text(date) for date in list(schedule_dates)]
+        if not date_texts:
+            return [{"term": term_prefix, "value": "n/a"}]
+        return [
+            {
+                "term": f"{term_prefix}.{idx // chunk_size + 1:02d}",
+                "value": ", ".join(date_texts[idx : idx + chunk_size]),
+            }
+            for idx in range(0, len(date_texts), chunk_size)
+        ]
+
+    ko_window = (
+        f"{len(ko_times)} monthly discrete observations; "
+        f"{_date_text(ko_dates[0] if ko_dates else None)} to {_date_text(ko_dates[-1] if ko_dates else None)}"
+    )
+    dki_window = (
+        f"{len(dki_dates)} trading-day discrete observations; "
+        f"{_date_text(dki_dates.iloc[0] if not dki_dates.empty else None)} to "
+        f"{_date_text(dki_dates.iloc[-1] if not dki_dates.empty else None)}"
+    )
     rows = [
         {"term": "underlying", "value": f"{UNDERLYING_SYMBOL}.SH"},
         {"term": "hedging_instrument", "value": "IM.CFE"},
         {"term": "initial_spot", "value": initial_spot},
+        {"term": "issue_date", "value": _date_text(normalized_issue_date)},
+        {"term": "maturity_date", "value": _date_text(maturity_date)},
+        {"term": "tenor_years_realized", "value": maturity},
         {"term": "pv_convention", "value": "principal_excluded_zero_upfront"},
         {"term": "payoff_include_principal", "value": False},
         {"term": "initial_product_price", "value": "0.0"},
         {"term": "notional", "value": terms.notional},
         {"term": "ko_ratio", "value": terms.ko_ratio},
         {"term": "ki_ratio", "value": terms.ki_ratio},
+        {"term": "ko_barrier_level", "value": float(initial_spot) * float(terms.ko_ratio)},
+        {"term": "ki_barrier_level", "value": float(initial_spot) * float(terms.ki_ratio)},
+        {
+            "term": "observation_schedule_date_basis",
+            "value": "KO target dates are mapped to the first available path date on or after each monthly observation time; DKI dates use every trading date after issue date",
+        },
+        {"term": "ko_observation.PPP-DKI", "value": ko_window},
+        {"term": "ko_observation.NPP-DKI", "value": ko_window},
+        {
+            "term": "ko_observation.PPP-EKI-Parachute",
+            "value": f"{ko_window}; final KO barrier equals KI barrier ({terms.ki_ratio:.2%})",
+        },
+        {"term": "ki_observation.PPP-DKI", "value": dki_window},
+        {"term": "ki_observation.NPP-DKI", "value": dki_window},
+        {
+            "term": "ki_observation.PPP-EKI-Parachute",
+            "value": f"final-only discrete KI observation on {_date_text(maturity_date)}",
+        },
+        {
+            "term": "final_observation_precedence",
+            "value": "KO has precedence at a final KO/KI tie; spot >= KI exits by KO, spot < KI settles through KI/maturity payoff",
+        },
+        {
+            "term": "post_ki_ko_allowed",
+            "value": "True; later KO remains allowed after KI unless a product explicitly disables it",
+        },
         {"term": "ppp_protection_rate", "value": terms.ppp_protection_rate},
         {"term": "rate", "value": terms.rate},
         {"term": "dividend_yield", "value": terms.dividend_yield},
         {"term": "volatility", "value": terms.volatility},
         {"term": "futures_multiplier", "value": FUTURES_MULTIPLIER},
     ]
+    for product_label in ["PPP-DKI", "NPP-DKI", "PPP-EKI-Parachute"]:
+        rows.extend(_date_schedule_rows(f"ko_observation_dates.{product_label}", ko_dates))
+    for product_label in ["PPP-DKI", "NPP-DKI"]:
+        rows.extend(_date_schedule_rows(f"ki_observation_dates.{product_label}", dki_dates, chunk_size=18))
+    rows.extend(
+        _date_schedule_rows(
+            "ki_observation_dates.PPP-EKI-Parachute",
+            [maturity_date],
+            chunk_size=18,
+        )
+    )
     for label, coupon in coupons.items():
         rows.append({"term": f"fair_coupon.{label}", "value": coupon})
         if coupon_results and label in coupon_results:
@@ -1342,6 +1457,56 @@ def write_html_dashboard(
             body_rows.append("<tr>" + "".join(cells) + "</tr>")
         return f"<table><thead><tr>{headers}</tr></thead><tbody>{''.join(body_rows)}</tbody></table>"
 
+    def observation_schedule_payload(frame: pd.DataFrame) -> dict[str, list[str]]:
+        schedules: dict[str, list[str]] = {}
+        if frame.empty or not {"term", "value"}.issubset(frame.columns):
+            return schedules
+        schedule_rows = frame[frame["term"].astype(str).str.startswith(("ko_observation_dates.", "ki_observation_dates."))]
+        for _, row in schedule_rows.iterrows():
+            term = str(row["term"])
+            prefix = term.rsplit(".", 1)[0]
+            key = prefix.replace("_dates", "", 1)
+            dates = [item.strip() for item in str(row["value"]).split(",") if item.strip()]
+            schedules.setdefault(key, []).extend(dates)
+        return schedules
+
+    observation_schedules = observation_schedule_payload(terms)
+
+    def terms_table_html(frame: pd.DataFrame) -> str:
+        if frame.empty:
+            return '<div class="empty-state">No records</div>'
+        visible = frame[
+            ~frame["term"].astype(str).str.startswith(("ko_observation_dates.", "ki_observation_dates."))
+        ].copy()
+        headers = "<th>Term</th><th>Value</th>"
+        rows = []
+        for _, row in visible.iterrows():
+            term = str(row["term"])
+            value = row["value"]
+            if isinstance(value, float):
+                value_text = fmt_number(value, 4)
+                value_cls = "num"
+            else:
+                value_text = esc(value)
+                value_cls = ""
+            if term in observation_schedules:
+                value_html = (
+                    '<div class="term-value-action">'
+                    f"<span>{value_text}</span>"
+                    f'<button class="obs-schedule-button" type="button" data-observation-key="{esc(term)}">View dates</button>'
+                    "</div>"
+                )
+                value_cls = ""
+            else:
+                value_html = value_text
+            rows.append(
+                "<tr>"
+                f'<td class="term-name">{esc(term)}</td>'
+                f'<td class="{value_cls}">{value_html}</td>'
+                "</tr>"
+            )
+        return f"<table><thead><tr>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+
     def metric_card(label: str, value: str, detail: str = "", tone: str = "") -> str:
         return (
             f'<div class="metric {tone}"><span>{esc(label)}</span>'
@@ -1625,7 +1790,7 @@ def write_html_dashboard(
     risk_table = summary_for_display.sort_values("worst_drawdown").head(15)
     trader_table = summary_for_display.sort_values("gross_trade_notional", ascending=False) if "gross_trade_notional" in summary_for_display.columns else summary_for_display
 
-    terms_html = table_html(terms, ["term", "value"], limit=None)
+    terms_html = terms_table_html(terms)
     executive_table = table_html(
         summary_for_display.sort_values(["scenario", "product"]),
         ["scenario", "product", "final_total_pnl", "worst_drawdown", "worst_daily_pnl", "num_trades", "lifecycle_actions"],
@@ -2334,6 +2499,85 @@ def write_html_dashboard(
   </script>
 """.replace("__DETAIL_PAYLOAD__", detail_payload.replace("</", "<\\/"))
 
+    observation_schedule_payload_text = json.dumps(
+        observation_schedules,
+        separators=(",", ":"),
+    )
+    observation_schedule_script = """
+  <script id="observation-schedules-data" type="application/json">__OBSERVATION_SCHEDULES_PAYLOAD__</script>
+  <script>
+    (() => {
+      const schedules = JSON.parse(document.getElementById("observation-schedules-data")?.textContent || "{}");
+      const modal = document.getElementById("observationScheduleModal");
+      const title = document.getElementById("observationScheduleTitle");
+      const summary = document.getElementById("observationScheduleSummary");
+      const body = document.getElementById("observationScheduleBody");
+      const pageLabel = document.getElementById("observationSchedulePage");
+      const prevButton = document.getElementById("observationSchedulePrev");
+      const nextButton = document.getElementById("observationScheduleNext");
+      const pageSize = 30;
+      let activeKey = "";
+      let activePage = 0;
+
+      const render = () => {
+        const dates = schedules[activeKey] || [];
+        const pageCount = Math.max(1, Math.ceil(dates.length / pageSize));
+        activePage = Math.min(Math.max(activePage, 0), pageCount - 1);
+        const start = activePage * pageSize;
+        const visibleDates = dates.slice(start, start + pageSize);
+        if (title) title.textContent = activeKey || "Observation Schedule";
+        if (summary) summary.textContent = `${dates.length.toLocaleString()} observation dates`;
+        if (pageLabel) pageLabel.textContent = `Page ${activePage + 1} / ${pageCount}`;
+        if (prevButton) prevButton.disabled = activePage <= 0;
+        if (nextButton) nextButton.disabled = activePage >= pageCount - 1;
+        if (body) {
+          body.innerHTML = visibleDates.map((date, idx) => `
+            <tr>
+              <td class="num">${start + idx + 1}</td>
+              <td>${date}</td>
+            </tr>
+          `).join("") || '<tr><td colspan="2">No schedule dates</td></tr>';
+        }
+      };
+
+      const open = (key) => {
+        activeKey = key;
+        activePage = 0;
+        render();
+        if (modal) {
+          modal.hidden = false;
+          modal.querySelector(".modal-close")?.focus();
+        }
+      };
+
+      const close = () => {
+        if (modal) modal.hidden = true;
+      };
+
+      document.querySelectorAll(".obs-schedule-button").forEach((button) => {
+        button.addEventListener("click", () => open(button.dataset.observationKey || ""));
+      });
+      prevButton?.addEventListener("click", () => {
+        activePage -= 1;
+        render();
+      });
+      nextButton?.addEventListener("click", () => {
+        activePage += 1;
+        render();
+      });
+      modal?.querySelectorAll("[data-close-modal]").forEach((button) => {
+        button.addEventListener("click", close);
+      });
+      modal?.addEventListener("click", (event) => {
+        if (event.target === modal) close();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && modal && !modal.hidden) close();
+      });
+    })();
+  </script>
+""".replace("__OBSERVATION_SCHEDULES_PAYLOAD__", observation_schedule_payload_text.replace("</", "<\\/"))
+
     plotly_divs = [
         plot_div(pnl_heatmap, include_plotlyjs=True),
         plot_div(drawdown_heatmap),
@@ -2695,6 +2939,115 @@ def write_html_dashboard(
       font-variant-numeric: tabular-nums;
       letter-spacing: 0;
     }}
+    .term-name {{
+      font-family: var(--font-number);
+      font-size: 12px;
+    }}
+    .term-value-action {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 420px;
+    }}
+    .term-value-action span {{
+      white-space: normal;
+      line-height: 1.4;
+    }}
+    .obs-schedule-button {{
+      flex: 0 0 auto;
+      border: 1px solid #bcc8d9;
+      background: #fff;
+      color: var(--navy);
+      padding: 5px 9px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 760;
+      cursor: pointer;
+    }}
+    .obs-schedule-button:hover {{
+      background: #eef3f8;
+    }}
+    .modal-backdrop[hidden] {{ display: none; }}
+    .modal-backdrop {{
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      background: rgba(16, 35, 62, 0.46);
+    }}
+    .modal-dialog {{
+      width: min(720px, 100%);
+      max-height: min(760px, 90vh);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      background: #fff;
+      border: 1px solid #a9b8cd;
+      box-shadow: 0 28px 70px rgba(10, 28, 52, 0.28);
+    }}
+    .modal-header {{
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px 10px;
+      border-bottom: 1px solid var(--line);
+    }}
+    .modal-header h3 {{ margin: 0; }}
+    .modal-close {{
+      border: 1px solid #bcc8d9;
+      background: #fff;
+      color: var(--ink);
+      width: 30px;
+      height: 30px;
+      font: inherit;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }}
+    .modal-summary {{
+      margin: 0;
+      padding: 10px 18px;
+      color: var(--muted);
+      font-size: 12.5px;
+    }}
+    .modal-table-wrap {{
+      overflow: auto;
+      margin: 0 18px;
+      border: 1px solid var(--line);
+    }}
+    .modal-table-wrap table {{ margin: 0; }}
+    .modal-table-wrap th {{ top: 0; }}
+    .modal-footer {{
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 18px 16px;
+    }}
+    .modal-footer button {{
+      border: 1px solid #bcc8d9;
+      background: #fff;
+      color: var(--navy);
+      min-width: 80px;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 760;
+      cursor: pointer;
+    }}
+    .modal-footer button:disabled {{
+      color: #98a2b3;
+      cursor: not-allowed;
+    }}
+    .modal-page-label {{
+      color: var(--muted);
+      font-size: 12.5px;
+      min-width: 92px;
+      text-align: center;
+    }}
     .pos {{ color: var(--green); }}
     .neg {{ color: var(--red); }}
     .empty-state {{ color: var(--muted); padding: 14px; border: 1px dashed var(--line); background: #fff; }}
@@ -2912,9 +3265,31 @@ def write_html_dashboard(
       <div class="panel">{terms_html}</div>
     </section>
   </main>
+  <div class="modal-backdrop" id="observationScheduleModal" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="observationScheduleTitle">
+      <div class="modal-header">
+        <h3 id="observationScheduleTitle">Observation Schedule</h3>
+        <button class="modal-close" type="button" aria-label="Close" data-close-modal>&times;</button>
+      </div>
+      <p class="modal-summary" id="observationScheduleSummary"></p>
+      <div class="modal-table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Date</th></tr></thead>
+          <tbody id="observationScheduleBody"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button id="observationSchedulePrev" type="button">Prev</button>
+        <span class="modal-page-label" id="observationSchedulePage"></span>
+        <button id="observationScheduleNext" type="button">Next</button>
+        <button type="button" data-close-modal>Close</button>
+      </div>
+    </div>
+  </div>
   <footer>Source tables: `data/summary_metrics.csv`, `data/daily_pnl.csv`, `data/daily_greeks.csv`, `data/hedge_actions.csv`, `data/lifecycle_events.csv`.</footer>
 {trade_chart_script}
 {detail_script}
+{observation_schedule_script}
 </body>
 </html>"""
     path.write_text(html, encoding="utf-8")
@@ -3016,7 +3391,14 @@ def run_case_study(args: argparse.Namespace) -> dict[str, Any]:
             summaries.append({key: _excel_safe_value(value) for key, value in summary.items()})
 
     consolidated = build_consolidated_frames(run_results)
-    term_table = terms_frame(terms, coupons, initial_spot, coupon_results)
+    term_table = terms_frame(
+        terms,
+        coupons,
+        initial_spot,
+        coupon_results,
+        issue_date=issue_date,
+        dates=base_spot["date"],
+    )
     write_csv_outputs(output_dir, summaries, consolidated)
     workbook_path = output_dir / "case_study_results.xlsx"
     write_excel_output(workbook_path, summaries, term_table, consolidated)

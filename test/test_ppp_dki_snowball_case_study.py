@@ -148,6 +148,19 @@ def test_case_study_product_construction_matches_terms():
     ]
     assert products["PPP-EKI-Parachute"].barrier_config.ko_barrier[-1] == pytest.approx(75.0)
 
+    term_table = case_study.terms_frame(
+        terms,
+        {"PPP-DKI": 0.10, "NPP-DKI": 0.20, "PPP-EKI-Parachute": 0.15},
+        100.0,
+        issue_date=pd.Timestamp("2024-01-02"),
+        dates=dates,
+    )
+    term_names = term_table["term"].astype(str).tolist()
+    assert "ko_observation.PPP-DKI" in term_names
+    assert "ki_observation.PPP-EKI-Parachute" in term_names
+    assert any(term.startswith("ko_observation_dates.PPP-DKI.") for term in term_names)
+    assert any(term.startswith("ki_observation_dates.PPP-DKI.") for term in term_names)
+
 
 def test_fixed_dividend_yield_overrides_pricing_q_but_keeps_implied_q():
     market_data = _market_data([100.0, 101.0])
@@ -374,6 +387,11 @@ def test_case_study_runner_smoke_creates_all_final_artifacts(tmp_path: Path):
     assert "multi-select-button" in dashboard
     assert 'data-role="scenario" multiple' in dashboard
     assert 'data-role="product" multiple' in dashboard
+    assert "observation-schedules-data" in dashboard
+    assert "observationScheduleModal" in dashboard
+    assert "obs-schedule-button" in dashboard
+    assert 'data-observation-key="ko_observation.PPP-DKI"' in dashboard
+    assert "final_observation_precedence" in dashboard
     assert "Daily Detail" in dashboard
     assert "daily-detail-data" in dashboard
     assert "Lifecycle Event Timeline" in dashboard
