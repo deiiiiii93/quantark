@@ -237,6 +237,7 @@ class PhoenixOption(BaseEquityOption):
         self._validate_coupon_parameters()
         self._validate_observation_parameters()
         self._validate_payoff_parameters()
+        self._validate_accrual_parameters()
         self._build_observation_schedules()
 
     def _validate_core_parameters(self) -> None:
@@ -367,6 +368,27 @@ class PhoenixOption(BaseEquityOption):
                 f"Participation rate must be positive, "
                 f"got {self.payoff_config.participation_rate}"
             )
+
+    def _validate_accrual_parameters(self) -> None:
+        """Validate accrual configuration flags and external factors."""
+        for flag_name, flag_value in [
+            ("is_annualized", self.accrual_config.is_annualized),
+            ("is_annualized_ko", self.accrual_config.is_annualized_ko),
+            ("is_annualized_ki", self.accrual_config.is_annualized_ki),
+            ("is_annualized_rebate", self.accrual_config.is_annualized_rebate),
+        ]:
+            if flag_value is not None and not isinstance(flag_value, bool):
+                raise ValidationError(f"{flag_name} must be boolean, got {flag_value}")
+
+        accrual_factors = self.accrual_config.accrual_factors
+        if accrual_factors is not None:
+            ko_obs_len = self.num_ko_observations
+            if ko_obs_len and len(accrual_factors) != ko_obs_len:
+                raise ValidationError(
+                    "accrual_factors length "
+                    f"({len(accrual_factors)}) must match KO observation length "
+                    f"({ko_obs_len})"
+                )
 
     def _build_observation_schedules(self) -> None:
         """Build ObservationSchedules from observation dates if needed (Legacy)."""
@@ -513,12 +535,15 @@ class PhoenixOption(BaseEquityOption):
         bus_days_in_year = pricing_env.bus_days_in_year if pricing_env else 252
 
         ko_records: List[ResolvedObservationRecord] = []
+        accrual_factors = self.accrual_config.accrual_factors
         for idx, rec in enumerate(resolved_schedule):
             rate = schedule.records[idx].return_rate
             if rate is None:
                 rate = self.get_ko_rate_at(idx)
 
-            if annualized_ko:
+            if accrual_factors is not None:
+                accrual_factor = float(accrual_factors[idx])
+            elif annualized_ko:
                 schedule_record = schedule.records[idx]
                 accrual_start_date = self.initial_date
                 if schedule_record.observation_date is not None:
@@ -739,6 +764,16 @@ class PhoenixOption(BaseEquityOption):
         if not observation_times:
             return []
 
+        accrual_factors = self.accrual_config.accrual_factors
+        if accrual_factors is not None:
+            if len(accrual_factors) != len(observation_times):
+                raise ValidationError(
+                    "accrual_factors length "
+                    f"({len(accrual_factors)}) must match observation_times length "
+                    f"({len(observation_times)})"
+                )
+            return [float(factor) for factor in accrual_factors]
+
         fixed = self.coupon_config.fixed_coupon_year_fraction
         if fixed is not None:
             return [float(fixed) for _ in observation_times]
@@ -862,7 +897,10 @@ class PhoenixOption(BaseEquityOption):
             self.accrual_config.is_annualized_ko
         )
 
-        if annualized_ko:
+        accrual_factors = self.accrual_config.accrual_factors
+        if accrual_factors is not None:
+            accrual_factor = float(accrual_factors[observation_idx])
+        elif annualized_ko:
             # Calculate proper accrual from initial_date
             if self.barrier_config.ko_observation_schedule is not None:
                 schedule = self.barrier_config.ko_observation_schedule
@@ -904,7 +942,14 @@ class PhoenixOption(BaseEquityOption):
         # Check if current period coupon is triggered
         current_coupon = 0.0
         if self.is_coupon_triggered(spot, observation_idx):
-            current_coupon = self.get_coupon_payoff(observation_idx)
+            coupon_year_fraction = (
+                float(accrual_factors[observation_idx])
+                if accrual_factors is not None
+                else None
+            )
+            current_coupon = self.get_coupon_payoff(
+                observation_idx, year_fraction=coupon_year_fraction
+            )
 
         return principal + ko_coupon + accumulated_coupons + current_coupon
 

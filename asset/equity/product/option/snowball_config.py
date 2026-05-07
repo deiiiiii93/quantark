@@ -197,6 +197,8 @@ class AccrualConfig:
         is_annualized_ki: If True, KI return accrues with year fraction
         is_annualized_rebate: If True, rebate accrues with year fraction
         accrual_dates: Calendar dates for annualized coupon calculation
+        accrual_factors: Optional externally supplied accrual factors by
+            KO/coupon observation
     """
 
     coupon_pay_type: CouponPayType = CouponPayType.INSTANT
@@ -205,12 +207,27 @@ class AccrualConfig:
     is_annualized_ki: Optional[bool] = None
     is_annualized_rebate: Optional[bool] = None
     accrual_dates: Optional[List[datetime]] = None
+    accrual_factors: Optional[List[float]] = None
 
     def __post_init__(self):
         """Validate configuration after initialization."""
         # Validate coupon_pay_type is enum
         if not isinstance(self.coupon_pay_type, CouponPayType):
             raise ValueError(f"coupon_pay_type must be CouponPayType, got {type(self.coupon_pay_type)}")
+        if self.accrual_factors is not None:
+            if not isinstance(self.accrual_factors, list):
+                raise ValueError(
+                    f"accrual_factors must be a list, got {type(self.accrual_factors)}"
+                )
+            for i, factor in enumerate(self.accrual_factors):
+                if isinstance(factor, bool) or not isinstance(factor, (int, float)):
+                    raise ValueError(
+                        f"accrual_factors[{i}] must be numeric, got {factor}"
+                    )
+                if factor < 0:
+                    raise ValueError(
+                        f"accrual_factors[{i}] must be non-negative, got {factor}"
+                    )
 
 @dataclass(frozen=True)
 class AirbagConfig:

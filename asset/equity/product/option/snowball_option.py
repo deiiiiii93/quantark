@@ -409,6 +409,15 @@ class SnowballOption(BaseEquityOption):
         ]:
             if flag_value is not None and not isinstance(flag_value, bool):
                 raise ValidationError(f"{flag_name} must be boolean, got {flag_value}")
+        accrual_factors = self.accrual_config.accrual_factors
+        if accrual_factors is not None:
+            ko_obs_len = self._get_observation_length(BarrierType.UP_OUT)
+            if ko_obs_len is not None and len(accrual_factors) != ko_obs_len:
+                raise ValidationError(
+                    "accrual_factors length "
+                    f"({len(accrual_factors)}) must match KO observation length "
+                    f"({ko_obs_len})"
+                )
 
     def _validate_barrier_array(
         self, barrier: Union[float, List[float]], name: str
@@ -980,12 +989,15 @@ class SnowballOption(BaseEquityOption):
         )
 
         ko_records: List[ResolvedObservationRecord] = []
+        accrual_factors = self.accrual_config.accrual_factors
         for idx, rec in enumerate(resolved_schedule):
             rate = schedule.records[idx].return_rate
             if rate is None:
                 rate = self.get_ko_rate_at(idx)
 
-            if annualized_ko:
+            if accrual_factors is not None:
+                accrual_factor = float(accrual_factors[idx])
+            elif annualized_ko:
                 schedule_record = schedule.records[idx]
                 accrual_start_date = self.initial_date
                 if schedule_record.observation_date is not None:

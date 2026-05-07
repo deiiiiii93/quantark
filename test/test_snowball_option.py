@@ -554,6 +554,53 @@ class TestPayoffCalculations:
         assert len(records) == 1
         assert abs(records[0].payoff - expected_payoff) < 1e-10
 
+    def test_external_accrual_factor_overrides_computed_ko_accrual(self):
+        """Test provided accrual factors override date-based KO accrual."""
+        observation_date = datetime(2024, 10, 1)
+        schedule = ObservationSchedule(
+            records=[
+                ObservationRecord(
+                    observation_date=observation_date,
+                    barrier=1.03,
+                )
+            ]
+        )
+        barrier_config = BarrierConfig(
+            ko_barrier=1.03,
+            ko_rate=0.10,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=schedule,
+            ki_barrier=None,
+        )
+        payoff_config = PayoffConfig(include_principal=False)
+        accrual_config = AccrualConfig(
+            is_annualized=True,
+            is_annualized_ko=True,
+            accrual_factors=[0.123],
+        )
+
+        snowball = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            payoff_config=payoff_config,
+            accrual_config=accrual_config,
+            contract_multiplier=10_000.0,
+            maturity=1.0,
+            initial_date=datetime(2024, 1, 1),
+        )
+        pricing_env = PricingEnvironment(
+            rate_curve=FlatRateCurve(rate=0.01),
+            valuation_date=datetime(2024, 6, 1),
+            day_count_convention=DayCountConvention.ACT_365,
+        )
+
+        records = snowball.resolve_ko_observations(pricing_env)
+        expected_payoff = get_principal(snowball) * barrier_config.ko_rate * 0.123
+
+        assert len(records) == 1
+        assert records[0].payoff == expected_payoff
+
     def test_get_payoff_negative_spot_raises(self):
         """Test that get_payoff raises ValidationError for negative spot."""
         snowball = create_standard_snowball()
@@ -956,6 +1003,31 @@ class TestValidationErrors:
 
         with pytest.raises(ValidationError, match="Valuation date"):
             snowball.get_maturity(pricing_env)
+
+    def test_accrual_factors_length_mismatch_raises(self):
+        """Test validation error when accrual factors do not match KO observations."""
+        barrier_config = create_basic_barrier_config(
+            ko_observation_dates=[0.25, 0.50]
+        )
+        accrual_config = AccrualConfig(accrual_factors=[0.25])
+
+        with pytest.raises(ValidationError, match="accrual_factors length"):
+            SnowballOption(
+                initial_price=100.0,
+                strike=100.0,
+                barrier_config=barrier_config,
+                accrual_config=accrual_config,
+                contract_multiplier=10_000.0,
+                maturity=1.0,
+            )
+
+    def test_accrual_factors_invalid_values_raise(self):
+        """Test validation error for invalid external accrual factors."""
+        with pytest.raises(ValueError, match="accrual_factors\\[0\\]"):
+            AccrualConfig(accrual_factors=[-0.25])
+
+        with pytest.raises(ValueError, match="accrual_factors\\[0\\]"):
+            AccrualConfig(accrual_factors=["bad"])
 
 
 class TestConfigurationObjects:

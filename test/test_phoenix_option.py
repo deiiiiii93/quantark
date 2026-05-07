@@ -32,6 +32,10 @@ from asset.equity.product.option.phoenix_helpers import (
     create_memory_phoenix,
     create_non_memory_phoenix,
 )
+from asset.equity.product.option.observation_schedule import (
+    ObservationRecord,
+    ObservationSchedule,
+)
 from asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
@@ -99,6 +103,7 @@ def create_test_phoenix(
     barrier_config: BarrierConfig = None,
     coupon_config: CouponBarrierConfig = None,
     payoff_config: PayoffConfig = None,
+    accrual_config: AccrualConfig = None,
     is_reverse: bool = False,
 ) -> PhoenixOption:
     """Create a phoenix option for testing."""
@@ -115,6 +120,7 @@ def create_test_phoenix(
         barrier_config=barrier_config,
         coupon_config=coupon_config,
         payoff_config=payoff_config,
+        accrual_config=accrual_config,
         contract_multiplier=contract_multiplier,
         maturity=maturity,
         is_reverse=is_reverse,
@@ -320,6 +326,23 @@ class TestCouponPayoff:
         yfs = phoenix.get_coupon_period_year_fractions([0.1, 0.2, 0.35])
         assert yfs == [1.0 / 12.0, 1.0 / 12.0, 1.0 / 12.0]
 
+    def test_external_accrual_factors_override_coupon_periods(self):
+        """Test external accrual factors drive Phoenix periodic coupons."""
+        coupon_config = CouponBarrierConfig(
+            coupon_barrier=85.0,
+            coupon_rate=0.12,
+            fixed_coupon_year_fraction=1.0 / 12.0,
+        )
+        accrual_config = AccrualConfig(accrual_factors=[0.20, 0.35, 0.45, 0.60])
+        phoenix = create_test_phoenix(
+            coupon_config=coupon_config,
+            accrual_config=accrual_config,
+        )
+
+        yfs = phoenix.get_coupon_period_year_fractions([0.1, 0.2, 0.35, 0.5])
+
+        assert yfs == [0.20, 0.35, 0.45, 0.60]
+
     def test_coupon_payoff_with_dates(self):
         """Test coupon payoff calculation with dates."""
         phoenix = create_test_phoenix()
@@ -513,6 +536,63 @@ class TestKOPayoff:
         expected = ko_rebate + accumulated + current_coupon
         assert payoff == expected
 
+    def test_external_accrual_factors_drive_ko_and_current_coupon(self):
+        """Test external accrual factors drive Phoenix KO and current coupon payoffs."""
+        barrier_config = create_basic_barrier_config(ko_rate=0.15)
+        payoff_config = PayoffConfig(include_principal=False)
+        accrual_config = AccrualConfig(
+            is_annualized=True,
+            is_annualized_ko=True,
+            accrual_factors=[0.10, 0.30, 0.60, 1.00],
+        )
+        phoenix = create_test_phoenix(
+            barrier_config=barrier_config,
+            payoff_config=payoff_config,
+            accrual_config=accrual_config,
+        )
+
+        payoff = phoenix.get_ko_payoff(
+            spot=105.0,
+            observation_idx=1,
+            accumulated_coupons=0.0,
+        )
+
+        principal = get_principal(phoenix)
+        expected = principal * 0.15 * 0.30 + principal * 0.01 * 0.30
+        assert payoff == expected
+
+    def test_external_accrual_factors_drive_resolved_ko_payoff(self):
+        """Test external accrual factors are used by resolved Phoenix KO profiles."""
+        schedule = ObservationSchedule(
+            records=[
+                ObservationRecord(observation_time=0.25, barrier=103.0),
+                ObservationRecord(observation_time=0.50, barrier=103.0),
+            ]
+        )
+        barrier_config = BarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_schedule=schedule,
+            ki_barrier=None,
+        )
+        payoff_config = PayoffConfig(include_principal=False)
+        accrual_config = AccrualConfig(
+            is_annualized=True,
+            is_annualized_ko=True,
+            accrual_factors=[0.10, 0.30],
+        )
+        phoenix = create_test_phoenix(
+            barrier_config=barrier_config,
+            payoff_config=payoff_config,
+            accrual_config=accrual_config,
+        )
+
+        records = phoenix.resolve_ko_observations(None)
+
+        assert records[0].payoff == get_principal(phoenix) * 0.15 * 0.10
+        assert records[1].payoff == get_principal(phoenix) * 0.15 * 0.30
+
 
 class TestProperties:
     """Tests for PhoenixOption properties."""
@@ -613,6 +693,21 @@ class TestValidation:
         """Test validation error for zero maturity."""
         with pytest.raises(ValidationError, match="Maturity"):
             create_test_phoenix(maturity=0.0)
+
+    def test_accrual_factors_length_mismatch_raises(self):
+        """Test validation error when accrual factors do not match observations."""
+        with pytest.raises(ValidationError, match="accrual_factors length"):
+            create_test_phoenix(
+                accrual_config=AccrualConfig(accrual_factors=[0.25])
+            )
+
+    def test_accrual_factors_invalid_values_raise(self):
+        """Test validation error for invalid external accrual factors."""
+        with pytest.raises(ValueError, match="accrual_factors\\[0\\]"):
+            AccrualConfig(accrual_factors=[-0.25])
+
+        with pytest.raises(ValueError, match="accrual_factors\\[0\\]"):
+            AccrualConfig(accrual_factors=["bad"])
 
 
 class TestHelperFunctions:
