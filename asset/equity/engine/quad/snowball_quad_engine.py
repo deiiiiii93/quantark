@@ -98,6 +98,18 @@ class SnowballQuadEngine(BaseEngine):
                 ki_continuous = True
                 ki_records = []
 
+        ko_record_0 = self._match_record(0.0, ko_records)
+        if self._ko_record_triggers_at_spot(product, spot, ko_record_0):
+            return self._get_immediate_ko_payoff(ko_record_0, pricing_env)
+
+        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
+            product,
+            spot,
+            pricing_env,
+            ki_continuous=ki_continuous,
+            ki_records=ki_records,
+        )
+
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],
             [rec.observation_time for rec in ki_records],
@@ -269,9 +281,7 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
 
-        value_surface = (
-            v_in if getattr(product, "_otc_lifecycle_knocked_in", False) else v_out
-        )
+        value_surface = v_in if knocked_in_at_valuation else v_out
         return math_utils.interpolate(value_surface, x=0.0)
 
     def calculate_event_stats(
@@ -321,6 +331,24 @@ class SnowballQuadEngine(BaseEngine):
             if self._treat_dense_discrete_ki_as_continuous(product, ki_records):
                 ki_continuous = True
                 ki_records = []
+
+        ko_record_0 = self._match_record(0.0, ko_records)
+        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
+            product,
+            spot,
+            pricing_env,
+            ki_continuous=ki_continuous,
+            ki_records=ki_records,
+        )
+
+        if self._ko_record_triggers_at_spot(product, spot, ko_record_0):
+            return self._build_immediate_ko_event_stats(
+                product,
+                pricing_env,
+                ko_records,
+                ko_record_0,
+                knocked_in_at_valuation,
+            )
 
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],
@@ -460,9 +488,7 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
 
-        initial_surface = (
-            v_in if getattr(product, "_otc_lifecycle_knocked_in", False) else v_out
-        )
+        initial_surface = v_in if knocked_in_at_valuation else v_out
         ed_unit = np.array(
             [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_ko)],
             dtype=float,
@@ -488,12 +514,11 @@ class SnowballQuadEngine(BaseEngine):
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
         # KI probability (no-KO): propagate terminal indicator on KI surface with KO absorbing to 0.
-        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
         ki_probability = 0.0
         ki_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
-        if already_knocked_in:
+        if knocked_in_at_valuation:
             ki_probability = 1.0
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
@@ -804,6 +829,129 @@ class SnowballQuadEngine(BaseEngine):
             if is_close(target_time, rec.observation_time, abs_tol=Tolerance.PRECISION):
                 return rec
         return None
+
+    def _ko_record_triggers_at_spot(
+        self,
+        product: SnowballOption,
+        spot: float,
+        ko_record: Optional[object],
+    ) -> bool:
+        """Return True when a KO record is triggered at the valuation spot."""
+        if ko_record is None:
+            return False
+        if ko_record.barrier is None:
+            raise ValidationError("KO observation at valuation requires a barrier level.")
+        if product.is_reverse:
+            return spot <= float(ko_record.barrier)
+        return spot >= float(ko_record.barrier)
+
+    def _get_immediate_ko_payoff(
+        self,
+        ko_record: object,
+        pricing_env: PricingEnvironment,
+    ) -> float:
+        """Return discounted KO payoff for a KO triggered at valuation."""
+        payoff = float(ko_record.payoff) if ko_record.payoff is not None else 0.0
+        settlement_time = ko_record.settlement_time
+        if settlement_time is not None and float(settlement_time) > 0.0:
+            payoff *= float(pricing_env.get_discount_factor(float(settlement_time)))
+        return payoff
+
+    def _is_already_knocked_in(self, product: SnowballOption, spot: float) -> bool:
+        """Check whether valuation spot is already in the KI region."""
+        if not product.has_ki_barrier:
+            return False
+
+        ki_barrier = product.barrier_config.ki_barrier
+        if isinstance(ki_barrier, list):
+            ki_barrier = ki_barrier[0]
+
+        if product.is_reverse:
+            return spot >= float(ki_barrier)
+        return spot <= float(ki_barrier)
+
+    def _is_knocked_in_at_valuation(
+        self,
+        product: SnowballOption,
+        spot: float,
+        pricing_env: PricingEnvironment,
+        ki_continuous: bool,
+        ki_records: Sequence = (),
+    ) -> bool:
+        """Determine KI state at valuation before the Quad recursion starts."""
+        if getattr(product, "_otc_lifecycle_knocked_in", False):
+            return True
+        if not product.has_ki_barrier:
+            return False
+        if ki_continuous:
+            return self._is_already_knocked_in(product, spot)
+
+        if not ki_records:
+            ki_records = product.resolve_ki_observations(pricing_env)
+        ki_record_0 = self._match_record(0.0, ki_records)
+        if ki_record_0 is None:
+            return False
+        if ki_record_0.barrier is None:
+            raise ValidationError("KI observation at valuation requires a barrier level.")
+        if product.is_reverse:
+            return spot >= float(ki_record_0.barrier)
+        return spot <= float(ki_record_0.barrier)
+
+    def _build_immediate_ko_event_stats(
+        self,
+        product: SnowballOption,
+        pricing_env: PricingEnvironment,
+        ko_records: Sequence,
+        ko_record_0: object,
+        knocked_in_at_valuation: bool,
+    ) -> AutocallableEventStats:
+        """Build deterministic event stats when KO is triggered at valuation."""
+        ko_times = np.array([float(rec.observation_time) for rec in ko_records], dtype=float)
+        ko_probability = np.zeros(len(ko_records), dtype=float)
+        expected_discounted_ko_cashflow = np.zeros(len(ko_records), dtype=float)
+        ko_index = 0
+        for idx, rec in enumerate(ko_records):
+            if rec is ko_record_0 or is_close(
+                rec.observation_time,
+                ko_record_0.observation_time,
+                abs_tol=Tolerance.PRECISION,
+            ):
+                ko_index = idx
+                break
+
+        pv = self._get_immediate_ko_payoff(ko_record_0, pricing_env)
+        ko_probability[ko_index] = 1.0
+        expected_discounted_ko_cashflow[ko_index] = pv
+
+        survival_probability = np.ones(len(ko_records), dtype=float)
+        cumulative = 0.0
+        for idx in range(len(ko_records)):
+            cumulative += ko_probability[idx]
+            survival_probability[idx] = max(0.0, 1.0 - cumulative)
+
+        ki_times = np.array([], dtype=float)
+        ki_event_probability = np.array([], dtype=float)
+        ki_survival_probability = np.array([], dtype=float)
+        ki_probability = 0.0
+        if knocked_in_at_valuation:
+            ki_probability = 1.0
+            ki_times = np.array([0.0], dtype=float)
+            ki_event_probability = np.array([1.0], dtype=float)
+            ki_survival_probability = np.array([0.0], dtype=float)
+
+        return AutocallableEventStats(
+            pv=pv,
+            ko_times=ko_times,
+            ko_probability=ko_probability,
+            survival_probability=survival_probability,
+            expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
+            ki_probability=ki_probability,
+            expected_discounted_maturity_cashflow=0.0,
+            reconciliation_error=0.0,
+            ki_times=ki_times,
+            ki_event_probability=ki_event_probability,
+            ki_survival_probability=ki_survival_probability,
+        )
 
     def _resolve_fft_padding_factor(self) -> int:
         factor = getattr(self.params, "fft_padding_factor", None)

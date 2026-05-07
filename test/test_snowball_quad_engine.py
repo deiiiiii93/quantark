@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from asset.equity.param import QuadParams
 from asset.equity.product.option.snowball_config import (
+    AccrualConfig,
     AirbagConfig,
     BarrierConfig,
     PayoffConfig,
@@ -228,3 +229,83 @@ def test_disable_ko_after_ki_reduces_value():
     assert price_disabled < price_enabled or price_disabled == pytest.approx(
         price_enabled, abs=1e-6
     )
+
+
+def test_quad_applies_immediate_ko_at_valuation_observation():
+    env = create_pricing_env(spot=150.0)
+    barrier_config = BarrierConfig(
+        ko_barrier=103.0,
+        ko_rate=0.10,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.0, 0.5, 1.0],
+        ki_barrier=None,
+    )
+    product = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        payoff_config=PayoffConfig(include_principal=True),
+        accrual_config=AccrualConfig(is_annualized=False),
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    engine = SnowballQuadEngine(params=QuadParams(grid_points=301))
+
+    price = engine.price(product, env)
+    ko_record_0 = product.resolve_ko_observations(env)[0]
+
+    assert price == pytest.approx(ko_record_0.payoff, abs=1e-10)
+
+    stats = engine.calculate_event_stats(product, env)
+    assert stats is not None
+    assert stats.pv == pytest.approx(ko_record_0.payoff, abs=1e-10)
+    assert stats.ko_times[0] == pytest.approx(0.0)
+    assert stats.ko_probability[0] == pytest.approx(1.0)
+    assert stats.expected_discounted_maturity_cashflow == pytest.approx(0.0)
+
+
+def test_quad_applies_immediate_ki_at_valuation_observation():
+    env = create_pricing_env(spot=70.0)
+    barrier_config = BarrierConfig(
+        ko_barrier=150.0,
+        ko_rate=0.10,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.5, 1.0],
+        ki_barrier=75.0,
+        ki_observation_type=ObservationType.DISCRETE,
+        ki_observation_dates=[0.0, 0.5, 1.0],
+        ki_continuous=False,
+    )
+    product = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        payoff_config=PayoffConfig(include_principal=True),
+        accrual_config=AccrualConfig(is_annualized=False),
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    lifecycle_product = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        payoff_config=PayoffConfig(include_principal=True),
+        accrual_config=AccrualConfig(is_annualized=False),
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    setattr(lifecycle_product, "_otc_lifecycle_knocked_in", True)
+    engine = SnowballQuadEngine(params=QuadParams(grid_points=301))
+
+    price = engine.price(product, env)
+    lifecycle_price = engine.price(lifecycle_product, env)
+
+    assert price == pytest.approx(lifecycle_price, abs=1e-10)
+
+    stats = engine.calculate_event_stats(product, env)
+    assert stats is not None
+    assert stats.ki_probability == pytest.approx(1.0)
+    assert stats.ki_times[0] == pytest.approx(0.0)
