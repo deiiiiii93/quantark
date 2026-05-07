@@ -69,7 +69,8 @@ class SnowballQuadEngine(BaseEngine):
         validate_positive(spot, "spot")
         validate_positive(maturity, "maturity", allow_zero=True)
         if is_zero(maturity, tol=Tolerance.ZERO):
-            return product.get_payoff(spot, pricing_env)
+            knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+            return product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
 
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
@@ -459,8 +460,12 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
 
+        initial_surface = (
+            v_in if getattr(product, "_otc_lifecycle_knocked_in", False) else v_out
+        )
         ed_unit = np.array(
-            [math_utils.interpolate(v_out[i], x=0.0) for i in range(n_ko)], dtype=float
+            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_ko)],
+            dtype=float,
         )
         ko_times = np.array([rec.observation_time for rec in ko_records], dtype=float)
         ko_prob = np.zeros(n_ko, dtype=float)
@@ -483,8 +488,17 @@ class SnowballQuadEngine(BaseEngine):
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
         # KI probability (no-KO): propagate terminal indicator on KI surface with KO absorbing to 0.
+        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
         ki_probability = 0.0
-        if product.has_ki_barrier:
+        ki_times = np.array([], dtype=float)
+        ki_event_probability = np.array([], dtype=float)
+        ki_survival_probability = np.array([], dtype=float)
+        if already_knocked_in:
+            ki_probability = 1.0
+            ki_times = np.array([0.0], dtype=float)
+            ki_event_probability = np.array([1.0], dtype=float)
+            ki_survival_probability = np.array([0.0], dtype=float)
+        elif product.has_ki_barrier:
             v_in_ki = np.ones(grid.size, dtype=float)
             v_out_ki = np.zeros(grid.size, dtype=float)
             for step_index in range(len(times), 0, -1):
@@ -583,6 +597,9 @@ class SnowballQuadEngine(BaseEngine):
             ki_probability=ki_probability,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cf,
             reconciliation_error=0.0,
+            ki_times=ki_times,
+            ki_event_probability=ki_event_probability,
+            ki_survival_probability=ki_survival_probability,
         )
 
     def _validate_product(self, product: SnowballOption) -> None:

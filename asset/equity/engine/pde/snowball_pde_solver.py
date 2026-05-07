@@ -340,6 +340,7 @@ class SnowballPDESolver(BasePDESolver):
         self._validate_product(product)
 
         # Determine knocked-in state at valuation
+        already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
         ki_continuous = (
             product.barrier_config.ki_continuous
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
@@ -574,9 +575,18 @@ class SnowballPDESolver(BasePDESolver):
             cumulative += ko_probability[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative)
 
-        ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
-        df_T = pricing_env.get_discount_factor(float(tau))
-        ki_probability = float(ed_ki / df_T) if df_T > 0.0 else 0.0
+        ki_times = np.array([], dtype=float)
+        ki_event_probability = np.array([], dtype=float)
+        ki_survival_probability = np.array([], dtype=float)
+        if already_knocked_in:
+            ki_probability = 1.0
+            ki_times = np.array([0.0], dtype=float)
+            ki_event_probability = np.array([1.0], dtype=float)
+            ki_survival_probability = np.array([0.0], dtype=float)
+        else:
+            ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
+            df_T = pricing_env.get_discount_factor(float(tau))
+            ki_probability = float(ed_ki / df_T) if df_T > 0.0 else 0.0
 
         pv = float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
@@ -590,6 +600,9 @@ class SnowballPDESolver(BasePDESolver):
             ki_probability=ki_probability,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cf,
             reconciliation_error=0.0,
+            ki_times=ki_times,
+            ki_event_probability=ki_event_probability,
+            ki_survival_probability=ki_survival_probability,
         )
 
     def calculate_greeks(
@@ -781,10 +794,10 @@ class SnowballPDESolver(BasePDESolver):
         For continuous monitoring, a barrier breach at valuation implies immediate KI.
         For discrete monitoring, a barrier breach only matters if there is a KI observation at t=0.
         """
-        if not product.has_ki_barrier:
-            return False
         if getattr(product, "_otc_lifecycle_knocked_in", False):
             return True
+        if not product.has_ki_barrier:
+            return False
 
         if ki_continuous:
             return self._is_already_knocked_in(product, spot)
@@ -850,7 +863,9 @@ class SnowballPDESolver(BasePDESolver):
     ) -> float:
         """Calculate terminal payoff when already expired."""
         # Determine if knocked-in based on current spot
-        knocked_in = self._is_already_knocked_in(product, spot)
+        knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+        if not knocked_in:
+            knocked_in = self._is_already_knocked_in(product, spot)
         return product.get_payoff(spot, pricing_env, knocked_in=knocked_in)
 
     def _build_grids(

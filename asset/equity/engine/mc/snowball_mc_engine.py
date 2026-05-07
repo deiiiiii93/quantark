@@ -216,7 +216,8 @@ class SnowballMCEngine(BaseEngine):
 
         # Handle near-expiry case
         if T < 1e-10:
-            return product.get_payoff(S, pricing_env)
+            knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+            return product.get_payoff(S, pricing_env, knocked_in=knocked_in)
 
         # Price using appropriate method
         if isinstance(product, KnockOutResetSnowballOption):
@@ -321,11 +322,13 @@ class SnowballMCEngine(BaseEngine):
                 )
 
         already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
-        if already_knocked_in and product.has_ki_barrier:
+        if already_knocked_in:
             ki_triggered[:] = True
             first_ki_idx[:] = 0
 
-        if product.barrier_config.disable_ko_after_ki and product.has_ki_barrier:
+        if product.barrier_config.disable_ko_after_ki and (
+            product.has_ki_barrier or already_knocked_in
+        ):
             if already_knocked_in:
                 ko_valid = np.zeros_like(ko_triggered)
             else:
@@ -364,12 +367,12 @@ class SnowballMCEngine(BaseEngine):
 
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
-        if product.has_ki_barrier:
-            if already_knocked_in:
-                ki_event_times = np.array([0.0], dtype=float)
-                ki_event_probability = np.array([1.0], dtype=float)
-                ki_survival_probability = np.array([0.0], dtype=float)
-            elif ki_event_times.size:
+        if already_knocked_in:
+            ki_event_times = np.array([0.0], dtype=float)
+            ki_event_probability = np.array([1.0], dtype=float)
+            ki_survival_probability = np.array([0.0], dtype=float)
+        elif product.has_ki_barrier:
+            if ki_event_times.size:
                 ki_event_probability = np.zeros(len(ki_event_times), dtype=float)
                 for i in range(len(ki_event_times)):
                     ki_event_probability[i] = float(
@@ -425,7 +428,11 @@ class SnowballMCEngine(BaseEngine):
             ko_probability=ko_probability,
             survival_probability=survival_probability,
             expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
-            ki_probability=float(np.mean(ki_triggered)) if product.has_ki_barrier else 0.0,
+            ki_probability=(
+                float(np.mean(ki_triggered))
+                if product.has_ki_barrier or already_knocked_in
+                else 0.0
+            ),
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
             reconciliation_error=float(reconciliation_error),
             ki_times=ki_event_times,
@@ -1183,12 +1190,14 @@ class SnowballMCEngine(BaseEngine):
                 )
 
         already_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
-        if already_knocked_in and product.has_ki_barrier:
+        if already_knocked_in:
             ki_triggered[:] = True
             first_ki_idx[:] = 0
 
         # Handle disable_ko_after_ki logic
-        if product.barrier_config.disable_ko_after_ki and ki_barriers_val is not None:
+        if product.barrier_config.disable_ko_after_ki and (
+            ki_barriers_val is not None or already_knocked_in
+        ):
             if already_knocked_in:
                 ko_valid = np.zeros_like(ko_triggered)
             else:
