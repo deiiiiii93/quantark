@@ -48,6 +48,7 @@ from .range_accrual_helpers import (
     assign_calendar_day_weights,
 )
 from .single_sharkfin_option import SingleSharkfinOption
+from .double_sharkfin_option import DoubleSharkfinOption
 
 __all__ = [
     "BaseEquityOption",
@@ -98,4 +99,6 @@ __all__ = [
     "assign_calendar_day_weights",
     # Single Sharkfin option
     "SingleSharkfinOption",
+    # Double Sharkfin option
+    "DoubleSharkfinOption",
 ]
