@@ -47,6 +47,7 @@ from .range_accrual_helpers import (
     generate_range_observation_records,
     assign_calendar_day_weights,
 )
+from .single_sharkfin_option import SingleSharkfinOption
 
 __all__ = [
     "BaseEquityOption",
@@ -95,4 +96,6 @@ __all__ = [
     "create_stepdown_range_accrual",
     "generate_range_observation_records",
     "assign_calendar_day_weights",
+    # Single Sharkfin option
+    "SingleSharkfinOption",
 ]
