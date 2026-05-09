@@ -178,3 +178,24 @@ class TestSingleSharkfinOption:
 
         assert option.has_barrier_hit([100.0, 110.0, 121.0])
         assert not option.has_barrier_hit([100.0, 110.0, 119.0])
+
+    def test_pay_at_hit_flag_is_stored(self):
+        option = SingleSharkfinOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=120.0,
+            maturity=1.0,
+            pay_at_hit=True,
+        )
+
+        assert option.pay_at_hit is True
+
+    def test_pay_at_hit_must_be_boolean(self):
+        with pytest.raises(ValidationError, match="pay_at_hit must be boolean"):
+            SingleSharkfinOption(
+                strike=100.0,
+                option_type=OptionType.CALL,
+                barrier=120.0,
+                maturity=1.0,
+                pay_at_hit="yes",
+            )

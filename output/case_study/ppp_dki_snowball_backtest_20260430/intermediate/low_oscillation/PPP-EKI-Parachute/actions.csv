@@ -1,0 +1,2 @@
+date,action_type,observation_index,spot,barrier,cashflow,alive_before,knocked_in_before,knocked_out_before,matured_before,alive_after,knocked_in_after,knocked_out_after,matured_after,payoff
+2023-07-04,KO,1,6967.097550927363,6935.98807,-194888.21405678426,True,False,False,False,False,False,True,False,194888.21405678426

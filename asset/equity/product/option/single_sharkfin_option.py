@@ -50,6 +50,8 @@ class SingleSharkfinOption(BaseEquityOption):
         participation_rate: Participation in the capped vanilla payoff
         knock_out_rebate: Fixed payoff if the barrier is hit
         no_hit_rebate: Fixed payoff added when the barrier is not hit
+        pay_at_hit: If True, pay knock-out rebate immediately on hit;
+            otherwise pay it at expiry
         observation_type: EXPIRY, DISCRETE, or CONTINUOUS monitoring
         observation_dates: Legacy discrete observation times in years
         observation_schedule: Preferred discrete observation schedule
@@ -61,6 +63,7 @@ class SingleSharkfinOption(BaseEquityOption):
     participation_rate: float = 1.0
     knock_out_rebate: float = 0.0
     no_hit_rebate: float = 0.0
+    pay_at_hit: bool = False
     observation_type: ObservationType = ObservationType.CONTINUOUS
     observation_dates: Optional[List[float]] = None
     observation_schedule: Optional[ObservationSchedule] = None
@@ -79,6 +82,7 @@ class SingleSharkfinOption(BaseEquityOption):
         participation_rate: float = 1.0,
         knock_out_rebate: float = 0.0,
         no_hit_rebate: float = 0.0,
+        pay_at_hit: bool = False,
         observation_type: ObservationType = ObservationType.CONTINUOUS,
         observation_dates: Optional[List[float]] = None,
         observation_schedule: Optional[ObservationSchedule] = None,
@@ -100,6 +104,8 @@ class SingleSharkfinOption(BaseEquityOption):
             participation_rate: Participation in the capped no-hit payoff.
             knock_out_rebate: Fixed payoff if barrier is hit.
             no_hit_rebate: Fixed payoff added if barrier is not hit.
+            pay_at_hit: If True, knock-out rebate is paid immediately on hit.
+                If False, it is paid at expiry.
             observation_type: EXPIRY, DISCRETE, or CONTINUOUS monitoring.
             observation_dates: Discrete observation times in year fractions.
             observation_schedule: Preferred discrete observation schedule.
@@ -120,6 +126,7 @@ class SingleSharkfinOption(BaseEquityOption):
         self.participation_rate = participation_rate
         self.knock_out_rebate = knock_out_rebate
         self.no_hit_rebate = no_hit_rebate
+        self.pay_at_hit = pay_at_hit
         self.observation_type = observation_type
         self.observation_dates = observation_dates
         self.observation_schedule = observation_schedule
@@ -160,6 +167,8 @@ class SingleSharkfinOption(BaseEquityOption):
             raise ValidationError(
                 f"No-hit rebate must be non-negative, got {self.no_hit_rebate}"
             )
+        if not isinstance(self.pay_at_hit, bool):
+            raise ValidationError(f"pay_at_hit must be boolean, got {self.pay_at_hit}")
         if not isinstance(self.observation_type, ObservationType):
             raise ValidationError(f"Invalid observation type: {self.observation_type}")
         if not isinstance(self.observation_frequency, ObservationFrequency):

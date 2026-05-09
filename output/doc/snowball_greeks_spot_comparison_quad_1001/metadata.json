@@ -1,0 +1,115 @@
+{
+  "engine": "SnowballQuadEngine",
+  "quad_params": {
+    "grid_points": 1001
+  },
+  "market": {
+    "initial_price": 100.0,
+    "strike": 100.0,
+    "rate": 0.02,
+    "dividend_yield": 0.03,
+    "volatility": 0.22,
+    "valuation_date": "2026-01-05T00:00:00"
+  },
+  "finite_difference": {
+    "spot_bump": 0.005,
+    "vol_bump": 0.01,
+    "rate_bump": 0.0001,
+    "div_bump": 0.0001
+  },
+  "tenors": [
+    1,
+    2,
+    3
+  ],
+  "variants": {
+    "standard_dki": "Standard Snowball, continuous down-and-in monitoring.",
+    "european_ki": "European KI Snowball, KI checked only at maturity.",
+    "stepdown": "Step-down Snowball, KO barrier decreases 0.5% of initial per month.",
+    "parachute": "Parachute Snowball, final KO barrier drops to the KI level.",
+    "airbag": "Airbag Snowball, reduced participation below 60% spot."
+  },
+  "ko_ki_combos": [
+    {
+      "combo": "KO100_KI80",
+      "label": "KO 100 / KI 80",
+      "ko": 100.0,
+      "ki": 80.0
+    },
+    {
+      "combo": "KO103_KI75",
+      "label": "KO 103 / KI 75",
+      "ko": 103.0,
+      "ki": 75.0
+    },
+    {
+      "combo": "KO103_KI70",
+      "label": "KO 103 / KI 70",
+      "ko": 103.0,
+      "ki": 70.0
+    },
+    {
+      "combo": "KO105_KI75",
+      "label": "KO 105 / KI 75",
+      "ko": 105.0,
+      "ki": 75.0
+    }
+  ],
+  "spot_grid": [
+    60.0,
+    62.5,
+    65.0,
+    67.5,
+    70.0,
+    72.5,
+    75.0,
+    77.5,
+    80.0,
+    82.5,
+    85.0,
+    87.5,
+    90.0,
+    92.5,
+    95.0,
+    97.5,
+    100.0,
+    102.5,
+    103.0,
+    105.0,
+    107.5,
+    110.0,
+    112.5,
+    115.0,
+    117.5,
+    120.0
+  ],
+  "tasks_count": 1560,
+  "workers": 8,
+  "elapsed_seconds": 188.1824688911438,
+  "plots": {
+    "facet_variants_delta": "plots/facet_variants_delta.png",
+    "facet_variants_gamma": "plots/facet_variants_gamma.png",
+    "facet_variants_vega": "plots/facet_variants_vega.png",
+    "facet_variants_dividend_rho": "plots/facet_variants_dividend_rho.png",
+    "standard_dki_delta_by_combo": "plots/combo_slices/standard_dki_delta_by_combo.png",
+    "european_ki_delta_by_combo": "plots/combo_slices/european_ki_delta_by_combo.png",
+    "stepdown_delta_by_combo": "plots/combo_slices/stepdown_delta_by_combo.png",
+    "parachute_delta_by_combo": "plots/combo_slices/parachute_delta_by_combo.png",
+    "airbag_delta_by_combo": "plots/combo_slices/airbag_delta_by_combo.png",
+    "standard_dki_gamma_by_combo": "plots/combo_slices/standard_dki_gamma_by_combo.png",
+    "european_ki_gamma_by_combo": "plots/combo_slices/european_ki_gamma_by_combo.png",
+    "stepdown_gamma_by_combo": "plots/combo_slices/stepdown_gamma_by_combo.png",
+    "parachute_gamma_by_combo": "plots/combo_slices/parachute_gamma_by_combo.png",
+    "airbag_gamma_by_combo": "plots/combo_slices/airbag_gamma_by_combo.png",
+    "standard_dki_vega_by_combo": "plots/combo_slices/standard_dki_vega_by_combo.png",
+    "european_ki_vega_by_combo": "plots/combo_slices/european_ki_vega_by_combo.png",
+    "stepdown_vega_by_combo": "plots/combo_slices/stepdown_vega_by_combo.png",
+    "parachute_vega_by_combo": "plots/combo_slices/parachute_vega_by_combo.png",
+    "airbag_vega_by_combo": "plots/combo_slices/airbag_vega_by_combo.png",
+    "standard_dki_dividend_rho_by_combo": "plots/combo_slices/standard_dki_dividend_rho_by_combo.png",
+    "european_ki_dividend_rho_by_combo": "plots/combo_slices/european_ki_dividend_rho_by_combo.png",
+    "stepdown_dividend_rho_by_combo": "plots/combo_slices/stepdown_dividend_rho_by_combo.png",
+    "parachute_dividend_rho_by_combo": "plots/combo_slices/parachute_dividend_rho_by_combo.png",
+    "airbag_dividend_rho_by_combo": "plots/combo_slices/airbag_dividend_rho_by_combo.png"
+  }
+}

@@ -1,0 +1,7 @@
+date,trade_type,instrument_type,contract,quantity,price,multiplier,notional,transaction_cost,reason
+2023-05-04,hedge_rebalance,futures,IM2305,3.0,6717.385147125124,200.0,4030431.088275074,0.0,delta_rebalance
+2023-05-08,hedge_rebalance,futures,IM2305,-1.0,6909.443881349795,200.0,1381888.776269959,0.0,delta_rebalance
+2023-05-10,hedge_rebalance,futures,IM2305,-1.0,7087.956931429783,200.0,1417591.3862859567,0.0,delta_rebalance
+2023-05-15,roll_close,futures,IM2305,-1.0,7314.7581329464465,200.0,1462951.6265892894,0.0,futures_roll
+2023-05-15,roll_open,futures,IM2306,1.0,7281.167568715771,200.0,1456233.5137431542,0.0,futures_roll
+2023-05-16,hedge_rebalance,futures,IM2306,-1.0,7340.185939327545,200.0,1468037.1878655092,0.0,delta_rebalance

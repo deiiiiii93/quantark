@@ -9,6 +9,9 @@ from .digital_option_engine import DigitalOptionAnalyticalEngine
 from .barrier_analytical_engine import BarrierAnalyticalEngine
 from .double_barrier_option_engine import DoubleBarrierOptionAnalyticalEngine
 from .one_touch_analytical_engine import OneTouchAnalyticalEngine
+from .single_sharkfin_option_analytical_engine import (
+    SingleSharkfinOptionAnalyticalEngine,
+)
 from .asian_option_analytical_engine import AsianOptionAnalyticalEngine
 from .range_accrual_analytical_engine import (
     RangeAccrualAnalyticalEngine,
@@ -23,6 +26,7 @@ __all__ = [
     "BarrierAnalyticalEngine",
     "DoubleBarrierOptionAnalyticalEngine",
     "OneTouchAnalyticalEngine",
+    "SingleSharkfinOptionAnalyticalEngine",
     "AsianOptionAnalyticalEngine",
     "RangeAccrualAnalyticalEngine",
     "RangeAccrualAnalyticalResult",

@@ -1,0 +1,3 @@
+date,action_type,observation_index,spot,barrier,cashflow,alive_before,knocked_in_before,knocked_out_before,matured_before,alive_after,knocked_in_after,knocked_out_after,matured_after,payoff
+2023-11-14,KI,129.0,5041.175687845304,5050.47675,0.0,True,False,False,False,True,True,False,False,
+2026-04-29,MATURITY,,4377.07985,,2500000.0,True,True,False,False,False,True,False,True,-2500000.0
