@@ -8,6 +8,7 @@ from .analytical import (
     BarrierAnalyticalEngine,
     OneTouchAnalyticalEngine,
     AsianOptionAnalyticalEngine,
+    DoubleSharkfinOptionAnalyticalEngine,
 )
 from .pde_engine import PDEEngine
 from .mc import (
@@ -17,6 +18,7 @@ from .mc import (
     PhoenixMCEngine,
     DigitalOptionMCEngine,
     BarrierOptionMCEngine,
+    DoubleSharkfinOptionMCEngine,
 )
 from .pde import (
     BasePDESolver,
@@ -48,6 +50,7 @@ __all__ = [
     "BarrierAnalyticalEngine",
     "OneTouchAnalyticalEngine",
     "AsianOptionAnalyticalEngine",
+    "DoubleSharkfinOptionAnalyticalEngine",
     # Monte Carlo
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
@@ -55,6 +58,7 @@ __all__ = [
     "PhoenixMCEngine",
     "DigitalOptionMCEngine",
     "BarrierOptionMCEngine",
+    "DoubleSharkfinOptionMCEngine",
     # Unified PDE Engine
     "PDEEngine",
     # PDE Solvers
