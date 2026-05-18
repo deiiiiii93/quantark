@@ -88,9 +88,15 @@ class PricingResult:
 class BaseEngine:
     # existing: def price(self, product, env) -> float  (unchanged)
 
-    def price_with_events(self, product, env) -> PricingResult:
+    def price_with_events(self, product, env,
+                          emit_distribution: bool = True) -> PricingResult:
         """Default: wrap price() with EventDistribution.trivial(maturity).
-        Engines that can cheaply emit richer event timing override this."""
+        Engines that can cheaply emit richer event timing override this.
+
+        emit_distribution: when False, callers signal they don't need event timing
+        (e.g., no legs require it); expensive emission paths (PDE forward density)
+        may skip. The default of True preserves correctness for callers that don't
+        know about this flag."""
         npv = self.price(product, env)
         return PricingResult(npv=npv,
                              event_distribution=EventDistribution.trivial(product.get_maturity()))
@@ -312,11 +318,12 @@ where
 
 ```python
 class PaymentTrigger(Enum):
-    AT_KO = "at_ko"
-    AT_KI = "at_ki"
-    AT_MATURITY_NO_KO = "at_maturity_no_ko"
-    AT_MATURITY_WITH_KI = "at_maturity_with_ki"
-    AT_MATURITY_ANY = "at_maturity_any"
+    AT_KO = "at_ko"                          # paid at the KO event date on KO paths
+    AT_KI = "at_ki"                          # paid at the KI event date on KI paths
+    AT_MATURITY_NO_KO = "at_maturity_no_ko"  # paid at maturity on paths that survived without KI
+    AT_MATURITY_WITH_KI = "at_maturity_with_ki"  # paid at maturity on paths that reached maturity with KI triggered
+    AT_MATURITY_ANY = "at_maturity_any"      # paid at maturity on any path that did NOT KO
+                                             # (equivalent to AT_MATURITY_NO_KO + AT_MATURITY_WITH_KI)
 
 @dataclass(frozen=True)
 class FixedPayoffLeg(CashLeg):
@@ -324,6 +331,8 @@ class FixedPayoffLeg(CashLeg):
     trigger: PaymentTrigger
     payment_offset_days: int = 0             # T+N settlement delay from trigger event
 ```
+
+**Trigger semantics — "backend premium that is canceled by KO"** corresponds to `trigger=AT_MATURITY_ANY`: paid only on paths that reach maturity (i.e., never KO'd), regardless of whether KI triggered. For a backend premium that is also canceled by KI, use `AT_MATURITY_NO_KO`.
 
 **Valuation:**
 
@@ -344,11 +353,14 @@ Where `P(trigger at obs i)` is read from `event_dist.probabilities[trigger_event
 Any engine that does not override returns:
 
 ```python
-PricingResult(npv=self.price(product, env),
-              event_distribution=EventDistribution.trivial(product.get_maturity()))
+def price_with_events(self, product, env, emit_distribution: bool = True):
+    return PricingResult(
+        npv=self.price(product, env),
+        event_distribution=EventDistribution.trivial(product.get_maturity()),
+    )
 ```
 
-This means: existing engines work immediately for `DeterministicLeg`s and for `AccrualLeg`s with `ko_behavior=PAY_FULL_SCHEDULE`. KO-sensitive legs raise a clear validation error if used with a non-overriding engine.
+This means: existing engines work immediately for `DeterministicLeg`s and for `AccrualLeg`s with `ko_behavior=PAY_FULL_SCHEDULE`. KO-sensitive legs (`AccrualLeg` with `TRUNCATE_AT_KO`, `FixedPayoffLeg`) emit a warning when paired with a non-overriding engine on a KO-capable product (see §9.2).
 
 ### 6.2 Per-engine override summary
 
