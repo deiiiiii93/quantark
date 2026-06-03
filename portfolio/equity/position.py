@@ -2,13 +2,14 @@
 Equity position class for tracking individual equity derivative positions.
 """
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 import uuid
 from asset.equity.product.base_equity_product import BaseEquityProduct
 from asset.equity.engine.base_engine import BaseEngine
 from priceenv import PricingEnvironment
 from asset.equity.riskmeasures import GreeksCalculator
+from cashleg import CashLeg, LegPV, TradeValueBreakdown, value_leg
 from util.exceptions import ValidationError
 
 
@@ -28,6 +29,7 @@ class EquityPosition:
         engine: Pricing engine specific to this position
         entry_timestamp: When the position was opened
         position_id: Unique identifier for this position
+        cash_legs: Optional cash terms attached to this position
     """
     product: BaseEquityProduct
     quantity: float
@@ -36,6 +38,7 @@ class EquityPosition:
     engine: BaseEngine
     entry_timestamp: datetime
     position_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    cash_legs: List[CashLeg] = field(default_factory=list)
     
     def __post_init__(self):
         """Validate position parameters."""
@@ -88,6 +91,110 @@ class EquityPosition:
         current_price = self.get_current_price(pricing_env)
         return current_price * self.quantity
 
+    def get_trade_value(self, pricing_env: PricingEnvironment) -> float:
+        """
+        Calculate full trade value including product and attached cash legs.
+
+        For positions without cash legs, this is exactly get_market_value().
+        """
+        if not self.cash_legs:
+            return self.get_market_value(pricing_env)
+
+        needs_distribution = any(
+            leg.requires_event_distribution() for leg in self.cash_legs
+        )
+        result = self.engine.price_with_events(
+            self.product, pricing_env, emit_distribution=needs_distribution
+        )
+        unit_notional = self._get_unit_notional(pricing_env)
+        leg_pv_total = sum(
+            value_leg(leg, result.event_distribution, pricing_env, unit_notional)
+            for leg in self.cash_legs
+        )
+        return (result.npv + leg_pv_total) * self.quantity
+
+    def get_trade_value_breakdown(
+        self, pricing_env: PricingEnvironment
+    ) -> TradeValueBreakdown:
+        """Return product and per-leg PV attribution."""
+        if not self.cash_legs:
+            return TradeValueBreakdown(
+                product_npv=self.get_market_value(pricing_env),
+                leg_pvs={},
+            )
+
+        needs_distribution = any(
+            leg.requires_event_distribution() for leg in self.cash_legs
+        )
+        result = self.engine.price_with_events(
+            self.product, pricing_env, emit_distribution=needs_distribution
+        )
+        unit_notional = self._get_unit_notional(pricing_env)
+        leg_pvs = {}
+        for leg in self.cash_legs:
+            pv = (
+                value_leg(leg, result.event_distribution, pricing_env, unit_notional)
+                * self.quantity
+            )
+            leg_pvs[leg.leg_id] = LegPV(
+                name=leg.name,
+                direction=leg.direction,
+                pv=pv,
+            )
+
+        return TradeValueBreakdown(
+            product_npv=result.npv * self.quantity,
+            leg_pvs=leg_pvs,
+        )
+
+    def get_trade_greeks(
+        self,
+        pricing_env: PricingEnvironment,
+        greeks_calculator: GreeksCalculator,
+    ) -> Dict[str, float]:
+        """Calculate trade-level Greeks by bumping get_trade_value()."""
+        from copy import deepcopy
+        from param import FlatRateCurve
+
+        bump = self.engine.params.bump_size
+        base_value = self.get_trade_value(pricing_env)
+
+        env_up = deepcopy(pricing_env)
+        env_up.spot_quote.spot *= 1.0 + bump
+        env_down = deepcopy(pricing_env)
+        env_down.spot_quote.spot *= 1.0 - bump
+        value_up = self.get_trade_value(env_up)
+        value_down = self.get_trade_value(env_down)
+
+        spot_bump_amount = pricing_env.spot * bump
+        delta = (value_up - value_down) / (2.0 * spot_bump_amount)
+        gamma = (value_up - 2.0 * base_value + value_down) / (spot_bump_amount**2)
+
+        env_vol_up = deepcopy(pricing_env)
+        env_vol_down = deepcopy(pricing_env)
+        self._bump_flat_or_term_vol(env_vol_up, bump)
+        self._bump_flat_or_term_vol(env_vol_down, -bump)
+        vega = (
+            self.get_trade_value(env_vol_up) - self.get_trade_value(env_vol_down)
+        ) / (2.0 * bump)
+
+        current_rate = pricing_env.get_rate(self.product.get_maturity(pricing_env))
+        env_rate_up = deepcopy(pricing_env)
+        env_rate_down = deepcopy(pricing_env)
+        env_rate_up.rate_curve = FlatRateCurve(current_rate + bump)
+        env_rate_down.rate_curve = FlatRateCurve(current_rate - bump)
+        rho = (
+            self.get_trade_value(env_rate_up) - self.get_trade_value(env_rate_down)
+        ) / (2.0 * bump)
+
+        return {
+            "price": base_value,
+            "delta": delta,
+            "gamma": gamma,
+            "vega": vega,
+            "rho": rho,
+        }
+
     def get_actual_notional(
         self, pricing_env: Optional[PricingEnvironment] = None
     ) -> float:
@@ -113,6 +220,23 @@ class EquityPosition:
 
         contract_multiplier = getattr(self.product, "contract_multiplier", 1.0)
         return self.quantity * base_price * contract_multiplier
+
+    def _get_unit_notional(self, pricing_env: PricingEnvironment) -> float:
+        """Return per-unit notional so quantity scales product and leg PV once."""
+        return self.get_actual_notional(pricing_env) / self.quantity
+
+    @staticmethod
+    def _bump_flat_or_term_vol(pricing_env: PricingEnvironment, bump: float) -> None:
+        vol_surface = pricing_env.vol_surface
+        if hasattr(vol_surface, "volatility"):
+            vol_surface.volatility += bump
+            return
+        if hasattr(vol_surface, "vols"):
+            vol_surface.vols = [float(vol) + bump for vol in vol_surface.vols]
+            return
+        raise ValidationError(
+            f"Unsupported volatility surface bump for {type(vol_surface).__name__}"
+        )
     
     def get_pnl(self, pricing_env: PricingEnvironment) -> float:
         """

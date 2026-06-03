@@ -6,6 +6,7 @@ discrete/continuous KI monitoring.
 """
 
 import sys
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from asset.equity.engine.quad.quad_math import QuadratureMath
 from asset.equity.param import QuadParams
 from asset.equity.product.option.snowball_config import (
     AccrualConfig,
@@ -309,3 +311,64 @@ def test_quad_applies_immediate_ki_at_valuation_observation():
     assert stats is not None
     assert stats.ki_probability == pytest.approx(1.0)
     assert stats.ki_times[0] == pytest.approx(0.0)
+
+
+def test_diffuse_fft_vectorized_matches_single_surface_path():
+    params = QuadParams(grid_points=301)
+    engine = SnowballQuadEngine(params=params)
+    math_utils = QuadratureMath(
+        grid_x=params.grid_points,
+        spot=100.0,
+        maturity=1.0,
+        vol_max=0.2,
+        num_std_devs=params.num_std_devs,
+        fft_padding_factor=params.fft_padding_factor,
+        fft_filter_alpha=params.fft_filter_alpha,
+        fft_filter_power=params.fft_filter_power,
+    )
+    tau_step = 0.5 * 0.2 * 0.2 / 252.0
+    alpha = -0.5
+    beta = 0.25
+    prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
+    omega_array = np.exp(
+        -(math_utils.z_grid**2) / (4.0 * tau_step) - alpha * math_utils.z_grid
+    )
+    values = np.vstack(
+        [
+            np.exp(-0.5 * math_utils.grid**2),
+            np.maximum(100.0 * np.exp(math_utils.grid) - 100.0, 0.0),
+            np.maximum(100.0 - 100.0 * np.exp(math_utils.grid), 0.0),
+        ]
+    )
+
+    vectorized = engine._diffuse_fft(
+        values,
+        math_utils,
+        omega_array,
+        prefactor,
+        0,
+        params.grid_points - 1,
+        (params.grid_points - 1) % 2,
+        alpha,
+        beta,
+        tau_step,
+    )
+    rowwise = np.vstack(
+        [
+            engine._diffuse_fft(
+                row,
+                math_utils,
+                omega_array,
+                prefactor,
+                0,
+                params.grid_points - 1,
+                (params.grid_points - 1) % 2,
+                alpha,
+                beta,
+                tau_step,
+            )
+            for row in values
+        ]
+    )
+
+    assert vectorized == pytest.approx(rowwise, rel=1e-12, abs=1e-12)

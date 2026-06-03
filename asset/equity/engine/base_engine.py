@@ -48,6 +48,36 @@ class BaseEngine(ABC):
         """
         pass
 
+    def price_with_events(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        emit_distribution: bool = True,
+    ) -> "PricingResult":
+        """
+        Return product NPV and an event distribution for cash-leg valuation.
+
+        Engines that already implement calculate_event_stats are adapted to the
+        generalized EventDistribution. Engines without event stats fall back to
+        a maturity-only distribution, which is sufficient for deterministic and
+        full-schedule cash legs.
+        """
+        from cashleg.event_distribution import EventDistribution, PricingResult
+
+        if emit_distribution:
+            stats = self.calculate_event_stats(product, pricing_env)
+            if stats is not None:
+                return PricingResult(
+                    npv=float(stats.pv),
+                    event_distribution=EventDistribution.from_autocallable_stats(stats),
+                )
+
+        npv = self.price(product, pricing_env)
+        return PricingResult(
+            npv=npv,
+            event_distribution=EventDistribution.trivial(product.get_maturity(pricing_env)),
+        )
+
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Dict[str, float]:

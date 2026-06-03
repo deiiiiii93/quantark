@@ -675,21 +675,10 @@ class SnowballQuadEngine(BaseEngine):
             base = prefactor * conv
             return base + self._tail_correction(values, math_utils, alpha, beta, tau_step)
 
-        out = np.zeros_like(values, dtype=float)
-        for i in range(values.shape[0]):
-            out[i] = self._diffuse_fft(
-                values[i],
-                math_utils,
-                omega_array,
-                prefactor,
-                p_lr,
-                p_ur,
-                p0,
-                alpha,
-                beta,
-                tau_step,
-            )
-        return out
+        u_array = math_utils.simpson_weights_many(values, p_lr, p_ur, p0)
+        conv = math_utils.convolution_fft_many(omega_array, u_array)
+        base = prefactor * conv
+        return base + self._tail_correction(values, math_utils, alpha, beta, tau_step)
 
     def _diffuse_with_bridge(
         self,
@@ -729,20 +718,26 @@ class SnowballQuadEngine(BaseEngine):
         band = self._bridge_band(tau_step, math_utils.h, grid.size)
         denom = vol * vol * dt
 
-        for i in range(grid.size):
-            j0 = max(0, i - band)
-            j1 = min(grid.size, i + band + 1)
-            y = grid[j0:j1]
-            z = grid[i] - y
-            omega = np.exp(-(z**2) / (4.0 * tau_step) - alpha * z)
-            w = weights[j0:j1]
+        for offset in range(-band, band + 1):
+            if offset >= 0:
+                source = slice(0, grid.size - offset)
+                target = slice(offset, grid.size)
+            else:
+                source = slice(-offset, grid.size)
+                target = slice(0, grid.size + offset)
+
+            source_grid = grid[source]
+            target_grid = grid[target]
+            z = float(offset) * math_utils.h
+            omega = math.exp(-(z**2) / (4.0 * tau_step) - alpha * z)
+            w = weights[source]
 
             if is_reverse:
-                d0 = log_barrier - grid[i]
-                d1 = log_barrier - y
+                d0 = log_barrier - target_grid
+                d1 = log_barrier - source_grid
             else:
-                d0 = grid[i] - log_barrier
-                d1 = y - log_barrier
+                d0 = target_grid - log_barrier
+                d1 = source_grid - log_barrier
 
             safe = (d0 > 0.0) & (d1 > 0.0)
             exponent = np.where(safe, -2.0 * d0 * d1 / denom, 0.0)
@@ -750,9 +745,11 @@ class SnowballQuadEngine(BaseEngine):
             p_hit = np.where(safe, np.exp(exponent), 1.0)
             kernel = omega * w * p_hit
             if delta.ndim == 1:
-                correction[i] = prefactor * float(np.sum(kernel * delta[j0:j1]))
+                correction[target] += prefactor * kernel * delta[source]
             else:
-                correction[:, i] = prefactor * (delta[:, j0:j1] @ kernel)
+                correction[:, target] += prefactor * kernel.reshape(1, -1) * delta[
+                    :, source
+                ]
 
         return base + correction
 
