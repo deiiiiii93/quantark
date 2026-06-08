@@ -7,6 +7,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -18,6 +20,110 @@ from priceenv import PricingEnvironment
 from util.calendar import DayCountConvention
 from util.enum import OptionType
 from util.exceptions import NumericalError, ValidationError
+
+
+def _discounted_european_lower_bound(
+    option: EuropeanVanillaOption,
+    spot: float,
+    rate: float,
+    dividend_yield: float,
+    maturity: float,
+) -> float:
+    spot_pv = spot * math.exp(-dividend_yield * maturity)
+    strike_pv = option.strike * math.exp(-rate * maturity)
+    if option.is_call():
+        return max(spot_pv - strike_pv, 0.0) * option.contract_multiplier
+    return max(strike_pv - spot_pv, 0.0) * option.contract_multiplier
+
+
+def test_high_dividend_call_can_price_below_immediate_payoff():
+    """European call lower bound discounts dividends and strike."""
+    pricing_env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=8356.744),
+        vol_surface=FlatVolSurface(volatility=0.2395),
+        rate_curve=FlatRateCurve(rate=0.014),
+        div_yield=ContinuousDividendYield(div_yield=0.0795),
+        valuation_date=datetime(2026, 6, 6),
+    )
+    call = EuropeanVanillaOption(
+        strike=98.77679014859717,
+        option_type=OptionType.CALL,
+        exercise_date=datetime(2026, 8, 12),
+        contract_multiplier=1.0,
+    )
+
+    engine = BlackScholesEngine()
+    price = engine.price(call, pricing_env)
+    maturity = call.get_maturity(pricing_env)
+    immediate_payoff = call.intrinsic_value(pricing_env.spot)
+    lower_bound = _discounted_european_lower_bound(
+        call, pricing_env.spot, 0.014, 0.0795, maturity
+    )
+
+    assert price == pytest.approx(8137.155016, abs=1e-6)
+    assert price < immediate_payoff
+    assert price >= lower_bound - 1e-6
+
+
+def test_discounted_put_lower_bound_can_be_below_immediate_payoff():
+    """European put lower bound discounts the strike, unlike immediate payoff."""
+    pricing_env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=1.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.10),
+        div_yield=ContinuousDividendYield(div_yield=0.0),
+        valuation_date=datetime(2024, 1, 1),
+    )
+    put = EuropeanVanillaOption(
+        strike=100.0,
+        option_type=OptionType.PUT,
+        maturity=1.0,
+    )
+
+    price = BlackScholesEngine().price(put, pricing_env)
+    immediate_payoff = put.intrinsic_value(pricing_env.spot)
+    lower_bound = _discounted_european_lower_bound(
+        put, pricing_env.spot, 0.10, 0.0, 1.0
+    )
+
+    assert price < immediate_payoff
+    assert price >= lower_bound - 1e-6
+
+
+def test_black_scholes_rejects_price_below_discounted_european_lower_bound():
+    """The sanity gate rejects prices below the European PV lower bound."""
+    pricing_env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=120.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.01),
+        div_yield=ContinuousDividendYield(div_yield=0.0),
+        valuation_date=datetime(2024, 1, 1),
+    )
+    call = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
+    engine = BlackScholesEngine()
+    lower_bound = _discounted_european_lower_bound(call, 120.0, 0.01, 0.0, 1.0)
+
+    engine._price_call = lambda *args: lower_bound - 1e-5
+
+    with pytest.raises(NumericalError, match="discounted European lower bound"):
+        engine.price(call, pricing_env)
+
+
+def test_black_scholes_still_rejects_negative_prices():
+    """The lower-bound fix must not weaken negative price validation."""
+    pricing_env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.01),
+        div_yield=ContinuousDividendYield(div_yield=0.0),
+        valuation_date=datetime(2024, 1, 1),
+    )
+    call = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
+    engine = BlackScholesEngine()
+    engine._price_call = lambda *args: -1.0
+
+    with pytest.raises(NumericalError, match="Negative price computed"):
+        engine.price(call, pricing_env)
 
 
 def test_call_option_pricing():

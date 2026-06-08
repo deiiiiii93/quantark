@@ -20,7 +20,21 @@ from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQu
 from priceenv import PricingEnvironment
 from util.enum import OptionType
 from util.enum.engine_enums import EngineType, QuadratureMethod
-from util.exceptions import PricingError, ValidationError
+from util.exceptions import NumericalError, PricingError, ValidationError
+
+
+def _discounted_european_lower_bound(
+    option: EuropeanVanillaOption,
+    spot: float,
+    rate: float,
+    dividend_yield: float,
+    maturity: float,
+) -> float:
+    spot_pv = spot * math.exp(-dividend_yield * maturity)
+    strike_pv = option.strike * math.exp(-rate * maturity)
+    if option.is_call():
+        return max(spot_pv - strike_pv, 0.0) * option.contract_multiplier
+    return max(strike_pv - spot_pv, 0.0) * option.contract_multiplier
 
 
 def create_pricing_env(
@@ -41,6 +55,27 @@ def create_pricing_env(
 
 class TestEuropeanQuadEngineBasic:
     """Basic functionality tests for EuropeanQuadEngine."""
+
+    def test_rejects_price_below_discounted_european_lower_bound(self):
+        """Quadrature sanity gate uses the discounted European lower bound."""
+        pricing_env = create_pricing_env(spot=120.0, rate=0.01, div=0.0)
+        call = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
+        engine = EuropeanQuadEngine()
+        lower_bound = _discounted_european_lower_bound(call, 120.0, 0.01, 0.0, 1.0)
+        engine._price_simpson = lambda *args: lower_bound - 1e-3
+
+        with pytest.raises(NumericalError, match="discounted European lower bound"):
+            engine.price(call, pricing_env)
+
+    def test_still_rejects_negative_prices(self):
+        """The lower-bound fix must not weaken negative price validation."""
+        pricing_env = create_pricing_env(spot=100.0, rate=0.01, div=0.0)
+        call = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
+        engine = EuropeanQuadEngine()
+        engine._price_simpson = lambda *args: -1.0
+
+        with pytest.raises(NumericalError, match="Negative price computed"):
+            engine.price(call, pricing_env)
 
     def test_call_option_pricing_vs_black_scholes(self):
         """Test call option pricing matches Black-Scholes."""
