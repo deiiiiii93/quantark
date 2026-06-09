@@ -128,7 +128,7 @@ class AutocallableBacktestEngine:
             greeks = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
             if self.lifecycle.alive:
                 price = float(self.pricing_engine.price(product, env))
-                greeks = self._replay.calculate_greeks(product, env, price)
+                greeks = self._calculate_greeks(product, env, price)
 
             if self.config.calculate_event_probabilities and self.lifecycle.alive:
                 self._replay.record_event_probabilities(date, product, env)

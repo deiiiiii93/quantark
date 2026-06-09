@@ -40,6 +40,14 @@ class ProductReplay:
     Holds the inputs the moved methods previously read off the engine/config,
     a shared ``AutocallableLifecycleState`` (the same instance the engine uses,
     so lifecycle mutations are visible to both), and output sink lists.
+
+    Two-phase initialisation note
+    ------------------------------
+    ``start_date`` is ``None`` at construction time.  It MUST be populated
+    before any replay method is called.  ``AutocallableBacktestEngine`` sets
+    ``self._replay.start_date`` to the first backtest date at the top of
+    ``run()``, before the daily loop begins.  Any standalone caller is
+    responsible for the same assignment.
     """
 
     def __init__(
@@ -55,14 +63,14 @@ class ProductReplay:
         market_data: Any,
         start_date: Optional[pd.Timestamp],
         underlying: str,
-        fixed_dividend_yield: Optional[float] = None,
-        delta_bump_size: Optional[float] = None,
-        gamma_bump_size: Optional[float] = None,
-        surface_config: Any = None,
         actions_sink: list[dict[str, Any]],
         event_prob_sink: list[dict[str, Any]],
         daily_event_sink: list[dict[str, Any]],
         surfaces_sink: list[dict[str, Any]],
+        fixed_dividend_yield: Optional[float] = None,
+        delta_bump_size: Optional[float] = None,
+        gamma_bump_size: Optional[float] = None,
+        surface_config: Any = None,
     ) -> None:
         self.product = product
         self.product_quantity = product_quantity
@@ -221,6 +229,8 @@ class ProductReplay:
         spot: float,
         q_center: float,
     ) -> None:
+        if self.surface_config is None:
+            return
         spec = self.surface_config
         spot_grid = np.linspace(
             spot * (1.0 - spec.spot_width),
