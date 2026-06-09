@@ -84,9 +84,9 @@ def test_book_config_rejects_empty_products():
 
 def test_results_summary_empty_states():
     from backtest.otc.book_engine import BookBacktestResults
-    r = BookBacktestResults(config=None, states=[], greeks=[], trades=[], actions=[],
-                            daily_event_summary=[], event_probabilities=[],
-                            products_meta=[{"position_id": 1}])
+    r = BookBacktestResults(config=None, states=[], greeks=[], rebalances=[], trades=[],
+                            actions=[], daily_event_summary=[], event_probabilities=[],
+                            surfaces=[], products_meta=[{"position_id": 1}])
     s = r.get_summary()
     assert s["num_days"] == 0 and s["num_products"] == 1
 

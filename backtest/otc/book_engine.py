@@ -3,12 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
-import numpy as np
 import pandas as pd
 
 from util.exceptions import ValidationError
 from .config import AutocallableEngineConfig, FuturesRollPolicy, SurfaceGridConfig
-from .market import AutocallableMarketDataSet
+from .market import AutocallableMarketDataSet, ImpliedBasisYield, SignedDividendYield
 from .state import AutocallableDeltaHedgeStrategy, AutocallableLifecycleState, FuturesHedgePosition
 from backtest.transaction_costs import TransactionCostModel, ZeroCostModel
 from .engine_factory import create_pricing_engine, create_surface_engine, create_event_stats_engine
@@ -169,6 +168,19 @@ class BookAutocallableBacktestEngine:
             env, basis_yield, implied_q, futures_ttm = self._replays[0].build_env(
                 date, market, selected
             )
+            if self.hedge.kind == "spot":
+                # For spot hedges, build_env synthesises a 100-year future
+                # (futures_price == spot), which collapses implied_q ≈ rate.
+                # That is economically wrong: override with an explicit dividend
+                # yield so the pricer receives a dividend, not the risk-free rate.
+                implied_q = (
+                    float(self.config.fixed_dividend_yield)
+                    if self.config.fixed_dividend_yield is not None
+                    else 0.0
+                )
+                basis_yield = 0.0
+                env.div_yield = SignedDividendYield(implied_q)
+                env.basis_yield = ImpliedBasisYield(0.0)
             pricing_q = self._replays[0].pricing_dividend_yield(implied_q)
 
             # Initial book value: priced BEFORE lifecycle on the first day,
@@ -245,10 +257,12 @@ class BookAutocallableBacktestEngine:
             config=self.config,
             states=self._states,
             greeks=self._greeks,
+            rebalances=self._rebalances,
             trades=self._trades,
             actions=self._actions,
             daily_event_summary=self._daily_event_summary,
             event_probabilities=self._event_probabilities,
+            surfaces=self._surfaces,
             products_meta=[
                 {
                     "position_id": bp.position_id,
@@ -291,6 +305,8 @@ class BookAutocallableBacktestEngine:
         trade_type = "hedge_rebalance"
         if any_alive:
             if is_spot:
+                # Spot mode: always target full delta-neutral; strategy.hedge_ratio
+                # and target_delta are not applied — only delta_threshold (band) is.
                 target = -float(net_position_delta)
             else:
                 target = self.strategy.target_contracts(
@@ -457,6 +473,9 @@ class BookAutocallableBacktestEngine:
         pre_hedge_gamma_cash_1pct = pre_hedge_gamma * spot**2 / 100.0
         post_hedge_gamma_cash_1pct = post_hedge_gamma * spot**2 / 100.0
 
+        # Book-level aggregates: alive=ANY product alive (hedge-control field);
+        # knocked_out/matured=ALL products in that terminal state (book is only
+        # fully exited when every leg has terminated).
         knocked_in = any(r.lifecycle.knocked_in for r in self._replays)
         knocked_out = all(r.lifecycle.knocked_out for r in self._replays)
         matured = all(r.lifecycle.matured for r in self._replays)
@@ -517,15 +536,17 @@ class BookAutocallableBacktestEngine:
 
 
 class BookBacktestResults:
-    def __init__(self, *, config, states, greeks, trades, actions,
-                 daily_event_summary, event_probabilities, products_meta):
+    def __init__(self, *, config, states, greeks, rebalances, trades, actions,
+                 daily_event_summary, event_probabilities, surfaces, products_meta):
         self.config = config
         self._states = states
         self._greeks = greeks
+        self._rebalances = rebalances
         self._trades = trades
         self._actions = actions
         self._daily_event_summary = daily_event_summary
         self._event_probabilities = event_probabilities
+        self._surfaces = surfaces
         self._products_meta = products_meta
 
     @staticmethod
@@ -537,10 +558,12 @@ class BookBacktestResults:
 
     def states_df(self): return self._frame(self._states)
     def greeks_df(self): return self._frame(self._greeks)
+    def rebalances_df(self): return self._frame(self._rebalances)
     def trades_df(self): return self._frame(self._trades)
     def actions_df(self): return self._frame(self._actions)
     def daily_event_summary_df(self): return self._frame(self._daily_event_summary)
     def event_probability_df(self): return self._frame(self._event_probabilities)
+    def surfaces_df(self): return self._frame(self._surfaces)
 
     def get_summary(self):
         states = self.states_df()
