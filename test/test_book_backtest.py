@@ -73,3 +73,19 @@ def test_single_product_summary_is_stable(single_summary):
     assert single_summary["num_trades"] == 7
     assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
     assert single_summary["total_pnl"] == pytest.approx(-9580.965682060465, rel=1e-9)
+
+
+def test_book_config_rejects_empty_products():
+    from backtest.otc.book_engine import BookAutocallableBacktestConfig
+    market = _synthetic_market()
+    with pytest.raises(Exception):
+        BookAutocallableBacktestConfig(products=[], market_data=market)
+
+
+def test_results_summary_empty_states():
+    from backtest.otc.book_engine import BookBacktestResults
+    r = BookBacktestResults(config=None, states=[], greeks=[], trades=[], actions=[],
+                            daily_event_summary=[], event_probabilities=[],
+                            products_meta=[{"position_id": 1}])
+    s = r.get_summary()
+    assert s["num_days"] == 0 and s["num_products"] == 1
