@@ -89,3 +89,38 @@ def test_results_summary_empty_states():
                             products_meta=[{"position_id": 1}])
     s = r.get_summary()
     assert s["num_days"] == 0 and s["num_products"] == 1
+
+
+def test_book_of_one_matches_single_product(single_summary):
+    from backtest.otc.book_engine import (
+        BookAutocallableBacktestConfig,
+        BookAutocallableBacktestEngine,
+        BookProduct,
+        HedgeSpec,
+    )
+
+    market = _synthetic_market()
+    # Build the SAME snowball as _single_config (exact constructor call).
+    snowball = create_standard_snowball(
+        initial_price=6000.0,
+        strike=6000.0,
+        maturity=1.0,
+        ko_barrier=6180.0,   # 103% of initial_price
+        ki_barrier=4500.0,   # 75% of initial_price
+        ko_rate=0.15,
+    )
+    cfg = BookAutocallableBacktestConfig(
+        products=[BookProduct(product=snowball, quantity=-350.0, position_id=1, has_lifecycle=True)],
+        market_data=market,
+        hedge=HedgeSpec(kind="futures", multiplier=200.0),
+        engine_config=AutocallableEngineConfig(pricing_engine_type=EngineType.QUADRATURE),
+        underlying="CSI500",
+        start_date=datetime(2024, 1, 2),
+        end_date=datetime(2024, 4, 30),
+        calculate_surfaces=False,
+        calculate_event_probabilities=False,
+    )
+    book = BookAutocallableBacktestEngine(cfg).run().get_summary()
+    assert book["num_days"] == single_summary["num_days"]      # 86
+    assert book["num_trades"] == single_summary["num_trades"]  # 7
+    assert book["total_pnl"] == pytest.approx(single_summary["total_pnl"], rel=1e-9)  # -9580.96...
