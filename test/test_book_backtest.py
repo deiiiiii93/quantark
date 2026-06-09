@@ -51,7 +51,7 @@ def _single_config(market):
     return AutocallableBacktestConfig(
         product=snowball, market_data=market,
         engine_config=AutocallableEngineConfig(pricing_engine_type=EngineType.QUADRATURE),
-        product_quantity=-1.0, underlying="CSI500",
+        product_quantity=-350.0, underlying="CSI500",
         start_date=datetime(2024, 1, 2), end_date=datetime(2024, 4, 30),
         calculate_surfaces=False, calculate_event_probabilities=False,
     )
@@ -66,7 +66,10 @@ def single_summary():
 
 def test_single_product_summary_is_stable(single_summary):
     # Pinned values recorded from the deterministic synthetic-market run.
+    # product_quantity=-350.0 ensures the rounded futures target is nonzero,
+    # exercising the hedge/rebalance/roll path.
     # These are the characterization anchors for the Task 1.2 refactor.
     assert single_summary["num_days"] == 86
-    assert single_summary["num_trades"] == 0
-    assert single_summary["total_pnl"] == pytest.approx(1.0482609702399657, rel=1e-9)
+    assert single_summary["num_trades"] == 7
+    assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
+    assert single_summary["total_pnl"] == pytest.approx(-9580.965682060465, rel=1e-9)
