@@ -2,6 +2,13 @@
 OTC autocallable backtesting tools.
 """
 
+from .book_engine import (
+    BookAutocallableBacktestConfig,
+    BookAutocallableBacktestEngine,
+    BookBacktestResults,
+    BookProduct,
+    HedgeSpec,
+)
 from .config import (
     AutocallableBacktestConfig,
     AutocallableEngineConfig,
@@ -37,6 +44,11 @@ from .state import (
 __all__ = [
     "AKShareAutocallableDataAdapter",
     "AutocallableBacktestConfig",
+    "BookAutocallableBacktestConfig",
+    "BookAutocallableBacktestEngine",
+    "BookBacktestResults",
+    "BookProduct",
+    "HedgeSpec",
     "AutocallableBacktestDashboard",
     "AutocallableDashboardConfig",
     "AutocallableBacktestEngine",

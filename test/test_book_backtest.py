@@ -124,3 +124,81 @@ def test_book_of_one_matches_single_product(single_summary):
     assert book["num_days"] == single_summary["num_days"]      # 86
     assert book["num_trades"] == single_summary["num_trades"]  # 7
     assert book["total_pnl"] == pytest.approx(single_summary["total_pnl"], rel=1e-9)  # -9580.96...
+
+
+def test_offsetting_products_net_to_near_zero_hedge():
+    """Two equal-and-opposite positions on the same underlying net to ~zero delta,
+    producing materially fewer hedge trades than the single -350 book (7 trades)."""
+    from backtest.otc.book_engine import (
+        BookAutocallableBacktestConfig,
+        BookAutocallableBacktestEngine,
+        BookProduct,
+        HedgeSpec,
+    )
+
+    market = _synthetic_market()
+    sb = create_standard_snowball(
+        initial_price=6000.0,
+        strike=6000.0,
+        maturity=1.0,
+        ko_barrier=6180.0,
+        ki_barrier=4500.0,
+        ko_rate=0.15,
+    )
+    cfg = BookAutocallableBacktestConfig(
+        products=[
+            BookProduct(product=sb, quantity=-350.0, position_id=1, has_lifecycle=True),
+            BookProduct(product=sb, quantity=350.0, position_id=2, has_lifecycle=True),
+        ],
+        market_data=market,
+        hedge=HedgeSpec(kind="futures", multiplier=200.0),
+        engine_config=AutocallableEngineConfig(pricing_engine_type=EngineType.QUADRATURE),
+        underlying="CSI500",
+        start_date=datetime(2024, 1, 2),
+        end_date=datetime(2024, 4, 30),
+        calculate_event_probabilities=False,
+    )
+    summary = BookAutocallableBacktestEngine(cfg).run().get_summary()
+    assert summary["num_products"] == 2
+    # Net delta ~0 after rounding -> essentially no hedge trades.
+    # The single -350 book produces 7 trades; offsetting legs must be materially fewer.
+    # (A residual ±1 contract on some days is possible from integer rounding.)
+    assert summary["num_trades"] <= 3
+
+
+def test_spot_hedge_mode_runs():
+    """Spot-hedged book runs end-to-end (no futures roll), trades are instrument_type='spot',
+    and total P&L is finite."""
+    from backtest.otc.book_engine import (
+        BookAutocallableBacktestConfig,
+        BookAutocallableBacktestEngine,
+        BookProduct,
+        HedgeSpec,
+    )
+
+    market = _synthetic_market()
+    sb = create_standard_snowball(
+        initial_price=6000.0,
+        strike=6000.0,
+        maturity=1.0,
+        ko_barrier=6180.0,
+        ki_barrier=4500.0,
+        ko_rate=0.15,
+    )
+    cfg = BookAutocallableBacktestConfig(
+        products=[BookProduct(product=sb, quantity=-350.0, position_id=1, has_lifecycle=True)],
+        market_data=market,
+        hedge=HedgeSpec(kind="spot", multiplier=1.0),
+        engine_config=AutocallableEngineConfig(pricing_engine_type=EngineType.QUADRATURE),
+        underlying="CSI500",
+        start_date=datetime(2024, 1, 2),
+        end_date=datetime(2024, 4, 30),
+        calculate_event_probabilities=False,
+    )
+    results = BookAutocallableBacktestEngine(cfg).run()
+    summary = results.get_summary()
+    assert summary["num_days"] > 0
+    assert np.isfinite(summary["total_pnl"])
+    trades = results.trades_df()
+    if not trades.empty:
+        assert (trades["instrument_type"] == "spot").any()
