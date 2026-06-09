@@ -44,6 +44,7 @@ from stresstest.stress.stress_types import (
     BasisDividendRelationshipMode,
 )
 from util.exceptions import ValidationError
+from util.numerical import pnl_pct_of_abs_baseline
 
 
 class DynamicScenarioEngine:
@@ -273,7 +274,7 @@ class DynamicScenarioEngine:
             final_value=final_value,
             day_results=day_results,
             total_pnl=final_value - baseline_value,
-            total_pnl_pct=((final_value - baseline_value) / baseline_value * 100) if baseline_value != 0 else 0,
+            total_pnl_pct=pnl_pct_of_abs_baseline(final_value - baseline_value, baseline_value),
             total_transaction_costs=cumulative_transaction_costs,
             net_pnl=final_value - baseline_value - cumulative_transaction_costs,
             total_hedges=total_hedges,

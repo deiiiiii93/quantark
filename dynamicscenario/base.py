@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Protocol, runtime_checkable
 from datetime import datetime
 
+from util.numerical import pnl_pct_of_abs_baseline
+
 
 @runtime_checkable
 class RiskMetricsAdapter(Protocol):
@@ -121,7 +123,10 @@ class BaseScenarioResults:
             self.total_pnl = self.final_value - self.baseline_value
         
         if self.total_pnl_pct == 0.0 and self.baseline_value != 0:
-            self.total_pnl_pct = (self.total_pnl / self.baseline_value) * 100
+            self.total_pnl_pct = pnl_pct_of_abs_baseline(
+                self.total_pnl,
+                self.baseline_value,
+            )
         
         if self.net_pnl == 0.0:
             self.net_pnl = self.total_pnl - self.total_transaction_costs
@@ -290,4 +295,3 @@ def get_engine_for_portfolio(
         return DynamicScenarioEngine(eq_config)
     
     raise ValueError(f"No engine available for portfolio type: {type(portfolio).__name__}")
-

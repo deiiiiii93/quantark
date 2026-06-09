@@ -7,6 +7,8 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
 
+from util.numerical import pnl_pct_of_abs_baseline
+
 
 @dataclass
 class PositionSnapshot:
@@ -269,7 +271,10 @@ class DynamicScenarioResults:
             self.total_pnl = self.final_value - self.baseline_value
         
         if self.total_pnl_pct == 0.0 and self.baseline_value != 0:
-            self.total_pnl_pct = (self.total_pnl / self.baseline_value) * 100
+            self.total_pnl_pct = pnl_pct_of_abs_baseline(
+                self.total_pnl,
+                self.baseline_value,
+            )
         
         if self.net_pnl == 0.0:
             self.net_pnl = self.total_pnl - self.total_transaction_costs

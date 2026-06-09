@@ -16,6 +16,7 @@ from stresstest.equity.results import ScenarioResult, StressTestResults
 from stresstest.scenario.scenario import Scenario
 from stresstest.stress.stress_applicator import StressApplicator
 from util.exceptions import ValidationError
+from util.numerical import pnl_pct_of_abs_baseline
 
 
 class EquityStressMetricsAdapter(StressMetricsAdapter):
@@ -114,9 +115,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
 
         stressed_value = stressed_portfolio.get_portfolio_value()
         portfolio_pnl = stressed_value - baseline_value
-        portfolio_pnl_pct = (
-            (portfolio_pnl / baseline_value * 100) if baseline_value != 0 else 0.0
-        )
+        portfolio_pnl_pct = pnl_pct_of_abs_baseline(portfolio_pnl, baseline_value)
 
         greeks = None
         if self.config.calculate_greeks and self.greeks_calculator:
@@ -205,9 +204,7 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
             stressed_value = position.get_market_value(stressed_env)
 
             position_pnl = stressed_value - original_value
-            position_pnl_pct = (
-                (position_pnl / original_value * 100) if original_value != 0 else 0.0
-            )
+            position_pnl_pct = pnl_pct_of_abs_baseline(position_pnl, original_value)
 
             result = {
                 "position_id": position_id,
@@ -273,4 +270,3 @@ class EquityStressEngine(BaseStressEngine, ScenarioRunner):
 
 # Backward-compatible alias to avoid breaking external imports.
 StressTestEngine = EquityStressEngine
-
