@@ -5,13 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-**Note**: The project includes a pre-configured virtual environment `quantark/`. Either activate it first (`source quantark/bin/activate`) or use `quantark/bin/python` and `quantark/bin/pip` for all commands below.
+**Note**: The project virtual environment lives at `.venv/`. Either activate it first (`source .venv/bin/activate`) or use `.venv/bin/python` and `.venv/bin/pip` for all commands below. (`quantark/` is the library package — the old venv of that name is gone.)
 
 ### Dependencies
 ```bash
-# Install Python dependencies (using the virtual environment's pip)
-pip install -r requirements.txt
+# Create the venv and install the library editable with dev extras
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
 ```
+
+### Package layout & imports
+All library code lives under the single top-level package `quantark` (e.g. `quantark.asset`, `quantark.util`, `quantark.param`). Always write new code with canonical `quantark.*` imports. The 12 historical flat top-level names (`asset`, `util`, `param`, …) still import via a compatibility shim (`quantark/_compat.py`, registered by `quantark_compat.pth`) that aliases them to the same module objects with a `DeprecationWarning` — existing consumers keep working, but do not write new flat imports. `example/` scripts intentionally keep flat imports as a live exerciser of the shim.
 
 ### Testing
 ```bash
@@ -109,32 +113,32 @@ QuantArk is a professional-grade financial derivatives pricing library with a mo
 
 The library separates concerns across independent, composable components:
 
-1. **Products** (`asset/*/product/`) - Define instrument specifications (strike, maturity, type)
+1. **Products** (`quantark/asset/*/product/`) - Define instrument specifications (strike, maturity, type)
    - Vanilla: `EuropeanVanillaOption`, `AmericanOption`, `AsianOption`
    - Exotic: `BarrierOption`, `OneTouchOption`, `CashOrNothingDigitalOption`
    - Autocallable: `SnowballOption`, `PhoenixOption`, `KOResetSnowballOption`, `RangeAccrualOption`
    - Fixed Income: `FixedBond`, `ConvertibleBond`, `BondForward`, `BondFutures`, `InterestRateSwap`
-2. **Processes** (`asset/*/process/`) - Stochastic models (BSM, Heston, Local Vol)
+2. **Processes** (`quantark/asset/*/process/`) - Stochastic models (BSM, Heston, Local Vol)
    - Examples: `GeometricBrownianMotion`, `HestonProcess`
-3. **Engines** (`asset/*/engine/`) - Pricing algorithms (Analytical, PDE, Monte Carlo, Quadrature)
+3. **Engines** (`quantark/asset/*/engine/`) - Pricing algorithms (Analytical, PDE, Monte Carlo, Quadrature)
    - Examples: `BlackScholesEngine`, `MonteCarloEngine`, `SnowballPDESolver`, `PhoenixQuadEngine`
-4. **Parameters** (`param/`) - Market data (spot, vol surface, rate curve, dividends)
+4. **Parameters** (`quantark/param/`) - Market data (spot, vol surface, rate curve, dividends)
    - Examples: `SpotQuote`, `FlatVolSurface`, `FlatRateCurve`, `ContinuousDividendYield`
-5. **PriceEnv** (`priceenv/`) - Unified pricing environment bundling all market data
+5. **PriceEnv** (`quantark/priceenv/`) - Unified pricing environment bundling all market data
    - `PricingEnvironment` is the central data container
-6. **RiskMeasures** (`asset/*/riskmeasures/`) - Greeks calculation (analytical and numerical)
+6. **RiskMeasures** (`quantark/asset/*/riskmeasures/`) - Greeks calculation (analytical and numerical)
    - Examples: `GreeksCalculator`, `BondGreeksCalculator`
-7. **VaR** (`var/`) - Portfolio Value-at-Risk calculations with multiple methodologies
+7. **VaR** (`quantark/var/`) - Portfolio Value-at-Risk calculations with multiple methodologies
    - Engines: `ParametricVaREngine`, `HistoricalVaREngine`, `MonteCarloVaREngine`
    - Risk Factors: `SpotReturnFactor`, `RateShiftFactor`, `VolChangeFactor`
    - Results: `VaRResult`, `IncrementalVaRResult`, `VaRReportGenerator`
 
 ### Engine Method Selection Pattern
 
-For engines supporting multiple methods, use the two-level enum pattern defined in `util/enum/engine_enums.py`:
+For engines supporting multiple methods, use the two-level enum pattern defined in `quantark/util/enum/engine_enums.py`:
 
 ```python
-from util.enum.engine_enums import AmericanAnalyticalMethod, EngineType
+from quantark.util.enum.engine_enums import AmericanAnalyticalMethod, EngineType
 
 # Preferred: Two-level enum pattern
 engine = AmericanOptionAnalyticalEngine(
@@ -152,7 +156,7 @@ Always follow this two-level enum pattern (EngineType.ANALYTICAL(method)) for ne
 
 ### Asset Class Structure
 
-Each asset class (`asset/equity/`, `asset/bond/`, `asset/rate/`) follows the same internal structure:
+Each asset class (`quantark/asset/equity/`, `quantark/asset/bond/`, `quantark/asset/rate/`) follows the same internal structure:
 - `product/` - Instrument definitions
 - `engine/` - Pricing engines (analytical/, mc/, pde/, quad/, tree/)
 - `process/` - Stochastic processes
@@ -168,13 +172,13 @@ Products represent one contract/unit, while positions carry quantity:
 
 ### Supporting Modules
 
-- **VaR** (`var/`) - Portfolio Value-at-Risk calculations (parametric, historical, Monte Carlo) with attribution
-- **SIMM** (`simm/`) - ISDA SIMM v2.6 initial margin calculations
-- **Portfolio** (`portfolio/`) - Portfolio management with position tracking (equity and fixed income)
-- **Backtest** (`backtest/`) - Framework for testing hedging strategies (delta-neutral, DV01-neutral, convexity-neutral)
-- **Dynamic Scenario** (`dynamicscenario/`) - Multi-day scenario simulation (equity and FI)
-- **Stress Test** (`stresstest/`) - Stress testing framework with scenario definitions (equity and FI)
-- **Utilities** (`util/`) - Exceptions, enums, calendar (China holidays/business-day), market data adapter framework, numerical utilities
+- **VaR** (`quantark/var/`) - Portfolio Value-at-Risk calculations (parametric, historical, Monte Carlo) with attribution
+- **SIMM** (`quantark/simm/`) - ISDA SIMM v2.6 initial margin calculations
+- **Portfolio** (`quantark/portfolio/`) - Portfolio management with position tracking (equity and fixed income)
+- **Backtest** (`quantark/backtest/`) - Framework for testing hedging strategies (delta-neutral, DV01-neutral, convexity-neutral)
+- **Dynamic Scenario** (`quantark/dynamicscenario/`) - Multi-day scenario simulation (equity and FI)
+- **Stress Test** (`quantark/stresstest/`) - Stress testing framework with scenario definitions (equity and FI)
+- **Utilities** (`quantark/util/`) - Exceptions, enums, calendar (China holidays/business-day), market data adapter framework, numerical utilities
 
 ### Exception Hierarchy
 
@@ -234,11 +238,11 @@ Skip proposal for:
 - **Numerical Stability**: Handle edge cases (near-expiry, deep ITM/OTM)
 
 ### Numerical Operations (IMPORTANT)
-Always use `util/numerical/` utilities for numerical operations. **Do NOT** use raw float comparisons or hardcoded tolerances.
+Always use `quantark/util/numerical/` utilities for numerical operations. **Do NOT** use raw float comparisons or hardcoded tolerances.
 
 **Float Comparison** - Use `util.numerical.comparison`:
 ```python
-from util.numerical import is_zero, is_close, almost_equal, Tolerance
+from quantark.util.numerical import is_zero, is_close, almost_equal, Tolerance
 
 # CORRECT: Use is_zero for expiry checks
 if is_zero(time_to_expiry):  # Uses Tolerance.ZERO (1e-10)
@@ -251,7 +255,7 @@ if time_to_expiry < 1e-10:  # Don't do this
 
 **Safe Math** - Use `util.numerical.safe_math`:
 ```python
-from util.numerical import safe_log, safe_exp, safe_sqrt, safe_divide
+from quantark.util.numerical import safe_log, safe_exp, safe_sqrt, safe_divide
 
 # CORRECT: Protected math operations
 log_moneyness = safe_log(spot / strike)  # Prevents log(0)
@@ -264,7 +268,7 @@ log_moneyness = math.log(spot / strike)  # Can fail with log(0)
 
 **Number Formatting** - Use `util.numerical.formatting`:
 ```python
-from util.numerical import format_currency, format_percentage, format_basis_points
+from quantark.util.numerical import format_currency, format_percentage, format_basis_points
 
 # CORRECT: Standardized formatting
 print(format_currency(price))        # $1,234.56
@@ -277,7 +281,7 @@ print(f"${price:.2f}")  # Don't hardcode format strings
 
 **Validation** - Use `util.numerical.validation`:
 ```python
-from util.numerical import validate_positive, validate_probability, is_valid_number
+from quantark.util.numerical import validate_positive, validate_probability, is_valid_number
 
 # CORRECT: Standardized validation
 strike = validate_positive(strike, "strike")
@@ -297,7 +301,7 @@ confidence = validate_probability(confidence_level, "confidence_level")
 - `openspec/AGENTS.md` - OpenSpec instructions for spec-driven development
 - `openspec/project.md` - Project conventions, tech stack, domain context
 - `docs/` - Technical implementation details (backtest theory, stress test theory, quad engines, convertible bonds, engine param guide)
-- Module-level `CLAUDE.md` - Detailed guides in `asset/equity/`, `var/`, `backtest/`, `stresstest/`, `dynamicscenario/`, `simm/`
+- Module-level `CLAUDE.md` - Detailed guides in `quantark/asset/equity/`, `quantark/var/`, `quantark/backtest/`, `quantark/stresstest/`, `quantark/dynamicscenario/`, `quantark/simm/`
 
 ## Important Notes
 

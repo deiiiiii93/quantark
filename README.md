@@ -46,24 +46,36 @@ QuantArk is designed with a clean, modular architecture that separates concerns 
 
 ## Installation
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/QuantArk.git
-cd QuantArk
+QuantArk is a standard pip-installable package (PEP 621 `pyproject.toml`,
+hatchling backend). All code lives under the single top-level package
+`quantark`.
 
-# Install dependencies
-pip install -r requirements.txt
+```bash
+# As a dependency (from a checkout or VCS URL)
+pip install /path/to/quant-ark
+
+# For development: editable install with test tooling
+git clone <repo-url> && cd quant-ark
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
 ```
+
+**Migration note**: imports use the `quantark.*` namespace
+(`from quantark.util.enum import OptionType`). The historical flat
+top-level packages (`asset`, `util`, `param`, …) still work through a
+compatibility shim that aliases them to the same modules and emits a
+`DeprecationWarning` — migrate existing code to `quantark.*` at your
+convenience.
 
 ## Quick Start
 
 ```python
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.riskmeasures import GreeksCalculator
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
 
 # Set up market data
 spot = SpotQuote(spot=100.0)
@@ -103,13 +115,13 @@ print(f"Theta: {analytical_greeks['theta']:.6f} (per day)")
 print(f"Rho:   {analytical_greeks['rho']:.6f}")
 
 # Calculate portfolio VaR
-from var import (
+from quantark.var import (
     ParametricVaREngine,
     HistoricalVaREngine,
     VaRConfig,
     EquityRiskFactorConfig,
 )
-from portfolio.equity.portfolio import EquityPortfolio
+from quantark.portfolio.equity.portfolio import EquityPortfolio
 
 # Create a portfolio
 portfolio = EquityPortfolio(
@@ -151,7 +163,7 @@ For QUAD/PDE batch pricing, you can use named presets, factory helpers, or YAML/
 configs instead of tuning many individual parameters.
 
 ```python
-from asset.equity.param import make_quad_params, make_pde_params
+from quantark.asset.equity.param import make_quad_params, make_pde_params
 
 quad_params = make_quad_params(profile="barrier_sensitive")
 pde_params = make_pde_params(profile="balanced")
@@ -165,7 +177,7 @@ Randomized QMC uses a target standard error for adaptive batching. For large
 notionals, prefer relative scaling to avoid overly strict absolute tolerances:
 
 ```python
-from asset.equity.param import MCParams
+from quantark.asset.equity.param import MCParams
 
 mc_params = MCParams(
     num_paths=100000,

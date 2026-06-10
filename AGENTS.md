@@ -53,11 +53,15 @@ python example/stress_test_demo.py
 
 ### Dependencies
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# The project uses a virtual environment named 'quantark'
+# The project venv lives at .venv/; install the library editable with dev extras
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
 ```
+
+All library code lives under the top-level package `quantark`
+(`quantark.asset`, `quantark.util`, …). Write canonical `quantark.*`
+imports; the historical flat names still resolve via a deprecation shim
+(`quantark/_compat.py`) but must not appear in new code.
 
 ## Project Index
 
@@ -109,18 +113,18 @@ QuantArk is a professional-grade financial derivatives pricing library with a mo
 
 The library separates concerns across independent, composable components:
 
-1. Products (`asset/*/product/`) - Define instrument specifications (strike, maturity, type)
-2. Processes (`asset/*/process/`) - Stochastic models (BSM, Heston, Local Vol)
-3. Engines (`asset/*/engine/`) - Pricing algorithms (Analytical, PDE, Monte Carlo, Quadrature, Tree)
-4. Parameters (`param/`) - Market data (spot, vol surface, rate curve, dividends)
-5. PricingEnvironment (`priceenv/`) - Unified pricing environment bundling all market data
-6. RiskMeasures (`asset/*/riskmeasures/`) - Greeks calculation (analytical and numerical)
+1. Products (`quantark/asset/*/product/`) - Define instrument specifications (strike, maturity, type)
+2. Processes (`quantark/asset/*/process/`) - Stochastic models (BSM, Heston, Local Vol)
+3. Engines (`quantark/asset/*/engine/`) - Pricing algorithms (Analytical, PDE, Monte Carlo, Quadrature, Tree)
+4. Parameters (`quantark/param/`) - Market data (spot, vol surface, rate curve, dividends)
+5. PricingEnvironment (`quantark/priceenv/`) - Unified pricing environment bundling all market data
+6. RiskMeasures (`quantark/asset/*/riskmeasures/`) - Greeks calculation (analytical and numerical)
 
 ### Engine Method Selection Pattern
 
 For engines supporting multiple methods, use the two-level enum pattern:
 
-**Enum Definition** (`util/enum/engine_enums.py`):
+**Enum Definition** (`quantark/util/enum/engine_enums.py`):
 ```python
 class AmericanAnalyticalMethod(Enum):
     BS93 = "BS93"
@@ -143,7 +147,7 @@ class EngineType(Enum):
 
 **Engine Implementation**:
 ```python
-from util.enum.engine_enums import AmericanAnalyticalMethod, EngineType
+from quantark.util.enum.engine_enums import AmericanAnalyticalMethod, EngineType
 
 class AmericanOptionAnalyticalEngine(BaseEngine):
     DEFAULT_METHOD = AmericanAnalyticalMethod.BS93
@@ -179,57 +183,57 @@ IMPORTANT: Always follow this two-level enum pattern (EngineType.ANALYTICAL(meth
 
 ### Key Asset Classes
 
-**Equity** (`asset/equity/`):
+**Equity** (`quantark/asset/equity/`):
 - Products: European/American options, barriers, one-touch options, delta-one products
 - Engines: Analytical, PDE, Monte Carlo, Quadrature
 - Risk: Delta, Gamma, Vega, Theta, Rho (both analytical and finite-difference methods)
 
-**Fixed Income** (`asset/bond/`):
+**Fixed Income** (`quantark/asset/bond/`):
 - Products: Fixed and floating rate bonds, swaps, bond options, forwards, futures, convertibles
 - Engines: Analytical discount-based pricing, tree and PDE where applicable
 - Risk: DV01, convexity, duration
 
-**Rates** (`asset/rate/`):
+**Rates** (`quantark/asset/rate/`):
 - Interest rate derivatives
 
 ### Supporting Modules
 
-**Portfolio** (`portfolio/`):
+**Portfolio** (`quantark/portfolio/`):
 - Base portfolio classes with position tracking
 - Equity and FI portfolio implementations
 - Portfolio snapshot and storage functionality
 - Greek aggregation at portfolio level
 
-**Backtest** (`backtest/`):
+**Backtest** (`quantark/backtest/`):
 - Framework for testing hedging strategies (delta-neutral, DV01-neutral)
 - Transaction cost modeling (fixed, proportional, slippage, bid-ask)
 - Logging and visualization (matplotlib, plotly)
 - Performance metrics (Sharpe, drawdown, VaR, CVaR)
 - Separate implementations for equity and fixed income
 
-**Dynamic Scenario** (`dynamicscenario/`):
+**Dynamic Scenario** (`quantark/dynamicscenario/`):
 - Multi-day scenario simulation with day-by-day parameter evolution
 - Path modeling (spot, vol, rate curves)
 - Hedging strategy simulation with rebalancing
 - Greeks and risk measure evolution tracking
 - Both equity and FI support
 
-**VaR** (`var/`):
+**VaR** (`quantark/var/`):
 - Parametric, historical, and Monte Carlo VaR engines
 - Risk factor configuration and attribution
 - Backtesting and reporting
 
-**Stress Test** (`stresstest/`):
+**Stress Test** (`quantark/stresstest/`):
 - Scenario construction and stress application
 - Equity and FI stress engines
 - Results aggregation and reporting
 
-**SIMM** (`simm/`):
+**SIMM** (`quantark/simm/`):
 - Standard Initial Margin Model calibration and CRIF parsing
 - Risk class engines and aggregation
 - Reporting and result utilities
 
-**Utilities** (`util/`):
+**Utilities** (`quantark/util/`):
 - `exceptions.py`: Exception hierarchy (QuantArkException -> ValidationError, NumericalError, MarketDataError, PricingError)
 - `enum/`: OptionType, ExerciseStyle, BarrierType, engine enums
 - `calendar/`: Day count conventions
@@ -238,7 +242,7 @@ IMPORTANT: Always follow this two-level enum pattern (EngineType.ANALYTICAL(meth
 
 ### Numerical Utilities (IMPORTANT - Always Use These)
 
-The `util/numerical/` module provides standardized utilities for all numerical operations. Always use these instead of raw float comparisons or hardcoded tolerances.
+The `quantark/util/numerical/` module provides standardized utilities for all numerical operations. Always use these instead of raw float comparisons or hardcoded tolerances.
 
 **Module Structure:**
 - `constants.py`: `Tolerance` (ZERO=1e-10, PRECISION=1e-6, etc.), `FinancialConstants`
@@ -249,7 +253,7 @@ The `util/numerical/` module provides standardized utilities for all numerical o
 
 **Usage Examples:**
 ```python
-from util.numerical import (
+from quantark.util.numerical import (
     is_zero, is_close, Tolerance,           # Comparison
     safe_log, safe_exp, safe_sqrt,          # Safe math
     format_currency, format_percentage,      # Formatting
