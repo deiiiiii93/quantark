@@ -15,10 +15,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 
@@ -26,7 +24,7 @@ from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
-from example.generate_snowball_rfq_ko_rate_demo import (
+from example.snowball_rfq_ko_rate_demo_workflow import (
     BASE_KI_BARRIER,
     BASE_KO_BARRIER,
     solve_fair_ko_rate_with_engine,
