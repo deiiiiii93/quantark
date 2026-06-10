@@ -52,9 +52,6 @@ is named below), not denylist-based, so nothing slips through by omission.
 - `pyproject.toml`, `pytest.ini`, `quantark_compat.pth`, `README.md`.
 - New files: `LICENSE` (Apache-2.0 text), `NOTICE` (copyright line),
   `CHANGELOG.md`, a fresh lean `.gitignore`.
-- `docs/` — **markdown files only**: theory docs (English and Chinese `.md`
-  both kept), engine parameter guide, implementation notes that read as
-  library documentation.
 
 **Excluded:**
 
@@ -68,7 +65,10 @@ is named below), not denylist-based, so nothing slips through by omission.
   `PROJECT_INDEX.md`, `QODER.md`, `GEMINI.md`, `QUAD_PDE_IMPROVEMENTS.md`,
   `package.json`, `package-lock.json`, `risk-report-wizard.skill`,
   `requirements.txt` (redundant with `pyproject.toml`).
-- `docs/` binaries: all `.docx`/`.pdf`, including the regulatory filing.
+- `docs/` **in its entirety** — theory docs, implementation notes,
+  binaries, and the regulatory filing all stay private. README is the
+  sole public documentation at launch; public docs are authored fresh in
+  Stage 3.
 - `CLAUDE.md` and `AGENTS.md` (root and module-level) — they reference the
   internal OpenSpec workflow, personal paths, and the private consumer. A
   public-appropriate `AGENTS.md` may be added later as a separate task.
@@ -86,7 +86,7 @@ is named below), not denylist-based, so nothing slips through by omission.
 
 ### 2. Stage 1 — GitHub launch
 
-- Create public repo `github.com/<owner>/quantark` (name matches the
+- Create public repo `github.com/deiiiiii93/quantark` (name matches the
   import and PyPI name). Push the curated tree as the initial commit.
 - Gitee repo is frozen as the private archive. The local
   `/Users/fuxinyao/quant-ark` checkout re-points `origin` to GitHub; the
@@ -129,7 +129,8 @@ is named below), not denylist-based, so nothing slips through by omission.
 - **Shim sunset:** the `.pth` flat-import shim ships through 0.x (existing
   `DeprecationWarning` stands); removed at 1.0 once open-otc-trading is
   fully migrated to `quantark.*` imports (its Phase D).
-- Docs site: mkdocs-material on GitHub Pages, porting `docs/*.md`.
+- Docs site: mkdocs-material on GitHub Pages. Content is authored for the
+  public repo; private theory docs may be selectively ported after review.
 - Community files: `CONTRIBUTING.md`, issue templates; `CITATION.cff`
   optional.
 - **1.0 criteria:** public API reviewed and frozen, dependencies slimmed,
@@ -149,8 +150,9 @@ is named below), not denylist-based, so nothing slips through by omission.
 ## Testing / acceptance
 
 - Stage 1: CI green on the public repo (test matrix + packaging smoke);
-  `pip install git+https://github.com/<owner>/quantark` works in a fresh
-  venv; open-otc-trading suite still passes against the local checkout.
+  `pip install git+https://github.com/deiiiiii93/quantark` works in a
+  fresh venv; open-otc-trading suite still passes against the local
+  checkout.
 - Stage 2: `pip install quantark` from PyPI in a fresh venv passes the
   import smoke test.
 - Curation: grep sweep returns no hits for personal/internal strings; a
