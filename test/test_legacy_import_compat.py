@@ -151,6 +151,27 @@ def test_installed_distribution_wins_over_alias(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_quantark_dir_on_sys_path_does_not_split_identity():
+    # Regression: if the quantark/ package directory itself leaks onto
+    # sys.path (legacy scripts computed "repo root" one level short),
+    # util/ becomes findable as a top-level package and PathFinder would
+    # load duplicate modules. The finder must treat that as its own
+    # package, not a real distribution, and keep aliasing.
+    result = run_py(
+        """
+        import sys
+        import quantark, os
+        sys.path.insert(0, os.path.dirname(quantark.__file__))
+        import quantark._compat
+        import util.enum as old
+        import quantark.util.enum as new
+        assert old is new, "module identity split via leaked package dir"
+        print("ok")
+        """
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_unknown_submodule_still_fails():
     result = run_py(
         """
