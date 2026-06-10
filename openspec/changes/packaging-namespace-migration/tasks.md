@@ -125,6 +125,20 @@
 - [x] 5.3 Update `CLAUDE.md`, `AGENTS.md`, `README.md`: venv path
   (`quantark/` → `.venv/`), install instructions, canonical import examples,
   legacy-name deprecation note *(commit `922e7b4`)*
-- [ ] 5.4 Merge the worktree branch to `main`, re-point the consumer's
+- [x] 5.4 Merge the worktree branch to `main`, re-point the consumer's
   editable install at the migrated `main`, and confirm the consumer app
   boots (consumer's own import flip is Phase D in its repo, out of scope)
+  *(Done 2026-06-10: main had moved (`73b7107` book engines) — merged main
+  into the branch first, resolved two import conflicts by re-codemod, suite
+  green (1921 passed); then deleted the old `quantark/` venv in the main
+  checkout, fast-forwarded main, restored the 449 untracked output files
+  from backup, removed `__pycache__`-only flat dir remnants, created
+  `.venv/` with editable install (smoke green). Consumer: its venv is
+  uv-managed and had NO quantark install (pure sys.path injection) —
+  installed editable quantark via uv (shim `.pth` deployed), set
+  `QUANTARK_PATH=/Users/fuxinyao/quant-ark/quantark` in its `.env` (interim
+  config until Phase D: keeps the CSV-by-path lookup working; the package-
+  dir sys.path insert is neutralized by the shim's leak guard). Consumer
+  suite in its own venv: 1876 passed, 2 failed — the same two pre-existing
+  failures as baseline, zero new. If the consumer app is currently running,
+  restart it to pick up the new install.)*
