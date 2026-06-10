@@ -52,8 +52,12 @@
   `quantark/util/calendar/business_calendar.py::_load_holidays_from_csv`
   with `importlib.resources.files("quantark.util")`-based resolution
   *(commit `c04e579`)*
-- [ ] 2.5 Run the full pytest suite from the worktree venv (editable install
-  of the moved package) and fix fallout until green
+- [x] 2.5 Run the full pytest suite from the worktree venv (editable install
+  of the moved package) and fix fallout until green *(fallout was 19
+  state-dependent failures, root-caused to 20 library files whose
+  module-level `sys.path.insert` "repo root" computations landed on the
+  `quantark/` package dir after the move — fixed in `55bb0fa`, plus shim
+  hardening in `8ec844e`)*
 
 ## 3. Compatibility Shim (Phase C, part 2)
 
@@ -107,14 +111,20 @@
 
 ## 5. Acceptance Gates & Docs
 
-- [ ] 5.1 Gate 1: full quant-ark pytest suite green on canonical imports in
-  the worktree
-- [ ] 5.2 Gate 2: run open-otc-trading's full suite **unchanged** against an
-  editable install of the migrated worktree (its flat imports exercise the
-  shim; its cross-channel equivalence tests catch module-identity bugs)
-- [ ] 5.3 Update `CLAUDE.md`, `AGENTS.md`, `README.md`: venv path
+- [x] 5.1 Gate 1: full quant-ark pytest suite green on canonical imports in
+  the worktree *(1920 passed, 4 skipped, 0 failed — baseline 1910 + 10 new
+  shim tests; same 3 pre-broken example-dependent modules excluded as in the
+  baseline)*
+- [x] 5.2 Gate 2: run open-otc-trading's full suite **unchanged** against an
+  editable install of the migrated worktree *(isolated venv
+  `/tmp/otc_gate2_venv` with consumer deps + editable worktree quantark,
+  `QUANTARK_PATH=<worktree>/quantark`: 1805 passed, 2 failed — byte-identical
+  to the consumer's own-venv baseline against un-migrated main
+  (`/tmp/otc_baseline.log` vs `/tmp/otc_gate2.log`); the 2 failures are
+  pre-existing consumer bugs unrelated to quant-ark)*
+- [x] 5.3 Update `CLAUDE.md`, `AGENTS.md`, `README.md`: venv path
   (`quantark/` → `.venv/`), install instructions, canonical import examples,
-  legacy-name deprecation note
+  legacy-name deprecation note *(commit `922e7b4`)*
 - [ ] 5.4 Merge the worktree branch to `main`, re-point the consumer's
   editable install at the migrated `main`, and confirm the consumer app
   boots (consumer's own import flip is Phase D in its repo, out of scope)
