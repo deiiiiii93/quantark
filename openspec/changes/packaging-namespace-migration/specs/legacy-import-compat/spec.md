@@ -55,9 +55,10 @@ imports of the same root SHALL NOT emit additional warnings.
   emitted
 
 ### Requirement: Installed distributions take precedence
-The compatibility finder SHALL be consulted only after Python's standard
-finders, so a genuinely installed third-party distribution whose name matches
-a legacy root (e.g. HoloViz `param`) SHALL win over the quantark alias.
+The compatibility mechanism SHALL yield to genuinely installed third-party
+distributions: when an installed package's name matches a legacy root (e.g.
+HoloViz `param`), importing that name SHALL resolve to the installed package,
+and the alias SHALL NOT reach inside such a package for submodule imports.
 
 #### Scenario: Real package shadows the alias
 - **WHEN** a distinct third-party package named `param` is installed in the

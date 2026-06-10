@@ -70,7 +70,7 @@ post-pass grep that finds zero flat imports under `quantark/` and `test/`).
 `example/` scripts are left on flat imports deliberately — they become live
 exercisers of the shim (migrating them is cheap follow-up work).
 
-### D3. Compat shim: meta-path finder, registered via `.pth`, appended to `sys.meta_path`
+### D3. Compat shim: meta-path finder, registered via `.pth`, prepended with explicit precedence
 
 A module `quantark._compat` defines a `MetaPathFinder` whose `find_spec`
 handles any module name whose root is one of the 12 legacy names: it imports
@@ -92,25 +92,37 @@ the finder before any user code runs — import order independent.
 (*Alternative*: install the finder from `quantark/__init__.py`. Rejected:
 only works if `quantark` happens to be imported before a flat name.)
 
-Precedence: the finder is **appended** to `sys.meta_path`, not prepended.
-Normal finders run first, so if a real distribution (e.g. HoloViz `param`) is
-installed in the venv, `import param` resolves to it — the shim only catches
-names that would otherwise fail. This makes collisions deterministic instead
-of silently shadowed; a venv that needs both HoloViz `param` and legacy flat
+Precedence: the finder is **prepended** to `sys.meta_path` with explicit
+yield rules. *(Amended during implementation: the original "append" design
+failed in testing — once a legacy root is aliased, its `__path__` points into
+`quantark/`, so `PathFinder` resolves submodule imports like
+`import util.enum` through that path into fresh duplicate modules before an
+appended finder is ever consulted: the exact identity split the shim
+prevents.)* The prepended finder defers explicitly: for root names it returns
+`None` when `PathFinder` locates a real installed distribution (e.g. HoloViz
+`param`; namespace placeholders without a loader don't count), and for dotted
+names it only aliases when the root module is itself our alias. Net effect is
+unchanged: real distributions win, collisions are deterministic instead of
+silently shadowed, and a venv needing both HoloViz `param` and legacy flat
 imports is exactly the situation the migration exists to eliminate.
 
 Each first import of a legacy root emits one `DeprecationWarning` naming the
 `quantark.*` replacement.
 
-### D4. Packaging: `pyproject.toml` with setuptools backend
+### D4. Packaging: `pyproject.toml` with hatchling backend
 
-PEP 621 metadata, setuptools build backend (least churn from the current
-setup; no need for hatchling). `packages.find` restricted to `quantark*`.
-The two holiday CSVs declared as package data
-(`quantark.util` → `calendar/holidayfile/*.csv`). The `.pth` shim file
-installed via setuptools' data-files mechanism. `requires-python = ">=3.10"`
-(matches the project's documented support; `setup.py` said 3.8 — flagged in
-Open Questions). `setup.py` is deleted, not kept alongside.
+PEP 621 metadata with the **hatchling** build backend. *(Amended during
+implementation: the original choice was setuptools for least churn, but
+setuptools has no pyproject-only mechanism to place a `.pth` file at the
+site-packages root. Hatchling's `force-include` maps an arbitrary source file
+to the wheel root, and per the hatchling changelog (≥1.4.0) editable wheel
+targets respect `force-include` by default — so the shim's `.pth` works for
+both regular and editable installs.)* Wheel packages limited to `quantark`;
+the holiday CSVs ride along as in-package files (hatchling includes
+non-Python files inside selected packages by default; the smoke test pins
+this). `requires-python = ">=3.10"` (matches the project's documented
+support; `setup.py` said 3.8 — flagged in Open Questions). `setup.py` is
+deleted, not kept alongside.
 
 ### D5. Dependency audit before declaring
 
