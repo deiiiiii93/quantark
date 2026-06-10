@@ -5,7 +5,6 @@ Render the quad-backed Snowball RFQ KO-rate HTML from a saved JSON payload.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 

@@ -5,7 +5,6 @@ Generate the quad-backed Snowball RFQ KO-rate demo end to end.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 

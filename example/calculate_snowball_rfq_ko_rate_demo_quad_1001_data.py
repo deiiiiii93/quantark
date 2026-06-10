@@ -5,7 +5,6 @@ Calculate the quad-backed Snowball RFQ KO-rate demo payload and CSV export.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 
