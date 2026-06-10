@@ -1,9 +1,6 @@
 """
 Standalone test for bond implementation without importing asset.
 """
-import sys
-sys.path.insert(0, '/Users/fuxinyao/QuantArk')
-
 from datetime import datetime
 import math
 
