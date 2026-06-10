@@ -2,7 +2,7 @@
 RFQ module for equity OTC quote solving.
 """
 
-from rfq.models import (
+from quantark.rfq.models import (
     RFQEngineSpec,
     RFQInputMode,
     RFQObjectInput,
@@ -14,7 +14,7 @@ from rfq.models import (
     RFQTermsheetInput,
     RFQUnknownSpec,
 )
-from rfq.service import RFQService, quote_rfq
+from quantark.rfq.service import RFQService, quote_rfq
 
 __all__ = [
     "RFQEngineSpec",

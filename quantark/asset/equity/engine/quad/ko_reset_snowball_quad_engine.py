@@ -13,19 +13,19 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.engine.quad.quad_math import QuadratureMath
-from asset.equity.param import QuadParams
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.ko_reset_snowball_option import (
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
-from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from priceenv import PricingEnvironment
-from util.enum import CouponPayType, ObservationType, PostKOScheduleMode
-from util.enum.engine_enums import EngineType
-from util.exceptions import PricingError, ValidationError
-from util.numerical import (
+from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
+from quantark.util.enum.engine_enums import EngineType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import (
     Tolerance,
     is_close,
     is_zero,

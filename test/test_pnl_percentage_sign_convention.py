@@ -1,8 +1,8 @@
 """Regression tests for P&L percentage sign convention."""
 
-from dynamicscenario.base import BaseScenarioResults
-from dynamicscenario.results.dynamic_results import DynamicScenarioResults
-from util.numerical import pnl_pct_of_abs_baseline
+from quantark.dynamicscenario.base import BaseScenarioResults
+from quantark.dynamicscenario.results.dynamic_results import DynamicScenarioResults
+from quantark.util.numerical import pnl_pct_of_abs_baseline
 
 
 def test_pnl_pct_positive_baseline_unchanged():

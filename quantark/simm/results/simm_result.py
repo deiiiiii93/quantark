@@ -158,7 +158,7 @@ class SIMMResult:
             ValidationError: If validation fails.
         """
         try:
-            from util.exceptions import ValidationError
+            from quantark.util.exceptions import ValidationError
         except ImportError:
             # Fallback for when running from tests
             from quantark.util.exceptions import ValidationError

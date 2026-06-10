@@ -5,7 +5,7 @@ Engine configuration parameters.
 import math
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 def _infer_target_scale(product: Optional[Any], pricing_env: Optional[Any]) -> float:
@@ -134,7 +134,7 @@ class BumpConfig:
         Returns:
             BumpConfig with values from Tolerance class.
         """
-        from util.numerical.constants import Tolerance
+        from quantark.util.numerical.constants import Tolerance
 
         return cls(
             spot_bump=Tolerance.BUMP_SPOT,

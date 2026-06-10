@@ -8,8 +8,8 @@ from dataclasses import is_dataclass, replace
 from inspect import signature
 from typing import Any, Callable, Dict, Iterable, Optional
 
-from asset.equity.engine import PDEEngine
-from asset.equity.engine.analytical import (
+from quantark.asset.equity.engine import PDEEngine
+from quantark.asset.equity.engine.analytical import (
     AmericanOptionAnalyticalEngine,
     AsianOptionAnalyticalEngine,
     BarrierAnalyticalEngine,
@@ -20,7 +20,7 @@ from asset.equity.engine.analytical import (
     OneTouchAnalyticalEngine,
     RangeAccrualAnalyticalEngine,
 )
-from asset.equity.engine.mc import (
+from quantark.asset.equity.engine.mc import (
     AmericanOptionMCEngine,
     AsianOptionMCEngine,
     BarrierOptionMCEngine,
@@ -30,7 +30,7 @@ from asset.equity.engine.mc import (
     SnowballMCEngine,
     EuropeanMCEngine,
 )
-from asset.equity.engine.quad import (
+from quantark.asset.equity.engine.quad import (
     BarrierQuadEngine,
     EuropeanQuadEngine,
     KOResetSnowballQuadEngine,
@@ -38,9 +38,9 @@ from asset.equity.engine.quad import (
     PhoenixQuadEngine,
     SnowballQuadEngine,
 )
-from asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
-from asset.equity.product.deltaone import Futures, SpotInstrument
-from asset.equity.product.option import (
+from quantark.asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.deltaone import Futures, SpotInstrument
+from quantark.asset.equity.product.option import (
     AccrualConfig,
     AmericanOption,
     AsianObservationRecord,
@@ -62,11 +62,11 @@ from asset.equity.product.option import (
     RangeAccrualOption,
     SnowballOption,
 )
-from asset.equity.product.option.snowball_config import AirbagConfig
-from param import ContinuousDividendYield, FlatVolSurface, NoDividend
-from priceenv import PricingEnvironment
-from rfq.models import RFQEngineSpec, RFQUnknownSpec
-from util.exceptions import ValidationError
+from quantark.asset.equity.product.option.snowball_config import AirbagConfig
+from quantark.param import ContinuousDividendYield, FlatVolSurface, NoDividend
+from quantark.priceenv import PricingEnvironment
+from quantark.rfq.models import RFQEngineSpec, RFQUnknownSpec
+from quantark.util.exceptions import ValidationError
 
 
 def _camel_to_snake(name: str) -> str:

@@ -3,13 +3,13 @@ Test date-based accrual for observation records with the new data structure.
 """
 
 from datetime import datetime
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ResolvedObservationRecord,
     ObservationSchedule,
 )
-from util.calendar import DayCountConvention
-from util.enum import TenorEnd
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import TenorEnd
 
 
 def test_observation_record_new_fields():
@@ -196,8 +196,8 @@ def test_tenor_end_options():
 
 def test_settlement_time_resolution():
     """Test that settlement_time is properly resolved for discounting."""
-    from priceenv import PricingEnvironment
-    from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+    from quantark.priceenv import PricingEnvironment
+    from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 
     pricing_env = PricingEnvironment(
         spot_quote=SpotQuote(spot=100.0),

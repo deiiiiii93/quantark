@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
-from util.enum import OptionType, ExerciseType
-from util.exceptions import ValidationError
+from quantark.util.enum import OptionType, ExerciseType
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

@@ -5,11 +5,11 @@ Tests for FRA analytical pricing engine.
 import unittest
 from datetime import datetime
 
-from asset.rate.product.fra import create_fra
-from asset.rate.engine.fra_engine import FRAEngine, FRAPricingResults
-from param.index import SOFR_3M
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
+from quantark.asset.rate.product.fra import create_fra
+from quantark.asset.rate.engine.fra_engine import FRAEngine, FRAPricingResults
+from quantark.param.index import SOFR_3M
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
 
 
 class TestFRAEnginePricing(unittest.TestCase):

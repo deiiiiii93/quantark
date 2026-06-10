@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

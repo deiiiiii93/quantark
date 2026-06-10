@@ -6,11 +6,11 @@ This module provides:
 - ConvertibleBondBinomialEngine: Goldman Sachs credit-adjusted binomial model
 - ConvertibleBondTrinomialEngine: Hull-White trinomial model with default
 """
-from asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTreeParams
-from asset.bond.engine.tree.convertible.binomial_engine import (
+from quantark.asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTreeParams
+from quantark.asset.bond.engine.tree.convertible.binomial_engine import (
     ConvertibleBondBinomialEngine,
 )
-from asset.bond.engine.tree.convertible.trinomial_engine import (
+from quantark.asset.bond.engine.tree.convertible.trinomial_engine import (
     ConvertibleBondTrinomialEngine,
 )
 

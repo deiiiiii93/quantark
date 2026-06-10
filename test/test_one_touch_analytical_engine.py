@@ -8,12 +8,12 @@ from datetime import datetime
 import pytest
 from scipy import stats
 
-from asset.equity.engine.analytical import DigitalOptionAnalyticalEngine, OneTouchAnalyticalEngine
-from asset.equity.product.option import CashOrNothingDigitalOption, OneTouchOption
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.barrier_shift import apply_barrier_shift
-from util.enum import BarrierDirection, ObservationType, OptionType, TouchType
+from quantark.asset.equity.engine.analytical import DigitalOptionAnalyticalEngine, OneTouchAnalyticalEngine
+from quantark.asset.equity.product.option import CashOrNothingDigitalOption, OneTouchOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.barrier_shift import apply_barrier_shift
+from quantark.util.enum import BarrierDirection, ObservationType, OptionType, TouchType
 
 
 def _pricing_env(spot: float = 100.0, vol: float = 0.2, rate: float = 0.03, div: float = 0.01):

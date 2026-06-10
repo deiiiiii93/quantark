@@ -9,14 +9,14 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from portfolio import Portfolio, Position, PortfolioSnapshot, PortfolioExporter
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.riskmeasures import GreeksCalculator
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.exceptions import ValidationError
+from quantark.portfolio import Portfolio, Position, PortfolioSnapshot, PortfolioExporter
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.exceptions import ValidationError
 
 
 # Test fixtures

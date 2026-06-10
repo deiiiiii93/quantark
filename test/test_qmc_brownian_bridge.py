@@ -5,10 +5,10 @@ import math
 
 import numpy as np
 
-from asset.equity.process.bsm.qmc_brownian_bridge import (
+from quantark.asset.equity.process.bsm.qmc_brownian_bridge import (
     compute_step_crossing_probabilities,
 )
-from util.numerical import is_close
+from quantark.util.numerical import is_close
 
 
 def test_crossing_and_touch_probabilities() -> None:

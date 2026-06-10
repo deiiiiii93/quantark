@@ -7,7 +7,7 @@ from typing import Union, Optional, List
 import json
 from datetime import datetime
 
-from dynamicscenario.results.dynamic_results import DynamicScenarioResults
+from quantark.dynamicscenario.results.dynamic_results import DynamicScenarioResults
 
 
 class DynamicResultExporter:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from portfolio.fi.portfolio import FIPortfolio
-from stresstest.fi.config import FIStressConfig
+from quantark.portfolio.fi.portfolio import FIPortfolio
+from quantark.stresstest.fi.config import FIStressConfig
 
 
 class FIMetricsCalculator:

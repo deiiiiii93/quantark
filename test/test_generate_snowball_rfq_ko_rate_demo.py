@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from example import generate_snowball_rfq_ko_rate_demo as demo
-from util.enum import ProtectionType
+from quantark.util.enum import ProtectionType
 
 
 def test_stepdown_builder_no_longer_duplicates_ko_barrier() -> None:

@@ -27,11 +27,11 @@ from typing import List, Optional
 
 from scipy.stats import norm
 
-from asset.rate.product.cap_floor import CapFloor, CapFloorType, Caplet, Collar
-from priceenv import PricingEnvironment
-from param.rrf import RateCurve, FlatRateCurve
-from util.exceptions import ValidationError, MarketDataError
-from util.numerical import safe_log, safe_sqrt, safe_divide, is_zero
+from quantark.asset.rate.product.cap_floor import CapFloor, CapFloorType, Caplet, Collar
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf import RateCurve, FlatRateCurve
+from quantark.util.exceptions import ValidationError, MarketDataError
+from quantark.util.numerical import safe_log, safe_sqrt, safe_divide, is_zero
 
 
 @dataclass

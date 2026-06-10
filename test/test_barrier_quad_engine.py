@@ -11,17 +11,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.barrier_option_mc_engine import BarrierOptionMCEngine
-from asset.equity.engine.quad import BarrierQuadEngine
-from asset.equity.param import MCParams, QuadParams
-from asset.equity.product.option import BarrierOption
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.engine.mc.barrier_option_mc_engine import BarrierOptionMCEngine
+from quantark.asset.equity.engine.quad import BarrierQuadEngine
+from quantark.asset.equity.param import MCParams, QuadParams
+from quantark.asset.equity.product.option import BarrierOption
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import BarrierType, ObservationAggregation, ObservationType, OptionType
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import BarrierType, ObservationAggregation, ObservationType, OptionType
 
 
 def create_pricing_env(

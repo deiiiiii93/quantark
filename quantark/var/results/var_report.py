@@ -8,8 +8,8 @@ human-readable reports from VaR calculations.
 from typing import Any, Dict, List, Optional, TextIO
 from datetime import datetime
 
-from var.results.var_result import VaRResult
-from var.results.incremental_var_result import IncrementalVaRResult
+from quantark.var.results.var_result import VaRResult
+from quantark.var.results.incremental_var_result import IncrementalVaRResult
 
 
 class VaRReportGenerator:

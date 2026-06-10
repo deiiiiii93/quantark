@@ -7,7 +7,7 @@ specification.
 
 import pytest
 import numpy as np
-from simm.calibration import (
+from quantark.simm.calibration import (
     # IR for cross-tests
     IR_TENOR_CORRELATIONS,
 
@@ -66,7 +66,7 @@ from simm.calibration import (
     INTER_RISK_CLASS_CORRELATIONS,
     INTER_RISK_CLASS_CORRELATION_LABELS,
 )
-from simm.calibration.accessors import (
+from quantark.simm.calibration.accessors import (
     get_risk_weight,
     get_intra_bucket_correlation,
     get_inter_bucket_correlation,

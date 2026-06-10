@@ -15,22 +15,22 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
-from asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
-from asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option import (
     create_reverse_phoenix,
     create_standard_phoenix,
     create_stepdown_phoenix,
 )
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import CouponPayType, ObservationType
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType, ObservationType
 
 
 @pytest.fixture(scope="module")

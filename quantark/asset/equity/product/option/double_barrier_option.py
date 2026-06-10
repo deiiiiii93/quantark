@@ -10,14 +10,14 @@ from typing import Optional, List
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
 from .observation_schedule import ObservationRecord, ObservationSchedule
-from util.enum import (
+from quantark.util.enum import (
     OptionType,
     ExerciseType,
     DoubleBarrierType,
     ObservationType,
     ObservationAggregation,
 )
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

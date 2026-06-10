@@ -6,15 +6,15 @@ import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Sequence
 
-from portfolio.fi.portfolio import FIPortfolio
-from stresstest.base import BaseStressEngine, ScenarioRunner
-from stresstest.fi.config import FIStressConfig
-from stresstest.fi.metrics import FIMetricsCalculator
-from stresstest.fi.results import FIStressResults, FIScenarioResult
-from stresstest.scenario.scenario import Scenario
-from stresstest.stress.stress_applicator import StressApplicator
-from util.exceptions import ValidationError
-from util.numerical import pnl_pct_of_abs_baseline
+from quantark.portfolio.fi.portfolio import FIPortfolio
+from quantark.stresstest.base import BaseStressEngine, ScenarioRunner
+from quantark.stresstest.fi.config import FIStressConfig
+from quantark.stresstest.fi.metrics import FIMetricsCalculator
+from quantark.stresstest.fi.results import FIStressResults, FIScenarioResult
+from quantark.stresstest.scenario.scenario import Scenario
+from quantark.stresstest.stress.stress_applicator import StressApplicator
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import pnl_pct_of_abs_baseline
 
 
 class FIStressEngine(BaseStressEngine, ScenarioRunner):

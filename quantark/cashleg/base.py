@@ -9,8 +9,8 @@ from enum import Enum
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cashleg.event_distribution import EventDistribution
-    from priceenv import PricingEnvironment
+    from quantark.cashleg.event_distribution import EventDistribution
+    from quantark.priceenv import PricingEnvironment
 
 
 class LegDirection(Enum):

@@ -9,14 +9,14 @@ from typing import Dict, List, Optional, Set
 
 import numpy as np
 
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.barrier_option import BarrierOption
-from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from asset.equity.param import PDEParams
-from priceenv import PricingEnvironment
-from util.enum import ObservationType, ObservationAggregation
-from util.exceptions import PricingError
-from util.numerical import is_close, safe_divide
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.barrier_option import BarrierOption
+from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.asset.equity.param import PDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType, ObservationAggregation
+from quantark.util.exceptions import PricingError
+from quantark.util.numerical import is_close, safe_divide
 
 from .base_pde_solver import BasePDESolver
 
@@ -155,7 +155,7 @@ class BarrierPDESolver(BasePDESolver):
         Returns:
             Vanilla option price
         """
-        from asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
         from .european_pde_solver import EuropeanPDESolver
 
         vanilla = EuropeanVanillaOption(
@@ -185,7 +185,7 @@ class BarrierPDESolver(BasePDESolver):
             Knock-out option price
         """
         # For knock-in decomposition, we need knock-out with zero rebate
-        from util.enum import BarrierType
+        from quantark.util.enum import BarrierType
 
         # Convert knock-in type to knock-out
         if product.barrier_type == BarrierType.UP_IN:
@@ -298,7 +298,7 @@ class BarrierPDESolver(BasePDESolver):
         Returns:
             Dictionary with price, delta, gamma for vanilla option
         """
-        from asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
         from .european_pde_solver import EuropeanPDESolver
 
         vanilla = EuropeanVanillaOption(
@@ -335,7 +335,7 @@ class BarrierPDESolver(BasePDESolver):
         Returns:
             Dictionary with price, delta, gamma for knock-out option
         """
-        from util.enum import BarrierType
+        from quantark.util.enum import BarrierType
 
         # Convert knock-in type to knock-out
         if product.barrier_type == BarrierType.UP_IN:

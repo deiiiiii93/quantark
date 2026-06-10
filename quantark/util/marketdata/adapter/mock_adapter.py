@@ -13,9 +13,9 @@ from pathlib import Path
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from util.marketdata.adapter.base_adapter import BaseMarketDataAdapter
-from util.marketdata.generator.mock_generator import MockDataGenerator
-from util.marketdata.models import TimeSeriesData, MarketDataPoint
+from quantark.util.marketdata.adapter.base_adapter import BaseMarketDataAdapter
+from quantark.util.marketdata.generator.mock_generator import MockDataGenerator
+from quantark.util.marketdata.models import TimeSeriesData, MarketDataPoint
 
 
 class MockMarketDataAdapter(BaseMarketDataAdapter):

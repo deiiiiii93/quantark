@@ -5,9 +5,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from example import otc_autocallable_backtest_demo as demo
-from util.enum.engine_enums import EngineType
+from quantark.util.enum.engine_enums import EngineType
 
 
 class FakeAKShare:

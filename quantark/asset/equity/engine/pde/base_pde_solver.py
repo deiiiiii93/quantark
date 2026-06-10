@@ -14,14 +14,14 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.param import PDEParams
-from priceenv import PricingEnvironment
-from util.exceptions import PricingError, NumericalError
-from util.numerical import is_close
-from util.enum.option_enums import ExerciseType, ObservationType
-from util.enum.engine_enums import EngineType
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.param import PDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import PricingError, NumericalError
+from quantark.util.numerical import is_close
+from quantark.util.enum.option_enums import ExerciseType, ObservationType
+from quantark.util.enum.engine_enums import EngineType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid

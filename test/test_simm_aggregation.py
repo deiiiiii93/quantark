@@ -14,9 +14,9 @@ import pytest
 import math
 from typing import List
 
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass, ProductClass, MarginType
-from simm.sensitivity import (
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass, ProductClass, MarginType
+from quantark.simm.sensitivity import (
     SensitivityCollection,
     IRDeltaSensitivity,
     IRVegaSensitivity,
@@ -26,7 +26,7 @@ from simm.sensitivity import (
     FXDeltaSensitivity,
     CurvatureSensitivity,
 )
-from simm.engines.aggregation import (
+from quantark.simm.engines.aggregation import (
     SIMMCalculator,
     ConcentrationCalculator,
     WeightedSensitivityCalculator,
@@ -199,7 +199,7 @@ class TestBucketAggregator:
         agg = BucketAggregator()
         
         # Create weighted sensitivities directly for controlled test
-        from simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
+        from quantark.simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
         
         ws_list = [
             WeightedSensitivity(
@@ -233,7 +233,7 @@ class TestBucketAggregator:
         """Residual bucket has no diversification."""
         agg = BucketAggregator()
         
-        from simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
+        from quantark.simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
         
         ws_list = [
             WeightedSensitivity(
@@ -268,7 +268,7 @@ class TestRiskClassAggregator:
     
     def test_single_bucket(self):
         """Single bucket margin = K_b."""
-        from simm.engines.aggregation.bucket_aggregator import BucketResult
+        from quantark.simm.engines.aggregation.bucket_aggregator import BucketResult
         
         agg = RiskClassAggregator()
         
@@ -290,7 +290,7 @@ class TestRiskClassAggregator:
     
     def test_with_residual_bucket(self):
         """Residual bucket is added without diversification."""
-        from simm.engines.aggregation.bucket_aggregator import BucketResult
+        from quantark.simm.engines.aggregation.bucket_aggregator import BucketResult
         
         agg = RiskClassAggregator()
         
@@ -325,7 +325,7 @@ class TestProductClassAggregator:
     
     def test_single_risk_class(self):
         """Single risk class: SIMM = IM."""
-        from simm.engines.aggregation.risk_class_aggregator import RiskClassResult
+        from quantark.simm.engines.aggregation.risk_class_aggregator import RiskClassResult
         
         agg = ProductClassAggregator()
         

@@ -15,13 +15,13 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import AsianOption, AsianObservationRecord, EuropeanVanillaOption
-from asset.equity.engine.analytical import AsianOptionAnalyticalEngine, BlackScholesEngine
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType, AveragingType, AsianStrikeType
-from util.enum.engine_enums import AsianAnalyticalMethod
-from util.exceptions import ValidationError, PricingError
+from quantark.asset.equity.product.option import AsianOption, AsianObservationRecord, EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import AsianOptionAnalyticalEngine, BlackScholesEngine
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType, AveragingType, AsianStrikeType
+from quantark.util.enum.engine_enums import AsianAnalyticalMethod
+from quantark.util.exceptions import ValidationError, PricingError
 
 
 def create_pricing_env(spot=100.0, vol=0.20, rate=0.05, div=0.0):
@@ -901,7 +901,7 @@ class TestErrorHandling:
     
     def test_wrong_product_type(self):
         """Test pricing wrong product type raises error."""
-        from asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
         
         pricing_env = create_pricing_env()
         euro_option = EuropeanVanillaOption(
@@ -926,7 +926,7 @@ class TestDefaultMethod:
     
     def test_two_level_enum_pattern(self):
         """Test two-level enum pattern for method selection."""
-        from util.enum.engine_enums import EngineType
+        from quantark.util.enum.engine_enums import EngineType
         
         # Pattern: EngineType.ANALYTICAL(AsianAnalyticalMethod.LEVY)
         engine = AsianOptionAnalyticalEngine(

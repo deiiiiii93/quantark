@@ -12,9 +12,9 @@ from typing import NamedTuple, Sequence
 import numpy as np
 from scipy.stats import norm
 
-from util.exceptions import NumericalError, ValidationError
-from util.numerical import Tolerance
-from asset.equity.engine.quad.quad_math import QuadratureMath
+from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.numerical import Tolerance
+from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 
 
 @dataclass(frozen=True)

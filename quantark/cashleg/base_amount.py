@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class BaseAmountMode(Enum):

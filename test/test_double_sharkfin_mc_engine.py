@@ -2,14 +2,14 @@ from datetime import datetime
 
 import pytest
 
-from asset.equity.engine.mc import DoubleSharkfinOptionMCEngine
-from asset.equity.param import MCParams
-from asset.equity.product.option import DoubleSharkfinOption
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import ObservationFrequency, ObservationType, OptionType
-from util.enum.engine_enums import EngineType, MonteCarloMethod
-from util.exceptions import PricingError
+from quantark.asset.equity.engine.mc import DoubleSharkfinOptionMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.product.option import DoubleSharkfinOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationFrequency, ObservationType, OptionType
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.util.exceptions import PricingError
 
 
 def _pricing_env(
@@ -139,7 +139,7 @@ def test_two_level_enum_method_selection():
 
 
 def test_rejects_non_double_sharkfin_product():
-    from asset.equity.product.option import EuropeanVanillaOption
+    from quantark.asset.equity.product.option import EuropeanVanillaOption
 
     engine = DoubleSharkfinOptionMCEngine(params=MCParams(num_paths=128))
     with pytest.raises(PricingError, match="only supports DoubleSharkfinOption"):

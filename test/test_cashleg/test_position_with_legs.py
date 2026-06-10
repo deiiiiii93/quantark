@@ -8,14 +8,14 @@ from datetime import datetime
 
 import pytest
 
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.riskmeasures import GreeksCalculator
-from cashleg import DeterministicLeg, LegDirection
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from portfolio.equity.position import EquityPosition
-from priceenv import PricingEnvironment
-from util.enum import OptionType
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.cashleg import DeterministicLeg, LegDirection
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.portfolio.equity.position import EquityPosition
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
 
 
 def _env(rate=0.05):

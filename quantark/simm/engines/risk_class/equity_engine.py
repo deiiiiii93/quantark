@@ -8,14 +8,14 @@ delta and vega sensitivities for equity positions.
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass
-from simm.sensitivity import EquityDeltaSensitivity, EquityVegaSensitivity
-from simm.engines.base import BaseSensitivityEngine
-from simm.engines.classification.bucket_mapper import BucketMapper
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass
+from quantark.simm.sensitivity import EquityDeltaSensitivity, EquityVegaSensitivity
+from quantark.simm.engines.base import BaseSensitivityEngine
+from quantark.simm.engines.classification.bucket_mapper import BucketMapper
 
-from portfolio.equity.position import EquityPosition
-from asset.equity.riskmeasures import GreeksCalculator
+from quantark.portfolio.equity.position import EquityPosition
+from quantark.asset.equity.riskmeasures import GreeksCalculator
 
 
 class EquitySensitivityEngine(BaseSensitivityEngine):

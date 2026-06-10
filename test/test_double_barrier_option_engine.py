@@ -8,12 +8,12 @@ S = 100, X = 100, r = 0.1, b = 0.1 (cost of carry = risk-free, so q = 0).
 import pytest
 from datetime import datetime
 
-from asset.equity.engine.analytical import DoubleBarrierOptionAnalyticalEngine
-from asset.equity.product.option import DoubleBarrierOption
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.enum.option_enums import DoubleBarrierType, ObservationType
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.asset.equity.engine.analytical import DoubleBarrierOptionAnalyticalEngine
+from quantark.asset.equity.product.option import DoubleBarrierOption
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.enum.option_enums import DoubleBarrierType, ObservationType
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 
 
 def make_env(spot: float, vol: float, rate: float, div: float = 0.0) -> PricingEnvironment:
@@ -140,7 +140,7 @@ class TestPutContinuousObservation:
         price = engine.price(option, env)
         assert price >= 0.0
         # Put KO should be cheaper than vanilla put
-        from asset.equity.engine.analytical import BlackScholesEngine
+        from quantark.asset.equity.engine.analytical import BlackScholesEngine
         vanilla_opt = engine._create_vanilla(option)
         vanilla_price = BlackScholesEngine().price(vanilla_opt, env)
         assert price < vanilla_price
@@ -175,7 +175,7 @@ class TestKnockInParity:
         ko_price = engine.price(ko, env)
         ki_price = engine.price(ki, env)
         vanilla_opt = engine._create_vanilla(ko)
-        from asset.equity.engine.analytical import BlackScholesEngine
+        from quantark.asset.equity.engine.analytical import BlackScholesEngine
         vanilla_price = BlackScholesEngine().price(vanilla_opt, env)
         assert ki_price == pytest.approx(vanilla_price - ko_price, abs=1e-4)
 
@@ -205,7 +205,7 @@ class TestKnockInParity:
         ko_price = engine.price(ko, env)
         ki_price = engine.price(ki, env)
         vanilla_opt = engine._create_vanilla(ko)
-        from asset.equity.engine.analytical import BlackScholesEngine
+        from quantark.asset.equity.engine.analytical import BlackScholesEngine
         vanilla_price = BlackScholesEngine().price(vanilla_opt, env)
         assert ki_price == pytest.approx(vanilla_price - ko_price, abs=1e-4)
 
@@ -262,11 +262,11 @@ class TestDailyObservation:
     """Daily observation (discrete with barrier shift) tests."""
 
     def test_daily_call_ko_shifted(self):
-        from asset.equity.product.option.observation_schedule import (
+        from quantark.asset.equity.product.option.observation_schedule import (
             ObservationSchedule,
             ObservationRecord,
         )
-        from util.enum import ObservationAggregation
+        from quantark.util.enum import ObservationAggregation
 
         env = make_env(spot=100.0, vol=0.25, rate=0.1, div=0.0)
         schedule = ObservationSchedule(
@@ -370,7 +370,7 @@ class TestEdgeCases:
         engine = DoubleBarrierOptionAnalyticalEngine()
         price = engine.price(option, env)
         vanilla_opt = engine._create_vanilla(option)
-        from asset.equity.engine.analytical import BlackScholesEngine
+        from quantark.asset.equity.engine.analytical import BlackScholesEngine
         vanilla_price = BlackScholesEngine().price(vanilla_opt, env)
         assert price == pytest.approx(vanilla_price, abs=1e-10)
 
@@ -404,7 +404,7 @@ class TestEdgeCases:
         )
         option.validate()
         engine = DoubleBarrierOptionAnalyticalEngine()
-        from util.exceptions import ValidationError
+        from quantark.util.exceptions import ValidationError
         with pytest.raises(ValidationError):
             engine.price(option, env)
 

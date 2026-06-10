@@ -6,21 +6,21 @@ import math
 from typing import Optional, Union, Tuple
 import numpy as np
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.option.digital_option import CashOrNothingDigitalOption
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.param import MCParams
-from priceenv import PricingEnvironment
-from util.enum.engine_enums import MonteCarloMethod, EngineType
-from util.exceptions import ValidationError, PricingError
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.param import MCParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
+from quantark.util.exceptions import ValidationError, PricingError
 
-from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
-from asset.equity.process.bsm.qmc_sobol import (
+from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
+from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
 )
-from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
-from asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
+from quantark.asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
+from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 
 
 class DigitalOptionMCEngine(BaseEngine):

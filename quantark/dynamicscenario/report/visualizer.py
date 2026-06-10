@@ -16,12 +16,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 
-from dynamicscenario.results.dynamic_results import DynamicScenarioResults
+from quantark.dynamicscenario.results.dynamic_results import DynamicScenarioResults
 
 
 # Type hint for FI results (imported only when needed)
 try:
-    from dynamicscenario.fi.results import FIDynamicScenarioResults
+    from quantark.dynamicscenario.fi.results import FIDynamicScenarioResults
 except ImportError:
     FIDynamicScenarioResults = None
 

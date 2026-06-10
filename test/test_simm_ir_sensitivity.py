@@ -5,10 +5,10 @@ Tests for Interest Rate sensitivity engine.
 import pytest
 from unittest.mock import Mock, MagicMock
 
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass, IRSubCurve, IR_TENORS
-from simm.engines.risk_class.ir_engine import IRSensitivityEngine
-from simm.sensitivity import IRDeltaSensitivity
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass, IRSubCurve, IR_TENORS
+from quantark.simm.engines.risk_class.ir_engine import IRSensitivityEngine
+from quantark.simm.sensitivity import IRDeltaSensitivity
 
 # Mock FIPosition
 class MockFIPosition:
@@ -186,7 +186,7 @@ class TestIRSensitivityEngine:
 
     def test_calculate_sensitivities_full(self):
         """Test full sensitivity calculation with config."""
-        from simm.sensitivity import SensitivityCollection
+        from quantark.simm.sensitivity import SensitivityCollection
 
         config = SIMMConfig(calculate_delta=True, calculate_vega=False)
 

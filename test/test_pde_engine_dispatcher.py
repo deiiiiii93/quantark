@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from datetime import datetime
-from asset.equity.engine import PDEEngine
-from asset.equity.engine.pde import (
+from quantark.asset.equity.engine import PDEEngine
+from quantark.asset.equity.engine.pde import (
     EuropeanPDESolver,
     AmericanPDESolver,
     BarrierPDESolver,
@@ -22,7 +22,7 @@ from asset.equity.engine.pde import (
     OneTouchPDESolver,
     DoubleOneTouchPDESolver,
 )
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     AmericanOption,
     BarrierOption,
@@ -30,19 +30,19 @@ from asset.equity.product.option import (
     OneTouchOption,
     DoubleOneTouchOption,
 )
-from asset.equity.param import PDEParams
-from asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from util.enum import (
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.util.enum import (
     OptionType,
     BarrierType,
     BarrierDirection,
     TouchType,
     DoubleBarrierType,
 )
-from util.enum.engine_enums import PDEMethod, EngineType
-from util.exceptions import ValidationError
+from quantark.util.enum.engine_enums import PDEMethod, EngineType
+from quantark.util.exceptions import ValidationError
 
 
 class TestPDEEngineBasics:
@@ -253,7 +253,7 @@ class TestPDEEngineErrorHandling:
 
     def test_unsupported_product_type(self, pricing_env):
         """Test error handling for unsupported product type."""
-        from asset.equity.product.base_equity_product import BaseEquityProduct
+        from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 
         class UnsupportedProduct(BaseEquityProduct):
             def get_maturity(self, pricing_env):
@@ -360,7 +360,7 @@ class TestGreeksCalculatorIntegration:
     @pytest.fixture
     def calculator(self):
         """Create GreeksCalculator with ENGINE mode for PDE grid-based Greeks."""
-        from util.enum.engine_enums import GreeksCalculationMode
+        from quantark.util.enum.engine_enums import GreeksCalculationMode
         return GreeksCalculator(greeks_mode=GreeksCalculationMode.ENGINE)
 
     def test_european_option_greeks(self, pde_engine, pricing_env, calculator):

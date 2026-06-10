@@ -21,20 +21,20 @@ from typing import Any, Callable, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from asset.equity.analysis.autocallable_path_analyzer import (
+from quantark.asset.equity.analysis.autocallable_path_analyzer import (
     AutocallablePathAnalyzer,
     RiskNeutralSnowballEventStats,
     ShockPnLDistribution,
 )
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.engine.event_stats import AutocallableEventStats
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.report.plotting import save_heatmap, save_line_plot
-from asset.equity.report.surfaces import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.report.plotting import save_heatmap, save_line_plot
+from quantark.asset.equity.report.surfaces import (
     GridSpec,
     SurfaceSet,
     build_q_grid,
@@ -43,15 +43,15 @@ from asset.equity.report.surfaces import (
     compute_surfaces_from_pv,
     derivative_1d,
 )
-from asset.equity.riskmeasures import GreeksCalculator
-from param import FlatVolSurface, SpotQuote
-from param import TermStructureVolSurface
-from param.div import ContinuousDividendYield, DividendYield, TermStructureDividendYield
-from priceenv import PricingEnvironment
-from util.enum import EquityGreek
-from util.exceptions import ValidationError
-from util.numerical import safe_divide, safe_log, safe_sqrt
-from asset.equity.report.term_structure import (
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.param import FlatVolSurface, SpotQuote
+from quantark.param import TermStructureVolSurface
+from quantark.param.div import ContinuousDividendYield, DividendYield, TermStructureDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import EquityGreek
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import safe_divide, safe_log, safe_sqrt
+from quantark.asset.equity.report.term_structure import (
     BucketedDividendYield,
     BucketedVolSurface,
     ScaledVolSurface,
@@ -60,12 +60,12 @@ from asset.equity.report.term_structure import (
     TenorBucket,
     default_tenor_buckets,
 )
-from portfolio import Portfolio
-from stresstest.equity.config import EquityStressConfig
-from stresstest.equity.engine import EquityStressEngine
-from stresstest.scenario.scenario import Scenario
-from stresstest.scenario.scenario_builder import ScenarioBuilder
-from stresstest.stress.stress_types import StressType
+from quantark.portfolio import Portfolio
+from quantark.stresstest.equity.config import EquityStressConfig
+from quantark.stresstest.equity.engine import EquityStressEngine
+from quantark.stresstest.scenario.scenario import Scenario
+from quantark.stresstest.scenario.scenario_builder import ScenarioBuilder
+from quantark.stresstest.stress.stress_types import StressType
 
 
 @dataclass(frozen=True)

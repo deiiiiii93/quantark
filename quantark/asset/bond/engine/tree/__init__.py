@@ -1,7 +1,7 @@
 """
 Tree-based pricing engines for bonds.
 """
-from asset.bond.engine.tree.convertible import (
+from quantark.asset.bond.engine.tree.convertible import (
     ConvertibleBondTreeParams,
     ConvertibleBondBinomialEngine,
     ConvertibleBondTrinomialEngine,

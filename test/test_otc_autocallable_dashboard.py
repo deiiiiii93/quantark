@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from asset.equity.param import MCParams, QuadParams
-from asset.equity.product.option import create_standard_snowball
-from backtest.otc import (
+from quantark.asset.equity.param import MCParams, QuadParams
+from quantark.asset.equity.product.option import create_standard_snowball
+from quantark.backtest.otc import (
     AutocallableBacktestConfig,
     AutocallableBacktestDashboard,
     AutocallableBacktestEngine,
@@ -16,9 +16,9 @@ from backtest.otc import (
     AutocallableMarketDataSet,
     SurfaceGridConfig,
 )
-from backtest.otc.results import AutocallableBacktestResults
-from util.enum import ObservationType
-from util.enum.engine_enums import EngineType
+from quantark.backtest.otc.results import AutocallableBacktestResults
+from quantark.util.enum import ObservationType
+from quantark.util.enum.engine_enums import EngineType
 
 
 def _snowball_product():

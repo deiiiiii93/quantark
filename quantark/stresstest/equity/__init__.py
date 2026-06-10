@@ -2,9 +2,9 @@
 Equity-specific stress testing implementation.
 """
 
-from stresstest.equity.config import EquityStressConfig, StressTestConfig
-from stresstest.equity.engine import EquityStressEngine, StressTestEngine
-from stresstest.equity.results import ScenarioResult, StressTestResults
+from quantark.stresstest.equity.config import EquityStressConfig, StressTestConfig
+from quantark.stresstest.equity.engine import EquityStressEngine, StressTestEngine
+from quantark.stresstest.equity.results import ScenarioResult, StressTestResults
 
 __all__ = [
     "EquityStressConfig",

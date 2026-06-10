@@ -18,8 +18,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import products
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option import (
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     AmericanOption,
     BarrierOption,
@@ -29,7 +29,7 @@ from asset.equity.product.option import (
 )
 
 # Import engines
-from asset.equity.engine import (
+from quantark.asset.equity.engine import (
     BlackScholesEngine,
     BarrierAnalyticalEngine,
     EuropeanPDESolver,
@@ -43,14 +43,14 @@ from asset.equity.engine import (
 )
 
 # Import parameters
-from asset.equity.param import PDEParams
+from quantark.asset.equity.param import PDEParams
 
 # Import market data
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 
 # Import enums
-from util.enum import (
+from quantark.util.enum import (
     OptionType,
     BarrierType,
     DoubleBarrierType,
@@ -58,7 +58,7 @@ from util.enum import (
     TouchType,
     ObservationType,
 )
-from util.exceptions import ValidationError, PricingError
+from quantark.util.exceptions import ValidationError, PricingError
 
 
 # ============================================================================

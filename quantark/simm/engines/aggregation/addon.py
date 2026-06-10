@@ -10,8 +10,8 @@ This module implements SIMM add-on calculations:
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
-from simm.taxonomy import ProductClass
-from simm.config import SIMMConfig
+from quantark.simm.taxonomy import ProductClass
+from quantark.simm.config import SIMMConfig
 
 
 @dataclass

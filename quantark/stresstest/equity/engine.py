@@ -7,16 +7,16 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
-from asset.equity.riskmeasures import GreeksCalculator
-from portfolio import Portfolio
-from portfolio.base import BasePortfolio
-from stresstest.base import BaseStressEngine, ScenarioRunner, StressMetricsAdapter
-from stresstest.equity.config import EquityStressConfig
-from stresstest.equity.results import ScenarioResult, StressTestResults
-from stresstest.scenario.scenario import Scenario
-from stresstest.stress.stress_applicator import StressApplicator
-from util.exceptions import ValidationError
-from util.numerical import pnl_pct_of_abs_baseline
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.portfolio import Portfolio
+from quantark.portfolio.base import BasePortfolio
+from quantark.stresstest.base import BaseStressEngine, ScenarioRunner, StressMetricsAdapter
+from quantark.stresstest.equity.config import EquityStressConfig
+from quantark.stresstest.equity.results import ScenarioResult, StressTestResults
+from quantark.stresstest.scenario.scenario import Scenario
+from quantark.stresstest.stress.stress_applicator import StressApplicator
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import pnl_pct_of_abs_baseline
 
 
 class EquityStressMetricsAdapter(StressMetricsAdapter):

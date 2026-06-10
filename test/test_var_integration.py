@@ -11,14 +11,14 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List
 
-from var import (
+from quantark.var import (
     VaRConfig,
     VaRMethod,
     ParametricVaREngine,
     HistoricalVaREngine,
     MonteCarloVaREngine,
 )
-from var.config import EquityRiskFactorConfig, FIRiskFactorConfig
+from quantark.var.config import EquityRiskFactorConfig, FIRiskFactorConfig
 
 
 class TestVarIntegrationBasic:

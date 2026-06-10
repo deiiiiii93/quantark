@@ -6,8 +6,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import numpy as np
 import pytest
 
-from cashleg.event_distribution import EventDistribution, EventType, PricingResult
-from util.exceptions import NumericalError
+from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult
+from quantark.util.exceptions import NumericalError
 
 
 def test_trivial_distribution_for_vanilla_product():

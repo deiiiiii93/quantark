@@ -10,12 +10,12 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 from dateutil.relativedelta import relativedelta
 
-from asset.bond.product.base_bond_product import BaseBondProduct
-from asset.bond.schedule.cashflow import CashFlow, FloatingCashFlow
-from param.index import RateIndex, IndexFixingStore
-from param.rrf import RateCurve
-from util.enum import ResetConvention
-from util.calendar import (
+from quantark.asset.bond.product.base_bond_product import BaseBondProduct
+from quantark.asset.bond.schedule.cashflow import CashFlow, FloatingCashFlow
+from quantark.param.index import RateIndex, IndexFixingStore
+from quantark.param.rrf import RateCurve
+from quantark.util.enum import ResetConvention
+from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
     Calendar,
@@ -23,8 +23,8 @@ from util.calendar import (
     create_calendar,
     calculate_day_count_fraction,
 )
-from util.enum import PaymentFrequency, StubType
-from util.exceptions import ValidationError
+from quantark.util.enum import PaymentFrequency, StubType
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass
@@ -324,7 +324,7 @@ class FloatingRateBond(BaseBondProduct):
             fixing_date: Date of the fixing
             rate: Fixed rate value
         """
-        from param.index import IndexFixing
+        from quantark.param.index import IndexFixing
 
         self.fixing_store.add_fixing(
             IndexFixing(fixing_date=fixing_date, rate=rate, index_name=self.index.name)

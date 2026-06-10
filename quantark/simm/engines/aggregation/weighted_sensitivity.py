@@ -13,16 +13,16 @@ Where:
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Any
 
-from simm.taxonomy import RiskClass, MarginType
-from simm.sensitivity import AnySensitivity, IRDeltaSensitivity, IRVegaSensitivity
-from simm.calibration import get_risk_weight, get_vrw
-from simm.calibration.ir import IR_RISK_WEIGHTS, IR_VRW, IR_TENOR_LABELS
-from simm.calibration.credit_qualifying import CREDIT_QUALIFYING_RISK_WEIGHTS, CREDIT_QUALIFYING_VRW
-from simm.calibration.credit_non_qualifying import CREDIT_NON_QUALIFYING_RISK_WEIGHTS, CREDIT_NON_QUALIFYING_VRW
-from simm.calibration.equity import EQUITY_RISK_WEIGHTS, EQUITY_VRW
-from simm.calibration.commodity import COMMODITY_RISK_WEIGHTS, COMMODITY_VRW
-from simm.calibration.fx import FX_RISK_WEIGHTS, FX_VRW
-from simm.taxonomy import get_currency_volatility
+from quantark.simm.taxonomy import RiskClass, MarginType
+from quantark.simm.sensitivity import AnySensitivity, IRDeltaSensitivity, IRVegaSensitivity
+from quantark.simm.calibration import get_risk_weight, get_vrw
+from quantark.simm.calibration.ir import IR_RISK_WEIGHTS, IR_VRW, IR_TENOR_LABELS
+from quantark.simm.calibration.credit_qualifying import CREDIT_QUALIFYING_RISK_WEIGHTS, CREDIT_QUALIFYING_VRW
+from quantark.simm.calibration.credit_non_qualifying import CREDIT_NON_QUALIFYING_RISK_WEIGHTS, CREDIT_NON_QUALIFYING_VRW
+from quantark.simm.calibration.equity import EQUITY_RISK_WEIGHTS, EQUITY_VRW
+from quantark.simm.calibration.commodity import COMMODITY_RISK_WEIGHTS, COMMODITY_VRW
+from quantark.simm.calibration.fx import FX_RISK_WEIGHTS, FX_VRW
+from quantark.simm.taxonomy import get_currency_volatility
 
 
 @dataclass

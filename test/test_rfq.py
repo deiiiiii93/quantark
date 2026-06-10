@@ -2,15 +2,15 @@ from datetime import datetime
 
 import pytest
 
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.engine.quad import PhoenixQuadEngine, SnowballQuadEngine
-from asset.equity.param import QuadParams
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.product.option.phoenix_config import CouponBarrierConfig
-from asset.equity.product.option.phoenix_option import PhoenixOption
-from asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
-from asset.equity.product.option.snowball_option import SnowballOption
-from param import (
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.engine.quad import PhoenixQuadEngine, SnowballQuadEngine
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.param import (
     ContinuousDividendYield,
     FlatRateCurve,
     FlatVolSurface,
@@ -18,8 +18,8 @@ from param import (
     TermStructureDividendYield,
     TermStructureVolSurface,
 )
-from priceenv import PricingEnvironment
-from rfq import (
+from quantark.priceenv import PricingEnvironment
+from quantark.rfq import (
     RFQEngineSpec,
     RFQInputMode,
     RFQObjectInput,
@@ -30,8 +30,8 @@ from rfq import (
     RFQUnknownSpec,
     quote_rfq,
 )
-from util.enum import CouponPayType, ObservationType, OptionType
-from util.exceptions import PricingError, ValidationError
+from quantark.util.enum import CouponPayType, ObservationType, OptionType
+from quantark.util.exceptions import PricingError, ValidationError
 
 
 def create_vanilla_env(

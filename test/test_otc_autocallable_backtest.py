@@ -6,18 +6,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option import (
     create_standard_phoenix,
     create_standard_snowball,
 )
-from backtest.otc import (
+from quantark.backtest.otc import (
     AKShareAutocallableDataAdapter,
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
@@ -29,11 +29,11 @@ from backtest.otc import (
     SurfaceGridConfig,
     derive_implied_dividend_yield,
 )
-from backtest.otc.engine_factory import create_pricing_engine, create_surface_engine
-from param import FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import ObservationType
-from util.enum.engine_enums import EngineType, PDEMethod
+from quantark.backtest.otc.engine_factory import create_pricing_engine, create_surface_engine
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType
+from quantark.util.enum.engine_enums import EngineType, PDEMethod
 
 
 def _snowball_product():

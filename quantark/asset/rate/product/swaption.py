@@ -18,20 +18,20 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from asset.rate.product.irs import (
+from quantark.asset.rate.product.irs import (
     InterestRateSwap,
     NotionalSchedule,
     SwapDirection,
     create_vanilla_irs,
 )
-from param.index import RateIndex
-from util.calendar import (
+from quantark.param.index import RateIndex
+from quantark.util.calendar import (
     DayCountConvention,
     Calendar,
     create_calendar,
 )
-from util.enum import PaymentFrequency
-from util.exceptions import ValidationError
+from quantark.util.enum import PaymentFrequency
+from quantark.util.exceptions import ValidationError
 
 
 class SwaptionType(Enum):

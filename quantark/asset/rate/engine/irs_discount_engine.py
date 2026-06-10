@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Union
 import math
 
-from asset.rate.product.irs import (
+from quantark.asset.rate.product.irs import (
     InterestRateSwap,
     BasisSwap,
     FixedLeg,
@@ -18,10 +18,10 @@ from asset.rate.product.irs import (
     SwapLeg,
     SwapDirection,
 )
-from asset.bond.schedule.cashflow import CashFlow, FloatingCashFlow
-from priceenv import PricingEnvironment
-from param.rrf import RateCurve, FlatRateCurve
-from util.exceptions import ValidationError, MarketDataError
+from quantark.asset.bond.schedule.cashflow import CashFlow, FloatingCashFlow
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf import RateCurve, FlatRateCurve
+from quantark.util.exceptions import ValidationError, MarketDataError
 
 
 @dataclass

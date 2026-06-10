@@ -11,14 +11,14 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from var import (
+from quantark.var import (
     VaRConfig,
     VaRMethod,
     ParametricVaREngine,
     HistoricalVaREngine,
     MonteCarloVaREngine,
 )
-from var.results import VaRResult, IncrementalVaRResult
+from quantark.var.results import VaRResult, IncrementalVaRResult
 
 
 class TestIncrementalVaRResult:
@@ -357,7 +357,7 @@ class TestVaREngineProtocolIncremental:
 
     def test_calculate_incremental_var_in_protocol(self):
         """Test calculate_incremental_var is in VaREngine protocol."""
-        from var.base import VaREngine
+        from quantark.var.base import VaREngine
         import inspect
 
         # Get all methods from the protocol
@@ -368,7 +368,7 @@ class TestVaREngineProtocolIncremental:
 
     def test_calculate_incremental_var_signature(self):
         """Test calculate_incremental_var signature matches protocol."""
-        from var.base import VaREngine
+        from quantark.var.base import VaREngine
 
         # Get the method signature
         sig = inspect.signature(VaREngine.calculate_incremental_var)

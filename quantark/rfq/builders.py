@@ -7,16 +7,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict
 
-from param import (
+from quantark.param import (
     ContinuousDividendYield,
     FlatRateCurve,
     FlatVolSurface,
     SpotQuote,
 )
-from priceenv import PricingEnvironment
-from rfq.models import RFQTermsheetInput
-from rfq.registry import ENGINE_BUILDERS, PRODUCT_BUILDERS
-from util.exceptions import ValidationError
+from quantark.priceenv import PricingEnvironment
+from quantark.rfq.models import RFQTermsheetInput
+from quantark.rfq.registry import ENGINE_BUILDERS, PRODUCT_BUILDERS
+from quantark.util.exceptions import ValidationError
 
 
 def build_product_from_termsheet(termsheet: RFQTermsheetInput) -> Any:

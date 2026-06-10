@@ -16,20 +16,20 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List
 
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.product.option import EuropeanVanillaOption
-from param import FlatRateCurve, FlatVolSurface, SpotQuote
-from portfolio.equity.portfolio import EquityPortfolio
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from var import (
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.portfolio.equity.portfolio import EquityPortfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.var import (
     VaRConfig,
     VaRMethod,
     ParametricVaREngine,
     HistoricalVaREngine,
     MonteCarloVaREngine,
 )
-from var.config import EquityRiskFactorConfig
+from quantark.var.config import EquityRiskFactorConfig
 
 
 def _build_equity_portfolio(position_count: int) -> EquityPortfolio:

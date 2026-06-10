@@ -9,12 +9,12 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from cashleg.base import LegDirection
-from cashleg.event_distribution import EventDistribution, EventType
-from cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.exceptions import ValidationError
+from quantark.cashleg.base import LegDirection
+from quantark.cashleg.event_distribution import EventDistribution, EventType
+from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError
 
 
 def _env(rate=0.05):

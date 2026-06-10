@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

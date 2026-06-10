@@ -7,9 +7,9 @@ market scenarios easily.
 
 from typing import Optional, List
 from datetime import datetime
-from dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
-from dynamicscenario.path.path_builder import PathBuilder
-from stresstest.stress.stress_types import StressType, StressLevel
+from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
+from quantark.dynamicscenario.path.path_builder import PathBuilder
+from quantark.stresstest.stress.stress_types import StressType, StressLevel
 
 
 class PathLibrary:
@@ -437,7 +437,7 @@ class PathLibrary:
         Raises:
             ValidationError: If no values provided or lengths mismatch
         """
-        from util.exceptions import ValidationError
+        from quantark.util.exceptions import ValidationError
         
         # Determine num_days from first non-None list
         all_values = [spot_values, vol_values, rate_values, div_yield_values]

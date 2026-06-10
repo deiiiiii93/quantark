@@ -17,25 +17,25 @@ import numpy as np
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
 
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.product.option.snowball_config import (
     BarrierConfig,
     PayoffConfig,
     AccrualConfig,
 )
-from asset.equity.product.option.snowball_helpers import (
+from quantark.asset.equity.product.option.snowball_helpers import (
     create_standard_snowball as create_standard_helper,
     create_stepdown_snowball as create_stepdown_helper,
     create_european_ki_snowball as create_european_ki_helper,
     create_parachute_snowball as create_parachute_helper,
     create_airbag_snowball as create_airbag_helper,
 )
-from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.param import PDEParams, MCParams
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from util.enum.engine_enums import MonteCarloMethod
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.param import PDEParams, MCParams
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.util.enum.engine_enums import MonteCarloMethod
 
 
 TOLERANCE = 0.05  # 5% relative error default

@@ -3,7 +3,7 @@ Unit tests for Snowball option helper functions.
 """
 
 import pytest
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     SnowballOption,
     create_standard_snowball,
     create_stepdown_snowball,
@@ -13,8 +13,8 @@ from asset.equity.product.option import (
     generate_ko_observation_dates,
     generate_stepdown_barriers,
 )
-from util.enum import ObservationType, CouponPayType, ProtectionType
-from util.exceptions import ValidationError
+from quantark.util.enum import ObservationType, CouponPayType, ProtectionType
+from quantark.util.exceptions import ValidationError
 
 
 # =============================================================================
@@ -587,10 +587,10 @@ class TestAirbagMCEngineIntegration:
     def test_airbag_snowball_mc_pricing(self):
         """Test MC engine correctly prices airbag snowball."""
         from datetime import datetime
-        from asset.equity.engine.mc import SnowballMCEngine
-        from asset.equity.param import MCParams
-        from param import SpotQuote, FlatVolSurface, FlatRateCurve
-        from priceenv import PricingEnvironment
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.asset.equity.param import MCParams
+        from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
+        from quantark.priceenv import PricingEnvironment
         
         # Create pricing environment (volatility will likely trigger KI for V1 payoff testing)
         pricing_env = PricingEnvironment(
@@ -638,10 +638,10 @@ class TestAirbagMCEngineIntegration:
     def test_airbag_mc_statistics(self):
         """Test MC engine returns reasonable statistics for airbag snowball."""
         from datetime import datetime
-        from asset.equity.engine.mc import SnowballMCEngine
-        from asset.equity.param import MCParams
-        from param import SpotQuote, FlatVolSurface, FlatRateCurve
-        from priceenv import PricingEnvironment
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.asset.equity.param import MCParams
+        from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
+        from quantark.priceenv import PricingEnvironment
         
         pricing_env = PricingEnvironment(
             valuation_date=datetime(2024, 1, 1),
@@ -701,7 +701,7 @@ class TestHelperIntegration:
 
     def test_import_from_option_module(self):
         """Test helpers can be imported from option module."""
-        from asset.equity.product.option import (
+        from quantark.asset.equity.product.option import (
             create_standard_snowball,
             create_stepdown_snowball,
             create_european_ki_snowball,

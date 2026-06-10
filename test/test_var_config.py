@@ -5,8 +5,8 @@ Unit tests for VaR configuration classes.
 import pytest
 from datetime import datetime
 
-from var.config import VaRConfig, VaRMethod, EquityRiskFactorConfig, FIRiskFactorConfig
-from util.exceptions import ValidationError
+from quantark.var.config import VaRConfig, VaRMethod, EquityRiskFactorConfig, FIRiskFactorConfig
+from quantark.util.exceptions import ValidationError
 
 
 def test_var_config_defaults():

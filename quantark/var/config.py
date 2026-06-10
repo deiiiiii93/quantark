@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import List, Optional
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class VaRMethod(Enum):

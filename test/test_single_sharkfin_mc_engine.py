@@ -2,25 +2,25 @@ from datetime import datetime
 
 import pytest
 
-from asset.equity.engine.analytical import SingleSharkfinOptionAnalyticalEngine
-from asset.equity.engine.mc import SingleSharkfinOptionMCEngine
-from asset.equity.param import MCParams
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.analytical import SingleSharkfinOptionAnalyticalEngine
+from quantark.asset.equity.engine.mc import SingleSharkfinOptionMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     ObservationRecord,
     ObservationSchedule,
     SingleSharkfinOption,
 )
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import (
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import (
     ObservationAggregation,
     ObservationFrequency,
     ObservationType,
     OptionType,
 )
-from util.enum.engine_enums import MonteCarloMethod
-from util.exceptions import PricingError, ValidationError
+from quantark.util.enum.engine_enums import MonteCarloMethod
+from quantark.util.exceptions import PricingError, ValidationError
 
 
 def _pricing_env(

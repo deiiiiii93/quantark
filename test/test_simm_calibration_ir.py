@@ -7,7 +7,7 @@ specification.
 
 import pytest
 import numpy as np
-from simm.calibration import (
+from quantark.simm.calibration import (
     IR_RISK_WEIGHTS,
     IR_TENOR_CORRELATIONS,
     IR_SUB_CURVE_CORRELATION,
@@ -22,7 +22,7 @@ from simm.calibration import (
     IR_VEGA_CONCENTRATION_THRESHOLDS,
     IR_TENOR_LABELS,
 )
-from simm.calibration.accessors import (
+from quantark.simm.calibration.accessors import (
     get_risk_weight,
     get_inter_bucket_correlation,
     get_concentration_threshold,

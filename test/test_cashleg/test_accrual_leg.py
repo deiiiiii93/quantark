@@ -9,14 +9,14 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from cashleg.accrual_leg import AccrualLeg, KOBehavior, PaymentConvention, SurvivalBasis
-from cashleg.base import LegDirection
-from cashleg.base_amount import BaseAmount, BaseAmountMode
-from cashleg.event_distribution import EventDistribution, EventType
-from cashleg.leg_schedule import LegSchedule
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.calendar.day_counter import DayCountConvention
+from quantark.cashleg.accrual_leg import AccrualLeg, KOBehavior, PaymentConvention, SurvivalBasis
+from quantark.cashleg.base import LegDirection
+from quantark.cashleg.base_amount import BaseAmount, BaseAmountMode
+from quantark.cashleg.event_distribution import EventDistribution, EventType
+from quantark.cashleg.leg_schedule import LegSchedule
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar.day_counter import DayCountConvention
 
 
 def _env(rate=0.05):

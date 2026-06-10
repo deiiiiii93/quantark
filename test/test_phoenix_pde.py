@@ -11,20 +11,20 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
-from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.param import PDEParams
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from asset.equity.product.option.phoenix_config import CouponBarrierConfig
-from asset.equity.product.option.phoenix_option import PhoenixOption
-from asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.calendar.day_counter import DayCountConvention
-from util.enum import CouponPayType, ObservationType, ProtectionType
+from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.enum import CouponPayType, ObservationType, ProtectionType
 
 
 def create_pricing_env(

@@ -24,22 +24,22 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.param import MCParams
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from asset.equity.product.option.snowball_option import SnowballOption
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import (
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import (
     CouponPayType,
     ObservationType,
 )
-from util.enum.engine_enums import EngineType, MonteCarloMethod
-from util.exceptions import PricingError, ValidationError
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.util.exceptions import PricingError, ValidationError
 
 # =============================================================================
 # Fixtures - Common test configurations
@@ -458,8 +458,8 @@ class TestValidation:
 
     def test_invalid_product_type(self):
         """Test error when pricing non-snowball product."""
-        from asset.equity.product.option import EuropeanVanillaOption
-        from util.enum import OptionType
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        from quantark.util.enum import OptionType
 
         option = EuropeanVanillaOption(
             strike=100.0,

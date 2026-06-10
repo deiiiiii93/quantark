@@ -3,9 +3,9 @@ Tests for SIMM sensitivity engine factory functions.
 """
 
 import pytest
-from simm.config import SIMMConfig
-from simm.engines.factory import create_engine, create_all_engines, get_available_engines
-from simm.taxonomy import RiskClass
+from quantark.simm.config import SIMMConfig
+from quantark.simm.engines.factory import create_engine, create_all_engines, get_available_engines
+from quantark.simm.taxonomy import RiskClass
 
 
 class TestCreateEngine:

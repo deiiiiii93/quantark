@@ -8,12 +8,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from simm.taxonomy import ProductClass, RiskClass
-from simm.results.simm_result import SIMMResult, RiskClassMargin, BucketDetail
-from simm.results.attribution import SIMMAttribution, PositionAttribution
-from simm.report.html_generator import SIMMHTMLReportGenerator
-from simm.report.excel_generator import SIMMExcelReportGenerator
-from simm.report.crif_export import (
+from quantark.simm.taxonomy import ProductClass, RiskClass
+from quantark.simm.results.simm_result import SIMMResult, RiskClassMargin, BucketDetail
+from quantark.simm.results.attribution import SIMMAttribution, PositionAttribution
+from quantark.simm.report.html_generator import SIMMHTMLReportGenerator
+from quantark.simm.report.excel_generator import SIMMExcelReportGenerator
+from quantark.simm.report.crif_export import (
     export_sensitivities_to_crif,
     write_crif_csv,
     create_crif_template,
@@ -121,7 +121,7 @@ class TestSIMMHTMLReportGenerator:
         assert '.section' in css
         assert '.data-table' in css
 
-    @patch('simm.report.html_generator.PLOTLY_AVAILABLE', False)
+    @patch('quantark.simm.report.html_generator.PLOTLY_AVAILABLE', False)
     def test_generate_without_plotly(self):
         """Test generating report without Plotly."""
         result = SIMMResult(
@@ -251,8 +251,8 @@ class TestCRIFExport:
 
     def test_write_crif_csv(self):
         """Test writing CRIF to CSV."""
-        from simm.crif import CRIFRecord
-        from simm.taxonomy import SensitivityType
+        from quantark.simm.crif import CRIFRecord
+        from quantark.simm.taxonomy import SensitivityType
 
         # Create mock CRIF records
         records = [
@@ -290,7 +290,7 @@ class TestCRIFExport:
 
     def test_export_sensitivities_to_crif_file(self):
         """Test exporting sensitivities to CRIF file."""
-        from simm.sensitivity import SensitivityCollection
+        from quantark.simm.sensitivity import SensitivityCollection
 
         # Create mock sensitivities
         sensitivities = SensitivityCollection([])

@@ -14,10 +14,10 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Any
 
-from simm.taxonomy import RiskClass, ProductClass, MarginType
-from simm.engines.aggregation.risk_class_aggregator import RiskClassResult
-from simm.calibration import get_inter_risk_class_correlation
-from simm.calibration.cross_risk import INTER_RISK_CLASS_CORRELATIONS
+from quantark.simm.taxonomy import RiskClass, ProductClass, MarginType
+from quantark.simm.engines.aggregation.risk_class_aggregator import RiskClassResult
+from quantark.simm.calibration import get_inter_risk_class_correlation
+from quantark.simm.calibration.cross_risk import INTER_RISK_CLASS_CORRELATIONS
 
 
 # Mapping from risk class to product class
@@ -148,7 +148,7 @@ class ProductClassAggregator:
             return 1.0
         
         # Map risk class to index in correlation matrix
-        from simm.calibration.cross_risk import INTER_RISK_CLASS_CORRELATION_LABELS
+        from quantark.simm.calibration.cross_risk import INTER_RISK_CLASS_CORRELATION_LABELS
         
         key1 = rc1.value
         key2 = rc2.value

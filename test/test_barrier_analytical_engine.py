@@ -4,30 +4,30 @@ from datetime import datetime
 import pytest
 from scipy import stats
 
-from asset.equity.engine.analytical import (
+from quantark.asset.equity.engine.analytical import (
     BarrierAnalyticalEngine,
     BlackScholesEngine,
     OneTouchAnalyticalEngine,
 )
-from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.product.option import (
     BarrierOption,
     EuropeanVanillaOption,
     OneTouchOption,
 )
-from param.quote.spot_quote import SpotQuote
-from param.rrf.rate_curve import FlatRateCurve
-from param.vol.vol_surface import FlatVolSurface
-from priceenv import PricingEnvironment
-from util.barrier_shift import apply_barrier_shift
-from util.enum import (
+from quantark.param.quote.spot_quote import SpotQuote
+from quantark.param.rrf.rate_curve import FlatRateCurve
+from quantark.param.vol.vol_surface import FlatVolSurface
+from quantark.priceenv import PricingEnvironment
+from quantark.util.barrier_shift import apply_barrier_shift
+from quantark.util.enum import (
     BarrierDirection,
     BarrierType,
     ObservationType,
     OptionType,
     TouchType,
 )
-from util.exceptions import PricingError
+from quantark.util.exceptions import PricingError
 
 
 def _pricing_env(spot: float = 100.0) -> PricingEnvironment:

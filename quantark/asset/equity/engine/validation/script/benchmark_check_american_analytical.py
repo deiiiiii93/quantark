@@ -10,14 +10,14 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent.parent))
 
-from asset.equity.product.option import AmericanOption
-from asset.equity.engine.analytical import AmericanOptionAnalyticalEngine
-from asset.equity.engine.mc import AmericanOptionMCEngine
-from asset.equity.param import MCParams
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.enum.engine_enums import AmericanAnalyticalMethod, MonteCarloMethod
+from quantark.asset.equity.product.option import AmericanOption
+from quantark.asset.equity.engine.analytical import AmericanOptionAnalyticalEngine
+from quantark.asset.equity.engine.mc import AmericanOptionMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.enum.engine_enums import AmericanAnalyticalMethod, MonteCarloMethod
 
 TOLERANCE = 0.05  # 5% relative error
 MC_PATHS = 100000

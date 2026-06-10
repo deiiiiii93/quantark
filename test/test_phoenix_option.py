@@ -22,27 +22,27 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from util.exceptions import ValidationError
-from asset.equity.product.option.phoenix_config import CouponBarrierConfig
-from asset.equity.product.option.phoenix_option import PhoenixOption
-from asset.equity.product.option.phoenix_helpers import (
+from quantark.util.exceptions import ValidationError
+from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.product.option.phoenix_helpers import (
     create_standard_phoenix,
     create_stepdown_phoenix,
     create_reverse_phoenix,
     create_memory_phoenix,
     create_non_memory_phoenix,
 )
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from util.calendar.day_counter import DayCountConvention
-from util.enum import (
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.enum import (
     BarrierType,
     CouponPayType,
     ExerciseType,
@@ -50,7 +50,7 @@ from util.enum import (
     OptionType,
     ProtectionType,
 )
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 # =============================================================================

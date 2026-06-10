@@ -10,15 +10,15 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from var import (
+from quantark.var import (
     VaRConfig,
     VaRMethod,
     ParametricVaREngine,
     HistoricalVaREngine,
     MonteCarloVaREngine,
 )
-from var.results import VaRResult
-from priceenv import PricingEnvironment
+from quantark.var.results import VaRResult
+from quantark.priceenv import PricingEnvironment
 
 
 class TestStressedVaRDetection:
@@ -123,11 +123,11 @@ class TestHistoricalVaRStressed:
         }, index=dates)
 
         # Create mock portfolio
-        from portfolio.equity.portfolio import EquityPortfolio
-        from portfolio.equity.position import EquityPosition
-        from asset.equity.product import EuropeanVanillaOption
-        from priceenv import PricingEnvironment
-        from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+        from quantark.portfolio.equity.portfolio import EquityPortfolio
+        from quantark.portfolio.equity.position import EquityPosition
+        from quantark.asset.equity.product import EuropeanVanillaOption
+        from quantark.priceenv import PricingEnvironment
+        from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 
         # Create a minimal portfolio for testing
         # First create a pricing environment
@@ -150,8 +150,8 @@ class TestHistoricalVaRStressed:
         )
 
         # Create a simple position and add it using add_position
-        from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
-        from util.enum.option_enums import OptionType
+        from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+        from quantark.util.enum.option_enums import OptionType
 
         option = EuropeanVanillaOption(
             strike=100.0,
@@ -195,9 +195,9 @@ class TestHistoricalVaRStressed:
         }, index=dates)
 
         # Create empty portfolio
-        from portfolio.equity.portfolio import EquityPortfolio
+        from quantark.portfolio.equity.portfolio import EquityPortfolio
         from datetime import datetime
-        from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+        from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 
         spot = SpotQuote(spot=100.0)
         vol_surface = FlatVolSurface(volatility=0.2)

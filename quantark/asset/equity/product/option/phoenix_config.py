@@ -8,9 +8,9 @@ when spot exceeds a coupon barrier at observation dates.
 from dataclasses import dataclass
 from typing import List, Optional, Union
 
-from util.enum import CouponPayType
-from util.calendar.day_counter import DayCountConvention
-from util.exceptions import ValidationError
+from quantark.util.enum import CouponPayType
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass(frozen=True)

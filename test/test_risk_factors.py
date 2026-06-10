@@ -6,7 +6,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from var.risk_factors import (
+from quantark.var.risk_factors import (
     SpotReturnFactor,
     VolChangeFactor,
     RateShiftFactor,

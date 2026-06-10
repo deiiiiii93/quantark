@@ -7,14 +7,14 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.option import AmericanOption
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.param import MCParams
-from priceenv import PricingEnvironment
-from util.enum.engine_enums import MonteCarloMethod, EngineType
-from util.exceptions import ValidationError, PricingError
-from util.numerical import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.option import AmericanOption
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.param import MCParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
+from quantark.util.exceptions import ValidationError, PricingError
+from quantark.util.numerical import (
     Tolerance,
     is_zero,
     is_finite,
@@ -26,13 +26,13 @@ from util.numerical import (
     validate_non_negative,
 )
 
-from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
-from asset.equity.process.bsm.qmc_sobol import (
+from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
+from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
 )
-from asset.equity.process.bsm.qmc_rqmc_driver import RQMCResult, run_rqmc
-from asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
+from quantark.asset.equity.process.bsm.qmc_rqmc_driver import RQMCResult, run_rqmc
+from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 
 
 @dataclass

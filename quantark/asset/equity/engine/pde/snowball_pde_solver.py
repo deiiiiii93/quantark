@@ -21,16 +21,16 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from scipy.linalg import solve_banded
 
-from asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
-from asset.equity.engine.event_stats import AutocallableEventStats
-from asset.equity.param import PDEParams
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from asset.equity.product.option.snowball_option import SnowballOption
-from priceenv import PricingEnvironment
-from util.enum import ObservationType, ProtectionType
-from util.exceptions import PricingError, ValidationError
-from util.numerical import Tolerance, is_close, is_zero, safe_divide
+from quantark.asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
+from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType, ProtectionType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import Tolerance, is_close, is_zero, safe_divide
 
 
 class SnowballPDESolver(BasePDESolver):

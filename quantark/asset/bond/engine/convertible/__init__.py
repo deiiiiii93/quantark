@@ -1,7 +1,7 @@
 """
 Facade engines for convertible bond pricing.
 """
-from asset.bond.engine.convertible.convertible_bond_engine import (
+from quantark.asset.bond.engine.convertible.convertible_bond_engine import (
     ConvertibleBondEngine,
     ConvertibleBondResult,
 )

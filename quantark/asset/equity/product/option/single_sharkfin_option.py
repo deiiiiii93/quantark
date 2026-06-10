@@ -12,15 +12,15 @@ from datetime import datetime
 from math import ceil
 from typing import List, Optional, Sequence
 
-from util.enum import (
+from quantark.util.enum import (
     ExerciseType,
     ObservationAggregation,
     ObservationFrequency,
     ObservationType,
     OptionType,
 )
-from util.exceptions import ValidationError
-from util.numerical import is_close
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 from .base_equity_option import BaseEquityOption
 from .observation_schedule import ObservationRecord, ObservationSchedule

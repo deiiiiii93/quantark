@@ -17,7 +17,7 @@ Backward Compatibility:
 """
 
 # Base protocols
-from backtest.base import (
+from quantark.backtest.base import (
     BaseTradeRecord,
     BaseHedgeExecutor,
     BaseBacktestEngine,
@@ -26,7 +26,7 @@ from backtest.base import (
 )
 
 # Equity implementations (with backward-compatible aliases)
-from backtest.equity import (
+from quantark.backtest.equity import (
     # Config
     BacktestConfig,
     EquityBacktestConfig,
@@ -49,7 +49,7 @@ from backtest.equity import (
 )
 
 # Transaction costs (shared)
-from backtest.transaction_costs import (
+from quantark.backtest.transaction_costs import (
     TransactionCostModel,
     ZeroCostModel,
     FixedCostModel,
@@ -58,7 +58,7 @@ from backtest.transaction_costs import (
 )
 
 # OTC autocallable backtests
-from backtest.otc import (
+from quantark.backtest.otc import (
     AKShareAutocallableDataAdapter,
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
@@ -77,12 +77,12 @@ from backtest.otc import (
 )
 
 # Logging (shared)
-from backtest.logger import BacktestLogger
+from quantark.backtest.logger import BacktestLogger
 
 # Visualization (shared)
-from backtest.visualizer import StaticVisualizer
-from backtest.dashboard import InteractiveDashboard
-from backtest.report_generator import ReportGenerator
+from quantark.backtest.visualizer import StaticVisualizer
+from quantark.backtest.dashboard import InteractiveDashboard
+from quantark.backtest.report_generator import ReportGenerator
 
 __all__ = [
     # Base protocols
@@ -147,7 +147,7 @@ def __getattr__(name):
         "FIBacktestState",
     )
     if name in fi_names:
-        from backtest import fi
+        from quantark.backtest import fi
 
         return getattr(fi, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

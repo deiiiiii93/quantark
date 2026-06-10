@@ -6,11 +6,11 @@ This module provides:
 - ConvertibleBondJumpDiffusionEngine: Bloomberg OVCV jump-diffusion model
 - ConvertibleBondTFEngine: Tsiveriotis-Fernandes decomposition model
 """
-from asset.bond.engine.pde.convertible.pde_params import ConvertibleBondPDEParams
-from asset.bond.engine.pde.convertible.jump_diffusion_engine import (
+from quantark.asset.bond.engine.pde.convertible.pde_params import ConvertibleBondPDEParams
+from quantark.asset.bond.engine.pde.convertible.jump_diffusion_engine import (
     ConvertibleBondJumpDiffusionEngine,
 )
-from asset.bond.engine.pde.convertible.tf_engine import (
+from quantark.asset.bond.engine.pde.convertible.tf_engine import (
     ConvertibleBondTFEngine,
 )
 

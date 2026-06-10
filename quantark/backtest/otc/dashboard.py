@@ -17,13 +17,13 @@ import numpy as np
 import pandas as pd
 from plotly.offline import get_plotlyjs
 
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.report.autocallable_risk_report import (
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.report.autocallable_risk_report import (
     build_snowball_risk_snapshot,
 )
-from asset.equity.report.surfaces import GridSpec
-from param import FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
+from quantark.asset.equity.report.surfaces import GridSpec
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
 
 from .engine_factory import create_surface_engine
 from .market import ImpliedBasisYield, SignedDividendYield

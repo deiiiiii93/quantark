@@ -11,19 +11,19 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.barrier_option_mc_engine import BarrierOptionMCEngine
-from asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.param import MCParams
-from asset.equity.product.option import BarrierOption, EuropeanVanillaOption
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.engine.mc.barrier_option_mc_engine import BarrierOptionMCEngine
+from quantark.asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.product.option import BarrierOption, EuropeanVanillaOption
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationSchedule,
     ObservationRecord,
 )
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import BarrierType, ObservationType, OptionType, ObservationAggregation
-from util.enum.engine_enums import MonteCarloMethod
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import BarrierType, ObservationType, OptionType, ObservationAggregation
+from quantark.util.enum.engine_enums import MonteCarloMethod
 
 
 def _pricing_env(spot: float = 100.0) -> PricingEnvironment:

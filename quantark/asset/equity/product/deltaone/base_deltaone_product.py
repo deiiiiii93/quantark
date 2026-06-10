@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
-from util.enum.deltaone_enums import DeltaOneType
-from util.exceptions import ValidationError
+from quantark.util.enum.deltaone_enums import DeltaOneType
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass
@@ -85,7 +85,7 @@ class BaseDeltaOneProduct(BaseEquityProduct):
                 raise ValidationError(
                     "PricingEnvironment required for date-based maturity calculation"
                 )
-            from util.calendar import calculate_year_fraction
+            from quantark.util.calendar import calculate_year_fraction
             
             # Validate valuation date is before maturity date
             if pricing_env.valuation_date >= self.maturity_date:

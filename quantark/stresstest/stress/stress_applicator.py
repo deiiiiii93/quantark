@@ -7,8 +7,8 @@ import re
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
-from priceenv import PricingEnvironment
-from param import (
+from quantark.priceenv import PricingEnvironment
+from quantark.param import (
     SpotQuote,
     VolatilitySurface,
     RateCurve,
@@ -19,17 +19,17 @@ from param import (
     FlatBasisYield,
     TermStructureBasisYield,
 )
-from param.rrf.rate_curve import FlatRateCurve, InterpolatedRateCurve, LinearRateCurve
-from portfolio import Portfolio, Position
-from stresstest.stress.stress_types import (
+from quantark.param.rrf.rate_curve import FlatRateCurve, InterpolatedRateCurve, LinearRateCurve
+from quantark.portfolio import Portfolio, Position
+from quantark.stresstest.stress.stress_types import (
     StressType,
     StressLevel,
     BasisDividendRelationshipMode,
 )
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 if TYPE_CHECKING:
-    from stresstest.scenario.scenario import Scenario, Stress
+    from quantark.stresstest.scenario.scenario import Scenario, Stress
 
 
 class StressApplicator:
@@ -296,11 +296,11 @@ class StressApplicator:
     def _stress_dividend(env: PricingEnvironment, stress: "Stress") -> None:
         """Stress dividend yield."""
         # If no dividend yield, create one with zero base
-        from param.div.dividend_yield import (
+        from quantark.param.div.dividend_yield import (
             ContinuousDividendYield,
             TermStructureDividendYield,
         )
-        from param.basis.basis_yield import (
+        from quantark.param.basis.basis_yield import (
             FlatBasisYield,
             calculate_basis_from_rate_dividend,
         )
@@ -392,11 +392,11 @@ class StressApplicator:
         For independent mode, basis is stressed directly.
         For auto-adjust modes, relationships between basis, dividend yield, and rate are maintained.
         """
-        from param.basis.basis_yield import (
+        from quantark.param.basis.basis_yield import (
             FlatBasisYield,
             calculate_dividend_from_rate_basis,
         )
-        from param.div.dividend_yield import (
+        from quantark.param.div.dividend_yield import (
             ContinuousDividendYield,
             TermStructureDividendYield,
         )

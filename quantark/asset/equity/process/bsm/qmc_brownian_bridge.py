@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from util.numerical import safe_log
+from quantark.util.numerical import safe_log
 
 
 @dataclass

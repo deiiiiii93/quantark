@@ -3,7 +3,7 @@ Black-Scholes-Merton process with continuous dividend yield.
 """
 
 from dataclasses import dataclass
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

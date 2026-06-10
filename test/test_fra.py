@@ -5,10 +5,10 @@ Tests for Forward Rate Agreement (FRA) product.
 import unittest
 from datetime import datetime
 
-from asset.rate.product.fra import ForwardRateAgreement, create_fra
-from param.index import SOFR_3M, EURIBOR_3M
-from util.calendar import DayCountConvention
-from util.exceptions import ValidationError
+from quantark.asset.rate.product.fra import ForwardRateAgreement, create_fra
+from quantark.param.index import SOFR_3M, EURIBOR_3M
+from quantark.util.calendar import DayCountConvention
+from quantark.util.exceptions import ValidationError
 
 
 class TestForwardRateAgreement(unittest.TestCase):

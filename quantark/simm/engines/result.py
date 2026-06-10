@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from decimal import Decimal
 
-from simm.sensitivity import SensitivityCollection
+from quantark.simm.sensitivity import SensitivityCollection
 
 
 @dataclass

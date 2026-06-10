@@ -6,9 +6,9 @@ directly or customized for specific needs.
 """
 
 from typing import Optional, Sequence
-from stresstest.scenario.scenario import Scenario, Stress
-from stresstest.scenario.scenario_builder import ScenarioBuilder
-from stresstest.stress.stress_types import StressType, StressLevel
+from quantark.stresstest.scenario.scenario import Scenario, Stress
+from quantark.stresstest.scenario.scenario_builder import ScenarioBuilder
+from quantark.stresstest.stress.stress_types import StressType, StressLevel
 
 
 class ScenarioLibrary:

@@ -60,7 +60,7 @@ class TestMonteCarloVarDemo:
 
     def test_monte_carlo_var_calculation(self):
         """Test that Monte Carlo VaR can be calculated."""
-        from var import MonteCarloVaREngine, VaRConfig, VaRMethod
+        from quantark.var import MonteCarloVaREngine, VaRConfig, VaRMethod
 
         portfolio = create_portfolio_for_mc()
         historical_data = generate_market_data_for_mc()

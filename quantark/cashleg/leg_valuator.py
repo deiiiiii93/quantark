@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from cashleg.base import CashLeg, LegDirection
-from cashleg.event_distribution import EventDistribution
+from quantark.cashleg.base import CashLeg, LegDirection
+from quantark.cashleg.event_distribution import EventDistribution
 
 
 def value_leg(

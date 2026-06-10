@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from var.results.var_result import VaRResult
+from quantark.var.results.var_result import VaRResult
 
 
 @dataclass

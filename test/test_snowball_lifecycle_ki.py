@@ -3,19 +3,19 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde import SnowballPDESolver
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from asset.equity.product.option.snowball_option import SnowballOption
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import ObservationType
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType
 
 
 KO_DATES = [0.25, 0.5, 0.75, 1.0]

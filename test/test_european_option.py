@@ -12,14 +12,14 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.riskmeasures import GreeksCalculator
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.calendar import DayCountConvention
-from util.enum import OptionType
-from util.exceptions import NumericalError, ValidationError
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import OptionType
+from quantark.util.exceptions import NumericalError, ValidationError
 
 
 def _discounted_european_lower_bound(

@@ -6,7 +6,7 @@ from typing import Any, Protocol, Union, runtime_checkable
 
 import pandas as pd
 
-from var.results import IncrementalVaRResult, VaRResult
+from quantark.var.results import IncrementalVaRResult, VaRResult
 
 
 @runtime_checkable

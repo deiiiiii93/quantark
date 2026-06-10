@@ -5,18 +5,18 @@ Tests for Swaption analytical (Black's model) pricing engine.
 import unittest
 from datetime import datetime
 
-from asset.rate.product.swaption import (
+from quantark.asset.rate.product.swaption import (
     create_payer_swaption,
     create_receiver_swaption,
 )
-from asset.rate.engine.swaption_engine import (
+from quantark.asset.rate.engine.swaption_engine import (
     SwaptionEngine,
     SwaptionPricingResults,
     SwaptionModelType,
 )
-from param.index import SOFR_3M
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
+from quantark.param.index import SOFR_3M
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
 
 
 class TestSwaptionEnginePricing(unittest.TestCase):

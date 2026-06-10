@@ -5,7 +5,7 @@ Tests for Interest Rate Cap, Floor, and Collar products.
 import unittest
 from datetime import datetime
 
-from asset.rate.product.cap_floor import (
+from quantark.asset.rate.product.cap_floor import (
     CapFloor,
     CapFloorType,
     Caplet,
@@ -14,10 +14,10 @@ from asset.rate.product.cap_floor import (
     create_floor,
     create_collar,
 )
-from asset.rate.product.irs import NotionalSchedule
-from param.index import SOFR_3M, EURIBOR_3M, IndexFixingStore, IndexFixing
-from util.enum import PaymentFrequency
-from util.exceptions import ValidationError
+from quantark.asset.rate.product.irs import NotionalSchedule
+from quantark.param.index import SOFR_3M, EURIBOR_3M, IndexFixingStore, IndexFixing
+from quantark.util.enum import PaymentFrequency
+from quantark.util.exceptions import ValidationError
 
 
 class TestCapFloorConstruction(unittest.TestCase):

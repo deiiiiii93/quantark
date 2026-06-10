@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

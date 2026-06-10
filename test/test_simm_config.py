@@ -5,8 +5,8 @@ Tests for SIMMConfig and SIMMVersion.
 """
 import pytest
 
-from simm.config import SIMMConfig, SIMMVersion
-from util.exceptions import ValidationError
+from quantark.simm.config import SIMMConfig, SIMMVersion
+from quantark.util.exceptions import ValidationError
 
 
 class TestSIMMVersion:

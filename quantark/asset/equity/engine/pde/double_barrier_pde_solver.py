@@ -8,12 +8,12 @@ knock-out barrier options (corridor options).
 from typing import Dict, Optional, List, Set
 import numpy as np
 
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.double_barrier_option import DoubleBarrierOption
-from asset.equity.param import PDEParams
-from priceenv import PricingEnvironment
-from util.enum import DoubleBarrierType, ObservationType, ObservationAggregation
-from util.exceptions import PricingError
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.double_barrier_option import DoubleBarrierOption
+from quantark.asset.equity.param import PDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import DoubleBarrierType, ObservationType, ObservationAggregation
+from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
 
@@ -96,7 +96,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
         """
         Price the underlying vanilla option.
         """
-        from asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
         from .european_pde_solver import EuropeanPDESolver
 
         vanilla = EuropeanVanillaOption(
@@ -197,7 +197,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
         """
         Calculate Greeks for the underlying vanilla option.
         """
-        from asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
         from .european_pde_solver import EuropeanPDESolver
 
         vanilla = EuropeanVanillaOption(

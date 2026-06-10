@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Union  # noqa: F401
 import numpy as np
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class BasisRelationshipMode(Enum):

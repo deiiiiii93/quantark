@@ -3,7 +3,7 @@ Barrier shift utility for discretely observed barrier options.
 """
 
 import math
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 def apply_barrier_shift(

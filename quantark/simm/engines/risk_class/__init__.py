@@ -9,8 +9,8 @@ This module contains sensitivity engines for each SIMM risk class:
 - FX
 """
 
-from simm.engines.risk_class.ir_engine import IRSensitivityEngine
-from simm.engines.risk_class.equity_engine import EquitySensitivityEngine
+from quantark.simm.engines.risk_class.ir_engine import IRSensitivityEngine
+from quantark.simm.engines.risk_class.equity_engine import EquitySensitivityEngine
 
 __all__ = [
     "IRSensitivityEngine",

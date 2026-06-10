@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
 
-from dynamicscenario.base import BaseDayResult, BaseScenarioResults
+from quantark.dynamicscenario.base import BaseDayResult, BaseScenarioResults
 
 
 @dataclass

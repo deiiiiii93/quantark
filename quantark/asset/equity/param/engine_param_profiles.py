@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 from .engine_params import PDEParams, QuadParams
 

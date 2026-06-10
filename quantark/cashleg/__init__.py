@@ -1,13 +1,13 @@
 """Cash-leg primitives for pricing equity-option cash terms alongside the option payoff."""
 
-from cashleg.accrual_leg import AccrualLeg, KOBehavior, PaymentConvention, SurvivalBasis
-from cashleg.base import CashLeg, LegDirection
-from cashleg.base_amount import BaseAmount, BaseAmountMode
-from cashleg.deterministic_leg import DeterministicLeg
-from cashleg.event_distribution import EventDistribution, EventType, PricingResult
-from cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
-from cashleg.leg_schedule import LegSchedule
-from cashleg.leg_valuator import LegPV, TradeValueBreakdown, value_leg
+from quantark.cashleg.accrual_leg import AccrualLeg, KOBehavior, PaymentConvention, SurvivalBasis
+from quantark.cashleg.base import CashLeg, LegDirection
+from quantark.cashleg.base_amount import BaseAmount, BaseAmountMode
+from quantark.cashleg.deterministic_leg import DeterministicLeg
+from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult
+from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
+from quantark.cashleg.leg_schedule import LegSchedule
+from quantark.cashleg.leg_valuator import LegPV, TradeValueBreakdown, value_leg
 
 __all__ = [
     "AccrualLeg",

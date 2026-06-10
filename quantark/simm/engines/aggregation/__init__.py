@@ -13,31 +13,31 @@ Components:
 - Main SIMMCalculator class
 """
 
-from simm.engines.aggregation.concentration import (
+from quantark.simm.engines.aggregation.concentration import (
     ConcentrationCalculator,
     ConcentrationResult,
 )
-from simm.engines.aggregation.weighted_sensitivity import (
+from quantark.simm.engines.aggregation.weighted_sensitivity import (
     WeightedSensitivityCalculator,
     WeightedSensitivity,
 )
-from simm.engines.aggregation.bucket_aggregator import (
+from quantark.simm.engines.aggregation.bucket_aggregator import (
     BucketAggregator,
     BucketResult,
 )
-from simm.engines.aggregation.risk_class_aggregator import (
+from quantark.simm.engines.aggregation.risk_class_aggregator import (
     RiskClassAggregator,
     RiskClassResult,
 )
-from simm.engines.aggregation.product_class_aggregator import (
+from quantark.simm.engines.aggregation.product_class_aggregator import (
     ProductClassAggregator,
     ProductClassResult,
 )
-from simm.engines.aggregation.addon import (
+from quantark.simm.engines.aggregation.addon import (
     AddOnCalculator,
     AddOnResult,
 )
-from simm.engines.aggregation.simm_calculator import (
+from quantark.simm.engines.aggregation.simm_calculator import (
     SIMMCalculator,
     SIMMAggregationResult,
 )

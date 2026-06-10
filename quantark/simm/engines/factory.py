@@ -3,19 +3,19 @@ Factory functions for creating SIMM sensitivity engines.
 """
 
 from typing import Dict, Any, Optional, Type
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass
 
-from simm.engines.base import SensitivityEngine, BaseSensitivityEngine
+from quantark.simm.engines.base import SensitivityEngine, BaseSensitivityEngine
 
 # Import engine classes
 try:
-    from simm.engines.risk_class.ir_engine import IRSensitivityEngine
+    from quantark.simm.engines.risk_class.ir_engine import IRSensitivityEngine
 except ImportError:
     IRSensitivityEngine = None
 
 try:
-    from simm.engines.risk_class.equity_engine import EquitySensitivityEngine
+    from quantark.simm.engines.risk_class.equity_engine import EquitySensitivityEngine
 except ImportError:
     EquitySensitivityEngine = None
 

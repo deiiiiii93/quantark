@@ -22,15 +22,15 @@ from enum import Enum
 from typing import List, Optional, Dict, Tuple, Union
 from dateutil.relativedelta import relativedelta
 
-from asset.bond.schedule.cashflow import (
+from quantark.asset.bond.schedule.cashflow import (
     CashFlow,
     FixedCashFlow,
     FloatingCashFlow,
     CompoundingMethod,
 )
-from param.index import RateIndex, IndexFixingStore
-from param.rrf import RateCurve
-from util.calendar import (
+from quantark.param.index import RateIndex, IndexFixingStore
+from quantark.param.rrf import RateCurve
+from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
     Calendar,
@@ -38,8 +38,8 @@ from util.calendar import (
     create_calendar,
     calculate_day_count_fraction,
 )
-from util.enum import PaymentFrequency, StubType, ResetConvention
-from util.exceptions import ValidationError
+from quantark.util.enum import PaymentFrequency, StubType, ResetConvention
+from quantark.util.exceptions import ValidationError
 
 
 class SwapDirection(Enum):
@@ -664,7 +664,7 @@ class FloatingLeg(SwapLeg):
 
     def add_fixing(self, fixing_date: datetime, rate: float) -> None:
         """Add a historical fixing for the index."""
-        from param.index import IndexFixing
+        from quantark.param.index import IndexFixing
 
         self.fixing_store.add_fixing(
             IndexFixing(fixing_date=fixing_date, rate=rate, index_name=self.index.name)

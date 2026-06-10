@@ -4,8 +4,8 @@ Configuration for dynamic scenario analysis.
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from stresstest.stress.stress_types import BasisDividendRelationshipMode
-from util.exceptions import ValidationError
+from quantark.stresstest.stress.stress_types import BasisDividendRelationshipMode
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

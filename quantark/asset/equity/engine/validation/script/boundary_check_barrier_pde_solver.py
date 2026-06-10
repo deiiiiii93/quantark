@@ -15,17 +15,17 @@ sys.path.insert(0, '.')
 
 import numpy as np
 
-from asset.equity.product.option import BarrierOption, EuropeanVanillaOption
-from asset.equity.engine.pde import BarrierPDESolver, EuropeanPDESolver
-from asset.equity.engine.analytical import BlackScholesEngine, BarrierAnalyticalEngine
-from asset.equity.param import PDEParams
-from param.quote.spot_quote import SpotQuote
-from param.rrf.rate_curve import FlatRateCurve
-from param.vol.vol_surface import FlatVolSurface
-from priceenv import PricingEnvironment
-from util.enum import BarrierType, OptionType, ObservationType
-from util.exceptions import PricingError
-from util.numerical import is_close, Tolerance
+from quantark.asset.equity.product.option import BarrierOption, EuropeanVanillaOption
+from quantark.asset.equity.engine.pde import BarrierPDESolver, EuropeanPDESolver
+from quantark.asset.equity.engine.analytical import BlackScholesEngine, BarrierAnalyticalEngine
+from quantark.asset.equity.param import PDEParams
+from quantark.param.quote.spot_quote import SpotQuote
+from quantark.param.rrf.rate_curve import FlatRateCurve
+from quantark.param.vol.vol_surface import FlatVolSurface
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import BarrierType, OptionType, ObservationType
+from quantark.util.exceptions import PricingError
+from quantark.util.numerical import is_close, Tolerance
 
 
 class BoundaryCheckResults:

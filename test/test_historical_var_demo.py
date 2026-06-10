@@ -50,7 +50,7 @@ class TestHistoricalVarDemo:
 
     def test_historical_var_calculation(self):
         """Test that Historical VaR can be calculated."""
-        from var import HistoricalVaREngine, VaRConfig, VaRMethod
+        from quantark.var import HistoricalVaREngine, VaRConfig, VaRMethod
 
         portfolio = create_options_portfolio()
         historical_data = generate_historical_data()
@@ -73,7 +73,7 @@ class TestHistoricalVarDemo:
 
     def test_non_linear_effects_captured(self):
         """Test that scenarios are available for non-linear analysis."""
-        from var import HistoricalVaREngine, VaRConfig, VaRMethod
+        from quantark.var import HistoricalVaREngine, VaRConfig, VaRMethod
 
         portfolio = create_options_portfolio()
         historical_data = generate_historical_data()

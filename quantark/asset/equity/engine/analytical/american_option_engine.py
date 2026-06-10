@@ -18,13 +18,13 @@ import numpy as np
 from typing import Optional, Union
 
 from scipy.stats import norm, multivariate_normal
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.option import AmericanOption
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.param import EngineParams
-from priceenv import PricingEnvironment
-from util.exceptions import ValidationError, NumericalError, PricingError
-from util.enum.engine_enums import AmericanAnalyticalMethod, EngineType
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.option import AmericanOption
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.param import EngineParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError, NumericalError, PricingError
+from quantark.util.enum.engine_enums import AmericanAnalyticalMethod, EngineType
 
 
 class AmericanOptionAnalyticalEngine(BaseEngine):

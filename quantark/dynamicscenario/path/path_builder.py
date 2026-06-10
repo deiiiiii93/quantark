@@ -7,9 +7,9 @@ multi-day market evolution scenarios.
 
 from typing import Optional, List, Union, Dict, Any
 from datetime import datetime
-from dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
-from stresstest.stress.stress_types import StressType, StressLevel
-from util.exceptions import ValidationError
+from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
+from quantark.stresstest.stress.stress_types import StressType, StressLevel
+from quantark.util.exceptions import ValidationError
 
 
 class PathBuilder:

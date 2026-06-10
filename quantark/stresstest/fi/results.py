@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from stresstest.equity.results import ScenarioResult, StressTestResults
+from quantark.stresstest.equity.results import ScenarioResult, StressTestResults
 
 
 @dataclass

@@ -4,15 +4,15 @@ Comprehensive tests for convertible bond product.
 import unittest
 from datetime import datetime
 
-from asset.bond.product.convertible.convertible_bond import (
+from quantark.asset.bond.product.convertible.convertible_bond import (
     ConvertibleBond,
     CallScheduleEntry,
     PutScheduleEntry,
     DiscreteDividend,
 )
-from util.calendar import DayCountConvention
-from util.enum import PaymentFrequency
-from util.exceptions import ValidationError
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import PaymentFrequency
+from quantark.util.exceptions import ValidationError
 
 
 class TestCallScheduleEntry(unittest.TestCase):

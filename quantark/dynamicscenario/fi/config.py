@@ -4,7 +4,7 @@ Configuration for FI dynamic scenario analysis.
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

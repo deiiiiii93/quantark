@@ -3,8 +3,8 @@ Fluent API for building stress test scenarios.
 """
 
 from typing import Optional, List, Dict, Any, Union
-from stresstest.scenario.scenario import Scenario, Stress
-from stresstest.stress.stress_types import (
+from quantark.stresstest.scenario.scenario import Scenario, Stress
+from quantark.stresstest.stress.stress_types import (
     StressType,
     StressLevel,
     BasisDividendRelationshipMode,

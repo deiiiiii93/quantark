@@ -39,12 +39,12 @@ Example:
     >>> results.generate_report("stress_report.html")
 """
 
-from stresstest.config import StressTestConfig
-from stresstest.engine import StressTestEngine
-from stresstest.fi import FIStressConfig, FIStressEngine
-from stresstest.scenario.scenario import Scenario, Stress
-from stresstest.scenario.scenario_builder import ScenarioBuilder
-from stresstest.stress.stress_types import (
+from quantark.stresstest.config import StressTestConfig
+from quantark.stresstest.engine import StressTestEngine
+from quantark.stresstest.fi import FIStressConfig, FIStressEngine
+from quantark.stresstest.scenario.scenario import Scenario, Stress
+from quantark.stresstest.scenario.scenario_builder import ScenarioBuilder
+from quantark.stresstest.stress.stress_types import (
     StressType,
     StressLevel,
     BasisDividendRelationshipMode,

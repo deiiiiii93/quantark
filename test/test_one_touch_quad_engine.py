@@ -6,13 +6,13 @@ from datetime import datetime
 
 import pytest
 
-from asset.equity.engine.analytical import OneTouchAnalyticalEngine
-from asset.equity.engine.quad import OneTouchQuadEngine
-from asset.equity.param import QuadParams
-from asset.equity.product.option import OneTouchOption
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import BarrierDirection, ObservationType, TouchType
+from quantark.asset.equity.engine.analytical import OneTouchAnalyticalEngine
+from quantark.asset.equity.engine.quad import OneTouchQuadEngine
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.option import OneTouchOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import BarrierDirection, ObservationType, TouchType
 
 
 def create_pricing_env(

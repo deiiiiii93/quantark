@@ -2,13 +2,13 @@ from datetime import datetime
 
 import pytest
 
-from param import FlatRateCurve, SpotQuote, TermStructureVolSurface
-from param.div import TermStructureDividendYield
-from portfolio import Portfolio
-from priceenv import PricingEnvironment
-from stresstest.scenario.scenario_builder import ScenarioBuilder
-from stresstest.stress.stress_applicator import StressApplicator
-from stresstest.stress.stress_types import StressType
+from quantark.param import FlatRateCurve, SpotQuote, TermStructureVolSurface
+from quantark.param.div import TermStructureDividendYield
+from quantark.portfolio import Portfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.stresstest.scenario.scenario_builder import ScenarioBuilder
+from quantark.stresstest.stress.stress_applicator import StressApplicator
+from quantark.stresstest.stress.stress_types import StressType
 
 
 def _build_env() -> PricingEnvironment:

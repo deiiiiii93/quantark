@@ -12,12 +12,12 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import AmericanOption, EuropeanVanillaOption
-from asset.equity.engine.analytical import AmericanOptionAnalyticalEngine, BlackScholesEngine
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.exceptions import ValidationError, PricingError
+from quantark.asset.equity.product.option import AmericanOption, EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import AmericanOptionAnalyticalEngine, BlackScholesEngine
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.exceptions import ValidationError, PricingError
 
 
 def create_pricing_env(spot=100.0, vol=0.20, rate=0.05, div=0.02):
@@ -325,13 +325,13 @@ class TestDefaultMethod:
     
     def test_default_is_bs93(self):
         """Test default method is BS93."""
-        from util.enum.engine_enums import AmericanAnalyticalMethod
+        from quantark.util.enum.engine_enums import AmericanAnalyticalMethod
         engine = AmericanOptionAnalyticalEngine()
         assert engine.method == AmericanAnalyticalMethod.BS93, "Default method should be BS93"
     
     def test_explicit_method(self):
         """Test explicit method selection."""
-        from util.enum.engine_enums import AmericanAnalyticalMethod
+        from quantark.util.enum.engine_enums import AmericanAnalyticalMethod
         engine_bs02 = AmericanOptionAnalyticalEngine(method="BS02")
         assert engine_bs02.method == AmericanAnalyticalMethod.BS02
         

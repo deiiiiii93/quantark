@@ -2,22 +2,22 @@
 VaR module for portfolio Value-at-Risk calculations.
 """
 
-from var.backtest import VaRBacktestResult, VaRBacktester
-from var.base import VaREngine
-from var.config import (
+from quantark.var.backtest import VaRBacktestResult, VaRBacktester
+from quantark.var.base import VaREngine
+from quantark.var.config import (
     EquityRiskFactorConfig,
     FIRiskFactorConfig,
     VaRConfig,
     VaRMethod,
 )
-from var.engines import (
+from quantark.var.engines import (
     HistoricalVaREngine,
     MonteCarloVaREngine,
     ParametricVaREngine,
 )
-from var.results import IncrementalVaRResult, VaRResult
-from var.results.var_report import VaRReportGenerator
-from var.attribution import ComponentVaRCalculator, MarginalVaRCalculator, VaRAttributor
+from quantark.var.results import IncrementalVaRResult, VaRResult
+from quantark.var.results.var_report import VaRReportGenerator
+from quantark.var.attribution import ComponentVaRCalculator, MarginalVaRCalculator, VaRAttributor
 
 __all__ = [
     "VaREngine",

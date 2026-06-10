@@ -23,11 +23,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from asset.rate.product.fra import ForwardRateAgreement
-from priceenv import PricingEnvironment
-from param.rrf import RateCurve, FlatRateCurve
-from util.exceptions import ValidationError, MarketDataError
-from util.numerical import safe_divide
+from quantark.asset.rate.product.fra import ForwardRateAgreement
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf import RateCurve, FlatRateCurve
+from quantark.util.exceptions import ValidationError, MarketDataError
+from quantark.util.numerical import safe_divide
 
 
 @dataclass

@@ -5,16 +5,16 @@ Tests for Swaption product.
 import unittest
 from datetime import datetime
 
-from asset.rate.product.swaption import (
+from quantark.asset.rate.product.swaption import (
     Swaption,
     SwaptionType,
     SwaptionExerciseStyle,
     create_payer_swaption,
     create_receiver_swaption,
 )
-from asset.rate.product.irs import InterestRateSwap, SwapDirection
-from param.index import SOFR_3M, EURIBOR_3M
-from util.exceptions import ValidationError
+from quantark.asset.rate.product.irs import InterestRateSwap, SwapDirection
+from quantark.param.index import SOFR_3M, EURIBOR_3M
+from quantark.util.exceptions import ValidationError
 
 
 class TestSwaptionConstruction(unittest.TestCase):

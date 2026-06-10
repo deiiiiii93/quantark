@@ -10,12 +10,12 @@ from typing import Optional, List
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
 from .observation_schedule import ObservationRecord, ObservationSchedule
-from util.enum import (
+from quantark.util.enum import (
     ObservationType,
     ObservationAggregation,
     TouchType,
 )
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass
@@ -204,7 +204,7 @@ class DoubleOneTouchOption(BaseEquityProduct):
                 raise ValidationError(
                     "PricingEnvironment required for date-based maturity calculation"
                 )
-            from util.calendar import calculate_year_fraction
+            from quantark.util.calendar import calculate_year_fraction
 
             return calculate_year_fraction(
                 pricing_env.valuation_date,

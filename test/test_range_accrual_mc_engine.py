@@ -16,17 +16,17 @@ from datetime import datetime
 import pytest
 import numpy as np
 
-from asset.equity.engine.mc import RangeAccrualMCEngine, RangeAccrualMCResult
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.mc import RangeAccrualMCEngine, RangeAccrualMCResult
+from quantark.asset.equity.product.option import (
     RangeAccrualOption,
     RangeAccrualConfig,
     RangeAccrualObservationRecord,
 )
-from asset.equity.param import MCParams
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from util.enum.engine_enums import MonteCarloMethod, EngineType
-from util.exceptions import ValidationError, PricingError
+from quantark.asset.equity.param import MCParams
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
+from quantark.util.exceptions import ValidationError, PricingError
 
 
 @pytest.fixture
@@ -382,8 +382,8 @@ class TestRangeAccrualMCEngineEdgeCases:
 
     def test_invalid_product_type(self, pricing_env):
         """Test that engine rejects non-RangeAccrual products."""
-        from asset.equity.product.option import EuropeanVanillaOption
-        from util.enum import OptionType
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        from quantark.util.enum import OptionType
 
         engine = RangeAccrualMCEngine()
         wrong_product = EuropeanVanillaOption(

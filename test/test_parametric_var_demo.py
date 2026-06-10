@@ -54,7 +54,7 @@ class TestParametricVarDemo:
 
     def test_var_calculation(self):
         """Test that VaR can be calculated."""
-        from var import ParametricVaREngine, VaRConfig, VaRMethod, EquityRiskFactorConfig
+        from quantark.var import ParametricVaREngine, VaRConfig, VaRMethod, EquityRiskFactorConfig
 
         portfolio = create_sample_portfolio()
         historical_data = generate_historical_data()

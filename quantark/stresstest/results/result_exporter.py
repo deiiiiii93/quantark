@@ -8,9 +8,9 @@ import pandas as pd
 import json
 from datetime import datetime
 
-from stresstest.results.stress_results import StressTestResults
-from stresstest.results.result_aggregator import ResultAggregator
-from util.exceptions import ValidationError
+from quantark.stresstest.results.stress_results import StressTestResults
+from quantark.stresstest.results.result_aggregator import ResultAggregator
+from quantark.util.exceptions import ValidationError
 
 
 class ResultExporter:

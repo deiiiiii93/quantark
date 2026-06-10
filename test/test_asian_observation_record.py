@@ -1,10 +1,10 @@
 
 import pytest
 from datetime import datetime
-from asset.equity.product.option.asian_option import AsianObservationRecord
-from priceenv import PricingEnvironment
-from param.rrf import FlatRateCurve
-from util.exceptions import ValidationError
+from quantark.asset.equity.product.option.asian_option import AsianObservationRecord
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf import FlatRateCurve
+from quantark.util.exceptions import ValidationError
 
 def test_asian_observation_record_time_resolution():
     # Test resolution using observation_time

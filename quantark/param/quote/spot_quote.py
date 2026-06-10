@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from util.exceptions import ValidationError
-from util.numerical import validate_positive
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import validate_positive
 
 
 @dataclass

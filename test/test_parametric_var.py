@@ -7,16 +7,16 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from var import VaRConfig, VaRMethod, EquityRiskFactorConfig
-from var.engines import ParametricVaREngine
-from portfolio.equity.portfolio import EquityPortfolio
-from portfolio.equity.position import EquityPosition
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from util.enum.option_enums import OptionType
-from util.exceptions import ValidationError
+from quantark.var import VaRConfig, VaRMethod, EquityRiskFactorConfig
+from quantark.var.engines import ParametricVaREngine
+from quantark.portfolio.equity.portfolio import EquityPortfolio
+from quantark.portfolio.equity.position import EquityPosition
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.util.enum.option_enums import OptionType
+from quantark.util.exceptions import ValidationError
 
 
 @pytest.fixture

@@ -10,29 +10,29 @@ from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent.parent))
 
-from asset.equity.engine.analytical import (  # noqa: E402
+from quantark.asset.equity.engine.analytical import (  # noqa: E402
     BarrierAnalyticalEngine,
     BlackScholesEngine,
 )
-from asset.equity.product.option import (  # noqa: E402
+from quantark.asset.equity.product.option import (  # noqa: E402
     BarrierOption,
     EuropeanVanillaOption,
     ObservationSchedule,
 )
-from param import (  # noqa: E402
+from quantark.param import (  # noqa: E402
     ContinuousDividendYield,
     FlatRateCurve,
     FlatVolSurface,
     SpotQuote,
 )
-from priceenv import PricingEnvironment  # noqa: E402
-from util.enum import (  # noqa: E402
+from quantark.priceenv import PricingEnvironment  # noqa: E402
+from quantark.util.enum import (  # noqa: E402
     BarrierType,
     ObservationFrequency,
     ObservationType,
     OptionType,
 )
-from util.numerical import Tolerance, is_close  # noqa: E402
+from quantark.util.numerical import Tolerance, is_close  # noqa: E402
 
 
 class BoundaryCheckResults:

@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from asset.equity.param import PDEParams, QuadParams, make_pde_params, make_quad_params
-from util.exceptions import ValidationError
+from quantark.asset.equity.param import PDEParams, QuadParams, make_pde_params, make_quad_params
+from quantark.util.exceptions import ValidationError
 
 
 def test_make_quad_params_profile_fast():

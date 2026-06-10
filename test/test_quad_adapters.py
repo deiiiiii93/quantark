@@ -4,20 +4,20 @@ Unit tests for quad input adapter resolution.
 
 import pytest
 
-from asset.equity.engine.quad.quad_adapters import (
+from quantark.asset.equity.engine.quad.quad_adapters import (
     BarrierQuadInputAdapter,
     OneTouchQuadInputAdapter,
     resolve_quad_adapter,
 )
-from asset.equity.product.option import BarrierOption, EuropeanVanillaOption, OneTouchOption
-from util.enum import (
+from quantark.asset.equity.product.option import BarrierOption, EuropeanVanillaOption, OneTouchOption
+from quantark.util.enum import (
     BarrierDirection,
     BarrierType,
     ObservationType,
     OptionType,
     TouchType,
 )
-from util.exceptions import PricingError
+from quantark.util.exceptions import PricingError
 
 
 def test_resolve_adapter_barrier_option():

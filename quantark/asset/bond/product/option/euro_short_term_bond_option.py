@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from asset.bond.product.couponbond.fixed_bond import FixedBond
-from util.enum import OptionType
-from util.exceptions import ValidationError
+from quantark.asset.bond.product.couponbond.fixed_bond import FixedBond
+from quantark.util.enum import OptionType
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

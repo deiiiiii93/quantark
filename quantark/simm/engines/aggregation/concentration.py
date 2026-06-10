@@ -16,9 +16,9 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Any
 
-from simm.taxonomy import RiskClass, MarginType
-from simm.sensitivity import AnySensitivity
-from simm.calibration import (
+from quantark.simm.taxonomy import RiskClass, MarginType
+from quantark.simm.sensitivity import AnySensitivity
+from quantark.simm.calibration import (
     get_concentration_threshold,
     IR_DELTA_CONCENTRATION_THRESHOLDS,
     IR_VEGA_CONCENTRATION_THRESHOLDS,
@@ -33,7 +33,7 @@ from simm.calibration import (
     FX_DELTA_CONCENTRATION_THRESHOLDS,
     FX_VEGA_CONCENTRATION_THRESHOLDS,
 )
-from simm.taxonomy import get_currency_volatility, CurrencyVolatility
+from quantark.simm.taxonomy import get_currency_volatility, CurrencyVolatility
 
 
 @dataclass

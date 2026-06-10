@@ -15,14 +15,14 @@ from typing import Optional
 
 from dateutil.relativedelta import relativedelta
 
-from param.index import RateIndex, IndexFixingStore
-from util.calendar import (
+from quantark.param.index import RateIndex, IndexFixingStore
+from quantark.util.calendar import (
     DayCountConvention,
     Calendar,
     calculate_day_count_fraction,
     create_calendar,
 )
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

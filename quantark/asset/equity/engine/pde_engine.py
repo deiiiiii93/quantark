@@ -8,10 +8,10 @@ the product type.
 
 from typing import Dict, Optional, Type, Union
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.param import PDEParams
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option import (
     AmericanOption,
     BarrierOption,
     DoubleBarrierOption,
@@ -22,9 +22,9 @@ from asset.equity.product.option import (
     KnockOutResetSnowballOption,
     PhoenixOption,
 )
-from priceenv import PricingEnvironment
-from util.enum.engine_enums import EngineType, PDEMethod
-from util.exceptions import ValidationError
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import EngineType, PDEMethod
+from quantark.util.exceptions import ValidationError
 
 from .pde import (
     AmericanPDESolver,

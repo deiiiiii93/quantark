@@ -8,7 +8,7 @@ from io import StringIO
 
 import pytest
 
-from simm.crif import (
+from quantark.simm.crif import (
     CRIFHeader,
     CRIFRecord,
     CRIFValidationError,
@@ -16,14 +16,14 @@ from simm.crif import (
     parse_crif_csv,
     sensitivities_to_crif,
 )
-from simm.sensitivity import (
+from quantark.simm.sensitivity import (
     IRDeltaSensitivity,
     FXDeltaSensitivity,
     CreditDeltaSensitivity,
     EquityDeltaSensitivity,
     SensitivityCollection,
 )
-from simm.taxonomy import (
+from quantark.simm.taxonomy import (
     IRSubCurve,
     MarginType,
     ProductClass,

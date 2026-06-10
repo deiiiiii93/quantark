@@ -3,9 +3,9 @@ Tests for SIMM sensitivity engine base classes.
 """
 
 import pytest
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass, MarginType
-from simm.engines.base import BaseSensitivityEngine, SensitivityEngine
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass, MarginType
+from quantark.simm.engines.base import BaseSensitivityEngine, SensitivityEngine
 
 
 class MockEngine(BaseSensitivityEngine):
@@ -73,7 +73,7 @@ class TestBaseSensitivityEngine:
 
     def test_calculate_sensitivities_with_delta_enabled(self):
         """Test full sensitivity calculation with delta enabled."""
-        from simm.sensitivity import SensitivityCollection
+        from quantark.simm.sensitivity import SensitivityCollection
 
         config = SIMMConfig(calculate_delta=True, calculate_vega=False)
 
@@ -83,7 +83,7 @@ class TestBaseSensitivityEngine:
                 return RiskClass.EQUITY
 
             def calculate_delta_sensitivities(self, positions, envs):
-                from simm.sensitivity import EquityDeltaSensitivity
+                from quantark.simm.sensitivity import EquityDeltaSensitivity
                 return [
                     EquityDeltaSensitivity(
                         trade_id="test1",

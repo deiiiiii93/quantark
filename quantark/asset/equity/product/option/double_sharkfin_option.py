@@ -11,15 +11,15 @@ from datetime import datetime
 from math import ceil
 from typing import List, Optional, Sequence
 
-from util.enum import (
+from quantark.util.enum import (
     ExerciseType,
     ObservationAggregation,
     ObservationFrequency,
     ObservationType,
     OptionType,
 )
-from util.exceptions import ValidationError
-from util.numerical import is_close
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 from .base_equity_option import BaseEquityOption
 from .observation_schedule import ObservationRecord, ObservationSchedule
@@ -435,7 +435,7 @@ class DoubleSharkfinOption(BaseEquityOption):
     @property
     def corridor_width_log(self) -> float:
         """Get the width of the corridor in log-price terms."""
-        from util.numerical import safe_log
+        from quantark.util.numerical import safe_log
 
         return safe_log(self.upper_barrier / self.lower_barrier)
 

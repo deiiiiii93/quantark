@@ -4,7 +4,7 @@ Unit tests for backtest module.
 
 import pytest
 from datetime import datetime, timedelta
-from backtest import (
+from quantark.backtest import (
     BacktestConfig,
     ZeroCostModel,
     CompleteCostModel,
@@ -12,12 +12,12 @@ from backtest import (
     TradeRecord,
     StateTracker,
 )
-from backtest.strategy import DeltaNeutralStrategy
-from portfolio import Position
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from util.enum import OptionType
-from util.marketdata.adapter.mock_adapter import MockMarketDataAdapter
+from quantark.backtest.strategy import DeltaNeutralStrategy
+from quantark.portfolio import Position
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.util.enum import OptionType
+from quantark.util.marketdata.adapter.mock_adapter import MockMarketDataAdapter
 
 
 class TestDeltaNeutralStrategy:

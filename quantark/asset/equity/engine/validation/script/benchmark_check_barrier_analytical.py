@@ -11,21 +11,21 @@ from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent.parent))
 
-from asset.equity.engine.analytical import BarrierAnalyticalEngine  # noqa: E402
-from asset.equity.engine.mc import BarrierOptionMCEngine  # noqa: E402
-from asset.equity.param import MCParams  # noqa: E402
-from asset.equity.product.option import (  # noqa: E402
+from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine  # noqa: E402
+from quantark.asset.equity.engine.mc import BarrierOptionMCEngine  # noqa: E402
+from quantark.asset.equity.param import MCParams  # noqa: E402
+from quantark.asset.equity.product.option import (  # noqa: E402
     BarrierOption,
     ObservationSchedule,
 )
-from param import (  # noqa: E402
+from quantark.param import (  # noqa: E402
     ContinuousDividendYield,
     FlatRateCurve,
     FlatVolSurface,
     SpotQuote,
 )
-from priceenv import PricingEnvironment  # noqa: E402
-from util.enum import (  # noqa: E402
+from quantark.priceenv import PricingEnvironment  # noqa: E402
+from quantark.util.enum import (  # noqa: E402
     BarrierType,
     ObservationFrequency,
     ObservationType,

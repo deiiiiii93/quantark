@@ -13,15 +13,15 @@ import scipy.sparse as sp
 from scipy.linalg import solve_banded
 from time import perf_counter
 
-from asset.equity.engine.pde.base_pde_solver import PDESolutionResult
-from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.phoenix_option import PhoenixOption
-from asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from priceenv import PricingEnvironment
-from util.enum import CouponPayType, ObservationType
-from util.exceptions import PricingError, ValidationError
-from util.numerical import is_close, is_zero
+from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType, ObservationType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import is_close, is_zero
 
 
 class PhoenixPDESolver(SnowballPDESolver):

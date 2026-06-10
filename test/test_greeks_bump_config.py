@@ -4,14 +4,14 @@ Integration tests for Greeks calculation with BumpConfig.
 
 import pytest
 from datetime import datetime
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.param import EngineParams, BumpConfig
-from asset.equity.riskmeasures import GreeksCalculator
-from param import SpotQuote, FlatVolSurface, FlatRateCurve
-from param.div import ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.param import EngineParams, BumpConfig
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
+from quantark.param.div import ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
 
 
 @pytest.fixture

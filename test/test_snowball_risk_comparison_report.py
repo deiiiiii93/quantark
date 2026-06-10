@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from docx import Document
 
-from asset.equity.report import snowball_risk_comparison_report as report
-from util.enum import ObservationType
+from quantark.asset.equity.report import snowball_risk_comparison_report as report
+from quantark.util.enum import ObservationType
 
 
 def _base_config(tmp_path: Path | None = None, *, num_paths: int = 4000):

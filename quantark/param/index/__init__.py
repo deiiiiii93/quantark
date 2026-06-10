@@ -2,7 +2,7 @@
 Rate index definitions for floating rate instruments.
 """
 
-from util.enum import ResetConvention
+from quantark.util.enum import ResetConvention
 from .rate_index import (
     RateIndex,
     IndexFixing,

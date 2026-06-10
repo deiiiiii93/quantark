@@ -23,15 +23,15 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Callable, Any
 
-from simm.taxonomy import RiskClass, MarginType
-from simm.engines.aggregation.bucket_aggregator import BucketResult
-from simm.engines.aggregation.concentration import ConcentrationCalculator
-from simm.calibration import get_inter_bucket_correlation
-from simm.calibration.ir import IR_INTER_CURRENCY_CORRELATION, IR_HVR
-from simm.calibration.credit_qualifying import CREDIT_QUALIFYING_INTER_BUCKET_CORRELATIONS
-from simm.calibration.credit_non_qualifying import CREDIT_NON_QUALIFYING_INTER_BUCKET_CORRELATION
-from simm.calibration.equity import EQUITY_INTER_BUCKET_CORRELATIONS
-from simm.calibration.commodity import COMMODITY_INTER_BUCKET_CORRELATIONS
+from quantark.simm.taxonomy import RiskClass, MarginType
+from quantark.simm.engines.aggregation.bucket_aggregator import BucketResult
+from quantark.simm.engines.aggregation.concentration import ConcentrationCalculator
+from quantark.simm.calibration import get_inter_bucket_correlation
+from quantark.simm.calibration.ir import IR_INTER_CURRENCY_CORRELATION, IR_HVR
+from quantark.simm.calibration.credit_qualifying import CREDIT_QUALIFYING_INTER_BUCKET_CORRELATIONS
+from quantark.simm.calibration.credit_non_qualifying import CREDIT_NON_QUALIFYING_INTER_BUCKET_CORRELATION
+from quantark.simm.calibration.equity import EQUITY_INTER_BUCKET_CORRELATIONS
+from quantark.simm.calibration.commodity import COMMODITY_INTER_BUCKET_CORRELATIONS
 
 
 # Inverse of standard normal CDF at 99.5% (Φ^-1(0.995))
@@ -316,7 +316,7 @@ class RiskClassAggregator:
         sum_sq = sum(ws**2 for ws in sensitivities_weighted.values())
         
         # Inter-index correlation (from calibration)
-        from simm.calibration.credit_qualifying import CREDIT_QUALIFYING_BASE_CORRELATION_INTER_INDEX_CORRELATION
+        from quantark.simm.calibration.credit_qualifying import CREDIT_QUALIFYING_BASE_CORRELATION_INTER_INDEX_CORRELATION
         rho = CREDIT_QUALIFYING_BASE_CORRELATION_INTER_INDEX_CORRELATION
         
         cross = 0.0

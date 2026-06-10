@@ -7,25 +7,25 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.param import MCParams
-from asset.equity.process.bsm.qmc_brownian_bridge import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.process.bsm.qmc_brownian_bridge import (
     compute_step_crossing_probabilities,
 )
-from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
-from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
-from asset.equity.process.bsm.qmc_sobol import (
+from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
+from quantark.asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
+from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
 )
-from asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option import DoubleSharkfinOption
-from priceenv import PricingEnvironment
-from util.enum import ObservationAggregation, ObservationType
-from util.enum.engine_enums import EngineType, MonteCarloMethod
-from util.exceptions import PricingError, ValidationError
-from util.numerical import (
+from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option import DoubleSharkfinOption
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationAggregation, ObservationType
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import (
     is_close,
     is_zero,
     safe_exp,

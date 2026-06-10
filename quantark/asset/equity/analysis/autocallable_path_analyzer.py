@@ -14,12 +14,12 @@ from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.param import MCParams
-from asset.equity.product.option.snowball_option import SnowballOption
-from priceenv import PricingEnvironment
-from util.enum import ObservationType
-from util.exceptions import ValidationError
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass(frozen=True)

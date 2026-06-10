@@ -29,9 +29,9 @@ Example:
 from dataclasses import fields
 from typing import List, Optional
 
-from util.calendar.day_counter import DayCountConvention
-from util.enum import CouponPayType, ObservationType
-from util.exceptions import ValidationError
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.enum import CouponPayType, ObservationType
+from quantark.util.exceptions import ValidationError
 
 from .phoenix_config import CouponBarrierConfig
 from .phoenix_option import PhoenixOption

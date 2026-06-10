@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from asset.equity.engine.quad.quad_core import QuadratureCore
+from quantark.asset.equity.engine.quad.quad_core import QuadratureCore
 
 
 def _make_core() -> QuadratureCore:

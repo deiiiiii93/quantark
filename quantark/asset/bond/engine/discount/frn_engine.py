@@ -10,11 +10,11 @@ from datetime import datetime
 from typing import Optional, Tuple
 import math
 
-from asset.bond.product.couponbond.frn import FloatingRateBond
-from asset.bond.schedule.cashflow import FloatingCashFlow
-from priceenv import PricingEnvironment
-from param.rrf import RateCurve
-from util.exceptions import ValidationError, MarketDataError
+from quantark.asset.bond.product.couponbond.frn import FloatingRateBond
+from quantark.asset.bond.schedule.cashflow import FloatingCashFlow
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf import RateCurve
+from quantark.util.exceptions import ValidationError, MarketDataError
 
 
 @dataclass
@@ -704,7 +704,7 @@ class FRNDiscountEngine:
             return 0.0
 
         # Price with rates bumped up
-        from param.rrf import FlatRateCurve
+        from quantark.param.rrf import FlatRateCurve
 
         original_curve = self.pricing_env.rate_curve
 

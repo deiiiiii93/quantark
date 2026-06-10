@@ -8,7 +8,7 @@ import math
 
 import pandas as pd
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass(frozen=True)

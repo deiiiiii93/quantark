@@ -5,8 +5,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import pytest
 
-from cashleg.base_amount import BaseAmount, BaseAmountMode
-from util.exceptions import ValidationError
+from quantark.cashleg.base_amount import BaseAmount, BaseAmountMode
+from quantark.util.exceptions import ValidationError
 
 
 def test_absolute_amount():

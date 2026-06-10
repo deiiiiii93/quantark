@@ -7,7 +7,7 @@ slippage, and bid-ask spreads.
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 import math
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class TransactionCostModel(ABC):

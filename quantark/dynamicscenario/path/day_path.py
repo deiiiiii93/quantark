@@ -8,8 +8,8 @@ market evolution scenarios.
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Iterator
 from datetime import datetime, timedelta
-from stresstest.stress.stress_types import StressType, StressLevel
-from util.exceptions import ValidationError
+from quantark.stresstest.stress.stress_types import StressType, StressLevel
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional, Union
 
 import pandas as pd
 
-from stresstest.equity.report.visualizer import StressTestVisualizer
-from stresstest.equity.results import StressTestResults
-from stresstest.results.result_aggregator import ResultAggregator
+from quantark.stresstest.equity.report.visualizer import StressTestVisualizer
+from quantark.stresstest.equity.results import StressTestResults
+from quantark.stresstest.results.result_aggregator import ResultAggregator
 
 
 class ReportGenerator:

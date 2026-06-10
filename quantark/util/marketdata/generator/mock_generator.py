@@ -17,8 +17,8 @@ from pathlib import Path
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from util.marketdata.models import MarketDataPoint, TimeSeriesData, OptionMarketData
-from util.exceptions import ValidationError
+from quantark.util.marketdata.models import MarketDataPoint, TimeSeriesData, OptionMarketData
+from quantark.util.exceptions import ValidationError
 
 
 class MockDataGenerator:

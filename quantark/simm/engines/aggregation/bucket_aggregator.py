@@ -15,15 +15,15 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Callable, Any
 
-from simm.taxonomy import RiskClass, MarginType
-from simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
-from simm.calibration import get_intra_bucket_correlation
-from simm.calibration.ir import IR_TENOR_CORRELATIONS, IR_SUB_CURVE_CORRELATION
-from simm.calibration.credit_qualifying import CREDIT_QUALIFYING_INTRA_BUCKET_CORRELATIONS
-from simm.calibration.credit_non_qualifying import CREDIT_NON_QUALIFYING_INTRA_BUCKET_CORRELATIONS
-from simm.calibration.equity import EQUITY_INTRA_BUCKET_CORRELATIONS
-from simm.calibration.commodity import COMMODITY_INTRA_BUCKET_CORRELATIONS
-from simm.calibration.fx import FX_CORRELATIONS
+from quantark.simm.taxonomy import RiskClass, MarginType
+from quantark.simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
+from quantark.simm.calibration import get_intra_bucket_correlation
+from quantark.simm.calibration.ir import IR_TENOR_CORRELATIONS, IR_SUB_CURVE_CORRELATION
+from quantark.simm.calibration.credit_qualifying import CREDIT_QUALIFYING_INTRA_BUCKET_CORRELATIONS
+from quantark.simm.calibration.credit_non_qualifying import CREDIT_NON_QUALIFYING_INTRA_BUCKET_CORRELATIONS
+from quantark.simm.calibration.equity import EQUITY_INTRA_BUCKET_CORRELATIONS
+from quantark.simm.calibration.commodity import COMMODITY_INTRA_BUCKET_CORRELATIONS
+from quantark.simm.calibration.fx import FX_CORRELATIONS
 
 
 @dataclass

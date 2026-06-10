@@ -10,21 +10,21 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, Any
 from datetime import datetime
 
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass, ProductClass, MarginType
-from simm.sensitivity import SensitivityCollection, AnySensitivity, CurvatureSensitivity
-from simm.engines.aggregation.concentration import ConcentrationCalculator, ConcentrationResult
-from simm.engines.aggregation.weighted_sensitivity import WeightedSensitivityCalculator, WeightedSensitivity
-from simm.engines.aggregation.bucket_aggregator import BucketAggregator, BucketResult
-from simm.engines.aggregation.risk_class_aggregator import RiskClassAggregator, RiskClassResult
-from simm.engines.aggregation.product_class_aggregator import (
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass, ProductClass, MarginType
+from quantark.simm.sensitivity import SensitivityCollection, AnySensitivity, CurvatureSensitivity
+from quantark.simm.engines.aggregation.concentration import ConcentrationCalculator, ConcentrationResult
+from quantark.simm.engines.aggregation.weighted_sensitivity import WeightedSensitivityCalculator, WeightedSensitivity
+from quantark.simm.engines.aggregation.bucket_aggregator import BucketAggregator, BucketResult
+from quantark.simm.engines.aggregation.risk_class_aggregator import RiskClassAggregator, RiskClassResult
+from quantark.simm.engines.aggregation.product_class_aggregator import (
     ProductClassAggregator,
     ProductClassResult,
     RISK_CLASS_TO_PRODUCT_CLASS,
 )
-from simm.engines.aggregation.addon import AddOnCalculator, AddOnResult
-from simm.calibration import get_risk_weight
-from simm.calibration.credit_qualifying import CREDIT_QUALIFYING_BASE_CORRELATION_RISK_WEIGHT
+from quantark.simm.engines.aggregation.addon import AddOnCalculator, AddOnResult
+from quantark.simm.calibration import get_risk_weight
+from quantark.simm.calibration.credit_qualifying import CREDIT_QUALIFYING_BASE_CORRELATION_RISK_WEIGHT
 
 
 @dataclass
@@ -422,7 +422,7 @@ class SIMMCalculator:
         Returns:
             SIMMAggregationResult.
         """
-        from simm.crif.parser import CRIFParser
+        from quantark.simm.crif.parser import CRIFParser
         
         parser = CRIFParser()
         collection = parser.parse_records(crif_records)

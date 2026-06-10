@@ -7,9 +7,9 @@ multi-day market scenarios focused on rate curve movements.
 
 from typing import Optional, List
 from datetime import datetime
-from dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
-from dynamicscenario.path.path_builder import PathBuilder
-from stresstest.stress.stress_types import StressType, StressLevel
+from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
+from quantark.dynamicscenario.path.path_builder import PathBuilder
+from quantark.stresstest.stress.stress_types import StressType, StressLevel
 
 
 class FIPathLibrary:

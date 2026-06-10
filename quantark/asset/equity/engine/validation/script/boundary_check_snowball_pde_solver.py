@@ -14,25 +14,25 @@ sys.path.insert(0, ".")
 import numpy as np
 from datetime import datetime, timedelta
 
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.product.option.snowball_config import (
     BarrierConfig,
     PayoffConfig,
     AccrualConfig,
     AirbagConfig,
 )
-from asset.equity.product.option.snowball_helpers import (
+from quantark.asset.equity.product.option.snowball_helpers import (
     create_standard_snowball as create_standard_helper,
     create_stepdown_snowball as create_stepdown_helper,
     create_european_ki_snowball as create_european_ki_helper,
     create_parachute_snowball as create_parachute_helper,
     create_airbag_snowball as create_airbag_helper,
 )
-from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from asset.equity.param import PDEParams
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from util.enum import ObservationType
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.param import PDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.util.enum import ObservationType
 
 
 class BoundaryCheckResults:

@@ -11,17 +11,17 @@ from datetime import datetime
 
 import pytest
 
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.engine.mc import EuropeanMCEngine
-from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.param import EngineParams, MCParams, PDEParams
-from asset.equity.product.option import AmericanOption, EuropeanVanillaOption
-from asset.equity.riskmeasures import GreeksCalculator
-from param import FlatRateCurve, FlatVolSurface, SpotQuote
-from param.div import ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.enum.engine_enums import EngineType, GreeksCalculationMode
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.engine.mc import EuropeanMCEngine
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.param import EngineParams, MCParams, PDEParams
+from quantark.asset.equity.product.option import AmericanOption, EuropeanVanillaOption
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.param.div import ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.enum.engine_enums import EngineType, GreeksCalculationMode
 
 
 @pytest.fixture
@@ -55,7 +55,7 @@ class TestEngineTypeAttribute:
 
     def test_base_engine_default_type(self):
         """Test that BaseEngine has default type ANALYTICAL."""
-        from asset.equity.engine.base_engine import BaseEngine
+        from quantark.asset.equity.engine.base_engine import BaseEngine
 
         assert BaseEngine.engine_type == EngineType.ANALYTICAL
 
@@ -76,8 +76,8 @@ class TestEngineTypeAttribute:
 
     def test_base_pde_solver_type(self):
         """Test that BasePDESolver has type PDE."""
-        from asset.equity.engine.pde.base_pde_solver import BasePDESolver
-        from util.enum.engine_enums import EngineType
+        from quantark.asset.equity.engine.pde.base_pde_solver import BasePDESolver
+        from quantark.util.enum.engine_enums import EngineType
 
         assert BasePDESolver.engine_type == EngineType.PDE
 

@@ -5,8 +5,8 @@ Volatility surface representations.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from util.exceptions import ValidationError
-from util.numerical import safe_divide, safe_sqrt, validate_positive
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import safe_divide, safe_sqrt, validate_positive
 import numpy as np
 
 

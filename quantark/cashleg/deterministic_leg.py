@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from cashleg.base import CashLeg
-from util.exceptions import ValidationError
+from quantark.cashleg.base import CashLeg
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass(frozen=True)

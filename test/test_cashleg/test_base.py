@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import pytest
 
-from cashleg.base import CashLeg, LegDirection
+from quantark.cashleg.base import CashLeg, LegDirection
 
 
 def test_leg_direction_signs():

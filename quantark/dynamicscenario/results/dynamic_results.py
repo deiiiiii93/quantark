@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
 
-from util.numerical import pnl_pct_of_abs_baseline
+from quantark.util.numerical import pnl_pct_of_abs_baseline
 
 
 @dataclass

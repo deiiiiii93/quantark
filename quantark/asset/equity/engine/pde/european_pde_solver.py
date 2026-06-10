@@ -8,11 +8,11 @@ with standard Black-Scholes boundary conditions.
 from typing import Optional, List
 import numpy as np
 
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.param import PDEParams
-from priceenv import PricingEnvironment
-from util.exceptions import PricingError
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.param import PDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
 

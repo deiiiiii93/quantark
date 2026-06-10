@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Protocol, runtime_checkable
 from datetime import datetime
 
-from util.numerical import pnl_pct_of_abs_baseline
+from quantark.util.numerical import pnl_pct_of_abs_baseline
 
 
 @runtime_checkable
@@ -278,19 +278,19 @@ def get_engine_for_portfolio(
         ValueError: If no engine supports the portfolio type
     """
     # Import here to avoid circular imports
-    from portfolio import Portfolio
-    from portfolio.fi import FIPortfolio
+    from quantark.portfolio import Portfolio
+    from quantark.portfolio.fi import FIPortfolio
     
     # Determine portfolio type and return appropriate engine
     if isinstance(portfolio, FIPortfolio):
-        from dynamicscenario.fi.engine import FIDynamicScenarioEngine
-        from dynamicscenario.fi.config import FIDynamicScenarioConfig
+        from quantark.dynamicscenario.fi.engine import FIDynamicScenarioEngine
+        from quantark.dynamicscenario.fi.config import FIDynamicScenarioConfig
         fi_config = config if isinstance(config, FIDynamicScenarioConfig) else FIDynamicScenarioConfig()
         return FIDynamicScenarioEngine(fi_config)
     
     elif isinstance(portfolio, Portfolio):
-        from dynamicscenario.engine import DynamicScenarioEngine
-        from dynamicscenario.config import DynamicScenarioConfig
+        from quantark.dynamicscenario.engine import DynamicScenarioEngine
+        from quantark.dynamicscenario.config import DynamicScenarioConfig
         eq_config = config if isinstance(config, DynamicScenarioConfig) else DynamicScenarioConfig()
         return DynamicScenarioEngine(eq_config)
     

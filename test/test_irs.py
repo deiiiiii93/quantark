@@ -16,7 +16,7 @@ import unittest
 from datetime import datetime
 import math
 
-from asset.rate.product.irs import (
+from quantark.asset.rate.product.irs import (
     InterestRateSwap,
     BasisSwap,
     FixedLeg,
@@ -28,18 +28,18 @@ from asset.rate.product.irs import (
     create_amortizing_irs,
     create_compounding_irs,
 )
-from asset.rate.engine.irs_discount_engine import (
+from quantark.asset.rate.engine.irs_discount_engine import (
     IRSDiscountEngine,
     IRSPricingResults,
     BasisSwapPricingResults,
 )
-from asset.bond.schedule.cashflow import (
+from quantark.asset.bond.schedule.cashflow import (
     CashFlow,
     FixedCashFlow,
     FloatingCashFlow,
     CompoundingMethod,
 )
-from param.index import (
+from quantark.param.index import (
     RateIndex,
     IndexFixing,
     IndexFixingStore,
@@ -48,16 +48,16 @@ from param.index import (
     EURIBOR_3M,
     SHIBOR_3M,
 )
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
-from util.calendar import (
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
     CalendarType,
     create_calendar,
 )
-from util.enum import PaymentFrequency, ResetConvention
-from util.exceptions import ValidationError
+from quantark.util.enum import PaymentFrequency, ResetConvention
+from quantark.util.exceptions import ValidationError
 
 
 class TestNotionalSchedule(unittest.TestCase):

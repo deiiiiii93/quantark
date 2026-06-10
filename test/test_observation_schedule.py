@@ -1,23 +1,23 @@
 import pytest
 from datetime import datetime
 
-from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.product.option import BarrierOption
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.product.option import BarrierOption
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from param.rrf.rate_curve import FlatRateCurve
-from param.quote.spot_quote import SpotQuote
-from param.vol.vol_surface import FlatVolSurface
-from priceenv import PricingEnvironment
-from util.enum import (
+from quantark.param.rrf.rate_curve import FlatRateCurve
+from quantark.param.quote.spot_quote import SpotQuote
+from quantark.param.vol.vol_surface import FlatVolSurface
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import (
     BarrierType,
     ObservationAggregation,
     ObservationType,
     OptionType,
 )
-from util.exceptions import PricingError, ValidationError
+from quantark.util.exceptions import PricingError, ValidationError
 
 
 def _pricing_env(spot: float = 100.0) -> PricingEnvironment:

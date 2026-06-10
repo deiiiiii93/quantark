@@ -9,15 +9,15 @@ from typing import Optional
 
 import numpy as np
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
-from asset.equity.engine.quad.quad_adapters import QuadInputAdapter, resolve_quad_adapter
-from asset.equity.engine.quad.quad_core import QuadratureCore
-from asset.equity.param import QuadParams
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from priceenv import PricingEnvironment
-from util.enum.engine_enums import EngineType
-from util.exceptions import ValidationError
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
+from quantark.asset.equity.engine.quad.quad_adapters import QuadInputAdapter, resolve_quad_adapter
+from quantark.asset.equity.engine.quad.quad_core import QuadratureCore
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import EngineType
+from quantark.util.exceptions import ValidationError
 
 
 class DiscreteQuadEngine(BaseEngine):

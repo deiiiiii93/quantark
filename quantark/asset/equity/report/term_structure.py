@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-from param.div import DividendYield
-from param.vol import VolatilitySurface
-from util.exceptions import ValidationError
-from util.numerical import safe_log, validate_positive
+from quantark.param.div import DividendYield
+from quantark.param.vol import VolatilitySurface
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import safe_log, validate_positive
 
 
 @dataclass(frozen=True)

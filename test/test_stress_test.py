@@ -13,19 +13,19 @@ try:
 except ImportError:
     yaml = None
 
-from portfolio import Portfolio
-from portfolio.fi import FIPortfolio
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from asset.equity.product import EuropeanVanillaOption
-from asset.equity.engine import BlackScholesEngine
-from asset.bond.product.couponbond.fixed_bond import FixedBond
-from asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
-from util.enum import OptionType, PaymentFrequency
-from util.calendar import DayCountConvention
-from param.rrf.rate_curve import LinearRateCurve
+from quantark.portfolio import Portfolio
+from quantark.portfolio.fi import FIPortfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.asset.equity.product import EuropeanVanillaOption
+from quantark.asset.equity.engine import BlackScholesEngine
+from quantark.asset.bond.product.couponbond.fixed_bond import FixedBond
+from quantark.asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
+from quantark.util.enum import OptionType, PaymentFrequency
+from quantark.util.calendar import DayCountConvention
+from quantark.param.rrf.rate_curve import LinearRateCurve
 
-from stresstest import (
+from quantark.stresstest import (
     StressTestEngine,
     StressTestConfig,
     ScenarioBuilder,
@@ -34,12 +34,12 @@ from stresstest import (
     Scenario,
     Stress,
 )
-from stresstest.fi import FIStressConfig, FIStressEngine
-from stresstest.scenario.scenario_library import ScenarioLibrary
-from stresstest.scenario.scenario_storage import ScenarioStorage
-from stresstest.stress.stress_applicator import StressApplicator
-from stresstest.results.result_aggregator import ResultAggregator
-from stresstest.results.result_exporter import ResultExporter
+from quantark.stresstest.fi import FIStressConfig, FIStressEngine
+from quantark.stresstest.scenario.scenario_library import ScenarioLibrary
+from quantark.stresstest.scenario.scenario_storage import ScenarioStorage
+from quantark.stresstest.stress.stress_applicator import StressApplicator
+from quantark.stresstest.results.result_aggregator import ResultAggregator
+from quantark.stresstest.results.result_exporter import ResultExporter
 
 
 class TestScenarioDefinition(unittest.TestCase):
@@ -425,7 +425,7 @@ class TestResultAggregator(unittest.TestCase):
     def setUp(self):
         """Create test results."""
         # Create simple test results (minimal setup)
-        from stresstest.results.stress_results import StressTestResults, ScenarioResult
+        from quantark.stresstest.results.stress_results import StressTestResults, ScenarioResult
         
         scenarios = [
             ScenarioBuilder().name("S1").spot_stress(-0.10).build(),

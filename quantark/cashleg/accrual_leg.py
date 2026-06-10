@@ -7,12 +7,12 @@ from enum import Enum
 
 import numpy as np
 
-from cashleg.base import CashLeg
-from cashleg.base_amount import BaseAmount
-from cashleg.event_distribution import EventDistribution
-from cashleg.leg_schedule import LegSchedule
-from util.calendar.day_counter import DayCountConvention
-from util.exceptions import ValidationError
+from quantark.cashleg.base import CashLeg
+from quantark.cashleg.base_amount import BaseAmount
+from quantark.cashleg.event_distribution import EventDistribution
+from quantark.cashleg.leg_schedule import LegSchedule
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.exceptions import ValidationError
 
 
 class PaymentConvention(Enum):

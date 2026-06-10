@@ -6,10 +6,10 @@ from unittest.mock import Mock, MagicMock
 
 import pytest
 
-from simm.taxonomy import ProductClass, RiskClass
-from simm.results.simm_result import SIMMResult, RiskClassMargin
-from simm.results.whatif import SIMMWhatIf, WhatIfResult
-from simm.sensitivity import SensitivityCollection
+from quantark.simm.taxonomy import ProductClass, RiskClass
+from quantark.simm.results.simm_result import SIMMResult, RiskClassMargin
+from quantark.simm.results.whatif import SIMMWhatIf, WhatIfResult
+from quantark.simm.sensitivity import SensitivityCollection
 
 
 class TestSIMMWhatIf:

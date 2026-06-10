@@ -4,7 +4,7 @@ Dividend yield representations.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import numpy as np
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class DividendYield(ABC):

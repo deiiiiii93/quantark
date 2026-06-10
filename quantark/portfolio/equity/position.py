@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import uuid
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.engine.base_engine import BaseEngine
-from priceenv import PricingEnvironment
-from asset.equity.riskmeasures import GreeksCalculator
-from cashleg import CashLeg, LegPV, TradeValueBreakdown, value_leg
-from util.exceptions import ValidationError
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.priceenv import PricingEnvironment
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.cashleg import CashLeg, LegPV, TradeValueBreakdown, value_leg
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass
@@ -154,7 +154,7 @@ class EquityPosition:
     ) -> Dict[str, float]:
         """Calculate trade-level Greeks by bumping get_trade_value()."""
         from copy import deepcopy
-        from param import FlatRateCurve
+        from quantark.param import FlatRateCurve
 
         bump = self.engine.params.bump_size
         base_value = self.get_trade_value(pricing_env)

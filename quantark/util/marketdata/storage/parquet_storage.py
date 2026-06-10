@@ -15,8 +15,8 @@ import sys
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from util.marketdata.models import TimeSeriesData, MarketDataSet
-from util.exceptions import ValidationError
+from quantark.util.marketdata.models import TimeSeriesData, MarketDataSet
+from quantark.util.exceptions import ValidationError
 
 
 class ParquetStorage:

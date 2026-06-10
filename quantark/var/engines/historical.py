@@ -9,13 +9,13 @@ from typing import Dict, Optional, Union
 import numpy as np
 import pandas as pd
 
-from portfolio.equity.portfolio import EquityPortfolio
-from portfolio.fi.portfolio import FIPortfolio
-from priceenv import PricingEnvironment
-from util.exceptions import ValidationError, MarketDataError
-from util.marketdata.models import MarketDataSet
-from var.results import IncrementalVaRResult, VaRResult
-from var.config import VaRConfig, VaRMethod
+from quantark.portfolio.equity.portfolio import EquityPortfolio
+from quantark.portfolio.fi.portfolio import FIPortfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError, MarketDataError
+from quantark.util.marketdata.models import MarketDataSet
+from quantark.var.results import IncrementalVaRResult, VaRResult
+from quantark.var.config import VaRConfig, VaRMethod
 
 
 class HistoricalVaREngine:
@@ -864,7 +864,7 @@ class HistoricalVaREngine:
             ValidationError: If portfolio is empty
             MarketDataError: If insufficient historical data
         """
-        from var.results.incremental_var_result import IncrementalVaRResult
+        from quantark.var.results.incremental_var_result import IncrementalVaRResult
 
         # Calculate full portfolio VaR first
         full_var_result = self.calculate_var(portfolio, historical_data)

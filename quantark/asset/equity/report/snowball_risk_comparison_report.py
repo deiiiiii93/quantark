@@ -22,41 +22,41 @@ from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from asset.equity.product.option.snowball_helpers import (
+from quantark.asset.equity.product.option.snowball_helpers import (
     create_european_ki_snowball,
     create_parachute_snowball,
 )
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.report.autocallable_risk_report import (
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.report.autocallable_risk_report import (
     _barrier_distance_metrics,
     _clone_env,
     _scale_vol_surface,
     _select_snowball_pricing_engine,
     _shift_dividend_yield,
 )
-from asset.equity.report.plotting import save_heatmap
-from asset.equity.report.term_structure import SkewSmileVolSurface
-from asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-from param import FlatVolSurface, SpotQuote
-from param.div import ContinuousDividendYield
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
-from util.calendar import (
+from quantark.asset.equity.report.plotting import save_heatmap
+from quantark.asset.equity.report.term_structure import SkewSmileVolSurface
+from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+from quantark.param import FlatVolSurface, SpotQuote
+from quantark.param.div import ContinuousDividendYield
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import (
     BusinessDayConvention,
     CalendarType,
     create_calendar,
 )
-from util.enum import CouponPayType, ObservationType, ProtectionType
-from util.enum.engine_enums import EngineType, MonteCarloMethod
-from util.exceptions import ValidationError
+from quantark.util.enum import CouponPayType, ObservationType, ProtectionType
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass(frozen=True)

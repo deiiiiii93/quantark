@@ -22,21 +22,21 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     AirbagConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from asset.equity.product.option.snowball_option import SnowballOption
-from param import FlatRateCurve
-from priceenv import PricingEnvironment
-from util.calendar import DayCountConvention, calculate_year_fraction
-from util.enum import (
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.param import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
+from quantark.util.enum import (
     BarrierType,
     CouponPayType,
     ExerciseType,
@@ -45,7 +45,7 @@ from util.enum import (
     ProtectionType,
     TenorEnd,
 )
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 # =============================================================================
 # Fixtures - Common test configurations

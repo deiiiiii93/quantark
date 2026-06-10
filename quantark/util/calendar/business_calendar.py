@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Set, Optional
 import csv
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class BusinessDayConvention(Enum):

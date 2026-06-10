@@ -5,14 +5,14 @@ Analytical Black-Scholes pricing engine for European options.
 import math
 from typing import Optional
 from scipy import stats
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.param import EngineParams
-from priceenv import PricingEnvironment
-from util.exceptions import ValidationError, NumericalError, PricingError
-from util.enum.engine_enums import EngineType
-from util.numerical import safe_exp
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.param import EngineParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError, NumericalError, PricingError
+from quantark.util.enum.engine_enums import EngineType
+from quantark.util.numerical import safe_exp
 
 
 class BlackScholesEngine(BaseEngine):

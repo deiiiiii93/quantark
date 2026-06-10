@@ -8,12 +8,12 @@ that pay a fixed rebate on touching (or not touching) a barrier.
 from typing import Dict, Optional, List, Set
 import numpy as np
 
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.one_touch_option import OneTouchOption
-from asset.equity.param import PDEParams
-from priceenv import PricingEnvironment
-from util.enum import ObservationType, ObservationAggregation, TouchType
-from util.exceptions import PricingError
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
+from quantark.asset.equity.param import PDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType, ObservationAggregation, TouchType
+from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
 from .spatial_grid import SpatialGrid

@@ -5,7 +5,7 @@ Tests for enums, tenors, currency classifications, and bucket definitions.
 """
 import pytest
 
-from simm.taxonomy import (
+from quantark.simm.taxonomy import (
     # Enums
     CurrencyVolatility,
     IRSubCurve,

@@ -8,9 +8,9 @@ import math
 
 import numpy as np
 
-from cashleg.base import CashLeg
-from cashleg.event_distribution import EventDistribution, EventType
-from util.exceptions import ValidationError
+from quantark.cashleg.base import CashLeg
+from quantark.cashleg.event_distribution import EventDistribution, EventType
+from quantark.util.exceptions import ValidationError
 
 
 class PaymentTrigger(Enum):

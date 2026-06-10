@@ -12,7 +12,7 @@ References:
 from enum import Enum
 from typing import Union, Optional, Any, Dict, Tuple
 
-from simm.calibration.ir import (
+from quantark.simm.calibration.ir import (
     IR_RISK_WEIGHTS,
     IR_TENOR_CORRELATIONS,
     IR_SUB_CURVE_CORRELATION,
@@ -28,7 +28,7 @@ from simm.calibration.ir import (
     IR_TENOR_LABELS,
 )
 
-from simm.calibration.credit_qualifying import (
+from quantark.simm.calibration.credit_qualifying import (
     CREDIT_QUALIFYING_RISK_WEIGHTS,
     CREDIT_QUALIFYING_INTRA_BUCKET_CORRELATIONS,
     CREDIT_QUALIFYING_INTER_BUCKET_CORRELATIONS,
@@ -39,7 +39,7 @@ from simm.calibration.credit_qualifying import (
     CREDIT_QUALIFYING_VEGA_CONCENTRATION_THRESHOLD,
 )
 
-from simm.calibration.credit_non_qualifying import (
+from quantark.simm.calibration.credit_non_qualifying import (
     CREDIT_NON_QUALIFYING_RISK_WEIGHTS,
     CREDIT_NON_QUALIFYING_INTRA_BUCKET_CORRELATIONS,
     CREDIT_NON_QUALIFYING_INTER_BUCKET_CORRELATION,
@@ -48,7 +48,7 @@ from simm.calibration.credit_non_qualifying import (
     CREDIT_NON_QUALIFYING_VEGA_CONCENTRATION_THRESHOLD,
 )
 
-from simm.calibration.equity import (
+from quantark.simm.calibration.equity import (
     EQUITY_RISK_WEIGHTS,
     EQUITY_INTRA_BUCKET_CORRELATIONS,
     EQUITY_INTER_BUCKET_CORRELATIONS,
@@ -59,7 +59,7 @@ from simm.calibration.equity import (
     EQUITY_BUCKET_LABELS,
 )
 
-from simm.calibration.commodity import (
+from quantark.simm.calibration.commodity import (
     COMMODITY_RISK_WEIGHTS,
     COMMODITY_INTRA_BUCKET_CORRELATIONS,
     COMMODITY_INTER_BUCKET_CORRELATIONS,
@@ -70,7 +70,7 @@ from simm.calibration.commodity import (
     COMMODITY_BUCKET_LABELS,
 )
 
-from simm.calibration.fx import (
+from quantark.simm.calibration.fx import (
     FX_RISK_WEIGHTS,
     FX_CORRELATIONS,
     FX_VEGA_CURVATURE_CORRELATION,
@@ -82,7 +82,7 @@ from simm.calibration.fx import (
     FX_VOLATILITY_GROUP_LABELS,
 )
 
-from simm.calibration.cross_risk import (
+from quantark.simm.calibration.cross_risk import (
     INTER_RISK_CLASS_CORRELATIONS,
     INTER_RISK_CLASS_CORRELATION_LABELS,
 )

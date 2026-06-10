@@ -7,16 +7,16 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
+from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
     KOResetSnowballPDESolver,
 )
-from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.param import PDEParams
-from asset.equity.product.option import create_ko_reset_snowball
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import PostKOScheduleMode
-from util.exceptions import ValidationError
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.product.option import create_ko_reset_snowball
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import PostKOScheduleMode
+from quantark.util.exceptions import ValidationError
 
 
 def create_pricing_env(

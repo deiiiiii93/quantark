@@ -8,14 +8,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from asset.equity.product.option import create_standard_snowball
-from backtest.otc import (
+from quantark.asset.equity.product.option import create_standard_snowball
+from quantark.backtest.otc import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableEngineConfig,
     AutocallableMarketDataSet,
 )
-from util.enum.engine_enums import EngineType
+from quantark.util.enum.engine_enums import EngineType
 
 
 def _synthetic_market(start="2024-01-02", end="2024-04-30", spot0=6000.0):
@@ -76,14 +76,14 @@ def test_single_product_summary_is_stable(single_summary):
 
 
 def test_book_config_rejects_empty_products():
-    from backtest.otc.book_engine import BookAutocallableBacktestConfig
+    from quantark.backtest.otc.book_engine import BookAutocallableBacktestConfig
     market = _synthetic_market()
     with pytest.raises(Exception):
         BookAutocallableBacktestConfig(products=[], market_data=market)
 
 
 def test_results_summary_empty_states():
-    from backtest.otc.book_engine import BookBacktestResults
+    from quantark.backtest.otc.book_engine import BookBacktestResults
     r = BookBacktestResults(config=None, states=[], greeks=[], rebalances=[], trades=[],
                             actions=[], daily_event_summary=[], event_probabilities=[],
                             surfaces=[], products_meta=[{"position_id": 1}])
@@ -92,7 +92,7 @@ def test_results_summary_empty_states():
 
 
 def test_book_of_one_matches_single_product(single_summary):
-    from backtest.otc.book_engine import (
+    from quantark.backtest.otc.book_engine import (
         BookAutocallableBacktestConfig,
         BookAutocallableBacktestEngine,
         BookProduct,
@@ -129,7 +129,7 @@ def test_book_of_one_matches_single_product(single_summary):
 def test_offsetting_products_net_to_near_zero_hedge():
     """Two equal-and-opposite positions on the same underlying net to ~zero delta,
     producing materially fewer hedge trades than the single -350 book (7 trades)."""
-    from backtest.otc.book_engine import (
+    from quantark.backtest.otc.book_engine import (
         BookAutocallableBacktestConfig,
         BookAutocallableBacktestEngine,
         BookProduct,
@@ -169,7 +169,7 @@ def test_offsetting_products_net_to_near_zero_hedge():
 def test_spot_hedge_mode_runs():
     """Spot-hedged book runs end-to-end (no futures roll), trades are instrument_type='spot',
     and total P&L is finite."""
-    from backtest.otc.book_engine import (
+    from quantark.backtest.otc.book_engine import (
         BookAutocallableBacktestConfig,
         BookAutocallableBacktestEngine,
         BookProduct,

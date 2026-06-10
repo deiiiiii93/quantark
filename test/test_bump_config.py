@@ -3,8 +3,8 @@ Unit tests for BumpConfig.
 """
 
 import pytest
-from asset.equity.param import BumpConfig
-from util.exceptions import ValidationError
+from quantark.asset.equity.param import BumpConfig
+from quantark.util.exceptions import ValidationError
 
 
 class TestBumpConfig:

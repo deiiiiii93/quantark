@@ -1,13 +1,13 @@
 import pytest
 
-from asset.equity.report.term_structure import (
+from quantark.asset.equity.report.term_structure import (
     BucketedDividendYield,
     BucketedVolSurface,
     ScaledVolSurface,
     ShiftedDividendYield,
 )
-from param.div import ContinuousDividendYield, TermStructureDividendYield
-from param.vol import FlatVolSurface, TermStructureVolSurface
+from quantark.param.div import ContinuousDividendYield, TermStructureDividendYield
+from quantark.param.vol import FlatVolSurface, TermStructureVolSurface
 
 
 def test_bucketed_vol_surface_bump_only_in_bucket():

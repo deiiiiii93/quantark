@@ -4,11 +4,11 @@ Base class for pricing engines.
 
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from priceenv import PricingEnvironment
-from asset.equity.param import EngineParams
-from asset.equity.engine.event_stats import AutocallableEventStats
-from util.enum.engine_enums import EngineType
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.priceenv import PricingEnvironment
+from quantark.asset.equity.param import EngineParams
+from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.util.enum.engine_enums import EngineType
 
 
 class BaseEngine(ABC):
@@ -62,7 +62,7 @@ class BaseEngine(ABC):
         a maturity-only distribution, which is sufficient for deterministic and
         full-schedule cash legs.
         """
-        from cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
 
         if emit_distribution:
             stats = self.calculate_event_stats(product, pricing_env)

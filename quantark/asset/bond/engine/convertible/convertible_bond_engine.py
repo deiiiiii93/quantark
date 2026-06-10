@@ -9,21 +9,21 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Dict, Optional, Union
 
-from asset.bond.product.convertible.convertible_bond import ConvertibleBond
-from asset.bond.engine.tree.convertible import (
+from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.bond.engine.tree.convertible import (
     ConvertibleBondTreeParams,
     ConvertibleBondBinomialEngine,
     ConvertibleBondTrinomialEngine,
 )
-from asset.bond.engine.pde.convertible import (
+from quantark.asset.bond.engine.pde.convertible import (
     ConvertibleBondPDEParams,
     ConvertibleBondJumpDiffusionEngine,
     ConvertibleBondTFEngine,
 )
-from priceenv import PricingEnvironment
-from param.rrf import ParallelShiftRateCurve
-from util.enum.engine_enums import EngineType, ConvertibleBondMethod, PDEMethod
-from util.exceptions import ValidationError
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf import ParallelShiftRateCurve
+from quantark.util.enum.engine_enums import EngineType, ConvertibleBondMethod, PDEMethod
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

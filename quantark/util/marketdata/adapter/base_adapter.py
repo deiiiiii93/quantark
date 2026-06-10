@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from util.marketdata.models import TimeSeriesData, MarketDataPoint, MarketDataSet
+from quantark.util.marketdata.models import TimeSeriesData, MarketDataPoint, MarketDataSet
 
 
 class BaseMarketDataAdapter(ABC):

@@ -11,16 +11,16 @@ The engines follow a protocol-based architecture with support for:
 - Full SIMM aggregation (concentration, bucket, risk class, product class)
 """
 
-from simm.engines.base import (
+from quantark.simm.engines.base import (
     SensitivityEngine,
     BaseSensitivityEngine,
 )
-from simm.engines.factory import create_engine
-from simm.engines.portfolio_adapter import SIMMPortfolioAdapter
-from simm.engines.result import SIMMResult
+from quantark.simm.engines.factory import create_engine
+from quantark.simm.engines.portfolio_adapter import SIMMPortfolioAdapter
+from quantark.simm.engines.result import SIMMResult
 
 # Aggregation engine exports
-from simm.engines.aggregation import (
+from quantark.simm.engines.aggregation import (
     SIMMCalculator,
     SIMMAggregationResult,
     ConcentrationCalculator,

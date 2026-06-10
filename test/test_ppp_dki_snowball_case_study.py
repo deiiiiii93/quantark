@@ -6,9 +6,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from asset.equity.param import QuadParams
-from asset.equity.product.option import AccrualConfig, BarrierConfig, PayoffConfig, SnowballOption
-from backtest.otc import (
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.option import AccrualConfig, BarrierConfig, PayoffConfig, SnowballOption
+from quantark.backtest.otc import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableDeltaHedgeStrategy,
@@ -16,10 +16,10 @@ from backtest.otc import (
     AutocallableMarketDataSet,
 )
 from example import ppp_dki_snowball_backtest_case_study as case_study
-from param import FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import CouponPayType, ObservationType, ProtectionType
-from util.enum.engine_enums import EngineType
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType, ObservationType, ProtectionType
+from quantark.util.enum.engine_enums import EngineType
 
 
 class RecordingEngine:

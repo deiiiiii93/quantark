@@ -9,12 +9,12 @@ from typing import Dict, List, Optional, Union
 
 import numpy as np
 
-from asset.equity.engine.event_stats import (
+from quantark.asset.equity.engine.event_stats import (
     AutocallableEventStats,
     PhoenixEventStats,
 )
-from util.exceptions import NumericalError
-from util.numerical.constants import Tolerance
+from quantark.util.exceptions import NumericalError
+from quantark.util.numerical.constants import Tolerance
 
 
 class EventType(Enum):

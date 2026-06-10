@@ -6,14 +6,14 @@ Includes abstract base strategy and concrete implementations for:
 - Fixed Income: DV01-neutral and convexity-neutral hedging
 """
 
-from backtest.strategy.base_strategy import (
+from quantark.backtest.strategy.base_strategy import (
     BaseStrategy,
     AssetClass,
     HedgingTarget,
 )
-from backtest.strategy.delta_neutral_strategy import DeltaNeutralStrategy
-from backtest.strategy.dv01_neutral_strategy import DV01NeutralStrategy
-from backtest.strategy.convexity_neutral_strategy import ConvexityNeutralStrategy
+from quantark.backtest.strategy.delta_neutral_strategy import DeltaNeutralStrategy
+from quantark.backtest.strategy.dv01_neutral_strategy import DV01NeutralStrategy
+from quantark.backtest.strategy.convexity_neutral_strategy import ConvexityNeutralStrategy
 
 __all__ = [
     # Base

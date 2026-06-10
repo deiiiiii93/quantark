@@ -6,9 +6,9 @@ from abc import ABC, abstractmethod
 from typing import Protocol, List, Dict, Any, Optional, TypeVar, Generic
 from typing_extensions import runtime_checkable
 
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass, MarginType
-from simm.sensitivity import SensitivityCollection, AnySensitivity
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass, MarginType
+from quantark.simm.sensitivity import SensitivityCollection, AnySensitivity
 
 
 @runtime_checkable

@@ -2,9 +2,9 @@
 Results management submodule.
 """
 
-from stresstest.results.stress_results import StressTestResults, ScenarioResult
-from stresstest.fi.results import FIStressResults, FIScenarioResult
-from stresstest.results.result_aggregator import ResultAggregator
+from quantark.stresstest.results.stress_results import StressTestResults, ScenarioResult
+from quantark.stresstest.fi.results import FIStressResults, FIScenarioResult
+from quantark.stresstest.results.result_aggregator import ResultAggregator
 
 __all__ = [
     "StressTestResults",

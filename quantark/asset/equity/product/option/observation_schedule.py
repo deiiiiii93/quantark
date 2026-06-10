@@ -8,19 +8,19 @@ from math import isclose
 from typing import List, Optional, TYPE_CHECKING
 from copy import deepcopy
 
-from util.enum import ObservationAggregation, TenorEnd, ObservationFrequency
-from util.calendar import DayCountConvention
-from util.exceptions import ValidationError
+from quantark.util.enum import ObservationAggregation, TenorEnd, ObservationFrequency
+from quantark.util.calendar import DayCountConvention
+from quantark.util.exceptions import ValidationError
 
 if TYPE_CHECKING:
-    from priceenv import PricingEnvironment
+    from quantark.priceenv import PricingEnvironment
 
 # Type alias for cleaner signatures
 PricingEnv = Optional["PricingEnvironment"]
 
 
 try:
-    from util.calendar import calculate_year_fraction, calculate_day_count_fraction
+    from quantark.util.calendar import calculate_year_fraction, calculate_day_count_fraction
 except ImportError:
     # Fallback for environments where calendar utilities are unavailable at import time.
     calculate_year_fraction = None

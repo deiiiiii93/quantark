@@ -10,9 +10,9 @@ from datetime import datetime, timedelta
 import time
 from copy import deepcopy
 
-from portfolio import Portfolio
-from priceenv import PricingEnvironment
-from param import (
+from quantark.portfolio import Portfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.param import (
     SpotQuote,
     FlatVolSurface,
     FlatRateCurve,
@@ -21,30 +21,30 @@ from param import (
     TermStructureDividendYield,
     TermStructureBasisYield,
 )
-from param.basis.basis_yield import (
+from quantark.param.basis.basis_yield import (
     calculate_basis_from_rate_dividend,
     calculate_dividend_from_rate_basis,
 )
-from asset.equity.riskmeasures import GreeksCalculator
-from asset.equity.product.deltaone import SpotInstrument, Futures
-from asset.equity.engine.analytical import DeltaOneEngine
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.asset.equity.product.deltaone import SpotInstrument, Futures
+from quantark.asset.equity.engine.analytical import DeltaOneEngine
 
-from backtest.strategy.base_strategy import BaseStrategy
-from backtest.transaction_costs import TransactionCostModel, ZeroCostModel
+from quantark.backtest.strategy.base_strategy import BaseStrategy
+from quantark.backtest.transaction_costs import TransactionCostModel, ZeroCostModel
 
-from dynamicscenario.config import DynamicScenarioConfig
-from dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
-from dynamicscenario.results.dynamic_results import (
+from quantark.dynamicscenario.config import DynamicScenarioConfig
+from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
+from quantark.dynamicscenario.results.dynamic_results import (
     DynamicScenarioResults, DayResult, PositionSnapshot, 
     TradeSnapshot, MarketState
 )
-from stresstest.stress.stress_types import (
+from quantark.stresstest.stress.stress_types import (
     StressType,
     StressLevel,
     BasisDividendRelationshipMode,
 )
-from util.exceptions import ValidationError
-from util.numerical import pnl_pct_of_abs_baseline
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import pnl_pct_of_abs_baseline
 
 
 class DynamicScenarioEngine:
@@ -491,7 +491,7 @@ class DynamicScenarioEngine:
             )
         else:
             # Create new hedge position
-            from util.enum.deltaone_enums import DeltaOneType
+            from quantark.util.enum.deltaone_enums import DeltaOneType
             hedge_product = SpotInstrument(
                 underlying=underlying,
                 deltaone_type=DeltaOneType.STOCK

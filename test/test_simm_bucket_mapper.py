@@ -3,7 +3,7 @@ Tests for SIMM bucket classification.
 """
 
 import pytest
-from simm.engines.classification.bucket_mapper import BucketMapper, BucketInfo
+from quantark.simm.engines.classification.bucket_mapper import BucketMapper, BucketInfo
 
 
 class TestBucketMapper:

@@ -11,12 +11,12 @@ from scipy import stats
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import CashOrNothingDigitalOption, EuropeanVanillaOption  # noqa: E402
-from asset.equity.engine.analytical import DigitalOptionAnalyticalEngine  # noqa: E402
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield  # noqa: E402
-from priceenv import PricingEnvironment  # noqa: E402
-from util.enum import OptionType  # noqa: E402
-from util.exceptions import ValidationError, PricingError  # noqa: E402
+from quantark.asset.equity.product.option import CashOrNothingDigitalOption, EuropeanVanillaOption  # noqa: E402
+from quantark.asset.equity.engine.analytical import DigitalOptionAnalyticalEngine  # noqa: E402
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield  # noqa: E402
+from quantark.priceenv import PricingEnvironment  # noqa: E402
+from quantark.util.enum import OptionType  # noqa: E402
+from quantark.util.exceptions import ValidationError, PricingError  # noqa: E402
 
 
 def _pricing_env(spot: float = 100.0, vol: float = 0.20, rate: float = 0.05, div: float = 0.02):

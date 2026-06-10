@@ -12,15 +12,15 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from asset.equity.engine.quad.quad_math import QuadratureMath
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, QuadParams
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.phoenix_option import PhoenixOption
-from priceenv import PricingEnvironment
-from util.enum import CouponPayType, ObservationType
-from util.exceptions import PricingError, ValidationError
-from util.numerical import Tolerance, is_close, is_zero, safe_log
+from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, QuadParams
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType, ObservationType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import Tolerance, is_close, is_zero, safe_log
 
 
 class PhoenixQuadEngine(SnowballQuadEngine):
@@ -457,7 +457,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         if not isinstance(product, PhoenixOption):
             return None
 
-        from asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+        from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 
         mc_engine = PhoenixMCEngine(params=MCParams())
         return mc_engine.calculate_event_stats(product, pricing_env)

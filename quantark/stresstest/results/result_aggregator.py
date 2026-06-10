@@ -5,7 +5,7 @@ Result aggregation and comparison utilities.
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import numpy as np
-from stresstest.results.stress_results import StressTestResults, ScenarioResult
+from quantark.stresstest.results.stress_results import StressTestResults, ScenarioResult
 
 
 class ResultAggregator:

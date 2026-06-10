@@ -10,15 +10,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Union, TYPE_CHECKING
 
-from util.enum import CouponPayType
-from util.calendar.day_counter import DayCountConvention
-from util.exceptions import ValidationError
+from quantark.util.enum import CouponPayType
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.exceptions import ValidationError
 
 if TYPE_CHECKING:
-    from priceenv import PricingEnvironment
+    from quantark.priceenv import PricingEnvironment
 
 try:
-    from util.calendar import calculate_year_fraction
+    from quantark.util.calendar import calculate_year_fraction
 except ImportError:
     calculate_year_fraction = None
 

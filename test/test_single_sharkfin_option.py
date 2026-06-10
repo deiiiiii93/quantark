@@ -4,13 +4,13 @@ Unit tests for SingleSharkfinOption.
 
 import pytest
 
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     ObservationRecord,
     ObservationSchedule,
     SingleSharkfinOption,
 )
-from util.enum import ObservationFrequency, ObservationType, OptionType
-from util.exceptions import ValidationError
+from quantark.util.enum import ObservationFrequency, ObservationType, OptionType
+from quantark.util.exceptions import ValidationError
 
 
 class TestSingleSharkfinOption:

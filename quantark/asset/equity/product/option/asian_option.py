@@ -10,22 +10,22 @@ from datetime import datetime
 from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 import numpy as np
 
-from util.enum import (
+from quantark.util.enum import (
     OptionType,
     ExerciseType,
     AveragingType,
     AsianStrikeType,
 )
-from util.exceptions import ValidationError
-from util.numerical import is_zero, safe_log, safe_exp
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero, safe_log, safe_exp
 
 from .base_equity_option import BaseEquityOption
 
 if TYPE_CHECKING:
-    from priceenv import PricingEnvironment
+    from quantark.priceenv import PricingEnvironment
 
 try:
-    from util.calendar import calculate_year_fraction
+    from quantark.util.calendar import calculate_year_fraction
 except ImportError:
     calculate_year_fraction = None
 

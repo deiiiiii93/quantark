@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from stresstest.base import ScenarioEnvelope, StressResultEnvelope
+from quantark.stresstest.base import ScenarioEnvelope, StressResultEnvelope
 
 
 @dataclass

@@ -6,8 +6,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import numpy as np
 import pytest
 
-from cashleg.leg_schedule import LegSchedule
-from util.exceptions import ValidationError
+from quantark.cashleg.leg_schedule import LegSchedule
+from quantark.util.exceptions import ValidationError
 
 
 def test_simple_quarterly_schedule():

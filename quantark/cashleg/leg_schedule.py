@@ -8,8 +8,8 @@ from typing import List, Optional
 
 import numpy as np
 
-from util.exceptions import ValidationError
-from util.numerical.constants import Tolerance
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical.constants import Tolerance
 
 
 @dataclass(frozen=True)

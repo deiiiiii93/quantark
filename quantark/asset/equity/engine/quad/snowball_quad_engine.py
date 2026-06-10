@@ -12,17 +12,17 @@ from typing import Optional, Sequence
 import numpy as np
 from scipy.special import erfc
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.engine.event_stats import AutocallableEventStats
-from asset.equity.engine.quad.quad_math import QuadratureMath
-from asset.equity.param import QuadParams
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.snowball_option import SnowballOption
-from priceenv import PricingEnvironment
-from util.enum import ObservationType
-from util.enum.engine_enums import EngineType
-from util.exceptions import PricingError, ValidationError
-from util.numerical import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType
+from quantark.util.enum.engine_enums import EngineType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import (
     Tolerance,
     is_close,
     is_zero,

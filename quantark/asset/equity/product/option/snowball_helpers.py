@@ -30,8 +30,8 @@ Example:
 from dataclasses import fields
 from typing import List, Optional
 
-from util.exceptions import ValidationError
-from util.enum import ObservationType, CouponPayType, PostKOScheduleMode
+from quantark.util.exceptions import ValidationError
+from quantark.util.enum import ObservationType, CouponPayType, PostKOScheduleMode
 
 from .snowball_option import SnowballOption
 from .ko_reset_snowball_option import KnockOutResetSnowballOption

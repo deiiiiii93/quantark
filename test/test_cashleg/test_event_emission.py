@@ -8,14 +8,14 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
-from asset.equity.product.option import create_standard_phoenix
-from asset.equity.product.option.snowball_helpers import create_standard_snowball
-from cashleg import (
+from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option import create_standard_phoenix
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.cashleg import (
     AccrualLeg,
     BaseAmount,
     BaseAmountMode,
@@ -26,11 +26,11 @@ from cashleg import (
     SurvivalBasis,
     value_leg,
 )
-from cashleg.event_distribution import EventType
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.calendar.day_counter import DayCountConvention
-from util.enum import CouponPayType
+from quantark.cashleg.event_distribution import EventType
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.enum import CouponPayType
 
 
 def _env():

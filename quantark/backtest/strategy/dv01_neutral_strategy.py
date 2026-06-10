@@ -3,8 +3,8 @@ DV01-neutral hedging strategy for Fixed Income portfolios.
 """
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-from backtest.strategy.base_strategy import BaseStrategy, AssetClass, HedgingTarget
-from util.exceptions import ValidationError
+from quantark.backtest.strategy.base_strategy import BaseStrategy, AssetClass, HedgingTarget
+from quantark.util.exceptions import ValidationError
 
 
 class DV01NeutralStrategy(BaseStrategy):

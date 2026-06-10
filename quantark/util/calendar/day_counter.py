@@ -4,7 +4,7 @@ Day count conventions and year fraction calculations.
 
 from enum import Enum
 from datetime import datetime, timedelta
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class DayCountConvention(Enum):

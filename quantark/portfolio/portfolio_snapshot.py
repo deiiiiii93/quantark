@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from .equity.portfolio import Portfolio
-from asset.equity.riskmeasures import GreeksCalculator
-from util.exceptions import ValidationError
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

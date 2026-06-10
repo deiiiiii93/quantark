@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 
-from var import (
+from quantark.var import (
     VaRConfig,
     VaRMethod,
     ParametricVaREngine,
@@ -20,8 +20,8 @@ from var import (
     MarginalVaRCalculator,
     EquityRiskFactorConfig,
 )
-from var.results import VaRResult
-from var.attribution import ComponentVaRCalculator, MarginalVaRCalculator
+from quantark.var.results import VaRResult
+from quantark.var.attribution import ComponentVaRCalculator, MarginalVaRCalculator
 
 
 class TestComponentVaRCalculator:

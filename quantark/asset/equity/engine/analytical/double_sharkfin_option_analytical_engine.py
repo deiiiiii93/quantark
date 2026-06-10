@@ -11,16 +11,16 @@ from typing import Optional
 import numpy as np
 from scipy import stats
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option import DoubleBarrierOption, DoubleSharkfinOption
-from asset.equity.param import EngineParams
-from priceenv import PricingEnvironment
-from util.barrier_shift import apply_barrier_shift
-from util.enum import DoubleBarrierType, ObservationType
-from util.enum.engine_enums import EngineType
-from util.exceptions import PricingError, ValidationError
-from util.numerical import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option import DoubleBarrierOption, DoubleSharkfinOption
+from quantark.asset.equity.param import EngineParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.barrier_shift import apply_barrier_shift
+from quantark.util.enum import DoubleBarrierType, ObservationType
+from quantark.util.enum.engine_enums import EngineType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import (
     is_zero,
     safe_exp,
     safe_log,

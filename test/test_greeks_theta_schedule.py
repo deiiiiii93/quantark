@@ -2,17 +2,17 @@ import pytest
 from datetime import datetime, timedelta
 from copy import deepcopy
 
-from asset.equity.product.option import BarrierOption
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.product.option import BarrierOption
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-from param.quote.spot_quote import SpotQuote
-from param.rrf.rate_curve import FlatRateCurve
-from param.vol.vol_surface import FlatVolSurface
-from priceenv import PricingEnvironment
-from util.enum import (
+from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+from quantark.param.quote.spot_quote import SpotQuote
+from quantark.param.rrf.rate_curve import FlatRateCurve
+from quantark.param.vol.vol_surface import FlatVolSurface
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import (
     BarrierType,
     ObservationAggregation,
     ObservationType,

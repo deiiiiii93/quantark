@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
-from portfolio.base import BasePortfolio
-from stresstest.scenario.scenario import Scenario
+from quantark.portfolio.base import BasePortfolio
+from quantark.stresstest.scenario.scenario import Scenario
 
 
 @dataclass

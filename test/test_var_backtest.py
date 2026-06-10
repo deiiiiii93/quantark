@@ -15,14 +15,14 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
-from var import (
+from quantark.var import (
     VaRConfig,
     VaRMethod,
     ParametricVaREngine,
     HistoricalVaREngine,
     MonteCarloVaREngine,
 )
-from var.results.var_result import VaRResult
+from quantark.var.results.var_result import VaRResult
 
 
 class TestVarBacktestMethodology:

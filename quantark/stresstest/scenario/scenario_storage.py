@@ -8,8 +8,8 @@ import json
 import yaml
 from pathlib import Path
 from typing import List, Union
-from stresstest.scenario.scenario import Scenario
-from util.exceptions import ValidationError
+from quantark.stresstest.scenario.scenario import Scenario
+from quantark.util.exceptions import ValidationError
 
 
 class ScenarioStorage:
@@ -190,7 +190,7 @@ class ScenarioStorage:
             filepath: Output file path
             format: File format ('yaml' or 'json')
         """
-        from stresstest.scenario.scenario_library import ScenarioLibrary
+        from quantark.stresstest.scenario.scenario_library import ScenarioLibrary
 
         # Create a few example scenarios
         scenarios = [

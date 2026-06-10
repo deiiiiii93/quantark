@@ -8,29 +8,29 @@ routing positions to appropriate engines based on risk class.
 from typing import Dict, List, Any, Union, Optional
 from datetime import datetime
 
-from simm.config import SIMMConfig
-from simm.sensitivity import SensitivityCollection
-from simm.engines.factory import create_engine, create_all_engines
-from simm.engines.base import SensitivityEngine
+from quantark.simm.config import SIMMConfig
+from quantark.simm.sensitivity import SensitivityCollection
+from quantark.simm.engines.factory import create_engine, create_all_engines
+from quantark.simm.engines.base import SensitivityEngine
 
 # Import portfolio classes
 try:
-    from portfolio.equity.portfolio import EquityPortfolio
-    from portfolio.equity.position import EquityPosition
+    from quantark.portfolio.equity.portfolio import EquityPortfolio
+    from quantark.portfolio.equity.position import EquityPosition
 except ImportError:
     EquityPortfolio = None
     EquityPosition = None
 
 try:
-    from portfolio.fi.portfolio import FIPortfolio
-    from portfolio.fi.position import FIPosition
+    from quantark.portfolio.fi.portfolio import FIPortfolio
+    from quantark.portfolio.fi.position import FIPosition
 except ImportError:
     FIPortfolio = None
     FIPosition = None
 
 # Import CRIF parser
 try:
-    from simm.crif.parser import CRIFParser
+    from quantark.simm.crif.parser import CRIFParser
 except ImportError:
     CRIFParser = None
 
@@ -250,7 +250,7 @@ class SIMMPortfolioAdapter:
 
         if portfolio_type == "equity":
             # Create equity and FX engines
-            from simm.taxonomy import RiskClass
+            from quantark.simm.taxonomy import RiskClass
 
             try:
                 engines["EQUITY"] = create_engine(
@@ -268,7 +268,7 @@ class SIMMPortfolioAdapter:
 
         elif portfolio_type == "fi":
             # Create IR, Credit Q, and Credit NQ engines
-            from simm.taxonomy import RiskClass
+            from quantark.simm.taxonomy import RiskClass
 
             try:
                 engines["INTEREST_RATE"] = create_engine(
@@ -304,7 +304,7 @@ class SIMMPortfolioAdapter:
         Returns:
             List of engine names
         """
-        from simm.engines.factory import get_available_engines
+        from quantark.simm.engines.factory import get_available_engines
 
         engines = get_available_engines()
         return list(engines.keys())
@@ -316,19 +316,19 @@ class SIMMPortfolioAdapter:
         Returns:
             Dict mapping engine names to lists of supported margin types
         """
-        from simm.taxonomy import RiskClass, MarginType
+        from quantark.simm.taxonomy import RiskClass, MarginType
 
         capabilities = {}
 
         try:
-            from simm.taxonomy import RiskClass as RC
-            from simm.engines.risk_class.ir_engine import IRSensitivityEngine
+            from quantark.simm.taxonomy import RiskClass as RC
+            from quantark.simm.engines.risk_class.ir_engine import IRSensitivityEngine
             capabilities["IRSensitivityEngine"] = ["Delta", "Vega", "Curvature"]
         except Exception:
             pass
 
         try:
-            from simm.engines.risk_class.equity_engine import EquitySensitivityEngine
+            from quantark.simm.engines.risk_class.equity_engine import EquitySensitivityEngine
             capabilities["EquitySensitivityEngine"] = ["Delta", "Vega"]
         except Exception:
             pass

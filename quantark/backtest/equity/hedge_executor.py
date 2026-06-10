@@ -7,14 +7,14 @@ Handles creation and management of hedge positions using spot or futures.
 from typing import Optional, Dict, Any
 from datetime import datetime
 import uuid
-from portfolio import Portfolio
-from asset.equity.product.deltaone import SpotInstrument, Futures
-from asset.equity.engine.analytical import DeltaOneEngine
-from priceenv import PricingEnvironment
+from quantark.portfolio import Portfolio
+from quantark.asset.equity.product.deltaone import SpotInstrument, Futures
+from quantark.asset.equity.engine.analytical import DeltaOneEngine
+from quantark.priceenv import PricingEnvironment
 from .state import TradeRecord
-from backtest.transaction_costs import TransactionCostModel
-from util.enum.deltaone_enums import DeltaOneType
-from util.exceptions import ValidationError
+from quantark.backtest.transaction_costs import TransactionCostModel
+from quantark.util.enum.deltaone_enums import DeltaOneType
+from quantark.util.exceptions import ValidationError
 
 
 class HedgeExecutor:

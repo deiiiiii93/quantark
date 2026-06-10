@@ -25,9 +25,9 @@ Example:
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from util.calendar.day_counter import DayCountConvention
-from util.enum import CouponPayType, ObservationFrequency
-from util.exceptions import ValidationError
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.enum import CouponPayType, ObservationFrequency
+from quantark.util.exceptions import ValidationError
 
 from .range_accrual_config import RangeAccrualConfig, RangeAccrualObservationRecord
 from .range_accrual_option import RangeAccrualOption

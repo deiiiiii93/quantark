@@ -7,15 +7,15 @@ from typing import Optional, Union, Tuple
 
 import numpy as np
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.option import BarrierOption
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.param import MCParams
-from priceenv import PricingEnvironment
-from util.enum import ObservationType, ObservationAggregation
-from util.enum.engine_enums import MonteCarloMethod, EngineType
-from util.exceptions import ValidationError, PricingError
-from util.numerical import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.option import BarrierOption
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.param import MCParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType, ObservationAggregation
+from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
+from quantark.util.exceptions import ValidationError, PricingError
+from quantark.util.numerical import (
     is_zero,
     is_close,
     validate_positive,
@@ -24,14 +24,14 @@ from util.numerical import (
     safe_log,
 )
 
-from asset.equity.process.bsm.qmc_brownian_bridge import compute_step_crossing_probabilities
-from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
-from asset.equity.process.bsm.qmc_sobol import (
+from quantark.asset.equity.process.bsm.qmc_brownian_bridge import compute_step_crossing_probabilities
+from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
+from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
 )
-from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
-from asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
+from quantark.asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
+from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 
 
 class BarrierOptionMCEngine(BaseEngine):
@@ -212,8 +212,8 @@ class BarrierOptionMCEngine(BaseEngine):
     def _price_vanilla_mc(
         self, product: BarrierOption, pricing_env: PricingEnvironment
     ) -> float:
-        from asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine
-        from asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
 
         vanilla = EuropeanVanillaOption(
             strike=product.strike,

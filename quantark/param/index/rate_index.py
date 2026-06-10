@@ -11,9 +11,9 @@ This module provides:
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-from util.calendar import DayCountConvention, CalendarType
-from util.enum import ResetConvention
-from util.exceptions import ValidationError
+from quantark.util.calendar import DayCountConvention, CalendarType
+from quantark.util.enum import ResetConvention
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

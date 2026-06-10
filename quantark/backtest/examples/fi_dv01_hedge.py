@@ -15,21 +15,21 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from backtest.fi import (
+from quantark.backtest.fi import (
     FIBacktestEngine,
     FIBacktestConfig,
 )
-from backtest.strategy import DV01NeutralStrategy
-from backtest.transaction_costs import ZeroCostModel, ProportionalCostModel
-from backtest.visualizer import StaticVisualizer
-from portfolio.fi import FIPosition
-from asset.bond.product.couponbond.fixed_bond import FixedBond
-from asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from util.marketdata import MockMarketDataAdapter
-from util.calendar import DayCountConvention
-from util.enum import PaymentFrequency
+from quantark.backtest.strategy import DV01NeutralStrategy
+from quantark.backtest.transaction_costs import ZeroCostModel, ProportionalCostModel
+from quantark.backtest.visualizer import StaticVisualizer
+from quantark.portfolio.fi import FIPosition
+from quantark.asset.bond.product.couponbond.fixed_bond import FixedBond
+from quantark.asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.util.marketdata import MockMarketDataAdapter
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import PaymentFrequency
 
 
 def create_initial_bond_position(underlying: str, start_date: datetime) -> FIPosition:

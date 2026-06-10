@@ -4,7 +4,7 @@ Configuration parameters for tree-based convertible bond pricing engines.
 from dataclasses import dataclass
 from typing import Union
 
-from util.enum.engine_enums import ConvertibleBondTrinomialVolScheme
+from quantark.util.enum.engine_enums import ConvertibleBondTrinomialVolScheme
 
 
 @dataclass

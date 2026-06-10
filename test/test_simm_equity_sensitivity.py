@@ -5,10 +5,10 @@ Tests for Equity sensitivity engine.
 import pytest
 from unittest.mock import Mock, MagicMock
 
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass
-from simm.engines.risk_class.equity_engine import EquitySensitivityEngine
-from simm.sensitivity import EquityDeltaSensitivity
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass
+from quantark.simm.engines.risk_class.equity_engine import EquitySensitivityEngine
+from quantark.simm.sensitivity import EquityDeltaSensitivity
 
 # Mock EquityPosition
 class MockEquityPosition:
@@ -46,7 +46,7 @@ class TestEquitySensitivityEngine:
 
     def test_init_with_custom_greeks_calculator(self):
         """Test initialization with custom Greeks calculator."""
-        from asset.equity.riskmeasures import GreeksCalculator
+        from quantark.asset.equity.riskmeasures import GreeksCalculator
 
         config = SIMMConfig()
         custom_calc = GreeksCalculator()
@@ -245,7 +245,7 @@ class TestEquitySensitivityEngine:
 
     def test_calculate_sensitivities_full(self):
         """Test full sensitivity calculation with config."""
-        from simm.sensitivity import SensitivityCollection
+        from quantark.simm.sensitivity import SensitivityCollection
 
         config = SIMMConfig(calculate_delta=True, calculate_vega=False)
 

@@ -1,7 +1,7 @@
 import pytest
 
-from asset.equity.param import MCParams
-from util.exceptions import ValidationError
+from quantark.asset.equity.param import MCParams
+from quantark.util.exceptions import ValidationError
 
 
 class DummyProduct:

@@ -9,7 +9,7 @@ from example.snowball_rfq_ko_rate_engine_compare_demo import (
     build_engines,
     run_case,
 )
-from util.numerical import almost_equal, is_non_positive
+from quantark.util.numerical import almost_equal, is_non_positive
 
 
 DETERMINISTIC_QUOTE_TOL = 0.008

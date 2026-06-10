@@ -12,15 +12,15 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.engine.quad import EuropeanQuadEngine
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.param import QuadParams
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.enum.engine_enums import EngineType, QuadratureMethod
-from util.exceptions import NumericalError, PricingError, ValidationError
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.engine.quad import EuropeanQuadEngine
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.param import QuadParams
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.enum.engine_enums import EngineType, QuadratureMethod
+from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 
 
 def _discounted_european_lower_bound(
@@ -355,7 +355,7 @@ class TestEuropeanQuadEngineValidation:
 
     def test_wrong_product_type_raises_error(self):
         """Test that non-European option raises PricingError."""
-        from asset.equity.product.option import AmericanOption
+        from quantark.asset.equity.product.option import AmericanOption
 
         pricing_env = create_pricing_env()
         american = AmericanOption(100.0, OptionType.CALL, maturity=1.0)

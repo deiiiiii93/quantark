@@ -19,17 +19,17 @@ from typing import List, Optional
 
 from dateutil.relativedelta import relativedelta
 
-from asset.rate.product.irs import NotionalSchedule
-from param.index import RateIndex, IndexFixingStore
-from util.calendar import (
+from quantark.asset.rate.product.irs import NotionalSchedule
+from quantark.param.index import RateIndex, IndexFixingStore
+from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
     Calendar,
     calculate_day_count_fraction,
     create_calendar,
 )
-from util.enum import PaymentFrequency
-from util.exceptions import ValidationError
+from quantark.util.enum import PaymentFrequency
+from quantark.util.exceptions import ValidationError
 
 
 class CapFloorType(Enum):

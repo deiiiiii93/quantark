@@ -2,7 +2,7 @@
 Configuration parameters for PDE-based convertible bond pricing engines.
 """
 from dataclasses import dataclass
-from util.enum.engine_enums import PDEMethod
+from quantark.util.enum.engine_enums import PDEMethod
 
 
 @dataclass

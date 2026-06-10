@@ -9,11 +9,11 @@ from copy import deepcopy
 from .config import FIBacktestConfig
 from .state import FIBacktestState, FIStateTracker, FITradeRecord
 from .hedge_executor import FIHedgeExecutor
-from backtest.logger import BacktestLogger
-from portfolio.fi import FIPortfolio
-from priceenv import PricingEnvironment
-from param import FlatRateCurve
-from util.exceptions import ValidationError
+from quantark.backtest.logger import BacktestLogger
+from quantark.portfolio.fi import FIPortfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.param import FlatRateCurve
+from quantark.util.exceptions import ValidationError
 
 
 class FIBacktestEngine:
@@ -124,7 +124,7 @@ class FIBacktestEngine:
     def _initialize(self):
         """Initialize portfolio, pricing environment, and hedge executor."""
         # Create initial pricing environment with default rate
-        from param import SpotQuote, FlatVolSurface, ContinuousDividendYield
+        from quantark.param import SpotQuote, FlatVolSurface, ContinuousDividendYield
         
         self.pricing_env = PricingEnvironment(
             spot_quote=SpotQuote(spot=100.0, asset_name=self.config.underlying),

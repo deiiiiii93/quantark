@@ -9,8 +9,8 @@ import plotly.graph_objects as go
 import seaborn as sns
 from plotly.subplots import make_subplots
 
-from stresstest.equity.results import StressTestResults
-from stresstest.results.result_aggregator import ResultAggregator
+from quantark.stresstest.equity.results import StressTestResults
+from quantark.stresstest.results.result_aggregator import ResultAggregator
 
 
 class StressTestVisualizer:

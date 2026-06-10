@@ -13,11 +13,11 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 
-from asset.bond.product.convertible.convertible_bond import ConvertibleBond
-from asset.bond.engine.pde.convertible.pde_params import ConvertibleBondPDEParams
-from priceenv import PricingEnvironment
-from util.exceptions import ValidationError, PricingError
-from util.numerical import Tolerance, safe_exp, safe_sqrt, safe_log, is_zero
+from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.bond.engine.pde.convertible.pde_params import ConvertibleBondPDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError, PricingError
+from quantark.util.numerical import Tolerance, safe_exp, safe_sqrt, safe_log, is_zero
 
 
 @dataclass

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Optional
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class SIMMVersion(Enum):

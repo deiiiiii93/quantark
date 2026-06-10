@@ -13,7 +13,7 @@ Tests cover:
 import pytest
 from datetime import datetime
 
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     RangeAccrualOption,
     RangeAccrualConfig,
     RangeAccrualObservationRecord,
@@ -23,11 +23,11 @@ from asset.equity.product.option import (
     generate_range_observation_records,
     assign_calendar_day_weights,
 )
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve
-from util.calendar.day_counter import DayCountConvention
-from util.enum import CouponPayType, ObservationFrequency
-from util.exceptions import ValidationError
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.util.enum import CouponPayType, ObservationFrequency
+from quantark.util.exceptions import ValidationError
 
 
 # =============================================================================

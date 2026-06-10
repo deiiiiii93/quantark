@@ -10,7 +10,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 from .models import (
     CRIF_COLUMN_MAPPING,

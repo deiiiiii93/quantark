@@ -14,14 +14,14 @@ from typing import List, Optional, Dict
 from dateutil.relativedelta import relativedelta
 from enum import Enum
 
-from util.calendar import (
+from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
     Calendar,
     calculate_day_count_fraction,
 )
-from util.enum import PaymentFrequency, StubType
-from util.exceptions import ValidationError
+from quantark.util.enum import PaymentFrequency, StubType
+from quantark.util.exceptions import ValidationError
 
 
 class CompoundingMethod(Enum):

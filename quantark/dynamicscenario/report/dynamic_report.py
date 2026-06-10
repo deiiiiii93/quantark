@@ -8,11 +8,11 @@ from datetime import datetime
 import base64
 from io import BytesIO
 
-from dynamicscenario.results.dynamic_results import DynamicScenarioResults
+from quantark.dynamicscenario.results.dynamic_results import DynamicScenarioResults
 
 # Type hint for FI results
 try:
-    from dynamicscenario.fi.results import FIDynamicScenarioResults
+    from quantark.dynamicscenario.fi.results import FIDynamicScenarioResults
 except ImportError:
     FIDynamicScenarioResults = None
 

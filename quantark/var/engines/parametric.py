@@ -10,12 +10,12 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from portfolio.equity.portfolio import EquityPortfolio
-from portfolio.fi.portfolio import FIPortfolio
-from util.exceptions import ValidationError, MarketDataError
-from var.results import IncrementalVaRResult, VaRResult
-from var.config import VaRConfig, VaRMethod, EquityRiskFactorConfig
-from var.risk_factors import (
+from quantark.portfolio.equity.portfolio import EquityPortfolio
+from quantark.portfolio.fi.portfolio import FIPortfolio
+from quantark.util.exceptions import ValidationError, MarketDataError
+from quantark.var.results import IncrementalVaRResult, VaRResult
+from quantark.var.config import VaRConfig, VaRMethod, EquityRiskFactorConfig
+from quantark.var.risk_factors import (
     SpotReturnFactor,
     VolChangeFactor,
     RateShiftFactor,
@@ -451,8 +451,8 @@ class ParametricVaREngine:
             return pd.DataFrame(risk_factors)
         else:
             # Fixed Income risk factors
-            from var.config import FIRiskFactorConfig
-            from var.risk_factors.fi_factors import (
+            from quantark.var.config import FIRiskFactorConfig
+            from quantark.var.risk_factors.fi_factors import (
                 ParallelShiftFactor,
                 KeyRateShiftFactor,
             )
@@ -515,7 +515,7 @@ class ParametricVaREngine:
         Raises:
             MarketDataError: If market data is invalid or insufficient
         """
-        from util.exceptions import MarketDataError
+        from quantark.util.exceptions import MarketDataError
 
         # Align all time series to common date range
         aligned_data = market_data.align_dates()
@@ -584,7 +584,7 @@ class ParametricVaREngine:
         self, portfolio: EquityPortfolio
     ) -> Dict[str, float]:
         """Compute portfolio-level sensitivities for equity."""
-        from asset.equity.riskmeasures import GreeksCalculator
+        from quantark.asset.equity.riskmeasures import GreeksCalculator
 
         calculator = GreeksCalculator()
         factors_config = self.config.equity_factors or EquityRiskFactorConfig()
@@ -647,9 +647,9 @@ class ParametricVaREngine:
         Returns:
             Psi: $ change per 1bp change in dividend yield
         """
-        from asset.equity.engine.analytical import BlackScholesEngine
-        from param.div_yield import ContinuousDividendYield
-        from priceenv.pricing_environment import PricingEnvironment
+        from quantark.asset.equity.engine.analytical import BlackScholesEngine
+        from quantark.param.div_yield import ContinuousDividendYield
+        from quantark.priceenv.pricing_environment import PricingEnvironment
 
         engine = BlackScholesEngine()
         base_price = engine.price(product, pricing_env)
@@ -777,7 +777,7 @@ class ParametricVaREngine:
         # Calculate position P&L for each scenario
         position_pnls = {}
         if isinstance(portfolio, EquityPortfolio):
-            from asset.equity.riskmeasures import GreeksCalculator
+            from quantark.asset.equity.riskmeasures import GreeksCalculator
 
             calculator = GreeksCalculator()
 
@@ -819,7 +819,7 @@ class ParametricVaREngine:
             # Calculate position-level dollar sensitivities
             position_dollar_sensitivities = {}
             if isinstance(portfolio, EquityPortfolio):
-                from asset.equity.riskmeasures import GreeksCalculator
+                from quantark.asset.equity.riskmeasures import GreeksCalculator
 
                 calculator = GreeksCalculator()
 
@@ -895,7 +895,7 @@ class ParametricVaREngine:
                 pos_value = pricing_env.spot * position.quantity
 
             # Get position-level sensitivity
-            from asset.equity.riskmeasures import GreeksCalculator
+            from quantark.asset.equity.riskmeasures import GreeksCalculator
 
             calculator = GreeksCalculator()
             greeks = calculator.calculate_analytical_greeks(
@@ -1079,7 +1079,7 @@ class ParametricVaREngine:
             ValidationError: If portfolio is empty
             MarketDataError: If insufficient historical data
         """
-        from var.results.incremental_var_result import IncrementalVaRResult
+        from quantark.var.results.incremental_var_result import IncrementalVaRResult
 
         # Calculate full portfolio VaR first
         full_var_result = self.calculate_var(portfolio, historical_data)

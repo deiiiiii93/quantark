@@ -3,13 +3,13 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.product.option.snowball_helpers import create_standard_snowball
-from asset.equity.report import autocallable_risk_report as report
-from asset.equity.report.surfaces import GridSpec
-from param import FlatRateCurve, FlatVolSurface, SpotQuote
-from param.div import ContinuousDividendYield
-from priceenv import PricingEnvironment
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.asset.equity.report import autocallable_risk_report as report
+from quantark.asset.equity.report.surfaces import GridSpec
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.param.div import ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
 
 
 class DummyEngine(BaseEngine):

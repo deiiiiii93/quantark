@@ -10,10 +10,10 @@ from abc import abstractmethod
 from typing import Optional
 from datetime import datetime
 
-from util.calendar import DayCountConvention, calculate_year_fraction
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from ..base_equity_product import BaseEquityProduct
-from util.enum import OptionType, ExerciseType, TenorEnd
-from util.exceptions import ValidationError
+from quantark.util.enum import OptionType, ExerciseType, TenorEnd
+from quantark.util.exceptions import ValidationError
 
 
 class BaseEquityOption(BaseEquityProduct):

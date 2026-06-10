@@ -6,13 +6,13 @@ import unittest
 from datetime import datetime
 import math
 
-from asset.bond.product.couponbond.frn import (
+from quantark.asset.bond.product.couponbond.frn import (
     FloatingRateBond,
     create_simple_frn,
 )
-from asset.bond.schedule.cashflow import FloatingCashFlow
-from asset.bond.engine.discount.frn_engine import FRNDiscountEngine, FRNPricingResults
-from param.index import (
+from quantark.asset.bond.schedule.cashflow import FloatingCashFlow
+from quantark.asset.bond.engine.discount.frn_engine import FRNDiscountEngine, FRNPricingResults
+from quantark.param.index import (
     RateIndex,
     IndexFixing,
     IndexFixingStore,
@@ -23,17 +23,17 @@ from param.index import (
     REPO_7D,
     create_index,
 )
-from param.rrf import FlatRateCurve
-from param.rrf.rate_curve import LinearRateCurve
-from priceenv import PricingEnvironment
-from util.calendar import (
+from quantark.param.rrf import FlatRateCurve
+from quantark.param.rrf.rate_curve import LinearRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
     CalendarType,
     create_calendar,
 )
-from util.enum import PaymentFrequency, ResetConvention
-from util.exceptions import ValidationError
+from quantark.util.enum import PaymentFrequency, ResetConvention
+from quantark.util.exceptions import ValidationError
 
 
 class TestRateIndex(unittest.TestCase):

@@ -25,28 +25,28 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde import SnowballPDESolver
-from asset.equity.engine.pde_engine import PDEEngine
-from asset.equity.param import MCParams, PDEParams
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from asset.equity.product.option.snowball_option import SnowballOption
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import (
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import (
     CouponPayType,
     ObservationType,
 )
-from util.exceptions import PricingError, ValidationError
-from util.numerical import is_close
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import is_close
 
 # =============================================================================
 # Fixtures - Common test configurations
@@ -211,8 +211,8 @@ class TestSnowballPDESolverBasic:
 
     def test_invalid_product_type(self):
         """Test that solver rejects non-SnowballOption products."""
-        from asset.equity.product.option import EuropeanVanillaOption
-        from util.enum import OptionType
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        from quantark.util.enum import OptionType
 
         european = EuropeanVanillaOption(
             strike=100.0, maturity=1.0, option_type=OptionType.CALL

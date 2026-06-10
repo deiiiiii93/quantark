@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from backtest import (
+from quantark.backtest import (
     BacktestEngine,
     BacktestConfig,
     CompleteCostModel,
@@ -23,12 +23,12 @@ from backtest import (
     InteractiveDashboard,
     ReportGenerator,
 )
-from backtest.strategy import DeltaNeutralStrategy
-from portfolio import Position
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from util.enum import OptionType
-from util.marketdata import MockMarketDataAdapter
+from quantark.backtest.strategy import DeltaNeutralStrategy
+from quantark.portfolio import Position
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.util.enum import OptionType
+from quantark.util.marketdata import MockMarketDataAdapter
 
 
 def main():

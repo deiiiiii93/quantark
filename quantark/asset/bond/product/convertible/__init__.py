@@ -1,7 +1,7 @@
 """
 Convertible bond products.
 """
-from asset.bond.product.convertible.convertible_bond import (
+from quantark.asset.bond.product.convertible.convertible_bond import (
     ConvertibleBond,
     CallScheduleEntry,
     PutScheduleEntry,

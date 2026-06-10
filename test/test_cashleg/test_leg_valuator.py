@@ -7,12 +7,12 @@ from datetime import datetime
 
 import pytest
 
-from cashleg.base import LegDirection
-from cashleg.deterministic_leg import DeterministicLeg
-from cashleg.event_distribution import EventDistribution
-from cashleg.leg_valuator import LegPV, TradeValueBreakdown, value_leg
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
+from quantark.cashleg.base import LegDirection
+from quantark.cashleg.deterministic_leg import DeterministicLeg
+from quantark.cashleg.event_distribution import EventDistribution
+from quantark.cashleg.leg_valuator import LegPV, TradeValueBreakdown, value_leg
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
 
 
 def _env():

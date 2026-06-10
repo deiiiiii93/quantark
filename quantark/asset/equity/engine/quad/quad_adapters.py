@@ -11,23 +11,23 @@ from typing import Sequence, TYPE_CHECKING
 
 import numpy as np
 
-from asset.equity.engine.quad.quad_core import QuadCoreInputs
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.quad.quad_core import QuadCoreInputs
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option import (
     BarrierOption,
     DoubleBarrierOption,
     DoubleOneTouchOption,
     EuropeanVanillaOption,
     OneTouchOption,
 )
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationSchedule,
     ResolvedObservationRecord,
 )
-from priceenv import PricingEnvironment
-from util.enum import ObservationAggregation, ObservationType, TouchType
-from util.exceptions import PricingError, ValidationError
-from util.numerical import (
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationAggregation, ObservationType, TouchType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import (
     Tolerance,
     is_close,
     is_zero,
@@ -36,7 +36,7 @@ from util.numerical import (
 )
 
 if TYPE_CHECKING:
-    from asset.equity.engine.quad.discrete_quad_engine import DiscreteQuadEngine
+    from quantark.asset.equity.engine.quad.discrete_quad_engine import DiscreteQuadEngine
 
 
 @dataclass(frozen=True)

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from .base_deltaone_product import BaseDeltaOneProduct
-from util.enum.deltaone_enums import DeltaOneType
-from util.exceptions import ValidationError
+from quantark.util.enum.deltaone_enums import DeltaOneType
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass

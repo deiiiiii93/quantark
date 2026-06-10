@@ -17,7 +17,7 @@ Key components:
 """
 
 # Base protocols
-from dynamicscenario.base import (
+from quantark.dynamicscenario.base import (
     BaseDynamicScenarioEngine,
     BaseScenarioResults,
     BaseDayResult,
@@ -26,29 +26,29 @@ from dynamicscenario.base import (
 )
 
 # Path components
-from dynamicscenario.path.day_path import DayStep, DayPath, ParameterChange
-from dynamicscenario.path.path_builder import PathBuilder
-from dynamicscenario.path.path_library import PathLibrary
+from quantark.dynamicscenario.path.day_path import DayStep, DayPath, ParameterChange
+from quantark.dynamicscenario.path.path_builder import PathBuilder
+from quantark.dynamicscenario.path.path_library import PathLibrary
 
 # Equity (default) components
-from dynamicscenario.config import DynamicScenarioConfig
-from dynamicscenario.engine import DynamicScenarioEngine
-from dynamicscenario.results.dynamic_results import (
+from quantark.dynamicscenario.config import DynamicScenarioConfig
+from quantark.dynamicscenario.engine import DynamicScenarioEngine
+from quantark.dynamicscenario.results.dynamic_results import (
     DayResult,
     DynamicScenarioResults,
     PositionSnapshot,
     TradeSnapshot,
     MarketState,
 )
-from dynamicscenario.results.result_exporter import DynamicResultExporter
-from dynamicscenario.report.dynamic_report import DynamicReportGenerator
-from dynamicscenario.report.visualizer import DynamicScenarioVisualizer
+from quantark.dynamicscenario.results.result_exporter import DynamicResultExporter
+from quantark.dynamicscenario.report.dynamic_report import DynamicReportGenerator
+from quantark.dynamicscenario.report.visualizer import DynamicScenarioVisualizer
 
 # FI path library
-from dynamicscenario.path.fi_path_library import FIPathLibrary
+from quantark.dynamicscenario.path.fi_path_library import FIPathLibrary
 
 # FI components
-from dynamicscenario.fi import (
+from quantark.dynamicscenario.fi import (
     FIDynamicScenarioConfig,
     FIDynamicScenarioEngine,
     FIDayResult,

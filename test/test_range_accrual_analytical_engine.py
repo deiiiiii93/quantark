@@ -17,21 +17,21 @@ from datetime import datetime
 
 import pytest
 
-from asset.equity.engine.analytical import (
+from quantark.asset.equity.engine.analytical import (
     RangeAccrualAnalyticalEngine,
     RangeAccrualAnalyticalResult,
 )
-from asset.equity.engine.mc import RangeAccrualMCEngine
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.mc import RangeAccrualMCEngine
+from quantark.asset.equity.product.option import (
     RangeAccrualOption,
     RangeAccrualConfig,
     RangeAccrualObservationRecord,
 )
-from asset.equity.param import MCParams
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from util.enum.engine_enums import MonteCarloMethod
-from util.exceptions import ValidationError, PricingError
+from quantark.asset.equity.param import MCParams
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.util.enum.engine_enums import MonteCarloMethod
+from quantark.util.exceptions import ValidationError, PricingError
 
 
 @pytest.fixture
@@ -626,8 +626,8 @@ class TestErrorHandling:
 
     def test_wrong_product_type(self, pricing_env, engine):
         """Should raise PricingError for wrong product type."""
-        from asset.equity.product.option import EuropeanVanillaOption
-        from util.enum import OptionType
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        from quantark.util.enum import OptionType
 
         wrong_product = EuropeanVanillaOption(
             strike=100.0, option_type=OptionType.CALL, maturity=1.0

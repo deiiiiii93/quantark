@@ -10,13 +10,13 @@ These tests verify the theta decomposition functionality in GreeksCalculator:
 import pytest
 from datetime import datetime
 
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.riskmeasures import GreeksCalculator
-from asset.equity.param import EngineParams
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.asset.equity.param import EngineParams
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
 
 
 @pytest.fixture

@@ -5,9 +5,9 @@ Extends DV01-neutral to also manage convexity exposure.
 """
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-from backtest.strategy.dv01_neutral_strategy import DV01NeutralStrategy
-from backtest.strategy.base_strategy import HedgingTarget
-from util.exceptions import ValidationError
+from quantark.backtest.strategy.dv01_neutral_strategy import DV01NeutralStrategy
+from quantark.backtest.strategy.base_strategy import HedgingTarget
+from quantark.util.exceptions import ValidationError
 
 
 class ConvexityNeutralStrategy(DV01NeutralStrategy):

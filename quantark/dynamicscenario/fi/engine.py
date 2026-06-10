@@ -10,25 +10,25 @@ from datetime import datetime, timedelta
 import time
 from copy import deepcopy
 
-from portfolio.fi.portfolio import FIPortfolio
-from priceenv import PricingEnvironment
-from param import FlatRateCurve
+from quantark.portfolio.fi.portfolio import FIPortfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.param import FlatRateCurve
 
-from backtest.strategy.base_strategy import BaseStrategy
-from backtest.transaction_costs import TransactionCostModel, ZeroCostModel
+from quantark.backtest.strategy.base_strategy import BaseStrategy
+from quantark.backtest.transaction_costs import TransactionCostModel, ZeroCostModel
 
-from dynamicscenario.base import BaseDynamicScenarioEngine
-from dynamicscenario.fi.config import FIDynamicScenarioConfig
-from dynamicscenario.fi.results import (
+from quantark.dynamicscenario.base import BaseDynamicScenarioEngine
+from quantark.dynamicscenario.fi.config import FIDynamicScenarioConfig
+from quantark.dynamicscenario.fi.results import (
     FIDynamicScenarioResults,
     FIDayResult,
     FIMarketState,
     FITradeSnapshot,
 )
-from dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
-from stresstest.stress.stress_types import StressType, StressLevel
-from util.exceptions import ValidationError
-from util.numerical import pnl_pct_of_abs_baseline
+from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
+from quantark.stresstest.stress.stress_types import StressType, StressLevel
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import pnl_pct_of_abs_baseline
 
 
 class FIDynamicScenarioEngine(BaseDynamicScenarioEngine):

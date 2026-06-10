@@ -6,9 +6,9 @@ import pytest
 import numpy as np
 from datetime import datetime, timedelta
 
-from asset.equity.product.option import AsianOption
-from util.enum import OptionType, AveragingType, AsianStrikeType
-from util.exceptions import ValidationError
+from quantark.asset.equity.product.option import AsianOption
+from quantark.util.enum import OptionType, AveragingType, AsianStrikeType
+from quantark.util.exceptions import ValidationError
 
 
 class TestAsianOptionCreation:

@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from util.exceptions import ValidationError
-from var.results.var_result import VaRResult
-from var.config import VaRConfig
+from quantark.util.exceptions import ValidationError
+from quantark.var.results.var_result import VaRResult
+from quantark.var.config import VaRConfig
 
 
 class ComponentVaRCalculator:

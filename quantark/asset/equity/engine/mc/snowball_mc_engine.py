@@ -19,31 +19,31 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from asset.equity.engine.base_engine import BaseEngine
-from asset.equity.engine.event_stats import AutocallableEventStats, KOResetEventStats
-from asset.equity.param import MCParams
-from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
-from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
-from asset.equity.process.bsm.qmc_sobol import (
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.event_stats import AutocallableEventStats, KOResetEventStats
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
+from quantark.asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
+from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
 )
-from asset.equity.product.base_equity_product import BaseEquityProduct
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.product.option.ko_reset_snowball_option import (
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
-from asset.equity.product.option.observation_schedule import ObservationRecord
-from priceenv import PricingEnvironment
-from util.calendar import DayCountConvention, calculate_year_fraction
-from util.enum import (
+from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
+from quantark.util.enum import (
     CouponPayType,
     ObservationType,
     PostKOScheduleMode,
 )
-from util.enum.engine_enums import EngineType, MonteCarloMethod
-from util.exceptions import PricingError, ValidationError
-from util.numerical import safe_log
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import safe_log
 
 # Optional Dask import
 try:

@@ -1,7 +1,7 @@
 """
 PDE-based pricing engines for bonds.
 """
-from asset.bond.engine.pde.convertible import (
+from quantark.asset.bond.engine.pde.convertible import (
     ConvertibleBondPDEParams,
     ConvertibleBondJumpDiffusionEngine,
     ConvertibleBondTFEngine,

@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from portfolio.equity.portfolio import EquityPortfolio
-from portfolio.fi.portfolio import FIPortfolio
-from util.exceptions import ValidationError
-from var.base import VaREngine
+from quantark.portfolio.equity.portfolio import EquityPortfolio
+from quantark.portfolio.fi.portfolio import FIPortfolio
+from quantark.util.exceptions import ValidationError
+from quantark.var.base import VaREngine
 
 
 @dataclass

@@ -4,17 +4,17 @@ from datetime import datetime
 import pytest
 from scipy import stats
 
-from asset.equity.engine.analytical import (
+from quantark.asset.equity.engine.analytical import (
     DoubleBarrierOptionAnalyticalEngine,
     DoubleSharkfinOptionAnalyticalEngine,
 )
-from asset.equity.product.option import DoubleBarrierOption, DoubleSharkfinOption
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.barrier_shift import apply_barrier_shift
-from util.enum import ObservationFrequency, ObservationType, OptionType
-from util.enum.option_enums import DoubleBarrierType
-from util.exceptions import PricingError
+from quantark.asset.equity.product.option import DoubleBarrierOption, DoubleSharkfinOption
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.barrier_shift import apply_barrier_shift
+from quantark.util.enum import ObservationFrequency, ObservationType, OptionType
+from quantark.util.enum.option_enums import DoubleBarrierType
+from quantark.util.exceptions import PricingError
 
 
 def _pricing_env(

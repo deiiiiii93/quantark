@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Tuple
 import math
-from util.exceptions import ValidationError
+from quantark.util.exceptions import ValidationError
 
 
 class RateCurve(ABC):

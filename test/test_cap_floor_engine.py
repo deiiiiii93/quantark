@@ -5,18 +5,18 @@ Tests for Cap/Floor analytical (Black's model) pricing engine.
 import unittest
 from datetime import datetime
 
-from asset.rate.product.cap_floor import (
+from quantark.asset.rate.product.cap_floor import (
     create_cap,
     create_floor,
     create_collar,
 )
-from asset.rate.engine.cap_floor_engine import (
+from quantark.asset.rate.engine.cap_floor_engine import (
     CapFloorEngine,
     CapFloorPricingResults,
 )
-from param.index import SOFR_3M
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
+from quantark.param.index import SOFR_3M
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
 
 
 class TestCapFloorEnginePricing(unittest.TestCase):

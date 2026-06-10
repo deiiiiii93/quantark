@@ -13,11 +13,11 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from asset.bond.product.convertible.convertible_bond import ConvertibleBond
-from asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTreeParams
-from priceenv import PricingEnvironment
-from util.exceptions import ValidationError, PricingError
-from util.numerical import safe_exp, safe_sqrt, is_zero
+from quantark.asset.bond.product.convertible.convertible_bond import ConvertibleBond
+from quantark.asset.bond.engine.tree.convertible.tree_params import ConvertibleBondTreeParams
+from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError, PricingError
+from quantark.util.numerical import safe_exp, safe_sqrt, is_zero
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class ConvertibleBondBinomialEngine:
         per-step forward rates. It still assumes constant volatility (uses
         ATM volatility to maturity), and does not apply volatility term structure.
         """
-        from param.vol.vol_surface import FlatVolSurface
+        from quantark.param.vol.vol_surface import FlatVolSurface
 
         vol_surface = self.pricing_env.vol_surface
 

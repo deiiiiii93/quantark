@@ -5,6 +5,6 @@ This module provides classification logic for mapping instruments to SIMM bucket
 for each risk class.
 """
 
-from simm.engines.classification.bucket_mapper import BucketMapper
+from quantark.simm.engines.classification.bucket_mapper import BucketMapper
 
 __all__ = ["BucketMapper"]

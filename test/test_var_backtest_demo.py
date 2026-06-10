@@ -99,14 +99,14 @@ class TestVarBacktestDemo:
     def test_backtester_import(self):
         """Test that VaRBacktester can be imported."""
         try:
-            from var import VaRBacktester
+            from quantark.var import VaRBacktester
             assert VaRBacktester is not None
         except ImportError:
             pytest.fail("VaRBacktester should be importable from var module")
 
     def test_backtester_initialization(self):
         """Test that VaRBacktester can be initialized."""
-        from var import VaRBacktester
+        from quantark.var import VaRBacktester
 
         backtester = VaRBacktester(confidence_level=0.99)
         assert backtester is not None
@@ -117,12 +117,12 @@ class TestVarBacktestDemo:
         # Create a portfolio and historical data with pnl column for proper backtesting
         import numpy as np
         from datetime import datetime
-        from var import VaRConfig, VaRMethod, HistoricalVaREngine
-        from asset.equity.product.option import EuropeanVanillaOption
-        from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
-        from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-        from priceenv import PricingEnvironment
-        from util.enum.option_enums import OptionType
+        from quantark.var import VaRConfig, VaRMethod, HistoricalVaREngine
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+        from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+        from quantark.priceenv import PricingEnvironment
+        from quantark.util.enum.option_enums import OptionType
 
         # Create a simple portfolio
         valuation_date = datetime(2024, 1, 1)
@@ -139,7 +139,7 @@ class TestVarBacktestDemo:
             valuation_date=valuation_date
         )
 
-        from portfolio.equity.portfolio import EquityPortfolio
+        from quantark.portfolio.equity.portfolio import EquityPortfolio
         portfolio = EquityPortfolio(
             portfolio_name="Test Portfolio",
             pricing_environments={"TEST": pricing_env}
@@ -169,7 +169,7 @@ class TestVarBacktestDemo:
             'pnl': np.random.normal(0, 100, 400)  # Required column
         }, index=dates)
 
-        from var import VaRBacktester
+        from quantark.var import VaRBacktester
 
         # Create VaR engine for backtesting with lookback matching backtester minimum (30)
         var_config = VaRConfig(confidence_level=0.99, var_method=VaRMethod.HISTORICAL, lookback_days=30)
@@ -191,12 +191,12 @@ class TestVarBacktestDemo:
         """Test Basel traffic light zone classification."""
         import numpy as np
         from datetime import datetime
-        from var import VaRConfig, VaRMethod, HistoricalVaREngine
-        from asset.equity.product.option import EuropeanVanillaOption
-        from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
-        from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-        from priceenv import PricingEnvironment
-        from util.enum.option_enums import OptionType
+        from quantark.var import VaRConfig, VaRMethod, HistoricalVaREngine
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+        from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+        from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+        from quantark.priceenv import PricingEnvironment
+        from quantark.util.enum.option_enums import OptionType
 
         # Create a simple portfolio
         valuation_date = datetime(2024, 1, 1)
@@ -213,8 +213,8 @@ class TestVarBacktestDemo:
             valuation_date=valuation_date
         )
 
-        from portfolio.equity.portfolio import EquityPortfolio
-        from var import VaRBacktester
+        from quantark.portfolio.equity.portfolio import EquityPortfolio
+        from quantark.var import VaRBacktester
 
         portfolio = EquityPortfolio(
             portfolio_name="Test Portfolio",

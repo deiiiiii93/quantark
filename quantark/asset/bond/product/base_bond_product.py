@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List
 
-from asset.bond.schedule.cashflow import CashFlow
+from quantark.asset.bond.schedule.cashflow import CashFlow
 
 
 class BaseBondProduct(ABC):

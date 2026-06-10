@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import List, Optional, Union
 
-from util.enum import (
+from quantark.util.enum import (
     ObservationType,
     CouponPayType,
     ProtectionType,

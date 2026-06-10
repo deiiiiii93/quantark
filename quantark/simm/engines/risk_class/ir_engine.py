@@ -8,12 +8,12 @@ delta (DV01), vega, and curvature sensitivities for fixed income positions.
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 
-from simm.config import SIMMConfig
-from simm.taxonomy import RiskClass, IRSubCurve, IR_TENORS
-from simm.sensitivity import IRDeltaSensitivity, IRVegaSensitivity, CurvatureSensitivity
-from simm.engines.base import BaseSensitivityEngine
+from quantark.simm.config import SIMMConfig
+from quantark.simm.taxonomy import RiskClass, IRSubCurve, IR_TENORS
+from quantark.simm.sensitivity import IRDeltaSensitivity, IRVegaSensitivity, CurvatureSensitivity
+from quantark.simm.engines.base import BaseSensitivityEngine
 
-from portfolio.fi.position import FIPosition
+from quantark.portfolio.fi.position import FIPosition
 
 
 class IRSensitivityEngine(BaseSensitivityEngine):

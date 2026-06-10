@@ -6,8 +6,8 @@ from typing import Dict
 
 import pytest
 
-from simm.taxonomy import ProductClass, RiskClass, MarginType
-from simm.results.simm_result import (
+from quantark.simm.taxonomy import ProductClass, RiskClass, MarginType
+from quantark.simm.results.simm_result import (
     SIMMResult,
     RiskClassMargin,
     BucketDetail,
