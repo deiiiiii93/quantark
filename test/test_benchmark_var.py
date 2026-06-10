@@ -16,6 +16,15 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List
 
+# All engine.calculate_var(...) calls in this module are commented out, so
+# every timing assertion measures a no-op and passes or fails on timer
+# granularity alone (observed flaking on fast CI runners). Skip the module
+# until the benchmark calls are restored and the assertions made robust.
+pytestmark = pytest.mark.skip(
+    reason="benchmark calls disabled (calculate_var commented out); "
+    "timing assertions over no-ops are vacuous and timer-flaky"
+)
+
 from quantark.asset.equity.engine.analytical import BlackScholesEngine
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote

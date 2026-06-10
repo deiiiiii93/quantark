@@ -45,6 +45,8 @@ jobs:
           /tmp/smoke/bin/pip install dist/*.whl
           cd /tmp
           /tmp/smoke/bin/python - <<'EOF'
+          from datetime import datetime
+
           from quantark.backtest.otc import AutocallableBacktestDashboard
           from quantark.asset.equity.product.option import EuropeanVanillaOption
           from quantark.asset.equity.engine.analytical import BlackScholesEngine
@@ -57,6 +59,7 @@ jobs:
               vol_surface=FlatVolSurface(volatility=0.20),
               rate_curve=FlatRateCurve(rate=0.05),
               div_yield=ContinuousDividendYield(div_yield=0.02),
+              valuation_date=datetime(2024, 1, 1),
           )
           opt = EuropeanVanillaOption(strike=100.0, maturity=1.0, option_type=OptionType.CALL)
           price = BlackScholesEngine().price(opt, env)

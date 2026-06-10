@@ -81,6 +81,8 @@ convenience.
 
 ```python
 from quantark.asset.equity.product.option import EuropeanVanillaOption
+from datetime import datetime
+
 from quantark.asset.equity.engine.analytical import BlackScholesEngine
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
@@ -97,7 +99,8 @@ pricing_env = PricingEnvironment(
     spot_quote=spot,
     vol_surface=vol,
     rate_curve=rate,
-    div_yield=div
+    div_yield=div,
+    valuation_date=datetime(2024, 1, 1),
 )
 
 # Create a European call option
@@ -124,48 +127,12 @@ print(f"Vega:  {analytical_greeks['vega']:.6f}")
 print(f"Theta: {analytical_greeks['theta']:.6f} (per day)")
 print(f"Rho:   {analytical_greeks['rho']:.6f}")
 
-# Calculate portfolio VaR
-from quantark.var import (
-    ParametricVaREngine,
-    HistoricalVaREngine,
-    VaRConfig,
-    EquityRiskFactorConfig,
-)
-from quantark.portfolio.equity.portfolio import EquityPortfolio
-
-# Create a portfolio
-portfolio = EquityPortfolio(
-    positions={
-        "AAPL": {"quantity": 100, "cost_basis": 150.0},
-        "MSFT": {"quantity": 50, "cost_basis": 300.0}
-    }
-)
-
-# Configure VaR calculation
-var_config = VaRConfig(
-    confidence_level=0.99,
-    holding_period=1,
-    equity_factors=EquityRiskFactorConfig(
-        include_spot=True,
-        include_vol=True,
-        include_rate=True
-    )
-)
-
-# Calculate parametric VaR
-parametric_engine = ParametricVaREngine(config=var_config)
-parametric_result = parametric_engine.calculate_var(portfolio, historical_data)
-
-print(f"\nParametric VaR (99%): ${parametric_result.var:.2f}")
-print(f"CVaR: ${parametric_result.cvar:.2f}")
-
-# Calculate historical VaR
-historical_engine = HistoricalVaREngine(config=var_config)
-historical_result = historical_engine.calculate_var(portfolio, historical_data)
-
-print(f"Historical VaR (99%): ${historical_result.var:.2f}")
-print(f"CVaR: ${historical_result.cvar:.2f}")
 ```
+
+For portfolio Value-at-Risk (parametric, historical, and Monte Carlo engines
+with risk-factor attribution), see the runnable demos:
+`example/parametric_var_demo.py`, `example/portfolio_var_demo.py`, and
+`example/var_backtest_demo.py`.
 
 ## Batch-Friendly Engine Params
 
