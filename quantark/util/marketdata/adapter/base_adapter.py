@@ -4,11 +4,8 @@ Base adapter for fetching market data from different sources.
 from abc import ABC, abstractmethod
 from typing import Optional, List
 from datetime import datetime
-import sys
-from pathlib import Path
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from quantark.util.marketdata.models import TimeSeriesData, MarketDataPoint, MarketDataSet
 

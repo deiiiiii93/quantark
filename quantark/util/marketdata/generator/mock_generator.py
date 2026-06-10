@@ -11,11 +11,8 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
-import sys
-from pathlib import Path
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from quantark.util.marketdata.models import MarketDataPoint, TimeSeriesData, OptionMarketData
 from quantark.util.exceptions import ValidationError

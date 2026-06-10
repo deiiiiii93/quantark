@@ -7,7 +7,7 @@ import numpy as np
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent.parent.parent))
 
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.asset.equity.engine.analytical.digital_option_engine import DigitalOptionAnalyticalEngine

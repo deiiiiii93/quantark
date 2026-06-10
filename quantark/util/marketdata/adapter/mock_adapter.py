@@ -7,11 +7,8 @@ when real data is not available.
 """
 from datetime import datetime
 from typing import Optional, Dict, Any
-import sys
-from pathlib import Path
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from quantark.util.marketdata.adapter.base_adapter import BaseMarketDataAdapter
 from quantark.util.marketdata.generator.mock_generator import MockDataGenerator

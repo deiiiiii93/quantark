@@ -10,10 +10,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 import json
-import sys
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from quantark.util.marketdata.models import TimeSeriesData, MarketDataSet
 from quantark.util.exceptions import ValidationError

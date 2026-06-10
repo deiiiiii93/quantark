@@ -7,11 +7,8 @@ and the PricingEnvironment objects used by the pricing engines.
 from datetime import datetime
 from typing import Optional, Iterator, Tuple
 import pandas as pd
-import sys
-from pathlib import Path
 
 # Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from quantark.util.marketdata.models import MarketDataPoint, TimeSeriesData, MarketDataSet
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield, NoDividend
