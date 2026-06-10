@@ -4,7 +4,7 @@ Business day calendar for settlement date adjustments.
 
 from enum import Enum
 from datetime import datetime, timedelta
-from pathlib import Path
+from importlib import resources
 from typing import Set, Optional
 import csv
 from quantark.util.exceptions import ValidationError
@@ -408,20 +408,18 @@ def _load_holidays_from_csv(
     calendar_name: str, year_range: tuple
 ) -> Optional[Set[datetime]]:
     start_year, end_year = year_range
-    repo_root = Path(__file__).resolve().parents[2]
-    csv_path = (
-        repo_root
-        / "util"
+    csv_resource = (
+        resources.files("quantark.util")
         / "calendar"
         / "holidayfile"
         / f"{calendar_name}.csv"
     )
-    if not csv_path.exists():
+    if not csv_resource.is_file():
         return None
 
     holidays: Set[datetime] = set()
     try:
-        with csv_path.open(newline="", encoding="utf-8") as handle:
+        with csv_resource.open("r", newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
             for row in reader:
                 date_str = (row.get("date") or row.get("Date") or "").strip()
