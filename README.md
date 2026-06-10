@@ -1,4 +1,9 @@
-# QuantArk - Professional Financial Derivatives Pricing Library
+# QuantArk — Financial Derivatives Pricing & Risk Library
+
+[![tests](https://github.com/deiiiiii93/quantark/actions/workflows/tests.yml/badge.svg)](https://github.com/deiiiiii93/quantark/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/quantark)](https://pypi.org/project/quantark/)
+[![Python](https://img.shields.io/pypi/pyversions/quantark)](https://pypi.org/project/quantark/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A modular, professional-grade Python library for pricing and risk management of financial derivatives.
 
@@ -46,18 +51,23 @@ QuantArk is designed with a clean, modular architecture that separates concerns 
 
 ## Installation
 
-QuantArk is a standard pip-installable package (PEP 621 `pyproject.toml`,
-hatchling backend). All code lives under the single top-level package
-`quantark`.
+```bash
+pip install quantark
+```
+
+From source / latest development version:
 
 ```bash
-# As a dependency (from a checkout or VCS URL)
-pip install /path/to/quant-ark
+pip install git+https://github.com/deiiiiii93/quantark
+```
 
-# For development: editable install with test tooling
-git clone <repo-url> && cd quant-ark
+For development (editable install with test tooling):
+
+```bash
+git clone https://github.com/deiiiiii93/quantark && cd quantark
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest
 ```
 
 **Migration note**: imports use the `quantark.*` namespace
@@ -169,7 +179,7 @@ quad_params = make_quad_params(profile="barrier_sensitive")
 pde_params = make_pde_params(profile="balanced")
 ```
 
-See `docs/engine_param_guide.md` for the preset decision table, config schema, and examples.
+Engine parameter presets accept either preset names or explicit config objects; see the docstrings in `quantark/asset/equity/param/` for the full schema.
 
 ## RQMC Target Std Scaling (MC Benchmarking)
 
@@ -317,13 +327,16 @@ Contributions are welcome! Please follow these guidelines:
 4. Validate inputs and handle edge cases
 5. Add professional error handling
 
+## Disclaimer
+
+QuantArk is provided for research and educational purposes. It is not
+investment advice, and no warranty is made as to the correctness of any
+price, risk figure, or model output. Validate independently before any
+production or trading use. See the LICENSE file for the full terms.
+
 ## License
 
-MIT License - see LICENSE file for details
-
-## Authors
-
-QuantArk Development Team
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Acknowledgments
 
