@@ -31,6 +31,11 @@ from quantark.util.numerical import (
     validate_positive,
 )
 
+# Broadie-Glasserman-Kou (1997) discrete-monitoring barrier correction:
+# beta = -zeta(1/2) / sqrt(2*pi). A barrier monitored discretely at spacing
+# dt is approximated by a continuous barrier shifted by exp(±beta*vol*sqrt(dt)).
+_BGK_BETA = 0.5825971579390107
+
 
 class SnowballQuadEngine(BaseEngine):
     """
@@ -90,11 +95,17 @@ class SnowballQuadEngine(BaseEngine):
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
         )
         ki_records: Sequence = []
+        ki_barrier_continuous: Optional[float] = None
+        if ki_continuous:
+            ki_barrier_continuous = self._continuous_ki_barrier_value(product)
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
             if not ki_records:
                 raise PricingError("KI observation schedule is empty for SnowballQuadEngine.")
             if self._treat_dense_discrete_ki_as_continuous(product, ki_records):
+                ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
+                    product, ki_records, vol
+                )
                 ki_continuous = True
                 ki_records = []
 
@@ -160,13 +171,8 @@ class SnowballQuadEngine(BaseEngine):
         )
 
         log_ki_barrier = None
-        if product.has_ki_barrier:
-            if ki_continuous:
-                if product.barrier_config.ki_barrier is None:
-                    raise PricingError("KI barrier configuration is missing.")
-                if isinstance(product.barrier_config.ki_barrier, list):
-                    raise PricingError("Continuous KI requires scalar ki_barrier.")
-                log_ki_barrier = safe_log(product.barrier_config.ki_barrier / spot)
+        if product.has_ki_barrier and ki_continuous:
+            log_ki_barrier = safe_log(ki_barrier_continuous / spot)
 
         full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
         omega_grid = math_utils.z_grid
@@ -206,9 +212,9 @@ class SnowballQuadEngine(BaseEngine):
 
             if ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
-                    spot_grid >= product.barrier_config.ki_barrier
+                    spot_grid >= ki_barrier_continuous
                     if product.is_reverse
-                    else spot_grid <= product.barrier_config.ki_barrier
+                    else spot_grid <= ki_barrier_continuous
                 )
                 v_out[ki_mask] = v_in[ki_mask]
             elif ki_records:
@@ -326,9 +332,15 @@ class SnowballQuadEngine(BaseEngine):
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
         )
         ki_records = []
+        ki_barrier_continuous: Optional[float] = None
+        if ki_continuous:
+            ki_barrier_continuous = self._continuous_ki_barrier_value(product)
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
             if self._treat_dense_discrete_ki_as_continuous(product, ki_records):
+                ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
+                    product, ki_records, vol
+                )
                 ki_continuous = True
                 ki_records = []
 
@@ -452,11 +464,7 @@ class SnowballQuadEngine(BaseEngine):
             )
 
             if ki_continuous:
-                if product.barrier_config.ki_barrier is None:
-                    raise PricingError("KI barrier configuration is missing.")
-                if isinstance(product.barrier_config.ki_barrier, list):
-                    raise PricingError("Continuous KI requires scalar ki_barrier.")
-                log_ki_barrier = safe_log(product.barrier_config.ki_barrier / spot)
+                log_ki_barrier = safe_log(ki_barrier_continuous / spot)
                 v_out = self._diffuse_with_bridge(
                     v_out,
                     v_in,
@@ -572,11 +580,7 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
                 if ki_continuous:
-                    if product.barrier_config.ki_barrier is None:
-                        raise PricingError("KI barrier configuration is missing.")
-                    if isinstance(product.barrier_config.ki_barrier, list):
-                        raise PricingError("Continuous KI requires scalar ki_barrier.")
-                    log_ki_barrier = safe_log(product.barrier_config.ki_barrier / spot)
+                    log_ki_barrier = safe_log(ki_barrier_continuous / spot)
                     v_out_ki = self._diffuse_with_bridge(
                         v_out_ki,
                         v_in_ki,
@@ -639,10 +643,13 @@ class SnowballQuadEngine(BaseEngine):
         Use bridge monitoring for dense discrete KI schedules.
 
         Daily DKI schedules over multi-year tenors create hundreds of tiny
-        quadrature steps and can accumulate numerical noise in the two-surface
-        recursion. The continuous bridge is the stable approximation used only
-        for pricing; lifecycle handling in the OTC backtest still uses the
-        product's explicit observation schedule.
+        quadrature steps; on grids that are coarse relative to the schedule
+        density the exact two-surface recursion can diverge. The continuous
+        bridge with a Broadie-Glasserman-Kou barrier shift (emulating the
+        discrete monitoring) is the stable approximation used for pricing;
+        set the threshold to 0 (with a sufficiently fine grid) for exact
+        discrete pricing. Lifecycle handling in the OTC backtest always uses
+        the product's explicit observation schedule.
         """
         threshold = int(
             getattr(self.params, "dense_discrete_ki_as_continuous_threshold", 120)
@@ -655,6 +662,41 @@ class SnowballQuadEngine(BaseEngine):
         if isinstance(product.barrier_config.ki_barrier, list):
             return False
         return True
+
+    def _continuous_ki_barrier_value(self, product: SnowballOption) -> float:
+        """Validated scalar KI barrier for continuous-monitoring pricing."""
+        ki_barrier = product.barrier_config.ki_barrier
+        if ki_barrier is None:
+            raise PricingError("KI barrier configuration is missing.")
+        if isinstance(ki_barrier, list):
+            raise PricingError("Continuous KI requires scalar ki_barrier.")
+        return float(ki_barrier)
+
+    def _bgk_equivalent_continuous_ki_barrier(
+        self, product: SnowballOption, ki_records: Sequence, vol: float
+    ) -> float:
+        """
+        Continuous-equivalent KI barrier for a dense discrete schedule.
+
+        When a dense discrete KI schedule is priced with the continuous
+        bridge approximation, the barrier must be shifted away from the
+        monitoring region (Broadie-Glasserman-Kou 1997): a down-in barrier
+        B monitored at spacing dt is equivalent to a continuous barrier at
+        B * exp(-beta * vol * sqrt(dt)); an up-in (reverse) barrier shifts
+        by the reciprocal factor. Without the shift, continuous monitoring
+        systematically overstates the knock-in probability.
+        """
+        barrier = self._continuous_ki_barrier_value(product)
+        obs_times = np.unique(
+            np.asarray([rec.observation_time for rec in ki_records], dtype=float)
+        )
+        spacings = np.diff(obs_times)
+        spacings = spacings[spacings > 0.0]
+        if spacings.size == 0:
+            return barrier
+        avg_dt = float(np.mean(spacings))
+        shift = _BGK_BETA * vol * math.sqrt(avg_dt)
+        return barrier * safe_exp(shift if product.is_reverse else -shift)
 
     def _diffuse_fft(
         self,

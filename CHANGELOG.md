@@ -21,3 +21,14 @@ During 0.x the public API may still change between minor versions.
   hedging backtest framework.
 - Legacy flat-import compatibility shim (`asset`, `util`, …) with
   `DeprecationWarning`; slated for removal in 1.0.
+
+### Fixed
+- `SnowballQuadEngine`: the dense-discrete-KI-to-continuous bridge
+  approximation now applies a Broadie-Glasserman-Kou barrier shift to
+  emulate discrete monitoring. Previously the conversion monitored the
+  unshifted barrier continuously, overstating knock-in probability (fair
+  KO-rate bias of up to ~0.9 coupon points vs PDE/MC on daily-KI
+  snowballs). A first-order residual can remain for strongly drifted
+  (deep-carry) underlyings; set
+  `QuadParams.dense_discrete_ki_as_continuous_threshold=0` with a
+  sufficiently fine grid for exact discrete pricing.

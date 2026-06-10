@@ -19,9 +19,15 @@ MAX_SPREAD_TOL = 0.012
 
 @pytest.fixture(scope="module")
 def engines():
-    """Requested KO-rate smoke configuration."""
+    """Requested KO-rate smoke configuration.
+
+    50k MC paths leave ~±0.005 sampling error on the solved KO rate, which
+    makes the spread tolerance a coin flip; 200k paths bring the MC quote
+    within ~±0.001 of its converged value (measured across seeds) so the
+    cross-engine checks test the engines, not the noise.
+    """
     return build_engines(
-        mc_paths=50_000,
+        mc_paths=200_000,
         quad_grid=1001,
         pde_grid=400,
         pde_steps=400,

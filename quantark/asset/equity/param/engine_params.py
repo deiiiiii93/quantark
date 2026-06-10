@@ -585,9 +585,17 @@ class QuadParams(EngineParams):
         event_smoothing_mode: Smoothing mode (fixed, auto, reverse_aware).
         event_smoothing_kernel: Smoothing kernel (cosine, tanh).
         event_smoothing_log_width: Target log-space width for auto smoothing.
-        dense_discrete_ki_as_continuous_threshold: Discrete KI schedules with more
-            observations than this threshold are priced with the continuous KI
-            bridge approximation for numerical stability. Set to 0 to disable.
+        dense_discrete_ki_as_continuous_threshold: Discrete KI schedules with
+            more observations than this threshold are priced with the
+            continuous KI bridge approximation, using a Broadie-Glasserman-Kou
+            barrier shift to emulate discrete monitoring. This keeps the
+            recursion numerically stable when the schedule is dense relative
+            to grid_points (exact discrete pricing can diverge on coarse
+            grids). The shift is first-order accurate; a residual bias can
+            remain for strongly drifted (deep-carry) underlyings. Set to 0 to
+            price discrete schedules exactly — accurate and convergent in
+            grid_points, but requires a grid fine enough for the schedule
+            density (roughly grid_points >= 2x observations).
     """
 
     grid_points: int = 1001  # Odd number for Simpson's rule
