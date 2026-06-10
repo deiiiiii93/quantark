@@ -1,14 +1,31 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "quantark"
 version = "0.1.0"
-description = "Professional financial derivatives pricing library"
+description = "Modular derivatives pricing and risk library: options, autocallables, bonds, VaR, SIMM"
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{ name = "QuantArk Team" }]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "fuxinyao", email = "ianchris0113@gmail.com" }]
+keywords = [
+    "quantitative-finance", "derivatives", "option-pricing", "monte-carlo",
+    "pde", "autocallable", "snowball", "var", "risk-management", "simm",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = [
     "numpy>=1.24.0",
     "scipy>=1.10.0",
@@ -27,8 +44,15 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0.0"]
 
+[project.urls]
+Homepage = "https://github.com/deiiiiii93/quantark"
+Repository = "https://github.com/deiiiiii93/quantark"
+Issues = "https://github.com/deiiiiii93/quantark/issues"
+Changelog = "https://github.com/deiiiiii93/quantark/blob/main/CHANGELOG.md"
+
 [tool.hatch.build.targets.wheel]
 packages = ["quantark"]
+exclude = ["quantark/**/*.md"]
 
 # Registers the legacy flat-import shim (quantark/_compat.py) at interpreter
 # startup. Hatchling applies force-include to editable wheels too, so the
@@ -37,4 +61,5 @@ packages = ["quantark"]
 "quantark_compat.pth" = "quantark_compat.pth"
 
 [tool.hatch.build.targets.sdist]
-include = ["quantark", "quantark_compat.pth", "README.md"]
+include = ["quantark", "quantark_compat.pth", "README.md", "LICENSE", "NOTICE", "CHANGELOG.md"]
+exclude = ["quantark/**/*.md"]
