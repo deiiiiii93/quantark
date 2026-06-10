@@ -63,6 +63,7 @@ class AutocallableBacktestEngine:
         self._replay = ProductReplay(
             product=config.product,
             product_quantity=config.product_quantity,
+            has_lifecycle=True,
             lifecycle=self.lifecycle,
             pricing_engine=self.pricing_engine,
             surface_engine=self.surface_engine,
@@ -417,4 +418,3 @@ class AutocallableBacktestEngine:
                 "basis_sensitivity": float(greeks.get("basis_sensitivity", np.nan)),
             }
         )
-

@@ -74,17 +74,18 @@ class AutocallableEngineConfig:
 
     def __post_init__(self) -> None:
         supported = {
+            EngineType.ANALYTICAL,
             EngineType.PDE,
             EngineType.MONTE_CARLO,
             EngineType.QUADRATURE,
         }
         if self.pricing_engine_type not in supported:
             raise ValidationError(
-                "pricing_engine_type must be PDE, MONTE_CARLO, or QUADRATURE"
+                "pricing_engine_type must be ANALYTICAL, PDE, MONTE_CARLO, or QUADRATURE"
             )
         if self.surface_engine_type is not None and self.surface_engine_type not in supported:
             raise ValidationError(
-                "surface_engine_type must be PDE, MONTE_CARLO, or QUADRATURE"
+                "surface_engine_type must be ANALYTICAL, PDE, MONTE_CARLO, or QUADRATURE"
             )
         if (
             self.event_stats_engine_type is not None
