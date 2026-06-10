@@ -9,10 +9,16 @@ enums, and module state keep a single identity regardless of spelling.
 
 Registration happens at interpreter startup through ``quantark_compat.pth``
 (installed alongside the package), which executes ``import quantark._compat``
-via the ``site`` machinery. The finder is appended to ``sys.meta_path``, so
-Python's standard finders run first: a genuinely installed distribution named
-like a legacy root (e.g. HoloViz ``param``) wins over the alias, and the shim
-only resolves names that would otherwise fail.
+via the ``site`` machinery.
+
+The finder must be *prepended* to ``sys.meta_path``: once a legacy root is
+aliased, its ``__path__`` points into ``quantark/``, and ``PathFinder`` would
+otherwise resolve submodule imports (``import util.enum``) through that path
+into fresh, duplicate module objects — the exact identity split this shim
+exists to prevent. Precedence for real packages is enforced explicitly
+instead: root imports defer to any genuinely installed distribution (e.g.
+HoloViz ``param``), and submodules are only aliased when the root itself is
+our alias.
 """
 
 from __future__ import annotations
@@ -70,9 +76,25 @@ class _AliasLoader(importlib.abc.Loader):
 
 class _LegacyAliasFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        root = fullname.partition(".")[0]
+        root, dot, _ = fullname.partition(".")
         if root not in LEGACY_ROOTS:
             return None
+        if dot:
+            # Alias submodules only beneath a root we aliased ourselves —
+            # never reach inside a genuinely installed package that happens
+            # to share a legacy name.
+            root_module = sys.modules.get(root)
+            if root_module is None or root_module is not sys.modules.get(
+                f"quantark.{root}"
+            ):
+                return None
+        else:
+            # A real installed distribution wins over the alias. Namespace
+            # placeholders (spec without a loader, e.g. a stray directory on
+            # sys.path) do not count as a real package.
+            real_spec = importlib.machinery.PathFinder.find_spec(fullname)
+            if real_spec is not None and real_spec.loader is not None:
+                return None
         canonical_name = f"quantark.{fullname}"
         try:
             importlib.import_module(canonical_name)
@@ -92,9 +114,9 @@ class _LegacyAliasFinder(importlib.abc.MetaPathFinder):
 
 
 def install() -> None:
-    """Append the legacy-alias finder to ``sys.meta_path`` (idempotent)."""
+    """Prepend the legacy-alias finder to ``sys.meta_path`` (idempotent)."""
     if not any(isinstance(f, _LegacyAliasFinder) for f in sys.meta_path):
-        sys.meta_path.append(_LegacyAliasFinder())
+        sys.meta_path.insert(0, _LegacyAliasFinder())
 
 
 install()
