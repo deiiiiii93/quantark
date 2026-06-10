@@ -145,3 +145,7 @@ docs/*.pdf
 tmp/
 docs/strategyindex
 external/
+debug/
+
+# Claude Code worktrees (nested checkouts created by the harness)
+.claude/worktrees/

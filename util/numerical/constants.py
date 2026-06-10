@@ -52,6 +52,7 @@ class Tolerance:
     # Financial calculation thresholds
     MONEYNESS_MAX: Final[float] = 100.0
     DISCOUNT_EXP_MAX: Final[float] = 100.0
+    PROBABILITY: Final[float] = 1e-6
 
     # Matrix/covariance tolerances
     EIGENVALUE_MIN: Final[float] = 1e-10

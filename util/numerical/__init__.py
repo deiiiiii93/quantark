@@ -51,6 +51,7 @@ from .validation import (
     validate_array,
     check_numerical_stability,
 )
+from .pnl import pnl_pct_of_abs_baseline
 
 __all__ = [
     # Constants
@@ -92,4 +93,6 @@ __all__ = [
     'validate_probability',
     'validate_array',
     'check_numerical_stability',
+    # P&L helpers
+    'pnl_pct_of_abs_baseline',
 ]

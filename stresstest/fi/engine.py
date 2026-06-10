@@ -14,6 +14,7 @@ from stresstest.fi.results import FIStressResults, FIScenarioResult
 from stresstest.scenario.scenario import Scenario
 from stresstest.stress.stress_applicator import StressApplicator
 from util.exceptions import ValidationError
+from util.numerical import pnl_pct_of_abs_baseline
 
 
 class FIStressEngine(BaseStressEngine, ScenarioRunner):
@@ -80,9 +81,7 @@ class FIStressEngine(BaseStressEngine, ScenarioRunner):
 
         stressed_value = stressed_portfolio.get_portfolio_value()
         portfolio_pnl = stressed_value - baseline_value
-        portfolio_pnl_pct = (
-            (portfolio_pnl / baseline_value * 100) if baseline_value != 0 else 0.0
-        )
+        portfolio_pnl_pct = pnl_pct_of_abs_baseline(portfolio_pnl, baseline_value)
 
         fi_metrics = self.metrics_calculator.portfolio_metrics(stressed_portfolio)
         fi_metrics["alerts"] = {
@@ -152,9 +151,7 @@ class FIStressEngine(BaseStressEngine, ScenarioRunner):
             original_value = original_position.get_market_value(original_env)
             stressed_value = position.get_market_value(stressed_env)
             position_pnl = stressed_value - original_value
-            position_pnl_pct = (
-                (position_pnl / original_value * 100) if original_value != 0 else 0.0
-            )
+            position_pnl_pct = pnl_pct_of_abs_baseline(position_pnl, original_value)
 
             result = {
                 "position_id": position_id,
@@ -214,4 +211,3 @@ class FIStressEngine(BaseStressEngine, ScenarioRunner):
             if stressed_env:
                 summary[underlying] = StressApplicator.get_stress_summary(env, stressed_env)
         return summary
-

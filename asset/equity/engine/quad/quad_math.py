@@ -85,6 +85,7 @@ class QuadratureMath:
         self.z_grid = -2.0 * log_c + np.arange(2 * self.grid_x - 1) * self.h
         self._weights: np.ndarray | None = None
         self._fft_filter_cache: dict[int, np.ndarray] = {}
+        self._omega_fft_cache: dict[tuple[int, bytes], np.ndarray] = {}
 
     def _factor_c(self) -> float:
         return (
@@ -115,6 +116,29 @@ class QuadratureMath:
         u_array[p_lr + 2 : p_ur + p0 - 1 : 2] = 2.0 * values[p_lr + 2 : p_ur + p0 - 1 : 2]
         return u_array
 
+    def simpson_weights_many(
+        self, values: np.ndarray, p_lr: int, p_ur: int, p0: int
+    ) -> np.ndarray:
+        values = np.asarray(values)
+        if values.ndim != 2:
+            raise NumericalError("values must be a 2D array.")
+        if values.shape[1] != self.grid_x:
+            raise NumericalError(
+                f"values second dimension must be grid_x={self.grid_x}, "
+                f"got {values.shape[1]}."
+            )
+
+        u_array = np.zeros((values.shape[0], 2 * self.grid_x - 1), dtype=values.dtype)
+        u_array[:, p_lr] = values[:, p_lr]
+        u_array[:, p_ur + p0] = values[:, p_ur + p0]
+        u_array[:, p_lr + 1 : p_ur + p0 : 2] = (
+            4.0 * values[:, p_lr + 1 : p_ur + p0 : 2]
+        )
+        u_array[:, p_lr + 2 : p_ur + p0 - 1 : 2] = (
+            2.0 * values[:, p_lr + 2 : p_ur + p0 - 1 : 2]
+        )
+        return u_array
+
     def simpson_weight_vector(self) -> np.ndarray:
         if self._weights is None:
             weights = np.ones(self.grid_x)
@@ -130,7 +154,7 @@ class QuadratureMath:
             raise NumericalError("omega_array and u_array must have the same length.")
         base_len = len(u_array)
         fft_len = base_len if self.fft_padding_factor <= 1 else int(self.fft_padding_factor * base_len)
-        omega_fft = np.fft.fft(omega_array, n=fft_len)
+        omega_fft = self._get_omega_fft(omega_array, fft_len)
         u_fft = np.fft.fft(u_array, n=fft_len)
         product = omega_fft * u_fft
         fft_filter = self._get_fft_filter(fft_len)
@@ -138,6 +162,43 @@ class QuadratureMath:
             product *= fft_filter
         f_array = np.fft.ifft(product).real
         return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+
+    def convolution_fft_many(
+        self, omega_array: np.ndarray, u_array: np.ndarray
+    ) -> np.ndarray:
+        omega_array = np.asarray(omega_array).ravel()
+        u_array = np.asarray(u_array)
+        if u_array.ndim != 2:
+            raise NumericalError("u_array must be a 2D array.")
+        if u_array.shape[1] != len(omega_array):
+            raise NumericalError(
+                "omega_array length must match u_array second dimension."
+            )
+
+        base_len = len(omega_array)
+        fft_len = (
+            base_len
+            if self.fft_padding_factor <= 1
+            else int(self.fft_padding_factor * base_len)
+        )
+        omega_fft = self._get_omega_fft(omega_array, fft_len)
+        u_fft = np.fft.fft(u_array, n=fft_len, axis=1)
+        product = u_fft * omega_fft.reshape(1, -1)
+        fft_filter = self._get_fft_filter(fft_len)
+        if fft_filter is not None:
+            product *= fft_filter.reshape(1, -1)
+        f_array = np.fft.ifft(product, axis=1).real
+        return f_array[:, self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+
+    def _get_omega_fft(self, omega_array: np.ndarray, fft_len: int) -> np.ndarray:
+        omega_array = np.ascontiguousarray(omega_array, dtype=float)
+        key = (int(fft_len), omega_array.tobytes())
+        cached = self._omega_fft_cache.get(key)
+        if cached is not None:
+            return cached
+        omega_fft = np.fft.fft(omega_array, n=fft_len)
+        self._omega_fft_cache[key] = omega_fft
+        return omega_fft
 
     def _get_fft_filter(self, length: int) -> Optional[np.ndarray]:
         if self.fft_filter_alpha <= 0.0:

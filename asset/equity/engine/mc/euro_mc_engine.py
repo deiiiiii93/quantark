@@ -13,6 +13,7 @@ from asset.equity.param import MCParams
 from priceenv import PricingEnvironment
 from util.enum.engine_enums import MonteCarloMethod, EngineType
 from util.exceptions import ValidationError, PricingError
+from util.numerical import safe_exp
 
 from asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from asset.equity.process.bsm.qmc_sobol import (
@@ -166,13 +167,32 @@ class EuropeanMCEngine(BaseEngine):
         if price < 0:
             raise PricingError(f"Negative price computed: {price}")
 
-        intrinsic = product.intrinsic_value(S)
-        if price < intrinsic - 1e-6:
+        lower_bound = self._european_lower_bound(product, S, K, T, r, q)
+        if price < lower_bound - 1e-6:
             raise PricingError(
-                f"Price ({price:.6f}) below intrinsic value ({intrinsic:.6f})"
+                f"Price ({price:.6f}) below discounted European lower bound "
+                f"({lower_bound:.6f})"
             )
 
         return price
+
+    def _european_lower_bound(
+        self,
+        product: EuropeanVanillaOption,
+        S: float,
+        K: float,
+        T: float,
+        r: float,
+        q: float,
+    ) -> float:
+        """Calculate the discounted no-arbitrage lower bound for a European option."""
+        spot_pv = S * safe_exp(-q * T)
+        strike_pv = K * safe_exp(-r * T)
+        if product.is_call():
+            lower_bound = max(spot_pv - strike_pv, 0.0)
+        else:
+            lower_bound = max(strike_pv - spot_pv, 0.0)
+        return lower_bound * product.contract_multiplier
 
     def _validate_inputs(
         self, S: float, K: float, T: float, r: float, q: float, sigma: float
