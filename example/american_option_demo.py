@@ -12,14 +12,13 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import AmericanOption, EuropeanVanillaOption
-from asset.equity.engine.analytical import AmericanOptionAnalyticalEngine, BlackScholesEngine
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.enum.engine_enums import AmericanAnalyticalMethod
+from quantark.asset.equity.product.option import AmericanOption, EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import AmericanOptionAnalyticalEngine, BlackScholesEngine
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.enum.engine_enums import AmericanAnalyticalMethod
 
 
 def print_section(title: str):

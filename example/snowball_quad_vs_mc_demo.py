@@ -15,17 +15,15 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, QuadParams
-from asset.equity.product.option.snowball_helpers import create_standard_snowball
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import ObservationType
-from util.enum.engine_enums import MonteCarloMethod, EngineType
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, QuadParams
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType
+from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
 
 
 def parse_mc_method(name: str) -> MonteCarloMethod:

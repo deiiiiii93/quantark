@@ -24,27 +24,25 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from asset.equity.engine.pde import SnowballPDESolver
-from asset.equity.param import PDEParams
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.product.option import (
     SnowballOption,
     create_european_ki_snowball,
     create_parachute_snowball,
     create_standard_snowball,
     create_stepdown_snowball,
 )
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from asset.equity.product.option.snowball_helpers import generate_ko_observation_dates
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import ObservationType, ProtectionType
+from quantark.asset.equity.product.option.snowball_helpers import generate_ko_observation_dates
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import ObservationType, ProtectionType
 
 
 TEMPLATE_PATH = ROOT / "example" / "templates" / "snowball_rfq_ko_rate_dashboard.html"

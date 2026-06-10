@@ -7,11 +7,11 @@ Usage:
 
 from datetime import datetime
 
-from asset.equity.product.option.snowball_helpers import create_standard_snowball
-from param import SpotQuote, TermStructureVolSurface
-from param.div import TermStructureDividendYield
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.param import SpotQuote, TermStructureVolSurface
+from quantark.param.div import TermStructureDividendYield
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
 
 
 def build_product():

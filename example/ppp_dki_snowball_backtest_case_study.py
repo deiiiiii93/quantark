@@ -31,17 +31,16 @@ from typing import Any, Callable, Optional
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from asset.equity.param import MCParams, PDEParams, QuadParams
-from asset.equity.product.option import (
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
     SnowballOption,
     create_parachute_snowball,
 )
-from backtest.otc import (
+from quantark.backtest.otc import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableDeltaHedgeStrategy,
@@ -51,12 +50,12 @@ from backtest.otc import (
     SignedDividendYield,
     SurfaceGridConfig,
 )
-from backtest.otc.engine_factory import create_pricing_engine
-from param import FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import CouponPayType, ObservationType, ProtectionType
-from util.enum.engine_enums import EngineType, PDEMethod
-from util.exceptions import ValidationError
+from quantark.backtest.otc.engine_factory import create_pricing_engine
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType, ObservationType, ProtectionType
+from quantark.util.enum.engine_enums import EngineType, PDEMethod
+from quantark.util.exceptions import ValidationError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

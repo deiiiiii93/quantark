@@ -6,18 +6,17 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
-from asset.bond.product.couponbond.fixed_bond import FixedBond
-from param.rrf.rate_curve import LinearRateCurve
-from portfolio.fi import FIPortfolio
-from priceenv import PricingEnvironment
-from stresstest.fi import FIStressConfig, FIStressEngine
-from stresstest.results.result_exporter import ResultExporter
-from stresstest.scenario.scenario_library import ScenarioLibrary
-from util.enum import PaymentFrequency
-from util.calendar import DayCountConvention
+from quantark.asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
+from quantark.asset.bond.product.couponbond.fixed_bond import FixedBond
+from quantark.param.rrf.rate_curve import LinearRateCurve
+from quantark.portfolio.fi import FIPortfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.stresstest.fi import FIStressConfig, FIStressEngine
+from quantark.stresstest.results.result_exporter import ResultExporter
+from quantark.stresstest.scenario.scenario_library import ScenarioLibrary
+from quantark.util.enum import PaymentFrequency
+from quantark.util.calendar import DayCountConvention
 
 
 def build_demo_portfolio() -> FIPortfolio:

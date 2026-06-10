@@ -13,16 +13,14 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from portfolio import Portfolio
-from asset.equity.product.deltaone import SpotInstrument, Futures
-from asset.equity.engine.analytical import DeltaOneEngine
-from asset.equity.riskmeasures import GreeksCalculator
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import DeltaOneType
+from quantark.portfolio import Portfolio
+from quantark.asset.equity.product.deltaone import SpotInstrument, Futures
+from quantark.asset.equity.engine.analytical import DeltaOneEngine
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import DeltaOneType
 
 
 def print_section(title: str):

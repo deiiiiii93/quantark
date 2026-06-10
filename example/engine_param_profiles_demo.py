@@ -4,7 +4,7 @@ Demo: engine parameter presets and config loaders.
 
 from pathlib import Path
 
-from asset.equity.param import PDEParams, QuadParams, make_pde_params, make_quad_params
+from quantark.asset.equity.param import PDEParams, QuadParams, make_pde_params, make_quad_params
 
 
 def main() -> None:

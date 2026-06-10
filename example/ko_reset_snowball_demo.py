@@ -12,33 +12,31 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
     KOResetSnowballPDESolver,
 )
-from asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
+from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
     KOResetSnowballQuadEngine,
 )
-from asset.equity.param import BumpConfig, EngineParams, MCParams, PDEParams, QuadParams
-from asset.equity.product.option import (
+from quantark.asset.equity.param import BumpConfig, EngineParams, MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option import (
     KnockOutResetSnowballOption,
     ObservationRecord,
     ObservationSchedule,
 )
-from asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.calendar import CalendarType, DayCountConvention, create_calendar
-from util.enum import ObservationType, PostKOScheduleMode
-from util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
+from quantark.util.enum import ObservationType, PostKOScheduleMode
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 
 
 def business_day_time(calendar, start_date, end_date, bus_days_in_year):

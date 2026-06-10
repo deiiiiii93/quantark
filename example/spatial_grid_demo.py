@@ -21,20 +21,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
 
-# Add project root directory to Python path so asset.* imports work even when
-# running this script from the example/ directory.
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-
-from asset.equity.engine.pde.spatial_grid import SpatialGrid
+from quantark.asset.equity.engine.pde.spatial_grid import SpatialGrid
 
 
 def _ensure_dir(path: Path) -> None:

@@ -20,26 +20,25 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Import FI portfolio and products
-from portfolio.fi import FIPortfolio
-from asset.bond.product import FixedBond, create_simple_fixed_bond
-from asset.bond.engine import BondDiscountEngine
-from priceenv import PricingEnvironment
-from param.rrf.rate_curve import FlatRateCurve
-from util.enum import PaymentFrequency
-from util.calendar import DayCountConvention
+from quantark.portfolio.fi import FIPortfolio
+from quantark.asset.bond.product import FixedBond, create_simple_fixed_bond
+from quantark.asset.bond.engine import BondDiscountEngine
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf.rate_curve import FlatRateCurve
+from quantark.util.enum import PaymentFrequency
+from quantark.util.calendar import DayCountConvention
 
 # Import dynamic scenario components
-from dynamicscenario import (
+from quantark.dynamicscenario import (
     FIDynamicScenarioConfig,
     FIDynamicScenarioEngine,
     FIPathLibrary,
     DynamicScenarioVisualizer,
     DynamicReportGenerator,
 )
-from dynamicscenario.results.result_exporter import FIResultExporter
+from quantark.dynamicscenario.results.result_exporter import FIResultExporter
 
 
 def create_demo_fi_portfolio():

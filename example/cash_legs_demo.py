@@ -11,12 +11,11 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.quad import SnowballQuadEngine
-from asset.equity.param import QuadParams
-from asset.equity.product.option.snowball_helpers import create_standard_snowball
-from cashleg import (
+from quantark.asset.equity.engine.quad import SnowballQuadEngine
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.cashleg import (
     AccrualLeg,
     BaseAmount,
     BaseAmountMode,
@@ -29,10 +28,10 @@ from cashleg import (
     PaymentTrigger,
     SurvivalBasis,
 )
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from portfolio.equity.position import EquityPosition
-from priceenv import PricingEnvironment
-from util.calendar.day_counter import DayCountConvention
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.portfolio.equity.position import EquityPosition
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar.day_counter import DayCountConvention
 
 
 def main() -> None:

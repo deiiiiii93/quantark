@@ -13,10 +13,10 @@ Types demonstrated:
 
 from datetime import datetime
 import numpy as np
-from asset.equity.product.option import AsianOption, AsianObservationRecord
-from priceenv import PricingEnvironment
-from param.rrf import FlatRateCurve
-from util.enum import OptionType, AveragingType, AsianStrikeType
+from quantark.asset.equity.product.option import AsianOption, AsianObservationRecord
+from quantark.priceenv import PricingEnvironment
+from quantark.param.rrf import FlatRateCurve
+from quantark.util.enum import OptionType, AveragingType, AsianStrikeType
 
 
 def demonstrate_fixed_strike_options():

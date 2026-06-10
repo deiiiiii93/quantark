@@ -6,20 +6,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.analytical import BarrierAnalyticalEngine
-from asset.equity.engine.quad import BarrierQuadEngine
-from asset.equity.engine.mc import BarrierOptionMCEngine
-from asset.equity.param import QuadParams, MCParams
-from asset.equity.product.option import BarrierOption
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
+from quantark.asset.equity.engine.quad import BarrierQuadEngine
+from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
+from quantark.asset.equity.param import QuadParams, MCParams
+from quantark.asset.equity.product.option import BarrierOption
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum import BarrierType, ObservationAggregation, ObservationType, OptionType
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import BarrierType, ObservationAggregation, ObservationType, OptionType
 
 
 def create_pricing_env() -> PricingEnvironment:

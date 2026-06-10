@@ -13,20 +13,18 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.bond.product.couponbond.fixed_bond import FixedBond, create_simple_fixed_bond
-from asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
-from param.rrf.rate_curve import FlatRateCurve, LinearRateCurve, LogLinearRateCurve
-from priceenv import PricingEnvironment
-from util.calendar import (
+from quantark.asset.bond.product.couponbond.fixed_bond import FixedBond, create_simple_fixed_bond
+from quantark.asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
+from quantark.param.rrf.rate_curve import FlatRateCurve, LinearRateCurve, LogLinearRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import (
     DayCountConvention,
     BusinessDayConvention,
     CalendarType,
     create_calendar,
 )
-from util.enum import PaymentFrequency
+from quantark.util.enum import PaymentFrequency
 
 
 def example_1_simple_bond():

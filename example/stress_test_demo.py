@@ -15,30 +15,28 @@ import numpy as np
 from pathlib import Path
 import sys
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Core imports
-from portfolio import Portfolio
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from asset.equity.product import EuropeanVanillaOption
-from asset.equity.engine import BlackScholesEngine
-from util.enum import OptionType
+from quantark.portfolio import Portfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.asset.equity.product import EuropeanVanillaOption
+from quantark.asset.equity.engine import BlackScholesEngine
+from quantark.util.enum import OptionType
 
 # Stress test imports
-from stresstest import (
+from quantark.stresstest import (
     StressTestEngine,
     StressTestConfig,
     ScenarioBuilder,
     StressType,
     StressLevel,
 )
-from stresstest.scenario import Scenario, Stress
-from stresstest.scenario.scenario_library import ScenarioLibrary
-from stresstest.scenario.scenario_storage import ScenarioStorage
-from stresstest.results.result_exporter import ResultExporter
-from stresstest.report import ReportGenerator, StressTestVisualizer
+from quantark.stresstest.scenario import Scenario, Stress
+from quantark.stresstest.scenario.scenario_library import ScenarioLibrary
+from quantark.stresstest.scenario.scenario_storage import ScenarioStorage
+from quantark.stresstest.results.result_exporter import ResultExporter
+from quantark.stresstest.report import ReportGenerator, StressTestVisualizer
 
 
 def create_sample_portfolio() -> Portfolio:

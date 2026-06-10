@@ -29,34 +29,32 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
-from asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
-from asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
-from asset.equity.product.option.observation_schedule import (
+from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
 )
-from asset.equity.product.option.phoenix_config import CouponBarrierConfig
-from asset.equity.product.option.phoenix_option import PhoenixOption
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.product.option.snowball_config import (
     AccrualConfig,
     BarrierConfig,
     PayoffConfig,
 )
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.calendar import (
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import (
     CalendarType,
     DayCountConvention,
     calculate_year_fraction,
     create_calendar,
 )
-from util.enum import CouponPayType, ObservationAggregation, ObservationType
-from util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.util.enum import CouponPayType, ObservationAggregation, ObservationType
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 
 
 # =========================

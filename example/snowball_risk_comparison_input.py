@@ -2,11 +2,11 @@
 
 from pathlib import Path
 
-from asset.equity.report.snowball_risk_comparison_report import (
+from quantark.asset.equity.report.snowball_risk_comparison_report import (
     SnowballRiskComparisonConfig,
 )
-from asset.equity.param import QuadParams
-from util.enum.engine_enums import MonteCarloMethod
+from quantark.asset.equity.param import QuadParams
+from quantark.util.enum.engine_enums import MonteCarloMethod
 
 
 def build_config() -> SnowballRiskComparisonConfig:

@@ -22,15 +22,15 @@ Usage:
 
 from datetime import datetime
 
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     create_standard_snowball,
     create_airbag_snowball,
 )
-from asset.equity.engine.mc import SnowballMCEngine
-from asset.equity.param import MCParams
-from param import SpotQuote, FlatVolSurface, FlatRateCurve
-from priceenv import PricingEnvironment
-from util.enum.engine_enums import MonteCarloMethod
+from quantark.asset.equity.engine.mc import SnowballMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import MonteCarloMethod
 
 
 def create_pricing_environment(

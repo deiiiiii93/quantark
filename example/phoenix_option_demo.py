@@ -20,10 +20,8 @@ import sys
 from pathlib import Path
 from datetime import date, datetime
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     PhoenixOption,
     CouponBarrierConfig,
     create_standard_phoenix,
@@ -32,13 +30,13 @@ from asset.equity.product.option import (
     create_memory_phoenix,
     create_non_memory_phoenix,
 )
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.product.option.snowball_config import (
     BarrierConfig,
     PayoffConfig,
     AccrualConfig,
 )
-from util.enum import ObservationType, CouponPayType, ProtectionType
-from util.calendar.day_counter import DayCountConvention
+from quantark.util.enum import ObservationType, CouponPayType, ProtectionType
+from quantark.util.calendar.day_counter import DayCountConvention
 
 
 def demo_basic_phoenix():

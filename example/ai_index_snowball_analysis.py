@@ -31,13 +31,13 @@ from typing import List, Dict, Tuple, Optional
 import warnings
 
 # QuantArk imports
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.param import MCParams
-from util.enum import ObservationType
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.util.enum import ObservationType
 
 
 # =============================================================================

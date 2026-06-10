@@ -9,16 +9,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import QuadParams
-from asset.equity.product.option.snowball_helpers import create_standard_snowball
-from param import SpotQuote, TermStructureVolSurface
-from param.div import TermStructureDividendYield
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import QuadParams
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.param import SpotQuote, TermStructureVolSurface
+from quantark.param.div import TermStructureDividendYield
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
 
 
 def build_term_structure_env() -> PricingEnvironment:

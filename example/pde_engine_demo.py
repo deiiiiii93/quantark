@@ -13,21 +13,20 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     AmericanOption,
     BarrierOption,
 )
-from asset.equity.engine import PDEEngine, BlackScholesEngine
-from asset.equity.engine.analytical import AmericanOptionAnalyticalEngine
-from asset.equity.riskmeasures import GreeksCalculator
-from asset.equity.param import PDEParams
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType, BarrierType
-from util.enum.engine_enums import PDEMethod, EngineType, AmericanAnalyticalMethod
+from quantark.asset.equity.engine import PDEEngine, BlackScholesEngine
+from quantark.asset.equity.engine.analytical import AmericanOptionAnalyticalEngine
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.asset.equity.param import PDEParams
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType, BarrierType
+from quantark.util.enum.engine_enums import PDEMethod, EngineType, AmericanAnalyticalMethod
 
 
 def print_section(title: str):

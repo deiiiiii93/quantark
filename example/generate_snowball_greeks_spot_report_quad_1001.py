@@ -24,27 +24,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import pandas as pd
 
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import BumpConfig, EngineParams, QuadParams
-from asset.equity.product.option.snowball_helpers import (
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import BumpConfig, EngineParams, QuadParams
+from quantark.asset.equity.product.option.snowball_helpers import (
     create_airbag_snowball,
     create_european_ki_snowball,
     create_parachute_snowball,
     create_standard_snowball,
     create_stepdown_snowball,
 )
-from asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-from param import FlatVolSurface, SpotQuote
-from param.div import ContinuousDividendYield
-from param.rrf import FlatRateCurve
-from priceenv import PricingEnvironment
+from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
+from quantark.param import FlatVolSurface, SpotQuote
+from quantark.param.div import ContinuousDividendYield
+from quantark.param.rrf import FlatRateCurve
+from quantark.priceenv import PricingEnvironment
 
 
 INITIAL_PRICE = 100.0

@@ -14,26 +14,18 @@ It generates a log–log plot of absolute pricing error vs total number of paths
 
 from __future__ import annotations
 
-import os
-import sys
 from math import exp, log, sqrt
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm
 
-# Add project root directory to Python path so asset.* imports work even when
-# running this script from the example/ directory.
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.append(ROOT_DIR)
-
-from asset.equity.process.bsm.qmc_path_generator import (
+from quantark.asset.equity.process.bsm.qmc_path_generator import (
     GBMPathGenerator,
     GBMPathGeneratorQMC,
 )
-from asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
-from asset.equity.process.bsm.qmc_sobol import (
+from quantark.asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
+from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
 )

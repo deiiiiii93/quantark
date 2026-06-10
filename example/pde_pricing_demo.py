@@ -18,11 +18,9 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import products
-from asset.equity.product.option import (
+from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     AmericanOption,
     BarrierOption,
@@ -32,7 +30,7 @@ from asset.equity.product.option import (
 )
 
 # Import engines
-from asset.equity.engine import (
+from quantark.asset.equity.engine import (
     BlackScholesEngine,
     EuropeanPDESolver,
     AmericanPDESolver,
@@ -43,12 +41,12 @@ from asset.equity.engine import (
 )
 
 # Import parameters and market data
-from asset.equity.param import PDEParams
-from priceenv import PricingEnvironment
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.asset.equity.param import PDEParams
+from quantark.priceenv import PricingEnvironment
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 
 # Import enums
-from util.enum import (
+from quantark.util.enum import (
     OptionType,
     BarrierType,
     DoubleBarrierType,

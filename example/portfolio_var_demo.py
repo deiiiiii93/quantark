@@ -11,22 +11,20 @@ from datetime import datetime, timedelta
 import sys
 from pathlib import Path
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
-from param import (
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+from quantark.param import (
     ContinuousDividendYield,
     FlatRateCurve,
     FlatVolSurface,
     SpotQuote,
 )
-from portfolio.equity.portfolio import EquityPortfolio
-from priceenv import PricingEnvironment
-from util.enum.option_enums import OptionType
+from quantark.portfolio.equity.portfolio import EquityPortfolio
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.option_enums import OptionType
 
-from var import (
+from quantark.var import (
     VaRConfig,
     VaRMethod,
     EquityRiskFactorConfig,

@@ -15,19 +15,17 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.bond.product.couponbond.fixed_bond import FixedBond, create_simple_fixed_bond
-from asset.bond.product.forward.bond_forward import BondForward
-from asset.bond.product.futures.bond_futures import BondFutures, DeliverableBond
-from asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
-from asset.bond.engine.analytical.bond_forward_engine import BondForwardEngine
-from asset.bond.engine.analytical.bond_futures_engine import BondFuturesEngine
-from param.rrf.rate_curve import FlatRateCurve, LinearRateCurve
-from priceenv import PricingEnvironment
-from util.calendar import DayCountConvention
-from util.enum import PaymentFrequency
+from quantark.asset.bond.product.couponbond.fixed_bond import FixedBond, create_simple_fixed_bond
+from quantark.asset.bond.product.forward.bond_forward import BondForward
+from quantark.asset.bond.product.futures.bond_futures import BondFutures, DeliverableBond
+from quantark.asset.bond.engine.discount.bond_discount_engine import BondDiscountEngine
+from quantark.asset.bond.engine.analytical.bond_forward_engine import BondForwardEngine
+from quantark.asset.bond.engine.analytical.bond_futures_engine import BondFuturesEngine
+from quantark.param.rrf.rate_curve import FlatRateCurve, LinearRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import PaymentFrequency
 
 
 def example_1_simple_bond_forward():

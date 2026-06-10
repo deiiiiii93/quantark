@@ -13,31 +13,29 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from portfolio import Portfolio
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
+from quantark.portfolio import Portfolio
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
 
 # Dynamic scenario imports
-from dynamicscenario import (
+from quantark.dynamicscenario import (
     DayPath, DayStep, ParameterChange,
     PathBuilder, PathLibrary,
     DynamicScenarioConfig, DynamicScenarioEngine,
     DynamicScenarioResults
 )
-from dynamicscenario.results.result_exporter import DynamicResultExporter
-from dynamicscenario.report.dynamic_report import DynamicReportGenerator
-from dynamicscenario.report.visualizer import DynamicScenarioVisualizer
-from stresstest.stress.stress_types import StressType
+from quantark.dynamicscenario.results.result_exporter import DynamicResultExporter
+from quantark.dynamicscenario.report.dynamic_report import DynamicReportGenerator
+from quantark.dynamicscenario.report.visualizer import DynamicScenarioVisualizer
+from quantark.stresstest.stress.stress_types import StressType
 
 # Hedging strategy from backtest module
-from backtest.strategy.delta_neutral_strategy import DeltaNeutralStrategy
-from backtest.transaction_costs import ProportionalCostModel
+from quantark.backtest.strategy.delta_neutral_strategy import DeltaNeutralStrategy
+from quantark.backtest.transaction_costs import ProportionalCostModel
 
 
 def print_section(title: str):

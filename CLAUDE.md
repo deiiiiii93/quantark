@@ -15,7 +15,7 @@ python3 -m venv .venv
 ```
 
 ### Package layout & imports
-All library code lives under the single top-level package `quantark` (e.g. `quantark.asset`, `quantark.util`, `quantark.param`). Always write new code with canonical `quantark.*` imports. The 12 historical flat top-level names (`asset`, `util`, `param`, …) still import via a compatibility shim (`quantark/_compat.py`, registered by `quantark_compat.pth`) that aliases them to the same module objects with a `DeprecationWarning` — existing consumers keep working, but do not write new flat imports. `example/` scripts intentionally keep flat imports as a live exerciser of the shim.
+All library code lives under the single top-level package `quantark` (e.g. `quantark.asset`, `quantark.util`, `quantark.param`). Always write new code with canonical `quantark.*` imports. The 12 historical flat top-level names (`asset`, `util`, `param`, …) still import via a compatibility shim (`quantark/_compat.py`, registered by `quantark_compat.pth`) that aliases them to the same module objects with a `DeprecationWarning` — existing consumers keep working, but do not write new flat imports. `example/` scripts use canonical `quantark.*` imports; the shim is exercised by `test/test_legacy_import_compat.py`.
 
 ### Testing
 ```bash

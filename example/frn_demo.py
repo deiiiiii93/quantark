@@ -14,16 +14,14 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.bond.product.couponbond.frn import (
+from quantark.asset.bond.product.couponbond.frn import (
     FloatingRateBond,
     FloatingCashFlow,
     create_simple_frn,
 )
-from asset.bond.engine.discount.frn_engine import FRNDiscountEngine, FRNPricingResults
-from param.index import (
+from quantark.asset.bond.engine.discount.frn_engine import FRNDiscountEngine, FRNPricingResults
+from quantark.param.index import (
     RateIndex,
     IndexFixing,
     IndexFixingStore,
@@ -35,11 +33,11 @@ from param.index import (
     REPO_7D,
     create_index,
 )
-from param.rrf import FlatRateCurve
-from param.rrf.rate_curve import LinearRateCurve
-from priceenv import PricingEnvironment
-from util.calendar import DayCountConvention, BusinessDayConvention
-from util.enum import PaymentFrequency, ResetConvention
+from quantark.param.rrf import FlatRateCurve
+from quantark.param.rrf.rate_curve import LinearRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.calendar import DayCountConvention, BusinessDayConvention
+from quantark.util.enum import PaymentFrequency, ResetConvention
 
 
 def example_1_simple_sofr_frn():

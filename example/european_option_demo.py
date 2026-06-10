@@ -13,17 +13,15 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.product.option import EuropeanVanillaOption
-from asset.equity.engine.analytical import BlackScholesEngine
-from asset.equity.riskmeasures import GreeksCalculator
-from asset.equity.param import EngineParams
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import OptionType
-from util.calendar import DayCountConvention
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.asset.equity.param import EngineParams
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
+from quantark.util.calendar import DayCountConvention
 
 
 def print_section(title: str):

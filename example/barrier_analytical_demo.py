@@ -11,20 +11,18 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-# Add parent directory to path to import QuantArk modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.analytical import BarrierAnalyticalEngine
-from asset.equity.engine.mc import BarrierOptionMCEngine
-from asset.equity.param import MCParams
-from asset.equity.product.option import (
+from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
+from quantark.asset.equity.engine.mc import BarrierOptionMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.product.option import (
     BarrierOption,
     ObservationRecord,
     ObservationSchedule,
 )
-from param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
-from priceenv import PricingEnvironment
-from util.enum import BarrierType, ObservationType, OptionType
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import BarrierType, ObservationType, OptionType
 
 
 def print_section(title: str) -> None:

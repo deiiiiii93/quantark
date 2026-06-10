@@ -5,23 +5,23 @@ Benchmark script for SnowballMCEngine to test Dask parallelization speedup.
 import time
 import datetime
 import numpy as np
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.product.option.snowball_option import SnowballOption
-from asset.equity.product.option.snowball_config import (
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.product.option.snowball_config import (
     BarrierConfig,
     PayoffConfig,
     AccrualConfig,
 )
-from asset.equity.param import MCParams
-from priceenv import PricingEnvironment
-from param import (
+from quantark.asset.equity.param import MCParams
+from quantark.priceenv import PricingEnvironment
+from quantark.param import (
     SpotQuote,
     FlatVolSurface,
     FlatRateCurve,
     ContinuousDividendYield,
 )
-from util.enum import ObservationType, CouponPayType, EngineType
-from util.enum.engine_enums import MonteCarloMethod
+from quantark.util.enum import ObservationType, CouponPayType, EngineType
+from quantark.util.enum.engine_enums import MonteCarloMethod
 
 def run_benchmark():
     # 1. Setup Market Data

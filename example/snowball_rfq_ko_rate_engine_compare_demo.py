@@ -21,21 +21,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde import SnowballPDESolver
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from example.generate_snowball_rfq_ko_rate_demo import (
     BASE_KI_BARRIER,
     BASE_KO_BARRIER,
     solve_fair_ko_rate_with_engine,
 )
-from util.enum.engine_enums import EngineType, MonteCarloMethod
-from util.numerical import format_basis_points, format_percentage
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.util.numerical import format_basis_points, format_percentage
 
 
 @dataclass(frozen=True)

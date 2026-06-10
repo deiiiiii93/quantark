@@ -14,9 +14,8 @@ Run this script to see the IRS module in action.
 
 from datetime import datetime
 import sys
-sys.path.insert(0, '.')
 
-from asset.rate.product.irs import (
+from quantark.asset.rate.product.irs import (
     InterestRateSwap,
     BasisSwap,
     FixedLeg,
@@ -28,17 +27,17 @@ from asset.rate.product.irs import (
     create_amortizing_irs,
     create_compounding_irs,
 )
-from asset.rate.engine.irs_discount_engine import (
+from quantark.asset.rate.engine.irs_discount_engine import (
     IRSDiscountEngine,
     IRSPricingResults,
     BasisSwapPricingResults,
 )
-from asset.bond.schedule.cashflow import CompoundingMethod
-from param.index import SOFR, SOFR_3M, EURIBOR_3M, SHIBOR_3M
-from param.rrf import FlatRateCurve
-from param.rrf.rate_curve import LinearRateCurve
-from priceenv import PricingEnvironment
-from util.enum import PaymentFrequency
+from quantark.asset.bond.schedule.cashflow import CompoundingMethod
+from quantark.param.index import SOFR, SOFR_3M, EURIBOR_3M, SHIBOR_3M
+from quantark.param.rrf import FlatRateCurve
+from quantark.param.rrf.rate_curve import LinearRateCurve
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import PaymentFrequency
 
 
 def print_separator(title: str):

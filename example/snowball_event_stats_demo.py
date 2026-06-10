@@ -21,17 +21,15 @@ from pathlib import Path
 
 import numpy as np
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
-from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from asset.equity.param import MCParams, PDEParams, QuadParams
-from asset.equity.product.option.snowball_helpers import create_standard_snowball
-from param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
-from priceenv import PricingEnvironment
-from util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.product.option.snowball_helpers import create_standard_snowball
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 
 
 def create_pricing_env(
