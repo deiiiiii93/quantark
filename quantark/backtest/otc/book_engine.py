@@ -116,6 +116,7 @@ class BookAutocallableBacktestEngine:
             replay = ProductReplay(
                 product=bp.product,
                 product_quantity=bp.quantity,
+                has_lifecycle=bp.has_lifecycle,
                 lifecycle=lifecycle,
                 pricing_engine=pricing_engine,
                 surface_engine=surface_engine,

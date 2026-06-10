@@ -55,6 +55,7 @@ class ProductReplay:
         *,
         product: Any,
         product_quantity: float,
+        has_lifecycle: bool,
         lifecycle: Any,
         pricing_engine: BaseEngine,
         surface_engine: BaseEngine,
@@ -74,6 +75,7 @@ class ProductReplay:
     ) -> None:
         self.product = product
         self.product_quantity = product_quantity
+        self.has_lifecycle = has_lifecycle
         self.lifecycle = lifecycle
         self.pricing_engine = pricing_engine
         self.surface_engine = surface_engine
@@ -462,6 +464,8 @@ class ProductReplay:
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
         if not self.lifecycle.alive:
+            return
+        if not self.has_lifecycle:
             return
         ko_records = self._scheduled_records(product, env, "ko")
         ko_disabled_after_ki = bool(

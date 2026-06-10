@@ -114,7 +114,7 @@ class AutocallableBacktestDashboard:
     def _build_risk_snapshots(
         self, states: pd.DataFrame
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        product = self.results.config.product
+        product = getattr(self.results.config, "product", None)
         if not isinstance(product, SnowballOption):
             return [], [
                 {
@@ -129,7 +129,7 @@ class AutocallableBacktestDashboard:
         snapshots: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
         surface_engine = create_surface_engine(
-            self.results.config.product, self.results.config.engine_config
+            product, self.results.config.engine_config
         )
 
         for date in dates:

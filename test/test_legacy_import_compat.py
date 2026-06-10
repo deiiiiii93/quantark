@@ -132,7 +132,7 @@ def test_canonical_spec_survives_legacy_import():
 
 def test_installed_distribution_wins_over_alias(tmp_path):
     # A real package named like a legacy root must shadow the shim alias:
-    # the finder is appended to sys.meta_path, so PathFinder runs first.
+    # the finder defers root imports to genuine installed distributions.
     fake = tmp_path / "param"
     fake.mkdir()
     (fake / "__init__.py").write_text("SENTINEL = 'real-third-party'\n")
