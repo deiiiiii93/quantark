@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Run tests
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python -m pytest -m "not slow"
+          else
+            python -m pytest
+          fi
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+      - name: Install wheel in clean venv and smoke test
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/smoke/bin/python - <<'EOF'
+          from quantark.backtest.otc import AutocallableBacktestDashboard
+          from quantark.asset.equity.product.option import EuropeanVanillaOption
+          from quantark.asset.equity.engine.analytical import BlackScholesEngine
+          from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+          from quantark.priceenv import PricingEnvironment
+          from quantark.util.enum import OptionType
+
+          env = PricingEnvironment(
+              spot_quote=SpotQuote(spot=100.0),
+              vol_surface=FlatVolSurface(volatility=0.20),
+              rate_curve=FlatRateCurve(rate=0.05),
+              div_yield=ContinuousDividendYield(div_yield=0.02),
+          )
+          opt = EuropeanVanillaOption(strike=100.0, maturity=1.0, option_type=OptionType.CALL)
+          price = BlackScholesEngine().price(opt, env)
+          assert 8.0 < price < 11.0, f"BS price out of range: {price}"
+          print(f"smoke OK: {price:.6f}")
+          EOF

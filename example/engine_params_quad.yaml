@@ -1,0 +1,5 @@
+engine: quad
+profile: barrier_sensitive
+overrides:
+  num_std_devs: 10
+  fft_filter_alpha: 18
