@@ -22,6 +22,7 @@ from .option_enums import (
 from .engine_enums import (
     EngineType,
     GreeksCalculationMode,
+    KnockInMonitoringMode,
     PDEMethod,
     MonteCarloMethod,
     AmericanAnalyticalMethod,
@@ -60,6 +61,7 @@ __all__ = [
     # Engine enums
     "EngineType",
     "GreeksCalculationMode",
+    "KnockInMonitoringMode",
     "PDEMethod",
     "MonteCarloMethod",
     "AmericanAnalyticalMethod",

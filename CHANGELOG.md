@@ -5,6 +5,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [Unreleased]
+
+### Added
+- `SnowballQuadEngine`: explicit `ki_monitoring_mode` on `QuadParams`
+  (`KnockInMonitoringMode`). `EXACT_DISCRETE` (default) prices every KI
+  observation date exactly with adaptive spatial-grid refinement.
+  `BGK_APPROXIMATION` is an opt-in performance mode that replaces a dense
+  discrete KI schedule with continuous monitoring at a
+  Broadie-Glasserman-Kou shifted barrier; the engine validates approximately
+  regular spacing, a constant resolved barrier, full-horizon coverage, and
+  stable volatility, raising `ValidationError` otherwise. A first-order
+  residual bias remains (a few bp of PV at daily spacing, growing with
+  observation spacing and drift).
+
+### Fixed
+- `SnowballQuadEngine`: dense discrete KI schedules now retain their explicit
+  observation dates instead of being delegated to continuous monitoring. The
+  engine adaptively refines its internal spatial grid to resolve short
+  diffusion intervals, avoiding the material fair-KO-rate bias caused by the
+  previous continuous-monitoring approximation.
+
 ## [0.1.0] - 2026-06-11
 
 ### Added
@@ -21,14 +42,3 @@ During 0.x the public API may still change between minor versions.
   hedging backtest framework.
 - Legacy flat-import compatibility shim (`asset`, `util`, …) with
   `DeprecationWarning`; slated for removal in 1.0.
-
-### Fixed
-- `SnowballQuadEngine`: the dense-discrete-KI-to-continuous bridge
-  approximation now applies a Broadie-Glasserman-Kou barrier shift to
-  emulate discrete monitoring. Previously the conversion monitored the
-  unshifted barrier continuously, overstating knock-in probability (fair
-  KO-rate bias of up to ~0.9 coupon points vs PDE/MC on daily-KI
-  snowballs). A first-order residual can remain for strongly drifted
-  (deep-carry) underlyings; set
-  `QuadParams.dense_discrete_ki_as_continuous_threshold=0` with a
-  sufficiently fine grid for exact discrete pricing.

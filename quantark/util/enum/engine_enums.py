@@ -117,6 +117,30 @@ class QuadratureMethod(Enum):
         return self.value
 
 
+class KnockInMonitoringMode(Enum):
+    """Treatment of discrete knock-in schedules in quadrature engines.
+
+    Attributes:
+        EXACT_DISCRETE: Price every KI observation date exactly; the engine
+            adaptively refines its spatial grid to resolve short diffusion
+            intervals. This is the default.
+        BGK_APPROXIMATION: Opt-in performance mode that replaces a dense
+            discrete KI schedule with continuous Brownian-bridge monitoring
+            at a Broadie-Glasserman-Kou (1997) shifted barrier. Only valid
+            when the schedule is approximately regular, the resolved barrier
+            is constant, monitoring covers the full pricing horizon, and the
+            volatility surface is stable over the schedule; the engine raises
+            ValidationError otherwise. A first-order residual bias remains
+            (largest for coarse spacing and strong drift).
+    """
+
+    EXACT_DISCRETE = "exact_discrete"
+    BGK_APPROXIMATION = "bgk_approximation"
+
+    def __str__(self):
+        return self.value
+
+
 class GreeksCalculationMode(Enum):
     """Mode for calculating delta/gamma in GreeksCalculator.
 

@@ -25,9 +25,16 @@ from quantark.asset.equity.product.option.snowball_config import (
     PayoffConfig,
 )
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
-from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.param import (
+    ContinuousDividendYield,
+    FlatRateCurve,
+    FlatVolSurface,
+    SpotQuote,
+    TermStructureVolSurface,
+)
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import ObservationType
+from quantark.util.enum import KnockInMonitoringMode, ObservationType
+from quantark.util.exceptions import NumericalError, ValidationError
 
 
 def create_pricing_env(
@@ -372,3 +379,184 @@ def test_diffuse_fft_vectorized_matches_single_surface_path():
     )
 
     assert vectorized == pytest.approx(rowwise, rel=1e-12, abs=1e-12)
+
+
+def test_dense_discrete_ki_does_not_delegate_to_continuous_bridge(monkeypatch):
+    env = create_pricing_env()
+    ki_dates = [(index + 1) / 130.0 for index in range(130)]
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ki_observation_dates=ki_dates,
+    )
+    product = create_standard_snowball(barrier_config)
+    engine = SnowballQuadEngine(params=QuadParams(grid_points=301))
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("discrete KI must not use Brownian-bridge diffusion")
+
+    monkeypatch.setattr(engine, "_diffuse_with_bridge", fail_if_called)
+
+    assert np.isfinite(engine.price(product, env))
+
+
+def test_dense_discrete_ki_refines_under_resolved_grid():
+    engine = SnowballQuadEngine(params=QuadParams(grid_points=301))
+    times = [(index + 1) / 244.0 for index in range(244)]
+
+    resolved = engine._resolve_grid_points(maturity=1.0, vol=0.20, times=times)
+
+    assert resolved > engine.params.grid_points
+    assert resolved % 2 == 1
+
+
+def test_adaptive_grid_refinement_can_be_disabled():
+    engine = SnowballQuadEngine(
+        params=QuadParams(grid_points=301, min_diffusion_stddev_cells=0.0)
+    )
+    times = [(index + 1) / 244.0 for index in range(244)]
+
+    assert engine._resolve_grid_points(maturity=1.0, vol=0.20, times=times) == 301
+
+
+def test_adaptive_grid_refinement_respects_safety_cap():
+    engine = SnowballQuadEngine(
+        params=QuadParams(grid_points=301, max_adaptive_grid_points=501)
+    )
+    times = [(index + 1) / 244.0 for index in range(244)]
+
+    with pytest.raises(NumericalError, match="max_adaptive_grid_points=501"):
+        engine._resolve_grid_points(maturity=1.0, vol=0.20, times=times)
+
+
+def create_daily_ki_snowball(num_observations: int = 252) -> SnowballOption:
+    ki_dates = [(index + 1) / num_observations for index in range(num_observations)]
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ki_observation_dates=ki_dates,
+    )
+    return create_standard_snowball(barrier_config)
+
+
+def test_ki_monitoring_mode_defaults_to_exact_discrete():
+    assert QuadParams().ki_monitoring_mode is KnockInMonitoringMode.EXACT_DISCRETE
+
+
+def test_ki_monitoring_mode_accepts_string_and_rejects_unknown():
+    params = QuadParams(ki_monitoring_mode="BGK_APPROXIMATION")
+    assert params.ki_monitoring_mode is KnockInMonitoringMode.BGK_APPROXIMATION
+
+    with pytest.raises(ValidationError, match="ki_monitoring_mode"):
+        QuadParams(ki_monitoring_mode="continuous_magic")
+
+
+def test_bgk_mode_matches_exact_discrete_on_regular_daily_schedule():
+    env = create_pricing_env()
+    product = create_daily_ki_snowball()
+
+    exact = SnowballQuadEngine(params=QuadParams()).price(product, env)
+    bgk = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    ).price(product, env)
+
+    assert abs(bgk - exact) < 5e-4 * abs(exact)
+
+
+def test_bgk_mode_routes_dense_discrete_ki_through_bridge(monkeypatch):
+    env = create_pricing_env()
+    product = create_daily_ki_snowball()
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    bridge_calls = []
+    original = engine._diffuse_with_bridge
+
+    def record_bridge(*args, **kwargs):
+        bridge_calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "_diffuse_with_bridge", record_bridge)
+
+    assert np.isfinite(engine.price(product, env))
+    assert bridge_calls
+
+
+def test_bgk_mode_rejects_irregular_ki_schedule():
+    env = create_pricing_env()
+    ki_dates = [(month + 1) / 12.0 for month in range(6)] + [
+        0.5 + (index + 1) / 252.0 for index in range(126)
+    ]
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ki_observation_dates=ki_dates,
+    )
+    product = create_standard_snowball(barrier_config)
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    with pytest.raises(ValidationError, match="regular"):
+        engine.price(product, env)
+
+
+def test_bgk_mode_rejects_partial_monitoring_window():
+    env = create_pricing_env()
+    ki_dates = [0.5 + (index + 1) / 252.0 for index in range(126)]
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ki_observation_dates=ki_dates,
+    )
+    product = create_standard_snowball(barrier_config)
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    with pytest.raises(ValidationError, match="horizon"):
+        engine.price(product, env)
+
+
+def test_bgk_mode_rejects_varying_ki_barrier_schedule():
+    env = create_pricing_env()
+    num_observations = 252
+    ki_dates = [(index + 1) / num_observations for index in range(num_observations)]
+    step_down_barriers = [
+        75.0 - 2.0 * index / (num_observations - 1) for index in range(num_observations)
+    ]
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=step_down_barriers,
+        ki_continuous=False,
+        ki_observation_dates=ki_dates,
+    )
+    product = create_standard_snowball(barrier_config)
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    with pytest.raises(ValidationError, match="constant"):
+        engine.price(product, env)
+
+
+def test_bgk_mode_rejects_unstable_volatility():
+    env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=TermStructureVolSurface(times=[0.1, 1.0], vols=[0.40, 0.20]),
+        rate_curve=FlatRateCurve(rate=0.05),
+        div_yield=ContinuousDividendYield(div_yield=0.02),
+        valuation_date=datetime(2024, 1, 1),
+    )
+    product = create_daily_ki_snowball()
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    with pytest.raises(ValidationError, match="volatility"):
+        engine.price(product, env)

@@ -20,8 +20,8 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType
-from quantark.util.enum.engine_enums import EngineType
-from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.enum.engine_enums import EngineType, KnockInMonitoringMode
+from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
     is_close,
@@ -35,6 +35,19 @@ from quantark.util.numerical import (
 # beta = -zeta(1/2) / sqrt(2*pi). A barrier monitored discretely at spacing
 # dt is approximated by a continuous barrier shifted by exp(±beta*vol*sqrt(dt)).
 _BGK_BETA = 0.5825971579390107
+
+# Validity gates for KnockInMonitoringMode.BGK_APPROXIMATION. The shift assumes
+# regular monitoring of a constant barrier over the full pricing horizon at a
+# single volatility; outside these bounds the engine refuses to approximate.
+# Spacing ratio 7 tolerates weekend/holiday gaps in business-day daily
+# schedules while rejecting mixed-frequency schedules.
+_BGK_MAX_SPACING_RATIO = 7.0
+# Schedule must start within this many mean spacings of valuation and end
+# within this many mean spacings of maturity.
+_BGK_MAX_EDGE_GAP_RATIO = 2.0
+# Maximum relative deviation of the surface vol sampled along the schedule
+# (at the KI barrier) from the single pricing vol used for the shift.
+_BGK_MAX_VOL_DISPERSION = 0.25
 
 
 class SnowballQuadEngine(BaseEngine):
@@ -102,9 +115,9 @@ class SnowballQuadEngine(BaseEngine):
             ki_records = product.resolve_ki_observations(pricing_env)
             if not ki_records:
                 raise PricingError("KI observation schedule is empty for SnowballQuadEngine.")
-            if self._treat_dense_discrete_ki_as_continuous(product, ki_records):
+            if self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION:
                 ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
-                    product, ki_records, vol
+                    product, ki_records, pricing_env, vol, maturity
                 )
                 ki_continuous = True
                 ki_records = []
@@ -132,8 +145,11 @@ class SnowballQuadEngine(BaseEngine):
         align_log = self._select_alignment_log(spot, product)
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
+        grid_points = self._resolve_grid_points(
+            maturity, vol, [rec.observation_time for rec in ki_records]
+        )
         math_utils = QuadratureMath(
-            grid_x=self.params.grid_points,
+            grid_x=grid_points,
             spot=spot,
             maturity=maturity,
             vol_max=vol,
@@ -337,9 +353,11 @@ class SnowballQuadEngine(BaseEngine):
             ki_barrier_continuous = self._continuous_ki_barrier_value(product)
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
-            if self._treat_dense_discrete_ki_as_continuous(product, ki_records):
+            if ki_records and (
+                self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION
+            ):
                 ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
-                    product, ki_records, vol
+                    product, ki_records, pricing_env, vol, maturity
                 )
                 ki_continuous = True
                 ki_records = []
@@ -372,8 +390,11 @@ class SnowballQuadEngine(BaseEngine):
         align_log = self._select_alignment_log(spot, product)
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
+        grid_points = self._resolve_grid_points(
+            maturity, vol, [rec.observation_time for rec in ki_records]
+        )
         math_utils = QuadratureMath(
-            grid_x=self.params.grid_points,
+            grid_x=grid_points,
             spot=spot,
             maturity=maturity,
             vol_max=vol,
@@ -636,32 +657,48 @@ class SnowballQuadEngine(BaseEngine):
             raise PricingError("SnowballQuadEngine requires discrete KO monitoring.")
         # Airbag and call-rebate features are handled via product payoff functions.
 
-    def _treat_dense_discrete_ki_as_continuous(
-        self, product: SnowballOption, ki_records: Sequence
-    ) -> bool:
-        """
-        Use bridge monitoring for dense discrete KI schedules.
+    def _resolve_grid_points(
+        self, maturity: float, vol: float, times: Sequence[float]
+    ) -> int:
+        """Refine the spatial grid until the shortest diffusion step is resolved."""
+        requested = int(self.params.grid_points)
+        min_cells = float(getattr(self.params, "min_diffusion_stddev_cells", 0.0) or 0.0)
+        if min_cells <= 0.0 or not times:
+            return requested
 
-        Daily DKI schedules over multi-year tenors create hundreds of tiny
-        quadrature steps; on grids that are coarse relative to the schedule
-        density the exact two-surface recursion can diverge. The continuous
-        bridge with a Broadie-Glasserman-Kou barrier shift (emulating the
-        discrete monitoring) is the stable approximation used for pricing;
-        set the threshold to 0 (with a sufficiently fine grid) for exact
-        discrete pricing. Lifecycle handling in the OTC backtest always uses
-        the product's explicit observation schedule.
-        """
-        threshold = int(
-            getattr(self.params, "dense_discrete_ki_as_continuous_threshold", 120)
-            or 0
+        times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))
+        positive_dt = np.diff(times_full)
+        positive_dt = positive_dt[positive_dt > Tolerance.ZERO]
+        if positive_dt.size == 0:
+            return requested
+
+        min_diffusion_stddev = vol * math.sqrt(float(np.min(positive_dt)))
+        log_half_width = (
+            float(self.params.num_std_devs) * vol * math.sqrt(maturity)
+            + (1.0 + 0.5 * vol * vol) * maturity
         )
-        if threshold <= 0 or len(ki_records) <= threshold:
-            return False
-        if product.barrier_config.ki_barrier is None:
-            return False
-        if isinstance(product.barrier_config.ki_barrier, list):
-            return False
-        return True
+        required = int(
+            math.ceil(1.0 + 2.0 * log_half_width * min_cells / min_diffusion_stddev)
+        )
+        if required % 2 == 0:
+            required += 1
+        max_adaptive = int(getattr(self.params, "max_adaptive_grid_points", 5001))
+        if required > max_adaptive and requested < required:
+            raise NumericalError(
+                "Observation intervals require at least "
+                f"{required} quadrature grid points to resolve the shortest diffusion "
+                f"step, exceeding max_adaptive_grid_points={max_adaptive}. Increase "
+                "max_adaptive_grid_points or use a different pricing engine."
+            )
+        return max(requested, required)
+
+    def _ki_monitoring_mode(self) -> KnockInMonitoringMode:
+        mode = getattr(
+            self.params, "ki_monitoring_mode", KnockInMonitoringMode.EXACT_DISCRETE
+        )
+        if isinstance(mode, str):
+            mode = KnockInMonitoringMode(mode.lower())
+        return mode
 
     def _continuous_ki_barrier_value(self, product: SnowballOption) -> float:
         """Validated scalar KI barrier for continuous-monitoring pricing."""
@@ -673,30 +710,107 @@ class SnowballQuadEngine(BaseEngine):
         return float(ki_barrier)
 
     def _bgk_equivalent_continuous_ki_barrier(
-        self, product: SnowballOption, ki_records: Sequence, vol: float
+        self,
+        product: SnowballOption,
+        ki_records: Sequence,
+        pricing_env: PricingEnvironment,
+        vol: float,
+        maturity: float,
     ) -> float:
         """
-        Continuous-equivalent KI barrier for a dense discrete schedule.
+        Continuous-equivalent KI barrier for a regular discrete schedule.
 
-        When a dense discrete KI schedule is priced with the continuous
-        bridge approximation, the barrier must be shifted away from the
-        monitoring region (Broadie-Glasserman-Kou 1997): a down-in barrier
-        B monitored at spacing dt is equivalent to a continuous barrier at
-        B * exp(-beta * vol * sqrt(dt)); an up-in (reverse) barrier shifts
-        by the reciprocal factor. Without the shift, continuous monitoring
-        systematically overstates the knock-in probability.
+        A down-in barrier B monitored at spacing dt is approximated by a
+        continuous barrier at B * exp(-beta * vol * sqrt(dt)); an up-in
+        (reverse) barrier shifts by the reciprocal factor
+        (Broadie-Glasserman-Kou 1997). The shift is first-order accurate and
+        only sound for approximately regular schedules with a constant
+        resolved barrier covering the full pricing horizon under stable
+        volatility; this method validates those conditions and raises
+        ValidationError when the schedule does not qualify.
         """
-        barrier = self._continuous_ki_barrier_value(product)
+        barrier = self._bgk_constant_resolved_barrier(ki_records)
+
         obs_times = np.unique(
             np.asarray([rec.observation_time for rec in ki_records], dtype=float)
         )
         spacings = np.diff(obs_times)
-        spacings = spacings[spacings > 0.0]
+        spacings = spacings[spacings > Tolerance.ZERO]
         if spacings.size == 0:
-            return barrier
-        avg_dt = float(np.mean(spacings))
-        shift = _BGK_BETA * vol * math.sqrt(avg_dt)
+            raise ValidationError(
+                "BGK_APPROXIMATION requires at least two distinct KI observation "
+                "dates; use KnockInMonitoringMode.EXACT_DISCRETE."
+            )
+        mean_dt = float(np.mean(spacings))
+        max_dt = float(np.max(spacings))
+        if max_dt > _BGK_MAX_SPACING_RATIO * mean_dt:
+            raise ValidationError(
+                "BGK_APPROXIMATION requires approximately regular KI observation "
+                f"intervals: max spacing {max_dt:.6g} exceeds "
+                f"{_BGK_MAX_SPACING_RATIO:g}x mean spacing {mean_dt:.6g}; use "
+                "KnockInMonitoringMode.EXACT_DISCRETE."
+            )
+
+        first_gap = float(obs_times[0])
+        last_gap = float(maturity) - float(obs_times[-1])
+        edge_tol = _BGK_MAX_EDGE_GAP_RATIO * mean_dt
+        if first_gap > edge_tol or last_gap > edge_tol:
+            raise ValidationError(
+                "BGK_APPROXIMATION requires KI monitoring to cover the full "
+                f"pricing horizon: schedule spans [{float(obs_times[0]):.6g}, "
+                f"{float(obs_times[-1]):.6g}] of [0, {float(maturity):.6g}]; use "
+                "KnockInMonitoringMode.EXACT_DISCRETE."
+            )
+
+        self._validate_bgk_vol_stability(pricing_env, barrier, obs_times, vol)
+
+        shift = _BGK_BETA * vol * math.sqrt(mean_dt)
         return barrier * safe_exp(shift if product.is_reverse else -shift)
+
+    def _bgk_constant_resolved_barrier(self, ki_records: Sequence) -> float:
+        """Resolved KI barrier, validated constant across all observations."""
+        barriers = [rec.barrier for rec in ki_records]
+        if any(b is None for b in barriers):
+            raise ValidationError(
+                "BGK_APPROXIMATION requires every KI observation to resolve a "
+                "barrier level; use KnockInMonitoringMode.EXACT_DISCRETE."
+            )
+        reference = float(barriers[0])
+        for b in barriers[1:]:
+            if not is_close(float(b), reference, abs_tol=Tolerance.PRECISION):
+                raise ValidationError(
+                    "BGK_APPROXIMATION requires a constant resolved KI barrier, "
+                    f"got per-observation levels {reference:.6g} and {float(b):.6g}; "
+                    "use KnockInMonitoringMode.EXACT_DISCRETE."
+                )
+        return reference
+
+    def _validate_bgk_vol_stability(
+        self,
+        pricing_env: PricingEnvironment,
+        barrier: float,
+        obs_times: np.ndarray,
+        vol: float,
+    ) -> None:
+        """Require the surface vol along the schedule to stay near the pricing vol."""
+        sample_times = obs_times
+        if sample_times.size > 16:
+            indices = np.linspace(0, sample_times.size - 1, 16).astype(int)
+            sample_times = sample_times[indices]
+        for t in sample_times:
+            sampled = float(pricing_env.get_vol(barrier, float(t)))
+            if not np.isfinite(sampled) or sampled <= 0.0:
+                raise ValidationError(
+                    f"BGK_APPROXIMATION sampled an invalid volatility {sampled} at "
+                    f"t={float(t):.6g}; use KnockInMonitoringMode.EXACT_DISCRETE."
+                )
+            if abs(sampled - vol) > _BGK_MAX_VOL_DISPERSION * vol:
+                raise ValidationError(
+                    "BGK_APPROXIMATION requires stable volatility over the KI "
+                    f"schedule: vol {sampled:.6g} at t={float(t):.6g} deviates more "
+                    f"than {_BGK_MAX_VOL_DISPERSION:.0%} from pricing vol "
+                    f"{vol:.6g}; use KnockInMonitoringMode.EXACT_DISCRETE."
+                )
 
     def _diffuse_fft(
         self,

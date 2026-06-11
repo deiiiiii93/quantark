@@ -4,7 +4,8 @@ Engine configuration parameters.
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Union
+from quantark.util.enum.engine_enums import KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
 
 
@@ -585,17 +586,22 @@ class QuadParams(EngineParams):
         event_smoothing_mode: Smoothing mode (fixed, auto, reverse_aware).
         event_smoothing_kernel: Smoothing kernel (cosine, tanh).
         event_smoothing_log_width: Target log-space width for auto smoothing.
-        dense_discrete_ki_as_continuous_threshold: Discrete KI schedules with
-            more observations than this threshold are priced with the
-            continuous KI bridge approximation, using a Broadie-Glasserman-Kou
-            barrier shift to emulate discrete monitoring. This keeps the
-            recursion numerically stable when the schedule is dense relative
-            to grid_points (exact discrete pricing can diverge on coarse
-            grids). The shift is first-order accurate; a residual bias can
-            remain for strongly drifted (deep-carry) underlyings. Set to 0 to
-            price discrete schedules exactly — accurate and convergent in
-            grid_points, but requires a grid fine enough for the schedule
-            density (roughly grid_points >= 2x observations).
+        min_diffusion_stddev_cells: Minimum spatial-grid cells per discrete-KI
+            interval diffusion standard deviation. The engine increases its
+            internal odd grid size when dense KI intervals would otherwise be
+            under-resolved. Set to 0 to disable adaptive refinement.
+        max_adaptive_grid_points: Maximum grid size selected by adaptive
+            refinement. Explicitly requested larger grids are still honored.
+        ki_monitoring_mode: Treatment of discrete KI schedules
+            (KnockInMonitoringMode or its string value, case-insensitive).
+            EXACT_DISCRETE (default) prices every KI observation date exactly
+            with adaptive grid refinement. BGK_APPROXIMATION is an opt-in
+            performance mode that replaces the discrete schedule with
+            continuous monitoring at a Broadie-Glasserman-Kou shifted
+            barrier; the engine validates regular spacing, constant resolved
+            barrier, full-horizon coverage, and stable volatility, raising
+            ValidationError when the schedule does not qualify. Ignored for
+            products without a discrete KI schedule.
     """
 
     grid_points: int = 1001  # Odd number for Simpson's rule
@@ -609,7 +615,11 @@ class QuadParams(EngineParams):
     event_smoothing_mode: str = "fixed"
     event_smoothing_kernel: str = "cosine"
     event_smoothing_log_width: float = 0.002
-    dense_discrete_ki_as_continuous_threshold: int = 120
+    min_diffusion_stddev_cells: float = 1.25
+    max_adaptive_grid_points: int = 5001
+    ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
+        KnockInMonitoringMode.EXACT_DISCRETE
+    )
 
     def __post_init__(self):
         """Validate quadrature parameters."""
@@ -685,10 +695,31 @@ class QuadParams(EngineParams):
             raise ValidationError(
                 f"event_smoothing_log_width must be positive, got {self.event_smoothing_log_width}"
             )
-        if self.dense_discrete_ki_as_continuous_threshold < 0:
+        if self.min_diffusion_stddev_cells < 0:
             raise ValidationError(
-                "dense_discrete_ki_as_continuous_threshold must be non-negative, "
-                f"got {self.dense_discrete_ki_as_continuous_threshold}"
+                "min_diffusion_stddev_cells must be non-negative, "
+                f"got {self.min_diffusion_stddev_cells}"
+            )
+        if self.max_adaptive_grid_points < 101:
+            raise ValidationError(
+                "max_adaptive_grid_points must be at least 101, "
+                f"got {self.max_adaptive_grid_points}"
+            )
+        if isinstance(self.ki_monitoring_mode, str):
+            try:
+                self.ki_monitoring_mode = KnockInMonitoringMode(
+                    self.ki_monitoring_mode.lower()
+                )
+            except ValueError:
+                raise ValidationError(
+                    "ki_monitoring_mode must be one of "
+                    f"{[mode.value for mode in KnockInMonitoringMode]}, "
+                    f"got {self.ki_monitoring_mode!r}"
+                )
+        elif not isinstance(self.ki_monitoring_mode, KnockInMonitoringMode):
+            raise ValidationError(
+                "ki_monitoring_mode must be a KnockInMonitoringMode or its "
+                f"string value, got {type(self.ki_monitoring_mode).__name__}"
             )
 
     @classmethod
