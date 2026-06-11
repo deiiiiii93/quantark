@@ -505,6 +505,36 @@ def test_bgk_mode_rejects_irregular_ki_schedule():
         engine.price(product, env)
 
 
+def test_bgk_mode_rejects_late_starting_daily_window():
+    """A daily schedule omitting its first eight days must not be BGK-converted.
+
+    Continuous monitoring would cover the unmonitored opening window and
+    materially overstate the knock-in probability near the barrier.
+    """
+    env = create_pricing_env()
+    ki_dates = [(index + 8) / 365.0 for index in range(358)]
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ki_observation_dates=ki_dates,
+    )
+    product = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        contract_multiplier=10_000.0,
+        maturity=ki_dates[-1],
+        is_reverse=False,
+    )
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    with pytest.raises(ValidationError, match="horizon"):
+        engine.price(product, env)
+
+
 def test_bgk_mode_rejects_partial_monitoring_window():
     env = create_pricing_env()
     ki_dates = [0.5 + (index + 1) / 252.0 for index in range(126)]

@@ -27,8 +27,10 @@ During 0.x the public API may still change between minor versions.
 - `SnowballQuadEngine`: dense discrete KI schedules now retain their explicit
   observation dates instead of being delegated to continuous monitoring. The
   engine adaptively refines its internal spatial grid to resolve short
-  diffusion intervals, avoiding the material fair-KO-rate bias caused by the
-  previous continuous-monitoring approximation.
+  diffusion intervals (accuracy-oriented default of 2.5 cells per interval
+  diffusion stddev; lower to 1.25 or opt into BGK for speed), avoiding the
+  material fair-KO-rate bias caused by the previous continuous-monitoring
+  approximation.
 
 ## [0.1.0] - 2026-06-11
 

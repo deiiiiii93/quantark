@@ -589,7 +589,11 @@ class QuadParams(EngineParams):
         min_diffusion_stddev_cells: Minimum spatial-grid cells per discrete-KI
             interval diffusion standard deviation. The engine increases its
             internal odd grid size when dense KI intervals would otherwise be
-            under-resolved. Set to 0 to disable adaptive refinement.
+            under-resolved. The default 2.5 is accuracy-oriented (it removes
+            the material deep-carry quote error measured at 1.25);
+            performance-sensitive workloads such as large Greek/scenario
+            reports may explicitly lower it to 1.25 or opt into
+            BGK_APPROXIMATION. Set to 0 to disable adaptive refinement.
         max_adaptive_grid_points: Maximum grid size selected by adaptive
             refinement. Explicitly requested larger grids are still honored.
         ki_monitoring_mode: Treatment of discrete KI schedules
@@ -619,7 +623,7 @@ class QuadParams(EngineParams):
     event_smoothing_mode: str = "fixed"
     event_smoothing_kernel: str = "cosine"
     event_smoothing_log_width: float = 0.002
-    min_diffusion_stddev_cells: float = 1.25
+    min_diffusion_stddev_cells: float = 2.5
     max_adaptive_grid_points: int = 5001
     ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
         KnockInMonitoringMode.EXACT_DISCRETE

@@ -47,6 +47,11 @@ _BGK_BETA = 0.5825971579390107
 _BGK_REGULAR_BAND = (0.5, 1.5)
 _BGK_MIN_REGULAR_FRACTION = 0.70
 _BGK_MAX_SPACING_RATIO = 9.0  # max spacing vs median spacing
+# The schedule must start within this many median spacings of valuation and
+# end within this many median spacings of maturity: continuous monitoring
+# covers the gaps, so a wider unmonitored window materially overstates the
+# knock-in probability. 3x tolerates a weekend at either boundary.
+_BGK_MAX_EDGE_GAP_RATIO = 3.0
 # Maximum relative deviation of the surface vol sampled along the schedule
 # (at the KI barrier) from the single pricing vol used for the shift.
 _BGK_MAX_VOL_DISPERSION = 0.25
@@ -789,7 +794,7 @@ class SnowballQuadEngine(BaseEngine):
 
         first_gap = float(obs_times[0])
         last_gap = float(maturity) - float(obs_times[-1])
-        edge_tol = _BGK_MAX_SPACING_RATIO * median_dt
+        edge_tol = _BGK_MAX_EDGE_GAP_RATIO * median_dt
         if first_gap > edge_tol or last_gap > edge_tol:
             raise ValidationError(
                 "BGK_APPROXIMATION requires KI monitoring to cover the full "

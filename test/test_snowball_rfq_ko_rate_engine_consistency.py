@@ -68,14 +68,15 @@ def test_snowball_rfq_ko_rate_consistency(case, engines) -> None:
 def test_exact_discrete_fair_ko_rate_grid_convergence(label, case_kwargs) -> None:
     """Exact-discrete quad fair KO rates must converge under grid refinement.
 
-    Measured ladders (2026-06-11): the deep-carry case is the slowest to
-    converge — at the default 1001-point grid its fair KO rate sits ~38bp
-    above the refined cluster (0.631800 vs ~0.6281 at 4001+), because low
-    volatility concentrates barrier sensitivity below the spatial resolution
-    that the stability-oriented adaptive refinement guarantees. Stress
-    (+2.1bp) and long-maturity (+5.3bp) are comfortable at the default.
-    The bounds below lock in those measured accuracies; deep-carry RFQ
-    work should request grid_points >= 2001 explicitly.
+    Measured ladders (2026-06-11): deep carry is the slowest-converging
+    regime — low volatility concentrates barrier sensitivity below coarse
+    spatial resolution, leaving its fair KO rate ~38bp high on a raw
+    1001-point grid (0.631800 vs ~0.6281 at 4001+) while stress (+2.1bp)
+    and long-maturity (+5.3bp) were already comfortable. The accuracy-
+    oriented default min_diffusion_stddev_cells=2.5 refines deep carry to
+    ~2001 points automatically (0.628816); performance-sensitive callers
+    that lower it to 1.25 reintroduce the coarse-grid error. The bounds
+    below lock in the measured accuracies.
     """
     fair = {}
     for grid in (1001, 2001, 4001):
