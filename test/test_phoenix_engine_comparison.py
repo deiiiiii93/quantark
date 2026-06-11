@@ -31,6 +31,7 @@ from quantark.asset.equity.product.option.observation_schedule import (
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
+from quantark.util.enum.engine_enums import MonteCarloMethod
 
 
 @pytest.fixture(scope="module")
@@ -43,7 +44,10 @@ def engines():
     return {
         "quad": PhoenixQuadEngine(params=QuadParams(grid_points=401)),
         "pde": PhoenixPDESolver(params=PDEParams(grid_size=200, time_steps=100)),
-        "mc": PhoenixMCEngine(params=MCParams(num_paths=50000, seed=42)),
+        "mc": PhoenixMCEngine(
+            params=MCParams(num_paths=65536, seed=42),
+            method=MonteCarloMethod.QUASI,
+        ),
     }
 
 
