@@ -505,6 +505,40 @@ def test_bgk_mode_rejects_irregular_ki_schedule():
         engine.price(product, env)
 
 
+def test_bgk_mode_accepts_exact_weekend_gap_at_schedule_boundaries():
+    """An exact 3-day gap at either schedule edge sits on the documented
+    3x-median allowance and must pass despite last-ulp float noise."""
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    # Opening weekend: first observation exactly 3/365 after valuation.
+    opening = [(index + 3) / 365.0 for index in range(360)]
+    # Closing weekend: last observation exactly 3/365 before maturity.
+    closing = [(index + 1) / 365.0 for index in range(360)]
+
+    for ki_dates, maturity in (
+        (opening, opening[-1]),
+        (closing, closing[-1] + 3.0 / 365.0),
+    ):
+        barrier_config = create_barrier_config(
+            ko_barrier=103.0,
+            ki_barrier=75.0,
+            ki_continuous=False,
+            ko_observation_dates=[(month + 1) * maturity / 12.0 for month in range(12)],
+            ki_observation_dates=ki_dates,
+        )
+        product = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            contract_multiplier=10_000.0,
+            maturity=maturity,
+            is_reverse=False,
+        )
+        assert np.isfinite(engine.price(product, create_pricing_env()))
+
+
 def test_bgk_mode_rejects_late_starting_daily_window():
     """A daily schedule omitting its first eight days must not be BGK-converted.
 

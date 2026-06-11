@@ -771,17 +771,22 @@ class SnowballQuadEngine(BaseEngine):
                 "bgk_min_ki_observations."
             )
 
+        # Documented boundary values (e.g. an exact 3-day weekend gap at 3x a
+        # 1-day median) must pass despite last-ulp float noise, so every gate
+        # comparison is widened by Tolerance.PRECISION.
         median_dt = float(np.median(spacings))
         band_lo, band_hi = _BGK_REGULAR_BAND
         in_band_fraction = float(
             np.mean(
-                (spacings >= band_lo * median_dt) & (spacings <= band_hi * median_dt)
+                (spacings >= band_lo * median_dt - Tolerance.PRECISION)
+                & (spacings <= band_hi * median_dt + Tolerance.PRECISION)
             )
         )
         max_dt = float(np.max(spacings))
-        if (
-            in_band_fraction < _BGK_MIN_REGULAR_FRACTION
-            or max_dt > _BGK_MAX_SPACING_RATIO * median_dt
+        max_spacing_cap = _BGK_MAX_SPACING_RATIO * median_dt
+        if in_band_fraction < _BGK_MIN_REGULAR_FRACTION or (
+            max_dt > max_spacing_cap
+            and not is_close(max_dt, max_spacing_cap, abs_tol=Tolerance.PRECISION)
         ):
             raise ValidationError(
                 "BGK_APPROXIMATION requires approximately regular KI observation "
@@ -795,7 +800,13 @@ class SnowballQuadEngine(BaseEngine):
         first_gap = float(obs_times[0])
         last_gap = float(maturity) - float(obs_times[-1])
         edge_tol = _BGK_MAX_EDGE_GAP_RATIO * median_dt
-        if first_gap > edge_tol or last_gap > edge_tol:
+        first_exceeds = first_gap > edge_tol and not is_close(
+            first_gap, edge_tol, abs_tol=Tolerance.PRECISION
+        )
+        last_exceeds = last_gap > edge_tol and not is_close(
+            last_gap, edge_tol, abs_tol=Tolerance.PRECISION
+        )
+        if first_exceeds or last_exceeds:
             raise ValidationError(
                 "BGK_APPROXIMATION requires KI monitoring to cover the full "
                 f"pricing horizon: schedule spans [{float(obs_times[0]):.6g}, "
