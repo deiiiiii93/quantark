@@ -9,6 +9,8 @@ from datetime import date
 from typing import Dict, List, Optional, Any, Union
 import json
 
+from quantark.util.numerical import Tolerance, almost_equal
+
 from ..taxonomy import ProductClass, RiskClass, MarginType
 from ..sensitivity import Sensitivity
 
@@ -167,7 +169,7 @@ class SIMMResult:
         product_class_sum = sum(self.product_class_simm.values())
         expected_total = product_class_sum + self.addon_amount
 
-        if abs(self.total_simm - expected_total) > 1e-6:
+        if not almost_equal(self.total_simm, expected_total, tol=Tolerance.PRECISION):
             raise ValidationError(
                 f"Total SIMM {self.total_simm} does not match sum of product classes "
                 f"{product_class_sum} plus addon {self.addon_amount}"
@@ -192,7 +194,7 @@ class SIMMResult:
             actual_margin = sum(
                 rc.total_margin for rc in self.risk_class_margin[pc].values()
             )
-            if abs(actual_margin - expected_margin) > 1e-6:
+            if not almost_equal(actual_margin, expected_margin, tol=Tolerance.PRECISION):
                 raise ValidationError(
                     f"Product class {pc} margin {actual_margin} does not match "
                     f"sum of risk classes {expected_margin}"
@@ -327,7 +329,7 @@ class SIMMResult:
                     )
                     if other_bucket:
                         delta_k = bucket_detail.k_value - other_bucket.k_value
-                        if abs(delta_k) > 1e-6:
+                        if not almost_equal(delta_k, 0.0, tol=Tolerance.PRECISION):
                             diff_result["bucket_changes"].append({
                                 "risk_class": rc.value,
                                 "bucket": bucket,

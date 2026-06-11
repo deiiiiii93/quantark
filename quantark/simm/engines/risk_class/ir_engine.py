@@ -12,6 +12,7 @@ from quantark.simm.config import SIMMConfig
 from quantark.simm.taxonomy import RiskClass, IRSubCurve, IR_TENORS
 from quantark.simm.sensitivity import IRDeltaSensitivity, IRVegaSensitivity, CurvatureSensitivity
 from quantark.simm.engines.base import BaseSensitivityEngine
+from quantark.util.numerical import Tolerance, is_zero
 
 from quantark.portfolio.fi.position import FIPosition
 
@@ -69,7 +70,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
             # Get total position DV01
             total_dv01 = position.get_dv01(env)
 
-            if abs(total_dv01) < 1e-10:
+            if is_zero(total_dv01, tol=Tolerance.ZERO):
                 # Skip positions with negligible DV01
                 continue
 
@@ -83,7 +84,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
                 weight = tenor_weights[tenor_idx] if tenor_idx < len(tenor_weights) else 0.0
                 dv01_contribution = total_dv01 * weight
 
-                if abs(dv01_contribution) > 1e-10:
+                if not is_zero(dv01_contribution, tol=Tolerance.ZERO):
                     sensitivity = IRDeltaSensitivity(
                         trade_id=position.position_id,
                         amount=dv01_contribution,

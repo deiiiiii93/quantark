@@ -30,7 +30,13 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import Tolerance, is_close, is_zero, safe_divide
+from quantark.util.numerical import (
+    Tolerance,
+    is_close,
+    is_greater_than_or_close,
+    is_zero,
+    safe_divide,
+)
 
 
 class SnowballPDESolver(BasePDESolver):
@@ -753,9 +759,7 @@ class SnowballPDESolver(BasePDESolver):
     @staticmethod
     def _record_is_non_negative_time(record: ResolvedObservationRecord) -> bool:
         """Return True if record's time is >= 0 (within numerical tolerance)."""
-        return bool(
-            record.observation_time > 0.0 or is_close(record.observation_time, 0.0)
-        )
+        return is_greater_than_or_close(record.observation_time, 0.0)
 
     @staticmethod
     def _find_record_at_time(
@@ -1625,9 +1629,7 @@ class SnowballPDESolver(BasePDESolver):
 
         next_rec: Optional[ResolvedObservationRecord] = None
         for rec in future_records:
-            if rec.observation_time >= current_time or is_close(
-                rec.observation_time, current_time
-            ):
+            if is_greater_than_or_close(rec.observation_time, current_time):
                 next_rec = rec
                 break
         next_rec = next_rec if next_rec is not None else future_records[-1]

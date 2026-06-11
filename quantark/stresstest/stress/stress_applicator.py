@@ -2,7 +2,6 @@
 Stress application logic for modifying pricing environments.
 """
 
-import math
 import re
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
@@ -27,6 +26,7 @@ from quantark.stresstest.stress.stress_types import (
     BasisDividendRelationshipMode,
 )
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 if TYPE_CHECKING:
     from quantark.stresstest.scenario.scenario import Scenario, Stress
@@ -272,7 +272,7 @@ class StressApplicator:
             new_pillars = []
             found = False
             for time, rate in curve.pillars:
-                if math.isclose(time, bucket, rel_tol=1e-6):
+                if is_close(time, bucket, rel_tol=1e-6):
                     found = True
                     new_rate = stress.stress_type.apply(rate, stress.stress_value)
                     new_pillars.append((time, new_rate))

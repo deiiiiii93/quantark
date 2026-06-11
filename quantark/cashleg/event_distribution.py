@@ -14,7 +14,7 @@ from quantark.asset.equity.engine.event_stats import (
     PhoenixEventStats,
 )
 from quantark.util.exceptions import NumericalError
-from quantark.util.numerical.constants import Tolerance
+from quantark.util.numerical import Tolerance, almost_equal
 
 
 class EventType(Enum):
@@ -143,7 +143,7 @@ class EventDistribution:
 
         total = self._termination_probability_total()
         drift = total - 1.0
-        if abs(drift) <= Tolerance.PROBABILITY:
+        if almost_equal(drift, 0.0, tol=Tolerance.PROBABILITY):
             return self
 
         probabilities = dict(self.probabilities)
@@ -215,7 +215,7 @@ class EventDistribution:
                 )
 
         total = self._termination_probability_total()
-        if abs(total - 1.0) > Tolerance.PROBABILITY:
+        if not almost_equal(total, 1.0, tol=Tolerance.PROBABILITY):
             raise NumericalError(
                 f"EventDistribution termination probability sum = {total}, expected 1.0 "
                 f"(tolerance {Tolerance.PROBABILITY})"
@@ -224,7 +224,9 @@ class EventDistribution:
     def _validate_survival_shape(self) -> None:
         n_times = len(self.event_times)
         n_survival = len(self.survival_probability)
-        starts_at_zero = abs(float(self.event_times[0])) <= Tolerance.PROBABILITY
+        starts_at_zero = almost_equal(
+            float(self.event_times[0]), 0.0, tol=Tolerance.PROBABILITY
+        )
         expected_lengths = {n_times + 1}
         if starts_at_zero:
             expected_lengths.add(n_times)
@@ -243,7 +245,9 @@ class EventDistribution:
         return total
 
     def _survival_grid(self) -> tuple[np.ndarray, np.ndarray]:
-        starts_at_zero = abs(float(self.event_times[0])) <= Tolerance.PROBABILITY
+        starts_at_zero = almost_equal(
+            float(self.event_times[0]), 0.0, tol=Tolerance.PROBABILITY
+        )
         if len(self.survival_probability) == len(self.event_times):
             return self.event_times, self.survival_probability
         if starts_at_zero:

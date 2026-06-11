@@ -16,6 +16,8 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
+from quantark.util.numerical import is_close
+
 from .qmc_brownian_bridge import apply_brownian_bridge
 from .qmc_sobol import PseudoRandomNormalGenerator, RandomStream, SobolNormalGenerator
 from .qmc_variance_reduction import (
@@ -63,7 +65,7 @@ def _build_time_grid(
             )
         if np.any(dt <= 0.0):
             raise ValueError("dt_array must have strictly positive entries")
-        if not np.isclose(dt.sum(), maturity):
+        if not is_close(float(dt.sum()), maturity, rel_tol=1e-5, abs_tol=1e-8):
             raise ValueError(
                 f"Sum of dt_array ({dt.sum()}) must equal maturity ({maturity})."
             )

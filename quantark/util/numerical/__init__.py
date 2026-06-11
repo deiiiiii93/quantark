@@ -13,6 +13,10 @@ in quantitative finance calculations, including:
 from .constants import Tolerance, FinancialConstants
 from .comparison import (
     is_close,
+    is_greater_than,
+    is_less_than,
+    is_greater_than_or_close,
+    is_less_than_or_close,
     is_zero,
     is_positive,
     is_negative,
@@ -59,6 +63,10 @@ __all__ = [
     'FinancialConstants',
     # Comparison
     'is_close',
+    'is_greater_than',
+    'is_less_than',
+    'is_greater_than_or_close',
+    'is_less_than_or_close',
     'is_zero',
     'is_positive',
     'is_negative',

@@ -25,6 +25,8 @@ from quantark.util.exceptions import NumericalError, PricingError, ValidationErr
 from quantark.util.numerical import (
     Tolerance,
     is_close,
+    is_greater_than,
+    is_less_than,
     is_zero,
     safe_exp,
     safe_log,
@@ -784,9 +786,12 @@ class SnowballQuadEngine(BaseEngine):
         )
         max_dt = float(np.max(spacings))
         max_spacing_cap = _BGK_MAX_SPACING_RATIO * median_dt
-        if in_band_fraction < _BGK_MIN_REGULAR_FRACTION or (
-            max_dt > max_spacing_cap
-            and not is_close(max_dt, max_spacing_cap, abs_tol=Tolerance.PRECISION)
+        if is_less_than(
+            in_band_fraction,
+            _BGK_MIN_REGULAR_FRACTION,
+            abs_tol=Tolerance.PRECISION,
+        ) or is_greater_than(
+            max_dt, max_spacing_cap, abs_tol=Tolerance.PRECISION
         ):
             raise ValidationError(
                 "BGK_APPROXIMATION requires approximately regular KI observation "
@@ -800,10 +805,10 @@ class SnowballQuadEngine(BaseEngine):
         first_gap = float(obs_times[0])
         last_gap = float(maturity) - float(obs_times[-1])
         edge_tol = _BGK_MAX_EDGE_GAP_RATIO * median_dt
-        first_exceeds = first_gap > edge_tol and not is_close(
+        first_exceeds = is_greater_than(
             first_gap, edge_tol, abs_tol=Tolerance.PRECISION
         )
-        last_exceeds = last_gap > edge_tol and not is_close(
+        last_exceeds = is_greater_than(
             last_gap, edge_tol, abs_tol=Tolerance.PRECISION
         )
         if first_exceeds or last_exceeds:
@@ -1013,7 +1018,7 @@ class SnowballQuadEngine(BaseEngine):
             t = float(t)
             if t <= Tolerance.ZERO:
                 continue
-            if t > maturity and not is_close(t, maturity, abs_tol=Tolerance.PRECISION):
+            if is_greater_than(t, maturity, abs_tol=Tolerance.PRECISION):
                 continue
             if is_close(t, maturity, abs_tol=Tolerance.PRECISION):
                 t = float(maturity)

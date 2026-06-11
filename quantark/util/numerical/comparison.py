@@ -4,6 +4,16 @@ Float comparison utilities for stable numerical operations.
 This module provides functions for comparing floating-point numbers
 with configurable tolerances, addressing common issues with float
 equality in financial calculations.
+
+Use tolerant comparisons for values produced by numerical computation:
+- ``is_close`` or ``almost_equal`` for equality.
+- ``is_greater_than`` / ``is_less_than`` for strict computed boundaries.
+- ``is_greater_than_or_close`` / ``is_less_than_or_close`` for inclusive
+  computed boundaries.
+- ``is_zero`` and the sign helpers for values near zero.
+
+Keep raw comparisons for exact discrete values and strict input constraints.
+Use NumPy comparison functions for vectorized array masks.
 """
 
 import math
@@ -43,6 +53,96 @@ def is_close(
         True
     """
     return math.isclose(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def is_greater_than(
+    a: float,
+    b: float,
+    rel_tol: float = Tolerance.RELATIVE,
+    abs_tol: float = Tolerance.ABSOLUTE,
+) -> bool:
+    """
+    Check if ``a`` is meaningfully greater than ``b``.
+
+    Values that are close within the configured tolerances are treated as equal.
+    Use this for computed numerical boundaries where last-bit floating-point
+    noise must not turn equality into a strict ordering.
+
+    Args:
+        a: Value to compare.
+        b: Boundary value.
+        rel_tol: Relative tolerance.
+        abs_tol: Absolute tolerance.
+
+    Returns:
+        True if ``a > b`` and the values are not close.
+    """
+    return a > b and not is_close(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def is_less_than(
+    a: float,
+    b: float,
+    rel_tol: float = Tolerance.RELATIVE,
+    abs_tol: float = Tolerance.ABSOLUTE,
+) -> bool:
+    """
+    Check if ``a`` is meaningfully less than ``b``.
+
+    Values that are close within the configured tolerances are treated as equal.
+
+    Args:
+        a: Value to compare.
+        b: Boundary value.
+        rel_tol: Relative tolerance.
+        abs_tol: Absolute tolerance.
+
+    Returns:
+        True if ``a < b`` and the values are not close.
+    """
+    return a < b and not is_close(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def is_greater_than_or_close(
+    a: float,
+    b: float,
+    rel_tol: float = Tolerance.RELATIVE,
+    abs_tol: float = Tolerance.ABSOLUTE,
+) -> bool:
+    """
+    Check if ``a`` is greater than or close to ``b``.
+
+    Args:
+        a: Value to compare.
+        b: Boundary value.
+        rel_tol: Relative tolerance.
+        abs_tol: Absolute tolerance.
+
+    Returns:
+        True if ``a > b`` or the values are close.
+    """
+    return a > b or is_close(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
+
+
+def is_less_than_or_close(
+    a: float,
+    b: float,
+    rel_tol: float = Tolerance.RELATIVE,
+    abs_tol: float = Tolerance.ABSOLUTE,
+) -> bool:
+    """
+    Check if ``a`` is less than or close to ``b``.
+
+    Args:
+        a: Value to compare.
+        b: Boundary value.
+        rel_tol: Relative tolerance.
+        abs_tol: Absolute tolerance.
+
+    Returns:
+        True if ``a < b`` or the values are close.
+    """
+    return a < b or is_close(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
 
 
 def is_zero(x: float, tol: float = Tolerance.ZERO) -> bool:

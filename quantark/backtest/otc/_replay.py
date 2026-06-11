@@ -24,6 +24,7 @@ from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.util.numerical import is_close
 
 from .engine_factory import create_mc_event_stats_engine
 from .market import (
@@ -191,7 +192,7 @@ class ProductReplay:
                     2.0 * delta_spot_bump
                 )
 
-                if np.isclose(delta_bump, gamma_bump):
+                if is_close(delta_bump, gamma_bump, rel_tol=1e-5, abs_tol=1e-8):
                     gamma_price_up = delta_price_up
                     gamma_price_down = delta_price_down
                 else:

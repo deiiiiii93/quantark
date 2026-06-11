@@ -13,6 +13,7 @@ from quantark.simm.taxonomy import RiskClass
 from quantark.simm.sensitivity import EquityDeltaSensitivity, EquityVegaSensitivity
 from quantark.simm.engines.base import BaseSensitivityEngine
 from quantark.simm.engines.classification.bucket_mapper import BucketMapper
+from quantark.util.numerical import Tolerance, is_zero
 
 from quantark.portfolio.equity.position import EquityPosition
 from quantark.asset.equity.riskmeasures import GreeksCalculator
@@ -87,7 +88,7 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
             # Scale by position quantity
             delta *= position.quantity
 
-            if abs(delta) < 1e-10:
+            if is_zero(delta, tol=Tolerance.ZERO):
                 # Skip positions with negligible delta
                 continue
 
@@ -139,7 +140,7 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
             vega = greeks.get('vega', 0.0)
 
             # Skip if no vega (e.g., equity spot, futures)
-            if abs(vega) < 1e-10:
+            if is_zero(vega, tol=Tolerance.ZERO):
                 continue
 
             # Scale by position quantity
