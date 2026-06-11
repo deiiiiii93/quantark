@@ -14,10 +14,14 @@ During 0.x the public API may still change between minor versions.
   `BGK_APPROXIMATION` is an opt-in performance mode that replaces a dense
   discrete KI schedule with continuous monitoring at a
   Broadie-Glasserman-Kou shifted barrier; the engine validates approximately
-  regular spacing, a constant resolved barrier, full-horizon coverage, and
-  stable volatility, raising `ValidationError` otherwise. A first-order
-  residual bias remains (a few bp of PV at daily spacing, growing with
-  observation spacing and drift).
+  regular spacing (median-band dispersion test), a constant resolved
+  barrier, full-horizon coverage, stable volatility, and a minimum schedule
+  density (`bgk_min_ki_observations`), raising `ValidationError` otherwise.
+  Converted pricing matches the equivalent shifted-continuous product
+  exactly (grid-aligned to the shifted barrier) while the valuation-time KI
+  state keeps contractual discrete semantics. A first-order residual bias
+  remains (a few bp of PV at daily spacing, growing with observation
+  spacing and drift).
 
 ### Fixed
 - `SnowballQuadEngine`: dense discrete KI schedules now retain their explicit

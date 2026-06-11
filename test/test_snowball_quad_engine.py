@@ -545,6 +545,117 @@ def test_bgk_mode_rejects_varying_ki_barrier_schedule():
         engine.price(product, env)
 
 
+def test_bgk_mode_prices_as_shifted_continuous_with_discrete_valuation_state():
+    """BGK pricing must equal the equivalent shifted-continuous product.
+
+    Covers two regressions: valuation-time KI state must follow the
+    contractual discrete semantics (a spot between the shifted and the
+    contractual barrier is NOT knocked in without a t=0 observation), and
+    the spatial grid must align to the model's shifted barrier.
+    """
+    num_observations = 252
+    vol, ki_barrier = 0.20, 75.0
+    shifted = ki_barrier * math.exp(
+        -0.5825971579390107 * vol * math.sqrt(1.0 / num_observations)
+    )
+    spot_between = (shifted + ki_barrier) / 2.0
+    env = create_pricing_env(spot=spot_between, vol=vol)
+
+    product = create_daily_ki_snowball(num_observations)
+    bgk_engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+    bgk_price = bgk_engine.price(product, env)
+
+    continuous_config = create_barrier_config(
+        ko_barrier=103.0, ki_barrier=shifted, ki_continuous=True
+    )
+    continuous_product = create_standard_snowball(continuous_config)
+    continuous_price = SnowballQuadEngine(params=QuadParams()).price(
+        continuous_product, env
+    )
+
+    assert bgk_price == pytest.approx(continuous_price, abs=1e-9)
+
+    stats = bgk_engine.calculate_event_stats(product, env)
+    assert stats.ki_probability < 1.0
+
+
+def test_bgk_mode_rejects_alternating_spacing():
+    ki_dates = []
+    t = 0.0
+    index = 0
+    while t + (1.0 if index % 2 == 0 else 7.0) / 365.0 <= 1.0:
+        t += (1.0 if index % 2 == 0 else 7.0) / 365.0
+        ki_dates.append(t)
+        index += 1
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ki_observation_dates=ki_dates,
+    )
+    product = create_standard_snowball(barrier_config)
+    engine = SnowballQuadEngine(
+        params=QuadParams(
+            ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION,
+            bgk_min_ki_observations=2,
+        )
+    )
+
+    with pytest.raises(ValidationError, match="regular"):
+        engine.price(product, create_pricing_env())
+
+
+def test_bgk_mode_rejects_sparse_schedule():
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ki_observation_dates=[0.5, 1.0],
+    )
+    product = create_standard_snowball(barrier_config)
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    with pytest.raises(ValidationError, match="bgk_min_ki_observations"):
+        engine.price(product, create_pricing_env())
+
+
+def test_bgk_mode_accepts_business_day_weekend_gaps():
+    ki_dates = []
+    t = 0.0
+    index = 0
+    while True:
+        gap = (3.0 if index % 5 == 4 else 1.0) / 365.0
+        if t + gap > 1.0:
+            break
+        t += gap
+        ki_dates.append(t)
+        index += 1
+    barrier_config = create_barrier_config(
+        ko_barrier=103.0,
+        ki_barrier=75.0,
+        ki_continuous=False,
+        ko_observation_dates=[(month + 1) * ki_dates[-1] / 12.0 for month in range(12)],
+        ki_observation_dates=ki_dates,
+    )
+    product = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        contract_multiplier=10_000.0,
+        maturity=ki_dates[-1] + 1.0 / 365.0,
+        is_reverse=False,
+    )
+    engine = SnowballQuadEngine(
+        params=QuadParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+
+    assert np.isfinite(engine.price(product, create_pricing_env()))
+
+
 def test_bgk_mode_rejects_unstable_volatility():
     env = PricingEnvironment(
         spot_quote=SpotQuote(spot=100.0),

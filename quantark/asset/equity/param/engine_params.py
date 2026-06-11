@@ -602,6 +602,10 @@ class QuadParams(EngineParams):
             barrier, full-horizon coverage, and stable volatility, raising
             ValidationError when the schedule does not qualify. Ignored for
             products without a discrete KI schedule.
+        bgk_min_ki_observations: Minimum number of KI observation dates for
+            BGK_APPROXIMATION; sparser schedules are rejected because the
+            shift's first-order residual grows with observation spacing and
+            the performance motivation only exists for dense schedules.
     """
 
     grid_points: int = 1001  # Odd number for Simpson's rule
@@ -620,6 +624,7 @@ class QuadParams(EngineParams):
     ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
         KnockInMonitoringMode.EXACT_DISCRETE
     )
+    bgk_min_ki_observations: int = 100
 
     def __post_init__(self):
         """Validate quadrature parameters."""
@@ -720,6 +725,11 @@ class QuadParams(EngineParams):
             raise ValidationError(
                 "ki_monitoring_mode must be a KnockInMonitoringMode or its "
                 f"string value, got {type(self.ki_monitoring_mode).__name__}"
+            )
+        if self.bgk_min_ki_observations < 2:
+            raise ValidationError(
+                "bgk_min_ki_observations must be at least 2, "
+                f"got {self.bgk_min_ki_observations}"
             )
 
     @classmethod

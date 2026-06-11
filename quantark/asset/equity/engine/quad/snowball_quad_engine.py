@@ -39,12 +39,14 @@ _BGK_BETA = 0.5825971579390107
 # Validity gates for KnockInMonitoringMode.BGK_APPROXIMATION. The shift assumes
 # regular monitoring of a constant barrier over the full pricing horizon at a
 # single volatility; outside these bounds the engine refuses to approximate.
-# Spacing ratio 7 tolerates weekend/holiday gaps in business-day daily
-# schedules while rejecting mixed-frequency schedules.
-_BGK_MAX_SPACING_RATIO = 7.0
-# Schedule must start within this many mean spacings of valuation and end
-# within this many mean spacings of maturity.
-_BGK_MAX_EDGE_GAP_RATIO = 2.0
+# Regularity is measured against the median spacing: most intervals must lie
+# inside a band around it (business-day daily schedules in calendar time put
+# ~80% of intervals exactly at the median, the rest are weekend gaps), and no
+# interval may exceed the holiday-cluster cap. Alternating and mixed-frequency
+# schedules fail the band; monthly-then-daily mixes fail the cap.
+_BGK_REGULAR_BAND = (0.5, 1.5)
+_BGK_MIN_REGULAR_FRACTION = 0.70
+_BGK_MAX_SPACING_RATIO = 9.0  # max spacing vs median spacing
 # Maximum relative deviation of the surface vol sampled along the schedule
 # (at the KI barrier) from the single pricing vol used for the shift.
 _BGK_MAX_VOL_DISPERSION = 0.25
@@ -115,17 +117,13 @@ class SnowballQuadEngine(BaseEngine):
             ki_records = product.resolve_ki_observations(pricing_env)
             if not ki_records:
                 raise PricingError("KI observation schedule is empty for SnowballQuadEngine.")
-            if self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION:
-                ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
-                    product, ki_records, pricing_env, vol, maturity
-                )
-                ki_continuous = True
-                ki_records = []
 
         ko_record_0 = self._match_record(0.0, ko_records)
         if self._ko_record_triggers_at_spot(product, spot, ko_record_0):
             return self._get_immediate_ko_payoff(ko_record_0, pricing_env)
 
+        # Valuation-time KI state follows the contractual monitoring semantics,
+        # so it must be determined before any BGK schedule conversion.
         knocked_in_at_valuation = self._is_knocked_in_at_valuation(
             product,
             spot,
@@ -133,6 +131,15 @@ class SnowballQuadEngine(BaseEngine):
             ki_continuous=ki_continuous,
             ki_records=ki_records,
         )
+
+        if ki_records and (
+            self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION
+        ):
+            ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
+                product, ki_records, pricing_env, vol, maturity
+            )
+            ki_continuous = True
+            ki_records = []
 
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],
@@ -142,7 +149,9 @@ class SnowballQuadEngine(BaseEngine):
         if not times:
             raise PricingError("Observation time grid is empty for SnowballQuadEngine.")
 
-        align_log = self._select_alignment_log(spot, product)
+        align_log = self._select_alignment_log(
+            spot, product, ki_barrier_override=ki_barrier_continuous
+        )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
@@ -353,16 +362,10 @@ class SnowballQuadEngine(BaseEngine):
             ki_barrier_continuous = self._continuous_ki_barrier_value(product)
         if product.has_ki_barrier and not ki_continuous:
             ki_records = product.resolve_ki_observations(pricing_env)
-            if ki_records and (
-                self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION
-            ):
-                ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
-                    product, ki_records, pricing_env, vol, maturity
-                )
-                ki_continuous = True
-                ki_records = []
 
         ko_record_0 = self._match_record(0.0, ko_records)
+        # Valuation-time KI state follows the contractual monitoring semantics,
+        # so it must be determined before any BGK schedule conversion.
         knocked_in_at_valuation = self._is_knocked_in_at_valuation(
             product,
             spot,
@@ -380,6 +383,15 @@ class SnowballQuadEngine(BaseEngine):
                 knocked_in_at_valuation,
             )
 
+        if ki_records and (
+            self._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION
+        ):
+            ki_barrier_continuous = self._bgk_equivalent_continuous_ki_barrier(
+                product, ki_records, pricing_env, vol, maturity
+            )
+            ki_continuous = True
+            ki_records = []
+
         times = self._merge_times(
             [rec.observation_time for rec in ko_records],
             [rec.observation_time for rec in ki_records],
@@ -387,7 +399,9 @@ class SnowballQuadEngine(BaseEngine):
         )
         dt = self._build_dt(times)
 
-        align_log = self._select_alignment_log(spot, product)
+        align_log = self._select_alignment_log(
+            spot, product, ki_barrier_override=ki_barrier_continuous
+        )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
@@ -741,19 +755,41 @@ class SnowballQuadEngine(BaseEngine):
                 "BGK_APPROXIMATION requires at least two distinct KI observation "
                 "dates; use KnockInMonitoringMode.EXACT_DISCRETE."
             )
-        mean_dt = float(np.mean(spacings))
+
+        min_count = int(getattr(self.params, "bgk_min_ki_observations", 100))
+        if obs_times.size < min_count:
+            raise ValidationError(
+                "BGK_APPROXIMATION is a performance mode for dense KI schedules: "
+                f"got {obs_times.size} observation dates, fewer than "
+                f"bgk_min_ki_observations={min_count}; use "
+                "KnockInMonitoringMode.EXACT_DISCRETE or lower "
+                "bgk_min_ki_observations."
+            )
+
+        median_dt = float(np.median(spacings))
+        band_lo, band_hi = _BGK_REGULAR_BAND
+        in_band_fraction = float(
+            np.mean(
+                (spacings >= band_lo * median_dt) & (spacings <= band_hi * median_dt)
+            )
+        )
         max_dt = float(np.max(spacings))
-        if max_dt > _BGK_MAX_SPACING_RATIO * mean_dt:
+        if (
+            in_band_fraction < _BGK_MIN_REGULAR_FRACTION
+            or max_dt > _BGK_MAX_SPACING_RATIO * median_dt
+        ):
             raise ValidationError(
                 "BGK_APPROXIMATION requires approximately regular KI observation "
-                f"intervals: max spacing {max_dt:.6g} exceeds "
-                f"{_BGK_MAX_SPACING_RATIO:g}x mean spacing {mean_dt:.6g}; use "
-                "KnockInMonitoringMode.EXACT_DISCRETE."
+                f"intervals: {in_band_fraction:.0%} of intervals lie within "
+                f"[{band_lo:g}, {band_hi:g}]x the median spacing {median_dt:.6g} "
+                f"(need >= {_BGK_MIN_REGULAR_FRACTION:.0%}) and the max spacing "
+                f"{max_dt:.6g} must not exceed {_BGK_MAX_SPACING_RATIO:g}x the "
+                "median; use KnockInMonitoringMode.EXACT_DISCRETE."
             )
 
         first_gap = float(obs_times[0])
         last_gap = float(maturity) - float(obs_times[-1])
-        edge_tol = _BGK_MAX_EDGE_GAP_RATIO * mean_dt
+        edge_tol = _BGK_MAX_SPACING_RATIO * median_dt
         if first_gap > edge_tol or last_gap > edge_tol:
             raise ValidationError(
                 "BGK_APPROXIMATION requires KI monitoring to cover the full "
@@ -764,6 +800,7 @@ class SnowballQuadEngine(BaseEngine):
 
         self._validate_bgk_vol_stability(pricing_env, barrier, obs_times, vol)
 
+        mean_dt = float(np.mean(spacings))
         shift = _BGK_BETA * vol * math.sqrt(mean_dt)
         return barrier * safe_exp(shift if product.is_reverse else -shift)
 
@@ -1130,7 +1167,10 @@ class SnowballQuadEngine(BaseEngine):
         return str(priority).lower()
 
     def _select_alignment_log(
-        self, spot: float, product: SnowballOption
+        self,
+        spot: float,
+        product: SnowballOption,
+        ki_barrier_override: Optional[float] = None,
     ) -> Optional[float]:
         ko_candidates: list[float] = []
         ki_candidates: list[float] = []
@@ -1141,7 +1181,12 @@ class SnowballQuadEngine(BaseEngine):
         elif ko_barrier is not None and ko_barrier > 0:
             ko_candidates.append(float(ko_barrier))
 
-        if product.has_ki_barrier:
+        if ki_barrier_override is not None:
+            # The model's operative KI barrier (e.g. BGK-shifted) takes
+            # precedence over the contractual level for grid alignment.
+            if ki_barrier_override > 0:
+                ki_candidates.append(float(ki_barrier_override))
+        elif product.has_ki_barrier:
             ki_barrier = product.barrier_config.ki_barrier
             if isinstance(ki_barrier, list):
                 ki_candidates.extend([float(b) for b in ki_barrier if b > 0])
