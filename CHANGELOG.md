@@ -5,7 +5,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
-## [Unreleased]
+## [0.1.1] - 2026-06-11
 
 ### Added
 - `SnowballQuadEngine`: explicit `ki_monitoring_mode` on `QuadParams`
