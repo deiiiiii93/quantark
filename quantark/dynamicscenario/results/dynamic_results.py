@@ -276,7 +276,12 @@ class DayResult:
         if self.trades:
             lines.append(f"  Trades: {len(self.trades)}")
             lines.append(f"  Transaction Costs: ${self.transaction_costs_today:,.2f}")
-        
+
+        if self.lifecycle_events:
+            lines.append(f"  Lifecycle Events: {len(self.lifecycle_events)}")
+        if not is_zero(self.realized_cash):
+            lines.append(f"  Realized Cash: ${self.realized_cash:,.2f}")
+
         return "\n".join(lines)
 
 
@@ -546,14 +551,22 @@ class DynamicScenarioResults:
         """
         Get all lifecycle events as a DataFrame.
 
+        Columns are ordered: day_index (simulation day number), date
+        (simulation day date), event_date (the event's own date as ISO
+        string), then the remaining snapshot fields (position_id,
+        underlying, product_type, event_type, observation_index, spot,
+        barrier, payoff, cashflow, terminates_position).
+
         Returns:
             DataFrame with one row per event (empty if no events occurred)
         """
         rows = []
         for day in self.day_results:
             for event in day.lifecycle_events:
-                row = event.to_dict()
-                row["day_index"] = day.day_index
+                event_data = event.to_dict()
+                event_data["event_date"] = event_data.pop("date")
+                row = {"day_index": day.day_index, "date": day.date}
+                row.update(event_data)
                 rows.append(row)
         return pd.DataFrame(rows)
 

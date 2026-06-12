@@ -51,3 +51,26 @@ class TestConfigAndResults:
         assert data["event_type"] == "KO"
         assert data["position_id"] == "p1"
         assert data["terminates_position"] is True
+
+    def test_get_lifecycle_events_dataframe_columns(self):
+        from quantark.dynamicscenario.results.dynamic_results import (
+            DayResult,
+            DynamicScenarioResults,
+            LifecycleEventSnapshot,
+        )
+
+        snap = LifecycleEventSnapshot(
+            position_id="p1", underlying="IDX", product_type="SnowballOption",
+            event_type="KO", date=datetime(2026, 2, 4), observation_index=0,
+            spot=105.0, barrier=103.0, payoff=1.25, cashflow=2.5,
+            terminates_position=True,
+        )
+        day = DayResult(day_index=3, lifecycle_events=[snap])
+        results = DynamicScenarioResults(
+            path_name="t", baseline_value=0.0, final_value=0.0,
+            day_results=[day],
+        )
+        df = results.get_lifecycle_events()
+        assert list(df.columns)[:2] == ["day_index", "date"]
+        assert "event_date" in df.columns
+        assert df.iloc[0]["day_index"] == 3
