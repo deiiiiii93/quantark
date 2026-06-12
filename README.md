@@ -34,6 +34,8 @@ QuantArk is designed with a clean, modular architecture that separates concerns 
   - Monte Carlo VaR (simulation-based with stress testing)
 - **Bond Pricing**: Fixed rate bonds, FRNs, and bond options
 - **Interest Rate Swaps**: Pricing and risk metrics (DV01)
+- **FX Derivatives**: Garman-Kohlhagen vanilla, digital, and quanto options;
+  spot / forward / swap delta-one products with two-curve discounting
 - **Greeks Calculation**:
   - Analytical Greeks using closed-form formulas
   - Numerical Greeks using finite difference method (FDM)
@@ -129,6 +131,43 @@ print(f"Rho:   {analytical_greeks['rho']:.6f}")
 
 ```
 
+### FX Options
+
+```python
+from datetime import datetime
+
+from quantark.asset.fx.engine.analytical import GarmanKohlhagenEngine
+from quantark.asset.fx.product import CurrencyPair
+from quantark.asset.fx.product.option import FxVanillaOption
+from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
+from quantark.priceenv import FxPricingEnvironment
+from quantark.util.enum import OptionType
+
+fx_env = FxPricingEnvironment(
+    valuation_date=datetime(2026, 6, 12),
+    spot_quote=SpotQuote(spot=1.20),            # EUR/USD
+    domestic_curve=FlatRateCurve(rate=0.05),    # USD
+    foreign_curve=FlatRateCurve(rate=0.03),     # EUR
+    vol_surface=FlatVolSurface(volatility=0.10),
+)
+
+option = FxVanillaOption(
+    currency_pair=CurrencyPair("EUR", "USD"),
+    strike=1.25,
+    option_type=OptionType.CALL,
+    maturity=1.0,
+    notional_foreign=1_000_000.0,   # 1m EUR
+)
+
+engine = GarmanKohlhagenEngine()
+print(f"Price: {engine.price(option, fx_env):,.2f} USD")
+print(f"Delta: {engine.calculate_greeks(option, fx_env)['delta']:,.2f} EUR")
+```
+
+See `example/fx_vanilla_option_demo.py`, `example/fx_digital_option_demo.py`,
+`example/fx_quanto_option_demo.py`, and `example/fx_deltaone_demo.py` for
+digitals, quantos, and delta-one products.
+
 For portfolio Value-at-Risk (parametric, historical, and Monte Carlo engines
 with risk-factor attribution), see the runnable demos:
 `example/parametric_var_demo.py`, `example/portfolio_var_demo.py`, and
@@ -202,10 +241,16 @@ QuantArk/
 │   │   ├── engine/    # Bond pricing engines
 │   │   ├── product/   # Bond products
 │   │   └── riskmeasures/  # Bond risk measures
-│   └── rate/          # Interest rate derivatives
-│       ├── engine/    # IR pricing engines
-│       ├── product/   # IR products
-│       └── riskmeasures/  # IR risk measures
+│   ├── rate/          # Interest rate derivatives
+│   │   ├── engine/    # IR pricing engines
+│   │   ├── product/   # IR products
+│   │   └── riskmeasures/  # IR risk measures
+│   └── fx/            # FX derivatives
+│       ├── engine/    # Garman-Kohlhagen, digital, quanto, delta-one
+│       ├── process/   # Garman-Kohlhagen process
+│       ├── product/   # Options (vanilla/digital/quanto) and delta-one
+│       ├── report/    # Formatted pricing reports
+│       └── riskmeasures/  # FX Greeks calculator
 ├── param/              # Market data parameters
 │   ├── div/           # Dividend yields
 │   ├── quote/         # Spot quotes
