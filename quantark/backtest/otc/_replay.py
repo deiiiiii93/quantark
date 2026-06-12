@@ -1,13 +1,16 @@
 """
 Per-product replay helpers for OTC autocallable backtests.
 
-``ProductReplay`` encapsulates the single-product daily logic that operates on
-one product and its lifecycle state. The book/hedge-level engine constructs one
-``ProductReplay`` per product and delegates the per-product steps to it, while
-keeping the futures-hedge and book-level accounting for itself.
+``ProductReplay`` encapsulates per-product daily replay: pricing-environment
+construction, Greek calculation, and surface/event-probability recording.
+Lifecycle event detection is fully DELEGATED to
+``quantark.asset.equity.lifecycle.AutocallableLifecycleTracker``; this class
+acts as the adapter that converts the ``LifecycleEvent`` objects returned by
+the tracker into the engine's action-row sink format.
 
-This is a behavior-preserving extraction of methods that previously lived on
-``AutocallableBacktestEngine``; the engine passes in its own output lists as
+The book/hedge-level engine constructs one ``ProductReplay`` per product and
+delegates the per-product steps to it, while keeping the futures-hedge and
+book-level accounting for itself.  The engine passes in its own output lists as
 ``*_sink`` arguments so recorded rows are unchanged.
 """
 
@@ -44,11 +47,10 @@ class ProductReplay:
 
     Two-phase initialisation note
     ------------------------------
-    ``start_date`` is ``None`` at construction time.  It MUST be populated
-    before any replay method is called.  ``AutocallableBacktestEngine`` sets
-    ``self._replay.start_date`` to the first backtest date at the top of
-    ``run()``, before the daily loop begins.  Any standalone caller is
-    responsible for the same assignment.
+    ``start_date`` may be supplied at construction time or assigned later via
+    the ``start_date`` property (``AutocallableBacktestEngine`` assigns it at
+    the top of ``run()``).  It MUST be set before any observation method is
+    called — the tracker needs it to resolve schedule dates.
     """
 
     def __init__(
@@ -94,6 +96,8 @@ class ProductReplay:
         self.daily_event_sink = daily_event_sink
         self.surfaces_sink = surfaces_sink
 
+        # date_resolver captures self; do not replace self.market_data
+        # post-construction or the resolver will keep using the old one.
         self._tracker = AutocallableLifecycleTracker(
             product=product,
             quantity=product_quantity,
