@@ -137,6 +137,14 @@ class DynamicResultExporter:
             created_files.append(str(trades_path))
             print(f"Exported: {trades_path}")
 
+        # Lifecycle events
+        lifecycle_df = self.results.get_lifecycle_events()
+        if not lifecycle_df.empty:
+            lifecycle_path = output_dir / f"{prefix}_lifecycle_events.csv"
+            lifecycle_df.to_csv(lifecycle_path, index=False)
+            created_files.append(str(lifecycle_path))
+            print(f"Exported: {lifecycle_path}")
+
         # Market evolution
         market_df = self.results.get_market_evolution()
         if not market_df.empty:
@@ -201,6 +209,14 @@ class DynamicResultExporter:
                 trades_df.to_parquet(trades_path, index=False)
                 created_files.append(str(trades_path))
                 print(f"Exported: {trades_path}")
+
+            # Lifecycle events
+            lifecycle_df = self.results.get_lifecycle_events()
+            if not lifecycle_df.empty:
+                lifecycle_path = output_dir / f"{prefix}_lifecycle_events.parquet"
+                lifecycle_df.to_parquet(lifecycle_path, index=False)
+                created_files.append(str(lifecycle_path))
+                print(f"Exported: {lifecycle_path}")
 
         except ImportError:
             print("Warning: pyarrow not installed, skipping Parquet export")

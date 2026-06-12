@@ -426,3 +426,48 @@ class TestBarrierFamilyIntegration:
         # rebate=1.0, payment_at_hit=True → cashflow = 1.0 * 1.0 (quantity) = 1.0
         assert almost_equal(results.day_results[touch_day].realized_cash, 1.0)
         assert len(results.day_results[-1].positions) == 0
+
+
+class TestExporterAndReport:
+    """Verify that lifecycle events appear in CSV exports and HTML reports."""
+
+    def test_lifecycle_events_exported_and_reported(self, tmp_path):
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.dynamicscenario import (
+            DynamicReportGenerator,
+            DynamicResultExporter,
+            DynamicScenarioConfig,
+            DynamicScenarioEngine,
+            PathLibrary,
+        )
+
+        # 35-day rally that triggers the monthly KO observation (day ~30)
+        path = PathLibrary.consecutive_rally(days=35, daily_pct=0.02)
+        path.start_date = VAL_DATE
+
+        portfolio = make_portfolio(make_snowball(), SnowballQuadEngine())
+        config = DynamicScenarioConfig(calculate_greeks=False, handle_lifecycle_events=True)
+        results = DynamicScenarioEngine(config).run(portfolio, path)
+
+        # Sanity: one KO event must have occurred
+        events_df = results.get_lifecycle_events()
+        assert len(events_df) == 1
+        assert events_df.iloc[0]["event_type"] == "KO"
+
+        # Export to CSV; lifecycle_events.csv must be created with 1 row
+        prefix = "test_lifecycle"
+        exporter = DynamicResultExporter(results)
+        created = exporter.export_csv(tmp_path, prefix)
+        lifecycle_csv = tmp_path / f"{prefix}_lifecycle_events.csv"
+        assert lifecycle_csv.exists(), f"lifecycle_events CSV not found among {created}"
+        import pandas as pd
+        loaded = pd.read_csv(lifecycle_csv)
+        assert len(loaded) == 1
+        assert loaded.iloc[0]["event_type"] == "KO"
+
+        # Generate HTML report; file must exist and contain the section header
+        report_path = tmp_path / "report.html"
+        DynamicReportGenerator().generate_report(results, report_path, include_charts=False)
+        assert report_path.exists()
+        content = report_path.read_text(encoding="utf-8")
+        assert "Lifecycle Events" in content
