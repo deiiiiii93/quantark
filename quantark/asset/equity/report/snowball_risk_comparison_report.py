@@ -1557,84 +1557,67 @@ def _compute_greek_curves(
         [max(0.0, base_q + float(shift)) for shift in config.greek_q_shifts],
         dtype=float,
     )
-    greek_frames: dict[str, pd.DataFrame] = {}
-    for greek_name in ("delta", "gamma", "vega", "rhoq"):
-        rows = []
-        for spot in spot_grid:
-            row = {"spot": float(spot)}
-            env = _clone_env(pricing_env, spot=float(spot))
-            for label in labels:
-                values = calculator.calculate(
-                    products[label],
-                    env,
-                    engine,
-                    greeks=[
-                        "delta",
-                        "gamma",
-                        "vega",
-                        "dividend_rho",
-                    ],
-                )
-                key = "dividend_rho" if greek_name == "rhoq" else greek_name
-                row[label] = float(values[key])
-            rows.append(row)
-        greek_frames[greek_name] = pd.DataFrame(rows)
+    greek_names = ("delta", "gamma", "vega", "rhoq")
 
-    greek_q_frames: dict[str, pd.DataFrame] = {}
-    for greek_name in ("delta", "gamma", "vega", "rhoq"):
-        rows = []
-        for q_val in q_grid:
-            row = {"q": float(q_val)}
-            env = _clone_env(
-                pricing_env,
-                div_yield=ContinuousDividendYield(div_yield=float(q_val)),
+    def _greek_key(greek_name: str) -> str:
+        return "dividend_rho" if greek_name == "rhoq" else greek_name
+
+    def _values_per_label(env: PricingEnvironment) -> dict[str, Dict[str, float]]:
+        return {
+            label: calculator.calculate(
+                products[label],
+                env,
+                engine,
+                greeks=["delta", "gamma", "vega", "dividend_rho"],
             )
-            for label in labels:
-                values = calculator.calculate(
-                    products[label],
-                    env,
-                    engine,
-                    greeks=[
-                        "delta",
-                        "gamma",
-                        "vega",
-                        "dividend_rho",
-                    ],
-                )
-                key = "dividend_rho" if greek_name == "rhoq" else greek_name
-                row[label] = float(values[key])
-            rows.append(row)
-        greek_q_frames[greek_name] = pd.DataFrame(rows)
+            for label in labels
+        }
+
+    def _frames_from_points(
+        x_col: str, points: Sequence[tuple[float, Mapping[str, Mapping[str, float]]]]
+    ) -> dict[str, pd.DataFrame]:
+        return {
+            greek_name: pd.DataFrame(
+                [
+                    {
+                        x_col: x_val,
+                        **{
+                            label: float(values[label][_greek_key(greek_name)])
+                            for label in labels
+                        },
+                    }
+                    for x_val, values in points
+                ]
+            )
+            for greek_name in greek_names
+        }
+
+    spot_points = []
+    for spot in spot_grid:
+        env = _clone_env(pricing_env, spot=float(spot))
+        spot_points.append((float(spot), _values_per_label(env)))
+    greek_frames = _frames_from_points("spot", spot_points)
+
+    q_points = []
+    for q_val in q_grid:
+        env = _clone_env(
+            pricing_env,
+            div_yield=ContinuousDividendYield(div_yield=float(q_val)),
+        )
+        q_points.append((float(q_val), _values_per_label(env)))
+    greek_q_frames = _frames_from_points("q", q_points)
 
     q_slice_curves: dict[str, dict[str, pd.DataFrame]] = {}
     for slice_name, slice_spot in config.greek_q_slice_spots.items():
-        slice_frames: dict[str, pd.DataFrame] = {}
-        for greek_name in ("delta", "gamma", "vega", "rhoq"):
-            rows = []
-            for q_val in q_grid:
-                row = {"q": float(q_val)}
-                env = _clone_env(
-                    pricing_env,
-                    spot=float(slice_spot),
-                    div_yield=ContinuousDividendYield(div_yield=float(q_val)),
-                )
-                for label in labels:
-                    values = calculator.calculate(
-                        products[label],
-                        env,
-                        engine,
-                        greeks=[
-                            "delta",
-                            "gamma",
-                            "vega",
-                            "dividend_rho",
-                        ],
-                    )
-                    key = "dividend_rho" if greek_name == "rhoq" else greek_name
-                    row[label] = float(values[key])
-                rows.append(row)
-            slice_frames[greek_name] = pd.DataFrame(rows)
-        q_slice_curves[slice_name] = slice_frames
+        slice_points = []
+        for q_val in q_grid:
+            env = _clone_env(
+                pricing_env,
+                spot=float(slice_spot),
+                div_yield=ContinuousDividendYield(div_yield=float(q_val)),
+            )
+            slice_points.append((float(q_val), _values_per_label(env)))
+        q_slice_curves[slice_name] = _frames_from_points("q", slice_points)
 
     key_rows = []
     for spot in config.greek_key_spots:
