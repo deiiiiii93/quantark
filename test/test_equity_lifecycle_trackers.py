@@ -316,6 +316,26 @@ class TestBarrierLifecycleTracker:
         assert events[0].terminates_position
         assert almost_equal(events[0].cashflow, 10.0 * product.get_payoff(106.0, touched=True))
 
+    def test_exercise_date_product_not_immediately_expired(self):
+        from quantark.asset.equity.product.option import BarrierOption
+        from quantark.util.enum import BarrierType, OptionType
+
+        product = BarrierOption(
+            strike=100.0, option_type=OptionType.PUT,
+            barrier=90.0, barrier_type=BarrierType.DOWN_IN,
+            exercise_date=(START + pd.Timedelta(days=180)).to_pydatetime(),
+        )
+        tracker = self._tracker(product)
+        env = make_env(spot=95.0)
+
+        # well before exercise_date, no barrier hit -> no events at all
+        assert tracker.observe(START + pd.Timedelta(days=5), env, 95.0) == []
+        assert tracker.state.alive
+
+        # on/after exercise_date -> EXPIRY settles
+        events = tracker.observe(START + pd.Timedelta(days=180), env, 95.0)
+        assert [e.event_type.value for e in events] == ["EXPIRY"]
+
     def test_sharkfin_ko_pays_knock_out_rebate(self):
         from quantark.asset.equity.lifecycle import LifecycleEventType
         from quantark.asset.equity.product.option.single_sharkfin_option import (

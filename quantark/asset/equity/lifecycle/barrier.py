@@ -97,14 +97,37 @@ class BarrierLifecycleTracker:
         return max(0.0, days / 365.0)
 
     def _remaining_maturity(self, date: pd.Timestamp) -> float:
-        """Return remaining maturity in years from *date*."""
+        """Return remaining maturity in years from *date*.
+
+        When the product carries an ``exercise_date`` attribute (a datetime),
+        the remaining life is computed as the calendar-day difference between
+        that date and *date* divided by 365.  The float ``maturity`` field is
+        not consulted in that case.
+        """
+        exercise_date = getattr(self.product, "exercise_date", None)
+        if exercise_date is not None:
+            date_ts = pd.Timestamp(date).normalize()
+            exp_ts = pd.Timestamp(exercise_date).normalize()
+            return (exp_ts - date_ts).days / 365.0
+
         mat = getattr(self.product, "maturity", None)
         if mat is None:
             return 0.0
         return float(mat) - self._elapsed_years(date)
 
     def _expiry_due(self, date: pd.Timestamp) -> bool:
-        """Return True if *date* is on or past the product's expiry."""
+        """Return True if *date* is on or past the product's expiry.
+
+        When ``exercise_date`` is set on the product, expiry is triggered on
+        the calendar day that equals or exceeds that date (day-level
+        comparison).  The float-maturity arithmetic path is not consulted.
+        """
+        exercise_date = getattr(self.product, "exercise_date", None)
+        if exercise_date is not None:
+            date_ts = pd.Timestamp(date).normalize()
+            exp_ts = pd.Timestamp(exercise_date).normalize()
+            return date_ts >= exp_ts
+
         remaining = self._remaining_maturity(date)
         return remaining < 0.0 or is_zero(remaining)
 
