@@ -51,9 +51,15 @@ class TestMonteCarloVarDemo:
         assert 'rate_shift' in historical_data.columns
 
     def test_main_execution(self):
-        """Test that main execution completes without errors."""
+        """Test that main execution completes without errors.
+
+        Smoke test only (no value assertions), so small simulation counts
+        keep it fast while exercising the full demo code path.
+        """
         try:
-            monte_carlo_var_main()
+            monte_carlo_var_main(
+                mc_num_simulations=1000, convergence_counts=(200, 500)
+            )
             assert True
         except Exception as e:
             pytest.fail(f"Main execution raised exception: {e}")

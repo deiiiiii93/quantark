@@ -52,7 +52,7 @@ class TestVarBacktestDemo:
         from datetime import datetime
         
         np.random.seed(42)
-        num_days = 300  # Smaller dataset for faster testing
+        num_days = 100  # > 30-day rolling window; structural assertions only
         dates = pd.date_range(start=datetime(2023, 1, 1), periods=num_days, freq='D')
         
         # Less extreme data without crisis periods
@@ -160,13 +160,15 @@ class TestVarBacktestDemo:
             engine=engine
         )
 
-        # Create historical data with pnl column - need at least lookback_days + buffer
-        dates = pd.date_range(start='2023-01-01', periods=400, freq='D')
+        # Structural assertions only; 100 days (> 30-day lookback minimum)
+        # keeps the per-day VaR recalculation loop short.
+        np.random.seed(42)
+        dates = pd.date_range(start='2023-01-01', periods=100, freq='D')
         historical_data = pd.DataFrame({
-            'spot_return': np.random.normal(0.0005, 0.02, 400),
-            'vol_change': np.random.normal(0.0, 0.01, 400),
-            'rate_shift': np.random.normal(0.0, 0.001, 400),
-            'pnl': np.random.normal(0, 100, 400)  # Required column
+            'spot_return': np.random.normal(0.0005, 0.02, 100),
+            'vol_change': np.random.normal(0.0, 0.01, 100),
+            'rate_shift': np.random.normal(0.0, 0.001, 100),
+            'pnl': np.random.normal(0, 100, 100)  # Required column
         }, index=dates)
 
         from quantark.var import VaRBacktester
@@ -235,13 +237,15 @@ class TestVarBacktestDemo:
             engine=bs_engine
         )
 
-        # Create historical data with pnl column
-        dates = pd.date_range(start='2023-01-01', periods=400, freq='D')
+        # basel_zone validity only; 100 days (> 30-day lookback minimum)
+        # keeps the per-day VaR recalculation loop short.
+        np.random.seed(42)
+        dates = pd.date_range(start='2023-01-01', periods=100, freq='D')
         historical_data = pd.DataFrame({
-            'spot_return': np.random.normal(0.0005, 0.02, 400),
-            'vol_change': np.random.normal(0.0, 0.01, 400),
-            'rate_shift': np.random.normal(0.0, 0.001, 400),
-            'pnl': np.random.normal(0, 100, 400)
+            'spot_return': np.random.normal(0.0005, 0.02, 100),
+            'vol_change': np.random.normal(0.0, 0.01, 100),
+            'rate_shift': np.random.normal(0.0, 0.001, 100),
+            'pnl': np.random.normal(0, 100, 100)
         }, index=dates)
 
         # Create VaR engine for backtesting
