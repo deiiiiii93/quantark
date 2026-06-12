@@ -44,6 +44,10 @@ from quantark.backtest.strategy.semi_static_strategy import SemiStaticHedgeStrat
 from quantark.backtest.strategy.barrier_trigger_strategy import (
     BarrierTriggerHedgeStrategy,
 )
+from quantark.backtest.strategy.triggered_hedge_strategy import (
+    HedgeTrigger,
+    TriggeredHedgeStrategy,
+)
 
 __all__ = [
     # Base
@@ -74,6 +78,8 @@ __all__ = [
     'ScenarioHedgeStrategy',
     'SemiStaticHedgeStrategy',
     'BarrierTriggerHedgeStrategy',
+    'HedgeTrigger',
+    'TriggeredHedgeStrategy',
     # Fixed Income strategies
     'DV01NeutralStrategy',
     'ConvexityNeutralStrategy',

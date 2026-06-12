@@ -7,6 +7,12 @@ joint moves). Greeks are local derivatives; real market moves are large
 and joint, so for structured-product books scenario hedging can be more
 informative than pure delta/vega hedging.
 
+Here the scenario is the hedging *target*: hedges are sized today so the
+book is protected if the move happens (pre-emptive stress hedging, hedge
+costs paid up front). For the contingent variant — a realized move acting
+as a *trigger* that switches on ordinary Greek hedging — see
+TriggeredHedgeStrategy in triggered_hedge_strategy.py.
+
 Structurally, scenario hedging is the same linear problem as multi-Greek
 hedging: the sensitivity matrix columns hold per-unit scenario P&L of each
 hedge instrument instead of per-unit Greeks, and the targets are zero P&L

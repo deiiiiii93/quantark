@@ -146,6 +146,39 @@ class TestScenarioBacktest:
             assert abs(residual) <= 100.0 + 1e-6
 
 
+class TestTriggeredHedgeBacktest:
+    def test_impossible_trigger_never_hedges(self):
+        from quantark.backtest.strategy import HedgeTrigger, TriggeredHedgeStrategy
+
+        strategy = TriggeredHedgeStrategy(
+            triggers=[HedgeTrigger("deep_crash", spot_drawdown=0.90)],
+        )
+        engine = BacktestEngine(make_config(strategy))
+        engine.run()
+        # The short-call delta drifts the whole backtest, but the trigger
+        # never fires, so the strategy stays inactive
+        assert engine._num_hedges_executed == 0
+
+    def test_fired_trigger_enables_delta_hedging(self):
+        from quantark.backtest.strategy import HedgeTrigger, TriggeredHedgeStrategy
+
+        # Any movement away from the start fires one of these
+        strategy = TriggeredHedgeStrategy(
+            triggers=[
+                HedgeTrigger("any_dip", spot_drawdown=1e-9),
+                HedgeTrigger("any_rally", spot_rally=1e-9),
+            ],
+        )
+        engine = BacktestEngine(make_config(strategy))
+        engine.run()
+
+        assert strategy.armed
+        assert engine._num_hedges_executed > 0
+        greeks = engine.portfolio.get_portfolio_greeks(engine.greeks_calculator)
+        # Default target: delta neutralized (threshold 0 -> solve to zero)
+        assert abs(greeks["delta"]) < 1e-6
+
+
 class TestBarrierTriggerBacktest:
     def test_barrier_trigger_runs_on_existing_engine(self):
         from quantark.backtest.strategy import BarrierTriggerHedgeStrategy
