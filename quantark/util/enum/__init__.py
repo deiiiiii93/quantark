@@ -31,6 +31,7 @@ from .engine_enums import (
     ConvertibleBondTrinomialVolScheme,
 )
 from .deltaone_enums import DeltaOneType
+from .fx_enums import FxPayoutCurrency
 from .bond_enums import (
     PaymentFrequency,
     StubType,
@@ -70,6 +71,8 @@ __all__ = [
     "ConvertibleBondTrinomialVolScheme",
     # Delta-one enums
     "DeltaOneType",
+    # FX enums
+    "FxPayoutCurrency",
     # Bond enums
     "PaymentFrequency",
     "StubType",
