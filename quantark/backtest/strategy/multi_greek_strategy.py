@@ -101,10 +101,17 @@ class MultiGreekHedgeStrategy(BaseStrategy):
                 f"Must be one of {VALID_REBALANCE_FREQUENCIES}"
             )
 
+        # Targets keyed by non-Greek measures (e.g. scenario names) fall
+        # back to DELTA as the nominal primary for BaseStrategy metadata
+        try:
+            primary_target = HedgingTarget(targets[0].greek)
+        except ValueError:
+            primary_target = HedgingTarget.DELTA
+
         super().__init__(
             name=name,
             asset_class=AssetClass.EQUITY,
-            hedging_target=HedgingTarget(targets[0].greek),
+            hedging_target=primary_target,
             hedge_instrument="multi",
         )
 
@@ -174,6 +181,54 @@ class MultiGreekHedgeStrategy(BaseStrategy):
             current_time=current_time,
             last_rebalance_time=self._last_rebalance_date,
         )
+
+    def instrument_measures(
+        self,
+        instrument: BaseHedgeInstrument,
+        product,
+        engine,
+        pricing_env,
+        greeks_calculator,
+    ) -> Dict[str, float]:
+        """
+        Per-unit sensitivity measures of one tradeable contract.
+
+        The hedge solve is agnostic to what the measures are: this base
+        implementation returns Greeks; subclasses may return other
+        full-revaluation measures (e.g. scenario P&L) under the keys their
+        targets reference.
+
+        Args:
+            instrument: Hedge instrument spec
+            product: Concrete tradeable contract
+            engine: Pricing engine for the contract
+            pricing_env: Current pricing environment
+            greeks_calculator: Calculator shared with the backtest engine
+
+        Returns:
+            Dictionary mapping measure name to per-unit value
+        """
+        return instrument.unit_greeks(product, engine, pricing_env, greeks_calculator)
+
+    def compute_portfolio_measures(
+        self, portfolio, underlying: str, pricing_env
+    ) -> Dict[str, float]:
+        """
+        Extra portfolio-level measures needed by this strategy's targets.
+
+        Returned values are merged into the portfolio Greeks dict before
+        should_hedge / calculate_hedge_quantities are called. The base
+        strategy needs nothing beyond the engine-computed Greeks.
+
+        Args:
+            portfolio: Portfolio being hedged
+            underlying: Underlying asset identifier
+            pricing_env: Current pricing environment
+
+        Returns:
+            Dictionary mapping measure name to portfolio-level value
+        """
+        return {}
 
     def calculate_hedge_quantities(
         self,

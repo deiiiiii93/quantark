@@ -137,10 +137,6 @@ class MultiInstrumentHedgeExecutor:
         """
         Per-unit Greeks of each instrument's tradeable contract.
 
-        For instruments without a live contract, a fresh candidate is
-        created and cached so that the subsequent execute_hedges() trades
-        exactly the contract these Greeks describe.
-
         Args:
             underlying: Underlying asset identifier
             pricing_env: Current pricing environment
@@ -149,7 +145,37 @@ class MultiInstrumentHedgeExecutor:
         Returns:
             Dictionary mapping instrument name to its per-unit Greeks
         """
-        greeks: Dict[str, Dict[str, float]] = {}
+        return self.get_instrument_measures(
+            underlying, pricing_env, current_time, measure_provider=None
+        )
+
+    def get_instrument_measures(
+        self,
+        underlying: str,
+        pricing_env: PricingEnvironment,
+        current_time: datetime,
+        measure_provider=None,
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Per-unit sensitivity measures of each instrument's tradeable contract.
+
+        For instruments without a live contract, a fresh candidate is
+        created and cached so that the subsequent execute_hedges() trades
+        exactly the contract these measures describe.
+
+        Args:
+            underlying: Underlying asset identifier
+            pricing_env: Current pricing environment
+            current_time: Current timestamp
+            measure_provider: Object with an
+                instrument_measures(instrument, product, engine, pricing_env,
+                greeks_calculator) method (e.g. a MultiGreekHedgeStrategy);
+                None computes plain per-unit Greeks
+
+        Returns:
+            Dictionary mapping instrument name to its per-unit measures
+        """
+        measures: Dict[str, Dict[str, float]] = {}
         self._candidates = {}
         for name, instrument in self.instruments.items():
             contract = self._active.get(name)
@@ -161,10 +187,15 @@ class MultiInstrumentHedgeExecutor:
                 )
                 engine = instrument.create_engine()
                 self._candidates[name] = (product, engine)
-            greeks[name] = instrument.unit_greeks(
-                product, engine, pricing_env, self.greeks_calculator
-            )
-        return greeks
+            if measure_provider is not None:
+                measures[name] = measure_provider.instrument_measures(
+                    instrument, product, engine, pricing_env, self.greeks_calculator
+                )
+            else:
+                measures[name] = instrument.unit_greeks(
+                    product, engine, pricing_env, self.greeks_calculator
+                )
+        return measures
 
     def execute_hedges(
         self,

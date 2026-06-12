@@ -235,6 +235,15 @@ class BacktestEngine:
                 use_analytical=(self.config.greeks_method == "analytical"),
             )
 
+        # Strategies may need portfolio-level measures beyond Greeks
+        # (e.g. scenario P&L); merge them into the decision dict
+        if isinstance(self.config.strategy, MultiGreekHedgeStrategy):
+            extra_measures = self.config.strategy.compute_portfolio_measures(
+                self.portfolio, self.config.underlying, self.pricing_env
+            )
+            if extra_measures:
+                portfolio_greeks = {**portfolio_greeks, **extra_measures}
+
         # Get market data
         market_data = self._get_current_market_data(timestamp)
 
@@ -402,10 +411,11 @@ class BacktestEngine:
         Returns:
             List of TradeRecords (possibly empty)
         """
-        instrument_greeks = self.hedge_executor.get_instrument_greeks(
+        instrument_greeks = self.hedge_executor.get_instrument_measures(
             underlying=self.config.underlying,
             pricing_env=self.pricing_env,
             current_time=timestamp,
+            measure_provider=self.config.strategy,
         )
 
         quantities = self.config.strategy.calculate_hedge_quantities(
