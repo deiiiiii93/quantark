@@ -73,7 +73,7 @@ class TestEquitySensitivityEngine:
             ),
         ]
 
-        env = Mock()
+        env = Mock(spot=150.0)
         pricing_environments = {"AAPL": env}
 
         sensitivities = engine.calculate_delta_sensitivities(positions, pricing_environments)
@@ -85,8 +85,9 @@ class TestEquitySensitivityEngine:
         for sens in sensitivities:
             assert sens.risk_class == RiskClass.EQUITY
             assert sens.margin_type.value == "Delta"
-            # Should be scaled by quantity
-            assert abs(sens.amount - 50.0) < 1e-10  # 0.5 * 100
+            # SIMM equity delta is per 1% relative spot move (paragraph 26):
+            # 0.01 * spot * delta * quantity = 0.01 * 150 * 0.5 * 100.
+            assert abs(sens.amount - 75.0) < 1e-10
 
     def test_calculate_delta_sensitivities_with_zero_delta(self):
         """Test that positions with zero delta are skipped."""
@@ -124,7 +125,7 @@ class TestEquitySensitivityEngine:
             ),
         ]
 
-        env = Mock()
+        env = Mock(spot=150.0)
         pricing_environments = {"AAPL": env}
 
         sensitivities = engine.calculate_vega_sensitivities(positions, pricing_environments)
@@ -133,11 +134,14 @@ class TestEquitySensitivityEngine:
         assert len(sensitivities) > 0
 
         # Check that all sensitivities have correct risk class
+        from quantark.simm.sensitivity import vol_weighted_vega_equity
         for sens in sensitivities:
             assert sens.risk_class == RiskClass.EQUITY
             assert sens.margin_type.value == "Vega"
-            # Should be scaled by quantity
-            assert abs(sens.amount - 30.0) < 1e-10  # 0.3 * 100
+            # SIMM vega amounts are vol-weighted (paragraph 10(b)):
+            # sigma_kj * raw_vega * quantity.
+            expected = vol_weighted_vega_equity(30.0, sens.bucket_number)
+            assert abs(sens.amount - expected) < 1e-10
 
     def test_calculate_vega_sensitivities_with_zero_vega(self):
         """Test that positions with zero vega are skipped."""

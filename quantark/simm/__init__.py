@@ -44,9 +44,14 @@ from .sensitivity import (
     FXDeltaSensitivity,
     FXVegaSensitivity,
     IRDeltaSensitivity,
+    IRInflationDeltaSensitivity,
     IRVegaSensitivity,
+    IRXCcyBasisSensitivity,
     Sensitivity,
     SensitivityCollection,
+    vol_weighted_vega_commodity,
+    vol_weighted_vega_equity,
+    vol_weighted_vega_fx,
 )
 from .taxonomy import (
     # Enums
@@ -64,9 +69,12 @@ from .taxonomy import (
     VEGA_TENOR_LABELS,
     VEGA_TENORS,
     # Currency classifications
-    HIGH_VOL_CURRENCIES,
     LOW_VOL_CURRENCIES,
+    REGULAR_VOL_CURRENCIES,
     get_currency_volatility,
+    get_fx_volatility_group,
+    get_fx_concentration_category,
+    get_ir_concentration_group,
     # Bucket definitions
     COMMODITY_BUCKETS,
     CREDIT_NON_QUALIFYING_BUCKETS,
@@ -83,9 +91,10 @@ from .taxonomy import (
     FXBucket,
     IRBucket,
 )
-# Import results and reporting modules
+# Import results, reporting and template modules
 from . import results
 from . import report
+from . import template
 
 __all__ = [
     # Config
@@ -113,9 +122,14 @@ __all__ = [
     "FXDeltaSensitivity",
     "FXVegaSensitivity",
     "IRDeltaSensitivity",
+    "IRInflationDeltaSensitivity",
     "IRVegaSensitivity",
+    "IRXCcyBasisSensitivity",
     "Sensitivity",
     "SensitivityCollection",
+    "vol_weighted_vega_commodity",
+    "vol_weighted_vega_equity",
+    "vol_weighted_vega_fx",
     # Taxonomy - Enums
     "CurrencyVolatility",
     "IRSubCurve",
@@ -131,9 +145,12 @@ __all__ = [
     "VEGA_TENOR_LABELS",
     "VEGA_TENORS",
     # Taxonomy - Currency classifications
-    "HIGH_VOL_CURRENCIES",
     "LOW_VOL_CURRENCIES",
+    "REGULAR_VOL_CURRENCIES",
     "get_currency_volatility",
+    "get_fx_volatility_group",
+    "get_fx_concentration_category",
+    "get_ir_concentration_group",
     # Taxonomy - Bucket definitions
     "COMMODITY_BUCKETS",
     "CREDIT_NON_QUALIFYING_BUCKETS",
@@ -149,7 +166,8 @@ __all__ = [
     "EquityBucket",
     "FXBucket",
     "IRBucket",
-    # Results and reporting modules
+    # Results, reporting and template modules
     "results",
     "report",
+    "template",
 ]

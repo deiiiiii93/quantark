@@ -1,53 +1,51 @@
 """
-Risk Class Aggregator for SIMM.
+Risk-class level aggregation for SIMM.
 
-This module implements cross-bucket aggregation within a risk class.
+Implements:
+- Cross-bucket delta/vega aggregation (paragraphs 7(d), 8(d), 10(f)):
 
-Delta Margin = sqrt(Σ_b K_b² + Σ_b Σ_{c≠b} γ_bc × S_b × S_c) + K_residual
+      Margin = sqrt( sum_b K_b^2
+                     + sum_b sum_{c != b} gamma_bc [g_bc] S_b S_c )
+               + K_residual
 
-Where:
-- K_b is the bucket-level margin
-- γ_bc is the inter-bucket correlation
-- S_b = max(min(Σ WS_k, K_b), -K_b) is the capped bucket sum
-- K_residual is added without diversification
+  with S_b = max(min(sum_k WS_k, K_b), -K_b). The g_bc factor applies in
+  the Interest Rate risk class only.
 
-For IR, the formula includes g_bc factor:
-Delta Margin = sqrt(Σ_b K_b² + Σ_b Σ_{c≠b} γ_bc × g_bc × S_b × S_c)
+- Curvature margin (paragraph 11) with the theta / lambda factors,
+  squared correlations, separate residual treatment and the HVR_IR^-2
+  scale factor for the interest-rate risk class.
 
-For Curvature:
-- Uses ρ² and γ² (squared correlations)
-- Includes θ and λ factors
+- Base Correlation margin (paragraph 13).
 """
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union, Callable, Any
+from typing import Dict, Hashable, List, Union
 
-from quantark.simm.taxonomy import RiskClass, MarginType
+from quantark.simm.taxonomy import MarginType, RiskClass, is_residual_bucket
 from quantark.simm.engines.aggregation.bucket_aggregator import BucketResult
 from quantark.simm.engines.aggregation.concentration import ConcentrationCalculator
-from quantark.simm.calibration import get_inter_bucket_correlation
-from quantark.simm.calibration.ir import IR_INTER_CURRENCY_CORRELATION, IR_HVR
-from quantark.simm.calibration.credit_qualifying import CREDIT_QUALIFYING_INTER_BUCKET_CORRELATIONS
-from quantark.simm.calibration.credit_non_qualifying import CREDIT_NON_QUALIFYING_INTER_BUCKET_CORRELATION
-from quantark.simm.calibration.equity import EQUITY_INTER_BUCKET_CORRELATIONS
-from quantark.simm.calibration.commodity import COMMODITY_INTER_BUCKET_CORRELATIONS
-
-
-# Inverse of standard normal CDF at 99.5% (Φ^-1(0.995))
-PHI_INV_995 = 2.5758293035489
+from quantark.simm.engines.aggregation.correlations import (
+    inter_bucket_correlation,
+    intra_bucket_correlation,
+)
+from quantark.simm.calibration.ir import IR_HVR
+from quantark.simm.calibration.accessors import PHI_INV_995
+from quantark.simm.calibration.credit_qualifying import (
+    CREDIT_QUALIFYING_BASE_CORRELATION_INTER_INDEX_CORRELATION,
+)
 
 
 @dataclass
 class RiskClassResult:
-    """Result of risk class aggregation.
-    
+    """Result of risk class aggregation for one margin type.
+
     Attributes:
         risk_class: The risk class.
-        margin_type: Delta, Vega, or Curvature.
-        margin: The aggregated margin for this risk class and margin type.
-        bucket_results: Dict mapping bucket to BucketResult.
-        residual_margin: The residual bucket margin (added without diversification).
+        margin_type: Delta, Vega, Curvature, or BaseCorr.
+        margin: The aggregated margin.
+        bucket_results: Bucket-level results (delta/vega only).
+        residual_margin: The residual bucket contribution.
     """
     risk_class: RiskClass
     margin_type: MarginType
@@ -56,348 +54,258 @@ class RiskClassResult:
     residual_margin: float = 0.0
 
 
-class RiskClassAggregator:
-    """Aggregator for risk class margin calculation.
-    
-    Implements the cross-bucket aggregation formulas from SIMM spec.
+@dataclass
+class CurvatureExposure:
+    """Net curvature exposure CVR_k for one risk factor (paragraph 11(a)-(b)).
+
+    Attributes:
+        bucket: The bucket identifier.
+        risk_factor: Risk factor key (vega-style).
+        amount: Net CVR (scaling function already applied).
+        group: Group name for Credit Non-Qualifying correlations.
     """
-    
-    def aggregate_delta(
+    bucket: Union[str, int]
+    risk_factor: Hashable
+    amount: float
+    group: str = ""
+
+
+class RiskClassAggregator:
+    """Aggregator across buckets within a risk class."""
+
+    def __init__(self, calculation_currency: str = "USD"):
+        self.calculation_currency = calculation_currency.upper()
+
+    # ------------------------------------------------------------------
+    # Delta / Vega
+    # ------------------------------------------------------------------
+
+    def aggregate_delta_vega(
         self,
         bucket_results: List[BucketResult],
         risk_class: RiskClass,
-        bucket_cr_values: Optional[Dict[Union[str, int], float]] = None,
+        margin_type: MarginType,
     ) -> RiskClassResult:
-        """Aggregate delta margin across buckets.
-        
-        DeltaMargin = sqrt(Σ_b K_b² + Σ_b Σ_{c≠b} γ_bc × S_b × S_c) + K_residual
-        
-        For IR, includes g_bc factor.
-        
+        """Aggregate delta or vega margin across buckets.
+
         Args:
-            bucket_results: List of bucket results.
+            bucket_results: One BucketResult per bucket (residual included).
             risk_class: The risk class.
-            bucket_cr_values: Dict mapping bucket to bucket-level CR (for IR g_bc).
-            
+            margin_type: DELTA or VEGA.
+
         Returns:
-            RiskClassResult with aggregated delta margin.
+            RiskClassResult with the aggregated margin.
         """
         if not bucket_results:
-            return RiskClassResult(
-                risk_class=risk_class,
-                margin_type=MarginType.DELTA,
-                margin=0.0,
-            )
-        
-        # Separate residual and non-residual buckets
+            return RiskClassResult(risk_class=risk_class, margin_type=margin_type, margin=0.0)
+
         residual = [b for b in bucket_results if b.is_residual]
         non_residual = [b for b in bucket_results if not b.is_residual]
-        
-        if not non_residual:
-            # Only residual bucket
-            residual_margin = sum(b.k_b for b in residual)
-            return RiskClassResult(
-                risk_class=risk_class,
-                margin_type=MarginType.DELTA,
-                margin=residual_margin,
-                bucket_results={b.bucket: b for b in bucket_results},
-                residual_margin=residual_margin,
-            )
-        
-        # Get inter-bucket correlation function
-        gamma_func = self._get_inter_bucket_correlation_function(risk_class, MarginType.DELTA)
-        
-        # Calculate S_b for each bucket: S_b = max(min(Σ WS_k, K_b), -K_b)
-        s_values = {}
-        for br in non_residual:
-            s_values[br.bucket] = max(min(br.ws_sum, br.k_b), -br.k_b)
-        
-        buckets = [br.bucket for br in non_residual]
-        n = len(buckets)
-        
-        # Diagonal terms: Σ K_b²
-        sum_k_sq = sum(br.k_b ** 2 for br in non_residual)
-        
-        # Cross terms with gamma
-        cross_sum = 0.0
-        bucket_cr = bucket_cr_values or {}
-        
-        for i in range(n):
-            for j in range(i + 1, n):
-                b_i, b_j = buckets[i], buckets[j]
-                
-                gamma = gamma_func(b_i, b_j)
-                
-                # For IR, apply g_bc factor
-                if risk_class == RiskClass.INTEREST_RATE and bucket_cr:
-                    cr_i = bucket_cr.get(b_i, 1.0)
-                    cr_j = bucket_cr.get(b_j, 1.0)
-                    g_bc = ConcentrationCalculator.calculate_g_bc(cr_i, cr_j)
-                    gamma *= g_bc
-                
-                cross_sum += 2 * gamma * s_values[b_i] * s_values[b_j]
-        
-        # DeltaMargin (excluding residual)
-        margin = math.sqrt(max(0, sum_k_sq + cross_sum))
-        
-        # Add residual bucket margin
+
+        # K_residual is added without diversification (paragraph 8(d)).
         residual_margin = sum(b.k_b for b in residual)
-        margin += residual_margin
-        
+
+        total = 0.0
+        n = len(non_residual)
+        for i in range(n):
+            b_i = non_residual[i]
+            total += b_i.k_b ** 2
+            for j in range(i + 1, n):
+                b_j = non_residual[j]
+                gamma = inter_bucket_correlation(risk_class, b_i.bucket, b_j.bucket)
+                # g_bc applies in the Interest Rate risk class only
+                # (paragraphs 7(d) and 10(f)).
+                if risk_class == RiskClass.INTEREST_RATE:
+                    gamma *= ConcentrationCalculator.g_factor(b_i.bucket_cr, b_j.bucket_cr)
+                total += 2.0 * gamma * b_i.s_b * b_j.s_b
+
+        margin = math.sqrt(max(0.0, total)) + residual_margin
+
         return RiskClassResult(
             risk_class=risk_class,
-            margin_type=MarginType.DELTA,
+            margin_type=margin_type,
             margin=margin,
             bucket_results={b.bucket: b for b in bucket_results},
             residual_margin=residual_margin,
         )
-    
-    def aggregate_vega(
-        self,
-        bucket_results: List[BucketResult],
-        risk_class: RiskClass,
-        bucket_cr_values: Optional[Dict[Union[str, int], float]] = None,
-    ) -> RiskClassResult:
-        """Aggregate vega margin across buckets.
-        
-        Uses same formula as delta.
-        
-        Args:
-            bucket_results: List of bucket results.
-            risk_class: The risk class.
-            bucket_cr_values: Dict mapping bucket to bucket-level CR (for IR g_bc).
-            
-        Returns:
-            RiskClassResult with aggregated vega margin.
-        """
-        result = self.aggregate_delta(bucket_results, risk_class, bucket_cr_values)
-        result.margin_type = MarginType.VEGA
-        return result
-    
+
+    # ------------------------------------------------------------------
+    # Curvature
+    # ------------------------------------------------------------------
+
     def aggregate_curvature(
         self,
-        bucket_cvr_values: Dict[Union[str, int], Dict[str, float]],
+        exposures: List[CurvatureExposure],
         risk_class: RiskClass,
     ) -> RiskClassResult:
-        """Aggregate curvature margin across buckets.
-        
-        Uses squared correlations (ρ² and γ²) and θ/λ factors.
-        
-        CurvatureMargin = max(Σ CVR + λ × sqrt(Σ K_b² + Σ γ_bc² × S_b × S_c), 0)
-        
-        Where:
-        θ = min(Σ CVR / Σ|CVR|, 0)
-        λ = (Φ^-1(99.5%)² - 1)(1 + θ) - θ
-        
+        """Aggregate curvature margin for a risk class (paragraph 11).
+
         Args:
-            bucket_cvr_values: Dict mapping bucket -> {qualifier: CVR}.
+            exposures: Net CVR exposures per (bucket, risk factor).
             risk_class: The risk class.
-            
+
         Returns:
-            RiskClassResult with aggregated curvature margin.
+            RiskClassResult with the curvature margin.
         """
-        if not bucket_cvr_values:
+        if not exposures:
             return RiskClassResult(
-                risk_class=risk_class,
-                margin_type=MarginType.CURVATURE,
-                margin=0.0,
+                risk_class=risk_class, margin_type=MarginType.CURVATURE, margin=0.0
             )
-        
-        # Separate residual and non-residual
-        residual_cvrs = bucket_cvr_values.get("Residual", bucket_cvr_values.get(-1, {}))
-        non_residual = {b: cvrs for b, cvrs in bucket_cvr_values.items() 
-                       if b not in ("Residual", -1)}
-        
-        if not non_residual:
-            # Only residual
-            residual_margin = sum(abs(cvr) for cvr in residual_cvrs.values())
-            return RiskClassResult(
-                risk_class=risk_class,
-                margin_type=MarginType.CURVATURE,
-                margin=residual_margin,
-                residual_margin=residual_margin,
-            )
-        
-        # Get correlation functions (use squared correlations)
-        intra_corr_func = self._get_intra_bucket_corr_squared(risk_class)
-        gamma_func = self._get_inter_bucket_correlation_function(risk_class, MarginType.CURVATURE)
-        
-        # Calculate K_b for each bucket using ρ²
-        bucket_k = {}
-        for bucket, cvrs in non_residual.items():
-            qualifiers = list(cvrs.keys())
-            n_q = len(qualifiers)
-            
-            # Diagonal: Σ CVR²
-            sum_sq = sum(cvr**2 for cvr in cvrs.values())
-            
-            # Cross with ρ²
-            cross = 0.0
-            for i in range(n_q):
-                for j in range(i + 1, n_q):
-                    q_i, q_j = qualifiers[i], qualifiers[j]
-                    rho_sq = intra_corr_func(bucket, q_i, q_j) ** 2
-                    cross += 2 * rho_sq * cvrs[q_i] * cvrs[q_j]
-            
-            bucket_k[bucket] = math.sqrt(max(0, sum_sq + cross))
-        
-        # Calculate S_b for curvature
-        s_values = {}
-        for bucket, cvrs in non_residual.items():
-            cvr_sum = sum(cvrs.values())
-            k_b = bucket_k[bucket]
-            s_values[bucket] = max(min(cvr_sum, k_b), -k_b)
-        
-        # Calculate total CVR and |CVR|
-        total_cvr = sum(sum(cvrs.values()) for cvrs in bucket_cvr_values.values())
-        total_abs_cvr = sum(sum(abs(v) for v in cvrs.values()) for cvrs in bucket_cvr_values.values())
-        
-        # Calculate θ and λ
-        theta = min(total_cvr / total_abs_cvr, 0) if total_abs_cvr > 0 else 0
-        lambda_val = (PHI_INV_995**2 - 1) * (1 + theta) - theta
-        
-        # Cross-bucket with γ²
-        buckets = list(bucket_k.keys())
-        n = len(buckets)
-        sum_k_sq = sum(k**2 for k in bucket_k.values())
-        
-        cross_gamma = 0.0
-        for i in range(n):
-            for j in range(i + 1, n):
-                b_i, b_j = buckets[i], buckets[j]
-                gamma_sq = gamma_func(b_i, b_j) ** 2
-                cross_gamma += 2 * gamma_sq * s_values[b_i] * s_values[b_j]
-        
-        # CurvatureMargin (non-residual)
-        margin = max(total_cvr + lambda_val * math.sqrt(max(0, sum_k_sq + cross_gamma)), 0)
-        
-        # Apply HVR^(-2) scaling for IR curvature
+
+        non_residual = [e for e in exposures if not is_residual_bucket(e.bucket)]
+        residual = [e for e in exposures if is_residual_bucket(e.bucket)]
+
+        margin_non_res = self._curvature_non_residual(non_residual, risk_class)
+        margin_res = self._curvature_residual(residual, risk_class)
+
+        margin = margin_non_res + margin_res
+
+        # For the interest-rate risk class only, the CurvatureMargin is
+        # multiplied by HVR_IR^-2 (paragraph 11(d)).
         if risk_class == RiskClass.INTEREST_RATE:
-            hvr = IR_HVR
-            margin *= hvr ** (-2)
-        
-        # Add residual curvature margin
-        residual_margin = sum(abs(cvr) for cvr in residual_cvrs.values())
-        margin += residual_margin
-        
+            margin *= IR_HVR ** (-2)
+
         return RiskClassResult(
             risk_class=risk_class,
             margin_type=MarginType.CURVATURE,
             margin=margin,
-            residual_margin=residual_margin,
+            residual_margin=margin_res,
         )
-    
+
+    def _curvature_bucket_k(
+        self,
+        exposures: List[CurvatureExposure],
+        risk_class: RiskClass,
+        bucket: Union[str, int],
+    ) -> float:
+        """K_b = sqrt(sum CVR^2 + sum_{k != l} rho_kl^2 CVR_k CVR_l)
+        (paragraph 11(c))."""
+        n = len(exposures)
+        total = 0.0
+        for i in range(n):
+            e_i = exposures[i]
+            total += e_i.amount ** 2
+            for j in range(i + 1, n):
+                e_j = exposures[j]
+                rho = intra_bucket_correlation(
+                    risk_class,
+                    MarginType.CURVATURE,
+                    bucket,
+                    e_i.risk_factor,
+                    e_j.risk_factor,
+                    group_1=e_i.group,
+                    group_2=e_j.group,
+                    calculation_currency=self.calculation_currency,
+                )
+                total += 2.0 * (rho ** 2) * e_i.amount * e_j.amount
+        return math.sqrt(max(0.0, total))
+
+    @staticmethod
+    def _lambda(theta: float) -> float:
+        """lambda = (PHI_INV(99.5%)^2 - 1)(1 + theta) - theta (paragraph 11(d))."""
+        return (PHI_INV_995 ** 2 - 1.0) * (1.0 + theta) - theta
+
+    def _curvature_non_residual(
+        self,
+        exposures: List[CurvatureExposure],
+        risk_class: RiskClass,
+    ) -> float:
+        """Non-residual curvature margin (paragraph 11(d))."""
+        if not exposures:
+            return 0.0
+
+        by_bucket: Dict[Union[str, int], List[CurvatureExposure]] = {}
+        for e in exposures:
+            by_bucket.setdefault(e.bucket, []).append(e)
+
+        bucket_k = {
+            bucket: self._curvature_bucket_k(items, risk_class, bucket)
+            for bucket, items in by_bucket.items()
+        }
+        bucket_sum = {
+            bucket: sum(e.amount for e in items)
+            for bucket, items in by_bucket.items()
+        }
+        s_values = {
+            bucket: max(min(bucket_sum[bucket], bucket_k[bucket]), -bucket_k[bucket])
+            for bucket in by_bucket
+        }
+
+        total_cvr = sum(e.amount for e in exposures)
+        total_abs_cvr = sum(abs(e.amount) for e in exposures)
+
+        theta = min(total_cvr / total_abs_cvr, 0.0) if total_abs_cvr > 0 else 0.0
+        lam = self._lambda(theta)
+
+        buckets = list(by_bucket.keys())
+        n = len(buckets)
+        total = 0.0
+        for i in range(n):
+            total += bucket_k[buckets[i]] ** 2
+            for j in range(i + 1, n):
+                gamma = inter_bucket_correlation(risk_class, buckets[i], buckets[j])
+                total += 2.0 * (gamma ** 2) * s_values[buckets[i]] * s_values[buckets[j]]
+
+        return max(total_cvr + lam * math.sqrt(max(0.0, total)), 0.0)
+
+    def _curvature_residual(
+        self,
+        exposures: List[CurvatureExposure],
+        risk_class: RiskClass,
+    ) -> float:
+        """Residual curvature margin (paragraph 11(d))."""
+        if not exposures:
+            return 0.0
+
+        total_cvr = sum(e.amount for e in exposures)
+        total_abs_cvr = sum(abs(e.amount) for e in exposures)
+
+        theta = min(total_cvr / total_abs_cvr, 0.0) if total_abs_cvr > 0 else 0.0
+        lam = self._lambda(theta)
+
+        # All residual exposures share the residual bucket.
+        bucket = exposures[0].bucket
+        k_res = self._curvature_bucket_k(exposures, risk_class, bucket)
+
+        return max(total_cvr + lam * k_res, 0.0)
+
+    # ------------------------------------------------------------------
+    # Base Correlation
+    # ------------------------------------------------------------------
+
     def aggregate_base_corr(
         self,
-        sensitivities_weighted: Dict[str, float],
+        weighted_by_index: Dict[str, float],
     ) -> RiskClassResult:
-        """Aggregate base correlation margin (Credit Qualifying only).
-        
-        BaseCorrMargin uses simple sum with correlation.
-        
+        """Base Correlation margin (paragraph 13, Credit Qualifying only).
+
+        BaseCorrMargin = sqrt(sum WS_k^2 + sum_{k != l} rho_kl WS_k WS_l)
+        with rho_kl = 29% across different index families.
+
         Args:
-            sensitivities_weighted: Dict mapping index name to weighted sensitivity.
-            
+            weighted_by_index: WS_k = RW * s_k per index family.
+
         Returns:
-            RiskClassResult with base correlation margin.
+            RiskClassResult with the base correlation margin.
         """
-        if not sensitivities_weighted:
+        if not weighted_by_index:
             return RiskClassResult(
                 risk_class=RiskClass.CREDIT_QUALIFYING,
                 margin_type=MarginType.BASE_CORR,
                 margin=0.0,
             )
-        
-        indices = list(sensitivities_weighted.keys())
-        n = len(indices)
-        
-        # For base corr, CR = 1 always
-        # BaseCorrMargin = sqrt(Σ WS² + Σ ρ × WS_i × WS_j)
-        sum_sq = sum(ws**2 for ws in sensitivities_weighted.values())
-        
-        # Inter-index correlation (from calibration)
-        from quantark.simm.calibration.credit_qualifying import CREDIT_QUALIFYING_BASE_CORRELATION_INTER_INDEX_CORRELATION
+
         rho = CREDIT_QUALIFYING_BASE_CORRELATION_INTER_INDEX_CORRELATION
-        
-        cross = 0.0
+        values = list(weighted_by_index.values())
+        n = len(values)
+        total = 0.0
         for i in range(n):
+            total += values[i] ** 2
             for j in range(i + 1, n):
-                ws_i = sensitivities_weighted[indices[i]]
-                ws_j = sensitivities_weighted[indices[j]]
-                cross += 2 * rho * ws_i * ws_j
-        
-        margin = math.sqrt(max(0, sum_sq + cross))
-        
+                total += 2.0 * rho * values[i] * values[j]
+
         return RiskClassResult(
             risk_class=RiskClass.CREDIT_QUALIFYING,
             margin_type=MarginType.BASE_CORR,
-            margin=margin,
+            margin=math.sqrt(max(0.0, total)),
         )
-    
-    def _get_inter_bucket_correlation_function(
-        self,
-        risk_class: RiskClass,
-        margin_type: MarginType,
-    ) -> Callable[[Union[str, int], Union[str, int]], float]:
-        """Get inter-bucket correlation function."""
-        if risk_class == RiskClass.INTEREST_RATE:
-            gamma = IR_INTER_CURRENCY_CORRELATION
-            return lambda b1, b2: gamma if b1 != b2 else 1.0
-        
-        elif risk_class == RiskClass.CREDIT_QUALIFYING:
-            corr_matrix = CREDIT_QUALIFYING_INTER_BUCKET_CORRELATIONS
-            def get_corr(b1, b2):
-                if b1 == b2:
-                    return 1.0
-                b1_int = int(b1) if isinstance(b1, (int, str)) and str(b1).isdigit() else 1
-                b2_int = int(b2) if isinstance(b2, (int, str)) and str(b2).isdigit() else 1
-                return corr_matrix.get((b1_int, b2_int), corr_matrix.get((b2_int, b1_int), 0.36))
-            return get_corr
-        
-        elif risk_class == RiskClass.CREDIT_NON_QUALIFYING:
-            gamma = CREDIT_NON_QUALIFYING_INTER_BUCKET_CORRELATION
-            return lambda b1, b2: gamma if b1 != b2 else 1.0
-        
-        elif risk_class == RiskClass.EQUITY:
-            corr_matrix = EQUITY_INTER_BUCKET_CORRELATIONS
-            def get_corr(b1, b2):
-                if b1 == b2:
-                    return 1.0
-                b1_int = int(b1) if isinstance(b1, (int, str)) and str(b1).isdigit() else 1
-                b2_int = int(b2) if isinstance(b2, (int, str)) and str(b2).isdigit() else 1
-                return corr_matrix.get((b1_int, b2_int), corr_matrix.get((b2_int, b1_int), 0.15))
-            return get_corr
-        
-        elif risk_class == RiskClass.COMMODITY:
-            corr_matrix = COMMODITY_INTER_BUCKET_CORRELATIONS
-            def get_corr(b1, b2):
-                if b1 == b2:
-                    return 1.0
-                b1_int = int(b1) if isinstance(b1, (int, str)) and str(b1).isdigit() else 1
-                b2_int = int(b2) if isinstance(b2, (int, str)) and str(b2).isdigit() else 1
-                return corr_matrix.get((b1_int, b2_int), corr_matrix.get((b2_int, b1_int), 0.0))
-            return get_corr
-        
-        elif risk_class == RiskClass.FX:
-            # FX has single bucket
-            return lambda b1, b2: 1.0
-        
-        else:
-            return lambda b1, b2: 0.0
-    
-    def _get_intra_bucket_corr_squared(
-        self,
-        risk_class: RiskClass,
-    ) -> Callable[[Union[str, int], str, str], float]:
-        """Get intra-bucket correlation function for curvature (returns non-squared value).
-        
-        Curvature aggregation squares this value.
-        """
-        # Return base correlation; caller squares it
-        def get_corr(bucket, q1, q2):
-            if q1 == q2:
-                return 1.0
-            # Default correlation
-            return 0.5
-        
-        return get_corr

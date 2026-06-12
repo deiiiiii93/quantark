@@ -1,79 +1,54 @@
 """
-Credit Non-Qualifying Calibration Parameters for SIMM v2.6
+Credit Non-Qualifying calibration parameters for ISDA SIMM v2.6.
 
-This module contains all Credit Non-Qualifying (CreditNQ) calibration parameters
-as specified in ISDA SIMM v2.6, effective December 2, 2023.
-
-References:
-    - ISDA SIMM Methodology, Version 2.6, Section 2.3 (Credit Non-Qualifying Risk)
+All values are transcribed from the ISDA SIMM Methodology, version 2.6,
+Section F (Credit Non-Qualifying risk) and Sections J.2/J.7 (concentration
+thresholds). Paragraph references are given on each table.
 """
 
-import numpy as np
-
 
 # ============================================================================
-# RISK WEIGHTS
+# DELTA RISK WEIGHTS (paragraph 46)
 # ============================================================================
 
-# Credit Non-Qualifying risk weights by bucket (2 buckets + residual)
-# Source: ISDA SIMM v2.6, Table CN-1
 CREDIT_NON_QUALIFYING_RISK_WEIGHTS = {
-    1: 135,  # Sovereign
-    2: 135,  # Corporate
-    "Residual": 200
+    1: 280.0,
+    2: 1300.0,
+    "Residual": 1300.0,
 }
 
-
-# ============================================================================
-# INTRA-BUCKET CORRELATIONS
-# ============================================================================
-
-# Credit Non-Qualifying intra-bucket correlations
-# Same issuer correlation vs different issuer correlation
-# Source: ISDA SIMM v2.6, Section 2.3.1
-CREDIT_NON_QUALIFYING_INTRA_BUCKET_CORRELATIONS = {
-    # Same issuer, different risk factor
-    "same_issuer": 0.99,
-    # Different issuer, same bucket
-    1: 0.17,  # Sovereign
-    2: 0.28,  # Corporate
-    "Residual": 0.28
-}
-
-
-# ============================================================================
-# INTER-BUCKET CORRELATIONS
-# ============================================================================
-
-# Credit Non-Qualifying inter-bucket correlation (43%)
-# Correlation between bucket 1 and bucket 2
-# Source: ISDA SIMM v2.6, Table CN-2
-CREDIT_NON_QUALIFYING_INTER_BUCKET_CORRELATION = 0.43
-
-# Credit Non-Qualifying bucket labels
-CREDIT_NON_QUALIFYING_BUCKET_LABELS = [1, 2]
-
-
-# ============================================================================
-# VEGA RISK WEIGHTS
-# ============================================================================
-
-# Credit Non-Qualifying Vega Risk Weight (VRW)
+# Vega risk weight for Credit Non-Qualifying (paragraph 47).
 CREDIT_NON_QUALIFYING_VRW = 0.76
 
 
 # ============================================================================
-# CONCENTRATION THRESHOLDS
+# CORRELATIONS (paragraphs 48-49)
 # ============================================================================
 
-# Credit Non-Qualifying delta concentration thresholds (USD million)
-# Source: ISDA SIMM v2.6, Section 2.3.3
+# Intra-bucket correlations rho_kl (paragraph 48).
+# Same group name (such as CMBX, ABX): 83%. Different group name: 32%.
+# Residual bucket: 50% for both cases.
+CREDIT_NON_QUALIFYING_SAME_GROUP_CORRELATION = 0.83
+CREDIT_NON_QUALIFYING_DIFFERENT_GROUP_CORRELATION = 0.32
+CREDIT_NON_QUALIFYING_RESIDUAL_SAME_GROUP_CORRELATION = 0.50
+CREDIT_NON_QUALIFYING_RESIDUAL_DIFFERENT_GROUP_CORRELATION = 0.50
+
+# Inter-bucket correlation gamma_bc, non-residual to non-residual
+# (paragraph 49).
+CREDIT_NON_QUALIFYING_INTER_BUCKET_CORRELATION = 0.43
+
+
+# ============================================================================
+# CONCENTRATION THRESHOLDS (Sections J.2 and J.7)
+# ============================================================================
+
+# Delta concentration thresholds, USD mm/bp (paragraph 76).
 CREDIT_NON_QUALIFYING_DELTA_CONCENTRATION_THRESHOLDS = {
-    1: 300,  # Sovereign
-    2: 200,  # Corporate
-    "Residual": 20
+    1: 9.5,
+    2: 0.5,
+    "Residual": 0.5,
 }
 
-# Credit Non-Qualifying vega concentration threshold (USD million)
-# Source: ISDA SIMM v2.6, Section 2.3.4
-CREDIT_NON_QUALIFYING_VEGA_CONCENTRATION_THRESHOLD = 70
+# Vega concentration threshold, USD mm (paragraph 83), all buckets
+# including residual.
+CREDIT_NON_QUALIFYING_VEGA_CONCENTRATION_THRESHOLD = 70.0

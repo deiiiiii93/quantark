@@ -1,156 +1,136 @@
 """
-Commodity Calibration Parameters for SIMM v2.6
+Commodity calibration parameters for ISDA SIMM v2.6.
 
-This module contains all Commodity calibration parameters as specified in
-ISDA SIMM v2.6, effective December 2, 2023.
-
-References:
-    - ISDA SIMM Methodology, Version 2.6, Section 2.5 (Commodity Risk)
+All values are transcribed from the ISDA SIMM Methodology, version 2.6,
+Section H (Commodity risk) and Sections J.4/J.9 (concentration thresholds).
+Paragraph references are given on each table.
 """
 
 import numpy as np
 
 
 # ============================================================================
-# RISK WEIGHTS
+# DELTA RISK WEIGHTS (paragraph 61)
 # ============================================================================
 
-# Commodity risk weights by bucket (17 buckets)
-# Source: ISDA SIMM v2.6, Table CO-1
 COMMODITY_RISK_WEIGHTS = {
-    1: 70,   # Energy - Oil
-    2: 70,   # Energy - Gas
-    3: 70,   # Energy - Power
-    4: 70,   # Energy - Coal
-    5: 84,   # Metals - Base
-    6: 84,   # Metals - Precious
-    7: 84,   # Metals - Other
-    8: 58,   # Agriculture - Grains
-    9: 58,   # Agriculture - Softs
-    10: 58,  # Agriculture - Livestock
-    11: 58,  # Agriculture - Other
-    12: 60,  # Freight
-    13: 68,  # Weather
-    14: 68,  # Emission
-    15: 68,  # Nuclear
-    16: 68,  # Alternative Energy
-    17: 68   # Other
+    1: 48.0,    # Coal
+    2: 29.0,    # Crude
+    3: 33.0,    # Light Ends
+    4: 25.0,    # Middle Distillates
+    5: 35.0,    # Heavy Distillates
+    6: 30.0,    # North America Natural Gas
+    7: 60.0,    # European Natural Gas
+    8: 52.0,    # North American Power
+    9: 68.0,    # European Power and Carbon
+    10: 63.0,   # Freight
+    11: 21.0,   # Base Metals
+    12: 21.0,   # Precious Metals
+    13: 15.0,   # Grains and Oilseed
+    14: 16.0,   # Softs and Other Agriculturals
+    15: 13.0,   # Livestock and Dairy
+    16: 68.0,   # Other
+    17: 17.0,   # Indexes
 }
 
-
-# ============================================================================
-# INTRA-BUCKET CORRELATIONS
-# ============================================================================
-
-# Commodity intra-bucket correlations by bucket
-# Source: ISDA SIMM v2.6, Section 2.5.1
-COMMODITY_INTRA_BUCKET_CORRELATIONS = {
-    1: 0.34,  # Energy - Oil
-    2: 0.36,  # Energy - Gas
-    3: 0.26,  # Energy - Power
-    4: 0.31,  # Energy - Coal
-    5: 0.25,  # Metals - Base
-    6: 0.25,  # Metals - Precious
-    7: 0.25,  # Metals - Other
-    8: 0.24,  # Agriculture - Grains
-    9: 0.25,  # Agriculture - Softs
-    10: 0.19, # Agriculture - Livestock
-    11: 0.25, # Agriculture - Other
-    12: 0.31, # Freight
-    13: 0.15, # Weather
-    14: 0.18, # Emission
-    15: 0.18, # Nuclear
-    16: 0.18, # Alternative Energy
-    17: 0.25  # Other
-}
-
-
-# ============================================================================
-# INTER-BUCKET CORRELATIONS
-# ============================================================================
-
-# Commodity inter-bucket correlation matrix (17x17)
-# Source: ISDA SIMM v2.6, Table CO-2
-COMMODITY_INTER_BUCKET_CORRELATIONS = np.array([
-    #    1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16    17
-    [0.00, 0.72, 0.63, 0.63, 0.17, 0.17, 0.17, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 1 Oil
-    [0.72, 0.00, 0.57, 0.57, 0.17, 0.17, 0.17, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 2 Gas
-    [0.63, 0.57, 0.00, 0.54, 0.17, 0.17, 0.17, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 3 Power
-    [0.63, 0.57, 0.54, 0.00, 0.17, 0.17, 0.17, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 4 Coal
-    [0.17, 0.17, 0.17, 0.17, 0.00, 0.53, 0.53, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 5 Base Metals
-    [0.17, 0.17, 0.17, 0.17, 0.53, 0.00, 0.53, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 6 Precious Metals
-    [0.17, 0.17, 0.17, 0.17, 0.53, 0.53, 0.00, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 7 Other Metals
-    [0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.00, 0.44, 0.38, 0.44, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 8 Grains
-    [0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.44, 0.00, 0.38, 0.44, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 9 Softs
-    [0.14, 0.14, 0.14, 0.14, 0.14, 0.14, 0.14, 0.38, 0.38, 0.00, 0.38, 0.18, 0.11, 0.11, 0.11, 0.11, 0.14],  # 10 Livestock
-    [0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.44, 0.44, 0.38, 0.00, 0.18, 0.11, 0.11, 0.11, 0.11, 0.16],  # 11 Other Agriculture
-    [0.18, 0.18, 0.18, 0.18, 0.18, 0.18, 0.18, 0.18, 0.18, 0.18, 0.18, 0.00, 0.11, 0.11, 0.11, 0.11, 0.18],  # 12 Freight
-    [0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.00, 0.11, 0.11, 0.11, 0.11],  # 13 Weather
-    [0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.00, 0.11, 0.11, 0.11],  # 14 Emission
-    [0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.00, 0.11, 0.11],  # 15 Nuclear
-    [0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.00, 0.11],  # 16 Alt Energy
-    [0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.16, 0.14, 0.16, 0.18, 0.11, 0.11, 0.11, 0.11, 0.00],  # 17 Other
-])
-
-# Labels for Commodity buckets
-COMMODITY_BUCKET_LABELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-
-
-# ============================================================================
-# HISTORICAL VOLATILITY RATIOS AND VEGA RISK WEIGHTS
-# ============================================================================
-
-# Commodity Historical Volatility Ratio (HVR)
+# Historical volatility ratio for the commodity risk class (paragraph 62).
 COMMODITY_HVR = 0.74
 
-# Commodity Vega Risk Weight (VRW)
+# Vega risk weight for the commodity risk class (paragraph 63).
 COMMODITY_VRW = 0.55
 
 
 # ============================================================================
-# CONCENTRATION THRESHOLDS
+# CORRELATIONS (paragraphs 64-65)
 # ============================================================================
 
-# Commodity delta concentration thresholds (USD million / %)
-# Source: ISDA SIMM v2.6, Section 2.5.3
-COMMODITY_DELTA_CONCENTRATION_THRESHOLDS = {
-    1: 100,  # Energy - Oil
-    2: 100,  # Energy - Gas
-    3: 100,  # Energy - Power
-    4: 100,  # Energy - Coal
-    5: 80,   # Metals - Base
-    6: 80,   # Metals - Precious
-    7: 80,   # Metals - Other
-    8: 20,   # Agriculture - Grains
-    9: 20,   # Agriculture - Softs
-    10: 20,  # Agriculture - Livestock
-    11: 20,  # Agriculture - Other
-    12: 30,  # Freight
-    13: 30,  # Weather
-    14: 30,  # Emission
-    15: 30,  # Nuclear
-    16: 30,  # Alternative Energy
-    17: 30   # Other
+# Intra-bucket correlations rho_kl (paragraph 64).
+COMMODITY_INTRA_BUCKET_CORRELATIONS = {
+    1: 0.83,
+    2: 0.97,
+    3: 0.93,
+    4: 0.97,
+    5: 0.98,
+    6: 0.90,
+    7: 0.98,
+    8: 0.49,
+    9: 0.80,
+    10: 0.46,
+    11: 0.58,
+    12: 0.53,
+    13: 0.62,
+    14: 0.16,
+    15: 0.18,
+    16: 0.00,
+    17: 0.38,
 }
 
-# Commodity vega concentration thresholds (USD million / %)
-# Source: ISDA SIMM v2.6, Section 2.5.4
+# Inter-bucket correlations gamma_bc (paragraph 65), 17x17 indexed by
+# bucket-1.
+COMMODITY_INTER_BUCKET_CORRELATIONS = np.array([
+    #   1      2      3      4      5      6      7      8      9      10     11     12     13     14     15     16     17
+    [1.00,  0.22,  0.18,  0.21,  0.20,  0.24,  0.49,  0.16,  0.38,  0.14,  0.10,  0.02,  0.12,  0.11,  0.02,  0.00,  0.17],  # 1
+    [0.22,  1.00,  0.92,  0.90,  0.88,  0.25,  0.08,  0.19,  0.17,  0.17,  0.42,  0.28,  0.36,  0.27,  0.20,  0.00,  0.64],  # 2
+    [0.18,  0.92,  1.00,  0.87,  0.84,  0.16,  0.07,  0.15,  0.10,  0.18,  0.33,  0.22,  0.27,  0.23,  0.16,  0.00,  0.54],  # 3
+    [0.21,  0.90,  0.87,  1.00,  0.77,  0.19,  0.11,  0.18,  0.16,  0.14,  0.32,  0.22,  0.28,  0.22,  0.11,  0.00,  0.58],  # 4
+    [0.20,  0.88,  0.84,  0.77,  1.00,  0.19,  0.09,  0.12,  0.13,  0.18,  0.42,  0.34,  0.32,  0.29,  0.13,  0.00,  0.59],  # 5
+    [0.24,  0.25,  0.16,  0.19,  0.19,  1.00,  0.31,  0.62,  0.23,  0.10,  0.21,  0.05,  0.18,  0.10,  0.08,  0.00,  0.28],  # 6
+    [0.49,  0.08,  0.07,  0.11,  0.09,  0.31,  1.00,  0.21,  0.79,  0.17,  0.10, -0.08,  0.10,  0.07, -0.02,  0.00,  0.13],  # 7
+    [0.16,  0.19,  0.15,  0.18,  0.12,  0.62,  0.21,  1.00,  0.16,  0.08,  0.13, -0.07,  0.07,  0.05,  0.02,  0.00,  0.19],  # 8
+    [0.38,  0.17,  0.10,  0.16,  0.13,  0.23,  0.79,  0.16,  1.00,  0.15,  0.09, -0.06,  0.06,  0.06,  0.01,  0.00,  0.16],  # 9
+    [0.14,  0.17,  0.18,  0.14,  0.18,  0.10,  0.17,  0.08,  0.15,  1.00,  0.16,  0.09,  0.14,  0.09,  0.03,  0.00,  0.11],  # 10
+    [0.10,  0.42,  0.33,  0.32,  0.42,  0.21,  0.10,  0.13,  0.09,  0.16,  1.00,  0.36,  0.30,  0.25,  0.18,  0.00,  0.37],  # 11
+    [0.02,  0.28,  0.22,  0.22,  0.34,  0.05, -0.08, -0.07, -0.06,  0.09,  0.36,  1.00,  0.20,  0.18,  0.11,  0.00,  0.26],  # 12
+    [0.12,  0.36,  0.27,  0.28,  0.32,  0.18,  0.10,  0.07,  0.06,  0.14,  0.30,  0.20,  1.00,  0.28,  0.19,  0.00,  0.39],  # 13
+    [0.11,  0.27,  0.23,  0.22,  0.29,  0.10,  0.07,  0.05,  0.06,  0.09,  0.25,  0.18,  0.28,  1.00,  0.13,  0.00,  0.26],  # 14
+    [0.02,  0.20,  0.16,  0.11,  0.13,  0.08, -0.02,  0.02,  0.01,  0.03,  0.18,  0.11,  0.19,  0.13,  1.00,  0.00,  0.21],  # 15
+    [0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  1.00,  0.00],  # 16
+    [0.17,  0.64,  0.54,  0.58,  0.59,  0.28,  0.13,  0.19,  0.16,  0.11,  0.37,  0.26,  0.39,  0.26,  0.21,  0.00,  1.00],  # 17
+])
+
+
+# ============================================================================
+# CONCENTRATION THRESHOLDS (Sections J.4 and J.9)
+# ============================================================================
+
+# Delta concentration thresholds, USD mm/% (paragraph 78).
+COMMODITY_DELTA_CONCENTRATION_THRESHOLDS = {
+    1: 310.0,    # Coal
+    2: 2100.0,   # Crude Oil
+    3: 1700.0,   # Oil Fractions
+    4: 1700.0,
+    5: 1700.0,
+    6: 2800.0,   # Natural gas
+    7: 2800.0,
+    8: 2700.0,   # Power
+    9: 2700.0,
+    10: 52.0,    # Freight, Dry or Wet
+    11: 530.0,   # Base metals
+    12: 1300.0,  # Precious Metals
+    13: 100.0,   # Agricultural
+    14: 100.0,
+    15: 100.0,
+    16: 52.0,    # Other
+    17: 4000.0,  # Indices
+}
+
+# Vega concentration thresholds, USD mm (paragraph 85).
 COMMODITY_VEGA_CONCENTRATION_THRESHOLDS = {
-    1: 100,  # Energy - Oil
-    2: 100,  # Energy - Gas
-    3: 100,  # Energy - Power
-    4: 100,  # Energy - Coal
-    5: 80,   # Metals - Base
-    6: 80,   # Metals - Precious
-    7: 80,   # Metals - Other
-    8: 20,   # Agriculture - Grains
-    9: 20,   # Agriculture - Softs
-    10: 20,  # Agriculture - Livestock
-    11: 20,  # Agriculture - Other
-    12: 30,  # Freight
-    13: 30,  # Weather
-    14: 30,  # Emission
-    15: 30,  # Nuclear
-    16: 30,  # Alternative Energy
-    17: 30   # Other
+    1: 390.0,    # Coal
+    2: 2900.0,   # Crude Oil
+    3: 310.0,    # Oil fractions
+    4: 310.0,
+    5: 310.0,
+    6: 6300.0,   # Natural gas
+    7: 6300.0,
+    8: 1200.0,   # Power
+    9: 1200.0,
+    10: 120.0,   # Freight, Dry or Wet
+    11: 390.0,   # Base metals
+    12: 1300.0,  # Precious Metals
+    13: 590.0,   # Agricultural
+    14: 590.0,
+    15: 590.0,
+    16: 69.0,    # Other
+    17: 69.0,    # Indices
 }
