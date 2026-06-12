@@ -25,6 +25,9 @@ class DynamicScenarioConfig:
         save_intermediate_states: Whether to save state at each day
         generate_report: Whether to generate HTML report
         include_charts: Whether to include charts in report
+        handle_lifecycle_events: Detect and apply product lifecycle events
+            (knock-in/knock-out/coupon/maturity) along the day path. Disable
+            to reproduce the legacy inert-position behavior.
         metadata: Additional metadata
         
     Example:
@@ -47,7 +50,10 @@ class DynamicScenarioConfig:
     # Report settings
     generate_report: bool = True
     include_charts: bool = True
-    
+
+    # Lifecycle event handling
+    handle_lifecycle_events: bool = True
+
     # Additional settings
     metadata: Dict[str, Any] = field(default_factory=dict)
     basis_dividend_relationship_mode: BasisDividendRelationshipMode = (
@@ -109,6 +115,7 @@ class DynamicScenarioConfig:
             'save_intermediate_states': self.save_intermediate_states,
             'generate_report': self.generate_report,
             'include_charts': self.include_charts,
+            'handle_lifecycle_events': self.handle_lifecycle_events,
             'metadata': self.metadata,
             'basis_dividend_relationship_mode': self.basis_dividend_relationship_mode.value,
         }

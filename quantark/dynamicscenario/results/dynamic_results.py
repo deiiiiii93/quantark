@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
 
-from quantark.util.numerical import pnl_pct_of_abs_baseline
+from quantark.util.numerical import pnl_pct_of_abs_baseline, is_zero
 
 
 @dataclass
@@ -87,6 +87,54 @@ class TradeSnapshot:
 
 
 @dataclass
+class LifecycleEventSnapshot:
+    """
+    A realized product lifecycle event recorded during a dynamic scenario.
+
+    Attributes:
+        position_id: Position the event applies to
+        underlying: Underlying asset name
+        product_type: Product class name
+        event_type: One of 'KO', 'KI', 'COUPON', 'MATURITY', 'EXPIRY'
+        date: Event date (None when the path has no calendar dates)
+        observation_index: Index in the product observation schedule, if any
+        spot: Underlying close used for the observation
+        barrier: Barrier level checked, if any
+        payoff: Per-position-unit settlement amount
+        cashflow: Quantity-scaled amount booked to the cash ledger
+        terminates_position: Whether the position was removed by this event
+    """
+
+    position_id: str
+    underlying: str
+    product_type: str
+    event_type: str
+    date: Optional[datetime]
+    observation_index: Optional[int]
+    spot: float
+    barrier: Optional[float]
+    payoff: float
+    cashflow: float
+    terminates_position: bool
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "position_id": self.position_id,
+            "underlying": self.underlying,
+            "product_type": self.product_type,
+            "event_type": self.event_type,
+            "date": self.date.isoformat() if self.date else None,
+            "observation_index": self.observation_index,
+            "spot": self.spot,
+            "barrier": self.barrier,
+            "payoff": self.payoff,
+            "cashflow": self.cashflow,
+            "terminates_position": self.terminates_position,
+        }
+
+
+@dataclass
 class MarketState:
     """
     Market state at a point in time.
@@ -153,7 +201,9 @@ class DayResult:
     trades: List[TradeSnapshot] = field(default_factory=list)
     market_state: Optional[MarketState] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    lifecycle_events: List[LifecycleEventSnapshot] = field(default_factory=list)
+    realized_cash: float = 0.0
+
     @property
     def num_trades(self) -> int:
         """Get number of trades executed today."""
@@ -201,6 +251,8 @@ class DayResult:
             'trades': [t.to_dict() for t in self.trades],
             'market_state': self.market_state.to_dict() if self.market_state else None,
             'metadata': self.metadata,
+            'lifecycle_events': [e.to_dict() for e in self.lifecycle_events],
+            'realized_cash': self.realized_cash,
         }
     
     def get_summary(self) -> str:
@@ -489,7 +541,22 @@ class DynamicScenarioResults:
                     **trade.to_dict(),
                 })
         return pd.DataFrame(data) if data else pd.DataFrame()
-    
+
+    def get_lifecycle_events(self) -> pd.DataFrame:
+        """
+        Get all lifecycle events as a DataFrame.
+
+        Returns:
+            DataFrame with one row per event (empty if no events occurred)
+        """
+        rows = []
+        for day in self.day_results:
+            for event in day.lifecycle_events:
+                row = event.to_dict()
+                row["day_index"] = day.day_index
+                rows.append(row)
+        return pd.DataFrame(rows)
+
     def get_summary(self) -> str:
         """Get human-readable summary of results."""
         lines = [
@@ -512,6 +579,13 @@ class DynamicScenarioResults:
             f"Total Hedge Trades: {self.total_hedges}",
             "",
         ]
+
+        total_events = sum(len(d.lifecycle_events) for d in self.day_results)
+        lines.append(f"Lifecycle events: {total_events}")
+        if self.day_results and not is_zero(self.day_results[-1].realized_cash):
+            lines.append(
+                f"Realized settlement cash: ${self.day_results[-1].realized_cash:,.2f}"
+            )
         
         # Drawdown
         dd_amt, dd_pct, peak_day, trough_day = self.get_max_drawdown()
