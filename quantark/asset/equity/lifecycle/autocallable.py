@@ -65,11 +65,25 @@ class AutocallableLifecycleTracker:
     # ------------------------------------------------------------------
 
     def product_for_lifecycle(self) -> Any:
+        """
+        Return a copy of the product carrying the current knocked-in state.
+
+        Used for event observation; the copy's ``_otc_lifecycle_knocked_in``
+        attribute reflects the tracker's lifecycle state.
+        """
         product = deepcopy(self.product)
         setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
         return product
 
     def product_for_pricing(self, date: pd.Timestamp, pricing_env: PricingEnvironment) -> Any:
+        """
+        Return a time-decayed copy of the product for pricing on ``date``.
+
+        ``start_date`` must be set before calling this method; if it is
+        ``None`` no time decay or barrier-schedule shift is applied (elapsed
+        defaults to 0.0). The returned product's ``_otc_lifecycle_knocked_in``
+        attribute reflects the current lifecycle state.
+        """
         product = deepcopy(self.product)
         setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
         if (
@@ -265,7 +279,7 @@ class AutocallableLifecycleTracker:
     # Schedule resolution helpers (mirrors ProductReplay)
     # ------------------------------------------------------------------
 
-    def _state_snapshot(self) -> Dict[str, Any]:
+    def _state_snapshot(self) -> Dict[str, bool]:
         return {
             "alive": self.lifecycle.alive,
             "knocked_in": self.lifecycle.knocked_in,

@@ -106,7 +106,9 @@ class TestAutocallableLifecycleTracker:
         assert event.terminates_position
         assert tracker.lifecycle.knocked_out and not tracker.lifecycle.alive
 
-        profile = product.get_ko_observation_profile(make_env(spot=105.0))
+        profile = product.get_ko_observation_profile(
+            make_env(spot=105.0, valuation_date=START.to_pydatetime())
+        )
         expected = 2.0 * float(profile["payoffs"][0])
         assert almost_equal(event.cashflow, expected)
         assert almost_equal(tracker.lifecycle.realized_cashflows, expected)
