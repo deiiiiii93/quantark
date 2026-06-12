@@ -1,13 +1,16 @@
 """
 Per-product replay helpers for OTC autocallable backtests.
 
-``ProductReplay`` encapsulates the single-product daily logic that operates on
-one product and its lifecycle state. The book/hedge-level engine constructs one
-``ProductReplay`` per product and delegates the per-product steps to it, while
-keeping the futures-hedge and book-level accounting for itself.
+``ProductReplay`` encapsulates per-product daily replay: pricing-environment
+construction, Greek calculation, and surface/event-probability recording.
+Lifecycle event detection is fully DELEGATED to
+``quantark.asset.equity.lifecycle.AutocallableLifecycleTracker``; this class
+acts as the adapter that converts the ``LifecycleEvent`` objects returned by
+the tracker into the engine's action-row sink format.
 
-This is a behavior-preserving extraction of methods that previously lived on
-``AutocallableBacktestEngine``; the engine passes in its own output lists as
+The book/hedge-level engine constructs one ``ProductReplay`` per product and
+delegates the per-product steps to it, while keeping the futures-hedge and
+book-level accounting for itself.  The engine passes in its own output lists as
 ``*_sink`` arguments so recorded rows are unchanged.
 """
 
@@ -20,8 +23,8 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.numerical import is_close
@@ -44,11 +47,10 @@ class ProductReplay:
 
     Two-phase initialisation note
     ------------------------------
-    ``start_date`` is ``None`` at construction time.  It MUST be populated
-    before any replay method is called.  ``AutocallableBacktestEngine`` sets
-    ``self._replay.start_date`` to the first backtest date at the top of
-    ``run()``, before the daily loop begins.  Any standalone caller is
-    responsible for the same assignment.
+    ``start_date`` may be supplied at construction time or assigned later via
+    the ``start_date`` property (``AutocallableBacktestEngine`` assigns it at
+    the top of ``run()``).  It MUST be set before any observation method is
+    called — the tracker needs it to resolve schedule dates.
     """
 
     def __init__(
@@ -83,7 +85,6 @@ class ProductReplay:
         self.event_stats_engine = event_stats_engine
         self.engine_config = engine_config
         self.market_data = market_data
-        self.start_date = start_date
         self.underlying = underlying
         self.fixed_dividend_yield = fixed_dividend_yield
         self.delta_bump_size = delta_bump_size
@@ -95,35 +96,30 @@ class ProductReplay:
         self.daily_event_sink = daily_event_sink
         self.surfaces_sink = surfaces_sink
 
+        # date_resolver captures self; do not replace self.market_data
+        # post-construction or the resolver will keep using the old one.
+        self._tracker = AutocallableLifecycleTracker(
+            product=product,
+            quantity=product_quantity,
+            lifecycle=lifecycle,
+            start_date=start_date,
+            date_resolver=self._next_available_market_date,
+            has_lifecycle=has_lifecycle,
+        )
+
+    @property
+    def start_date(self) -> Optional[pd.Timestamp]:
+        return self._tracker.start_date
+
+    @start_date.setter
+    def start_date(self, value: Optional[pd.Timestamp]) -> None:
+        self._tracker.start_date = value
+
     def product_for_lifecycle(self):
-        product = deepcopy(self.product)
-        setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
-        return product
+        return self._tracker.product_for_lifecycle()
 
     def product_for_date(self, date: pd.Timestamp, pricing_env: PricingEnvironment):
-        product = deepcopy(self.product)
-        setattr(product, "_otc_lifecycle_knocked_in", self.lifecycle.knocked_in)
-        if (
-            getattr(product, "exercise_date", None) is None
-            and getattr(product, "maturity", None) is not None
-            and self.start_date is not None
-        ):
-            elapsed = max(0.0, (date - self.start_date).days / 365.0)
-            product.maturity = max(float(product.maturity) - elapsed, 1e-8)
-        elif self.start_date is not None:
-            elapsed = max(0.0, (date - self.start_date).days / 365.0)
-        else:
-            elapsed = 0.0
-        barrier_config = getattr(product, "barrier_config", None)
-        if barrier_config is not None and hasattr(barrier_config, "time_shift"):
-            shifted_config, dropped_all = barrier_config.time_shift(
-                elapsed,
-                date.to_pydatetime(),
-                pricing_env,
-            )
-            if shifted_config is not None and not dropped_all:
-                product.barrier_config = shifted_config
-        return product
+        return self._tracker.product_for_pricing(date, pricing_env)
 
     def build_env(self, date: pd.Timestamp, market: dict[str, float], selected):
         expiry = pd.Timestamp(selected["expiry_date"]).normalize()
@@ -377,242 +373,38 @@ class ProductReplay:
         except Exception:
             return None
 
-    def _lifecycle_snapshot(self) -> dict[str, Any]:
-        return {
-            "alive": self.lifecycle.alive,
-            "knocked_in": self.lifecycle.knocked_in,
-            "knocked_out": self.lifecycle.knocked_out,
-            "matured": self.lifecycle.matured,
-        }
-
-    def _append_action(
-        self,
-        *,
-        before_state: dict[str, Any],
-        action_type: str,
-        date: pd.Timestamp,
-        observation_index: Optional[int],
-        spot: float,
-        barrier: Optional[float],
-        cashflow: float,
-        **extra: Any,
-    ) -> None:
-        after_state = self._lifecycle_snapshot()
-        row = {
-            "date": date,
-            "action_type": action_type,
-            "observation_index": observation_index,
-            "spot": spot,
-            "barrier": barrier,
-            "cashflow": cashflow,
-            "alive_before": before_state["alive"],
-            "knocked_in_before": before_state["knocked_in"],
-            "knocked_out_before": before_state["knocked_out"],
-            "matured_before": before_state["matured"],
-            "alive_after": after_state["alive"],
-            "knocked_in_after": after_state["knocked_in"],
-            "knocked_out_after": after_state["knocked_out"],
-            "matured_after": after_state["matured"],
-        }
-        row.update(extra)
-        self.actions_sink.append(row)
-
-    def _maturity_market_date(self, product: Any, env: PricingEnvironment) -> pd.Timestamp:
-        explicit = (
-            getattr(product, "maturity_date", None)
-            or getattr(product, "exercise_date", None)
-        )
-        if explicit is not None:
-            return self._next_available_market_date(pd.Timestamp(explicit).normalize())
-
-        maturity = float(product.get_maturity(env))
-        base_date = pd.Timestamp(getattr(product, "initial_date", None) or self.start_date)
-        maturity_date = (
-            base_date + timedelta(days=int(round(maturity * 365.0)))
-        ).normalize()
-        return self._next_available_market_date(maturity_date)
-
     def settle_maturity_if_due(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
-        if not self.lifecycle.alive:
-            return
-        if date < self._maturity_market_date(product, env):
-            return
-
-        before = self._lifecycle_snapshot()
-        payoff = float(
-            product.get_payoff(
-                spot,
-                env,
-                knocked_in=self.lifecycle.knocked_in,
-            )
-        )
-        cashflow = self.product_quantity * payoff
-        if self.lifecycle.mark_maturity(date.to_pydatetime(), cashflow):
-            self._append_action(
-                before_state=before,
-                action_type="MATURITY",
-                date=date,
-                observation_index=None,
-                spot=spot,
-                barrier=None,
-                cashflow=cashflow,
-                payoff=payoff,
-            )
+        event = self._tracker.settle_maturity_if_due(date, product, env, spot)
+        if event is not None:
+            self.actions_sink.append(self._event_to_action_row(event))
 
     def apply_lifecycle_events(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
-        if not self.lifecycle.alive:
-            return
-        if not self.has_lifecycle:
-            return
-        ko_records = self._scheduled_records(product, env, "ko")
-        ko_disabled_after_ki = bool(
-            self.lifecycle.knocked_in
-            and getattr(product.barrier_config, "disable_ko_after_ki", False)
-        )
-        if not ko_disabled_after_ki:
-            for idx, rec in enumerate(ko_records):
-                if idx in self.lifecycle.observed_ko_indices:
-                    continue
-                if date < rec["date"]:
-                    continue
-                self.lifecycle.observed_ko_indices.add(idx)
-                if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=True):
-                    before = self._lifecycle_snapshot()
-                    cashflow = self.product_quantity * float(rec.get("payoff", 0.0))
-                    if self.lifecycle.mark_ko(date.to_pydatetime(), cashflow):
-                        self._append_action(
-                            before_state=before,
-                            action_type="KO",
-                            date=date,
-                            observation_index=idx,
-                            spot=spot,
-                            barrier=rec["barrier"],
-                            cashflow=cashflow,
-                            payoff=float(rec.get("payoff", 0.0)),
-                        )
-                    return
+        for event in self._tracker.observe(date, product, env, spot):
+            self.actions_sink.append(self._event_to_action_row(event))
 
-        ki_records = self._scheduled_records(product, env, "ki")
-        ki_observation_type = getattr(product.barrier_config, "ki_observation_type", None)
-        ki_continuous = getattr(product, "has_ki_barrier", False) and (
-            product.barrier_config.ki_continuous
-            or getattr(ki_observation_type, "name", None) == "CONTINUOUS"
-        )
-        if ki_continuous:
-            barrier = product.barrier_config.ki_barrier
-            if isinstance(barrier, list):
-                barrier = barrier[0]
-            if self._barrier_hit(spot, float(barrier), product.is_reverse, is_ko=False):
-                before = self._lifecycle_snapshot()
-                if self.lifecycle.mark_ki(date.to_pydatetime()):
-                    self._append_action(
-                        before_state=before,
-                        action_type="KI",
-                        date=date,
-                        observation_index=None,
-                        spot=spot,
-                        barrier=float(barrier),
-                        cashflow=0.0,
-                        monitoring="daily_close",
-                    )
-        else:
-            for idx, rec in enumerate(ki_records):
-                if idx in self.lifecycle.observed_ki_indices:
-                    continue
-                if date < rec["date"]:
-                    continue
-                self.lifecycle.observed_ki_indices.add(idx)
-                if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=False):
-                    before = self._lifecycle_snapshot()
-                    if self.lifecycle.mark_ki(date.to_pydatetime()):
-                        self._append_action(
-                            before_state=before,
-                            action_type="KI",
-                            date=date,
-                            observation_index=idx,
-                            spot=spot,
-                            barrier=rec["barrier"],
-                            cashflow=0.0,
-                        )
-
-        if isinstance(product, PhoenixOption):
-            for idx, rec in enumerate(ko_records):
-                if idx in self.lifecycle.observed_coupon_indices:
-                    continue
-                if date < rec["date"]:
-                    continue
-                self.lifecycle.observed_coupon_indices.add(idx)
-                if product.is_coupon_triggered(spot, idx):
-                    before = self._lifecycle_snapshot()
-                    coupon = self.product_quantity * product.get_coupon_payoff(idx)
-                    self.lifecycle.add_cashflow(coupon)
-                    self.lifecycle.coupon_memory_count = 0
-                    self._append_action(
-                        before_state=before,
-                        action_type="COUPON",
-                        date=date,
-                        observation_index=idx,
-                        spot=spot,
-                        barrier=product.get_coupon_barrier_at(idx),
-                        cashflow=coupon,
-                    )
-                elif product.has_memory_coupon:
-                    self.lifecycle.coupon_memory_count += 1
-
-    def _schedule_resolution_env(
-        self, product: Any, env: PricingEnvironment
-    ) -> PricingEnvironment:
-        """Resolve lifecycle schedules from the contract issue date."""
-        base_date = getattr(product, "initial_date", None) or self.start_date
-        if base_date is None:
-            return env
-
-        schedule_env = deepcopy(env)
-        schedule_env.valuation_date = pd.Timestamp(base_date).to_pydatetime()
-        return schedule_env
-
-    def _scheduled_records(
-        self, product: Any, env: PricingEnvironment, kind: str
-    ) -> list[dict[str, Any]]:
-        schedule_env = self._schedule_resolution_env(product, env)
-        if kind == "ko":
-            profile = product.get_ko_observation_profile(schedule_env)
-            schedule = getattr(product.barrier_config, "ko_observation_schedule", None)
-        else:
-            if not getattr(product, "has_ki_barrier", False):
-                return []
-            profile = product.get_ki_observation_profile(schedule_env)
-            schedule = getattr(product.barrier_config, "ki_observation_schedule", None)
-
-        times = list(profile.get("observation_times", []))
-        barriers = list(profile.get("barriers", []))
-        payoffs = list(profile.get("payoffs", [0.0] * len(times)))
-        schedule_dates = []
-        if schedule is not None:
-            for rec in schedule.records:
-                schedule_dates.append(getattr(rec, "observation_date", None))
-
-        records = []
-        base_date = pd.Timestamp(getattr(product, "initial_date", None) or self.start_date)
-        for idx, obs_time in enumerate(times):
-            if idx < len(schedule_dates) and schedule_dates[idx] is not None:
-                obs_date = pd.Timestamp(schedule_dates[idx]).normalize()
-            else:
-                obs_date = (base_date + timedelta(days=int(round(float(obs_time) * 365)))).normalize()
-            obs_date = self._next_available_market_date(obs_date)
-            records.append(
-                {
-                    "date": obs_date,
-                    "time": float(obs_time),
-                    "barrier": float(barriers[idx]) if idx < len(barriers) and barriers[idx] is not None else None,
-                    "payoff": float(payoffs[idx]) if idx < len(payoffs) and payoffs[idx] is not None else 0.0,
-                }
-            )
-        return records
+    def _event_to_action_row(self, event) -> dict[str, Any]:
+        row = {
+            "date": event.date,
+            "action_type": event.event_type.value,
+            "observation_index": event.observation_index,
+            "spot": event.spot,
+            "barrier": event.barrier,
+            "cashflow": event.cashflow,
+            "alive_before": event.state_before["alive"],
+            "knocked_in_before": event.state_before["knocked_in"],
+            "knocked_out_before": event.state_before["knocked_out"],
+            "matured_before": event.state_before["matured"],
+            "alive_after": event.state_after["alive"],
+            "knocked_in_after": event.state_after["knocked_in"],
+            "knocked_out_after": event.state_after["knocked_out"],
+            "matured_after": event.state_after["matured"],
+        }
+        row.update(event.metadata)
+        return row
 
     def _next_available_market_date(self, date: pd.Timestamp) -> pd.Timestamp:
         dates = self.market_data.dates
@@ -620,16 +412,6 @@ class ProductReplay:
         if len(eligible) == 0:
             return pd.Timestamp(date).normalize()
         return pd.Timestamp(eligible[0]).normalize()
-
-    @staticmethod
-    def _barrier_hit(
-        spot: float, barrier: Optional[float], is_reverse: bool, is_ko: bool
-    ) -> bool:
-        if barrier is None:
-            return False
-        if is_ko:
-            return spot <= barrier if is_reverse else spot >= barrier
-        return spot >= barrier if is_reverse else spot <= barrier
 
     @staticmethod
     def _date_from_time(date: pd.Timestamp, time_years: float) -> pd.Timestamp:

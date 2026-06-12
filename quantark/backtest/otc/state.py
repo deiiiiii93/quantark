@@ -2,57 +2,11 @@
 State and strategy objects for OTC autocallable backtests.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
 from quantark.util.exceptions import ValidationError
-
-
-@dataclass
-class AutocallableLifecycleState:
-    """Realized product lifecycle state during historical replay."""
-
-    alive: bool = True
-    knocked_in: bool = False
-    knocked_out: bool = False
-    matured: bool = False
-    ki_date: Optional[datetime] = None
-    ko_date: Optional[datetime] = None
-    maturity_date: Optional[datetime] = None
-    coupon_memory_count: int = 0
-    realized_cashflows: float = 0.0
-    observed_ko_indices: set[int] = field(default_factory=set)
-    observed_ki_indices: set[int] = field(default_factory=set)
-    observed_coupon_indices: set[int] = field(default_factory=set)
-
-    def mark_ki(self, timestamp: datetime) -> bool:
-        if self.knocked_in or self.knocked_out:
-            return False
-        self.knocked_in = True
-        self.ki_date = timestamp
-        return True
-
-    def mark_ko(self, timestamp: datetime, cashflow: float = 0.0) -> bool:
-        if self.knocked_out or self.matured:
-            return False
-        self.knocked_out = True
-        self.alive = False
-        self.ko_date = timestamp
-        self.realized_cashflows += float(cashflow)
-        return True
-
-    def mark_maturity(self, timestamp: datetime, cashflow: float = 0.0) -> bool:
-        if self.knocked_out or self.matured:
-            return False
-        self.matured = True
-        self.alive = False
-        self.maturity_date = timestamp
-        self.realized_cashflows += float(cashflow)
-        return True
-
-    def add_cashflow(self, amount: float) -> None:
-        self.realized_cashflows += float(amount)
 
 
 @dataclass

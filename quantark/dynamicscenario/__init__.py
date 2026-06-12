@@ -39,9 +39,11 @@ from quantark.dynamicscenario.results.dynamic_results import (
     PositionSnapshot,
     TradeSnapshot,
     MarketState,
+    LifecycleEventSnapshot,
 )
 from quantark.dynamicscenario.results.result_exporter import DynamicResultExporter
 from quantark.dynamicscenario.report.dynamic_report import DynamicReportGenerator
+from quantark.dynamicscenario.lifecycle_manager import LifecycleManager
 from quantark.dynamicscenario.report.visualizer import DynamicScenarioVisualizer
 
 # FI path library
@@ -82,6 +84,9 @@ __all__ = [
     "TradeSnapshot",
     "MarketState",
     "DynamicResultExporter",
+    # Lifecycle
+    "LifecycleManager",
+    "LifecycleEventSnapshot",
     # Report & Visualization
     "DynamicReportGenerator",
     "DynamicScenarioVisualizer",
