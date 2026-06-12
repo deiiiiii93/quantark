@@ -17,7 +17,7 @@ comparisons or bare math operations.
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -168,6 +168,7 @@ class BarrierLifecycleTracker:
             getattr(copy, "exercise_date", None) is None
             and getattr(copy, "maturity", None) is not None
         ):
+            # 1e-8 floor matches the maturity floor used by AutocallableLifecycleTracker
             remaining = max(1e-8, self._remaining_maturity(date))
             copy.maturity = remaining
         return copy
@@ -203,6 +204,7 @@ class BarrierLifecycleTracker:
             ``EuropeanVanillaOption`` replacement, or ``None`` if the product
             is not a knock-in barrier type that supports substitution.
         """
+        # 1e-8 floor matches the maturity floor used by AutocallableLifecycleTracker
         remaining = max(1e-8, self._remaining_maturity(date))
 
         if isinstance(self.product, BarrierOption):
@@ -299,29 +301,19 @@ class BarrierLifecycleTracker:
                 if barrier_hit:
                     # Spot hit at expiry-only monitoring → KO at expiry
                     payoff = product.rebate * product.contract_multiplier
-                    return [
-                        self._terminal_event(
-                            LifecycleEventType.EXPIRY,
-                            date,
-                            spot,
-                            barrier=product.barrier,
-                            payoff=payoff,
-                            expired=True,
-                        )
-                    ]
                 else:
                     # No barrier hit; pay vanilla payoff
                     payoff = product.get_payoff(spot)
-                    return [
-                        self._terminal_event(
-                            LifecycleEventType.EXPIRY,
-                            date,
-                            spot,
-                            barrier=product.barrier,
-                            payoff=payoff,
-                            expired=True,
-                        )
-                    ]
+                return [
+                    self._terminal_event(
+                        LifecycleEventType.EXPIRY,
+                        date,
+                        spot,
+                        barrier=product.barrier,
+                        payoff=payoff,
+                        expired=True,
+                    )
+                ]
 
         else:  # is_knock_in
             if barrier_hit and not self.state.knocked_in and self._monitored_intra_path():
@@ -517,7 +509,7 @@ class BarrierLifecycleTracker:
             ]
 
         if self._expiry_due(date):
-            payoff = product.get_payoff(spot, touched=False)
+            payoff = product.get_payoff(spot, touched=barrier_hit)
             return [
                 self._terminal_event(
                     LifecycleEventType.EXPIRY,
@@ -584,7 +576,7 @@ class BarrierLifecycleTracker:
         if is_zero(remaining) or remaining <= 0.0:
             return amount
         rate = env.get_rate(remaining)
-        return amount * safe_exp(-rate * remaining)
+        return float(amount * safe_exp(-rate * remaining))
 
     # ------------------------------------------------------------------
     # State snapshot & event constructors

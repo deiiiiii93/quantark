@@ -324,6 +324,7 @@ class TestBarrierLifecycleTracker:
             strike=100.0, option_type=OptionType.PUT,
             barrier=90.0, barrier_type=BarrierType.DOWN_IN,
             exercise_date=(START + pd.Timedelta(days=180)).to_pydatetime(),
+            rebate=1.5,
         )
         tracker = self._tracker(product)
         env = make_env(spot=95.0)
@@ -335,6 +336,9 @@ class TestBarrierLifecycleTracker:
         # on/after exercise_date -> EXPIRY settles
         events = tracker.observe(START + pd.Timedelta(days=180), env, 95.0)
         assert [e.event_type.value for e in events] == ["EXPIRY"]
+        assert almost_equal(
+            events[0].cashflow, 1.5 * product.contract_multiplier
+        )
 
     def test_sharkfin_ko_pays_knock_out_rebate(self):
         from quantark.asset.equity.lifecycle import LifecycleEventType
