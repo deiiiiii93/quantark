@@ -21,6 +21,113 @@ def make_env(spot=100.0, vol=0.20, rate=0.03):
     )
 
 
+def make_snowball(maturity=1.0, ko_barrier=103.0, ki_barrier=70.0):
+    from quantark.asset.equity.product.option import SnowballOption
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+
+    return SnowballOption(
+        initial_price=100.0, strike=100.0,
+        barrier_config=BarrierConfig(
+            ko_barrier=ko_barrier, ko_rate=0.15,
+            ko_observation_dates=[i / 12.0 for i in range(1, 13)],
+            ki_barrier=ki_barrier, ki_continuous=True,
+        ),
+        maturity=maturity, contract_multiplier=1.0,
+    )
+
+
+def make_portfolio(product, engine, spot=100.0):
+    from quantark.portfolio import Portfolio
+
+    env = make_env(spot=spot)
+    portfolio = Portfolio(
+        portfolio_name="lifecycle-test",
+        pricing_environments={"IDX": env},
+    )
+    portfolio.add_position(
+        product=product, quantity=1.0, entry_price=0.0,
+        underlying="IDX", engine=engine,
+    )
+    return portfolio
+
+
+class TestLifecycleManager:
+    def test_register_attaches_trackers_by_product_type(self):
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.dynamicscenario.lifecycle_manager import LifecycleManager
+
+        portfolio = make_portfolio(make_snowball(), SnowballQuadEngine())
+        manager = LifecycleManager(base_date=VAL_DATE)
+        manager.register_positions(portfolio)
+        assert manager.num_tracked == 1
+
+    def test_ko_reset_snowball_warns_and_is_untracked(self):
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.asset.equity.product.option.ko_reset_snowball_option import (
+            KnockOutResetSnowballOption,
+        )
+        from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+        from quantark.dynamicscenario.lifecycle_manager import LifecycleManager
+
+        snowball = make_snowball()
+        # post_barrier_config is required; provide a minimal valid one
+        post_config = BarrierConfig(
+            ko_barrier=103.0, ko_rate=0.15,
+            ko_observation_dates=[i / 12.0 for i in range(1, 13)],
+        )
+        ko_reset = KnockOutResetSnowballOption(
+            initial_price=100.0, strike=100.0,
+            barrier_config=snowball.barrier_config,
+            post_barrier_config=post_config,
+            maturity=1.0, contract_multiplier=1.0,
+        )
+        portfolio = make_portfolio(ko_reset, SnowballQuadEngine())
+        manager = LifecycleManager(base_date=VAL_DATE)
+        with pytest.warns(UserWarning, match="KO-reset"):
+            manager.register_positions(portfolio)
+        assert manager.num_tracked == 0
+
+    def test_process_day_settles_snowball_ko_to_cash(self):
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.dynamicscenario.lifecycle_manager import LifecycleManager
+
+        portfolio = make_portfolio(make_snowball(), SnowballQuadEngine(), spot=105.0)
+        manager = LifecycleManager(base_date=VAL_DATE)
+        manager.register_positions(portfolio)
+
+        # Day 5: above KO barrier but before first observation -> no event
+        snapshots = manager.process_day(portfolio, day_index=5, day_date=None)
+        assert snapshots == []
+        assert len(portfolio) == 1
+
+        # Day 30: first monthly KO observation date
+        ko_day = int(round(365 / 12))
+        snapshots = manager.process_day(portfolio, day_index=ko_day, day_date=None)
+        assert len(snapshots) == 1
+        assert snapshots[0].event_type == "KO"
+        assert snapshots[0].terminates_position
+        assert len(portfolio) == 0
+        assert manager.realized_cash > 0.0
+        assert almost_equal(manager.realized_cash, snapshots[0].cashflow)
+
+    def test_process_day_sets_ki_flag_and_decays_product(self):
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.dynamicscenario.lifecycle_manager import LifecycleManager
+
+        portfolio = make_portfolio(make_snowball(), SnowballQuadEngine(), spot=65.0)
+        manager = LifecycleManager(base_date=VAL_DATE)
+        manager.register_positions(portfolio)
+
+        snapshots = manager.process_day(portfolio, day_index=10, day_date=None)
+        assert [s.event_type for s in snapshots] == ["KI"]
+        assert len(portfolio) == 1
+        assert is_zero(manager.realized_cash)
+
+        position = next(iter(portfolio.positions.values()))
+        assert getattr(position.product, "_otc_lifecycle_knocked_in") is True
+        assert is_close(position.product.maturity, 1.0 - 10.0 / 365.0)
+
+
 class TestConfigAndResults:
     def test_config_flag_defaults_on(self):
         from quantark.dynamicscenario import DynamicScenarioConfig
