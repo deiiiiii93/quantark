@@ -76,7 +76,7 @@ class GarmanKohlhagenEngine(BaseFxEngine):
             * option.annualization_factor(fx_env)
         )
 
-        if value < -1e-12 * option.notional:
+        if value < 0 and not is_zero(value / option.notional):
             raise PricingError(f"Negative option value computed: {value}")
         return value
 
