@@ -449,6 +449,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             if getattr(product, "_otc_lifecycle_knocked_in", False)
             else v_out_list[0]
         )
+        self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
         return math_utils.interpolate(value_surface, x=0.0)
 
     def calculate_event_stats(

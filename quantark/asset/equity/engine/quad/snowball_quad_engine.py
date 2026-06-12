@@ -69,6 +69,7 @@ class SnowballQuadEngine(BaseEngine):
     """
 
     engine_type = EngineType.QUADRATURE
+    supports_spot_greeks_grid = True
 
     def __init__(self, params: Optional[QuadParams] = None) -> None:
         if params is None:
@@ -320,6 +321,7 @@ class SnowballQuadEngine(BaseEngine):
                 )
 
         value_surface = v_in if knocked_in_at_valuation else v_out
+        self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
         return math_utils.interpolate(value_surface, x=0.0)
 
     def calculate_event_stats(

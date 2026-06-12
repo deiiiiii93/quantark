@@ -290,6 +290,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     tau_step,
                 )
 
+        self._last_spot_greeks_grid = (spot_grid.copy(), v_out.copy())
         return math_utils.interpolate(v_out, x=0.0)
 
     def calculate_event_stats(

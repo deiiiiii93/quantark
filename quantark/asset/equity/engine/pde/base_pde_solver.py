@@ -9,7 +9,7 @@ from abc import abstractmethod
 from collections import OrderedDict
 import math
 import threading
-from typing import Dict, Optional, Tuple, List, NamedTuple
+from typing import Dict, Optional, Tuple, List, NamedTuple, Sequence
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
@@ -393,6 +393,36 @@ class BasePDESolver(BaseEngine):
         )
 
         return {"price": price, "delta": delta, "gamma": gamma}
+
+    def calculate_spot_greeks_curve(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot_levels: Sequence[float],
+    ) -> list[dict[str, float | str]]:
+        """Interpolate a spot Greeks curve from one PDE solve."""
+        spots = np.asarray([float(spot) for spot in spot_levels], dtype=float)
+        if spots.size == 0:
+            return []
+        if not np.all(np.isfinite(spots)) or np.any(spots <= 0.0):
+            raise ValueError("spot levels must be positive and finite")
+        if product.get_maturity(pricing_env) <= 0:
+            return super().calculate_spot_greeks_curve(product, pricing_env, spots)
+
+        result = self._solve(product, pricing_env)
+        prices = np.asarray(result.solution_vec, dtype=float)
+        deltas = np.gradient(prices, result.s_vec, edge_order=2)
+        gammas = np.gradient(deltas, result.s_vec, edge_order=2)
+        return [
+            {
+                "spot": float(spot),
+                "price": float(np.interp(spot, result.s_vec, prices)),
+                "delta": float(np.interp(spot, result.s_vec, deltas)),
+                "gamma": float(np.interp(spot, result.s_vec, gammas)),
+                "calculation_mode": "engine_grid",
+            }
+            for spot in spots
+        ]
 
     def _build_grids(
         self,

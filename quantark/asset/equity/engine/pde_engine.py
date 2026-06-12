@@ -6,7 +6,7 @@ and automatically routes pricing requests to the appropriate PDE solver based on
 the product type.
 """
 
-from typing import Dict, Optional, Type, Union
+from typing import Dict, Optional, Type, Union, Sequence
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.param import PDEParams
@@ -233,6 +233,15 @@ class PDEEngine(BaseEngine):
 
         solver = self._get_solver(product)
         return solver.calculate_greeks(product, pricing_env)
+
+    def calculate_spot_greeks_curve(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot_levels: Sequence[float],
+    ) -> list[dict[str, float | str]]:
+        solver = self._get_solver(product)
+        return solver.calculate_spot_greeks_curve(product, pricing_env, spot_levels)
 
     def __repr__(self):
         return f"PDEEngine(method={self.method.value})"

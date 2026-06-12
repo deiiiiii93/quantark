@@ -3,7 +3,10 @@ Base class for pricing engines.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from copy import deepcopy
+from math import isfinite
+from typing import Dict, Optional, Sequence
+import numpy as np
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.param import EngineParams
@@ -22,6 +25,7 @@ class BaseEngine(ABC):
     """
 
     engine_type: EngineType = EngineType.ANALYTICAL
+    supports_spot_greeks_grid = False
 
     def __init__(self, params: Optional[EngineParams] = None):
         """
@@ -118,6 +122,64 @@ class BaseEngine(ABC):
         greeks["gamma"] = gamma
 
         return greeks
+
+    def calculate_spot_greeks_curve(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot_levels: Sequence[float],
+    ) -> list[dict[str, float | str]]:
+        """Calculate Delta and Gamma along spot levels.
+
+        Engines with a reusable valuation grid override this method. The default
+        contract deliberately falls back to point Greeks so every engine remains
+        supported.
+        """
+        spots = np.asarray([float(spot) for spot in spot_levels], dtype=float)
+        if spots.size == 0:
+            return []
+        if not np.all(np.isfinite(spots)) or np.any(spots <= 0.0):
+            raise ValueError("spot levels must be positive and finite")
+        if self.supports_spot_greeks_grid:
+            self._last_spot_greeks_grid = None
+            self.price(product, pricing_env)
+            cached = self._last_spot_greeks_grid
+            if cached is not None:
+                grid_spots, grid_prices = cached
+                deltas = np.gradient(grid_prices, grid_spots, edge_order=2)
+                gammas = np.gradient(deltas, grid_spots, edge_order=2)
+                return [
+                    {
+                        "spot": float(spot),
+                        "price": float(np.interp(spot, grid_spots, grid_prices)),
+                        "delta": float(np.interp(spot, grid_spots, deltas)),
+                        "gamma": float(np.interp(spot, grid_spots, gammas)),
+                        "calculation_mode": "engine_grid",
+                    }
+                    for spot in spots
+                ]
+
+        rows: list[dict[str, float | str]] = []
+        for raw_spot in spots:
+            spot = float(raw_spot)
+            if not isfinite(spot) or spot <= 0.0:
+                raise ValueError(f"spot levels must be positive and finite, got {raw_spot}")
+            env = deepcopy(pricing_env)
+            env.spot_quote.spot = spot
+            greeks = self.calculate_greeks(product, env)
+            price = greeks.get("price")
+            if price is None:
+                price = self.price(product, env)
+            rows.append(
+                {
+                    "spot": spot,
+                    "price": float(price),
+                    "delta": float(greeks.get("delta", 0.0)),
+                    "gamma": float(greeks.get("gamma", 0.0)),
+                    "calculation_mode": "reprice",
+                }
+            )
+        return rows
 
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
