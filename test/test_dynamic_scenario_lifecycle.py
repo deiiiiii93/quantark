@@ -128,6 +128,104 @@ class TestLifecycleManager:
         assert is_close(position.product.maturity, 1.0 - 10.0 / 365.0)
 
 
+class TestEngineLifecycleIntegration:
+    def _run(self, product, engine, path, spot=100.0, handle=True):
+        from quantark.dynamicscenario import (
+            DynamicScenarioConfig,
+            DynamicScenarioEngine,
+        )
+
+        portfolio = make_portfolio(product, engine, spot=spot)
+        config = DynamicScenarioConfig(
+            calculate_greeks=False, handle_lifecycle_events=handle
+        )
+        scenario_engine = DynamicScenarioEngine(config)
+        return scenario_engine.run(portfolio, path)
+
+    def test_snowball_ko_mid_path_settles_to_cash(self):
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.dynamicscenario import PathLibrary
+
+        path = PathLibrary.consecutive_rally(days=35, daily_pct=0.02)
+        path.start_date = VAL_DATE
+        results = self._run(make_snowball(), SnowballQuadEngine(), path)
+
+        ko_day = int(round(365 / 12))
+        ko_result = results.day_results[ko_day]
+        assert [e.event_type for e in ko_result.lifecycle_events] == ["KO"]
+        assert ko_result.realized_cash > 0.0
+        # From the KO day onward the portfolio is pure cash
+        for day in results.day_results[ko_day:]:
+            assert len(day.positions) == 0
+            assert is_close(day.portfolio_value, ko_result.realized_cash)
+        assert is_close(results.final_value, ko_result.realized_cash)
+
+        events_df = results.get_lifecycle_events()
+        assert len(events_df) == 1
+        assert events_df.iloc[0]["event_type"] == "KO"
+
+    def test_snowball_ki_changes_subsequent_pricing(self):
+        from copy import deepcopy
+
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.dynamicscenario import PathLibrary
+
+        engine = SnowballQuadEngine()
+        # daily_pct=-0.04 applies -4% per day (PERCENTAGE stress: spot*(1-0.04));
+        # vol_change_pct=0.0 keeps vol flat so the expected env is easy to construct.
+        path = PathLibrary.consecutive_decline(days=10, daily_pct=-0.04, vol_change_pct=0.0)
+        path.start_date = VAL_DATE
+        results = self._run(make_snowball(), engine, path)
+
+        # spot on day k close = 100 * 0.96^(k+1); first close <= 70 is day index 8
+        ki_day = 8
+        assert [e.event_type for e in results.day_results[ki_day].lifecycle_events] == ["KI"]
+
+        # Final-day value equals directly pricing the decayed, flagged product.
+        # We use AutocallableLifecycleTracker.product_for_pricing to construct the
+        # exact product the engine sees (including barrier-schedule time-shift).
+        import pandas as pd
+        from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
+        from quantark.asset.equity.lifecycle.state import AutocallableLifecycleState
+
+        final_day = results.day_results[-1]
+        assert len(final_day.positions) == 1
+
+        start_ts = pd.Timestamp(VAL_DATE).normalize()
+        final_ts = start_ts + pd.Timedelta(days=9)
+        expected_env = make_env(spot=100.0 * 0.96 ** 10)
+        expected_env.valuation_date = final_day.date or VAL_DATE
+
+        tracker = AutocallableLifecycleTracker(
+            product=make_snowball(),
+            quantity=1.0,
+            lifecycle=AutocallableLifecycleState(knocked_in=True),
+            start_date=start_ts,
+        )
+        expected_product = tracker.product_for_pricing(final_ts, expected_env)
+        expected_value = engine.price(expected_product, expected_env)
+        assert is_close(
+            final_day.positions[0].market_value, expected_value, rel_tol=1e-6
+        )
+
+    def test_lifecycle_disabled_reproduces_inert_behavior(self):
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+        from quantark.dynamicscenario import PathLibrary
+
+        path = PathLibrary.consecutive_rally(days=35, daily_pct=0.02)
+        path.start_date = VAL_DATE
+        product = make_snowball()
+        results = self._run(product, SnowballQuadEngine(), path, handle=False)
+
+        for day in results.day_results:
+            assert day.lifecycle_events == []
+            assert is_zero(day.realized_cash)
+        assert len(results.day_results[-1].positions) == 1
+        # the original product object was never mutated
+        assert not hasattr(product, "_otc_lifecycle_knocked_in")
+        assert is_close(product.maturity, 1.0)
+
+
 class TestConfigAndResults:
     def test_config_flag_defaults_on(self):
         from quantark.dynamicscenario import DynamicScenarioConfig

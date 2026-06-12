@@ -34,8 +34,9 @@ from quantark.backtest.transaction_costs import TransactionCostModel, ZeroCostMo
 
 from quantark.dynamicscenario.config import DynamicScenarioConfig
 from quantark.dynamicscenario.path.day_path import DayPath, DayStep, ParameterChange
+from quantark.dynamicscenario.lifecycle_manager import LifecycleManager
 from quantark.dynamicscenario.results.dynamic_results import (
-    DynamicScenarioResults, DayResult, PositionSnapshot, 
+    DynamicScenarioResults, DayResult, LifecycleEventSnapshot, PositionSnapshot,
     TradeSnapshot, MarketState
 )
 from quantark.stresstest.stress.stress_types import (
@@ -142,7 +143,23 @@ class DynamicScenarioEngine:
         
         # Track hedge positions
         hedge_positions: Dict[str, str] = {}  # underlying -> position_id
-        
+
+        # Lifecycle event handling
+        lifecycle_manager: Optional[LifecycleManager] = None
+        if self.config.handle_lifecycle_events:
+            base_date = day_path.start_date
+            if base_date is None:
+                first_env = next(iter(working_portfolio.pricing_environments.values()))
+                base_date = first_env.valuation_date
+            if base_date is None:
+                raise ValidationError(
+                    "Lifecycle event handling requires day_path.start_date or a "
+                    "pricing environment valuation_date to anchor observation "
+                    "schedules (or set handle_lifecycle_events=False)."
+                )
+            lifecycle_manager = LifecycleManager(base_date=base_date)
+            lifecycle_manager.register_positions(working_portfolio)
+
         # Run each day
         for day_step in day_path:
             print(f"  Processing Day {day_step.day_index}...")
@@ -157,9 +174,19 @@ class DynamicScenarioEngine:
             if day_date:
                 for env in working_portfolio.pricing_environments.values():
                     env.valuation_date = day_date
-            
+
+            # Process lifecycle events on this day's close
+            lifecycle_events_today: List[LifecycleEventSnapshot] = []
+            if lifecycle_manager is not None:
+                lifecycle_events_today = lifecycle_manager.process_day(
+                    working_portfolio, day_step.day_index, day_date
+                )
+            realized_cash = (
+                lifecycle_manager.realized_cash if lifecycle_manager else 0.0
+            )
+
             # Calculate portfolio value and Greeks
-            portfolio_value = working_portfolio.get_portfolio_value()
+            portfolio_value = working_portfolio.get_portfolio_value() + realized_cash
             daily_pnl = portfolio_value - previous_value
             cumulative_pnl = portfolio_value - baseline_value
             
@@ -175,7 +202,7 @@ class DynamicScenarioEngine:
             trades_today: List[TradeSnapshot] = []
             transaction_costs_today = 0.0
             
-            if hedge_strategy:
+            if hedge_strategy and len(working_portfolio) > 0:
                 # Get market data for strategy
                 market_data = self._get_market_data(working_portfolio)
                 
@@ -257,6 +284,8 @@ class DynamicScenarioEngine:
                 positions=position_snapshots,
                 trades=trades_today,
                 market_state=market_state,
+                lifecycle_events=lifecycle_events_today,
+                realized_cash=realized_cash,
             )
             day_results.append(day_result)
             
@@ -266,7 +295,9 @@ class DynamicScenarioEngine:
         total_time = time.time() - start_time
         
         # Build final results
-        final_value = working_portfolio.get_portfolio_value()
+        final_value = working_portfolio.get_portfolio_value() + (
+            lifecycle_manager.realized_cash if lifecycle_manager else 0.0
+        )
         
         results = DynamicScenarioResults(
             path_name=day_path.name,
