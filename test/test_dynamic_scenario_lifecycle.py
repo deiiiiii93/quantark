@@ -365,7 +365,7 @@ class TestBarrierFamilyIntegration:
             expected_env,
         )
         # snapshot.market_value = BlackScholesEngine().price(European, env) * quantity (=1.0)
-        assert is_close(snapshot.market_value, expected, rel_tol=1e-6)
+        assert is_close(snapshot.market_value, expected, rel_tol=1e-9)
 
     def test_barrier_ko_rebate_settles_at_hit(self):
         from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
