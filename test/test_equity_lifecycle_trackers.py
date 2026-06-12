@@ -3,7 +3,6 @@
 from datetime import datetime
 
 import pandas as pd
-import pytest
 
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
@@ -41,6 +40,7 @@ class TestLifecyclePackage:
         )
         assert event.event_type.value == "KO"
         assert event.cashflow == 0.0
+        assert isinstance(hash(event), int)
 
     def test_backtest_state_is_reexport(self):
         from quantark.asset.equity.lifecycle import AutocallableLifecycleState as Shared

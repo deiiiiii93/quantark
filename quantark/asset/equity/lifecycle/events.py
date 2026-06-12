@@ -52,6 +52,6 @@ class LifecycleEvent:
     payoff: float = 0.0
     cashflow: float = 0.0
     terminates_position: bool = False
-    state_before: Dict[str, bool] = field(default_factory=dict)
-    state_after: Dict[str, bool] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    state_before: Dict[str, bool] = field(default_factory=dict, hash=False, compare=False)
+    state_after: Dict[str, bool] = field(default_factory=dict, hash=False, compare=False)
+    metadata: Dict[str, Any] = field(default_factory=dict, hash=False, compare=False)
