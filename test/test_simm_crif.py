@@ -261,7 +261,7 @@ class TestCRIFToSensitivities:
                 trade_id="T1",
                 valuation_date=date(2024, 1, 1),
                 risk_type="Risk_FX",
-                qualifier="EURUSD",
+                qualifier="EUR",
                 bucket="",
                 amount=50000.0,
                 amount_currency="USD",
@@ -273,7 +273,7 @@ class TestCRIFToSensitivities:
         assert len(collection) == 1
         sens = collection.sensitivities[0]
         assert isinstance(sens, FXDeltaSensitivity)
-        assert sens.currency_pair == "EURUSD"
+        assert sens.currency == "EUR"
     
     def test_convert_credit_delta(self):
         """Convert Credit Delta CRIF record to sensitivity."""
@@ -353,7 +353,7 @@ class TestSensitivitiesToCRIF:
             trade_id="T1",
             amount=50000.0,
             amount_currency="USD",
-            currency_pair="EURUSD",
+            currency="EUR",
         ))
         
         records = sensitivities_to_crif(collection, date(2024, 1, 1))
@@ -361,7 +361,7 @@ class TestSensitivitiesToCRIF:
         assert len(records) == 1
         record = records[0]
         assert record.risk_type == "Risk_FX"
-        assert record.qualifier == "EURUSD"
+        assert record.qualifier == "EUR"
 
 
 class TestRoundTrip:

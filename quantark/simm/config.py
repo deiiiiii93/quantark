@@ -5,7 +5,7 @@ This module provides configuration dataclasses for ISDA SIMM calculations.
 """
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict
 
 from quantark.util.exceptions import ValidationError
 
@@ -84,6 +84,11 @@ class SIMMConfig:
     calculate_vega: bool = True
     calculate_curvature: bool = True
     calculate_base_corr: bool = True
+
+    # Derive curvature exposures from vega sensitivities using the SIMM
+    # scaling function SF(t) (paragraph 11(a)). When False, only explicit
+    # CurvatureSensitivity records contribute to the curvature margin.
+    derive_curvature_from_vega: bool = True
     
     # Product class multipliers (default = 1.0)
     ms_rates_fx: float = 1.0
@@ -175,6 +180,7 @@ class SIMMConfig:
             calculate_vega=self.calculate_vega,
             calculate_curvature=self.calculate_curvature,
             calculate_base_corr=self.calculate_base_corr,
+            derive_curvature_from_vega=self.derive_curvature_from_vega,
             ms_rates_fx=self.ms_rates_fx,
             ms_credit=self.ms_credit,
             ms_equity=self.ms_equity,

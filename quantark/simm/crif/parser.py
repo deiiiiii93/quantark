@@ -25,13 +25,14 @@ from ..sensitivity import (
     CommodityVegaSensitivity,
     CreditDeltaSensitivity,
     CreditVegaSensitivity,
-    CurvatureSensitivity,
     EquityDeltaSensitivity,
     EquityVegaSensitivity,
     FXDeltaSensitivity,
     FXVegaSensitivity,
     IRDeltaSensitivity,
+    IRInflationDeltaSensitivity,
     IRVegaSensitivity,
+    IRXCcyBasisSensitivity,
     SensitivityCollection,
 )
 from ..taxonomy import (
@@ -225,134 +226,142 @@ def crif_to_sensitivities(
     return collection
 
 
+def crif_records_to_sensitivities(
+    records: List[Dict[str, Any]],
+) -> SensitivityCollection:
+    """Convert CRIF record dictionaries (CRIF column names or CRIFRecord
+    field names) to a SensitivityCollection."""
+    parsed: List[CRIFRecord] = []
+    for i, rec in enumerate(records, start=1):
+        if isinstance(rec, CRIFRecord):
+            parsed.append(rec)
+        else:
+            row = dict(rec)
+            # Accept field-name keys directly as well as CRIF column names.
+            for col, fld in CRIF_COLUMN_MAPPING.items():
+                if fld in row and col not in row:
+                    row[col] = row.pop(fld)
+            parsed.append(_parse_crif_row(row, i))
+    return crif_to_sensitivities(parsed)
+
+
 def _convert_crif_record(record: CRIFRecord) -> Optional[AnySensitivity]:
     """Convert a single CRIF record to a Sensitivity object."""
     sensitivity_type = record.get_sensitivity_type()
     if sensitivity_type is None:
         return None
-    
+
     risk_class = sensitivity_type.risk_class
     margin_type = sensitivity_type.margin_type
-    
+    product_class = record.get_product_class()
+
+    common: Dict[str, Any] = dict(
+        trade_id=record.trade_id,
+        amount=record.amount,
+        amount_currency=record.amount_currency,
+        product_class=product_class,
+    )
+
     # Parse tenor from label1 if present
     tenor = _parse_tenor(record.label1, risk_class)
-    
+
     # Interest Rate
     if risk_class == RiskClass.INTEREST_RATE:
-        if margin_type == MarginType.DELTA:
+        if sensitivity_type == SensitivityType.RISK_INFLATION:
+            return IRInflationDeltaSensitivity(currency=record.qualifier, **common)
+        elif sensitivity_type == SensitivityType.RISK_XCCY_BASIS:
+            return IRXCcyBasisSensitivity(currency=record.qualifier, **common)
+        elif sensitivity_type == SensitivityType.RISK_INFLATION_VOL:
+            return IRVegaSensitivity(
+                currency=record.qualifier,
+                option_tenor=tenor,
+                is_inflation=True,
+                **common,
+            )
+        elif margin_type == MarginType.DELTA:
             sub_curve = _parse_sub_curve(record.label2)
             return IRDeltaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 currency=record.qualifier,
                 tenor=tenor,
                 sub_curve=sub_curve,
+                **common,
             )
         elif margin_type == MarginType.VEGA:
             return IRVegaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 currency=record.qualifier,
                 option_tenor=tenor,
-                underlying_tenor=_parse_tenor(record.label2, risk_class) if record.label2 else 1.0,
+                **common,
             )
-    
+
     # Credit
     elif risk_class in (RiskClass.CREDIT_QUALIFYING, RiskClass.CREDIT_NON_QUALIFYING):
         is_qualifying = risk_class == RiskClass.CREDIT_QUALIFYING
         bucket_number = _parse_bucket_number(record.bucket)
-        
+
         if sensitivity_type == SensitivityType.RISK_BASE_CORR:
-            return BaseCorrSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
-                index_name=record.qualifier,
-            )
+            return BaseCorrSensitivity(index_name=record.qualifier, **common)
         elif margin_type == MarginType.DELTA:
             return CreditDeltaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 issuer=record.qualifier,
                 bucket_number=bucket_number,
                 tenor=tenor,
                 is_qualifying=is_qualifying,
+                **common,
             )
         elif margin_type == MarginType.VEGA:
             return CreditVegaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 issuer=record.qualifier,
                 bucket_number=bucket_number,
                 option_tenor=tenor,
                 is_qualifying=is_qualifying,
+                **common,
             )
-    
+
     # Equity
     elif risk_class == RiskClass.EQUITY:
         bucket_number = _parse_bucket_number(record.bucket)
         if margin_type == MarginType.DELTA:
             return EquityDeltaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 issuer=record.qualifier,
                 bucket_number=bucket_number,
+                **common,
             )
         elif margin_type == MarginType.VEGA:
             return EquityVegaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 issuer=record.qualifier,
                 bucket_number=bucket_number,
                 option_tenor=tenor,
+                **common,
             )
-    
+
     # Commodity
     elif risk_class == RiskClass.COMMODITY:
         bucket_number = _parse_bucket_number(record.bucket)
         if margin_type == MarginType.DELTA:
             return CommodityDeltaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 commodity_name=record.qualifier,
                 bucket_number=bucket_number,
-                delivery_tenor=tenor,
+                **common,
             )
         elif margin_type == MarginType.VEGA:
             return CommodityVegaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 commodity_name=record.qualifier,
                 bucket_number=bucket_number,
                 option_tenor=tenor,
+                **common,
             )
-    
+
     # FX
     elif risk_class == RiskClass.FX:
         if margin_type == MarginType.DELTA:
-            return FXDeltaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
-                currency_pair=record.qualifier,
-            )
+            return FXDeltaSensitivity(currency=record.qualifier, **common)
         elif margin_type == MarginType.VEGA:
             return FXVegaSensitivity(
-                trade_id=record.trade_id,
-                amount=record.amount,
-                amount_currency=record.amount_currency,
                 currency_pair=record.qualifier,
                 option_tenor=tenor,
+                **common,
             )
-    
+
     return None
 
 
@@ -474,23 +483,20 @@ def _convert_sensitivity_to_crif(
         bucket=str(sensitivity.bucket),
         amount=sensitivity.amount,
         amount_currency=sensitivity.amount_currency,
+        product_class=sensitivity.effective_product_class.value,
     )
-    
-    # Add tenor labels
-    if isinstance(sensitivity, (IRDeltaSensitivity, IRVegaSensitivity)):
-        record = CRIFRecord(
-            **{**record.__dict__, "label1": _tenor_to_label(sensitivity.tenor if hasattr(sensitivity, 'tenor') else sensitivity.option_tenor)}
-        )
-        if isinstance(sensitivity, IRDeltaSensitivity):
-            record = CRIFRecord(
-                **{**record.__dict__, "label2": sensitivity.sub_curve.value}
-            )
+
+    # Tenor / vertex labels
+    if isinstance(sensitivity, IRDeltaSensitivity):
+        record.label1 = sensitivity.vertex
+        record.label2 = sensitivity.sub_curve.value
+    elif isinstance(sensitivity, IRVegaSensitivity):
+        record.label1 = sensitivity.vertex
     elif isinstance(sensitivity, (CreditDeltaSensitivity, CreditVegaSensitivity)):
-        if hasattr(sensitivity, "tenor"):
-            record = CRIFRecord(
-                **{**record.__dict__, "label1": _tenor_to_label(sensitivity.tenor)}
-            )
-    
+        record.label1 = sensitivity.vertex
+    elif hasattr(sensitivity, "vertex"):
+        record.label1 = getattr(sensitivity, "vertex")
+
     return record
 
 
@@ -498,7 +504,14 @@ def _get_risk_type(sensitivity: AnySensitivity) -> str:
     """Get the CRIF risk_type for a sensitivity."""
     risk_class = sensitivity.risk_class
     margin_type = sensitivity.margin_type
-    
+
+    if isinstance(sensitivity, IRInflationDeltaSensitivity):
+        return SensitivityType.RISK_INFLATION.value
+    if isinstance(sensitivity, IRXCcyBasisSensitivity):
+        return SensitivityType.RISK_XCCY_BASIS.value
+    if isinstance(sensitivity, IRVegaSensitivity) and sensitivity.is_inflation:
+        return SensitivityType.RISK_INFLATION_VOL.value
+
     if risk_class == RiskClass.INTEREST_RATE:
         if margin_type == MarginType.DELTA:
             return SensitivityType.RISK_IR_CURVE.value

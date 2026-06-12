@@ -10,7 +10,11 @@ from decimal import Decimal
 
 from quantark.simm.config import SIMMConfig
 from quantark.simm.taxonomy import RiskClass
-from quantark.simm.sensitivity import EquityDeltaSensitivity, EquityVegaSensitivity
+from quantark.simm.sensitivity import (
+    EquityDeltaSensitivity,
+    EquityVegaSensitivity,
+    vol_weighted_vega_equity,
+)
 from quantark.simm.engines.base import BaseSensitivityEngine
 from quantark.simm.engines.classification.bucket_mapper import BucketMapper
 from quantark.util.numerical import Tolerance, is_zero
@@ -92,12 +96,16 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
                 # Skip positions with negligible delta
                 continue
 
+            # SIMM equity delta is per 1% relative spot move (paragraph 26):
+            # s = V(EQ + 1%.EQ) - V(EQ) ~= 0.01 * EQ * dV/dEQ.
+            amount = 0.01 * env.spot * delta
+
             # Classify to bucket
             bucket = self._classify_equity_bucket(position.underlying)
 
             sensitivity = EquityDeltaSensitivity(
                 trade_id=position.position_id,
-                amount=delta,
+                amount=amount,
                 issuer=position.underlying,
                 bucket_number=bucket,
             )
@@ -152,9 +160,14 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
             # Get option expiry for vega tenor
             option_tenor = self._get_option_expiry_tenor(position)
 
+            # SIMM vega amounts are vol-weighted: sigma_kj * dV/dsigma,
+            # with sigma_kj derived from the delta risk weight
+            # (paragraph 10(b)). GreeksCalculator vega is per 1 vol point.
+            amount = vol_weighted_vega_equity(vega, bucket)
+
             sensitivity = EquityVegaSensitivity(
                 trade_id=position.position_id,
-                amount=vega,
+                amount=amount,
                 issuer=position.underlying,
                 bucket_number=bucket,
                 option_tenor=option_tenor,

@@ -1,651 +1,448 @@
-"""
-Tests for SIMM Aggregation Engine.
+"""Tests for the SIMM aggregation engine (ISDA SIMM v2.6).
 
-This module tests the full SIMM calculation pipeline including:
-- Concentration risk calculation
-- Weighted sensitivity calculation
-- Bucket aggregation
-- Risk class aggregation
-- Product class aggregation
-- Main SIMMCalculator
+Expected values are hand-computed from the methodology formulas
+(paragraphs 5-13 and the calibration tables of Sections D-K).
 """
+import math
 
 import pytest
-import math
-from typing import List
 
 from quantark.simm.config import SIMMConfig
-from quantark.simm.taxonomy import RiskClass, ProductClass, MarginType
+from quantark.simm.taxonomy import (
+    IRSubCurve,
+    MarginType,
+    ProductClass,
+    RiskClass,
+)
 from quantark.simm.sensitivity import (
-    SensitivityCollection,
-    IRDeltaSensitivity,
-    IRVegaSensitivity,
+    BaseCorrSensitivity,
+    CreditDeltaSensitivity,
     EquityDeltaSensitivity,
     EquityVegaSensitivity,
-    CreditDeltaSensitivity,
     FXDeltaSensitivity,
-    CurvatureSensitivity,
+    FXVegaSensitivity,
+    IRDeltaSensitivity,
+    IRInflationDeltaSensitivity,
+    IRVegaSensitivity,
+    IRXCcyBasisSensitivity,
+    SensitivityCollection,
 )
 from quantark.simm.engines.aggregation import (
-    SIMMCalculator,
     ConcentrationCalculator,
-    WeightedSensitivityCalculator,
-    BucketAggregator,
-    RiskClassAggregator,
-    ProductClassAggregator,
+    SIMMCalculator,
+    net_by_risk_factor,
 )
+from quantark.simm.engines.aggregation.weighted_sensitivity import (
+    delta_risk_weight,
+    vega_risk_weight,
+)
+from quantark.simm.engines.aggregation.correlations import (
+    inter_bucket_correlation,
+    intra_bucket_correlation,
+)
+from quantark.simm.calibration.accessors import PHI_INV_995, scaling_function
+from quantark.simm.calibration.ir import IR_HVR
 
 
-class TestConcentrationCalculator:
-    """Tests for ConcentrationCalculator."""
-    
-    def test_ir_concentration_small_position(self):
-        """Small IR position should have CR = 1."""
-        calc = ConcentrationCalculator()
-        
+def _calc(config=None):
+    return SIMMCalculator(config or SIMMConfig())
+
+
+class TestNetting:
+    def test_ir_nets_by_tenor_and_subcurve(self):
         sens = [
-            IRDeltaSensitivity(
-                trade_id="t1",
-                amount=1_000_000,  # 1MM USD
-                currency="USD",
-                tenor=1.0,
-            )
+            IRDeltaSensitivity("T1", 100.0, currency="USD", tenor=5.0, sub_curve=IRSubCurve.OIS),
+            IRDeltaSensitivity("T2", -40.0, currency="USD", tenor=5.0, sub_curve=IRSubCurve.OIS),
+            IRDeltaSensitivity("T3", 70.0, currency="USD", tenor=5.0, sub_curve=IRSubCurve.LIBOR_3M),
+            IRDeltaSensitivity("T4", 30.0, currency="USD", tenor=10.0, sub_curve=IRSubCurve.OIS),
         ]
-        
-        result = calc.calculate(sens, RiskClass.INTEREST_RATE, MarginType.DELTA, "USD")
-        
-        # Small position relative to threshold should give CR = 1
-        assert result.bucket_cr == 1.0
-        assert result.cr_values.get("USD", 1.0) == 1.0
-    
-    def test_ir_concentration_large_position(self):
-        """Large IR position should have CR > 1."""
-        calc = ConcentrationCalculator()
-        
-        # Very large position
+        netted = {n.risk_factor: n.amount for n in net_by_risk_factor(sens, MarginType.DELTA)}
+        assert len(netted) == 3
+        assert netted[("Yield", "5y", "OIS")] == pytest.approx(60.0)
+        assert netted[("Yield", "5y", "Libor3m")] == pytest.approx(70.0)
+        assert netted[("Yield", "10y", "OIS")] == pytest.approx(30.0)
+
+    def test_equity_vega_netting_applies_hvr(self):
+        # Paragraph 10(c): VR_ik = HVR * sigma * vega; HVR_equity = 0.6.
         sens = [
-            IRDeltaSensitivity(
-                trade_id="t1",
-                amount=100_000_000_000,  # 100B USD
-                currency="USD",
-                tenor=1.0,
-            )
+            EquityVegaSensitivity("T1", 1000.0, issuer="AAPL", bucket_number=8, option_tenor=1.0),
+            EquityVegaSensitivity("T2", 500.0, issuer="AAPL", bucket_number=8, option_tenor=5.0),
         ]
-        
-        result = calc.calculate(sens, RiskClass.INTEREST_RATE, MarginType.DELTA, "USD")
-        
-        # Large position should give CR > 1
-        assert result.bucket_cr > 1.0
-    
-    def test_equity_concentration_per_factor(self):
-        """Equity CR should be per risk factor."""
-        calc = ConcentrationCalculator()
-        
+        netted = net_by_risk_factor(sens, MarginType.VEGA)
+        assert len(netted) == 1  # expiries net within the same risk factor
+        assert netted[0].amount == pytest.approx(0.6 * 1500.0)
+
+
+class TestRiskWeights:
+    def test_ir_delta_weights_by_currency_group(self):
+        rf = ("Yield", "5y", "OIS")
+        assert delta_risk_weight(RiskClass.INTEREST_RATE, "USD", rf) == 60
+        assert delta_risk_weight(RiskClass.INTEREST_RATE, "JPY", rf) == 23
+        assert delta_risk_weight(RiskClass.INTEREST_RATE, "BRL", rf) == 97
+
+    def test_ir_inflation_and_xccy_weights(self):
+        assert delta_risk_weight(RiskClass.INTEREST_RATE, "USD", ("Inflation",)) == 61
+        assert delta_risk_weight(RiskClass.INTEREST_RATE, "USD", ("XCcyBasis",)) == 21
+
+    def test_fx_weight_depends_on_groups_and_calc_currency(self):
+        # Paragraph 69: regular/regular 7.4; high given currency 14.7.
+        assert delta_risk_weight(RiskClass.FX, 1, ("EUR",), "USD") == 7.4
+        assert delta_risk_weight(RiskClass.FX, 1, ("BRL",), "USD") == 14.7
+        assert delta_risk_weight(RiskClass.FX, 1, ("RUB",), "TRY") == 21.4
+        # No FX risk factor for the calculation currency itself.
+        assert delta_risk_weight(RiskClass.FX, 1, ("USD",), "USD") == 0.0
+
+    def test_vega_risk_weights(self):
+        assert vega_risk_weight(RiskClass.INTEREST_RATE, "USD") == 0.23
+        assert vega_risk_weight(RiskClass.CREDIT_QUALIFYING, 1) == 0.76
+        assert vega_risk_weight(RiskClass.EQUITY, 5) == 0.45
+        assert vega_risk_weight(RiskClass.EQUITY, 12) == 0.96
+        assert vega_risk_weight(RiskClass.COMMODITY, 2) == 0.55
+        assert vega_risk_weight(RiskClass.FX, 1) == 0.48
+
+
+class TestCorrelations:
+    def test_ir_yield_yield_same_subcurve(self):
+        rho = intra_bucket_correlation(
+            RiskClass.INTEREST_RATE, MarginType.DELTA, "USD",
+            ("Yield", "1y", "OIS"), ("Yield", "2y", "OIS"))
+        assert rho == pytest.approx(0.94)
+
+    def test_ir_yield_yield_cross_subcurve_applies_phi(self):
+        rho = intra_bucket_correlation(
+            RiskClass.INTEREST_RATE, MarginType.DELTA, "USD",
+            ("Yield", "1y", "OIS"), ("Yield", "2y", "Libor3m"))
+        assert rho == pytest.approx(0.94 * 0.993)
+
+    def test_ir_inflation_and_xccy(self):
+        rho_infl = intra_bucket_correlation(
+            RiskClass.INTEREST_RATE, MarginType.DELTA, "USD",
+            ("Yield", "1y", "OIS"), ("Inflation",))
+        assert rho_infl == pytest.approx(0.24)
+        rho_xccy = intra_bucket_correlation(
+            RiskClass.INTEREST_RATE, MarginType.DELTA, "USD",
+            ("Yield", "1y", "OIS"), ("XCcyBasis",))
+        assert rho_xccy == pytest.approx(0.04)
+
+    def test_credit_qualifying_issuer_correlations(self):
+        same = intra_bucket_correlation(
+            RiskClass.CREDIT_QUALIFYING, MarginType.DELTA, 2,
+            ("ACME", "1y", ""), ("ACME", "5y", ""))
+        diff = intra_bucket_correlation(
+            RiskClass.CREDIT_QUALIFYING, MarginType.DELTA, 2,
+            ("ACME", "1y", ""), ("OTHER", "1y", ""))
+        assert same == 0.93
+        assert diff == 0.46
+
+    def test_fx_delta_correlation_depends_on_calc_currency(self):
+        reg = intra_bucket_correlation(
+            RiskClass.FX, MarginType.DELTA, 1, ("EUR",), ("GBP",),
+            calculation_currency="USD")
+        assert reg == 0.50
+        high_calc = intra_bucket_correlation(
+            RiskClass.FX, MarginType.DELTA, 1, ("EUR",), ("GBP",),
+            calculation_currency="BRL")
+        assert high_calc == 0.88
+
+    def test_fx_vega_correlation(self):
+        rho = intra_bucket_correlation(
+            RiskClass.FX, MarginType.VEGA, 1,
+            frozenset({"EUR", "USD"}), frozenset({"GBP", "USD"}))
+        assert rho == 0.50
+
+    def test_inter_bucket(self):
+        assert inter_bucket_correlation(RiskClass.INTEREST_RATE, "USD", "EUR") == 0.32
+        assert inter_bucket_correlation(RiskClass.EQUITY, 5, 6) == pytest.approx(0.29)
+        assert inter_bucket_correlation(RiskClass.CREDIT_NON_QUALIFYING, 1, 2) == 0.43
+
+
+class TestConcentration:
+    def test_ir_below_threshold(self):
+        sens = [IRDeltaSensitivity("T", 1000.0, currency="USD", tenor=5.0)]
+        netted = net_by_risk_factor(sens, MarginType.DELTA)
+        cr = ConcentrationCalculator().calculate(
+            netted, RiskClass.INTEREST_RATE, MarginType.DELTA, "USD")
+        assert cr.bucket_cr == 1.0
+
+    def test_ir_above_threshold(self):
+        # USD threshold 330mm/bp: net 1,320mm -> CR = sqrt(4) = 2.
+        sens = [IRDeltaSensitivity("T", 1320e6, currency="USD", tenor=5.0)]
+        netted = net_by_risk_factor(sens, MarginType.DELTA)
+        cr = ConcentrationCalculator().calculate(
+            netted, RiskClass.INTEREST_RATE, MarginType.DELTA, "USD")
+        assert cr.bucket_cr == pytest.approx(2.0)
+
+    def test_ir_xccy_excluded_and_unscaled(self):
         sens = [
-            EquityDeltaSensitivity(
-                trade_id="t1",
-                amount=1_000_000,
-                issuer="AAPL",
-                bucket_number=8,
-            ),
-            EquityDeltaSensitivity(
-                trade_id="t2",
-                amount=2_000_000,
-                issuer="GOOGL",
-                bucket_number=8,
-            ),
+            IRDeltaSensitivity("T", 1320e6, currency="USD", tenor=5.0),
+            IRXCcyBasisSensitivity("T", 999e9, currency="USD"),
         ]
-        
-        result = calc.calculate(sens, RiskClass.EQUITY, MarginType.DELTA, 8)
-        
-        # Each issuer should have its own CR
-        assert "AAPL" in result.cr_values
-        assert "GOOGL" in result.cr_values
-    
-    def test_g_bc_calculation(self):
-        """Test g_bc factor calculation."""
-        # Equal CR values
-        g = ConcentrationCalculator.calculate_g_bc(1.5, 1.5)
-        assert g == 1.0
-        
-        # Different CR values
-        g = ConcentrationCalculator.calculate_g_bc(1.0, 2.0)
-        assert g == 0.5
-        
-        # Order shouldn't matter
-        g1 = ConcentrationCalculator.calculate_g_bc(1.0, 2.0)
-        g2 = ConcentrationCalculator.calculate_g_bc(2.0, 1.0)
-        assert g1 == g2
+        netted = net_by_risk_factor(sens, MarginType.DELTA)
+        cr = ConcentrationCalculator().calculate(
+            netted, RiskClass.INTEREST_RATE, MarginType.DELTA, "USD")
+        # XCcy excluded from the sum -> CR_b still 2; XCcy factor CR = 1.
+        assert cr.bucket_cr == pytest.approx(2.0)
+        assert cr.cr_values[("XCcyBasis",)] == 1.0
+        assert cr.cr_values[("Yield", "5y", "OIS")] == pytest.approx(2.0)
 
-
-class TestWeightedSensitivityCalculator:
-    """Tests for WeightedSensitivityCalculator."""
-    
-    def test_weighted_sensitivity_basic(self):
-        """Test basic WS = RW × s × CR calculation."""
-        calc = WeightedSensitivityCalculator()
-        
+    def test_equity_per_factor(self):
+        # Bucket 5 threshold 12mm/%: 48mm -> CR = 2.
         sens = [
-            EquityDeltaSensitivity(
-                trade_id="t1",
-                amount=1_000_000,
-                issuer="AAPL",
-                bucket_number=8,
-            )
+            EquityDeltaSensitivity("T", 48e6, issuer="BIG", bucket_number=5),
+            EquityDeltaSensitivity("T", 1e6, issuer="SMALL", bucket_number=5),
         ]
-        
-        cr_values = {"AAPL": 1.0}
-        
-        result = calc.calculate(sens, RiskClass.EQUITY, MarginType.DELTA, 8, cr_values)
-        
-        assert len(result) == 1
-        ws = result[0]
-        
-        # WS should be RW × amount × CR
-        assert ws.weighted_value == ws.risk_weight * 1_000_000 * 1.0
-        assert ws.concentration_factor == 1.0
-    
-    def test_weighted_sensitivity_with_cr(self):
-        """Test WS with concentration risk > 1."""
-        calc = WeightedSensitivityCalculator()
-        
+        netted = net_by_risk_factor(sens, MarginType.DELTA)
+        cr = ConcentrationCalculator().calculate(
+            netted, RiskClass.EQUITY, MarginType.DELTA, 5)
+        assert cr.cr_values[("BIG",)] == pytest.approx(2.0)
+        assert cr.cr_values[("SMALL",)] == 1.0
+
+    def test_credit_groups_by_issuer(self):
+        # Bucket 2 threshold 0.17mm/bp: issuer net 0.68mm -> CR = 2.
         sens = [
-            EquityDeltaSensitivity(
-                trade_id="t1",
-                amount=1_000_000,
-                issuer="AAPL",
-                bucket_number=8,
-            )
+            CreditDeltaSensitivity("T", 0.5e6, issuer="ACME", bucket_number=2, tenor=1.0),
+            CreditDeltaSensitivity("T", 0.18e6, issuer="ACME", bucket_number=2, tenor=5.0),
         ]
-        
-        cr_values = {"AAPL": 2.0}  # CR = 2
-        
-        result = calc.calculate(sens, RiskClass.EQUITY, MarginType.DELTA, 8, cr_values)
-        
-        ws = result[0]
-        
-        # WS should be doubled due to CR = 2
-        assert ws.concentration_factor == 2.0
+        netted = net_by_risk_factor(sens, MarginType.DELTA)
+        cr = ConcentrationCalculator().calculate(
+            netted, RiskClass.CREDIT_QUALIFYING, MarginType.DELTA, 2)
+        for rf, value in cr.cr_values.items():
+            assert value == pytest.approx(2.0)
+
+    def test_fx_delta_category_thresholds(self):
+        # EUR category 1: 3300mm/%; net 13,200mm -> CR = 2.
+        sens = [FXDeltaSensitivity("T", 13200e6, currency="EUR")]
+        netted = net_by_risk_factor(sens, MarginType.DELTA)
+        cr = ConcentrationCalculator().calculate(
+            netted, RiskClass.FX, MarginType.DELTA, 1)
+        assert cr.cr_values[("EUR",)] == pytest.approx(2.0)
+
+    def test_f_and_g_factors(self):
+        assert ConcentrationCalculator.f_factor(2.0, 1.0) == 0.5
+        assert ConcentrationCalculator.g_factor(1.0, 1.0) == 1.0
 
 
-class TestBucketAggregator:
-    """Tests for BucketAggregator."""
-    
-    def test_single_sensitivity(self):
-        """Single sensitivity K_b = |WS|."""
-        agg = BucketAggregator()
-        ws_calc = WeightedSensitivityCalculator()
-        
-        sens = [
-            EquityDeltaSensitivity(
-                trade_id="t1",
-                amount=1_000_000,
-                issuer="AAPL",
-                bucket_number=8,
-            )
-        ]
-        
-        cr_values = {"AAPL": 1.0}
-        ws_list = ws_calc.calculate(sens, RiskClass.EQUITY, MarginType.DELTA, 8, cr_values)
-        
-        result = agg.aggregate(ws_list, RiskClass.EQUITY, MarginType.DELTA, 8, cr_values)
-        
-        # Single sensitivity: K_b = |WS|
-        expected_k = abs(ws_list[0].weighted_value)
-        assert abs(result.k_b - expected_k) < 1e-6
-    
-    def test_two_uncorrelated_sensitivities(self):
-        """Two uncorrelated sensitivities: K_b = sqrt(WS1² + WS2²)."""
-        agg = BucketAggregator()
-        
-        # Create weighted sensitivities directly for controlled test
-        from quantark.simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
-        
-        ws_list = [
-            WeightedSensitivity(
-                original=None,
-                qualifier="AAPL",
-                bucket=8,
-                risk_weight=1.0,
-                concentration_factor=1.0,
-                weighted_value=3_000_000,
-            ),
-            WeightedSensitivity(
-                original=None,
-                qualifier="GOOGL",
-                bucket=8,
-                risk_weight=1.0,
-                concentration_factor=1.0,
-                weighted_value=4_000_000,
-            ),
-        ]
-        
-        cr_values = {"AAPL": 1.0, "GOOGL": 1.0}
-        
-        result = agg.aggregate(ws_list, RiskClass.EQUITY, MarginType.DELTA, 8, cr_values)
-        
-        # With correlation ρ, K_b = sqrt(WS1² + WS2² + 2*ρ*WS1*WS2)
-        # The exact value depends on the correlation
-        assert result.k_b > 0
-        assert result.ws_sum == 7_000_000
-    
-    def test_residual_bucket(self):
-        """Residual bucket has no diversification."""
-        agg = BucketAggregator()
-        
-        from quantark.simm.engines.aggregation.weighted_sensitivity import WeightedSensitivity
-        
-        ws_list = [
-            WeightedSensitivity(
-                original=None,
-                qualifier="A",
-                bucket="Residual",
-                risk_weight=1.0,
-                concentration_factor=1.0,
-                weighted_value=1_000_000,
-            ),
-            WeightedSensitivity(
-                original=None,
-                qualifier="B",
-                bucket="Residual",
-                risk_weight=1.0,
-                concentration_factor=1.0,
-                weighted_value=-500_000,
-            ),
-        ]
-        
-        cr_values = {}
-        
-        result = agg.aggregate(ws_list, RiskClass.EQUITY, MarginType.DELTA, "Residual", cr_values)
-        
-        # Residual: K_b = sum of absolute values
-        assert result.is_residual
-        assert result.k_b == 1_500_000  # |1M| + |-0.5M|
+class TestDeltaMargin:
+    def test_single_equity_factor(self):
+        # WS = 26 * 1000; single factor -> margin = WS.
+        result = _calc().calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T", 1000.0, issuer="AAPL", bucket_number=5),
+        ]))
+        assert result.total_margin == pytest.approx(26000.0)
 
+    def test_ir_two_tenors(self):
+        s5, s10 = 10000.0, 20000.0
+        result = _calc().calculate(SensitivityCollection([
+            IRDeltaSensitivity("T", s5, currency="USD", tenor=5.0),
+            IRDeltaSensitivity("T", s10, currency="USD", tenor=10.0),
+        ]))
+        ws5, ws10 = 60 * s5, 60 * s10
+        expected = math.sqrt(ws5**2 + ws10**2 + 2 * 0.95 * ws5 * ws10)
+        assert result.total_margin == pytest.approx(expected)
 
-class TestRiskClassAggregator:
-    """Tests for RiskClassAggregator."""
-    
-    def test_single_bucket(self):
-        """Single bucket margin = K_b."""
-        from quantark.simm.engines.aggregation.bucket_aggregator import BucketResult
-        
-        agg = RiskClassAggregator()
-        
-        bucket_results = [
-            BucketResult(
-                risk_class=RiskClass.EQUITY,
-                margin_type=MarginType.DELTA,
-                bucket=8,
-                k_b=5_000_000,
-                ws_sum=5_000_000,
-                is_residual=False,
-            )
-        ]
-        
-        result = agg.aggregate_delta(bucket_results, RiskClass.EQUITY)
-        
-        # Single bucket: margin = K_b
-        assert result.margin == 5_000_000
-    
-    def test_with_residual_bucket(self):
-        """Residual bucket is added without diversification."""
-        from quantark.simm.engines.aggregation.bucket_aggregator import BucketResult
-        
-        agg = RiskClassAggregator()
-        
-        bucket_results = [
-            BucketResult(
-                risk_class=RiskClass.EQUITY,
-                margin_type=MarginType.DELTA,
-                bucket=8,
-                k_b=5_000_000,
-                ws_sum=5_000_000,
-                is_residual=False,
-            ),
-            BucketResult(
-                risk_class=RiskClass.EQUITY,
-                margin_type=MarginType.DELTA,
-                bucket="Residual",
-                k_b=1_000_000,
-                ws_sum=1_000_000,
-                is_residual=True,
-            ),
-        ]
-        
-        result = agg.aggregate_delta(bucket_results, RiskClass.EQUITY)
-        
-        # Margin = aggregated non-residual + residual
-        assert result.margin == 6_000_000
-        assert result.residual_margin == 1_000_000
+    def test_ir_inflation_correlation(self):
+        result = _calc().calculate(SensitivityCollection([
+            IRDeltaSensitivity("T", 10000.0, currency="USD", tenor=5.0),
+            IRInflationDeltaSensitivity("T", 5000.0, currency="USD"),
+        ]))
+        ws_y, ws_i = 60 * 10000.0, 61 * 5000.0
+        expected = math.sqrt(ws_y**2 + ws_i**2 + 2 * 0.24 * ws_y * ws_i)
+        assert result.total_margin == pytest.approx(expected)
 
+    def test_ir_cross_currency_buckets(self):
+        result = _calc().calculate(SensitivityCollection([
+            IRDeltaSensitivity("T", 10000.0, currency="USD", tenor=5.0),
+            IRDeltaSensitivity("T", 10000.0, currency="EUR", tenor=5.0),
+        ]))
+        k = 60 * 10000.0
+        expected = math.sqrt(2 * k**2 + 2 * 0.32 * k * k)
+        assert result.total_margin == pytest.approx(expected)
 
-class TestProductClassAggregator:
-    """Tests for ProductClassAggregator."""
-    
-    def test_single_risk_class(self):
-        """Single risk class: SIMM = IM."""
-        from quantark.simm.engines.aggregation.risk_class_aggregator import RiskClassResult
-        
-        agg = ProductClassAggregator()
-        
-        risk_class_results = {
-            RiskClass.EQUITY: {
-                MarginType.DELTA: RiskClassResult(
-                    risk_class=RiskClass.EQUITY,
-                    margin_type=MarginType.DELTA,
-                    margin=10_000_000,
-                )
-            }
-        }
-        
-        result = agg.aggregate(risk_class_results, ProductClass.EQUITY)
-        
-        # Single risk class: SIMM = IM
-        assert result.margin == 10_000_000
+    def test_equity_two_buckets_gamma(self):
+        result = _calc().calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T", 1000.0, issuer="A", bucket_number=5),
+            EquityDeltaSensitivity("T", 1000.0, issuer="B", bucket_number=6),
+        ]))
+        k5, k6 = 26 * 1000.0, 25 * 1000.0
+        expected = math.sqrt(k5**2 + k6**2 + 2 * 0.29 * k5 * k6)
+        assert result.total_margin == pytest.approx(expected)
 
+    def test_equity_residual_added_without_diversification(self):
+        result = _calc().calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T", 1000.0, issuer="A", bucket_number=5),
+            EquityDeltaSensitivity("T", 1000.0, issuer="X", bucket_number=-1),
+        ]))
+        assert result.total_margin == pytest.approx(26 * 1000.0 + 50 * 1000.0)
 
-class TestSIMMCalculator:
-    """Tests for the main SIMMCalculator."""
-    
-    def test_empty_sensitivities(self):
-        """Empty sensitivities should return zero margin."""
-        calc = SIMMCalculator()
-        collection = SensitivityCollection()
-        
-        result = calc.calculate(collection)
-        
+    def test_equity_residual_zero_intra_correlation(self):
+        # Paragraph 59: residual bucket rho = 0.
+        result = _calc().calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T", 1000.0, issuer="X", bucket_number=-1),
+            EquityDeltaSensitivity("T", 1000.0, issuer="Y", bucket_number=-1),
+        ]))
+        expected = math.sqrt(2) * 50 * 1000.0
+        assert result.total_margin == pytest.approx(expected)
+
+    def test_fx_pair_with_calc_currency_dependence(self):
+        result = _calc().calculate(SensitivityCollection([
+            FXDeltaSensitivity("T", 1000.0, currency="EUR"),
+            FXDeltaSensitivity("T", 1000.0, currency="GBP"),
+        ]))
+        ws = 7.4 * 1000.0
+        expected = math.sqrt(2 * ws**2 + 2 * 0.50 * ws * ws)
+        assert result.total_margin == pytest.approx(expected)
+
+    def test_fx_calc_currency_factor_dropped(self):
+        result = _calc().calculate(SensitivityCollection([
+            FXDeltaSensitivity("T", 1000.0, currency="USD"),
+        ]))
         assert result.total_margin == 0.0
-    
-    def test_single_equity_delta(self):
-        """Single equity delta sensitivity."""
-        config = SIMMConfig(
-            calculate_delta=True,
-            calculate_vega=False,
-            calculate_curvature=False,
-            calculate_base_corr=False,
-        )
-        calc = SIMMCalculator(config)
-        
-        collection = SensitivityCollection()
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=1_000_000,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        result = calc.calculate(collection)
-        
-        # Should have non-zero equity margin
-        assert result.total_margin > 0
-        assert result.by_risk_class.get(RiskClass.EQUITY, 0) > 0
-        assert result.by_product_class.get(ProductClass.EQUITY, 0) > 0
-    
-    def test_multiple_risk_classes(self):
-        """Multiple risk classes should aggregate correctly."""
-        config = SIMMConfig(
-            calculate_delta=True,
-            calculate_vega=False,
-            calculate_curvature=False,
-            calculate_base_corr=False,
-        )
-        calc = SIMMCalculator(config)
-        
-        collection = SensitivityCollection()
-        
-        # Add equity sensitivity
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=1_000_000,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        # Add IR sensitivity
-        collection.add(IRDeltaSensitivity(
-            trade_id="t2",
-            amount=2_000_000,
-            currency="USD",
-            tenor=1.0,
-        ))
-        
-        # Add FX sensitivity
-        collection.add(FXDeltaSensitivity(
-            trade_id="t3",
-            amount=500_000,
-            currency_pair="EURUSD",
-        ))
-        
-        result = calc.calculate(collection)
-        
-        # Should have non-zero total
-        assert result.total_margin > 0
-        
-        # Each risk class should contribute
-        assert result.by_risk_class.get(RiskClass.EQUITY, 0) > 0
-        assert result.by_risk_class.get(RiskClass.INTEREST_RATE, 0) > 0
-        assert result.by_risk_class.get(RiskClass.FX, 0) > 0
-        
-        # Product classes
-        assert result.by_product_class.get(ProductClass.EQUITY, 0) > 0
-        assert result.by_product_class.get(ProductClass.RATES_FX, 0) > 0
-    
-    def test_with_addon(self):
-        """Test with fixed add-on."""
-        config = SIMMConfig(
-            calculate_delta=True,
-            calculate_vega=False,
-            calculate_curvature=False,
-            calculate_base_corr=False,
-            addon_fixed=100_000,
-        )
-        calc = SIMMCalculator(config)
-        
-        collection = SensitivityCollection()
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=1_000_000,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        result = calc.calculate(collection)
-        
-        # Total should include add-on
-        assert result.addon is not None
-        assert result.addon.fixed_addon == 100_000
-        assert result.addon.total_addon == 100_000
-    
-    def test_with_multiplier(self):
-        """Test with product class multiplier."""
-        config = SIMMConfig(
-            calculate_delta=True,
-            calculate_vega=False,
-            calculate_curvature=False,
-            calculate_base_corr=False,
-            ms_equity=1.5,  # 50% extra for equity
-        )
-        calc = SIMMCalculator(config)
-        
-        collection = SensitivityCollection()
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=1_000_000,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        result = calc.calculate(collection)
-        
-        # Equity margin should have 1.5x multiplier applied
-        base_calc = SIMMCalculator(SIMMConfig(
-            calculate_delta=True,
-            calculate_vega=False,
-            calculate_curvature=False,
-            calculate_base_corr=False,
-        ))
-        base_result = base_calc.calculate(collection)
-        
-        expected_equity = base_result.by_product_class.get(ProductClass.EQUITY, 0) * 1.5
-        assert abs(result.by_product_class.get(ProductClass.EQUITY, 0) - expected_equity) < 1e-6
-    
+
+
+class TestVegaMargin:
+    def test_ir_vega_single_expiry(self):
+        # amount is vol-weighted vega; VR = VRW * amount (CR=1).
+        config = SIMMConfig(calculate_curvature=False)
+        result = _calc(config).calculate(SensitivityCollection([
+            IRVegaSensitivity("T", 1000.0, currency="USD", option_tenor=5.0),
+        ]))
+        assert result.total_margin == pytest.approx(0.23 * 1000.0)
+
+    def test_equity_vega_hvr_and_vrw(self):
+        config = SIMMConfig(calculate_curvature=False)
+        result = _calc(config).calculate(SensitivityCollection([
+            EquityVegaSensitivity("T", 1000.0, issuer="AAPL", bucket_number=5, option_tenor=1.0),
+        ]))
+        # VR = VRW * HVR * amount = 0.45 * 0.6 * 1000.
+        assert result.total_margin == pytest.approx(0.45 * 0.6 * 1000.0)
+
+    def test_ir_vega_two_expiries_tenor_correlation(self):
+        config = SIMMConfig(calculate_curvature=False)
+        result = _calc(config).calculate(SensitivityCollection([
+            IRVegaSensitivity("T", 1000.0, currency="USD", option_tenor=1.0),
+            IRVegaSensitivity("T", 1000.0, currency="USD", option_tenor=2.0),
+        ]))
+        vr = 0.23 * 1000.0
+        expected = math.sqrt(2 * vr**2 + 2 * 0.94 * vr * vr)
+        assert result.total_margin == pytest.approx(expected)
+
+
+class TestCurvatureMargin:
+    def test_scaling_function(self):
+        # Paragraph 11(a) example table.
+        assert scaling_function(14.0) == pytest.approx(0.50)
+        assert scaling_function(365.0 / 12.0) == pytest.approx(0.23, abs=0.005)
+        assert scaling_function(365.0) == pytest.approx(0.019, abs=0.0005)
+        assert scaling_function(365.0 * 5) == pytest.approx(0.004, abs=0.0005)
+
+    def test_single_positive_vega_curvature(self):
+        config = SIMMConfig(calculate_delta=False, calculate_vega=False)
+        result = _calc(config).calculate(SensitivityCollection([
+            IRVegaSensitivity("T", 1000.0, currency="USD", option_tenor=1.0),
+        ]))
+        cvr = scaling_function(365.0) * 1000.0
+        lam = (PHI_INV_995**2 - 1.0)  # theta = 0 for net positive CVR
+        expected = (cvr + lam * cvr) * IR_HVR ** (-2)
+        assert result.by_margin_type[RiskClass.INTEREST_RATE][MarginType.CURVATURE] == pytest.approx(expected)
+
+    def test_net_negative_curvature_floors_at_zero(self):
+        config = SIMMConfig(calculate_delta=False, calculate_vega=False)
+        result = _calc(config).calculate(SensitivityCollection([
+            EquityVegaSensitivity("T", -1000.0, issuer="A", bucket_number=5, option_tenor=1.0),
+        ]))
+        # theta = -1 -> lambda = 1; CVR + lambda*|K| = -CVR_abs + CVR_abs = 0.
+        curvature = result.by_margin_type.get(RiskClass.EQUITY, {}).get(MarginType.CURVATURE, 0.0)
+        assert curvature == pytest.approx(0.0)
+
+    def test_equity_volatility_index_bucket_has_zero_curvature(self):
+        # Paragraph 11(b): bucket 12 curvature taken to be zero.
+        config = SIMMConfig(calculate_delta=False, calculate_vega=False)
+        result = _calc(config).calculate(SensitivityCollection([
+            EquityVegaSensitivity("T", 1000.0, issuer="VIX", bucket_number=12, option_tenor=1.0),
+        ]))
+        assert result.by_margin_type.get(RiskClass.EQUITY, {}).get(MarginType.CURVATURE, 0.0) == 0.0
+
+
+class TestBaseCorrMargin:
+    def test_two_index_families(self):
+        config = SIMMConfig(calculate_delta=False, calculate_vega=False, calculate_curvature=False)
+        result = _calc(config).calculate(SensitivityCollection([
+            BaseCorrSensitivity("T", 100.0, index_name="CDX IG"),
+            BaseCorrSensitivity("T", -50.0, index_name="iTraxx Main"),
+        ]))
+        ws1, ws2 = 10 * 100.0, 10 * -50.0
+        expected = math.sqrt(ws1**2 + ws2**2 + 2 * 0.29 * ws1 * ws2)
+        assert result.total_margin == pytest.approx(expected)
+
+
+class TestProductClassSeparation:
+    def test_same_risk_class_in_different_product_classes_not_netted(self):
+        # Paragraph 6: IR risk of an Equity-product trade stays in the
+        # Equity product class; the offsetting RatesFX IR risk must NOT
+        # net against it.
+        offsetting = SensitivityCollection([
+            IRDeltaSensitivity("T1", 10000.0, currency="USD", tenor=5.0,
+                               product_class=ProductClass.RATES_FX),
+            IRDeltaSensitivity("T2", -10000.0, currency="USD", tenor=5.0,
+                               product_class=ProductClass.EQUITY),
+        ])
+        result = _calc().calculate(offsetting)
+        # Each product class carries |WS| = 600k of IR delta margin.
+        assert result.by_product_class[ProductClass.RATES_FX] == pytest.approx(600000.0)
+        assert result.by_product_class[ProductClass.EQUITY] == pytest.approx(600000.0)
+        assert result.total_margin == pytest.approx(1200000.0)
+
+    def test_psi_correlation_within_product_class(self):
+        result = _calc().calculate(SensitivityCollection([
+            IRDeltaSensitivity("T", 10000.0, currency="USD", tenor=5.0),
+            FXDeltaSensitivity("T", 10000.0, currency="EUR"),
+        ]))
+        im_ir = 60 * 10000.0
+        im_fx = 7.4 * 10000.0
+        expected = math.sqrt(im_ir**2 + im_fx**2 + 2 * 0.14 * im_ir * im_fx)
+        assert result.total_margin == pytest.approx(expected)
+
+    def test_total_is_sum_over_product_classes(self):
+        result = _calc().calculate(SensitivityCollection([
+            IRDeltaSensitivity("T", 10000.0, currency="USD", tenor=5.0),
+            EquityDeltaSensitivity("T", 1000.0, issuer="AAPL", bucket_number=5),
+        ]))
+        assert result.total_margin == pytest.approx(60 * 10000.0 + 26 * 1000.0)
+
+
+class TestAddOnsAndMultipliers:
+    def test_fixed_addon(self):
+        config = SIMMConfig(addon_fixed=1000.0)
+        result = _calc(config).calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T", 1000.0, issuer="AAPL", bucket_number=5),
+        ]))
+        assert result.total_margin == pytest.approx(26000.0 + 1000.0)
+
+    def test_multiplicative_scale(self):
+        config = SIMMConfig(ms_equity=1.5)
+        result = _calc(config).calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T", 1000.0, issuer="AAPL", bucket_number=5),
+        ]))
+        assert result.total_margin == pytest.approx(1.5 * 26000.0)
+
+
+class TestEdgeCases:
+    def test_empty_collection(self):
+        result = _calc().calculate(SensitivityCollection())
+        assert result.total_margin == 0.0
+
+    def test_fully_offsetting_sensitivities(self):
+        result = _calc().calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T1", 1000.0, issuer="AAPL", bucket_number=5),
+            EquityDeltaSensitivity("T2", -1000.0, issuer="AAPL", bucket_number=5),
+        ]))
+        assert result.total_margin == pytest.approx(0.0)
+
     def test_result_to_dict(self):
-        """Test result serialization."""
-        config = SIMMConfig(
-            calculate_delta=True,
-            calculate_vega=False,
-            calculate_curvature=False,
-            calculate_base_corr=False,
-        )
-        calc = SIMMCalculator(config)
-        
-        collection = SensitivityCollection()
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=1_000_000,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        result = calc.calculate(collection)
+        result = _calc().calculate(SensitivityCollection([
+            EquityDeltaSensitivity("T", 1000.0, issuer="AAPL", bucket_number=5),
+        ]))
         d = result.to_dict()
-        
-        assert "total_margin" in d
-        assert "by_product_class" in d
-        assert "by_risk_class" in d
-        assert "calculation_currency" in d
-
-
-class TestNumericalPrecision:
-    """Tests for numerical precision and edge cases."""
-    
-    def test_zero_sensitivity(self):
-        """Zero sensitivity should give zero margin."""
-        calc = SIMMCalculator()
-        
-        collection = SensitivityCollection()
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=0.0,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        result = calc.calculate(collection)
-        
-        assert result.by_risk_class.get(RiskClass.EQUITY, 0) == 0.0
-    
-    def test_offsetting_sensitivities(self):
-        """Offsetting sensitivities should net out."""
-        config = SIMMConfig(
-            calculate_delta=True,
-            calculate_vega=False,
-            calculate_curvature=False,
-            calculate_base_corr=False,
-        )
-        calc = SIMMCalculator(config)
-        
-        collection = SensitivityCollection()
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=1_000_000,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t2",
-            amount=-1_000_000,  # Offsetting
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        result = calc.calculate(collection)
-        
-        # Same issuer, same bucket - should net to zero
-        assert result.by_risk_class.get(RiskClass.EQUITY, 0) == 0.0
-    
-    def test_very_small_sensitivity(self):
-        """Very small sensitivities should be handled without numerical issues."""
-        calc = SIMMCalculator()
-        
-        collection = SensitivityCollection()
-        collection.add(EquityDeltaSensitivity(
-            trade_id="t1",
-            amount=1e-10,  # Very small
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        
-        result = calc.calculate(collection)
-        
-        # Should not raise any errors
-        assert result.total_margin >= 0
-
-
-class TestEndToEnd:
-    """End-to-end integration tests."""
-    
-    def test_simple_portfolio(self):
-        """Test a simple multi-asset portfolio."""
-        config = SIMMConfig()
-        calc = SIMMCalculator(config)
-        
-        collection = SensitivityCollection()
-        
-        # Equity positions
-        collection.add(EquityDeltaSensitivity(
-            trade_id="eq1",
-            amount=5_000_000,
-            issuer="AAPL",
-            bucket_number=8,
-        ))
-        collection.add(EquityDeltaSensitivity(
-            trade_id="eq2",
-            amount=3_000_000,
-            issuer="GOOGL",
-            bucket_number=8,
-        ))
-        
-        # IR positions
-        collection.add(IRDeltaSensitivity(
-            trade_id="ir1",
-            amount=10_000_000,
-            currency="USD",
-            tenor=5.0,
-        ))
-        collection.add(IRDeltaSensitivity(
-            trade_id="ir2",
-            amount=-5_000_000,
-            currency="EUR",
-            tenor=10.0,
-        ))
-        
-        # Credit position
-        collection.add(CreditDeltaSensitivity(
-            trade_id="cr1",
-            amount=2_000_000,
-            issuer="IBM",
-            bucket_number=3,
-            tenor=5.0,
-        ))
-        
-        result = calc.calculate(collection)
-        
-        # Verify structure
-        assert result.total_margin > 0
-        assert result.by_product_class[ProductClass.EQUITY] > 0
-        assert result.by_product_class[ProductClass.RATES_FX] > 0
-        assert result.by_product_class[ProductClass.CREDIT] > 0
-        
-        # Verify attribution
-        assert RiskClass.EQUITY in result.by_margin_type
-        assert MarginType.DELTA in result.by_margin_type[RiskClass.EQUITY]
-        
-        # Total should be sum of product classes (plus any add-ons)
-        pc_sum = sum(result.by_product_class.values())
-        assert abs(result.total_margin - pc_sum) < 1e-6  # No add-ons in this test
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        assert d["total_margin"] == pytest.approx(26000.0)
+        assert d["by_product_class"]["Equity"] == pytest.approx(26000.0)
+        assert d["simm_version"] == "2.6"
