@@ -33,6 +33,17 @@ from quantark.backtest.strategy.whalley_wilmott_strategy import WhalleyWilmottSt
 from quantark.backtest.strategy.min_variance_delta_strategy import (
     MinimumVarianceDeltaStrategy,
 )
+from quantark.backtest.strategy.scenarios import (
+    MarketScenario,
+    apply_scenario,
+    instrument_scenario_pnl,
+    portfolio_scenario_pnl,
+)
+from quantark.backtest.strategy.scenario_hedge_strategy import ScenarioHedgeStrategy
+from quantark.backtest.strategy.semi_static_strategy import SemiStaticHedgeStrategy
+from quantark.backtest.strategy.barrier_trigger_strategy import (
+    BarrierTriggerHedgeStrategy,
+)
 
 __all__ = [
     # Base
@@ -55,6 +66,14 @@ __all__ = [
     'DeltaGammaNeutralStrategy',
     'DeltaVegaNeutralStrategy',
     'DeltaGammaVegaNeutralStrategy',
+    # Event/scenario/barrier hedging
+    'MarketScenario',
+    'apply_scenario',
+    'instrument_scenario_pnl',
+    'portfolio_scenario_pnl',
+    'ScenarioHedgeStrategy',
+    'SemiStaticHedgeStrategy',
+    'BarrierTriggerHedgeStrategy',
     # Fixed Income strategies
     'DV01NeutralStrategy',
     'ConvexityNeutralStrategy',

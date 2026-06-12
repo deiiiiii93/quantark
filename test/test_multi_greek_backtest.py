@@ -97,6 +97,70 @@ class TestDeltaGammaBacktest:
         assert abs(greeks["gamma"]) <= 0.5 + 1e-6
 
 
+class TestSemiStaticBacktest:
+    def test_hedges_only_at_events(self):
+        from quantark.backtest.strategy import SemiStaticHedgeStrategy
+
+        obs_dates = [datetime(2024, 1, 15), datetime(2024, 2, 15)]
+        strategy = SemiStaticHedgeStrategy(rebalance_dates=obs_dates)
+        engine = BacktestEngine(make_config(strategy))
+        results = engine.run()
+
+        # Trade date + two observation dates = exactly 3 rebalances
+        assert engine._num_hedges_executed == 3
+        hedge_dates = {
+            t.timestamp.date()
+            for state in engine.state_tracker.states
+            for t in state.trades
+        }
+        assert hedge_dates == {
+            START.date(),
+            obs_dates[0].date(),
+            obs_dates[1].date(),
+        }
+        assert results is not None
+
+
+class TestScenarioBacktest:
+    def test_scenario_strategy_reduces_scenario_loss(self):
+        from quantark.backtest.strategy import MarketScenario, ScenarioHedgeStrategy
+        from quantark.backtest.strategy.scenarios import portfolio_scenario_pnl
+
+        scenarios = [
+            MarketScenario("spot_down_10", spot_shift=-0.10),
+            MarketScenario("vol_up_8", vol_shift=0.08),
+        ]
+        strategy = ScenarioHedgeStrategy(
+            scenarios=scenarios,
+            pnl_threshold=100.0,
+            rebalance_frequency="continuous",
+        )
+        engine = BacktestEngine(make_config(strategy))
+        engine.run()
+
+        # After the final rebalance, scenario P&L is inside the threshold
+        for scenario in scenarios:
+            residual = portfolio_scenario_pnl(
+                engine.portfolio, UNDERLYING, engine.pricing_env, scenario
+            )
+            assert abs(residual) <= 100.0 + 1e-6
+
+
+class TestBarrierTriggerBacktest:
+    def test_barrier_trigger_runs_on_existing_engine(self):
+        from quantark.backtest.strategy import BarrierTriggerHedgeStrategy
+
+        strategy = BarrierTriggerHedgeStrategy(
+            barrier_level=80.0,
+            far_delta_threshold=50.0,
+            near_delta_threshold=10.0,
+        )
+        engine = BacktestEngine(make_config(strategy))
+        results = engine.run()
+        assert results is not None
+        assert engine._num_hedges_executed > 0
+
+
 class TestSingleInstrumentStrategiesStillWork:
     def test_whalley_wilmott_runs_on_existing_engine(self):
         from quantark.backtest.strategy.whalley_wilmott_strategy import (
