@@ -51,7 +51,14 @@ class LifecycleManager:
         return len(self._autocallable) + len(self._barrier)
 
     def register_positions(self, portfolio) -> None:
-        """Attach lifecycle trackers to all trackable positions."""
+        """
+        Attach lifecycle trackers to all trackable positions.
+
+        Call once, after portfolio construction and before the first
+        ``process_day`` call; calling it again would re-register trackers
+        with fresh (reset) lifecycle state. Positions added later (e.g.
+        hedge instruments) are intentionally untracked.
+        """
         for position_id, position in portfolio.positions.items():
             product = position.product
             if isinstance(product, KnockOutResetSnowballOption):
