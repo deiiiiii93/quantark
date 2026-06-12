@@ -2,7 +2,7 @@
 Main equity backtest engine for simulating hedging strategies.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 from datetime import datetime
 import pandas as pd
 from copy import deepcopy
@@ -10,12 +10,15 @@ from copy import deepcopy
 from .config import BacktestConfig
 from .state import BacktestState, StateTracker, TradeRecord
 from .hedge_executor import HedgeExecutor
+from .multi_hedge_executor import MultiInstrumentHedgeExecutor
 from quantark.backtest.logger import BacktestLogger
+from quantark.backtest.strategy.multi_greek_strategy import MultiGreekHedgeStrategy
 from quantark.portfolio import Portfolio
 from quantark.priceenv import PricingEnvironment
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_zero
 
 
 class BacktestEngine:
@@ -69,7 +72,9 @@ class BacktestEngine:
 
         # Will be initialized in run()
         self.portfolio: Optional[Portfolio] = None
-        self.hedge_executor: Optional[HedgeExecutor] = None
+        self.hedge_executor: Optional[
+            Union[HedgeExecutor, MultiInstrumentHedgeExecutor]
+        ] = None
         self.pricing_env: Optional[PricingEnvironment] = None
         self.market_data_set = None
 
@@ -168,12 +173,21 @@ class BacktestEngine:
         # Record initial portfolio value
         self._initial_portfolio_value = self.portfolio.get_portfolio_value()
 
-        # Create hedge executor
-        self.hedge_executor = HedgeExecutor(
-            portfolio=self.portfolio,
-            transaction_cost_model=self.config.transaction_cost_model,
-            hedge_instrument_type=self.config.strategy.hedge_instrument,
-        )
+        # Create hedge executor (multi-instrument strategies trade a basket
+        # of instruments; single-target strategies keep the spot/futures path)
+        if isinstance(self.config.strategy, MultiGreekHedgeStrategy):
+            self.hedge_executor = MultiInstrumentHedgeExecutor(
+                portfolio=self.portfolio,
+                transaction_cost_model=self.config.transaction_cost_model,
+                instruments=self.config.strategy.hedge_instruments,
+                greeks_calculator=self.greeks_calculator,
+            )
+        else:
+            self.hedge_executor = HedgeExecutor(
+                portfolio=self.portfolio,
+                transaction_cost_model=self.config.transaction_cost_model,
+                hedge_instrument_type=self.config.strategy.hedge_instrument,
+            )
 
         # Reset strategy
         self.config.strategy.reset()
@@ -189,6 +203,29 @@ class BacktestEngine:
         """
         # Update pricing environment with current market data
         self._update_pricing_environment(timestamp)
+
+        # Roll expiring hedge contracts before computing Greeks, so the
+        # hedge solve never sizes against a contract about to vanish
+        trade_records = []
+        if isinstance(self.hedge_executor, MultiInstrumentHedgeExecutor):
+            roll_records = self.hedge_executor.process_rolls(
+                underlying=self.config.underlying,
+                pricing_env=self.pricing_env,
+                current_time=timestamp,
+            )
+            for record in roll_records:
+                self._cumulative_transaction_costs += record.transaction_cost
+                self.logger.log_trade(
+                    timestamp=timestamp,
+                    trade_type=record.trade_type,
+                    underlying=record.underlying,
+                    quantity=record.quantity,
+                    price=record.price,
+                    notional=record.notional,
+                    transaction_cost=record.transaction_cost,
+                    reason=record.reason,
+                )
+            trade_records.extend(roll_records)
 
         # Calculate portfolio Greeks
         portfolio_greeks = {}
@@ -221,20 +258,19 @@ class BacktestEngine:
             timestamp=timestamp,
             should_hedge=should_hedge,
             current_delta=current_delta,
-            threshold=self.config.strategy.delta_threshold,
+            threshold=getattr(self.config.strategy, "delta_threshold", 0.0),
             reason="threshold_check",
         )
 
         # Execute hedge if needed
-        trade_records = []
         if should_hedge:
-            trade_record = self._execute_hedge(
-                timestamp=timestamp,
-                portfolio_greeks=portfolio_greeks,
-                market_data=market_data,
+            trade_records.extend(
+                self._execute_hedge(
+                    timestamp=timestamp,
+                    portfolio_greeks=portfolio_greeks,
+                    market_data=market_data,
+                )
             )
-            if trade_record:
-                trade_records.append(trade_record)
 
         # Record state
         self._record_state(
@@ -284,9 +320,12 @@ class BacktestEngine:
         timestamp: datetime,
         portfolio_greeks: Dict[str, float],
         market_data: Dict[str, float],
-    ) -> Optional[TradeRecord]:
+    ) -> list:
         """
-        Execute hedge trade.
+        Execute hedge trade(s).
+
+        Single-target strategies trade one instrument; multi-Greek
+        strategies solve for and trade a basket.
 
         Args:
             timestamp: Current timestamp
@@ -294,8 +333,11 @@ class BacktestEngine:
             market_data: Market data
 
         Returns:
-            TradeRecord or None
+            List of TradeRecords (possibly empty)
         """
+        if isinstance(self.config.strategy, MultiGreekHedgeStrategy):
+            return self._execute_multi_hedge(timestamp, portfolio_greeks, market_data)
+
         # Calculate hedge size
         hedge_size = self.config.strategy.calculate_hedge_size(
             current_time=timestamp,
@@ -303,8 +345,8 @@ class BacktestEngine:
             market_data=market_data,
         )
 
-        if abs(hedge_size) < 1e-10:
-            return None
+        if is_zero(hedge_size):
+            return []
 
         # Execute hedge
         trade_record = self.hedge_executor.execute_hedge(
@@ -324,8 +366,7 @@ class BacktestEngine:
 
         # Update tracking
         self._cumulative_transaction_costs += trade_record.transaction_cost
-        if abs(hedge_size) > 1e-10:
-            self._num_hedges_executed += 1
+        self._num_hedges_executed += 1
 
         # Log trade
         self.logger.log_trade(
@@ -339,7 +380,66 @@ class BacktestEngine:
             reason=trade_record.reason,
         )
 
-        return trade_record
+        return [trade_record]
+
+    def _execute_multi_hedge(
+        self,
+        timestamp: datetime,
+        portfolio_greeks: Dict[str, float],
+        market_data: Dict[str, float],
+    ) -> list:
+        """
+        Execute a multi-instrument hedge rebalance.
+
+        Asks the executor for the per-unit Greeks of each tradeable
+        contract, solves for quantities via the strategy, and executes.
+
+        Args:
+            timestamp: Current timestamp
+            portfolio_greeks: Portfolio Greeks
+            market_data: Market data
+
+        Returns:
+            List of TradeRecords (possibly empty)
+        """
+        instrument_greeks = self.hedge_executor.get_instrument_greeks(
+            underlying=self.config.underlying,
+            pricing_env=self.pricing_env,
+            current_time=timestamp,
+        )
+
+        quantities = self.config.strategy.calculate_hedge_quantities(
+            current_time=timestamp,
+            portfolio_greeks=portfolio_greeks,
+            market_data=market_data,
+            instrument_greeks=instrument_greeks,
+        )
+
+        records = self.hedge_executor.execute_hedges(
+            underlying=self.config.underlying,
+            quantities=quantities,
+            pricing_env=self.pricing_env,
+            current_time=timestamp,
+        )
+
+        if records:
+            self._num_hedges_executed += 1
+            self.config.strategy.on_hedges_executed(timestamp, quantities)
+
+        for record in records:
+            self._cumulative_transaction_costs += record.transaction_cost
+            self.logger.log_trade(
+                timestamp=timestamp,
+                trade_type=record.trade_type,
+                underlying=record.underlying,
+                quantity=record.quantity,
+                price=record.price,
+                notional=record.notional,
+                transaction_cost=record.transaction_cost,
+                reason=record.reason,
+            )
+
+        return records
 
     def _record_state(
         self,
@@ -353,8 +453,10 @@ class BacktestEngine:
         portfolio_value = self.portfolio.get_portfolio_value()
         portfolio_pnl = self.portfolio.get_portfolio_pnl()
 
-        # Calculate net P&L (after transaction costs)
-        net_pnl = portfolio_pnl - self._cumulative_transaction_costs
+        # Calculate net P&L (after transaction costs), including realized
+        # P&L from hedge contracts that were closed or rolled
+        realized_pnl = getattr(self.hedge_executor, "realized_pnl", 0.0)
+        net_pnl = portfolio_pnl + realized_pnl - self._cumulative_transaction_costs
 
         # Create state
         state = BacktestState(
