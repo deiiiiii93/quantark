@@ -279,3 +279,150 @@ class TestConfigAndResults:
         assert list(df.columns)[:2] == ["day_index", "date"]
         assert "event_date" in df.columns
         assert df.iloc[0]["day_index"] == 3
+
+
+class TestBarrierFamilyIntegration:
+    def test_phoenix_coupon_books_cash_position_survives(self):
+        from quantark.asset.equity.engine.quad import PhoenixQuadEngine
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+        from quantark.dynamicscenario import PathBuilder
+
+        phoenix = create_standard_phoenix(
+            initial_price=100.0, strike=100.0, maturity=1.0,
+            ko_barrier=103.0, ki_barrier=70.0,
+            coupon_barrier=85.0, coupon_rate=0.01, num_observations=12,
+        )
+        # 32-day flat path: no spot/vol/rate changes — spot stays at 100.0
+        path = PathBuilder(num_days=32, name="Flat").build()
+        path.start_date = VAL_DATE
+
+        runner = TestEngineLifecycleIntegration()
+        results = runner._run(phoenix, PhoenixQuadEngine(), path)
+
+        # First observation is at t = 1/12 year ≈ day 30 (round(365/12))
+        coupon_day = int(round(365 / 12))
+        events = results.day_results[coupon_day].lifecycle_events
+        assert [e.event_type for e in events] == ["COUPON"]
+        assert not events[0].terminates_position
+        # get_coupon_payoff(0) with no dates → dcf=1.0, so payoff = 100*1.0*0.01*1.0 = 1.0
+        expected_coupon = float(phoenix.get_coupon_payoff(0))
+        assert almost_equal(events[0].cashflow, expected_coupon)
+        # Position must still be alive after coupon
+        final_day = results.day_results[-1]
+        assert len(final_day.positions) == 1
+        # realized_cash accumulates the coupon cashflow (no KO in this path)
+        assert is_close(final_day.realized_cash, expected_coupon)
+
+    def test_barrier_ki_substitution_prices_as_european(self):
+        from quantark.asset.equity.engine.analytical import (
+            BarrierAnalyticalEngine,
+            BlackScholesEngine,
+        )
+        from quantark.asset.equity.product.option import (
+            BarrierOption,
+            EuropeanVanillaOption,
+        )
+        from quantark.dynamicscenario import PathLibrary
+        from quantark.util.enum import BarrierType, OptionType
+
+        product = BarrierOption(
+            strike=100.0, option_type=OptionType.PUT,
+            barrier=90.0, barrier_type=BarrierType.DOWN_IN, maturity=1.0,
+        )
+        # consecutive_decline requires NEGATIVE daily_pct to produce a declining spot;
+        # vol_change_pct=0.0 keeps vol flat so the BlackScholes comparison is exact.
+        # spot on day k = 100 * 0.97^(k+1); first close <= 90 is day index 3 (100*0.97^4 ≈ 88.53)
+        path = PathLibrary.consecutive_decline(days=6, daily_pct=-0.03, vol_change_pct=0.0)
+        path.start_date = VAL_DATE
+
+        runner = TestEngineLifecycleIntegration()
+        results = runner._run(product, BarrierAnalyticalEngine(), path)
+
+        ki_day = 3
+        events = results.day_results[ki_day].lifecycle_events
+        assert [e.event_type for e in events] == ["KI"]
+
+        # After KI the lifecycle manager replaces position.product with EuropeanVanillaOption
+        # and switches the engine to BlackScholesEngine.
+        snapshot = results.day_results[ki_day].positions[0]
+        assert snapshot.product_type == "EuropeanVanillaOption"
+
+        # The tracker computes remaining maturity as 1.0 - elapsed(3 days) = 1.0 - 3/365.
+        # The pricing env on day 3 has spot = 100 * 0.97^4 (day-3 close, i.e. 4th multiplicative
+        # factor), vol unchanged at 0.20, rate at 0.03.
+        ki_spot = 100.0 * (0.97 ** 4)
+        remaining_maturity = 1.0 - 3.0 / 365.0
+        expected_env = make_env(spot=ki_spot)
+        ki_date = VAL_DATE + pd.Timedelta(days=ki_day)
+        expected_env.valuation_date = ki_date.to_pydatetime() if hasattr(ki_date, "to_pydatetime") else ki_date
+        expected = BlackScholesEngine().price(
+            EuropeanVanillaOption(
+                strike=100.0, option_type=OptionType.PUT,
+                maturity=remaining_maturity,
+            ),
+            expected_env,
+        )
+        # snapshot.market_value = BlackScholesEngine().price(European, env) * quantity (=1.0)
+        assert is_close(snapshot.market_value, expected, rel_tol=1e-6)
+
+    def test_barrier_ko_rebate_settles_at_hit(self):
+        from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
+        from quantark.asset.equity.product.option import BarrierOption
+        from quantark.dynamicscenario import PathLibrary
+        from quantark.util.enum import BarrierType, OptionType
+
+        product = BarrierOption(
+            strike=100.0, option_type=OptionType.CALL,
+            barrier=110.0, barrier_type=BarrierType.UP_OUT,
+            maturity=1.0, rebate=2.0, pay_at_hit=True,
+        )
+        # vol_change_pct=0.0 keeps vol flat; spot on day k = 100 * 1.03^(k+1)
+        # first close >= 110 is day index 3 (100*1.03^4 ≈ 112.55)
+        path = PathLibrary.consecutive_rally(days=6, daily_pct=0.03, vol_change_pct=0.0)
+        path.start_date = VAL_DATE
+
+        runner = TestEngineLifecycleIntegration()
+        results = runner._run(product, BarrierAnalyticalEngine(), path)
+
+        ko_day = 3
+        events = results.day_results[ko_day].lifecycle_events
+        assert [e.event_type for e in events] == ["KO"]
+        # rebate * contract_multiplier (=1.0) = 2.0; cashflow = quantity(1.0) * payoff(2.0)
+        assert almost_equal(
+            results.day_results[ko_day].realized_cash,
+            2.0 * product.contract_multiplier,
+        )
+        # From KO day onward: no live positions; portfolio_value = realized_cash
+        for day in results.day_results[ko_day:]:
+            assert len(day.positions) == 0
+            assert is_close(day.portfolio_value, day.realized_cash)
+
+    def test_one_touch_hit_terminates_with_rebate(self):
+        from quantark.asset.equity.engine.analytical import OneTouchAnalyticalEngine
+        from quantark.asset.equity.product.option.one_touch_option import (
+            OneTouchOption,
+        )
+        from quantark.dynamicscenario import PathLibrary
+        from quantark.util.enum import BarrierDirection
+
+        product = OneTouchOption(
+            barrier=105.0, barrier_direction=BarrierDirection.UP,
+            maturity=1.0, rebate=1.0, payment_at_hit=True,
+        )
+        # vol_change_pct=0.0 keeps vol flat; spot on day k = 100 * 1.02^(k+1)
+        # first close >= 105 is day index 2 (100*1.02^3 ≈ 106.12)
+        path = PathLibrary.consecutive_rally(days=5, daily_pct=0.02, vol_change_pct=0.0)
+        path.start_date = VAL_DATE
+
+        runner = TestEngineLifecycleIntegration()
+        results = runner._run(product, OneTouchAnalyticalEngine(), path)
+
+        # spot on day 2 close = 100 * 1.02^3 ≈ 106.12 >= 105
+        touch_day = 2
+        events = results.day_results[touch_day].lifecycle_events
+        assert [e.event_type for e in events] == ["KO"]
+        # rebate=1.0, payment_at_hit=True → cashflow = 1.0 * 1.0 (quantity) = 1.0
+        assert almost_equal(results.day_results[touch_day].realized_cash, 1.0)
+        assert len(results.day_results[-1].positions) == 0
