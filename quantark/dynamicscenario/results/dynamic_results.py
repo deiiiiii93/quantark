@@ -186,6 +186,9 @@ class DayResult:
         trades: List of trades executed today
         market_state: Market state after day's changes
         metadata: Additional data
+        lifecycle_events: Lifecycle events realized on this day
+        realized_cash: Cumulative settlement cash booked through this day
+            (running ledger total, not a per-day increment)
     """
     day_index: int
     date: Optional[datetime] = None
@@ -653,6 +656,12 @@ class DynamicScenarioResults:
             'execution_timestamp': self.execution_timestamp.isoformat(),
             'total_execution_time': self.total_execution_time,
             'config_summary': self.config_summary,
+            'total_lifecycle_events': sum(
+                len(d.lifecycle_events) for d in self.day_results
+            ),
+            'realized_cash': (
+                self.day_results[-1].realized_cash if self.day_results else 0.0
+            ),
             'day_results': [d.to_dict() for d in self.day_results],
             'metadata': self.metadata,
         }
