@@ -46,6 +46,56 @@ class HedgingTarget(Enum):
     DURATION = "duration"
 
 
+VALID_REBALANCE_FREQUENCIES = ["daily", "hourly", "on_threshold", "continuous"]
+
+
+def passes_frequency_gate(
+    frequency: str,
+    breach: bool,
+    current_time: datetime,
+    last_rebalance_time: Optional[datetime],
+) -> bool:
+    """
+    Shared rebalance-frequency gating for threshold-driven strategies.
+
+    Args:
+        frequency: One of VALID_REBALANCE_FREQUENCIES
+        breach: Whether the hedging threshold is currently breached
+        current_time: Current timestamp
+        last_rebalance_time: Timestamp of the last executed rebalance
+
+    Returns:
+        True if a hedge is allowed at this timestep
+
+    Semantics match DeltaNeutralStrategy: 'on_threshold' and 'continuous'
+    hedge whenever the threshold is breached; 'daily'/'hourly' additionally
+    allow at most one hedge per day/hour.
+    """
+    if not breach:
+        return False
+
+    if frequency in ("on_threshold", "continuous"):
+        return True
+
+    if frequency == "daily":
+        if last_rebalance_time is not None:
+            if current_time.date() == last_rebalance_time.date():
+                return False
+        return True
+
+    if frequency == "hourly":
+        if last_rebalance_time is not None:
+            current_hour = current_time.replace(minute=0, second=0, microsecond=0)
+            last_hour = last_rebalance_time.replace(
+                minute=0, second=0, microsecond=0
+            )
+            if current_hour == last_hour:
+                return False
+        return True
+
+    return False
+
+
 class BaseStrategy(ABC):
     """
     Abstract base class for hedging strategies.
