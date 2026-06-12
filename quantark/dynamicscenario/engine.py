@@ -149,8 +149,10 @@ class DynamicScenarioEngine:
         if self.config.handle_lifecycle_events:
             base_date = day_path.start_date
             if base_date is None:
-                first_env = next(iter(working_portfolio.pricing_environments.values()))
-                base_date = first_env.valuation_date
+                first_env = next(
+                    iter(working_portfolio.pricing_environments.values()), None
+                )
+                base_date = first_env.valuation_date if first_env else None
             if base_date is None:
                 raise ValidationError(
                     "Lifecycle event handling requires day_path.start_date or a "
@@ -159,6 +161,8 @@ class DynamicScenarioEngine:
                 )
             lifecycle_manager = LifecycleManager(base_date=base_date)
             lifecycle_manager.register_positions(working_portfolio)
+
+        use_analytical = (self.config.greeks_method == 'analytical')
 
         # Run each day
         for day_step in day_path:
@@ -192,7 +196,6 @@ class DynamicScenarioEngine:
             
             portfolio_greeks = {}
             if self.config.calculate_greeks and self.greeks_calculator:
-                use_analytical = (self.config.greeks_method == 'analytical')
                 portfolio_greeks = working_portfolio.get_portfolio_greeks(
                     self.greeks_calculator,
                     use_analytical=use_analytical
