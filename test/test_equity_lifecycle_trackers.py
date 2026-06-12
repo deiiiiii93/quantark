@@ -198,6 +198,25 @@ class TestAutocallableLifecycleTracker:
         expected = 1.0 * float(phoenix.get_coupon_payoff(0))
         assert almost_equal(coupon_events[0].cashflow, expected)
 
+    def test_phoenix_continuous_ki_observe_does_not_crash(self):
+        from quantark.asset.equity.lifecycle import LifecycleEventType
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+
+        phoenix = create_standard_phoenix(
+            initial_price=100.0, strike=100.0, maturity=1.0,
+            ko_barrier=103.0, ki_barrier=70.0,
+            coupon_barrier=85.0, coupon_rate=0.01, num_observations=12,
+        )
+        tracker = self._tracker(phoenix, quantity=1.0)
+        env = make_env(spot=100.0)
+        live = tracker.product_for_lifecycle()
+        # spot=100 > ki_barrier=70 (no KI); spot=100 < ko_barrier=103 (no KO);
+        # spot=100 > coupon_barrier=85 (coupon fires at obs 0)
+        events = tracker.observe(FIRST_KO_OBS, live, env, 100.0)
+        assert [e.event_type for e in events] == [LifecycleEventType.COUPON]
+
 
 class TestBarrierLifecycleTracker:
     def _tracker(self, product, quantity=1.0):

@@ -160,7 +160,6 @@ class AutocallableLifecycleTracker:
                         )
                     return events
 
-        ki_records = self._scheduled_records(product, env, "ki")
         ki_observation_type = getattr(product.barrier_config, "ki_observation_type", None)
         ki_continuous = getattr(product, "has_ki_barrier", False) and (
             product.barrier_config.ki_continuous
@@ -189,6 +188,7 @@ class AutocallableLifecycleTracker:
                         )
                     )
         else:
+            ki_records = self._scheduled_records(product, env, "ki")
             for idx, rec in enumerate(ki_records):
                 if idx in self.lifecycle.observed_ki_indices:
                     continue
