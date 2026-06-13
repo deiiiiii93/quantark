@@ -16,6 +16,7 @@ from quantark.backtest.strategy.base_strategy import (
 from quantark.backtest.strategy.delta_neutral_strategy import DeltaNeutralStrategy
 from quantark.backtest.strategy.dv01_neutral_strategy import DV01NeutralStrategy
 from quantark.backtest.strategy.convexity_neutral_strategy import ConvexityNeutralStrategy
+from quantark.backtest.strategy.fx_delta_neutral_strategy import FXDeltaNeutralStrategy
 from quantark.backtest.strategy.hedge_optimizer import HedgeOptimizer, HedgeTarget
 from quantark.backtest.strategy.hedge_instruments import (
     BaseHedgeInstrument,
@@ -83,4 +84,6 @@ __all__ = [
     # Fixed Income strategies
     'DV01NeutralStrategy',
     'ConvexityNeutralStrategy',
+    # FX strategies
+    'FXDeltaNeutralStrategy',
 ]

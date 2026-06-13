@@ -8,11 +8,13 @@ across multiple assets and products.
 Supports multiple asset classes:
 - Equity: Options, futures, delta-one products
 - Fixed Income: Bonds, bond futures, interest rate derivatives
+- FX: Spot, forward, swap, vanilla/digital/quanto options
 
 Main components:
 - BasePosition, BasePortfolio: Asset-agnostic protocols
 - EquityPosition, EquityPortfolio: Equity-specific implementations
 - FIPosition, FIPortfolio: Fixed Income-specific implementations
+- FXPosition, FXPortfolio: FX-specific implementations
 - PortfolioSnapshot: Point-in-time snapshot of portfolio state
 - PortfolioExporter: Export functionality for parquet and excel formats
 
@@ -37,7 +39,13 @@ from .fi import (
     FIPosition,
     FIPortfolio,
 )
-from .fx import FxPosition
+
+# FX implementations (FxPosition is a backward-compatible alias of FXPosition)
+from .fx import (
+    FXPosition,
+    FxPosition,
+    FXPortfolio,
+)
 
 # Utilities
 from .portfolio_snapshot import PortfolioSnapshot
@@ -53,7 +61,10 @@ __all__ = [
     # Fixed Income
     "FIPosition",
     "FIPortfolio",
+    # FX
+    "FXPosition",
     "FxPosition",
+    "FXPortfolio",
     # Backward compatibility aliases
     "Position",
     "Portfolio",

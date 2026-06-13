@@ -280,14 +280,21 @@ def get_engine_for_portfolio(
     # Import here to avoid circular imports
     from quantark.portfolio import Portfolio
     from quantark.portfolio.fi import FIPortfolio
-    
+    from quantark.portfolio.fx import FXPortfolio
+
     # Determine portfolio type and return appropriate engine
     if isinstance(portfolio, FIPortfolio):
         from quantark.dynamicscenario.fi.engine import FIDynamicScenarioEngine
         from quantark.dynamicscenario.fi.config import FIDynamicScenarioConfig
         fi_config = config if isinstance(config, FIDynamicScenarioConfig) else FIDynamicScenarioConfig()
         return FIDynamicScenarioEngine(fi_config)
-    
+
+    elif isinstance(portfolio, FXPortfolio):
+        from quantark.dynamicscenario.fx.engine import FXDynamicScenarioEngine
+        from quantark.dynamicscenario.fx.config import FXDynamicScenarioConfig
+        fx_config = config if isinstance(config, FXDynamicScenarioConfig) else FXDynamicScenarioConfig()
+        return FXDynamicScenarioEngine(fx_config)
+
     elif isinstance(portfolio, Portfolio):
         from quantark.dynamicscenario.engine import DynamicScenarioEngine
         from quantark.dynamicscenario.config import DynamicScenarioConfig

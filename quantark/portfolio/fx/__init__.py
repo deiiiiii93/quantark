@@ -1,5 +1,11 @@
-"""FX portfolio position support."""
+"""
+FX portfolio subpackage.
 
-from .position import FxPosition
+Provides FX-specific position and portfolio implementations conforming to the
+asset-agnostic ``BasePosition`` / ``BasePortfolio`` protocols, and to the SIMM
+``SIMMSensitivityProvider`` protocol (``FXPosition.get_simm_sensitivities``).
+"""
+from .portfolio import FXPortfolio
+from .position import FxPosition, FXPosition
 
-__all__ = ["FxPosition"]
+__all__ = ["FXPosition", "FxPosition", "FXPortfolio"]

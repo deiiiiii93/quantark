@@ -64,7 +64,9 @@ class ParameterChange:
         ]
         # FI/rate parameters
         rate_params = ["rate", "rate_parallel", "rate_short", "rate_long", "rate_curve"]
-        valid_params = equity_params + rate_params
+        # FX parameters (two-rate carry: separate domestic / foreign curves)
+        fx_params = ["domestic_rate", "foreign_rate", "rate_dom", "rate_for"]
+        valid_params = equity_params + rate_params + fx_params
 
         if self.parameter not in valid_params:
             raise ValidationError(
