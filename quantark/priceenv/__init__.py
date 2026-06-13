@@ -7,10 +7,12 @@ from .fx_pricing_environment import (
     FxQuantoMarketData,
     QuantoConversionOrientation,
 )
+from .credit_pricing_environment import CreditPricingEnvironment
 
 __all__ = [
     'PricingEnvironment',
     'FxPricingEnvironment',
     'FxQuantoMarketData',
     'QuantoConversionOrientation',
+    'CreditPricingEnvironment',
 ]
