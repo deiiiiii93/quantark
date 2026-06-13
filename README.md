@@ -36,6 +36,10 @@ QuantArk is designed with a clean, modular architecture that separates concerns 
 - **Interest Rate Swaps**: Pricing and risk metrics (DV01)
 - **FX Derivatives**: Garman-Kohlhagen vanilla, digital, and quanto options;
   spot / forward / swap delta-one products with two-curve discounting
+- **FX Portfolio & Risk**: `FXPortfolio` plus full integration with the
+  portfolio risk stack — FX stress testing, Value-at-Risk (parametric /
+  historical / Monte Carlo with two-rate factors), multi-day dynamic scenarios,
+  and delta-neutral backtest hedging (see `example/fx_portfolio_risk_demo.py`)
 - **Greeks Calculation**:
   - Analytical Greeks using closed-form formulas
   - Numerical Greeks using finite difference method (FDM)
@@ -217,6 +221,16 @@ The demo showcases:
 3. Put-Call Parity verification
 4. Comparison between analytical and numerical Greeks
 
+### FX portfolio across the full risk stack
+
+```bash
+python example/fx_portfolio_risk_demo.py   # one FX book through all four risk modules
+python example/fx_stress_test_demo.py      # FX stress testing (spot/vol/two-rate shocks)
+python example/fx_var_demo.py              # FX VaR (parametric / historical / Monte Carlo)
+python example/fx_dynamic_scenario_demo.py # multi-day FX path simulation
+python example/fx_backtest_demo.py         # FX delta-neutral hedging backtest
+```
+
 ## Project Structure
 
 ```
@@ -271,10 +285,11 @@ QuantArk/
 │   └── config.py      # VaR configuration
 ├── portfolio/         # Portfolio management
 │   ├── equity/        # Equity portfolios
-│   └── fi/            # Fixed income portfolios
-├── backtest/          # Hedging strategy backtesting
-├── dynamicscenario/   # Multi-day scenario simulation
-├── stresstest/        # Stress testing framework
+│   ├── fi/            # Fixed income portfolios
+│   └── fx/            # FX portfolios (FXPortfolio / FXPosition)
+├── backtest/          # Hedging strategy backtesting (equity / fi / fx)
+├── dynamicscenario/   # Multi-day scenario simulation (equity / fi / fx)
+├── stresstest/        # Stress testing framework (equity / fi / fx)
 ├── util/              # Utilities
 │   ├── enum/          # Enumerations
 │   └── exceptions.py  # Exception hierarchy
