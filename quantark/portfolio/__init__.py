@@ -40,10 +40,9 @@ from .fi import (
     FIPortfolio,
 )
 
-# FX implementations (FxPosition is a backward-compatible alias of FXPosition)
+# FX implementations
 from .fx import (
     FXPosition,
-    FxPosition,
     FXPortfolio,
 )
 
@@ -69,7 +68,6 @@ __all__ = [
     "FIPortfolio",
     # FX
     "FXPosition",
-    "FxPosition",
     "FXPortfolio",
     # Credit
     "CreditPosition",
