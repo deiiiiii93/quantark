@@ -21,6 +21,12 @@ from quantark.var.fx import (
     FXParametricVaREngine,
     FXRiskFactorConfig,
 )
+from quantark.var.credit import (
+    CreditHistoricalVaREngine,
+    CreditMonteCarloVaREngine,
+    CreditParametricVaREngine,
+    CreditRiskFactorConfig,
+)
 from quantark.var.results import IncrementalVaRResult, VaRResult
 from quantark.var.results.var_report import VaRReportGenerator
 from quantark.var.attribution import ComponentVaRCalculator, MarginalVaRCalculator, VaRAttributor
@@ -40,6 +46,10 @@ __all__ = [
     "FXHistoricalVaREngine",
     "FXMonteCarloVaREngine",
     "FXRiskFactorConfig",
+    "CreditParametricVaREngine",
+    "CreditHistoricalVaREngine",
+    "CreditMonteCarloVaREngine",
+    "CreditRiskFactorConfig",
     "VaRBacktester",
     "VaRBacktestResult",
     "VaRReportGenerator",
