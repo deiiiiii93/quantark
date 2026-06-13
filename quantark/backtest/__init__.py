@@ -150,4 +150,14 @@ def __getattr__(name):
         from quantark.backtest import fi
 
         return getattr(fi, name)
+
+    fx_names = (
+        "FXBacktestEngine",
+        "FXBacktestConfig",
+        "FXBacktestResults",
+    )
+    if name in fx_names:
+        from quantark.backtest import fx
+
+        return getattr(fx, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
