@@ -36,7 +36,7 @@ from quantark.util.calendar import (
     DayCountConvention,
     create_calendar,
 )
-from quantark.simm.config import SIMMConfig
+from quantark.simm.config import SIMMConfig, SIMMVersion
 from quantark.simm.engines.portfolio_adapter import SIMMPortfolioAdapter
 from quantark.simm.engines.aggregation import SIMMCalculator
 from quantark.simm.taxonomy import ProductClass, RiskClass, MarginType
@@ -266,7 +266,7 @@ def main() -> int:
 
     # --- configuration ---
     config = SIMMConfig(
-        version="2.6",
+        version=SIMMVersion.V2_6,
         calculation_currency="USD",
         calculate_delta=True,
         calculate_vega=True,
