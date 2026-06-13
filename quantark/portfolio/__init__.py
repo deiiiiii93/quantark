@@ -47,6 +47,12 @@ from .fx import (
     FXPortfolio,
 )
 
+# Credit implementations
+from .credit import (
+    CreditPosition,
+    CreditPortfolio,
+)
+
 # Utilities
 from .portfolio_snapshot import PortfolioSnapshot
 from .portfolio_storage import PortfolioExporter
@@ -65,6 +71,9 @@ __all__ = [
     "FXPosition",
     "FxPosition",
     "FXPortfolio",
+    # Credit
+    "CreditPosition",
+    "CreditPortfolio",
     # Backward compatibility aliases
     "Position",
     "Portfolio",
