@@ -1,8 +1,9 @@
 """
 Credit pricing environment bundling discount and hazard-rate market data.
 """
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
+from typing import List
 
 from quantark.param import RateCurve
 from quantark.param.credit import HazardCurve, ParallelShiftHazardCurve
@@ -86,4 +87,61 @@ class CreditPricingEnvironment:
         return (
             f"CreditPricingEnvironment(valuation_date={self.valuation_date.date()}, "
             f"r={self.get_rate(1.0):.2%}, lambda={self.get_hazard_rate(1.0):.2%})"
+        )
+
+
+@dataclass
+class BasketCreditPricingEnvironment:
+    """
+    Pricing environment for a basket of credit reference entities.
+
+    Bundles a shared discount curve with one hazard-rate curve per reference
+    entity. Used by basket-CDS Monte-Carlo engines.
+
+    Attributes:
+        valuation_date: Date of valuation (required).
+        discount_curve: Shared risk-free discount curve (required).
+        hazard_curves: One issuer hazard curve per basket entity (required).
+    """
+
+    valuation_date: datetime
+    discount_curve: RateCurve
+    hazard_curves: List[HazardCurve] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.valuation_date is None:
+            raise MarketDataError("Valuation date is required")
+        if self.discount_curve is None:
+            raise MarketDataError("Discount curve is required")
+        if not self.hazard_curves:
+            raise MarketDataError("At least one entity hazard curve is required")
+
+    @property
+    def n_entities(self) -> int:
+        return len(self.hazard_curves)
+
+    def get_discount_factor(self, time: float) -> float:
+        return self.discount_curve.get_discount_factor(time)
+
+    def entity_env(self, index: int) -> CreditPricingEnvironment:
+        """Single-name pricing environment for entity ``index``."""
+        return CreditPricingEnvironment(
+            valuation_date=self.valuation_date,
+            discount_curve=self.discount_curve,
+            hazard_curve=self.hazard_curves[index],
+        )
+
+    def with_hazard_shift(self, shift: float) -> "BasketCreditPricingEnvironment":
+        """Copy with every entity hazard curve shifted by ``shift``."""
+        return replace(
+            self,
+            hazard_curves=[
+                ParallelShiftHazardCurve(c, shift) for c in self.hazard_curves
+            ],
+        )
+
+    def with_rate_shift(self, shift: float) -> "BasketCreditPricingEnvironment":
+        """Copy with the shared discount curve shifted by ``shift``."""
+        return replace(
+            self, discount_curve=ParallelShiftRateCurve(self.discount_curve, shift)
         )
