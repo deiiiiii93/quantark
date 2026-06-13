@@ -75,6 +75,60 @@ class AutocallableBacktestResults:
     def event_probability_df(self) -> pd.DataFrame:
         return self._frame(self._event_probabilities, "date")
 
+    # ------------------------------------------------------------------
+    # BaseBacktestResults interface (thin adapters over the *_df frames),
+    # so OTC results are interchangeable with equity/FI results.
+    # ------------------------------------------------------------------
+
+    def get_total_pnl(self) -> float:
+        """Total P&L (product + hedge mark-to-market, net of costs)."""
+        states = self.states_df
+        if states.empty or "total_pnl" not in states.columns:
+            return 0.0
+        return float(states["total_pnl"].iloc[-1])
+
+    def get_total_return(self) -> float:
+        """Total P&L as a fraction of the initial portfolio value."""
+        states = self.states_df
+        if states.empty or "portfolio_value" not in states.columns:
+            return 0.0
+        initial = float(states["portfolio_value"].iloc[0])
+        if initial == 0.0:
+            return 0.0
+        return self.get_total_pnl() / initial
+
+    def get_pnl_series(self) -> pd.Series:
+        """P&L time series, indexed by date."""
+        states = self.states_df
+        if states.empty or "total_pnl" not in states.columns:
+            return pd.Series(dtype=float)
+        return states["total_pnl"]
+
+    def get_value_series(self) -> pd.Series:
+        """Portfolio value time series, indexed by date."""
+        states = self.states_df
+        if states.empty or "portfolio_value" not in states.columns:
+            return pd.Series(dtype=float)
+        return states["portfolio_value"]
+
+    def get_hedge_trades(self) -> pd.DataFrame:
+        """Executed futures hedge trades."""
+        return self.trades_df
+
+    def get_lifecycle_events(self) -> pd.DataFrame:
+        """Realized lifecycle events (KO/KI/coupon/maturity), one row each.
+
+        Adapts the OTC action log to the shared lifecycle-events schema by
+        exposing the event kind under an ``event_type`` column (matching the
+        equity engine's ``get_lifecycle_events``).
+        """
+        actions = self.actions_df
+        if actions.empty:
+            return actions
+        if "action_type" in actions.columns:
+            actions = actions.rename(columns={"action_type": "event_type"})
+        return actions
+
     def get_summary(self) -> dict[str, Any]:
         states = self.states_df
         if states.empty:

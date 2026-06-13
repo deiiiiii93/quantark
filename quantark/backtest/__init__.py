@@ -23,6 +23,7 @@ from quantark.backtest.base import (
     BaseBacktestEngine,
     BaseBacktestResults,
     BaseBacktestConfig,
+    get_backtest_engine,
 )
 
 # Equity implementations (with backward-compatible aliases)
@@ -91,6 +92,7 @@ __all__ = [
     "BaseBacktestEngine",
     "BaseBacktestResults",
     "BaseBacktestConfig",
+    "get_backtest_engine",
     # Equity (explicit names)
     "EquityBacktestEngine",
     "EquityBacktestConfig",

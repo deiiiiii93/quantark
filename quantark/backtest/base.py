@@ -132,37 +132,19 @@ class BaseHedgeExecutor(Protocol):
 class BaseBacktestEngine(Protocol):
     """
     Protocol for backtest engines across asset classes.
-    
-    Defines the interface for running backtests, including initialization,
-    stepping through time, and generating results.
+
+    The cross-asset contract is intentionally just ``run() -> results``: how an
+    engine steps through time is an implementation detail (the equity and FI
+    engines use ``_initialize``/``_step``/``_finalize``; the OTC autocallable
+    engine drives a single-product futures-basis replay loop). All engines are
+    constructed with their asset-specific config and produce a result object
+    satisfying :class:`BaseBacktestResults`.
     """
-    
+
     def run(self) -> Any:
         """
         Execute the backtest.
-        
-        Returns:
-            Backtest results object
-        """
-        ...
-    
-    def _initialize(self) -> None:
-        """Initialize portfolio, pricing environment, and hedge executor."""
-        ...
-    
-    def _step(self, timestamp: datetime) -> None:
-        """
-        Execute a single backtest step.
-        
-        Args:
-            timestamp: Current timestamp
-        """
-        ...
-    
-    def _finalize(self) -> Any:
-        """
-        Finalize backtest and create results.
-        
+
         Returns:
             Backtest results object
         """
@@ -226,9 +208,22 @@ class BaseBacktestResults(Protocol):
     def get_hedge_trades(self) -> Any:
         """
         Get hedge trade history.
-        
+
         Returns:
             DataFrame or list of trades
+        """
+        ...
+
+    def get_lifecycle_events(self) -> Any:
+        """
+        Get realized product lifecycle events.
+
+        One row per realized event (knock-out, knock-in, coupon, maturity,
+        expiry) detected during the backtest. Empty when the run had no
+        lifecycle-bearing products or lifecycle handling was disabled.
+
+        Returns:
+            DataFrame of lifecycle events
         """
         ...
 
@@ -255,9 +250,66 @@ class BaseBacktestConfig(Protocol):
     def validate(self) -> None:
         """
         Validate configuration parameters.
-        
+
         Raises:
             ValidationError: If configuration is invalid
         """
         ...
+
+
+def get_backtest_engine(config: Any) -> BaseBacktestEngine:
+    """
+    Build the backtest engine matching a config.
+
+    Dispatches on the config type so callers can stay engine-agnostic:
+
+    - ``AutocallableBacktestConfig`` -> ``AutocallableBacktestEngine``
+      (single-product OTC futures-basis replay)
+    - ``FIBacktestConfig`` -> ``FIBacktestEngine`` (fixed income portfolio)
+    - ``BacktestConfig`` / ``EquityBacktestConfig`` -> ``BacktestEngine``
+      (equity portfolio)
+
+    All returned engines expose ``run()`` and produce results satisfying
+    :class:`BaseBacktestResults`. Imports are deferred to avoid importing every
+    asset-class engine at module load.
+
+    Args:
+        config: An asset-class backtest configuration.
+
+    Returns:
+        The engine instance for that config.
+
+    Raises:
+        ValidationError: If no engine matches the config type.
+    """
+    from quantark.util.exceptions import ValidationError
+
+    from quantark.backtest.otc.config import AutocallableBacktestConfig
+
+    if isinstance(config, AutocallableBacktestConfig):
+        from quantark.backtest.otc.engine import AutocallableBacktestEngine
+
+        return AutocallableBacktestEngine(config)
+
+    try:
+        from quantark.backtest.fi.config import FIBacktestConfig
+    except Exception:  # pragma: no cover - FI optional at import time
+        FIBacktestConfig = None
+
+    if FIBacktestConfig is not None and isinstance(config, FIBacktestConfig):
+        from quantark.backtest.fi.engine import FIBacktestEngine
+
+        return FIBacktestEngine(config)
+
+    from quantark.backtest.equity.config import BacktestConfig
+
+    if isinstance(config, BacktestConfig):
+        from quantark.backtest.equity.engine import BacktestEngine
+
+        return BacktestEngine(config)
+
+    raise ValidationError(
+        f"No backtest engine registered for config type "
+        f"{type(config).__name__!r}"
+    )
 
