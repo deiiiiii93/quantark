@@ -67,6 +67,14 @@ from quantark.dynamicscenario.fx import (
     FXPathLibrary,
 )
 
+# Credit components
+from quantark.dynamicscenario.credit import (
+    CreditDynamicScenarioConfig,
+    CreditDynamicScenarioEngine,
+    CreditRiskMetricsAdapter,
+    CreditPathLibrary,
+)
+
 __all__ = [
     # Base protocols
     "BaseDynamicScenarioEngine",
@@ -112,4 +120,9 @@ __all__ = [
     "FXDynamicScenarioEngine",
     "FXRiskMetricsAdapter",
     "FXPathLibrary",
+    # Credit
+    "CreditDynamicScenarioConfig",
+    "CreditDynamicScenarioEngine",
+    "CreditRiskMetricsAdapter",
+    "CreditPathLibrary",
 ]
