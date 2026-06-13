@@ -5,6 +5,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.1.2] - 2026-06-13
+
+### Added
+- Credit dual-measure framework: a recovery convention layer
+  (`quantark.asset.credit.conventions`, `STANDARD_RECOVERY=0.40`) that
+  separates the canonical shared-curve **hazard01** factor from the
+  recovery-converted **CS01** used by products and SIMM. Curve shocks stay
+  in hazard space; spread stresses convert through the recovery convention.
+- Single-name CDS **roll-down / as-of pricing** via effective and maturity
+  dates (seasoned and forward-start), with `schedule_asof` and a
+  total-return coupon cash ledger threaded through the dynamic-scenario and
+  backtest engines. SIMM buckets the remaining tenor. (Basket as-of is
+  deferred.)
+
 ## [0.1.1] - 2026-06-11
 
 ### Added
