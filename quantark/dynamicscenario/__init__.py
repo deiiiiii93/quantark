@@ -59,6 +59,14 @@ from quantark.dynamicscenario.fi import (
     FITradeSnapshot,
 )
 
+# FX components
+from quantark.dynamicscenario.fx import (
+    FXDynamicScenarioConfig,
+    FXDynamicScenarioEngine,
+    FXRiskMetricsAdapter,
+    FXPathLibrary,
+)
+
 __all__ = [
     # Base protocols
     "BaseDynamicScenarioEngine",
@@ -99,4 +107,9 @@ __all__ = [
     "FIDynamicScenarioResults",
     "FIMarketState",
     "FITradeSnapshot",
+    # FX
+    "FXDynamicScenarioConfig",
+    "FXDynamicScenarioEngine",
+    "FXRiskMetricsAdapter",
+    "FXPathLibrary",
 ]
