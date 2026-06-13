@@ -12,6 +12,7 @@ import numpy as np
 from scipy.stats import norm, t as student_t
 
 from quantark.asset.credit.engine.base_credit_engine import BaseCreditEngine
+from quantark.asset.credit.engine.schedule import cds_coupon_schedule
 from quantark.asset.credit.product.basket_cds import BasketCDS, BasketType, CopulaType
 from quantark.param.credit import FlatHazardCurve
 from quantark.param.rrf import FlatRateCurve
@@ -144,13 +145,15 @@ class BasketCDSEngine(BaseCreditEngine):
         triggered = trig_time <= product.maturity
         pi = 1.0 / product.payment_freq
 
-        dates = np.arange(pi, product.maturity + pi / 2, pi)
-        dates = dates[dates <= product.maturity]
+        schedule = cds_coupon_schedule(product.maturity, product.payment_freq)
+        dates = np.array([t for t, _ in schedule])
+        accruals = np.array([a for _, a in schedule])
         df_dates = self._discount(env, dates)
 
-        # Scheduled coupons survive to a payment date when no trigger precedes it.
+        # Scheduled coupons survive to a payment date when no trigger precedes it;
+        # each coupon pays its actual accrual fraction (final period is a stub).
         survived = trig_time[:, None] >= dates[None, :]  # (n_sim, n_dates)
-        scheduled = (survived * (pi * df_dates)[None, :]).sum(axis=1)
+        scheduled = (survived * (accruals * df_dates)[None, :]).sum(axis=1)
 
         # Accrual from the last coupon date to the trigger time, paid on trigger.
         last_coupon = np.floor(trig_time / pi) * pi
@@ -192,9 +195,7 @@ class BasketCDSEngine(BaseCreditEngine):
         thickness = detach - attach
         weights = np.ones(product.n_entities) / product.n_entities
         recoveries = np.asarray(product.recovery_rates)
-        pi = 1.0 / product.payment_freq
-        dates = np.arange(pi, product.maturity + pi / 2, pi)
-        dates = dates[dates <= product.maturity]
+        schedule = cds_coupon_schedule(product.maturity, product.payment_freq)
 
         total = 0.0
         for sim in range(self.n_simulations):
@@ -204,7 +205,7 @@ class BasketCDSEngine(BaseCreditEngine):
             remaining = 1.0
             pv = 0.0
             ptr = 0
-            for d in dates:
+            for d, accrual in schedule:
                 while ptr < len(order) and taus[order[ptr]] <= d and taus[order[ptr]] <= product.maturity:
                     idx = order[ptr]
                     loss = weights[idx] * (1.0 - recoveries[idx])
@@ -220,6 +221,6 @@ class BasketCDSEngine(BaseCreditEngine):
                 if remaining <= 0:
                     break
                 df = self._discount(env, np.array([d]))[0]
-                pv += spread * product.notional * thickness * remaining * pi * df
+                pv += spread * product.notional * thickness * remaining * accrual * df
             total += pv
         return total / self.n_simulations

@@ -49,7 +49,7 @@ def _config():
 def test_parametric_var_positive_with_attribution():
     res = CreditParametricVaREngine(_config()).calculate_var(_portfolio(), _history())
     assert res.var > 0
-    assert res.factor_var and "ACME_spread_change" in res.factor_var
+    assert res.factor_var and "ACME_hazard_change" in res.factor_var
     assert res.component_var
 
 
@@ -70,3 +70,35 @@ def test_monte_carlo_var_positive():
 def test_engine_rejects_non_credit_portfolio():
     with pytest.raises(Exception):
         CreditParametricVaREngine(_config()).calculate_var(object(), _history())
+
+
+def test_include_spread_is_deprecated_alias_for_include_hazard():
+    from quantark.var.credit.config import CreditRiskFactorConfig
+
+    # Construction via the legacy kwarg still disables the credit factor.
+    with pytest.warns(DeprecationWarning):
+        cfg = CreditRiskFactorConfig(include_spread=False)
+    assert cfg.include_hazard is False
+
+    # Read and assignment through the alias both warn and map to include_hazard.
+    cfg2 = CreditRiskFactorConfig()
+    with pytest.warns(DeprecationWarning):
+        assert cfg2.include_spread is True
+    with pytest.warns(DeprecationWarning):
+        cfg2.include_spread = False
+    assert cfg2.include_hazard is False
+
+
+def test_bump_env_spread_change_is_deprecated_alias():
+    from quantark.var.credit.revaluation import bump_env
+
+    env = CreditPricingEnvironment(
+        valuation_date=datetime(2026, 6, 13),
+        discount_curve=FlatRateCurve(rate=0.03),
+        hazard_curve=FlatHazardCurve(hazard_rate=0.02),
+    )
+    with pytest.warns(DeprecationWarning):
+        bumped = bump_env(env, spread_change=1e-4)
+    ref = bump_env(env, hazard_change=1e-4)
+    # The legacy alias applies exactly the hazard shift (no recovery conversion).
+    assert bumped.get_hazard_rate(1.0) == pytest.approx(ref.get_hazard_rate(1.0))

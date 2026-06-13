@@ -76,6 +76,31 @@ def test_position_emits_credit_delta_sensitivity():
     assert deltas[0].bucket_number == 2  # JPMorgan -> Financials (IG)
 
 
+def test_seasoned_cds_simm_tenor_is_remaining_maturity():
+    # A dated 5y CDS valued two years after inception is a 3y exposure; the SIMM
+    # credit-delta must be bucketed at the remaining ~3y vertex, not the original
+    # 5y tenor, so seasoned-trade margin is consistent with its as-of pricing.
+    from datetime import timedelta
+
+    eff = datetime(2026, 6, 13)
+    dated = CDS(notional=10_000_000, maturity=5.0, recovery_rate=0.4,
+                coupon_spread=0.01, effective_date=eff)
+    env = CreditPricingEnvironment(
+        valuation_date=eff + timedelta(days=2 * 365),
+        discount_curve=FlatRateCurve(rate=0.03),
+        hazard_curve=FlatHazardCurve(hazard_rate=0.02),
+    )
+    pos = CreditPosition(product=dated, quantity=1.0, engine=CDSReducedFormEngine(),
+                         reference_entity="JPMORGAN")
+    sens = pos.get_simm_sensitivities(
+        SIMMConfig(calculation_currency="USD", calculate_delta=True),
+        {"JPMORGAN": env},
+    )
+    delta = next(s for s in sens.sensitivities
+                 if isinstance(s, CreditDeltaSensitivity))
+    assert delta.tenor == pytest.approx(3.0, abs=0.05)
+
+
 def test_portfolio_simm_margin_positive():
     env = _env()
     pf = CreditPortfolio(portfolio_name="cr", pricing_environments={"JPMORGAN": env})

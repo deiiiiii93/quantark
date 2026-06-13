@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
+from quantark.asset.credit.conventions import STANDARD_RECOVERY
 from quantark.backtest.strategy.base_strategy import BaseStrategy
 from quantark.backtest.transaction_costs import TransactionCostModel, ZeroCostModel
 from quantark.portfolio.credit import CreditPortfolio
@@ -23,6 +24,10 @@ class CreditBacktestConfig:
         strategy: Hedging strategy (e.g. CreditSpreadNeutralStrategy).
         transaction_cost_model: Cost model for hedge trades (default zero).
         calculate_greeks: Whether to compute greeks each step (required for hedging).
+        hedge_recovery: Recovery rate assumed for the credit hedge instrument when
+            translating hazard-path moves into the CDS-spread moves the spread CS01
+            hedge is marked against (``s = lambda (1 - R)``). Defaults to the ISDA
+            standard senior recovery; set explicitly to match the hedge instrument.
         metadata: Free-form metadata.
     """
 
@@ -32,6 +37,9 @@ class CreditBacktestConfig:
     transaction_cost_model: Optional[TransactionCostModel] = None
     calculate_greeks: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Appended after ``metadata`` to preserve the legacy positional signature
+    # ``CreditBacktestConfig(pf, path, strategy, model, calc_greeks, metadata)``.
+    hedge_recovery: float = STANDARD_RECOVERY
 
     def __post_init__(self) -> None:
         if not isinstance(self.portfolio, CreditPortfolio):
@@ -40,6 +48,10 @@ class CreditBacktestConfig:
             raise ValidationError("market_path must be a non-empty DataFrame")
         if self.strategy is None:
             raise ValidationError("A hedging strategy is required")
+        if not 0.0 <= self.hedge_recovery < 1.0:
+            raise ValidationError(
+                f"hedge_recovery must be in [0, 1), got {self.hedge_recovery}"
+            )
         if self.transaction_cost_model is None:
             self.transaction_cost_model = ZeroCostModel()
 

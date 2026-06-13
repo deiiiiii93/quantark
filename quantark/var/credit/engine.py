@@ -4,7 +4,7 @@ Credit Value-at-Risk engines (parametric / historical / Monte Carlo).
 All three share a finite-difference sensitivity and full-revaluation core over
 the CreditPricingEnvironment. Per-entity risk factors:
 
-* ``{entity}_spread_change`` - absolute hazard-intensity (credit-spread) change
+* ``{entity}_hazard_change`` - absolute hazard-intensity change (Hazard01 factor)
 * ``{entity}_rate_shift``    - absolute interest-rate change
 
 Input ``historical_data`` is a DataFrame of *levels* with columns
@@ -29,21 +29,21 @@ from quantark.var.credit.revaluation import bump_env, portfolio_value
 from quantark.var.results import VaRResult
 
 # Finite-difference bump sizes.
-_EPS = {"spread": 1e-4, "rate": 1e-4}
+_EPS = {"hazard": 1e-4, "rate": 1e-4}
 
 # (kind, level-column suffix, change-column suffix, include-flag attribute)
 _FACTOR_SPECS: List[Tuple[str, str, str, str]] = [
-    ("spread", "_hazard", "_spread_change", "include_spread"),
+    ("hazard", "_hazard", "_hazard_change", "include_hazard"),
     ("rate", "_rate", "_rate_shift", "include_rate"),
 ]
-_KW = {"spread": "spread_change", "rate": "rate_shift"}
+_KW = {"hazard": "hazard_change", "rate": "rate_shift"}
 
 
 @dataclass(frozen=True)
 class _Descriptor:
-    column: str  # e.g. "ACME_spread_change"
+    column: str  # e.g. "ACME_hazard_change"
     entity: str  # e.g. "ACME"
-    kind: str    # "spread" or "rate"
+    kind: str    # "hazard" or "rate"
 
 
 class _BaseCreditVaREngine:
@@ -150,7 +150,7 @@ class _BaseCreditVaREngine:
         for i, (_, row) in enumerate(changes.iterrows()):
             envs = dict(base_envs)
             for entity, ds in by_entity.items():
-                kw = {"spread_change": 0.0, "rate_shift": 0.0}
+                kw = {"hazard_change": 0.0, "rate_shift": 0.0}
                 for d in ds:
                     kw[_KW[d.kind]] = float(row[d.column])
                 envs[entity] = bump_env(base_envs[entity], **kw)

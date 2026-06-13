@@ -37,14 +37,15 @@ def test_factory_dispatches_credit_engine():
     assert isinstance(engine, CreditDynamicScenarioEngine)
 
 
-def test_spread_widening_path_profits_protection_buyer():
+def test_hazard_widening_path_profits_protection_buyer():
     engine = CreditDynamicScenarioEngine()
-    path = CreditPathLibrary.spread_widening(days=5, bps_per_day=10.0)
+    path = CreditPathLibrary.hazard_widening(days=5, bps_per_day=10.0)
     results = engine.run(_portfolio(side=ProtectionSide.BUY), path)
     assert results.num_days == 5
-    # Protection buyer's cumulative P&L is positive as spreads widen day over day.
+    # Protection buyer's cumulative P&L is positive as hazard widens day over day.
     assert results.total_pnl > 0
     assert results.day_results[-1].greeks["cs01"] != 0.0
+    assert results.day_results[-1].greeks["hazard01"] != 0.0
 
 
 def test_credit_crisis_path_runs():
@@ -56,6 +57,6 @@ def test_credit_crisis_path_runs():
 
 def test_hedging_not_supported_inline():
     engine = CreditDynamicScenarioEngine()
-    path = CreditPathLibrary.spread_widening(days=2)
+    path = CreditPathLibrary.hazard_widening(days=2)
     with pytest.raises(NotImplementedError):
         engine.run(_portfolio(), path, hedge_strategy=object())

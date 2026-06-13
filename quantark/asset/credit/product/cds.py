@@ -2,10 +2,14 @@
 Single-name Credit Default Swap (CDS) product.
 """
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
+from typing import Optional
 
 from quantark.util.exceptions import ValidationError
 from .base_credit_product import BaseCreditProduct
+
+_DAYS_PER_YEAR = 365.0
 
 
 class ProtectionSide(Enum):
@@ -33,6 +37,13 @@ class CDS(BaseCreditProduct):
         coupon_spread: Contractual running spread (decimal, e.g. 0.01 = 100bp).
         payment_freq: Premium payments per year (default 4 = quarterly).
         side: Protection side held (BUY = long protection).
+        effective_date: Trade inception (protection start). When supplied the
+            engine prices the CDS as a *seasoned* trade: the contractual coupon
+            calendar is anchored here and the remaining maturity is measured from
+            ``env.valuation_date``, enabling roll-down / carry. When ``None`` the
+            contract is priced from a flat ``maturity`` tenor (no roll-down).
+        maturity_date: Protection end. Defaults to ``effective_date`` plus
+            ``maturity`` years (ACT/365) when ``effective_date`` is given.
     """
 
     notional: float
@@ -41,9 +52,22 @@ class CDS(BaseCreditProduct):
     coupon_spread: float = 0.0
     payment_freq: int = 4
     side: ProtectionSide = ProtectionSide.BUY
+    effective_date: Optional[datetime] = None
+    maturity_date: Optional[datetime] = None
 
     def __post_init__(self) -> None:
+        # Derive the contractual maturity date from the tenor when only the
+        # effective date is supplied, so the coupon calendar is fully specified.
+        if self.effective_date is not None and self.maturity_date is None:
+            self.maturity_date = self.effective_date + timedelta(
+                days=self.maturity * _DAYS_PER_YEAR
+            )
         self.validate()
+
+    @property
+    def is_dated(self) -> bool:
+        """True when an explicit contractual calendar (effective date) is set."""
+        return self.effective_date is not None
 
     def validate(self) -> None:
         if self.notional <= 0:
@@ -64,6 +88,17 @@ class CDS(BaseCreditProduct):
             )
         if not isinstance(self.side, ProtectionSide):
             raise ValidationError("side must be a ProtectionSide")
+        if self.maturity_date is not None and self.effective_date is None:
+            raise ValidationError(
+                "maturity_date requires effective_date to anchor the coupon "
+                "calendar; supply effective_date (maturity_date is optional)"
+            )
+        if self.effective_date is not None and self.maturity_date is not None:
+            if self.maturity_date <= self.effective_date:
+                raise ValidationError(
+                    "maturity_date must be after effective_date, got "
+                    f"{self.maturity_date} <= {self.effective_date}"
+                )
 
     @property
     def side_sign(self) -> float:

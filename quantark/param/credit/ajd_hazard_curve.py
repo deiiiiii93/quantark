@@ -63,9 +63,9 @@ class AJDHazardCurve(HazardCurve):
         alpha, beta = y
         safe_denom = max(1.0 - self.mu_jump * beta, 1e-10)
         dalpha_dt = self.kappa * self.theta * beta + self.gamma * (
-            1.0 - 1.0 / safe_denom
+            1.0 / safe_denom - 1.0
         )
-        dbeta_dt = -self.kappa * beta - 0.5 * self.sigma**2 * beta**2 - 1.0
+        dbeta_dt = -self.kappa * beta + 0.5 * self.sigma**2 * beta**2 - 1.0
         return np.array([dalpha_dt, dbeta_dt])
 
     def get_survival_probability(self, time: float) -> float:

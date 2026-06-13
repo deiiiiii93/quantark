@@ -47,7 +47,7 @@ def test_rec01_negative_for_protection_buyer():
 def test_calculate_returns_all_measures():
     calc, eng = CreditGreeksCalculator(), CDSReducedFormEngine()
     greeks = calc.calculate(_cds(), _env(), eng)
-    for key in ("price", "cs01", "ir01", "rec01"):
+    for key in ("price", "hazard01", "cs01", "ir01", "rec01"):
         assert key in greeks
 
 

@@ -18,6 +18,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import math
 
+import numpy as np
+
 from quantark.util.exceptions import ValidationError
 
 
@@ -81,15 +83,26 @@ class ParallelShiftHazardCurve(HazardCurve):
         lambda_shift(t) = max(0, lambda_base(t) + shift)
         S_shift(t)      = exp(-integral lambda_shift)
 
-    For a flat base curve this is exact. The intensity is floored at zero so a
-    downward shock cannot produce a negative hazard rate.
+    The intensity is floored at zero so a downward shock cannot produce a
+    negative hazard rate.
     """
+
+    # Integration resolution (steps per year) for the floored downward shift.
+    _STEPS_PER_YEAR = 365
 
     def __init__(self, base_curve: HazardCurve, shift: float):
         if base_curve is None:
             raise ValidationError("base_curve is required")
         self.base_curve = base_curve
         self.shift = shift
+        # Lazily-built cumulative integral of the floored intensity, used only on
+        # the term-structured downward-shift path. The grid is extended in place
+        # as larger times are requested, so a full pricing sweep (which queries
+        # survival at every daily integration point) stays linear rather than
+        # re-integrating from zero on every call.
+        self._int_times = [0.0]
+        self._int_cum = [0.0]
+        self._last_intensity = None
 
     def get_hazard_rate(self, time: float) -> float:
         return max(0.0, self.base_curve.get_hazard_rate(time) + self.shift)
@@ -97,13 +110,45 @@ class ParallelShiftHazardCurve(HazardCurve):
     def get_survival_probability(self, time: float) -> float:
         if time < 0:
             raise ValidationError(f"Time must be non-negative, got {time}")
-        base = self.base_curve.get_survival_probability(time)
-        # Floored shift: when the base intensity stays above -shift everywhere,
-        # the integral of the shifted intensity is the base integral + shift*t.
-        floor_breached = self.base_curve.get_hazard_rate(time) + self.shift < 0
-        if floor_breached:
-            return math.exp(-self.get_hazard_rate(time) * time)
-        return base * math.exp(-self.shift * time)
+        if time == 0:
+            return 1.0
+        if isinstance(self.base_curve, FlatHazardCurve):
+            # Flat base: the floored intensity max(0, lambda + shift) is constant
+            # over the whole interval, so the survival law stays exact and O(1).
+            floored = max(0.0, self.base_curve.hazard_rate + self.shift)
+            return math.exp(-floored * time)
+        if self.shift >= 0:
+            # An upward shift never breaches the floor (base intensity >= 0), so
+            # the shifted integral is exactly the base integral + shift * t.
+            return self.base_curve.get_survival_probability(time) * math.exp(
+                -self.shift * time
+            )
+        # Term-structured base with a downward shift: the floor may bind on only
+        # part of the interval, so integrate max(0, lambda(u) + shift) over the
+        # whole [0, time] interval (cached/incremental) rather than assuming the
+        # endpoint intensity held throughout.
+        return math.exp(-self._floored_integral(time))
+
+    def _floored_integral(self, time: float) -> float:
+        """Cumulative integral of ``max(0, lambda(u) + shift)`` over ``[0, time]``."""
+        dt = 1.0 / self._STEPS_PER_YEAR
+        if self._last_intensity is None:
+            self._last_intensity = max(
+                0.0, self.base_curve.get_hazard_rate(0.0) + self.shift
+            )
+        while self._int_times[-1] < time - 1e-12:
+            t_prev = self._int_times[-1]
+            t_next = min(t_prev + dt, time)
+            next_intensity = max(
+                0.0, self.base_curve.get_hazard_rate(t_next) + self.shift
+            )
+            self._int_cum.append(
+                self._int_cum[-1]
+                + 0.5 * (self._last_intensity + next_intensity) * (t_next - t_prev)
+            )
+            self._int_times.append(t_next)
+            self._last_intensity = next_intensity
+        return float(np.interp(time, self._int_times, self._int_cum))
 
     def __repr__(self) -> str:
         return (

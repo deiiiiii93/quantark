@@ -94,3 +94,34 @@ def test_t_copula_runs_and_is_positive():
     product, env = _basket()
     product.copula_type = CopulaType.STUDENT_T
     assert eng.fair_spread(product, env) > 0
+
+
+def test_singular_correlation_matrix_rejected():
+    # A positive-semidefinite but singular matrix ([[1,1],[1,1]]) would pass a
+    # PSD check yet break the Cholesky used to draw correlated defaults, so it
+    # must be rejected at construction as not positive definite.
+    from quantark.util.exceptions import ValidationError
+
+    singular = np.array([[1.0, 1.0], [1.0, 1.0]])
+    with pytest.raises(ValidationError):
+        BasketCDS(
+            notional=NOTIONAL, maturity=MATURITY, recovery_rates=[RECOVERY] * 2,
+            basket_type=BasketType.FTD, n_to_default=1,
+            correlation_matrix=singular,
+        )
+
+
+def test_positive_definite_correlation_matrix_accepted():
+    # A well-conditioned correlation matrix is accepted and prices.
+    eng = BasketCDSEngine(n_simulations=20_000, seed=11)
+    product = BasketCDS(
+        notional=NOTIONAL, maturity=MATURITY, recovery_rates=[RECOVERY] * 2,
+        basket_type=BasketType.FTD, n_to_default=1,
+        correlation_matrix=_corr(2, 0.5), coupon_spread=0.0,
+    )
+    env = BasketCreditPricingEnvironment(
+        valuation_date=datetime(2026, 6, 13),
+        discount_curve=FlatRateCurve(rate=RATE),
+        hazard_curves=[FlatHazardCurve(hazard_rate=HAZARD)] * 2,
+    )
+    assert eng.fair_spread(product, env) > 0

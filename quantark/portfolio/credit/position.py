@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 import uuid
 
 from quantark.asset.credit.engine.base_credit_engine import BaseCreditEngine
+from quantark.asset.credit.engine.schedule import year_fraction_act365
 from quantark.asset.credit.product.base_credit_product import BaseCreditProduct
 from quantark.asset.credit.riskmeasures import CreditGreeksCalculator
 from quantark.priceenv import CreditPricingEnvironment
@@ -26,7 +27,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
 #: Core credit Greeks aggregated across positions.
-_CORE_GREEKS = ("cs01", "ir01", "rec01")
+_CORE_GREEKS = ("hazard01", "cs01", "ir01", "rec01")
 
 #: Shared bucket mapper (issuer -> SIMM credit bucket).
 _BUCKET_MAPPER = BucketMapper()
@@ -162,10 +163,16 @@ class CreditPosition:
             )
 
         recovery = getattr(self.product, "recovery_rate", 0.4)
-        spread_bump = 1e-4 / max(1e-6, 1.0 - recovery)  # hazard move for 1bp spread
-        up = self.engine.price(self.product, env.with_hazard_shift(+spread_bump))
-        down = self.engine.price(self.product, env.with_hazard_shift(-spread_bump))
-        cs01 = (up - down) / 2.0 * self.quantity
+        lgd = 1.0 - recovery
+        if lgd <= 1e-6:
+            # Full recovery: spread s = lambda (1 - R) is pinned at zero, so the
+            # position carries no spread risk and emits no credit-delta.
+            cs01 = 0.0
+        else:
+            spread_bump = 1e-4 / lgd  # hazard move for a 1bp spread move
+            up = self.engine.price(self.product, env.with_hazard_shift(+spread_bump))
+            down = self.engine.price(self.product, env.with_hazard_shift(-spread_bump))
+            cs01 = (up - down) / 2.0 * self.quantity
 
         result = SensitivityCollection()
         if not is_zero(cs01):
@@ -176,9 +183,25 @@ class CreditPosition:
                     amount_currency=config.calculation_currency.upper(),
                     issuer=self.reference_entity,
                     bucket_number=self._bucket(),
-                    tenor=self.product.maturity,
+                    tenor=self._remaining_tenor(env),
                     is_qualifying=self.is_qualifying,
                     payment_currency=self.payment_currency.upper(),
                 )
             )
         return result
+
+    def _remaining_tenor(self, env: CreditPricingEnvironment) -> float:
+        """
+        Tenor (years) used for SIMM vertex bucketing.
+
+        For a seasoned dated CDS the spread risk now lives at the *remaining*
+        maturity (the engine prices off the contractual dates as of
+        ``env.valuation_date``), so the sensitivity must be bucketed there — a
+        5y trade valued two years on is a 3y exposure, not a 5y one. Un-dated
+        contracts fall back to the contractual ``maturity`` tenor.
+        """
+        product = self.product
+        if getattr(product, "is_dated", False):
+            remaining = year_fraction_act365(env.valuation_date, product.maturity_date)
+            return max(0.0, remaining)
+        return product.maturity

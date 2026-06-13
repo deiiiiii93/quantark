@@ -89,8 +89,25 @@ class BasketCDS(BaseCreditProduct):
             raise ValidationError("Coupon spread must be non-negative")
         if self.payment_freq <= 0:
             raise ValidationError("Payment frequency must be positive")
-        if np.asarray(self.correlation_matrix).shape != (n, n):
+        corr = np.asarray(self.correlation_matrix, dtype=float)
+        if corr.shape != (n, n):
             raise ValidationError(f"Correlation matrix must be {n}x{n}")
+        if not np.allclose(corr, corr.T, atol=1e-8):
+            raise ValidationError("Correlation matrix must be symmetric")
+        if not np.allclose(np.diag(corr), 1.0, atol=1e-8):
+            raise ValidationError("Correlation matrix must have a unit diagonal")
+        # Must be positive *definite*: the basket engine draws correlated
+        # default times via a Cholesky factorisation, which requires a strictly
+        # positive-definite matrix. A merely positive-semidefinite (singular)
+        # matrix such as [[1, 1], [1, 1]] would pass a PSD check but break the
+        # Cholesky, so a singular or indefinite matrix is rejected here.
+        min_eigenvalue = float(np.linalg.eigvalsh(corr).min())
+        if min_eigenvalue <= 1e-10:
+            raise ValidationError(
+                "Correlation matrix must be positive definite for the Cholesky "
+                "factorisation used to draw correlated default times "
+                f"(smallest eigenvalue {min_eigenvalue:.2e})"
+            )
         if self.basket_type == BasketType.NTD and not 1 <= self.n_to_default <= n:
             raise ValidationError(
                 f"n_to_default must be in [1, {n}], got {self.n_to_default}"

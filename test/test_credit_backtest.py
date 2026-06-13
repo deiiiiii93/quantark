@@ -3,6 +3,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from quantark.asset.credit.engine.analytical import CDSReducedFormEngine
 from quantark.asset.credit.product import CDS, ProtectionSide
@@ -36,6 +37,18 @@ def _path(days=40, seed=2):
     rate = 0.03 + np.cumsum(rng.normal(0, 0.0002, days))
     idx = pd.date_range("2026-06-15", periods=days, freq="B")
     return pd.DataFrame({"ACME_hazard": hazard, "ACME_rate": rate}, index=idx)
+
+
+def test_config_positional_construction_preserves_metadata_slot():
+    # Legacy positional signature: hedge_recovery was appended after metadata so
+    # the 6th positional argument still binds to metadata (not hedge_recovery).
+    meta = {"book": "macro"}
+    cfg = CreditBacktestConfig(
+        _portfolio(), _path(), CreditSpreadNeutralStrategy(cs01_threshold=500.0),
+        None, True, meta,
+    )
+    assert cfg.metadata == meta
+    assert cfg.hedge_recovery == pytest.approx(0.4)  # ISDA standard default
 
 
 def test_backtest_runs_and_records_steps():

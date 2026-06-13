@@ -12,6 +12,8 @@ import dataclasses
 from copy import deepcopy
 from typing import Dict
 
+from quantark.asset.credit.engine.schedule import contractual_coupon_dates
+from quantark.asset.credit.product.cds import CDS
 from quantark.asset.credit.riskmeasures import CreditGreeksCalculator
 from quantark.backtest.credit.config import CreditBacktestConfig
 from quantark.backtest.credit.results import CreditBacktestResults
@@ -50,7 +52,7 @@ class CreditBacktestEngine:
         self._apply_row(portfolio, entities, path.iloc[0], first_ts)
         initial_value = portfolio.get_portfolio_value()
 
-        hedge: Dict[str, float] = {e: 0.0 for e in entities}  # accumulated hedge CS01
+        hedge: Dict[str, float] = {e: 0.0 for e in entities}  # accumulated spread CS01
         prev_hazard: Dict[str, float] = {
             e: portfolio.pricing_environments[e].hazard_curve.get_hazard_rate(1.0)
             for e in entities
@@ -61,16 +63,32 @@ class CreditBacktestEngine:
         num_hedges = 0
         rows = []
 
+        # Total-return cash ledger: as the valuation date advances the engine
+        # reprices each seasoned CDS (roll-down) and settled coupons leave the
+        # PV. Booking them as realized cash keeps reported portfolio P&L a
+        # carry-preserving total return. Un-dated CDS book nothing (unchanged).
+        realized_cash = 0.0
+        prev_ts = first_ts
+
         for ts, row in path.iterrows():
             self._apply_row(portfolio, entities, row, ts)
+            for pos in portfolio.positions.values():
+                realized_cash += self._realized_coupon_cash(pos, prev_ts, ts)
+            prev_ts = ts
 
-            # Mark the existing hedge to the new spread before rebalancing.
+            # Mark the existing hedge to the new spread before rebalancing. The
+            # hedge holds a spread CS01, so its P&L is driven by the spread move
+            # Δs = Δlambda (1 - R), not the raw hazard move.
             for entity in entities:
                 hazard = portfolio.pricing_environments[entity].hazard_curve.get_hazard_rate(1.0)
-                cum_hedge_pnl += hedge[entity] * (hazard - prev_hazard[entity]) / _BPS
+                spread_move_bps = (
+                    (hazard - prev_hazard[entity]) * (1.0 - cfg.hedge_recovery) / _BPS
+                )
+                cum_hedge_pnl += hedge[entity] * spread_move_bps
                 prev_hazard[entity] = hazard
 
-            value = portfolio.get_portfolio_value()
+            # Total-return value = remaining mark-to-market + cash booked so far.
+            value = portfolio.get_portfolio_value() + realized_cash
             portfolio_pnl = value - initial_value
 
             cs01_pre_total = 0.0
@@ -92,8 +110,13 @@ class CreditBacktestEngine:
                 if strategy.should_hedge(ts, greeks, market):
                     size = strategy.calculate_hedge_size(ts, greeks, market)
                     hedge[entity] += size
+                    # `size` is a hedge CS01 ($ per 1bp). Convert it to the
+                    # underlying CDS notional via CS01 = notional * RPV01 * 1bp,
+                    # so the cost models see a real trade notional (and unit
+                    # price) rather than a dollar-CS01 / hazard-rate mix.
+                    hedge_notional = self._cs01_to_notional(portfolio, entity, size)
                     cost = cost_model.calculate_cost(
-                        quantity=abs(size), price=hazard, notional=abs(size),
+                        quantity=hedge_notional, price=1.0, notional=hedge_notional,
                         instrument_type="cds", trade_type="hedge")
                     costs_today += cost
                     num_hedges += 1
@@ -121,7 +144,7 @@ class CreditBacktestEngine:
         return CreditBacktestResults(
             rows=rows,
             initial_value=initial_value,
-            final_value=portfolio.get_portfolio_value(),
+            final_value=portfolio.get_portfolio_value() + realized_cash,
             num_hedges=num_hedges,
             total_transaction_costs=cum_costs,
             total_hedge_pnl=cum_hedge_pnl,
@@ -129,6 +152,61 @@ class CreditBacktestEngine:
         )
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _realized_coupon_cash(position, start, end) -> float:
+        """
+        Premium cash settled in ``(start, end]`` for one seasoned CDS position.
+
+        Protection buyers pay the running coupon (cash outflow), sellers receive
+        it. With no default modelled on the deterministic path the name is taken
+        to survive, so each contractual coupon is booked in full at face when its
+        payment date is crossed. Un-dated CDS book nothing.
+        """
+        product = position.product
+        if not isinstance(product, CDS) or not product.is_dated:
+            return 0.0
+        cash = 0.0
+        for pay_date, accrual in contractual_coupon_dates(
+            product.effective_date, product.maturity_date, product.payment_freq
+        ):
+            if start < pay_date <= end:
+                coupon = product.notional * product.coupon_spread * accrual
+                cash += -product.side_sign * position.quantity * coupon
+        return cash
+
+    @staticmethod
+    def _cs01_to_notional(
+        portfolio: CreditPortfolio, entity: str, cs01_amount: float
+    ) -> float:
+        """
+        Convert a hedge CS01 ($ per 1bp) into a CDS notional for cost models.
+
+        Uses the credit-triangle identity ``CS01 = notional * RPV01 * 1bp``,
+        where the risky annuity (RPV01) per unit notional is recovered from a
+        representative unit-notional CDS on ``entity``. The present value is
+        linear in the running coupon (``PV = side_sign * (protection -
+        coupon * RPV01)``), so differencing two coupon levels isolates RPV01
+        using only the engine's guaranteed ``price`` method.
+        """
+        positions = [
+            p for p in portfolio.positions.values() if p.reference_entity == entity
+        ]
+        if not positions:
+            return abs(cs01_amount)
+        reference = positions[0]
+        env = portfolio.pricing_environments[entity]
+        unit = dataclasses.replace(reference.product, notional=1.0)
+        pv_zero = reference.engine.price(
+            dataclasses.replace(unit, coupon_spread=0.0), env
+        )
+        pv_one = reference.engine.price(
+            dataclasses.replace(unit, coupon_spread=0.01), env
+        )
+        rpv01 = abs(pv_zero - pv_one) / 0.01  # risky annuity per unit notional
+        if rpv01 <= 0:
+            return abs(cs01_amount)
+        return abs(cs01_amount) / (rpv01 * _BPS)
+
     @staticmethod
     def _clone_portfolio(portfolio: CreditPortfolio) -> CreditPortfolio:
         cloned = CreditPortfolio(
