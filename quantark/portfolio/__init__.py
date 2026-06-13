@@ -37,6 +37,7 @@ from .fi import (
     FIPosition,
     FIPortfolio,
 )
+from .fx import FxPosition
 
 # Utilities
 from .portfolio_snapshot import PortfolioSnapshot
@@ -52,6 +53,7 @@ __all__ = [
     # Fixed Income
     "FIPosition",
     "FIPortfolio",
+    "FxPosition",
     # Backward compatibility aliases
     "Position",
     "Portfolio",

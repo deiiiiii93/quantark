@@ -110,12 +110,18 @@ class SIMMConfig:
     
     def _validate(self) -> None:
         """Validate configuration values."""
+        if self.version != SIMMVersion.V2_6:
+            raise ValidationError(
+                f"SIMM version {self.version} is not supported; only v2.6 calibration is available"
+            )
+
         # Validate calculation currency
         if not isinstance(self.calculation_currency, str) or len(self.calculation_currency) != 3:
             raise ValidationError(
                 f"calculation_currency must be a 3-letter ISO currency code, "
                 f"got {self.calculation_currency!r}"
             )
+        self.calculation_currency = self.calculation_currency.upper()
         
         # Validate multipliers are positive
         for name, value in [

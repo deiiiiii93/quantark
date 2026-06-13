@@ -655,6 +655,10 @@ class CurvatureSensitivity(BaseSensitivity):
     risk_class_value: RiskClass = RiskClass.INTEREST_RATE
     qualifier_value: str = ""
     bucket_value: Union[str, int] = ""
+    label1: str = ""
+    label2: str = ""
+    risk_factor_value: Optional[Hashable] = None
+    group: str = ""
 
     @property
     def risk_class(self) -> RiskClass:
@@ -674,7 +678,20 @@ class CurvatureSensitivity(BaseSensitivity):
 
     @property
     def risk_factor(self) -> Hashable:
+        if self.risk_factor_value is not None:
+            return self.risk_factor_value
+        if self.risk_class_value == RiskClass.INTEREST_RATE and self.label1:
+            return ("Yield", self.label1, self.label2 or IRSubCurve.OIS.value)
+        if self.risk_class_value in (
+            RiskClass.CREDIT_QUALIFYING,
+            RiskClass.CREDIT_NON_QUALIFYING,
+        ):
+            return (self.qualifier_value, self.label1, self.label2)
         return (self.qualifier_value,)
+
+    @property
+    def group_name(self) -> str:
+        return self.group
 
 
 # Type alias for any sensitivity type

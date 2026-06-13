@@ -62,8 +62,7 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
         """
         Calculate equity delta sensitivities.
 
-        Uses the GreeksCalculator to extract delta from positions.
-        Scales by position quantity and classifies to appropriate bucket.
+        Uses position-scaled Greeks and classifies to the appropriate bucket.
 
         Args:
             positions: List of equity positions
@@ -82,15 +81,13 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
 
             env = pricing_environments.get(position.underlying)
             if env is None:
-                # Skip if no pricing environment available
-                continue
+                raise ValidationError(
+                    f"Missing equity pricing environment for {position.underlying}"
+                )
 
             # Get Greeks from position
             greeks = position.get_greeks(env, self.greeks_calculator)
             delta = greeks.get('delta', 0.0)
-
-            # Scale by position quantity
-            delta *= position.quantity
 
             if is_zero(delta, tol=Tolerance.ZERO):
                 # Skip positions with negligible delta
@@ -140,8 +137,9 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
 
             env = pricing_environments.get(position.underlying)
             if env is None:
-                # Skip if no pricing environment available
-                continue
+                raise ValidationError(
+                    f"Missing equity pricing environment for {position.underlying}"
+                )
 
             # Get Greeks from position
             greeks = position.get_greeks(env, self.greeks_calculator)
@@ -151,14 +149,11 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
             if is_zero(vega, tol=Tolerance.ZERO):
                 continue
 
-            # Scale by position quantity
-            vega *= position.quantity
-
             # Classify to bucket
             bucket = self._classify_equity_bucket(position.underlying)
 
             # Get option expiry for vega tenor
-            option_tenor = self._get_option_expiry_tenor(position)
+            option_tenor = self._get_option_expiry_tenor(position, env)
 
             # SIMM vega amounts are vol-weighted: sigma_kj * dV/dsigma,
             # with sigma_kj derived from the delta risk weight
@@ -193,7 +188,9 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
         """
         return self.bucket_mapper.classify_equity_bucket(issuer)
 
-    def _get_option_expiry_tenor(self, position: EquityPosition) -> float:
+    def _get_option_expiry_tenor(
+        self, position: EquityPosition, pricing_env: Optional[Any] = None
+    ) -> float:
         """
         Get the option expiry tenor for vega bucket assignment.
 
@@ -207,7 +204,7 @@ class EquitySensitivityEngine(BaseSensitivityEngine):
         if hasattr(position.product, 'get_maturity'):
             # Get maturity from product
             # Note: This is approximate - production code would get from pricing env
-            maturity = position.product.get_maturity(None)
+            maturity = position.product.get_maturity(pricing_env)
             return float(maturity)
 
         # Default to 1 year if maturity not available

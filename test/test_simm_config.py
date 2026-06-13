@@ -42,14 +42,13 @@ class TestSIMMConfig:
     def test_custom_values(self):
         """Config should accept custom values."""
         config = SIMMConfig(
-            version=SIMMVersion.V2_5,
             calculation_currency="EUR",
             calculate_vega=False,
             ms_credit=1.5,
             addon_fixed=1_000_000,
         )
         
-        assert config.version == SIMMVersion.V2_5
+        assert config.version == SIMMVersion.V2_6
         assert config.calculation_currency == "EUR"
         assert config.calculate_vega is False
         assert config.ms_credit == 1.5
@@ -107,13 +106,14 @@ class TestSIMMConfig:
             ms_credit=1.5,
         )
         
-        new_config = original.with_version(SIMMVersion.V2_5)
-        
-        assert new_config.version == SIMMVersion.V2_5
-        assert new_config.calculation_currency == "EUR"
-        assert new_config.ms_credit == 1.5
+        with pytest.raises(ValidationError, match="only v2.6"):
+            original.with_version(SIMMVersion.V2_5)
         # Original unchanged
         assert original.version == SIMMVersion.V2_6
+
+    def test_rejects_v2_5(self):
+        with pytest.raises(ValidationError, match="only v2.6"):
+            SIMMConfig(version=SIMMVersion.V2_5)
     
     def test_addon_factors(self):
         """Addon factors should work correctly."""

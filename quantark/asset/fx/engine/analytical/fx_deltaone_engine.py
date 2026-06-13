@@ -18,7 +18,7 @@ class FxDeltaOneEngine(BaseFxEngine):
 
     Spot / forward (net cash settlement in quote currency):
         NPV_quote = N * (F_mkt - K) * df_dom(T)
-        NPV_base  = N * (F_mkt - K) / S * df_for(T)
+        NPV_base  = NPV_quote / S
 
     where F_mkt is the outright market forward to the settlement date
     (interest rate parity from spot, or a quoted market forward) and the
@@ -81,15 +81,14 @@ class FxDeltaOneEngine(BaseFxEngine):
         fx_env: FxPricingEnvironment,
     ) -> Dict[str, Union[float, bool, str]]:
         t = product.get_maturity(fx_env)
-        spot = fx_env.spot
+        spot = fx_env.effective_spot()
         forward = fx_env.get_forward(t)
         df_dom = fx_env.get_domestic_df(t)
-        df_for = fx_env.get_foreign_df(t)
 
         n = product.notional_base
         k = product.contract_rate
         npv_quote = n * (forward - k) * df_dom
-        npv_base = n * (forward - k) / spot * df_for
+        npv_base = npv_quote / spot
 
         return {
             "currency_pair": str(product.currency_pair),
@@ -102,7 +101,7 @@ class FxDeltaOneEngine(BaseFxEngine):
             "forward_points": forward - spot,
             "contract_forward_points": k - spot,
             "domestic_discount_factor": df_dom,
-            "foreign_discount_factor": df_for,
+            "foreign_discount_factor": fx_env.get_foreign_df(t),
             "years_to_settlement": t,
         }
 
