@@ -16,11 +16,13 @@ Orchestrates the full ISDA SIMM v2.6 margin calculation:
    classes with multiplicative scales and add-ons (Section L).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, Hashable, List, Optional, Tuple, Union
 
 from quantark.simm.config import SIMMConfig
+from quantark.simm.market_data import SIMMMarketData
+from quantark.util.exceptions import ValidationError
 from quantark.simm.taxonomy import (
     EQUITY_VOLATILITY_INDEX_BUCKET,
     MarginType,
@@ -146,13 +148,18 @@ class SIMMCalculator:
         >>> print(result.total_margin)
     """
 
-    def __init__(self, config: Optional[SIMMConfig] = None):
+    def __init__(
+        self,
+        config: Optional[SIMMConfig] = None,
+        market_data: Optional[SIMMMarketData] = None,
+    ):
         """Initialize the calculator.
 
         Args:
             config: SIMM configuration. Defaults to SIMMConfig().
         """
         self.config = config or SIMMConfig()
+        self.market_data = market_data
         ccy = self.config.calculation_currency
         self.concentration_calc = ConcentrationCalculator()
         self.weighted_sens_calc = WeightedSensitivityCalculator(ccy)
@@ -169,6 +176,7 @@ class SIMMCalculator:
         self,
         sensitivities: Union[SensitivityCollection, List[AnySensitivity]],
         notionals: Optional[Dict[str, float]] = None,
+        market_data: Optional[SIMMMarketData] = None,
     ) -> SIMMAggregationResult:
         """Calculate total SIMM margin.
 
@@ -182,6 +190,10 @@ class SIMMCalculator:
         """
         if not isinstance(sensitivities, SensitivityCollection):
             sensitivities = SensitivityCollection(list(sensitivities))
+        sensitivities = self._normalize_sensitivities(
+            sensitivities, market_data or self.market_data
+        )
+        self._validate_curvature_mode(sensitivities)
 
         product_class_results: Dict[ProductClass, ProductClassResult] = {}
         bucket_details: Dict[ProductClass, Dict[RiskClass, Dict[MarginType, Dict[Any, BucketResult]]]] = {}
@@ -238,6 +250,7 @@ class SIMMCalculator:
         self,
         crif_records: List[Dict[str, Any]],
         notionals: Optional[Dict[str, float]] = None,
+        market_data: Optional[SIMMMarketData] = None,
     ) -> SIMMAggregationResult:
         """Calculate SIMM from CRIF record dictionaries.
 
@@ -250,8 +263,61 @@ class SIMMCalculator:
         """
         from quantark.simm.crif.parser import crif_records_to_sensitivities
 
-        collection = crif_records_to_sensitivities(crif_records)
-        return self.calculate(collection, notionals)
+        collection = crif_records_to_sensitivities(
+            crif_records,
+            calculation_currency=self.config.calculation_currency,
+            market_data=market_data or self.market_data,
+        )
+        return self.calculate(collection, notionals, market_data)
+
+    def _normalize_sensitivities(
+        self,
+        sensitivities: SensitivityCollection,
+        market_data: Optional[SIMMMarketData],
+    ) -> SensitivityCollection:
+        """Convert all amounts and USD thresholds into calculation currency."""
+        target = self.config.calculation_currency
+        normalized: List[AnySensitivity] = []
+        for sensitivity in sensitivities:
+            source = sensitivity.amount_currency.upper()
+            if source == target:
+                normalized.append(replace(sensitivity, amount_currency=target))
+                continue
+            if market_data is None:
+                raise ValidationError(
+                    f"SIMMMarketData required to convert sensitivity amount from "
+                    f"{source} to {target}"
+                )
+            normalized.append(
+                replace(
+                    sensitivity,
+                    amount=sensitivity.amount * market_data.fx_rate(source, target),
+                    amount_currency=target,
+                )
+            )
+
+        if target == "USD" or not normalized:
+            threshold_scale = 1.0
+        else:
+            if market_data is None:
+                raise ValidationError(
+                    f"SIMMMarketData required to convert USD concentration thresholds "
+                    f"to {target}"
+                )
+            threshold_scale = market_data.fx_rate("USD", target)
+        self.concentration_calc = ConcentrationCalculator(threshold_scale)
+        return SensitivityCollection(normalized)
+
+    def _validate_curvature_mode(self, sensitivities: SensitivityCollection) -> None:
+        if not self.config.derive_curvature_from_vega:
+            return
+        explicit = sensitivities.by_margin_type(MarginType.CURVATURE)
+        vega = sensitivities.by_margin_type(MarginType.VEGA)
+        if explicit and vega:
+            raise ValidationError(
+                "Explicit curvature sensitivities cannot be combined with "
+                "vega-derived curvature"
+            )
 
     # ------------------------------------------------------------------
     # Per-(product class, risk class) margins
@@ -388,7 +454,12 @@ class SIMMCalculator:
             risk_class, MarginType.CURVATURE
         ):
             if isinstance(sens, CurvatureSensitivity):
-                add(sens.bucket, sens.risk_factor, sens.amount)
+                add(
+                    sens.bucket,
+                    sens.risk_factor,
+                    sens.amount,
+                    getattr(sens, "group_name", ""),
+                )
 
         return self.risk_class_agg.aggregate_curvature(
             list(exposures.values()), risk_class

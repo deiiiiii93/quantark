@@ -85,6 +85,11 @@ def _cr(net_amount: float, threshold_mm: float) -> float:
 class ConcentrationCalculator:
     """Calculator for concentration risk factors per bucket."""
 
+    def __init__(self, threshold_currency_scale: float = 1.0):
+        if threshold_currency_scale <= 0:
+            raise ValidationError("threshold_currency_scale must be positive")
+        self.threshold_currency_scale = threshold_currency_scale
+
     def calculate(
         self,
         netted: List[NettedSensitivity],
@@ -139,7 +144,7 @@ class ConcentrationCalculator:
             ns.amount for ns in netted
             if ns.risk_factor[0] != "XCcyBasis"  # type: ignore[index]
         )
-        bucket_cr = _cr(net, threshold)
+        bucket_cr = _cr(net, threshold * self.threshold_currency_scale)
 
         cr_values = {
             ns.risk_factor: (
@@ -180,7 +185,10 @@ class ConcentrationCalculator:
             issuer = str(ns.risk_factor[0])  # type: ignore[index]
             issuer_sums[issuer] = issuer_sums.get(issuer, 0.0) + ns.amount
 
-        issuer_cr = {issuer: _cr(net, threshold) for issuer, net in issuer_sums.items()}
+        issuer_cr = {
+            issuer: _cr(net, threshold * self.threshold_currency_scale)
+            for issuer, net in issuer_sums.items()
+        }
         cr_values = {
             ns.risk_factor: issuer_cr[str(ns.risk_factor[0])]  # type: ignore[index]
             for ns in netted
@@ -208,7 +216,10 @@ class ConcentrationCalculator:
             else:
                 threshold = COMMODITY_VEGA_CONCENTRATION_THRESHOLDS[int(bucket)]
 
-        cr_values = {ns.risk_factor: _cr(ns.amount, threshold) for ns in netted}
+        cr_values = {
+            ns.risk_factor: _cr(ns.amount, threshold * self.threshold_currency_scale)
+            for ns in netted
+        }
         return ConcentrationResult(cr_values=cr_values)
 
     def _fx(
@@ -233,7 +244,9 @@ class ConcentrationCalculator:
                 if len(cats) == 1:
                     cats = cats * 2
                 threshold = get_fx_vega_concentration_threshold(cats[0], cats[1])
-            cr_values[ns.risk_factor] = _cr(ns.amount, threshold)
+            cr_values[ns.risk_factor] = _cr(
+                ns.amount, threshold * self.threshold_currency_scale
+            )
         return ConcentrationResult(cr_values=cr_values)
 
     @staticmethod

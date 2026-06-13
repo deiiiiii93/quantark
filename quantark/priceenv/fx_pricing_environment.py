@@ -4,12 +4,20 @@ FX pricing environment bundling market data for a single currency pair.
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from quantark.param import RateCurve, SpotQuote, VolatilitySurface
 from quantark.util.calendar import Calendar, DayCountConvention
 from quantark.util.exceptions import MarketDataError
 from quantark.util.numerical import safe_exp
+
+
+class QuantoConversionOrientation(Enum):
+    """Orientation of the stochastic conversion rate used for quanto pricing."""
+
+    SETTLEMENT_PER_DOMESTIC = "SettlementPerDomestic"
+    DOMESTIC_PER_SETTLEMENT = "DomesticPerSettlement"
 
 
 @dataclass
@@ -30,11 +38,13 @@ class FxQuantoMarketData:
         settlement_curve: Discount curve of the settlement currency
         quanto_vol: Volatility of the conversion (quanto) currency pair
         correlation: Correlation between underlying pair and conversion pair
+        conversion_orientation: Quote orientation of the conversion pair
     """
 
     settlement_curve: RateCurve
     quanto_vol: float
     correlation: float
+    conversion_orientation: QuantoConversionOrientation
 
     def __post_init__(self):
         if self.settlement_curve is None:
@@ -46,6 +56,10 @@ class FxQuantoMarketData:
         if not -1.0 <= self.correlation <= 1.0:
             raise MarketDataError(
                 f"Quanto correlation must be in [-1, 1], got {self.correlation}"
+            )
+        if not isinstance(self.conversion_orientation, QuantoConversionOrientation):
+            raise MarketDataError(
+                "Quanto conversion_orientation must be a QuantoConversionOrientation"
             )
 
 

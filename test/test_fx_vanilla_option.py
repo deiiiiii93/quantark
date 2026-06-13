@@ -53,13 +53,12 @@ def gk_reference_price(is_call, spot=SPOT, strike=STRIKE, t=T, t_del=None):
     """Independent GK reference implementation."""
     t_del = t if t_del is None else t_del
     fwd = spot * math.exp((R_DOM - R_FOR) * t)
-    k_adj = strike * math.exp(-(R_DOM - R_FOR) * (t_del - t))
-    d1 = (math.log(fwd / k_adj) + VOL**2 / 2 * t) / (VOL * math.sqrt(t))
+    d1 = (math.log(fwd / strike) + VOL**2 / 2 * t) / (VOL * math.sqrt(t))
     d2 = d1 - VOL * math.sqrt(t)
     df = math.exp(-R_DOM * t_del)
     if is_call:
-        return NOTIONAL_FOR * (fwd * norm.cdf(d1) - k_adj * norm.cdf(d2)) * df
-    return NOTIONAL_FOR * (k_adj * norm.cdf(-d2) - fwd * norm.cdf(-d1)) * df
+        return NOTIONAL_FOR * (fwd * norm.cdf(d1) - strike * norm.cdf(d2)) * df
+    return NOTIONAL_FOR * (strike * norm.cdf(-d2) - fwd * norm.cdf(-d1)) * df
 
 
 class TestGarmanKohlhagenPrice:
@@ -113,6 +112,17 @@ class TestGarmanKohlhagenPrice:
         assert price == pytest.approx(
             gk_reference_price(True, t_del=t_del), rel=1e-12
         )
+
+    def test_delivery_lag_greeks_use_consistent_finite_differences(self):
+        engine = GarmanKohlhagenEngine()
+        option = make_option(delivery=T + 0.25)
+        env = make_env()
+        greeks = engine.calculate_greeks(option, env)
+        expected_delta, expected_gamma = engine._fdm_delta_gamma(
+            option, env, greeks["price"]
+        )
+        assert greeks["delta"] == pytest.approx(expected_delta, rel=1e-12)
+        assert greeks["gamma"] == pytest.approx(expected_gamma, rel=1e-12)
 
     def test_market_forward_override(self):
         engine = GarmanKohlhagenEngine()

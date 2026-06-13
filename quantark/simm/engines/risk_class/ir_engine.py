@@ -5,14 +5,12 @@ This module implements the IR sensitivity engine for SIMM calculations, handling
 delta (DV01), vega, and curvature sensitivities for fixed income positions.
 """
 
-from typing import List, Dict, Any, Optional
-from decimal import Decimal
+from typing import List, Dict, Any
 
-from quantark.simm.config import SIMMConfig
-from quantark.simm.taxonomy import RiskClass, IRSubCurve, IR_TENORS
+from quantark.simm.taxonomy import RiskClass, IRSubCurve, get_currency_volatility
 from quantark.simm.sensitivity import IRDeltaSensitivity, IRVegaSensitivity, CurvatureSensitivity
-from quantark.simm.engines.base import BaseSensitivityEngine
-from quantark.util.numerical import Tolerance, is_zero
+from quantark.simm.engines.base import BaseSensitivityEngine, SIMMSensitivityProvider
+from quantark.util.exceptions import ValidationError
 
 from quantark.portfolio.fi.position import FIPosition
 
@@ -25,9 +23,8 @@ class IRSensitivityEngine(BaseSensitivityEngine):
     for fixed income positions including bonds, swaps, and swaptions.
 
     Integration:
-    - Uses FIPosition.get_dv01() for delta calculation
+    - Requires independently shocked market-vertex sensitivities
     - Supports all IR sub-curves (OIS, LIBOR, etc.)
-    - Distributes DV01 across tenor buckets
     - Handles currency volatility classification
     """
 
@@ -42,10 +39,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         pricing_environments: Dict[str, Any],
     ) -> List[IRDeltaSensitivity]:
         """
-        Calculate IR delta sensitivities via DV01 bucketing.
-
-        Distributes the position DV01 across the SIMM tenor bucket vertices
-        using approximate key rate duration methodology.
+        Calculate provider-supplied IR delta sensitivities.
 
         Args:
             positions: List of fixed income positions
@@ -54,47 +48,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         Returns:
             List of IRDeltaSensitivity objects
         """
-        sensitivities = []
-
-        for position in positions:
-            # Check if position has required FI methods (duck typing)
-            if not (hasattr(position, 'get_dv01') and hasattr(position, 'underlying')):
-                # Skip non-FI positions for IR engine
-                continue
-
-            env = pricing_environments.get(position.underlying)
-            if env is None:
-                # Skip if no pricing environment available
-                continue
-
-            # Get total position DV01
-            total_dv01 = position.get_dv01(env)
-
-            if is_zero(total_dv01, tol=Tolerance.ZERO):
-                # Skip positions with negligible DV01
-                continue
-
-            # Determine sub-curve based on product type
-            sub_curve = self._determine_sub_curve(position)
-
-            # Distribute DV01 across tenor buckets
-            tenor_weights = self._calculate_tenor_weights(position)
-
-            for tenor_idx, tenor in enumerate(IR_TENORS):
-                weight = tenor_weights[tenor_idx] if tenor_idx < len(tenor_weights) else 0.0
-                dv01_contribution = total_dv01 * weight
-
-                if not is_zero(dv01_contribution, tol=Tolerance.ZERO):
-                    sensitivity = IRDeltaSensitivity(
-                        trade_id=position.position_id,
-                        amount=dv01_contribution,
-                        currency=position.underlying,
-                        tenor=tenor,
-                        sub_curve=sub_curve,
-                    )
-                    sensitivities.append(sensitivity)
-
-        return sensitivities
+        return self._provider_sensitivities(positions, pricing_environments, "Delta")
 
     def calculate_vega_sensitivities(
         self,
@@ -104,9 +58,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         """
         Calculate IR vega sensitivities.
 
-        This implementation provides a simplified vega calculation.
-        In production, this would integrate with swaption volatility surfaces
-        and use proper volatility sensitivities.
+        Vega must be supplied by a compliant position provider.
 
         Args:
             positions: List of fixed income positions
@@ -115,11 +67,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         Returns:
             List of IRVegaSensitivity objects
         """
-        # TODO: Implement full IR vega calculation
-        # For now, return empty list as IR vega requires
-        # swaption volatility surface integration
-
-        return []
+        return self._provider_sensitivities(positions, pricing_environments, "Vega")
 
     def calculate_curvature_sensitivities(
         self,
@@ -129,8 +77,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         """
         Calculate IR curvature sensitivities.
 
-        Curvature represents the convexity adjustment for non-linear rate exposures.
-        This implementation uses simplified CVR calculation.
+        Curvature must be supplied by a compliant position provider.
 
         Args:
             positions: List of fixed income positions
@@ -139,10 +86,27 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         Returns:
             List of CurvatureSensitivity objects
         """
-        # TODO: Implement full IR curvature calculation
-        # For now, return empty list
+        return self._provider_sensitivities(positions, pricing_environments, "Curvature")
 
-        return []
+    def _provider_sensitivities(
+        self, positions: List[Any], market_data: Dict[str, Any], margin_type: str
+    ) -> List[Any]:
+        sensitivities: List[Any] = []
+        for position in positions:
+            if not hasattr(position, "get_dv01"):
+                continue
+            if not isinstance(position, SIMMSensitivityProvider):
+                raise ValidationError(
+                    f"Position {getattr(position, 'position_id', position)!r} must "
+                    "provide independently shocked IR SIMM sensitivities; total DV01 "
+                    "cannot be allocated across SIMM vertices"
+                )
+            supplied = position.get_simm_sensitivities(self.config, market_data)
+            sensitivities.extend(
+                s for s in supplied.by_risk_class(RiskClass.INTEREST_RATE)
+                if s.margin_type.value == margin_type
+            )
+        return sensitivities
 
     def _determine_sub_curve(self, position: FIPosition) -> IRSubCurve:
         """
@@ -181,15 +145,10 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         Returns:
             List of weights summing to 1.0
         """
-        # Simplified approach: equal weighting across all tenors
-        # In production, this would use:
-        # 1. Actual key rate durations
-        # 2. Maturity-based weighting
-        # 3. Product-specific bucketing (bullet vs amortizing)
-        # 4. Instrument-specific factors
-
-        weight = 1.0 / len(IR_TENORS)
-        return [weight] * len(IR_TENORS)
+        raise ValidationError(
+            "Total DV01 cannot be distributed across SIMM vertices; provide "
+            "independently shocked key-rate sensitivities"
+        )
 
     def classify_to_buckets(
         self,
@@ -240,10 +199,7 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         """
         Classify currency by volatility group.
 
-        Per SIMM v2.6 specification:
-        - Low volatility: USD, EUR, GBP, CHF, etc.
-        - Regular volatility: CAD, AUD, NZD, etc.
-        - High volatility: Emerging market currencies
+        Per SIMM v2.6 specification, only JPY is low volatility.
 
         Args:
             currency: ISO currency code
@@ -251,15 +207,4 @@ class IRSensitivityEngine(BaseSensitivityEngine):
         Returns:
             Volatility classification string
         """
-        low_vol = {"USD", "EUR", "GBP", "CHF", "JPY", "CNY"}
-        regular_vol = {"CAD", "AUD", "NZD", "SEK", "NOK", "DKK"}
-
-        currency_upper = currency.upper()
-
-        if currency_upper in low_vol:
-            return "Low"
-        elif currency_upper in regular_vol:
-            return "Regular"
-        else:
-            # Default to High for emerging market currencies
-            return "High"
+        return get_currency_volatility(currency).value

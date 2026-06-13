@@ -18,7 +18,11 @@ from quantark.asset.fx.product.option import (
     FxQuantoVanillaOption,
 )
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
-from quantark.priceenv import FxPricingEnvironment, FxQuantoMarketData
+from quantark.priceenv import (
+    FxPricingEnvironment,
+    FxQuantoMarketData,
+    QuantoConversionOrientation,
+)
 from quantark.util.enum import OptionType
 
 
@@ -33,6 +37,7 @@ def make_env(correlation):
             settlement_curve=FlatRateCurve(rate=0.001),  # JPY
             quanto_vol=0.12,                             # USD/JPY vol
             correlation=correlation,
+            conversion_orientation=QuantoConversionOrientation.SETTLEMENT_PER_DOMESTIC,
         ),
     )
 

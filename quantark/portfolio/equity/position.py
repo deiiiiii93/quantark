@@ -326,6 +326,29 @@ class EquityPosition:
         if greeks_calculator is None:
             greeks_calculator = GreeksCalculator()
         return self.get_greeks(pricing_env, greeks_calculator, use_analytical)
+
+    def get_simm_sensitivities(self, config: Any, market_data: Any):
+        """Return built-in SIMM equity sensitivities for this position."""
+        from quantark.simm.engines.risk_class.equity_engine import EquitySensitivityEngine
+
+        if config.calculation_currency.upper() != "USD":
+            raise ValidationError(
+                "Built-in equity SIMM generation assumes USD-valued pricing "
+                "environments; supply explicit translated sensitivities for "
+                f"calculation currency {config.calculation_currency}"
+            )
+        if not isinstance(market_data, dict):
+            raise ValidationError(
+                "Equity SIMM sensitivity generation requires pricing environments "
+                "mapped by underlying"
+            )
+        if self.underlying not in market_data:
+            raise ValidationError(
+                f"Missing equity pricing environment for {self.underlying}"
+            )
+        return EquitySensitivityEngine(config).calculate_sensitivities(
+            [self], market_data, config
+        )
     
     def is_long(self) -> bool:
         """Check if position is long."""

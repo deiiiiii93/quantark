@@ -37,7 +37,14 @@ from quantark.backtest.transaction_costs import ProportionalCostModel
 from quantark.dynamicscenario import FXDynamicScenarioConfig, FXPathLibrary, get_engine_for_portfolio
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.portfolio.fx import FXPortfolio, FXPosition
-from quantark.priceenv import FxPricingEnvironment, FxQuantoMarketData
+from quantark.priceenv import (
+    FxPricingEnvironment,
+    FxQuantoMarketData,
+    QuantoConversionOrientation,
+)
+from quantark.simm import SIMMConfig
+from quantark.simm.engines.aggregation import SIMMCalculator
+from quantark.simm.engines.portfolio_adapter import SIMMPortfolioAdapter
 from quantark.stresstest import FXStressConfig, FXStressEngine
 from quantark.stresstest.scenario.scenario import Scenario, Stress
 from quantark.stresstest.scenario.scenario_library import ScenarioLibrary
@@ -148,14 +155,25 @@ def main() -> None:
     print(f"  Hedges: {bt.num_hedges}   Net P&L ${bt.total_net_pnl:,.2f}   "
           f"vol reduction {eff['vol_reduction_pct']:.1f}%")
 
+    # 5) SIMM initial margin ---------------------------------------------
+    section("5) SIMM INITIAL MARGIN (ISDA SIMM v2.6)")
+    simm_cfg = SIMMConfig(calculation_currency="USD",
+                          calculate_delta=True, calculate_vega=True,
+                          calculate_curvature=True, derive_curvature_from_vega=True)
+    sens = SIMMPortfolioAdapter(simm_cfg).portfolio_to_sensitivities(pf)
+    simm = SIMMCalculator(simm_cfg).calculate(sens)
+    print(f"  FX sensitivities generated: {len(sens.sensitivities)}")
+    print(f"  Total SIMM initial margin: ${simm.total_margin:,.2f} USD")
+
     # Instrument coverage: quanto flows through the FX portfolio layer ----
     section("FX INSTRUMENT COVERAGE (quanto, JPY-settled)")
     quanto_env = FxPricingEnvironment(
         valuation_date=datetime(2026, 6, 12), spot_quote=SpotQuote(spot=1.20),
         domestic_curve=FlatRateCurve(rate=0.05), foreign_curve=FlatRateCurve(rate=0.03),
         vol_surface=FlatVolSurface(volatility=0.10),
-        quanto=FxQuantoMarketData(settlement_curve=FlatRateCurve(rate=0.001),
-                                  quanto_vol=0.12, correlation=0.3))
+        quanto=FxQuantoMarketData(
+            settlement_curve=FlatRateCurve(rate=0.001), quanto_vol=0.12, correlation=0.3,
+            conversion_orientation=QuantoConversionOrientation.SETTLEMENT_PER_DOMESTIC))
     quanto_pos = FXPosition(
         product=FxQuantoVanillaOption(
             currency_pair=CurrencyPair("EUR", "USD"), strike=1.25, option_type=OptionType.CALL,

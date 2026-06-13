@@ -8,7 +8,8 @@ from unittest.mock import Mock, MagicMock
 from quantark.simm.config import SIMMConfig
 from quantark.simm.taxonomy import RiskClass, IRSubCurve, IR_TENORS
 from quantark.simm.engines.risk_class.ir_engine import IRSensitivityEngine
-from quantark.simm.sensitivity import IRDeltaSensitivity
+from quantark.simm.sensitivity import IRDeltaSensitivity, SensitivityCollection
+from quantark.util.exceptions import ValidationError
 
 # Mock FIPosition
 class MockFIPosition:
@@ -21,6 +22,18 @@ class MockFIPosition:
 
     def get_dv01(self, env):
         return self.dv01_value
+
+    def get_simm_sensitivities(self, config, market_data):
+        if self.dv01_value == 0:
+            return SensitivityCollection()
+        return SensitivityCollection([
+            IRDeltaSensitivity(
+                trade_id=self.position_id,
+                amount=self.dv01_value,
+                currency=self.underlying,
+                tenor=5.0,
+            )
+        ])
 
 
 class TestIRSensitivityEngine:
@@ -54,8 +67,8 @@ class TestIRSensitivityEngine:
 
         sensitivities = engine.calculate_delta_sensitivities(positions, pricing_environments)
 
-        # Check that sensitivities were created
-        assert len(sensitivities) > 0
+        assert len(sensitivities) == 1
+        assert sensitivities[0].tenor == 5.0
 
         # Check that all sensitivities have correct risk class
         for sens in sensitivities:
@@ -99,26 +112,19 @@ class TestIRSensitivityEngine:
         engine = IRSensitivityEngine(config)
 
         position = MockFIPosition()
-        weights = engine._calculate_tenor_weights(position)
-
-        # Should return equal weights
-        assert len(weights) == len(IR_TENORS)
-        assert sum(weights) == pytest.approx(1.0, abs=1e-10)
-
-        # All weights should be equal (simplified approach)
-        for i in range(len(weights) - 1):
-            assert weights[i] == pytest.approx(weights[i + 1], abs=1e-10)
+        with pytest.raises(ValidationError, match="cannot be distributed"):
+            engine._calculate_tenor_weights(position)
 
     def test_classify_currency_volatility(self):
         """Test currency volatility classification."""
         config = SIMMConfig()
         engine = IRSensitivityEngine(config)
 
-        # Test low volatility currencies
-        assert engine._classify_currency_volatility("USD") == "Low"
-        assert engine._classify_currency_volatility("EUR") == "Low"
-        assert engine._classify_currency_volatility("GBP") == "Low"
-        assert engine._classify_currency_volatility("CHF") == "Low"
+        # Only JPY is low volatility under SIMM v2.6.
+        assert engine._classify_currency_volatility("USD") == "Regular"
+        assert engine._classify_currency_volatility("EUR") == "Regular"
+        assert engine._classify_currency_volatility("GBP") == "Regular"
+        assert engine._classify_currency_volatility("CHF") == "Regular"
         assert engine._classify_currency_volatility("JPY") == "Low"
 
         # Test regular volatility currencies
@@ -152,9 +158,22 @@ class TestIRSensitivityEngine:
         assert "pos1" in classification
         assert "pos2" in classification
         assert classification["pos1"]["bucket"] == "USD"
-        assert classification["pos1"]["volatility_class"] == "Low"
+        assert classification["pos1"]["volatility_class"] == "Regular"
         assert classification["pos2"]["bucket"] == "EUR"
-        assert classification["pos2"]["volatility_class"] == "Low"
+        assert classification["pos2"]["volatility_class"] == "Regular"
+
+    def test_total_dv01_without_provider_is_rejected(self):
+        class TotalDV01Only:
+            position_id = "unsupported"
+            underlying = "USD"
+
+            def get_dv01(self, env):
+                return 100.0
+
+        with pytest.raises(ValidationError, match="independently shocked"):
+            IRSensitivityEngine(SIMMConfig()).calculate_delta_sensitivities(
+                [TotalDV01Only()], {"USD": Mock()}
+            )
 
     def test_calculate_vega_sensitivities(self):
         """Test vega sensitivity calculation."""

@@ -20,7 +20,11 @@ from quantark.asset.fx.product.option import (
     FxVanillaOption,
 )
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
-from quantark.priceenv import FxPricingEnvironment, FxQuantoMarketData
+from quantark.priceenv import (
+    FxPricingEnvironment,
+    FxQuantoMarketData,
+    QuantoConversionOrientation,
+)
 from quantark.util.enum import FxPayoutCurrency, OptionType
 from quantark.util.exceptions import MarketDataError, ValidationError
 
@@ -44,6 +48,7 @@ def make_env(correlation=CORR, with_quanto=True, **overrides):
             settlement_curve=FlatRateCurve(rate=R_SET),
             quanto_vol=QUANTO_VOL,
             correlation=correlation,
+            conversion_orientation=QuantoConversionOrientation.SETTLEMENT_PER_DOMESTIC,
         )
         if with_quanto
         else None

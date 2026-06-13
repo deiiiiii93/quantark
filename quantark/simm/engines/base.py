@@ -12,6 +12,16 @@ from quantark.simm.sensitivity import SensitivityCollection, AnySensitivity
 
 
 @runtime_checkable
+class SIMMSensitivityProvider(Protocol):
+    """Position-level contract for supplying compliant SIMM risk-factor sensitivities."""
+
+    def get_simm_sensitivities(
+        self, config: SIMMConfig, market_data: Any
+    ) -> SensitivityCollection:
+        ...
+
+
+@runtime_checkable
 class SensitivityEngine(Protocol):
     """
     Protocol for all SIMM sensitivity engines.

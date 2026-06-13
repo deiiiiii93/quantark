@@ -14,6 +14,7 @@ The engines follow a protocol-based architecture with support for:
 from quantark.simm.engines.base import (
     SensitivityEngine,
     BaseSensitivityEngine,
+    SIMMSensitivityProvider,
 )
 from quantark.simm.engines.factory import create_engine
 from quantark.simm.engines.portfolio_adapter import SIMMPortfolioAdapter
@@ -41,6 +42,7 @@ __all__ = [
     # Base engine classes
     "SensitivityEngine",
     "BaseSensitivityEngine",
+    "SIMMSensitivityProvider",
     "create_engine",
     "SIMMPortfolioAdapter",
     "SIMMResult",

@@ -39,7 +39,8 @@ QuantArk is designed with a clean, modular architecture that separates concerns 
 - **FX Portfolio & Risk**: `FXPortfolio` plus full integration with the
   portfolio risk stack — FX stress testing, Value-at-Risk (parametric /
   historical / Monte Carlo with two-rate factors), multi-day dynamic scenarios,
-  and delta-neutral backtest hedging (see `example/fx_portfolio_risk_demo.py`)
+  delta-neutral backtest hedging, and ISDA SIMM v2.6 initial margin
+  (one `FXPosition` feeds all five; see `example/fx_portfolio_risk_demo.py`)
 - **Greeks Calculation**:
   - Analytical Greeks using closed-form formulas
   - Numerical Greeks using finite difference method (FDM)
