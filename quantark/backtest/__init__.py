@@ -162,4 +162,14 @@ def __getattr__(name):
         from quantark.backtest import fx
 
         return getattr(fx, name)
+
+    credit_names = (
+        "CreditBacktestEngine",
+        "CreditBacktestConfig",
+        "CreditBacktestResults",
+    )
+    if name in credit_names:
+        from quantark.backtest import credit
+
+        return getattr(credit, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

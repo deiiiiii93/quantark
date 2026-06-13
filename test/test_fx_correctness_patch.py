@@ -23,7 +23,7 @@ from quantark.priceenv import (
     FxQuantoMarketData,
     QuantoConversionOrientation,
 )
-from quantark.portfolio import FxPosition
+from quantark.portfolio import FXPosition
 from quantark.simm import FXDeltaSensitivity, FXVegaSensitivity, SIMMConfig
 from quantark.util.enum import FxPayoutCurrency, OptionType
 
@@ -102,7 +102,7 @@ def test_fx_position_supplies_delta_and_vega_simm_risk_factors():
         maturity=1.0,
         notional_foreign=1_000_000,
     )
-    position = FxPosition(product=product, quantity=2.0, engine=GarmanKohlhagenEngine())
+    position = FXPosition(product=product, quantity=2.0, engine=GarmanKohlhagenEngine())
     sensitivities = position.get_simm_sensitivities(
         SIMMConfig(), {"EURUSD": _env()}
     )

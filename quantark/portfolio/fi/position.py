@@ -225,6 +225,75 @@ class FIPosition:
         
         return risk_measures
 
+    def get_simm_sensitivities(self, config: Any, market_data: Any):
+        """
+        Produce ISDA SIMM interest-rate delta sensitivities for this position.
+
+        Computes *independently shocked* key-rate DV01: each of the twelve SIMM
+        IR curve vertices is bumped by 1bp in isolation (the curve is
+        represented on those vertices and linearly interpolated, so a single
+        vertex bump is a localized tent shift), the bond is repriced, and the
+        market-value change is the IR delta at that vertex. No total-DV01
+        allocation is used; vertices the bond is insensitive to drop out.
+
+        ``market_data`` is the per-underlying pricing-environment map (the
+        ``pricing_environments`` dict of an :class:`FIPortfolio`).
+        """
+        import dataclasses
+
+        from quantark.param.rrf import LinearRateCurve
+        from quantark.simm.sensitivity import (
+            IRDeltaSensitivity,
+            SensitivityCollection,
+        )
+        from quantark.simm.taxonomy import IR_TENORS, IRSubCurve
+        from quantark.util.numerical import is_zero
+
+        if not isinstance(market_data, dict):
+            raise ValidationError(
+                "FI SIMM sensitivity generation requires pricing environments "
+                "mapped by underlying"
+            )
+        env = market_data.get(self.underlying)
+        if env is None:
+            raise ValidationError(
+                f"Missing FI pricing environment for {self.underlying}"
+            )
+
+        base_curve = env.rate_curve
+        vertices = list(IR_TENORS)
+        base_rates = [base_curve.get_rate(t) for t in vertices]
+        bump = 1e-4  # 1 basis point
+        currency = (self.underlying or config.calculation_currency).upper()
+
+        result = SensitivityCollection()
+        for k, tenor in enumerate(vertices):
+            up_rates = list(base_rates)
+            down_rates = list(base_rates)
+            up_rates[k] += bump
+            down_rates[k] -= bump
+            up_env = dataclasses.replace(
+                env, rate_curve=LinearRateCurve(list(zip(vertices, up_rates)))
+            )
+            down_env = dataclasses.replace(
+                env, rate_curve=LinearRateCurve(list(zip(vertices, down_rates)))
+            )
+            delta = (
+                self.get_market_value(up_env) - self.get_market_value(down_env)
+            ) / 2.0
+            if not is_zero(delta):
+                result.add(
+                    IRDeltaSensitivity(
+                        trade_id=self.position_id,
+                        amount=delta,
+                        amount_currency=config.calculation_currency.upper(),
+                        currency=currency,
+                        tenor=tenor,
+                        sub_curve=IRSubCurve.OIS,
+                    )
+                )
+        return result
+
     def get_actual_notional(self) -> float:
         """
         Calculate actual notional based on denominator.

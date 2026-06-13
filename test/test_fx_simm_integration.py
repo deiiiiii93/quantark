@@ -14,7 +14,7 @@ from quantark.asset.fx.product import CurrencyPair
 from quantark.asset.fx.product.deltaone import FxForward
 from quantark.asset.fx.product.option import FxVanillaOption
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
-from quantark.portfolio import FxPosition, FXPosition, FXPortfolio
+from quantark.portfolio import FXPosition, FXPortfolio
 from quantark.priceenv import FxPricingEnvironment
 from quantark.simm import SIMMConfig
 from quantark.simm.engines.aggregation import SIMMCalculator
@@ -44,7 +44,6 @@ def _book():
 def test_fx_position_is_simm_provider():
     assert issubclass(FXPosition, SIMMSensitivityProvider) or hasattr(
         FXPosition, "get_simm_sensitivities")
-    assert FxPosition is FXPosition
 
 
 def test_fx_portfolio_generates_simm_sensitivities_and_margin():
@@ -62,9 +61,9 @@ def test_fx_portfolio_generates_simm_sensitivities_and_margin():
     assert result.total_margin > 0
 
 
-def test_fxposition_alias_keyword_construction():
-    """The SIMM-correctness code constructs FxPosition without an explicit underlying."""
-    pos = FxPosition(
+def test_fxposition_keyword_construction_derives_underlying():
+    """FXPosition can be constructed without an explicit underlying; it is derived."""
+    pos = FXPosition(
         product=FxVanillaOption(currency_pair=CurrencyPair("EUR", "USD"), strike=1.25,
                                 option_type=OptionType.CALL, maturity=1.0,
                                 notional_foreign=1_000_000.0),

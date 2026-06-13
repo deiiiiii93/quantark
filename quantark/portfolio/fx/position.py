@@ -10,8 +10,6 @@ Unifies two roles:
 * **SIMM sensitivity provider** — implements ``get_simm_sensitivities`` so the same
   position feeds the ISDA SIMM v2.6 initial-margin engine via
   :class:`~quantark.simm.engines.portfolio_adapter.SIMMPortfolioAdapter`.
-
-``FxPosition`` is kept as a backward-compatible alias for ``FXPosition``.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -182,7 +180,3 @@ class FXPosition:
                 )
             )
         return result
-
-
-#: Backward-compatible alias (the SIMM-correctness work named this ``FxPosition``).
-FxPosition = FXPosition
