@@ -31,6 +31,11 @@ class BacktestConfig:
         save_snapshots: Whether to save portfolio snapshots at each step
         calculate_greeks: Whether to calculate Greeks at each step
         greeks_method: Method for Greeks calculation ('analytical' or 'numerical')
+        handle_lifecycle_events: Detect realized product lifecycle events
+            (Snowball/Phoenix KO/KI/coupon/maturity, barrier-family KO/KI/expiry)
+            on each day's close. Terminated positions settle to cash that stays
+            in portfolio value; knocked-in barriers reprice as their European
+            equivalent. Positions with no lifecycle semantics are unaffected.
         metadata: Additional metadata for the backtest
     """
 
@@ -48,6 +53,7 @@ class BacktestConfig:
     save_snapshots: bool = True
     calculate_greeks: bool = True
     greeks_method: str = "analytical"
+    handle_lifecycle_events: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):

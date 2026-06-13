@@ -76,6 +76,9 @@ class BacktestState:
         greeks: Portfolio Greeks (delta, gamma, vega, theta, rho)
         market_data: Current market data (spot, vol, rate, div_yield)
         trades: List of trades executed at this timestamp
+        realized_cash: Cumulative settlement cash booked from lifecycle events
+        lifecycle_events: Lifecycle events that fired at this timestamp
+            (``ProcessedLifecycleEvent`` records; empty when none)
         metadata: Additional state information
     """
     timestamp: datetime
@@ -90,6 +93,8 @@ class BacktestState:
     greeks: Dict[str, float] = field(default_factory=dict)
     market_data: Dict[str, float] = field(default_factory=dict)
     trades: List[TradeRecord] = field(default_factory=list)
+    realized_cash: float = 0.0
+    lifecycle_events: List[Any] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -109,6 +114,7 @@ class BacktestState:
             'transaction_costs': self.transaction_costs,
             'num_positions': self.num_positions,
             'num_hedges': self.num_hedges,
+            'realized_cash': self.realized_cash,
         }
         
         # Add Greeks with prefix
@@ -141,21 +147,26 @@ class StateTracker:
         """Initialize empty state tracker."""
         self.states: List[BacktestState] = []
         self.trades: List[TradeRecord] = []
+        self.lifecycle_events: List[Any] = []
         self._current_state: Optional[BacktestState] = None
-    
+
     def add_state(self, state: BacktestState):
         """
         Add a new state snapshot.
-        
+
         Args:
             state: BacktestState to add
         """
         self.states.append(state)
         self._current_state = state
-        
+
         # Also track trades
         for trade in state.trades:
             self.trades.append(trade)
+
+        # Track lifecycle events flat for cross-day reporting
+        for event in state.lifecycle_events:
+            self.lifecycle_events.append(event)
     
     def get_current_state(self) -> Optional[BacktestState]:
         """Get the most recent state."""
@@ -206,12 +217,47 @@ class StateTracker:
         
         data = [trade.to_dict() for trade in self.trades]
         df = pd.DataFrame(data)
-        
+
         if 'timestamp' in df.columns:
             df.set_index('timestamp', inplace=True)
-        
+
         return df
-    
+
+    def get_lifecycle_events_dataframe(self) -> pd.DataFrame:
+        """
+        Convert realized lifecycle events to a DataFrame.
+
+        One row per ``ProcessedLifecycleEvent`` (knock-out, knock-in, coupon,
+        maturity, expiry), indexed by event date.
+
+        Returns:
+            DataFrame with all lifecycle events (empty if none fired)
+        """
+        if not self.lifecycle_events:
+            return pd.DataFrame()
+
+        rows = []
+        for item in self.lifecycle_events:
+            event = item.event
+            rows.append({
+                'date': event.date,
+                'position_id': item.position_id,
+                'underlying': item.underlying,
+                'product_type': item.product_type,
+                'event_type': event.event_type.value,
+                'observation_index': event.observation_index,
+                'spot': event.spot,
+                'barrier': event.barrier,
+                'payoff': event.payoff,
+                'cashflow': event.cashflow,
+                'terminates_position': event.terminates_position,
+            })
+
+        df = pd.DataFrame(rows)
+        if 'date' in df.columns:
+            df.set_index('date', inplace=True)
+        return df
+
     def get_summary(self) -> Dict[str, Any]:
         """
         Get summary statistics of state history.
@@ -238,9 +284,10 @@ class StateTracker:
         }
     
     def clear(self):
-        """Clear all tracked states and trades."""
+        """Clear all tracked states, trades, and lifecycle events."""
         self.states.clear()
         self.trades.clear()
+        self.lifecycle_events.clear()
         self._current_state = None
     
     def __len__(self) -> int:

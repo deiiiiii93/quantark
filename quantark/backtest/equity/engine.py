@@ -16,6 +16,7 @@ from quantark.backtest.strategy.multi_greek_strategy import MultiGreekHedgeStrat
 from quantark.portfolio import Portfolio
 from quantark.priceenv import PricingEnvironment
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
+from quantark.asset.equity.lifecycle import PortfolioLifecycleManager
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
@@ -77,6 +78,11 @@ class BacktestEngine:
         ] = None
         self.pricing_env: Optional[PricingEnvironment] = None
         self.market_data_set = None
+
+        # Lifecycle event handling (Snowball/Phoenix/barrier-family)
+        self.lifecycle_manager: Optional[PortfolioLifecycleManager] = None
+        self._realized_lifecycle_pnl: float = 0.0
+        self._lifecycle_events_today: list = []
 
         # Performance tracking
         self._initial_portfolio_value: float = 0.0
@@ -173,6 +179,21 @@ class BacktestEngine:
         # Record initial portfolio value
         self._initial_portfolio_value = self.portfolio.get_portfolio_value()
 
+        # Attach lifecycle trackers to lifecycle-bearing positions. Registered
+        # once, before stepping, so hedge instruments added later stay
+        # untracked. Snowball/Phoenix and barrier-family products get realized
+        # KO/KI/coupon/maturity/expiry handling; everything else is a no-op.
+        if self.config.handle_lifecycle_events:
+            self.lifecycle_manager = PortfolioLifecycleManager(
+                base_date=self.config.start_date
+            )
+            self.lifecycle_manager.register_positions(self.portfolio)
+            if self.lifecycle_manager.num_tracked > 0:
+                self.logger.logger.info(
+                    f"Lifecycle tracking enabled for "
+                    f"{self.lifecycle_manager.num_tracked} position(s)"
+                )
+
         # Create hedge executor (multi-instrument strategies trade a basket
         # of instruments; single-target strategies keep the spot/futures path)
         if isinstance(self.config.strategy, MultiGreekHedgeStrategy):
@@ -203,6 +224,14 @@ class BacktestEngine:
         """
         # Update pricing environment with current market data
         self._update_pricing_environment(timestamp)
+
+        # Process realized lifecycle events on this day's close. Terminated
+        # positions settle to cash (kept in portfolio value); knocked-in
+        # barriers reprice as their European equivalent. Booked before Greeks
+        # so the hedge sizes against the surviving portfolio.
+        self._lifecycle_events_today = []
+        if self.lifecycle_manager is not None:
+            self._process_lifecycle(timestamp)
 
         # Roll expiring hedge contracts before computing Greeks, so the
         # hedge solve never sizes against a contract about to vanish
@@ -288,6 +317,40 @@ class BacktestEngine:
             market_data=market_data,
             trade_records=trade_records,
         )
+
+    def _process_lifecycle(self, timestamp: datetime):
+        """
+        Detect and apply realized lifecycle events for this day's close.
+
+        Delegates event detection and position mutation/removal to the shared
+        ``PortfolioLifecycleManager`` (which books settlement cash into its
+        ``realized_cash`` ledger), then accumulates the realized P&L impact:
+        a terminating event swaps the position's cost basis for its settlement
+        cash, while a non-terminating cash event (coupon, knock-in) is pure
+        realized gain.
+
+        Args:
+            timestamp: Current timestamp (the day's close).
+        """
+        # Capture cost basis before the manager mutates/removes positions, so
+        # realized P&L matches the (price - entry) * quantity convention used
+        # by Portfolio.get_portfolio_pnl for still-live positions.
+        pre_costs = {
+            pid: pos.entry_price * pos.quantity
+            for pid, pos in self.portfolio.positions.items()
+        }
+        events = self.lifecycle_manager.process_day(
+            self.portfolio, day_index=0, day_date=timestamp
+        )
+        for item in events:
+            event = item.event
+            if event.terminates_position:
+                self._realized_lifecycle_pnl += (
+                    event.cashflow - pre_costs.get(item.position_id, 0.0)
+                )
+            else:
+                self._realized_lifecycle_pnl += event.cashflow
+        self._lifecycle_events_today = events
 
     def _update_pricing_environment(self, timestamp: datetime):
         """Update pricing environment with current market data."""
@@ -459,14 +522,26 @@ class BacktestEngine:
         trade_records: list,
     ):
         """Record current state."""
-        # Calculate portfolio value and P&L
-        portfolio_value = self.portfolio.get_portfolio_value()
+        # Settlement cash from terminated lifecycle positions stays in
+        # portfolio value, so value (and P&L) is continuous across event days.
+        realized_cash = (
+            self.lifecycle_manager.realized_cash
+            if self.lifecycle_manager is not None
+            else 0.0
+        )
+        portfolio_value = self.portfolio.get_portfolio_value() + realized_cash
         portfolio_pnl = self.portfolio.get_portfolio_pnl()
 
         # Calculate net P&L (after transaction costs), including realized
-        # P&L from hedge contracts that were closed or rolled
+        # P&L from hedge contracts that were closed or rolled and from
+        # settled/coupon-paying lifecycle positions
         realized_pnl = getattr(self.hedge_executor, "realized_pnl", 0.0)
-        net_pnl = portfolio_pnl + realized_pnl - self._cumulative_transaction_costs
+        net_pnl = (
+            portfolio_pnl
+            + self._realized_lifecycle_pnl
+            + realized_pnl
+            - self._cumulative_transaction_costs
+        )
 
         # Create state
         state = BacktestState(
@@ -478,6 +553,8 @@ class BacktestEngine:
             greeks=portfolio_greeks,
             market_data=market_data,
             trades=trade_records,
+            realized_cash=realized_cash,
+            lifecycle_events=self._lifecycle_events_today,
         )
 
         # Add to tracker
@@ -496,12 +573,20 @@ class BacktestEngine:
         """Finalize backtest and create results."""
         from .results import BacktestResults
 
+        # Settled lifecycle cash stays in portfolio value so final value (and
+        # total P&L) stays continuous after terminated positions are removed.
+        realized_cash = (
+            self.lifecycle_manager.realized_cash
+            if self.lifecycle_manager is not None
+            else 0.0
+        )
+
         # Create results object
         results = BacktestResults(
             config=self.config,
             state_tracker=self.state_tracker,
             initial_value=self._initial_portfolio_value,
-            final_value=self.portfolio.get_portfolio_value(),
+            final_value=self.portfolio.get_portfolio_value() + realized_cash,
             num_hedges=self._num_hedges_executed,
             total_transaction_costs=self._cumulative_transaction_costs,
         )

@@ -135,6 +135,15 @@ class BacktestResults:
             self.trades_df["trade_type"].isin(["open", "adjust", "close"])
         ]
 
+    def get_lifecycle_events(self) -> pd.DataFrame:
+        """Get realized product lifecycle events.
+
+        One row per event (knock-out, knock-in, coupon, maturity, expiry)
+        detected during the backtest, indexed by event date. Empty when
+        ``handle_lifecycle_events`` was off or no events fired.
+        """
+        return self.state_tracker.get_lifecycle_events_dataframe()
+
     def get_summary(self) -> Dict[str, Any]:
         """
         Get comprehensive summary of results.
