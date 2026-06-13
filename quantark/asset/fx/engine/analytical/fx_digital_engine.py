@@ -13,7 +13,7 @@ from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum import FxPayoutCurrency
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_zero, safe_exp, safe_log, safe_sqrt
+from quantark.util.numerical import is_close, is_zero, safe_exp, safe_log, safe_sqrt
 
 
 class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
@@ -52,7 +52,9 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
             raise ValidationError(f"Time to expiry must be non-negative, got {tau}")
         spot = fx_env.effective_spot()
         if is_zero(tau):
-            return option.get_payoff(spot)
+            return option.get_payoff(spot) * fx_env.get_domestic_df(
+                option.get_delivery(fx_env)
+            )
 
         tau_delivery = option.get_delivery(fx_env)
         d1, d2 = self._d1_d2(option, fx_env, tau)
@@ -62,9 +64,10 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
             prob = norm.cdf(d2) if option.is_call() else norm.cdf(-d2)
             value = option.payout * df_dom * prob
         else:
-            df_for = fx_env.get_foreign_df(tau_delivery)
+            df_dom = fx_env.get_domestic_df(tau_delivery)
+            fwd = fx_env.get_forward(tau)
             prob = norm.cdf(d1) if option.is_call() else norm.cdf(-d1)
-            value = option.payout * spot * df_for * prob
+            value = option.payout * fwd * df_dom * prob
 
         return value * option.participation_rate
 
@@ -84,6 +87,9 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
 
         tau = option.get_maturity(fx_env)
         tau_delivery = option.get_delivery(fx_env)
+        if not is_close(tau, tau_delivery) or fx_env.market_forward is not None:
+            return super().calculate_greeks(option, fx_env)
+
         spot = fx_env.effective_spot()
         sigma = fx_env.get_vol(option.strike, tau)
         value = self.price(option, fx_env)

@@ -26,10 +26,10 @@ class MockEquityPosition:
 
     def get_greeks(self, env, greeks_calculator):
         return {
-            "delta": self._delta,
-            "vega": self._vega,
-            "gamma": 0.1,
-            "theta": -0.05,
+            "delta": self._delta * self.quantity,
+            "vega": self._vega * self.quantity,
+            "gamma": 0.1 * self.quantity,
+            "theta": -0.05 * self.quantity,
         }
 
 

@@ -21,6 +21,7 @@ This is the foundation module. Additional modules provide:
 - Reporting and attribution
 """
 from .config import SIMMConfig, SIMMVersion
+from .market_data import FXRateProvider, MappingFXRateProvider, SIMMMarketData
 from .crif import (
     CRIFHeader,
     CRIFRecord,
@@ -100,6 +101,9 @@ __all__ = [
     # Config
     "SIMMConfig",
     "SIMMVersion",
+    "FXRateProvider",
+    "MappingFXRateProvider",
+    "SIMMMarketData",
     # CRIF
     "CRIFHeader",
     "CRIFRecord",

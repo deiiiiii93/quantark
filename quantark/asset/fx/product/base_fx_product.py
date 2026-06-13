@@ -124,11 +124,13 @@ class BaseFxProduct(ABC):
             raise ValidationError(
                 "FxPricingEnvironment required for date-based maturity calculation"
             )
-        if fx_env.valuation_date >= target_date:
+        if fx_env.valuation_date > target_date:
             raise ValidationError(
-                f"Valuation date ({fx_env.valuation_date}) must be before "
+                f"Valuation date ({fx_env.valuation_date}) must be on or before "
                 f"target date ({target_date})"
             )
+        if fx_env.valuation_date == target_date:
+            return 0.0
         return calculate_year_fraction(
             fx_env.valuation_date,
             target_date,

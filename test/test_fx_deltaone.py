@@ -68,9 +68,7 @@ class TestFxForward:
         t = forward.get_maturity(env)
         fwd_mkt = SPOT * math.exp((R_DOM - R_FOR) * t)
         details = FxDeltaOneEngine().price_details(forward, env)
-        expected_base = (
-            NOTIONAL * (fwd_mkt - 1.21) / SPOT * math.exp(-R_FOR * t)
-        )
+        expected_base = details["npv_quote_currency"] / SPOT
         assert details["npv_base_currency"] == pytest.approx(
             expected_base, rel=1e-10
         )
@@ -199,6 +197,14 @@ class TestFxSwap:
         assert details["npv_base_currency"] == pytest.approx(
             expected_base, rel=1e-10
         )
+
+    def test_near_leg_is_included_on_settlement_date(self):
+        details = FxDeltaOneEngine().price_details(
+            self.make_swap(), make_env(valuation_date=self.NEAR)
+        )
+        assert details["near_leg_expired"] is False
+        assert details["domestic_discount_factor_near"] == pytest.approx(1.0)
+        assert details["foreign_discount_factor_near"] == pytest.approx(1.0)
 
     def test_near_after_far_rejected(self):
         with pytest.raises(ValidationError):

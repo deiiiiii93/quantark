@@ -26,10 +26,8 @@ class GarmanKohlhagenEngine(BaseFxEngine):
         Put:  [K*N(-d2) - F*N(-d1)] * df_dom(T_del)
 
     where F is the outright forward at expiry (interest rate parity from the
-    effective spot, or a market-quoted forward), and when delivery settles
-    after expiry the strike is adjusted by the forward rate differential:
-
-        K_adj = K * exp(-(r_d_fwd - r_f_fwd) * (T_del - T))
+    effective spot, or a market-quoted forward). Delivery after expiry changes
+    only the payment discount factor; the payoff remains fixed at expiry.
 
     Greeks are computed with closed forms following the legacy conventions
     (vega per 1% vol, theta daily, rho = dV/dr / 100).
@@ -54,19 +52,23 @@ class GarmanKohlhagenEngine(BaseFxEngine):
             raise ValidationError(f"Time to expiry must be non-negative, got {tau}")
         spot = fx_env.effective_spot()
         if is_zero(tau):
-            return option.get_payoff(spot) * option.annualization_factor(fx_env)
+            return (
+                option.get_payoff(spot)
+                * fx_env.get_domestic_df(option.get_delivery(fx_env))
+                * option.annualization_factor(fx_env)
+            )
 
-        fwd, strike_adj, tau_delivery = self._forward_and_strike(option, fx_env, tau)
+        fwd, strike, tau_delivery = self._forward_and_strike(option, fx_env, tau)
         sigma = fx_env.get_vol(option.strike, tau)
         self._validate_market(spot, sigma)
 
-        d1, d2 = self._d1_d2(fwd, strike_adj, sigma, tau)
+        d1, d2 = self._d1_d2(fwd, strike, sigma, tau)
         df_dom = fx_env.get_domestic_df(tau_delivery)
 
         if option.is_call():
-            unit_value = fwd * norm.cdf(d1) - strike_adj * norm.cdf(d2)
+            unit_value = fwd * norm.cdf(d1) - strike * norm.cdf(d2)
         else:
-            unit_value = strike_adj * norm.cdf(-d2) - fwd * norm.cdf(-d1)
+            unit_value = strike * norm.cdf(-d2) - fwd * norm.cdf(-d1)
 
         value = (
             option.notional
@@ -98,14 +100,18 @@ class GarmanKohlhagenEngine(BaseFxEngine):
         option = self._check_product(product)
 
         tau = option.get_maturity(fx_env)
+        tau_delivery = option.get_delivery(fx_env)
+        if not is_close(tau, tau_delivery) or fx_env.market_forward is not None:
+            return super().calculate_greeks(option, fx_env)
+
         spot = fx_env.effective_spot()
         value = self.price(option, fx_env)
 
-        fwd, strike_adj, tau_delivery = self._forward_and_strike(option, fx_env, tau)
+        fwd, strike, tau_delivery = self._forward_and_strike(option, fx_env, tau)
         sigma = fx_env.get_vol(option.strike, tau)
         self._validate_market(spot, sigma)
 
-        d1, d2 = self._d1_d2(fwd, strike_adj, sigma, tau)
+        d1, d2 = self._d1_d2(fwd, strike, sigma, tau)
         df_dom = fx_env.get_domestic_df(tau_delivery)
         df_for = fx_env.get_foreign_df(tau_delivery)
         r_dom = fx_env.get_domestic_rate(tau_delivery)
@@ -129,20 +135,20 @@ class GarmanKohlhagenEngine(BaseFxEngine):
         if option.is_call():
             theta_carry = (
                 n * r_for * spot * df_for * nd1
-                - n * r_dom * strike_adj * df_dom * nd2
+                - n * r_dom * strike * df_dom * nd2
             )
         else:
             theta_carry = (
                 -n * r_for * spot * df_for * nnd1
-                + n * r_dom * strike_adj * df_dom * nnd2
+                + n * r_dom * strike * df_dom * nnd2
             )
         theta = (theta_diffusion + theta_carry) / 365.0
 
         if option.is_call():
-            rho_dom = n * strike_adj * df_dom * tau_delivery * nd2 / 100.0
+            rho_dom = n * strike * df_dom * tau_delivery * nd2 / 100.0
             rho_for = -n * spot * df_for * tau_delivery * nd1 / 100.0
         else:
-            rho_dom = -n * strike_adj * df_dom * tau_delivery * nnd2 / 100.0
+            rho_dom = -n * strike * df_dom * tau_delivery * nnd2 / 100.0
             rho_for = n * spot * df_for * tau_delivery * nnd1 / 100.0
 
         fwd_delta = delta * float(safe_exp(r_for * tau_delivery))
@@ -209,22 +215,12 @@ class GarmanKohlhagenEngine(BaseFxEngine):
         option: FxVanillaOption, fx_env: FxPricingEnvironment, tau: float
     ) -> Tuple[float, float, float]:
         """
-        Forward at expiry and delivery-adjusted strike.
-
-        When delivery settles after expiry, the strike is discounted by the
-        forward rate differential over the delivery window.
+        Forward at expiry, contractual strike, and delivery time.
         """
         tau_delivery = option.get_delivery(fx_env)
         fwd = fx_env.get_forward(tau)
 
-        strike = option.strike
-        if not is_close(tau, tau_delivery):
-            r_dom_fwd = fx_env.domestic_curve.get_forward_rate(tau, tau_delivery)
-            r_for_fwd = fx_env.foreign_curve.get_forward_rate(tau, tau_delivery)
-            strike = strike * float(
-                safe_exp(-(r_dom_fwd - r_for_fwd) * (tau_delivery - tau))
-            )
-        return fwd, strike, tau_delivery
+        return fwd, option.strike, tau_delivery
 
     @staticmethod
     def _d1_d2(fwd: float, strike: float, sigma: float, tau: float) -> Tuple[float, float]:

@@ -2,11 +2,12 @@
 Factory functions for creating SIMM sensitivity engines.
 """
 
-from typing import Dict, Any, Optional, Type
+from typing import Dict, Any, Type
 from quantark.simm.config import SIMMConfig
 from quantark.simm.taxonomy import RiskClass
 
 from quantark.simm.engines.base import SensitivityEngine, BaseSensitivityEngine
+from quantark.simm.engines.risk_class.provider_engine import ProviderSensitivityEngine
 
 # Import engine classes
 try:
@@ -45,17 +46,10 @@ def create_engine(
     }
 
     engine_class = engines.get(risk_class)
-
+    if engine_class is None and isinstance(risk_class, RiskClass):
+        return ProviderSensitivityEngine(config, risk_class)
     if engine_class is None:
-        raise ValueError(
-            f"No sensitivity engine available for risk class: {risk_class}. "
-            f"Available engines: {list(engines.keys())}"
-        )
-
-    if engine_class is None:
-        raise ValueError(
-            f"Engine class for {risk_class} is not implemented yet"
-        )
+        raise ValueError(f"No sensitivity engine available for risk class: {risk_class}")
 
     try:
         return engine_class(config=config, **kwargs)
@@ -83,27 +77,7 @@ def create_all_engines(
     Note:
         Only engines that are currently implemented will be included.
     """
-    engines: Dict[RiskClass, SensitivityEngine] = {}
-
-    # Interest Rate engine
-    try:
-        engines[RiskClass.INTEREST_RATE] = create_engine(
-            RiskClass.INTEREST_RATE, config, **kwargs
-        )
-    except (ValueError, TypeError):
-        # Engine not implemented yet
-        pass
-
-    # Equity engine
-    try:
-        engines[RiskClass.EQUITY] = create_engine(
-            RiskClass.EQUITY, config, **kwargs
-        )
-    except (ValueError, TypeError):
-        # Engine not implemented yet
-        pass
-
-    return engines
+    return {risk_class: create_engine(risk_class, config, **kwargs) for risk_class in RiskClass}
 
 
 def get_engine_name(engine: SensitivityEngine) -> str:
@@ -133,5 +107,8 @@ def get_available_engines() -> Dict[str, Type[BaseSensitivityEngine]]:
 
     if EquitySensitivityEngine is not None:
         engines["Equity"] = EquitySensitivityEngine
+
+    for risk_class in RiskClass:
+        engines.setdefault(risk_class.value, ProviderSensitivityEngine)
 
     return engines

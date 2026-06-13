@@ -11,7 +11,11 @@ from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.asset.fx.product.option.fx_quanto_vanilla_option import (
     FxQuantoVanillaOption,
 )
-from quantark.priceenv import FxPricingEnvironment, FxQuantoMarketData
+from quantark.priceenv import (
+    FxPricingEnvironment,
+    FxQuantoMarketData,
+    QuantoConversionOrientation,
+)
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import MarketDataError, PricingError, ValidationError
 from quantark.util.numerical import is_zero, safe_exp, safe_log, safe_sqrt
@@ -58,7 +62,11 @@ class GarmanKohlhagenQuantoEngine(BaseFxEngine):
             raise ValidationError(f"Time to expiry must be non-negative, got {tau}")
         spot = fx_env.effective_spot()
         if is_zero(tau):
-            return option.get_payoff(spot) * option.annualization_factor(fx_env)
+            return (
+                option.get_payoff(spot)
+                * quanto.settlement_curve.get_discount_factor(option.get_delivery(fx_env))
+                * option.annualization_factor(fx_env)
+            )
 
         tau_delivery = option.get_delivery(fx_env)
         sigma = fx_env.get_vol(option.strike, tau)
@@ -118,7 +126,13 @@ def _quanto_forward(
     Applies mu_q = -rho * sigma * sigma_quanto to the market forward when
     quoted, otherwise to the interest-rate-parity drift.
     """
-    quanto_adj = -quanto.correlation * sigma * quanto.quanto_vol
+    sign = (
+        -1.0
+        if quanto.conversion_orientation
+        == QuantoConversionOrientation.SETTLEMENT_PER_DOMESTIC
+        else 1.0
+    )
+    quanto_adj = sign * quanto.correlation * sigma * quanto.quanto_vol
     return fx_env.get_forward(tau) * float(safe_exp(quanto_adj * tau))
 
 

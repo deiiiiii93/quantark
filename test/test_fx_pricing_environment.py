@@ -9,7 +9,11 @@ import pytest
 
 from quantark.asset.fx.product import CurrencyPair
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
-from quantark.priceenv import FxPricingEnvironment, FxQuantoMarketData
+from quantark.priceenv import (
+    FxPricingEnvironment,
+    FxQuantoMarketData,
+    QuantoConversionOrientation,
+)
 from quantark.util.exceptions import MarketDataError
 
 
@@ -119,6 +123,7 @@ class TestQuantoMarketData:
             settlement_curve=FlatRateCurve(rate=0.001),
             quanto_vol=0.12,
             correlation=-0.3,
+            conversion_orientation=QuantoConversionOrientation.SETTLEMENT_PER_DOMESTIC,
         )
         env = make_env(quanto=quanto)
         assert env.quanto.correlation == pytest.approx(-0.3)
@@ -131,6 +136,15 @@ class TestQuantoMarketData:
                 settlement_curve=FlatRateCurve(rate=0.001),
                 quanto_vol=0.12,
                 correlation=1.5,
+                conversion_orientation=QuantoConversionOrientation.SETTLEMENT_PER_DOMESTIC,
+            )
+
+    def test_quanto_orientation_required(self):
+        with pytest.raises(TypeError):
+            FxQuantoMarketData(
+                settlement_curve=FlatRateCurve(rate=0.001),
+                quanto_vol=0.12,
+                correlation=-0.3,
             )
 
     def test_quanto_default_none(self):

@@ -6,12 +6,12 @@ routing positions to appropriate engines based on risk class.
 """
 
 from typing import Dict, List, Any, Union, Optional
-from datetime import datetime
-
 from quantark.simm.config import SIMMConfig
 from quantark.simm.sensitivity import SensitivityCollection
 from quantark.simm.engines.factory import create_engine, create_all_engines
 from quantark.simm.engines.base import SensitivityEngine
+from quantark.simm.engines.base import SIMMSensitivityProvider
+from quantark.util.exceptions import ValidationError
 
 # Import portfolio classes
 try:
@@ -64,40 +64,41 @@ class SIMMPortfolioAdapter:
         """
         Convert a portfolio to SIMM sensitivities.
 
-        This method:
-        1. Determines portfolio type (equity, fixed income, or mixed)
-        2. Creates appropriate engines for each risk class
-        3. Routes positions to correct engines
-        4. Aggregates results into a single SensitivityCollection
+        Every position must implement ``SIMMSensitivityProvider``. This keeps
+        market-vertex generation with the position/market model that can
+        represent the required shocks and prevents silent approximations.
 
         Args:
             portfolio: Portfolio object or dict with positions
-            **kwargs: Additional arguments (e.g., greeks_calculator for equity engine)
+            **kwargs: Reserved for backward compatibility
 
         Returns:
             SensitivityCollection containing all calculated sensitivities
         """
-        # Determine portfolio type
-        portfolio_type = self._determine_portfolio_type(portfolio)
-
         # Extract positions and pricing environments
         positions, pricing_environments = self._extract_portfolio_data(portfolio)
 
-        # Create engines for the portfolio type
-        engines = self._create_engines_for_portfolio_type(portfolio_type, **kwargs)
-
-        # Calculate sensitivities using each engine
         all_sensitivities = SensitivityCollection()
-
-        for risk_class, engine in engines.items():
-            try:
-                engine_collection = engine.calculate_sensitivities(
-                    positions, pricing_environments, self.config
+        errors: List[str] = []
+        for position in positions:
+            position_id = getattr(position, "position_id", repr(position))
+            if not isinstance(position, SIMMSensitivityProvider):
+                errors.append(
+                    f"{position_id}: position does not implement SIMMSensitivityProvider"
                 )
-                all_sensitivities.add_many(engine_collection.sensitivities)
+                continue
+            try:
+                position_collection = position.get_simm_sensitivities(
+                    self.config, pricing_environments
+                )
+                all_sensitivities.add_many(position_collection.sensitivities)
             except Exception as e:
-                # Log error but continue with other engines
-                print(f"Error calculating sensitivities for {risk_class}: {e}")
+                errors.append(f"{position_id}: {e}")
+
+        if errors:
+            raise ValidationError(
+                "SIMM sensitivity generation incomplete: " + "; ".join(errors)
+            )
 
         return all_sensitivities
 
@@ -252,44 +253,24 @@ class SIMMPortfolioAdapter:
             # Create equity and FX engines
             from quantark.simm.taxonomy import RiskClass
 
-            try:
-                engines["EQUITY"] = create_engine(
-                    RiskClass.EQUITY, self.config, **kwargs
-                )
-            except Exception as e:
-                print(f"Warning: Could not create Equity engine: {e}")
-
-            try:
-                engines["FX"] = create_engine(
-                    RiskClass.FX, self.config, **kwargs
-                )
-            except Exception as e:
-                print(f"Warning: Could not create FX engine: {e}")
+            engines["EQUITY"] = create_engine(
+                RiskClass.EQUITY, self.config, **kwargs
+            )
+            engines["FX"] = create_engine(RiskClass.FX, self.config, **kwargs)
 
         elif portfolio_type == "fi":
             # Create IR, Credit Q, and Credit NQ engines
             from quantark.simm.taxonomy import RiskClass
 
-            try:
-                engines["INTEREST_RATE"] = create_engine(
-                    RiskClass.INTEREST_RATE, self.config, **kwargs
-                )
-            except Exception as e:
-                print(f"Warning: Could not create IR engine: {e}")
-
-            try:
-                engines["CREDIT_Q"] = create_engine(
-                    RiskClass.CREDIT_QUALIFYING, self.config, **kwargs
-                )
-            except Exception as e:
-                print(f"Warning: Could not create Credit Q engine: {e}")
-
-            try:
-                engines["CREDIT_NQ"] = create_engine(
-                    RiskClass.CREDIT_NON_QUALIFYING, self.config, **kwargs
-                )
-            except Exception as e:
-                print(f"Warning: Could not create Credit NQ engine: {e}")
+            engines["INTEREST_RATE"] = create_engine(
+                RiskClass.INTEREST_RATE, self.config, **kwargs
+            )
+            engines["CREDIT_Q"] = create_engine(
+                RiskClass.CREDIT_QUALIFYING, self.config, **kwargs
+            )
+            engines["CREDIT_NQ"] = create_engine(
+                RiskClass.CREDIT_NON_QUALIFYING, self.config, **kwargs
+            )
 
         elif portfolio_type == "mixed" or portfolio_type == "dict":
             # Create all available engines

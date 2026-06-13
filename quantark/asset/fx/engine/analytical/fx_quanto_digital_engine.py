@@ -53,7 +53,10 @@ class FxQuantoDigitalAnalyticalEngine(BaseFxEngine):
             raise ValidationError(f"Time to expiry must be non-negative, got {tau}")
         spot = fx_env.effective_spot()
         if is_zero(tau):
-            return option.get_payoff(spot)
+            return (
+                option.get_payoff(spot)
+                * quanto.settlement_curve.get_discount_factor(option.get_delivery(fx_env))
+            )
 
         tau_delivery = option.get_delivery(fx_env)
         sigma = fx_env.get_vol(option.strike, tau)

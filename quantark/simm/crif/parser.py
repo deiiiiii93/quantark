@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
+from quantark.simm.market_data import SIMMMarketData
 
 from .models import (
     CRIF_COLUMN_MAPPING,
@@ -207,6 +209,8 @@ def _validate_crif_record(
 
 def crif_to_sensitivities(
     records: List[CRIFRecord],
+    calculation_currency: Optional[str] = None,
+    market_data: Optional[SIMMMarketData] = None,
 ) -> SensitivityCollection:
     """Convert CRIF records to Sensitivity objects.
     
@@ -219,7 +223,7 @@ def crif_to_sensitivities(
     collection = SensitivityCollection()
     
     for record in records:
-        sensitivity = _convert_crif_record(record)
+        sensitivity = _convert_crif_record(record, calculation_currency, market_data)
         if sensitivity:
             collection.add(sensitivity)
     
@@ -228,6 +232,8 @@ def crif_to_sensitivities(
 
 def crif_records_to_sensitivities(
     records: List[Dict[str, Any]],
+    calculation_currency: Optional[str] = None,
+    market_data: Optional[SIMMMarketData] = None,
 ) -> SensitivityCollection:
     """Convert CRIF record dictionaries (CRIF column names or CRIFRecord
     field names) to a SensitivityCollection."""
@@ -242,10 +248,14 @@ def crif_records_to_sensitivities(
                 if fld in row and col not in row:
                     row[col] = row.pop(fld)
             parsed.append(_parse_crif_row(row, i))
-    return crif_to_sensitivities(parsed)
+    return crif_to_sensitivities(parsed, calculation_currency, market_data)
 
 
-def _convert_crif_record(record: CRIFRecord) -> Optional[AnySensitivity]:
+def _convert_crif_record(
+    record: CRIFRecord,
+    calculation_currency: Optional[str] = None,
+    market_data: Optional[SIMMMarketData] = None,
+) -> Optional[AnySensitivity]:
     """Convert a single CRIF record to a Sensitivity object."""
     sensitivity_type = record.get_sensitivity_type()
     if sensitivity_type is None:
@@ -255,10 +265,38 @@ def _convert_crif_record(record: CRIFRecord) -> Optional[AnySensitivity]:
     margin_type = sensitivity_type.margin_type
     product_class = record.get_product_class()
 
+    amount = record.amount
+    amount_currency = record.amount_currency
+    if (
+        record.amount_usd is not None
+        and record.amount_currency.upper() != "USD"
+        and market_data is not None
+    ):
+        expected_usd = record.amount * market_data.fx_rate(
+            record.amount_currency, "USD"
+        )
+        if not is_close(expected_usd, record.amount_usd):
+            raise CRIFValidationError(
+                f"AmountUSD ({record.amount_usd}) is inconsistent with Amount "
+                f"({record.amount} {record.amount_currency}) and supplied FX rates"
+            )
+    if calculation_currency and calculation_currency.upper() == "USD":
+        if record.amount_usd is not None:
+            if (
+                record.amount_currency.upper() == "USD"
+                and not is_close(record.amount, record.amount_usd)
+            ):
+                raise CRIFValidationError(
+                    f"Amount ({record.amount}) and AmountUSD ({record.amount_usd}) "
+                    "are inconsistent for a USD-denominated record"
+                )
+            amount = record.amount_usd
+            amount_currency = "USD"
+
     common: Dict[str, Any] = dict(
         trade_id=record.trade_id,
-        amount=record.amount,
-        amount_currency=record.amount_currency,
+        amount=amount,
+        amount_currency=amount_currency,
         product_class=product_class,
     )
 

@@ -44,7 +44,7 @@ def make_env():
     )
 
 
-def quantlib_price(strike, is_call, payoff_kind="vanilla"):
+def quantlib_option(strike, is_call, payoff_kind="vanilla"):
     """Price with QuantLib's Garman-Kohlhagen setup (BSM with q = r_f)."""
     calc_date = ql.Date(VALUATION.day, VALUATION.month, VALUATION.year)
     ql.Settings.instance().evaluationDate = calc_date
@@ -74,7 +74,11 @@ def quantlib_price(strike, is_call, payoff_kind="vanilla"):
     exercise = ql.EuropeanExercise(expiry)
     option = ql.VanillaOption(payoff, exercise)
     option.setPricingEngine(ql.AnalyticEuropeanEngine(process))
-    return option.NPV()
+    return option
+
+
+def quantlib_price(strike, is_call, payoff_kind="vanilla"):
+    return quantlib_option(strike, is_call, payoff_kind).NPV()
 
 
 @pytest.mark.parametrize("strike", [1.10, 1.20, 1.30])
@@ -105,3 +109,25 @@ def test_digital_matches_quantlib(strike, is_call):
     ours = FxDigitalOptionAnalyticalEngine().price(option, make_env())
     reference = quantlib_price(strike, is_call, payoff_kind="digital") * PAYOUT
     assert ours == pytest.approx(reference, rel=1e-9)
+
+
+@pytest.mark.parametrize("strike", [1.10, 1.20, 1.30])
+@pytest.mark.parametrize("is_call", [True, False])
+def test_vanilla_greeks_match_quantlib(strike, is_call):
+    option = FxVanillaOption(
+        currency_pair=CurrencyPair("EUR", "USD"),
+        strike=strike,
+        option_type=OptionType.CALL if is_call else OptionType.PUT,
+        maturity=1.0,
+        notional_foreign=NOTIONAL,
+    )
+    ours = GarmanKohlhagenEngine().calculate_greeks(option, make_env())
+    reference = quantlib_option(strike, is_call)
+    assert ours["delta"] == pytest.approx(reference.delta() * NOTIONAL, rel=1e-8)
+    assert ours["gamma"] == pytest.approx(reference.gamma() * NOTIONAL, rel=1e-8)
+    assert ours["vega"] == pytest.approx(reference.vega() * NOTIONAL * 0.01, rel=1e-8)
+    assert ours["theta"] == pytest.approx(reference.thetaPerDay() * NOTIONAL, rel=1e-8)
+    assert ours["rho_dom"] == pytest.approx(reference.rho() * NOTIONAL / 100.0, rel=1e-8)
+    assert ours["rho_for"] == pytest.approx(
+        reference.dividendRho() * NOTIONAL / 100.0, rel=1e-8
+    )
