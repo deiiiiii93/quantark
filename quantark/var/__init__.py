@@ -15,6 +15,12 @@ from quantark.var.engines import (
     MonteCarloVaREngine,
     ParametricVaREngine,
 )
+from quantark.var.fx import (
+    FXHistoricalVaREngine,
+    FXMonteCarloVaREngine,
+    FXParametricVaREngine,
+    FXRiskFactorConfig,
+)
 from quantark.var.results import IncrementalVaRResult, VaRResult
 from quantark.var.results.var_report import VaRReportGenerator
 from quantark.var.attribution import ComponentVaRCalculator, MarginalVaRCalculator, VaRAttributor
@@ -30,6 +36,10 @@ __all__ = [
     "ParametricVaREngine",
     "HistoricalVaREngine",
     "MonteCarloVaREngine",
+    "FXParametricVaREngine",
+    "FXHistoricalVaREngine",
+    "FXMonteCarloVaREngine",
+    "FXRiskFactorConfig",
     "VaRBacktester",
     "VaRBacktestResult",
     "VaRReportGenerator",
