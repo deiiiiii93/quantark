@@ -42,6 +42,7 @@ Example:
 from quantark.stresstest.config import StressTestConfig
 from quantark.stresstest.engine import StressTestEngine
 from quantark.stresstest.fi import FIStressConfig, FIStressEngine
+from quantark.stresstest.fx import FXStressConfig, FXStressEngine
 from quantark.stresstest.scenario.scenario import Scenario, Stress
 from quantark.stresstest.scenario.scenario_builder import ScenarioBuilder
 from quantark.stresstest.stress.stress_types import (
@@ -57,6 +58,8 @@ __all__ = [
     "StressTestEngine",
     "FIStressConfig",
     "FIStressEngine",
+    "FXStressConfig",
+    "FXStressEngine",
     "Scenario",
     "Stress",
     "ScenarioBuilder",
