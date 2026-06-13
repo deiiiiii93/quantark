@@ -1,4 +1,4 @@
 """Analytical / semi-analytical credit pricing engines."""
-from .constant_hazard import CDSConstantHazardEngine
+from .reduced_form import CDSReducedFormEngine
 
-__all__ = ["CDSConstantHazardEngine"]
+__all__ = ["CDSReducedFormEngine"]

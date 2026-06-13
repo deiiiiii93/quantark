@@ -20,7 +20,7 @@ from quantark.util.exceptions import NumericalError
 _DT = 1.0 / 365.0
 
 
-class CDSConstantHazardEngine(BaseCreditEngine):
+class CDSReducedFormEngine(BaseCreditEngine):
     """Reduced-form CDS pricing engine valuing premium and protection legs."""
 
     def price(self, product: CDS, env: CreditPricingEnvironment) -> float:
