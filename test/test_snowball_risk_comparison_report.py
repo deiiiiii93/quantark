@@ -15,6 +15,26 @@ def _base_config(tmp_path: Path | None = None, *, num_paths: int = 4000):
     )
 
 
+def _light_config(tmp_path: Path, *, num_paths: int = 512):
+    """Structure-preserving config for tests that assert report shape, not values.
+
+    A short tenor keeps the daily-KI quad pricings cheap (cost scales with the
+    observation count), and trimmed Greek grids keep bump-and-reprice counts
+    low. The q-shift endpoints (-0.02, +0.05) are kept so the q-grid spans the
+    same [0.08, 0.15] range the report documents.
+    """
+    return report.SnowballRiskComparisonConfig(
+        output_dir=tmp_path / "risk_report",
+        num_paths=num_paths,
+        generate_plots=False,
+        tenor_months=6,
+        greek_spot_multipliers=(0.70, 1.00, 1.05),
+        greek_q_shifts=(-0.02, 0.0, 0.05),
+        greek_key_spots=(70.0, 100.0),
+        greek_key_q_shifts=(0.0, 0.05),
+    )
+
+
 @pytest.fixture(scope="module")
 def analysis_bundle(tmp_path_factory):
     tmp_path = tmp_path_factory.mktemp("snowball-risk-comparison")
@@ -107,11 +127,23 @@ def test_parachute_dki_value_exceeds_eki_on_74_anchor(analysis_bundle):
     assert dki_increment > eki_increment
 
 
-def test_greek_curves_cover_requested_structures(analysis_bundle):
+def test_greek_curves_cover_requested_structures(tmp_path):
+    config = _light_config(tmp_path)
+    (
+        calendar,
+        _ko_dates,
+        ko_times,
+        _daily_ki_dates,
+        daily_ki_times,
+        _maturity_date,
+        maturity_time,
+    ) = report._build_ko_schedule(config)
+    pricing_env = report._build_pricing_environment(config, calendar)
+    products = report._build_structures(config, ko_times, daily_ki_times, maturity_time)
     greek_curves = report._compute_greek_curves(
-        config=analysis_bundle["config"],
-        pricing_env=analysis_bundle["pricing_env"],
-        products=analysis_bundle["products"],
+        config=config,
+        pricing_env=pricing_env,
+        products=products,
     )
     for frame in (
         greek_curves.delta,
@@ -126,8 +158,8 @@ def test_greek_curves_cover_requested_structures(analysis_bundle):
         first_col = frame.columns[0]
         assert first_col in {"spot", "q"}
         assert list(frame.columns) == [first_col, "PPP-EKI", "PPP-DKI", "NPP-DKI"]
-    assert len(greek_curves.delta) == len(analysis_bundle["config"].greek_spot_multipliers)
-    assert len(greek_curves.delta_q_curve) == len(analysis_bundle["config"].greek_q_shifts)
+    assert len(greek_curves.delta) == len(config.greek_spot_multipliers)
+    assert len(greek_curves.delta_q_curve) == len(config.greek_q_shifts)
     assert greek_curves.q_grid.min() == pytest.approx(0.08)
     assert greek_curves.q_grid.max() == pytest.approx(0.15)
     assert set(greek_curves.key_spot_table["Structure"]) == {
@@ -148,7 +180,7 @@ def test_greek_curves_cover_requested_structures(analysis_bundle):
 
 
 def test_bilingual_docx_smoke(tmp_path):
-    config = _base_config(tmp_path=tmp_path, num_paths=512)
+    config = _light_config(tmp_path)
     result = report.generate_snowball_risk_comparison_report(config)
 
     assert result.report_path.exists()

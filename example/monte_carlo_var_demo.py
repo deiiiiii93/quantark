@@ -157,8 +157,16 @@ def generate_market_data_for_mc(num_days=252):
     return data
 
 
-def main():
-    """Run Monte Carlo VaR demonstration and display results."""
+def main(
+    mc_num_simulations: int = 10000,
+    convergence_counts: tuple = (1000, 5000, 10000),
+):
+    """Run Monte Carlo VaR demonstration and display results.
+
+    Args:
+        mc_num_simulations: Simulation count for the headline VaR run.
+        convergence_counts: Simulation counts for the convergence analysis.
+    """
     print("=" * 80)
     print("Monte Carlo VaR (Simulation) Demonstration")
     print("=" * 80)
@@ -206,7 +214,7 @@ def main():
         confidence_level=0.99,
         holding_period=1,
         var_method=VaRMethod.MONTE_CARLO,
-        mc_num_simulations=10000,
+        mc_num_simulations=mc_num_simulations,
         mc_seed=42,
     )
 
@@ -228,7 +236,7 @@ def main():
     print("Testing VaR at different simulation counts:")
     print()
 
-    simulation_counts = [1000, 5000, 10000]
+    simulation_counts = list(convergence_counts)
     convergence_results = []
 
     for num_sims in simulation_counts:
