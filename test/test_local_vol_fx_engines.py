@@ -91,3 +91,12 @@ def test_fx_lv_rejects_expiry_delivery_mismatch():
                           delivery=1.05, notional_foreign=1e6)
     with pytest.raises(PricingError):
         FxLocalVolPDESolver().price(opt, env)
+
+
+def test_fx_lv_theta_with_explicit_equal_delivery():
+    # Explicit delivery == maturity must survive the theta maturity-shrink (both reduced).
+    env = _fx_env()
+    opt = FxVanillaOption(strike=1.20, option_type=OptionType.CALL, maturity=1.0,
+                          delivery=1.0, notional_foreign=1e6)
+    g = FxLocalVolPDESolver(grid_size=300, time_steps=120).calculate_greeks(opt, env)
+    assert "theta" in g and g["theta"] < 0
