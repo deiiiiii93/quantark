@@ -32,9 +32,11 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
     """Full-truncation log-Euler SLV with a shared correlated Brownian.
 
     Variance and the rho-correlated part of spot are driven by the SAME Brownian dW_v,
-    so the spot scheme is martingale-consistent (E[S_T] = forward up to O(dt) symmetric
-    Euler bias) — avoiding the QE correlation-reconstruction drift bias. The leverage
-    sigma_hat = sigma_LV / sqrt(E[v|S]) is calibrated on-the-fly by binning.
+    so the spot scheme is martingale-consistent up to the O(dt) symmetric Euler bias
+    (E[S_T] -> forward as the step count grows) — avoiding the QE correlation-
+    reconstruction drift bias. The Dupire local vol is frozen at the start of each step
+    (Euler), an O(dt) discretization choice. The leverage sigma_hat = sigma_LV /
+    sqrt(E[v|S]) is calibrated on-the-fly by binning.
     """
     kappa, theta, sigma = params.kappa, params.theta, params.sigma
     rho = float(np.clip(params.rho, -0.999, 0.999))
@@ -62,7 +64,10 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
         if record_grid is not None:
             econd_nodes = np.maximum(eval_binned(record_grid, boundaries, bin_means), _KMIN)
             lv_nodes = np.asarray(lv_surface.local_vol(record_grid, t), dtype=float)
-            records.append(np.maximum(lv_nodes / np.sqrt(econd_nodes), 1e-8))
+            # Same clip as the in-simulation sigma_hat^2 so the recorded leverage matches
+            # the effective leverage the MC used (consumed identically by the backward PDE).
+            sigma_hat2_nodes = np.clip(lv_nodes * lv_nodes / econd_nodes, 1e-8, 10.0)
+            records.append(np.sqrt(sigma_hat2_nodes))
 
         v_plus = np.maximum(v, 0.0)
         sqrt_vp = np.sqrt(v_plus)
@@ -146,8 +151,9 @@ def calibrate_leverage_surface(
     rng = np.random.default_rng(seed)
     _, records = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
                                num_paths, num_bins, bin_method, rng, record_grid=strike_grid)
-    # records[i] is the leverage row at time node t_{i+1} (after step i); prepend t=0 row.
-    node_times = np.concatenate([[0.0], np.cumsum(dt)])
-    lev_rows = [records[0]] + records  # row for t=0 uses the first step's calibration
-    leverage_grid = np.vstack(lev_rows)
-    return LeverageSurface(time_grid=node_times, strike_grid=strike_grid, leverage_grid=leverage_grid)
+    # records[i] is recorded at the START of step i, i.e. at time node t_i (t_0 = 0).
+    # There are M records at t_0 .. t_{M-1}; the leverage at t in (t_{M-1}, T] is covered
+    # by flat extrapolation in the LeverageSurface (the backward PDE starts at T from the payoff).
+    record_times = np.concatenate([[0.0], np.cumsum(dt)])[:-1]  # t_0 .. t_{M-1}
+    leverage_grid = np.vstack(records)
+    return LeverageSurface(time_grid=record_times, strike_grid=strike_grid, leverage_grid=leverage_grid)

@@ -70,22 +70,13 @@ def bin_conditional(stock_values, variance_values, num_bins, method):
 
 
 def eval_binned(query_S, boundaries, bin_means):
-    """Evaluate the binned conditional expectation at arbitrary query stock values
-    (linear blend across interior bins, flat extrapolation at the edges)."""
-    num_bins = bin_means.size
-    q = np.asarray(query_S, dtype=float)
-    out = np.empty(q.shape, dtype=float)
-    for k in range(num_bins):
-        bl, br = boundaries[k], boundaries[k + 1]
-        mask = (q >= bl) & (q <= br) if k == 0 else (q > bl) & (q <= br)
-        if 0 < k < num_bins - 1:
-            t = (q[mask] - bl) / max(br - bl, 1e-12)
-            out[mask] = (1 - t) * bin_means[k - 1] + t * bin_means[k]
-        else:
-            out[mask] = bin_means[k]
-    out[q < boundaries[0]] = bin_means[0]
-    out[q > boundaries[-1]] = bin_means[-1]
-    return out
+    """Evaluate the binned conditional expectation at arbitrary query stock values.
+
+    Continuous piecewise-linear interpolation between bin MIDPOINTS (the Section 3.2
+    scheme of van der Stoep et al.), with flat extrapolation beyond the outer midpoints.
+    """
+    midpoints = 0.5 * (boundaries[:-1] + boundaries[1:])
+    return np.interp(np.asarray(query_S, dtype=float), midpoints, bin_means)
 
 
 def estimate_conditional_expectation(

@@ -35,7 +35,7 @@ def test_slv_reprices_flat_vanilla_exact_vanilla_property():
         num_paths=80_000, num_bins=25, seed=7, return_stderr=True,
     )
     bs = bs_call_price(s0, k, T, 0.2, r, q)
-    assert abs(price - bs) < 4 * se + 0.1
+    assert abs(price - bs) < 4 * se + 0.03
 
 
 def test_slv_eta_zero_degenerates_to_local_vol():
@@ -46,7 +46,7 @@ def test_slv_eta_zero_degenerates_to_local_vol():
     dt, rf, cf = _const(T, 100, 0.0, 0.0)
     price = price_european_slv_mc(s0, k, True, P, lv, dt, rf, cf, disc_factor=1.0,
                                   eta=0.0, num_paths=60_000, num_bins=25, seed=3)
-    assert price == pytest.approx(bs_call_price(s0, k, T, 0.2, 0.0, 0.0), abs=0.15)
+    assert price == pytest.approx(bs_call_price(s0, k, T, 0.2, 0.0, 0.0), abs=0.08)
 
 
 def test_calibrate_leverage_surface_flat_is_near_one_over_sqrt_v():
