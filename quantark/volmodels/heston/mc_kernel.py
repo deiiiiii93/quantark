@@ -50,7 +50,7 @@ def _simulate_terminal_spot(
             sqrt_vp = np.sqrt(v_plus)
             v = v + kappa * (theta - v_plus) * dt + sigma * sqrt_vp * z1 + 0.25 * sigma2 * (z1 * z1 - dt)
             s = s + drift * s * dt + sqrt_vp * s * z_s + 0.5 * s * v_plus * (z_s * z_s - dt)
-        return np.maximum(s, 0.0)
+        return s
 
     if scheme == HestonMCScheme.EULERLOG:
         log_s = np.full(n_paths, np.log(s0))
@@ -69,6 +69,11 @@ def _simulate_terminal_spot(
 
     if scheme == HestonMCScheme.QUADEXP:
         psi_c = 1.5
+        deterministic_vol = sigma <= 1e-8
+        # When variance is deterministic, spot diffusion is the FULL Brownian (no
+        # correlation to a non-existent variance shock); otherwise the rho-correlated
+        # part is reconstructed via corr and the independent part scales by rho_hat.
+        diff_coef = 1.0 if deterministic_vol else rho_hat
         log_s = np.full(n_paths, np.log(max(float(s0), 1e-12)))
         v_n = np.full(n_paths, max(float(v0), 0.0))
         for i in range(M):
@@ -76,12 +81,17 @@ def _simulate_terminal_spot(
             sqrt_dt = np.sqrt(dt)
             drift = r_fwd[i] - carry_fwd[i]
             exp_kdt = np.exp(-kappa * dt)
-            k_safe = max(kappa, _KMIN)
+            omexp = -np.expm1(-kappa * dt)  # 1 - e^{-k dt}, stable
             m = theta + (v_n - theta) * exp_kdt
-            s2 = (
-                v_n * sigma2 * exp_kdt * (1.0 - exp_kdt) / k_safe
-                + theta * sigma2 * (1.0 - exp_kdt) ** 2 / (2.0 * k_safe)
-            )
+            if kappa > _KMIN:
+                inv_k = 1.0 / kappa
+                s2 = (
+                    v_n * sigma2 * exp_kdt * (omexp * inv_k)
+                    + theta * sigma2 * (omexp * omexp * inv_k) / 2.0
+                )
+            else:
+                # kappa -> 0 limit: (1-e^{-k dt})/k -> dt, second term -> 0.
+                s2 = v_n * sigma2 * dt
             with np.errstate(divide="ignore", invalid="ignore"):
                 psi = np.where(m <= 1e-12, 0.0, s2 / (m * m))
             psi = np.maximum(psi, 0.0)
@@ -106,11 +116,11 @@ def _simulate_terminal_spot(
             v_np = np.maximum(v_np, 0.0)
 
             v_bar = np.maximum(0.5 * (v_np + np.maximum(v_n, 0.0)), 0.0)
-            if sigma <= 1e-8:
+            if deterministic_vol:
                 corr = 0.0
             else:
                 corr = (rho / sigma) * (v_np - v_n - kappa * (theta - v_bar) * dt)
-            log_s = log_s + (drift - 0.5 * v_bar) * dt + corr + np.sqrt(v_bar) * sqrt_dt * rho_hat * z_ind[:, i]
+            log_s = log_s + (drift - 0.5 * v_bar) * dt + corr + np.sqrt(v_bar) * sqrt_dt * diff_coef * z_ind[:, i]
             v_n = v_np
         return np.exp(log_s)
 
@@ -169,6 +179,9 @@ def price_european_heston_mc(
         u_var = rng.random((n_eff, M))
 
     s_terminal = _simulate_terminal_spot(s0, params, scheme, dt, rf, cf, z_var, z_ind, u_var)
+    if not np.all(np.isfinite(s_terminal)):
+        from quantark.util.exceptions import NumericalError
+        raise NumericalError("Heston MC produced non-finite terminal spots (extreme parameters)")
     payoff = np.maximum(s_terminal - strike, 0.0) if is_call else np.maximum(strike - s_terminal, 0.0)
     discounted = float(disc_factor) * payoff
 

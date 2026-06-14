@@ -32,7 +32,10 @@ class FxHestonMCEngine(BaseFxEngine):
             raise ValidationError("model_params must be a HestonParams instance")
         super().__init__(params)
         self.model_params = model_params
-        self.scheme = (HestonMCScheme[scheme.upper()] if isinstance(scheme, str) else scheme)
+        try:
+            self.scheme = (HestonMCScheme[scheme.upper()] if isinstance(scheme, str) else scheme)
+        except KeyError:
+            raise ValidationError(f"unknown Heston MC scheme: {scheme}")
         if not isinstance(self.scheme, HestonMCScheme):
             raise ValidationError("scheme must be a HestonMCScheme")
         self.num_paths, self.time_steps, self.seed = num_paths, time_steps, seed

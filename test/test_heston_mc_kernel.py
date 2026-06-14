@@ -57,3 +57,30 @@ def test_reproducible_and_validation():
     with pytest.raises(ValidationError):
         price_european_heston_mc(s0=-1.0, strike=100.0, is_call=True, params=P, step_dt=dt,
                                  r_fwd=rf, carry_fwd=cf, disc_factor=1.0, num_paths=100)
+
+
+def test_quadexp_deterministic_vol_is_rho_independent():
+    # sigma->0: variance deterministic => price independent of rho, equals BS.
+    from quantark.volmodels.black_scholes import bs_call_price
+    s0, k, T, r, q = 100.0, 100.0, 1.0, 0.0, 0.0
+    dt, rf, cf = _const(T, 100, r, q)
+    bs = bs_call_price(s0, k, T, np.sqrt(0.04), r, q)
+    for rho in (0.0, -0.7, -0.99):
+        p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=1e-10, rho=rho)
+        price, se = price_european_heston_mc(
+            s0, k, True, p, dt, rf, cf, disc_factor=1.0, scheme=HestonMCScheme.QUADEXP,
+            num_paths=200_000, seed=4, use_antithetic=True, return_stderr=True)
+        assert abs(price - bs) < 4 * se + 0.02
+
+
+def test_quadexp_zero_kappa_matches_analytic():
+    # kappa=0, sigma>0: variance is a driftless CIR; QE moments use the k->0 limit.
+    p = HestonParams(v0=0.04, kappa=0.0, theta=0.04, sigma=0.3, rho=-0.5)
+    s0, k, T, r, q = 100.0, 100.0, 1.0, 0.02, 0.0
+    dt, rf, cf = _const(T, 200, r, q)
+    price, se = price_european_heston_mc(
+        s0, k, True, p, dt, rf, cf, disc_factor=float(np.exp(-r * T)),
+        scheme=HestonMCScheme.QUADEXP, num_paths=300_000, seed=8,
+        use_antithetic=True, return_stderr=True)
+    analytic = heston_call_price(s0, k, T, p, r, q)
+    assert abs(price - analytic) < 4 * se + 0.05
