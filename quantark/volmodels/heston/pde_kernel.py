@@ -101,7 +101,7 @@ class _HestonADI:
         for i in range(1, n):
             denom = b[i] - a[i] * cp[i - 1]
             if abs(denom) < 1e-14:
-                denom = 1e-14
+                raise NumericalError("zero pivot in Heston ADI tridiagonal solve (refine grid)")
             cp[i] = c[i] / denom
             dp[i] = (d[i] - a[i] * dp[i - 1]) / denom
         x[n - 1] = dp[n - 1]
