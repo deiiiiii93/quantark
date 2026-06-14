@@ -42,3 +42,18 @@ def test_validation_rejects_nonincreasing_axes():
 def test_validation_rejects_nonpositive_vol():
     with pytest.raises(ValidationError):
         GridVolSurface([90.0, 100.0], [0.5, 1.0], np.array([[0.2, 0.0], [0.2, 0.2]]))
+
+
+def test_non_flat_strike_interpolation():
+    # smile at each maturity; query between strike nodes at an exact maturity
+    strikes = [90.0, 100.0, 110.0]
+    maturities = [0.5, 1.0]
+    iv = np.array([[0.25, 0.20, 0.22], [0.25, 0.20, 0.22]])
+    surf = GridVolSurface(strikes, maturities, iv)
+    # at T=1.0 (a grid maturity), strike 95 -> linear interp of 0.25,0.20 = 0.225
+    assert surf.get_vol(95.0, 1.0, spot=100.0) == pytest.approx(0.225, abs=1e-12)
+
+
+def test_rejects_nonfinite_strike():
+    with pytest.raises(ValidationError):
+        GridVolSurface([90.0, np.nan, 110.0], [0.5, 1.0], np.full((2, 3), 0.2))

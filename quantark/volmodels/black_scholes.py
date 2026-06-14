@@ -49,24 +49,39 @@ def bs_vega(s: float, k: float, t: float, sigma: float, r: float, q: float) -> f
 
 def implied_vol_call(
     s: float, k: float, t: float, price: float, r: float, q: float,
-    tol: float = Tolerance.PRECISION, max_iter: int = 100,
+    tol: float = Tolerance.PRECISION, max_iter: int = 100, max_vol: float = 10.0,
 ) -> float:
     """Invert the BS call price for implied vol via Brent's method.
 
-    Raises NumericalError if price is outside no-arbitrage bounds.
+    - A price at (or just below) the intrinsic lower bound implies zero vol -> returns 0.0.
+    - A price at (or above) the upper bound S e^{-qT} has unbounded implied vol -> raises.
+    - Zero/negative maturity is not invertible -> raises.
+
+    Raises NumericalError outside the no-arbitrage band or if bracketing fails.
     """
     from scipy.optimize import brentq
 
     _validate(s, k, t, 0.0)
+    if t <= Tolerance.ZERO:
+        raise NumericalError("cannot invert implied vol at zero maturity")
+
     intrinsic = max(s * safe_exp(-q * t) - k * safe_exp(-r * t), 0.0)
     upper = s * safe_exp(-q * t)
     if price < intrinsic - tol or price > upper + tol:
         raise NumericalError(f"call price {price} outside no-arbitrage [{intrinsic}, {upper}]")
+    if price <= intrinsic + tol:
+        return 0.0
+    if price >= upper - tol:
+        raise NumericalError(f"call price {price} at upper bound {upper}: implied vol unbounded")
 
     def objective(sigma: float) -> float:
         return bs_call_price(s, k, t, sigma, r, q) - price
 
+    lo, hi = 1e-9, float(max_vol)
+    # Expand the upper bracket if the price implies a very high vol.
+    while objective(hi) < 0.0 and hi < 1e3:
+        hi *= 2.0
     try:
-        return float(brentq(objective, 1e-9, 5.0, xtol=tol, maxiter=max_iter))
+        return float(brentq(objective, lo, hi, xtol=tol, maxiter=max_iter))
     except ValueError as exc:  # pragma: no cover
         raise NumericalError(f"implied vol bracketing failed: {exc}") from exc

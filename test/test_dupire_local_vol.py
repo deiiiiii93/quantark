@@ -84,3 +84,73 @@ def test_floor_is_opt_in():
         validate_arbitrage=False, vol_floor=0.05,
     )
     assert np.all(lv.lv_grid >= 0.05 - 1e-12)
+
+
+def _analytic_smile_iv(strikes, spot, v0, c):
+    """iv(K) = sqrt(v0 + c*ln(K/spot)^2): total variance is exactly quadratic in ln K."""
+    y = np.log(np.asarray(strikes) / spot)
+    return np.sqrt(v0 + c * y * y)
+
+
+def _analytic_local_vol(K, T, spot, v0, c):
+    """Exact Gatheral local vol for w(y,T)=(v0+c y^2) T, r=q=0 (y=ln(K/spot))."""
+    y = np.log(K / spot)
+    w = (v0 + c * y * y) * T
+    w_y = 2.0 * c * y * T
+    w_yy = 2.0 * c * T
+    dwdT_y = v0 + c * y * y
+    denom = 1.0 - (y / w) * w_y + 0.25 * (-0.25 - 1.0 / w + (y * y) / (w * w)) * w_y ** 2 + 0.5 * w_yy
+    return np.sqrt(dwdT_y / denom)
+
+
+def test_dupire_matches_analytic_smile_all_nodes():
+    spot, v0, c = 100.0, 0.04, 0.05
+    strikes = list(100.0 * np.exp(np.linspace(-0.4, 0.4, 7)))
+    maturities = list(np.linspace(0.25, 2.0, 5))
+    iv = np.tile(_analytic_smile_iv(strikes, spot, v0, c), (len(maturities), 1))
+    surf = GridVolSurface(strikes, maturities, iv)
+    lv = build_dupire_local_vol(surf, spot=spot, rate_curve=FlatRateCurve(0.0), div_yield=lambda t: 0.0)
+    # quadratic-in-lnK variance => FD (central + Lagrange boundary) is exact at EVERY node,
+    # including the boundary rows/cols (verifies the boundary-FD fix).
+    err = 0.0
+    for i, t in enumerate(maturities):
+        for j, k in enumerate(strikes):
+            err = max(err, abs(float(lv.lv_grid[i, j]) - _analytic_local_vol(k, t, spot, v0, c)))
+    assert err < 1e-9
+
+
+def test_carry_term_is_wired():
+    # off-ATM nodes (w_y != 0) must change when carry is non-zero; ATM (y=0) unaffected.
+    spot, v0, c = 100.0, 0.04, 0.05
+    strikes = list(100.0 * np.exp(np.linspace(-0.4, 0.4, 7)))
+    maturities = list(np.linspace(0.25, 2.0, 5))
+    iv = np.tile(_analytic_smile_iv(strikes, spot, v0, c), (len(maturities), 1))
+    surf = GridVolSurface(strikes, maturities, iv)
+    lv0 = build_dupire_local_vol(surf, spot=spot, rate_curve=FlatRateCurve(0.0), div_yield=lambda t: 0.0)
+    lvc = build_dupire_local_vol(surf, spot=spot, rate_curve=FlatRateCurve(0.05), div_yield=lambda t: 0.0)
+    assert not np.allclose(lv0.lv_grid, lvc.lv_grid)  # carry term materially changes output
+
+
+def test_isolated_butterfly_arbitrage_raises():
+    # iv concave in strike (hump at center) -> w_yy < 0 -> denominator <= 0 -> butterfly.
+    # constant across maturities => no calendar arbitrage, isolating the butterfly check.
+    strikes = [80.0, 90.0, 100.0, 110.0, 120.0]
+    maturities = [0.5, 1.0, 1.5]
+    iv_row = np.array([0.18, 0.25, 0.40, 0.25, 0.18])
+    iv = np.tile(iv_row, (len(maturities), 1))
+    surf = GridVolSurface(strikes, maturities, iv)
+    with pytest.raises(NumericalError) as exc:
+        build_dupire_local_vol(surf, spot=100.0, rate_curve=FlatRateCurve(0.0), div_yield=lambda t: 0.0)
+    assert "butterfly" in str(exc.value)
+
+
+def test_local_vol_vectorized_matches_scalar():
+    K = np.array([80.0, 100.0, 120.0])
+    T = np.array([0.5, 1.0])
+    lv = LocalVolSurface(K, T, np.array([[0.18, 0.20, 0.22], [0.19, 0.21, 0.23]]))
+    spots = np.array([85.0, 100.0, 130.0])
+    times = np.array([0.4, 0.75, 1.2])
+    vec = lv.local_vol(spots, times)
+    assert vec.shape == (3,)
+    for i in range(3):
+        assert vec[i] == pytest.approx(float(lv.local_vol(spots[i], times[i])), abs=1e-12)

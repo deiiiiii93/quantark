@@ -150,6 +150,10 @@ class GridVolSurface(VolatilitySurface):
             raise ValidationError(
                 f"iv_grid shape {self.iv_grid.shape} must equal (nT, nK)=({nT}, {nK})"
             )
+        if not all(np.isfinite(k) and k > 0 for k in self.strikes):
+            raise ValidationError("strikes must be finite and positive")
+        if not all(np.isfinite(t) for t in self.maturities):
+            raise ValidationError("maturities must be finite")
         if any(self.strikes[i] >= self.strikes[i + 1] for i in range(nK - 1)):
             raise ValidationError("strikes must be strictly increasing")
         if any(self.maturities[i] >= self.maturities[i + 1] for i in range(nT - 1)):

@@ -23,13 +23,17 @@ from typing import Callable, Optional
 import numpy as np
 
 from quantark.util.exceptions import NumericalError, ValidationError
-from quantark.util.numerical import safe_exp, safe_log, safe_sqrt
+from quantark.util.numerical import safe_divide, safe_exp, safe_log, safe_sqrt
 from quantark.util.numerical.constants import Tolerance
 from quantark.volmodels.localvol.surface import LocalVolSurface
 
 
 def _fd1(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
-    """First derivative along last axis (non-uniform central interior; first-order one-sided ends)."""
+    """First derivative along last axis.
+
+    Non-uniform central differences on the interior and 3-point Lagrange one-sided
+    formulas at both ends (second-order; exact for quadratics).
+    """
     d = np.zeros_like(arr)
     dxm = x[1:-1] - x[:-2]
     dxp = x[2:] - x[1:-1]
@@ -38,13 +42,29 @@ def _fd1(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
         + arr[..., 1:-1] * (dxp - dxm) / (dxm * dxp)
         + arr[..., 2:] * dxm / (dxp * (dxm + dxp))
     )
-    d[..., 0] = (arr[..., 1] - arr[..., 0]) / (x[1] - x[0])
-    d[..., -1] = (arr[..., -1] - arr[..., -2]) / (x[-1] - x[-2])
+    # Left end: Lagrange derivative through (x0, x1, x2) evaluated at x0.
+    a, b, c = x[0], x[1], x[2]
+    d[..., 0] = (
+        arr[..., 0] * ((a - b) + (a - c)) / ((a - b) * (a - c))
+        + arr[..., 1] * (a - c) / ((b - a) * (b - c))
+        + arr[..., 2] * (a - b) / ((c - a) * (c - b))
+    )
+    # Right end: Lagrange derivative through (x[-3], x[-2], x[-1]) evaluated at x[-1].
+    a, b, c = x[-3], x[-2], x[-1]
+    d[..., -1] = (
+        arr[..., -3] * (c - b) / ((a - b) * (a - c))
+        + arr[..., -2] * (c - a) / ((b - a) * (b - c))
+        + arr[..., -1] * ((c - a) + (c - b)) / ((c - a) * (c - b))
+    )
     return d
 
 
-def _fd2_interior(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
-    """Second derivative, non-uniform central on interior; boundary cols copy nearest interior."""
+def _fd2(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Second derivative along last axis.
+
+    Non-uniform central differences on the interior; 3-point Lagrange second
+    derivative (constant across the stencil, exact for quadratics) at both ends.
+    """
     d2 = np.zeros_like(arr)
     dxm = x[1:-1] - x[:-2]
     dxp = x[2:] - x[1:-1]
@@ -52,8 +72,18 @@ def _fd2_interior(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
     d2[..., 1:-1] = (
         arr[..., :-2] * dxp - arr[..., 1:-1] * (dxm + dxp) + arr[..., 2:] * dxm
     ) / denom
-    d2[..., 0] = d2[..., 1]
-    d2[..., -1] = d2[..., -2]
+    a, b, c = x[0], x[1], x[2]
+    d2[..., 0] = (
+        arr[..., 0] * 2.0 / ((a - b) * (a - c))
+        + arr[..., 1] * 2.0 / ((b - a) * (b - c))
+        + arr[..., 2] * 2.0 / ((c - a) * (c - b))
+    )
+    a, b, c = x[-3], x[-2], x[-1]
+    d2[..., -1] = (
+        arr[..., -3] * 2.0 / ((a - b) * (a - c))
+        + arr[..., -2] * 2.0 / ((b - a) * (b - c))
+        + arr[..., -1] * 2.0 / ((c - a) * (c - b))
+    )
     return d2
 
 
@@ -86,10 +116,14 @@ def build_dupire_local_vol(
         raise ValidationError("Dupire requires >= 3 strikes and >= 3 maturities")
     if vol_floor is not None and vol_floor <= 0:
         raise ValidationError("vol_floor must be positive when provided")
+    if not np.isfinite(spot) or spot <= 0:
+        raise ValidationError(f"spot must be positive and finite, got {spot}")
 
     ln_k = safe_log(K)                                   # (nK,)
     r_zero = np.array([rate_curve.get_rate(t) for t in T])
     q_zero = np.array([div_yield(t) for t in T])
+    if not (np.all(np.isfinite(r_zero)) and np.all(np.isfinite(q_zero))):
+        raise ValidationError("rate_curve / div_yield returned non-finite values")
     carry_zero = r_zero - q_zero                         # zero cost-of-carry to T
     fwd = spot * safe_exp(carry_zero * T)                # forward F_T (nT,)
     ln_fwd = safe_log(fwd)                               # (nT,)
@@ -98,17 +132,18 @@ def build_dupire_local_vol(
     y = ln_k[None, :] - ln_fwd[:, None]                  # log-moneyness (nT, nK)
 
     w_y = _fd1(w, ln_k)                                  # dw/dy == dw/dln K at fixed T
-    w_yy = _fd2_interior(w, ln_k)
+    w_yy = _fd2(w, ln_k)
     dw_dT_K = _fd1(w.T, T).T                             # dw/dT at fixed strike
     # d ln(F_T)/dT via the SAME _fd1 stencil as dw_dT_K, so dw/dT|_y is a consistent
     # discrete operator (b(T) = d ln F/dT); avoids backward/central stencil mismatch.
     dlnF_dT = _fd1(ln_fwd, T)                            # (nT,)
     dw_dT_y = dw_dT_K + dlnF_dT[:, None] * w_y           # dw/dT at fixed moneyness
 
+    inv_w = safe_divide(1.0, w)
     denom = (
         1.0
-        - (y / w) * w_y
-        + 0.25 * (-0.25 - 1.0 / w + (y * y) / (w * w)) * (w_y * w_y)
+        - y * inv_w * w_y
+        + 0.25 * (-0.25 - inv_w + (y * y) * inv_w * inv_w) * (w_y * w_y)
         + 0.5 * w_yy
     )
 
@@ -118,8 +153,11 @@ def build_dupire_local_vol(
             raise NumericalError(
                 f"calendar arbitrage: dw/dT|_y < 0 (moneyness) at nodes {idx.tolist()}"
             )
-        if np.any(denom <= Tolerance.PRECISION):
-            idx = np.argwhere(denom <= Tolerance.PRECISION)
+        # Butterfly no-arbitrage requires a strictly positive denominator; a tiny
+        # positive denominator is a numerical-stability concern handled by the
+        # lv2 check below, not an arbitrage rejection.
+        if np.any(denom <= Tolerance.ZERO):
+            idx = np.argwhere(denom <= Tolerance.ZERO)
             raise NumericalError(
                 f"butterfly arbitrage: Dupire denominator <= 0 at nodes {idx.tolist()}"
             )

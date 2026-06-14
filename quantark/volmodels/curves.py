@@ -18,6 +18,8 @@ def _validate_grid(t_grid: np.ndarray) -> np.ndarray:
     t = np.asarray(t_grid, dtype=float)
     if t.ndim != 1 or t.size < 2:
         raise ValidationError("t_grid must be a 1D array with at least 2 points")
+    if not np.all(np.isfinite(t)):
+        raise ValidationError("t_grid must be finite")
     if np.any(np.diff(t) <= 0):
         raise ValidationError("t_grid must be strictly increasing")
     if t[0] < 0:

@@ -22,3 +22,20 @@ def test_forward_carry_from_zero_yields():
 def test_grid_must_be_increasing():
     with pytest.raises(ValidationError):
         forward_rates_on_grid(FlatRateCurve(rate=0.05), np.array([0.0, 0.5, 0.25]))
+
+
+class _TermCurve:
+    """Minimal term-structure curve exposing get_forward_rate for the helper."""
+    def get_forward_rate(self, t0, t1):
+        return 0.02 + 0.01 * t1
+
+
+def test_non_flat_curve_forward_rates():
+    fwd = forward_rates_on_grid(_TermCurve(), np.array([0.0, 0.5, 1.0]))
+    assert fwd[0] == pytest.approx(0.02 + 0.01 * 0.5, abs=1e-12)
+    assert fwd[1] == pytest.approx(0.02 + 0.01 * 1.0, abs=1e-12)
+
+
+def test_grid_rejects_nonfinite():
+    with pytest.raises(ValidationError):
+        forward_rates_on_grid(_TermCurve(), np.array([0.0, np.nan, 1.0]))

@@ -37,6 +37,10 @@ class LocalVolSurface:
             raise ValidationError(
                 f"lv_grid shape {self.lv_grid.shape} must equal (nT, nK)=({nT}, {nK})"
             )
+        if not np.all(np.isfinite(self.strike_grid)) or np.any(self.strike_grid <= 0):
+            raise ValidationError("strike_grid must be finite and positive")
+        if not np.all(np.isfinite(self.time_grid)) or np.any(self.time_grid < 0):
+            raise ValidationError("time_grid must be finite and non-negative")
         if np.any(np.diff(self.strike_grid) <= 0):
             raise ValidationError("strike_grid must be strictly increasing")
         if nT > 1 and np.any(np.diff(self.time_grid) <= 0):
@@ -45,21 +49,35 @@ class LocalVolSurface:
             raise ValidationError("lv_grid must be finite and strictly positive")
 
     def local_vol(self, spot: ArrayLike, t: ArrayLike) -> "float | np.ndarray":
-        """Bilinear (time, strike) interpolation with flat extrapolation."""
+        """Vectorized bilinear (time, strike) interpolation with flat extrapolation.
+
+        Gathers only the surrounding grid nodes (no per-point Python loop), so it is
+        suitable for Monte Carlo path evaluation.
+        """
         s = np.asarray(spot, dtype=float)
         tt = np.asarray(t, dtype=float)
         s_b, t_b = np.broadcast_arrays(s, tt)
-        s_c = np.clip(s_b, self.strike_grid[0], self.strike_grid[-1])
+        shape = s_b.shape
+
+        K = self.strike_grid
+        s_flat = np.clip(s_b.ravel(), K[0], K[-1])
+        jK = np.clip(np.searchsorted(K, s_flat, side="right"), 1, K.size - 1)
+        j0, j1 = jK - 1, jK
+        wK = (s_flat - K[j0]) / (K[j1] - K[j0])
+
+        g = self.lv_grid
         if self.time_grid.size == 1:
-            vals = np.interp(s_c.ravel(), self.strike_grid, self.lv_grid[0])
+            row = g[0]
+            vals = row[j0] * (1.0 - wK) + row[j1] * wK
         else:
-            t_c = np.clip(t_b, self.time_grid[0], self.time_grid[-1]).ravel()
-            per_row = np.array(
-                [np.interp(s_c.ravel(), self.strike_grid, self.lv_grid[i])
-                 for i in range(self.time_grid.size)]
-            )  # (nT, npts)
-            vals = np.array([
-                np.interp(t_c[j], self.time_grid, per_row[:, j]) for j in range(t_c.size)
-            ])
-        result = np.asarray(vals, dtype=float).reshape(s_b.shape)
+            Tg = self.time_grid
+            t_flat = np.clip(t_b.ravel(), Tg[0], Tg[-1])
+            iT = np.clip(np.searchsorted(Tg, t_flat, side="right"), 1, Tg.size - 1)
+            i0, i1 = iT - 1, iT
+            wT = (t_flat - Tg[i0]) / (Tg[i1] - Tg[i0])
+            bottom = g[i0, j0] * (1.0 - wK) + g[i0, j1] * wK
+            top = g[i1, j0] * (1.0 - wK) + g[i1, j1] * wK
+            vals = bottom * (1.0 - wT) + top * wT
+
+        result = np.asarray(vals, dtype=float).reshape(shape)
         return result if result.shape else float(result)
