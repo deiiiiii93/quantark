@@ -18,9 +18,11 @@ from .snowball_pde_solver import SnowballPDESolver
 from .ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
 from .phoenix_pde_solver import PhoenixPDESolver
 from .local_vol_pde_solver import LocalVolPDESolver
+from .heston_pde_solver import HestonPDESolver
 
 __all__ = [
     "LocalVolPDESolver",
+    "HestonPDESolver",
     # Grid utilities
     'TimeGrid',
     'SpatialGrid',
