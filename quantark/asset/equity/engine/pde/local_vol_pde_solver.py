@@ -34,6 +34,7 @@ class LocalVolPDESolver(BaseEngine):
                  local_vol_surface: Optional[LocalVolSurface] = None):
         super().__init__(params if params is not None else PDEParams())
         self._prebuilt = local_vol_surface
+        self._greeks_smax = 0.0  # >0 pins the spatial grid across Greek bumps
 
     def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
         if self._prebuilt is not None:
@@ -60,7 +61,9 @@ class LocalVolPDESolver(BaseEngine):
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
         is_call = product.option_type == OptionType.CALL
-        s_max = float(self.params.s_max) if self.params.s_max > 0 else 0.0
+        s_max = self._greeks_smax if self._greeks_smax > 0 else (
+            float(self.params.s_max) if self.params.s_max > 0 else 0.0
+        )
         unit = price_european_lv_pde(
             s0=float(env.spot), strike=float(product.strike), is_call=is_call, T=T,
             lv_surface=lv, step_dt=np.diff(t_grid), r_fwd=r_fwd, carry_fwd=carry_fwd,
@@ -75,11 +78,20 @@ class LocalVolPDESolver(BaseEngine):
                          pricing_env: PricingEnvironment) -> Dict[str, float]:
         lv = self._build_surface(pricing_env)
         bump = self.params.get_effective_bump_config()
-        return local_vol_model_greeks(
-            self._price_with_surface, product, pricing_env, lv,
-            spot_bump=bump.spot_bump, rate_bump=bump.rate_bump,
-            theta_days=bump.time_bump_days,
+        # Pin the spatial grid (s_max) across spot bumps so finite differences are not
+        # contaminated by grid movement.
+        base_smax = float(self.params.s_max) if self.params.s_max > 0 else (
+            4.0 * max(float(pricing_env.spot), float(getattr(product, "strike", pricing_env.spot)))
         )
+        self._greeks_smax = base_smax
+        try:
+            return local_vol_model_greeks(
+                self._price_with_surface, product, pricing_env, lv,
+                spot_bump=bump.spot_bump, rate_bump=bump.rate_bump,
+                theta_days=bump.time_bump_days,
+            )
+        finally:
+            self._greeks_smax = 0.0
 
 
 def _supported_products():

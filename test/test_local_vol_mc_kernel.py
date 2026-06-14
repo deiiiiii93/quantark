@@ -68,3 +68,14 @@ def test_rejects_invalid_inputs():
         price_european_lv_mc(s0=100.0, strike=100.0, is_call=True, lv_surface=lv,
                              step_dt=np.full(5, 0.2), r_fwd=np.zeros(5), carry_fwd=np.zeros(5),
                              disc_factor=-0.1, num_paths=100)
+
+
+def test_antithetic_stderr_below_naive():
+    # For a monotone payoff, antithetic pairing reduces variance vs independent paths.
+    lv = _flat_lv(0.2)
+    common = dict(s0=100.0, strike=100.0, is_call=True, lv_surface=lv,
+                  step_dt=np.full(50, 0.02), r_fwd=np.zeros(50), carry_fwd=np.zeros(50),
+                  disc_factor=1.0, num_paths=40_000, seed=9, return_stderr=True)
+    _, se_anti = price_european_lv_mc(use_antithetic=True, **common)
+    _, se_plain = price_european_lv_mc(use_antithetic=False, **common)
+    assert se_anti < se_plain

@@ -83,3 +83,16 @@ def test_equity_lv_prebuilt_surface_used(monkeypatch):
     price = LocalVolPDESolver(params=PDEParams(grid_size=200, time_steps=100),
                               local_vol_surface=lv).price(_call(), env)
     assert price > 0
+
+
+def test_equity_lv_rho_matches_analytic_magnitude():
+    import math
+    from scipy.stats import norm
+    env = _env(0.2, 0.03, 0.01)
+    g = LocalVolPDESolver(params=PDEParams(grid_size=600, time_steps=300)).calculate_greeks(_call(), env)
+    # BS call rho (per 1%): K T e^{-rT} N(d2) / 100
+    S, K, T, r, q, vol = 100.0, 100.0, 1.0, 0.03, 0.01, 0.2
+    d2 = (math.log(S / K) + (r - q - 0.5 * vol * vol) * T) / (vol * math.sqrt(T))
+    rho_bs = K * T * math.exp(-r * T) * norm.cdf(d2) / 100.0
+    assert g["rho"] == pytest.approx(rho_bs, abs=0.03)
+    assert g["theta"] < 0  # long call decays

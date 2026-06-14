@@ -33,6 +33,7 @@ class FxLocalVolPDESolver(BaseFxEngine):
         super().__init__(params)
         self.grid_size, self.time_steps, self.theta = grid_size, time_steps, theta
         self._prebuilt = local_vol_surface
+        self._greeks_smax = 0.0  # >0 pins the spatial grid across Greek bumps
 
     def _price_with_surface(self, product: BaseFxProduct, fx_env: FxPricingEnvironment,
                             lv: LocalVolSurface) -> float:
@@ -49,7 +50,8 @@ class FxLocalVolPDESolver(BaseFxEngine):
         unit = price_european_lv_pde(
             s0=float(fx_env.effective_spot()), strike=float(product.strike),
             is_call=product.is_call(), T=T, lv_surface=lv, step_dt=np.diff(t_grid),
-            r_fwd=r_fwd, carry_fwd=carry_fwd, n_s=int(self.grid_size), theta=float(self.theta),
+            r_fwd=r_fwd, carry_fwd=carry_fwd, n_s=int(self.grid_size),
+            s_max=float(self._greeks_smax), theta=float(self.theta),
         )
         return fx_contract_value(product, fx_env, unit)
 
@@ -59,11 +61,16 @@ class FxLocalVolPDESolver(BaseFxEngine):
     def calculate_greeks(self, product: BaseFxProduct,
                          fx_env: FxPricingEnvironment) -> Dict[str, float]:
         lv = build_fx_local_vol(fx_env, self._prebuilt)
-        return fx_local_vol_model_greeks(
-            self._price_with_surface, product, fx_env, lv,
-            spot_bump=self.params.spot_bump, rate_bump=self.params.rate_bump,
-            theta_days=int(self.params.theta_days),
-        )
+        # Pin the spatial grid across spot bumps so finite differences are clean.
+        self._greeks_smax = 4.0 * max(float(fx_env.effective_spot()), float(product.strike))
+        try:
+            return fx_local_vol_model_greeks(
+                self._price_with_surface, product, fx_env, lv,
+                spot_bump=self.params.spot_bump, rate_bump=self.params.rate_bump,
+                theta_days=int(self.params.theta_days),
+            )
+        finally:
+            self._greeks_smax = 0.0
 
 
 def _supported_products():

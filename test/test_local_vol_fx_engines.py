@@ -72,3 +72,22 @@ def test_fx_lv_greeks_exclude_vega():
     g = FxLocalVolPDESolver(grid_size=300, time_steps=120).calculate_greeks(_opt(), env)
     assert set(["price", "delta", "gamma", "rho_dom", "rho_for"]).issubset(g.keys())
     assert "vega" not in g
+
+
+def test_fx_lv_greeks_match_gk_magnitude():
+    env = _fx_env(0.1, 0.03, 0.01)
+    opt = _opt()
+    gk = GarmanKohlhagenEngine().calculate_greeks(opt, env)
+    g = FxLocalVolPDESolver(grid_size=600, time_steps=250).calculate_greeks(opt, env)
+    assert "theta" in g
+    assert g["rho_dom"] == pytest.approx(gk["rho_dom"], rel=2e-2)
+    assert g["rho_for"] == pytest.approx(gk["rho_for"], rel=2e-2)
+    assert g["delta"] == pytest.approx(gk["delta"], rel=3e-2)  # FD-on-PDE delta carries grid noise
+
+
+def test_fx_lv_rejects_expiry_delivery_mismatch():
+    env = _fx_env()
+    opt = FxVanillaOption(strike=1.20, option_type=OptionType.CALL, maturity=1.0,
+                          delivery=1.05, notional_foreign=1e6)
+    with pytest.raises(PricingError):
+        FxLocalVolPDESolver().price(opt, env)

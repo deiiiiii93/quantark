@@ -9,6 +9,7 @@ and reused, so the sensitivities exclude recalibration effects.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 from typing import Callable, Dict
 
 from quantark.param.rrf import ParallelShiftRateCurve
@@ -42,17 +43,24 @@ def local_vol_model_greeks(
     env_ru.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, rate_bump)
     env_rd = deepcopy(pricing_env)
     env_rd.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, -rate_bump)
+    # Repository convention: rho reported per 1% rate move (dV/dr / 100).
     greeks["rho"] = (
         price_with_surface(product, env_ru, lv_surface)
         - price_with_surface(product, env_rd, lv_surface)
-    ) / (2.0 * rate_bump)
+    ) / (2.0 * rate_bump) / 100.0
 
+    # Theta: daily decay. Prefer shrinking a float maturity; otherwise advance the
+    # valuation date (date-based products) so theta is always provided.
     dt = theta_days / 365.0
     maturity = getattr(product, "maturity", None)
     if maturity is not None and maturity > dt:
         shifted = deepcopy(product)
         shifted.maturity = maturity - dt
         future = price_with_surface(shifted, pricing_env, lv_surface)
-        greeks["theta"] = (future - base) / theta_days
+    else:
+        env_fut = deepcopy(pricing_env)
+        env_fut.valuation_date = pricing_env.valuation_date + timedelta(days=theta_days)
+        future = price_with_surface(product, env_fut, lv_surface)
+    greeks["theta"] = (future - base) / theta_days
 
     return greeks

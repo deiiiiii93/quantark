@@ -87,3 +87,33 @@ def test_rejects_invalid_inputs():
     with pytest.raises(ValidationError):
         price_european_lv_pde(-1.0, 100.0, True, 1.0, lv, np.full(3, 1 / 3), np.zeros(3),
                               np.zeros(3), n_s=100)
+
+
+def _smile_lv():
+    # Non-flat local vol in BOTH strike and time so rate-step ORDER matters.
+    K = np.array([50.0, 80.0, 100.0, 125.0, 160.0])
+    T = np.array([0.25, 0.5, 1.0])
+    base = np.array([0.30, 0.24, 0.20, 0.24, 0.30])
+    grid = np.vstack([base + 0.04, base + 0.02, base])  # vol decreases with maturity
+    return LocalVolSurface(K, T, grid)
+
+
+def test_per_step_rate_order_matters_under_nonflat_surface():
+    # Same integrated rate, reversed step order: under a state-dependent local-vol
+    # surface the prices must differ (proves per-step alignment is real, not collapsed).
+    s0, k, T, M = 100.0, 100.0, 1.0, 100
+    dt = np.full(M, T / M)
+    rising = np.where(np.arange(M) < M // 2, 0.01, 0.06)
+    falling = rising[::-1].copy()
+    cf = np.zeros(M)
+    lv = _smile_lv()
+    p_rise = price_european_lv_pde(s0, k, True, T, lv, dt, rising, cf, n_s=400)
+    p_fall = price_european_lv_pde(s0, k, True, T, lv, dt, falling, cf, n_s=400)
+    assert abs(p_rise - p_fall) > 1e-3
+
+
+def test_rejects_step_sum_not_equal_T():
+    lv = _flat_lv(0.2)
+    with pytest.raises(ValidationError):
+        price_european_lv_pde(100.0, 100.0, True, 1.0, lv, np.full(50, 0.01),
+                              np.zeros(50), np.zeros(50), n_s=200)  # sum=0.5 != T=1.0

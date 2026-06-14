@@ -87,6 +87,8 @@ def price_european_lv_pde(
         raise ValidationError("r_fwd and carry_fwd must be finite")
     if s0 <= 0 or strike <= 0 or T <= 0:
         raise ValidationError("s0, strike, T must be positive")
+    if not np.isclose(float(dt.sum()), float(T), rtol=1e-9, atol=1e-12):
+        raise ValidationError(f"sum(step_dt)={dt.sum()} must equal T={T}")
     if n_s < 4:
         raise ValidationError("n_s must be >= 4 (>= 2 interior nodes)")
     if not 0.0 <= theta <= 1.0:
