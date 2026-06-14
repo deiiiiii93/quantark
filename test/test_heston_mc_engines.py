@@ -1,0 +1,59 @@
+import numpy as np
+import pytest
+from datetime import datetime
+from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.param.div import ContinuousDividendYield
+from quantark.priceenv import PricingEnvironment, FxPricingEnvironment
+from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.engine.analytical import HestonAnalyticalEngine
+from quantark.asset.equity.engine.mc import HestonMCEngine
+from quantark.asset.equity.param import MCParams
+from quantark.asset.fx.product.option.fx_vanilla_option import FxVanillaOption
+from quantark.asset.fx.engine.analytical import FxHestonAnalyticalEngine
+from quantark.asset.fx.engine.mc import FxHestonMCEngine
+from quantark.util.enum import OptionType
+from quantark.util.enum.engine_enums import HestonMCScheme
+from quantark.volmodels.heston import HestonParams
+
+
+P = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
+
+
+def _eq_env(r=0.03, q=0.01):
+    return PricingEnvironment(rate_curve=FlatRateCurve(r), valuation_date=datetime(2026, 1, 1),
+                              spot_quote=SpotQuote(spot=100.0), vol_surface=FlatVolSurface(0.2),
+                              div_yield=ContinuousDividendYield(q))
+
+
+def test_equity_heston_mc_matches_analytic():
+    env = _eq_env()
+    opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    analytic = HestonAnalyticalEngine(P).price(opt, env)
+    mc = HestonMCEngine(P, scheme=HestonMCScheme.QUADEXP,
+                        params=MCParams(num_paths=200_000, time_steps=50, seed=7,
+                                        use_antithetic=True)).price(opt, env)
+    assert mc == pytest.approx(analytic, abs=0.15)
+
+
+def test_equity_heston_mc_greeks_no_vega():
+    env = _eq_env()
+    opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    g = HestonMCEngine(P, params=MCParams(num_paths=40_000, time_steps=25, seed=1,
+                                          use_antithetic=True)).calculate_greeks(opt, env)
+    assert set(["price", "delta", "gamma", "theta", "rho"]).issubset(g.keys())
+    assert "vega" not in g
+
+
+def _fx_env(rd=0.03, rf=0.01):
+    return FxPricingEnvironment(valuation_date=datetime(2026, 1, 1), spot_quote=SpotQuote(spot=1.20),
+                                domestic_curve=FlatRateCurve(rd), foreign_curve=FlatRateCurve(rf),
+                                vol_surface=FlatVolSurface(0.1))
+
+
+def test_fx_heston_mc_matches_analytic():
+    env = _fx_env()
+    opt = FxVanillaOption(strike=1.20, option_type=OptionType.CALL, maturity=1.0,
+                          notional_foreign=1_000_000.0)
+    analytic = FxHestonAnalyticalEngine(P).price(opt, env)
+    mc = FxHestonMCEngine(P, num_paths=200_000, time_steps=50, seed=9).price(opt, env)
+    assert mc == pytest.approx(analytic, rel=5e-3)
