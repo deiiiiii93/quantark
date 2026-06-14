@@ -65,11 +65,19 @@ def calibrate_heston(
         raise ValidationError("target must be 'price' or 'iv'")
     if not options:
         raise ValidationError("at least one market option is required")
-    if regularize_feller < 0.0:
-        raise ValidationError("regularize_feller must be non-negative")
+    if not (np.isfinite(regularize_feller) and regularize_feller >= 0.0):
+        raise ValidationError("regularize_feller must be finite and non-negative")
+    if not (np.isfinite(s0) and s0 > 0):
+        raise ValidationError("s0 must be finite and positive")
+    if not (np.isfinite(r) and np.isfinite(carry)):
+        raise ValidationError("r and carry must be finite")
     for opt in options:
         if opt.price is None and opt.iv is None:
             raise ValidationError("each MarketOption must set price or iv")
+        if opt.price is not None and not np.isfinite(opt.price):
+            raise ValidationError("MarketOption price must be finite")
+        if opt.iv is not None and not (np.isfinite(opt.iv) and opt.iv > 0):
+            raise ValidationError("MarketOption iv must be finite and positive")
         if not (np.isfinite(opt.K) and opt.K > 0 and np.isfinite(opt.T) and opt.T > 0):
             raise ValidationError("MarketOption K and T must be finite and positive")
         if not np.isfinite(opt.weight) or opt.weight < 0:

@@ -34,9 +34,10 @@ def _deterministic_limit_call(s0, r, carry, params, strike, T) -> float:
     from quantark.volmodels.black_scholes import bs_call_price
 
     if params.kappa > 0:
+        # -expm1(-kT)/k is the stable form of (1 - e^{-kT})/k (-> T as k -> 0).
         integrated = params.theta * T + (params.v0 - params.theta) * (
-            1.0 - float(safe_exp(-params.kappa * T))
-        ) / params.kappa
+            -np.expm1(-params.kappa * T) / params.kappa
+        )
     else:
         integrated = params.v0 * T
     vol_eff = float(safe_sqrt(max(integrated, 0.0) / T))
@@ -46,6 +47,8 @@ def _deterministic_limit_call(s0, r, carry, params, strike, T) -> float:
 def _validate_call_noarb(price: float, s0, r, carry, strike, T) -> float:
     """Clamp tiny rounding violations; raise if the CF result is materially
     outside the European call no-arbitrage band (a sign quadrature failed)."""
+    if not np.isfinite(price):
+        raise NumericalError("Heston CF quadrature produced a non-finite price")
     lower = max(s0 * float(safe_exp(-carry * T)) - strike * float(safe_exp(-r * T)), 0.0)
     upper = s0 * float(safe_exp(-carry * T))
     tol = max(1e-7, 1e-6 * s0)

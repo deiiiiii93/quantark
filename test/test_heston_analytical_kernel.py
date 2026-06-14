@@ -111,3 +111,12 @@ def test_calibration_rejects_quote_without_price_or_iv():
     with pytest.raises(ValidationError):
         calibrate_heston(100.0, [MarketOption(K=100.0, T=1.0)], 0.02, 0.0,
                          HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.3, rho=-0.2))
+
+
+def test_deterministic_limit_tiny_kappa_no_cancellation():
+    # kappa -> 0 with sigma=0: integrated variance -> v0*T (stable via expm1).
+    p = HestonParams(v0=0.09, kappa=1e-18, theta=0.01, sigma=0.0, rho=0.0)
+    s0, k, T, r, q = 100.0, 100.0, 1.0, 0.0, 0.0
+    # as kappa->0, V(T) -> v0*T => vol_eff -> sqrt(v0)
+    assert heston_call_price(s0, k, T, p, r, q) == pytest.approx(
+        bs_call_price(s0, k, T, np.sqrt(0.09), r, q), abs=1e-6)
