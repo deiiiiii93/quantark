@@ -26,6 +26,11 @@ class HestonParams:
     rho: float
 
     def __post_init__(self) -> None:
+        import math as _math
+        for name, val in (("v0", self.v0), ("kappa", self.kappa), ("theta", self.theta),
+                          ("sigma", self.sigma), ("rho", self.rho)):
+            if not _math.isfinite(val):
+                raise ValidationError(f"{name} must be finite, got {val}")
         if self.v0 < 0:
             raise ValidationError(f"v0 must be non-negative, got {self.v0}")
         if self.kappa < 0:

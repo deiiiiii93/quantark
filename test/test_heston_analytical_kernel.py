@@ -67,3 +67,47 @@ def test_calibration_recovers_known_params():
     assert res.params.v0 == pytest.approx(true.v0, abs=5e-3)
     assert res.params.theta == pytest.approx(true.theta, abs=1e-2)
     assert res.params.rho == pytest.approx(true.rho, abs=5e-2)
+
+
+def test_deterministic_limit_sigma_zero_matches_bs():
+    # sigma exactly 0: exact deterministic-variance limit (no ZeroDivisionError).
+    flat = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.0, rho=0.0)
+    s0, k, T, r, q = 100.0, 105.0, 1.0, 0.03, 0.01
+    price = heston_call_price(s0, k, T, flat, r, q)
+    assert price == pytest.approx(bs_call_price(s0, k, T, np.sqrt(0.04), r, q), abs=1e-9)
+
+
+def test_deterministic_limit_term_structure_variance():
+    # v0 != theta, sigma=0 => integrated CIR variance, not flat v0.
+    p = HestonParams(v0=0.09, kappa=3.0, theta=0.01, sigma=0.0, rho=0.0)
+    s0, k, T, r, q = 100.0, 100.0, 1.0, 0.0, 0.0
+    integrated = 0.01 * T + (0.09 - 0.01) * (1 - np.exp(-3.0 * T)) / 3.0
+    vol_eff = np.sqrt(integrated / T)
+    assert heston_call_price(s0, k, T, p, r, q) == pytest.approx(
+        bs_call_price(s0, k, T, vol_eff, r, q), abs=1e-9)
+
+
+def test_extreme_params_raise_rather_than_return_garbage():
+    from quantark.util.exceptions import NumericalError
+    # ultra-short maturity + far OTM: CF quadrature is unreliable -> must raise, not
+    # silently return a negative/huge price.
+    p = HestonParams(v0=0.04, kappa=0.3, theta=0.04, sigma=2.0, rho=-0.99)
+    with pytest.raises(NumericalError):
+        heston_call_price(100.0, 10000.0, 1e-8, p, 0.0, 0.0)
+
+
+def test_calibration_default_feller_penalty_runs():
+    # Default regularize_feller>0 must not crash when params cross the Feller boundary.
+    s0, r, q = 100.0, 0.02, 0.0
+    true = HestonParams(v0=0.05, kappa=1.5, theta=0.05, sigma=0.3, rho=-0.5)
+    opts = [MarketOption(K=k, T=t, price=heston_call_price(s0, k, t, true, r, q))
+            for t in (0.5, 1.0) for k in (90.0, 100.0, 110.0)]
+    init = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.9, rho=-0.2)  # Feller violated
+    res = calibrate_heston(s0, opts, r, q, init, target="price")  # default penalty on
+    assert res.success
+
+
+def test_calibration_rejects_quote_without_price_or_iv():
+    with pytest.raises(ValidationError):
+        calibrate_heston(100.0, [MarketOption(K=100.0, T=1.0)], 0.02, 0.0,
+                         HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.3, rho=-0.2))

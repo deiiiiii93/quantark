@@ -10,6 +10,7 @@ from quantark.asset.fx.product.option.fx_vanilla_option import FxVanillaOption
 from quantark.asset.fx.engine.analytical import FxHestonAnalyticalEngine
 from quantark.util.enum import OptionType
 from quantark.util.enum.engine_enums import EngineType, HestonAnalyticalMethod
+from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.heston.analytical_kernel import heston_call_price
 
@@ -89,3 +90,30 @@ def test_fx_heston_greeks_no_vega():
     g = FxHestonAnalyticalEngine(PARAMS).calculate_greeks(opt, env)
     assert set(["price", "delta", "gamma", "rho_dom", "rho_for"]).issubset(g.keys())
     assert "vega" not in g
+
+
+def test_fx_heston_matches_gk_in_deterministic_limit():
+    # sigma->0 Heston == BS == GK; FX engine (with sizing) must match GarmanKohlhagen.
+    from quantark.asset.fx.engine.analytical import GarmanKohlhagenEngine
+    flat = HestonParams(v0=0.01, kappa=2.0, theta=0.01, sigma=0.0, rho=0.0)  # vol=0.1
+    env = _fx_env(0.03, 0.01)
+    opt = FxVanillaOption(strike=1.20, option_type=OptionType.CALL, maturity=1.0,
+                          notional_foreign=1_000_000.0, participation_rate=1.5)
+    gk = GarmanKohlhagenEngine().price(opt, env)
+    fx = FxHestonAnalyticalEngine(flat).price(opt, env)
+    assert fx == pytest.approx(gk, rel=1e-6)
+
+
+def test_method_tuple_must_be_analytical():
+    from quantark.util.enum.engine_enums import PDEMethod
+    with pytest.raises(ValidationError):
+        HestonAnalyticalEngine(PARAMS, method=EngineType.PDE(PDEMethod.CRANK_NICOLSON))
+
+
+def test_equity_heston_put_via_parity():
+    env = _eq_env(0.03, 0.01)
+    from quantark.volmodels.heston.analytical_kernel import heston_put_price
+    put = EuropeanVanillaOption(strike=110.0, option_type=OptionType.PUT, maturity=1.0)
+    eng = HestonAnalyticalEngine(PARAMS)
+    assert eng.price(put, env) == pytest.approx(
+        heston_put_price(100.0, 110.0, 1.0, PARAMS, 0.03, 0.01), abs=1e-9)

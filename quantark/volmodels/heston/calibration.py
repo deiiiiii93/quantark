@@ -65,6 +65,15 @@ def calibrate_heston(
         raise ValidationError("target must be 'price' or 'iv'")
     if not options:
         raise ValidationError("at least one market option is required")
+    if regularize_feller < 0.0:
+        raise ValidationError("regularize_feller must be non-negative")
+    for opt in options:
+        if opt.price is None and opt.iv is None:
+            raise ValidationError("each MarketOption must set price or iv")
+        if not (np.isfinite(opt.K) and opt.K > 0 and np.isfinite(opt.T) and opt.T > 0):
+            raise ValidationError("MarketOption K and T must be finite and positive")
+        if not np.isfinite(opt.weight) or opt.weight < 0:
+            raise ValidationError("MarketOption weight must be finite and non-negative")
 
     Ks = np.array([opt.K for opt in options], dtype=float)
     Ts = np.array([opt.T for opt in options], dtype=float)
@@ -100,8 +109,10 @@ def calibrate_heston(
             model = np.array([heston_implied_vol(s0, K, T, p, r, carry, method=method)
                               for K, T in zip(Ks, Ts)])
         res = (model - y) * np.sqrt(w)
-        feller_violation = max(0.0, p.sigma * p.sigma - 2.0 * p.kappa * p.theta)
-        if regularize_feller > 0.0 and feller_violation > 0.0:
+        # Fixed-length residual: always append the penalty term when enabled (it is 0
+        # when Feller is satisfied) so least_squares sees a constant dimension.
+        if regularize_feller > 0.0:
+            feller_violation = max(0.0, p.sigma * p.sigma - 2.0 * p.kappa * p.theta)
             res = np.concatenate([res, np.array([math.sqrt(regularize_feller) * feller_violation])])
         return res
 

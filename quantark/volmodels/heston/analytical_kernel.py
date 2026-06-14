@@ -11,8 +11,12 @@ from __future__ import annotations
 import numpy as np
 from scipy import integrate
 
-from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import safe_exp, safe_log
+from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.numerical import safe_exp, safe_log, safe_sqrt
+
+# Below this vol-of-vol the CF integrands are numerically unstable; the exact
+# deterministic-variance (sigma -> 0) limit is used instead.
+_SIGMA_MIN = 1e-4
 
 
 def _validate(s0: float, strike: float, T: float, params) -> None:
@@ -22,9 +26,42 @@ def _validate(s0: float, strike: float, T: float, params) -> None:
         raise ValidationError("maturity must be positive")
 
 
+def _deterministic_limit_call(s0, r, carry, params, strike, T) -> float:
+    """Exact sigma->0 Heston call: BS with the integrated CIR variance.
+
+    v_t = theta + (v0 - theta) e^{-kappa t};  V(T) = int_0^T v_t dt.
+    """
+    from quantark.volmodels.black_scholes import bs_call_price
+
+    if params.kappa > 0:
+        integrated = params.theta * T + (params.v0 - params.theta) * (
+            1.0 - float(safe_exp(-params.kappa * T))
+        ) / params.kappa
+    else:
+        integrated = params.v0 * T
+    vol_eff = float(safe_sqrt(max(integrated, 0.0) / T))
+    return bs_call_price(s0, strike, T, vol_eff, r, carry)
+
+
+def _validate_call_noarb(price: float, s0, r, carry, strike, T) -> float:
+    """Clamp tiny rounding violations; raise if the CF result is materially
+    outside the European call no-arbitrage band (a sign quadrature failed)."""
+    lower = max(s0 * float(safe_exp(-carry * T)) - strike * float(safe_exp(-r * T)), 0.0)
+    upper = s0 * float(safe_exp(-carry * T))
+    tol = max(1e-7, 1e-6 * s0)
+    if price < lower - tol or price > upper + tol:
+        raise NumericalError(
+            f"Heston CF price {price} outside no-arbitrage band [{lower}, {upper}] "
+            "(extreme parameters or maturity too small for quadrature)"
+        )
+    return min(max(price, lower), upper)
+
+
 def price_european_lewis(s0, r, carry, params, strike, T) -> float:
     """European CALL via Lewis (2000) single-integral formulation."""
     _validate(s0, strike, T, params)
+    if params.sigma < _SIGMA_MIN:
+        return _deterministic_limit_call(s0, r, carry, params, strike, T)
     k = float(strike)
     f = s0 * float(safe_exp((r - carry) * T))
     v = params.sigma ** 2
@@ -45,12 +82,15 @@ def price_european_lewis(s0, r, carry, params, strike, T) -> float:
 
     integral, _ = integrate.quad(integrand, 0.0, np.inf, limit=500)
     i1 = integral / (2.0 * np.pi)
-    return float(f * np.exp(-r * T) - np.sqrt(k * f) * np.exp(-r * T) * i1)
+    price = float(f * np.exp(-r * T) - np.sqrt(k * f) * np.exp(-r * T) * i1)
+    return _validate_call_noarb(price, s0, r, carry, strike, T)
 
 
 def price_european_gatheral(s0, r, carry, params, strike, T) -> float:
     """European CALL via Gatheral (2006) two-probability formulation."""
     _validate(s0, strike, T, params)
+    if params.sigma < _SIGMA_MIN:
+        return _deterministic_limit_call(s0, r, carry, params, strike, T)
     k = float(strike)
     f = s0 * float(safe_exp((r - carry) * T))
     x0 = float(safe_log(f / k))
@@ -76,12 +116,15 @@ def price_european_gatheral(s0, r, carry, params, strike, T) -> float:
 
     p1 = compute_prob(1)
     p2 = compute_prob(0)
-    return float(s0 * np.exp(-carry * T) * p1 - k * np.exp(-r * T) * p2)
+    price = float(s0 * np.exp(-carry * T) * p1 - k * np.exp(-r * T) * p2)
+    return _validate_call_noarb(price, s0, r, carry, strike, T)
 
 
 def price_european_weber(s0, r, carry, params, strike, T) -> float:
     """European CALL via the Weber formulation."""
     _validate(s0, strike, T, params)
+    if params.sigma < _SIGMA_MIN:
+        return _deterministic_limit_call(s0, r, carry, params, strike, T)
     k = float(strike)
     v = params.sigma ** 2
 
@@ -102,10 +145,11 @@ def price_european_weber(s0, r, carry, params, strike, T) -> float:
         integral, _ = integrate.quad(integrand, 0.0, np.inf, limit=500)
         return 0.5 + integral / np.pi
 
-    return float(
+    price = float(
         s0 * np.exp(-carry * T) * compute_f(1.0, params.kappa - params.rho * params.sigma)
         - np.exp(-r * T) * k * compute_f(-1.0, params.kappa)
     )
+    return _validate_call_noarb(price, s0, r, carry, strike, T)
 
 
 _METHODS = {

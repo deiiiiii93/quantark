@@ -19,6 +19,8 @@ def _resolve_method(method) -> str:
     if method is None:
         return "gatheral"
     if isinstance(method, tuple):
+        if len(method) != 2 or method[0] != EngineType.ANALYTICAL:
+            raise ValidationError(f"method tuple must be EngineType.ANALYTICAL(method), got {method!r}")
         method = method[1]
     if isinstance(method, HestonAnalyticalMethod):
         return method.name.lower()

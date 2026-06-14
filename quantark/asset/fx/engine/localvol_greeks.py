@@ -59,16 +59,18 @@ def fx_local_vol_model_greeks(
     # for date-based products advance the valuation date so theta is always provided.
     dt = theta_days / 365.0
     maturity = getattr(product, "maturity", None)
-    if maturity is not None and maturity > dt:
+    if maturity is not None and maturity > 0:
+        eff = min(dt, 0.5 * maturity)  # never shrink past expiry
         shifted = deepcopy(product)
-        shifted.maturity = maturity - dt
+        shifted.maturity = maturity - eff
         if getattr(shifted, "delivery", None) is not None:
-            shifted.delivery = shifted.delivery - dt
+            shifted.delivery = shifted.delivery - eff
         future = price_with_surface(shifted, fx_env, lv_surface)
+        greeks["theta"] = (future - base) / (eff * 365.0)
     else:
         env_fut = deepcopy(fx_env)
         env_fut.valuation_date = fx_env.valuation_date + timedelta(days=theta_days)
         future = price_with_surface(product, env_fut, lv_surface)
-    greeks["theta"] = (future - base) / theta_days
+        greeks["theta"] = (future - base) / theta_days
 
     return greeks
