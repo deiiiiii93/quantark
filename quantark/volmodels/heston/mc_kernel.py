@@ -50,7 +50,10 @@ def _simulate_terminal_spot(
             sqrt_vp = np.sqrt(v_plus)
             v = v + kappa * (theta - v_plus) * dt + sigma * sqrt_vp * z1 + 0.25 * sigma2 * (z1 * z1 - dt)
             s = s + drift * s * dt + sqrt_vp * s * z_s + 0.5 * s * v_plus * (z_s * z_s - dt)
-        return s
+        # Arithmetic Euler can overshoot below zero; apply an absorbing boundary at S=0
+        # (a price at zero stays at zero). EULERLOG/QUADEXP preserve positivity exactly
+        # and are the recommended schemes.
+        return np.maximum(s, 0.0)
 
     if scheme == HestonMCScheme.EULERLOG:
         log_s = np.full(n_paths, np.log(s0))
