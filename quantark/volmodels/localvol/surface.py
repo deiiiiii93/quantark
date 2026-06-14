@@ -56,6 +56,8 @@ class LocalVolSurface:
         """
         s = np.asarray(spot, dtype=float)
         tt = np.asarray(t, dtype=float)
+        if not (np.all(np.isfinite(s)) and np.all(np.isfinite(tt))):
+            raise ValidationError("spot and t must be finite")
         s_b, t_b = np.broadcast_arrays(s, tt)
         shape = s_b.shape
 

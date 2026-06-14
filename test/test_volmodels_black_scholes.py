@@ -41,3 +41,20 @@ def test_implied_vol_out_of_bounds_raises():
 
 def test_vega_positive():
     assert bs_vega(100.0, 100.0, 1.0, 0.2, 0.0, 0.0) > 0
+
+
+def test_implied_vol_at_intrinsic_lower_bound_returns_zero():
+    s, k, t, r, q = 110.0, 100.0, 1.0, 0.0, 0.0
+    intrinsic = s - k  # r=q=0
+    assert implied_vol_call(s, k, t, intrinsic, r, q) == 0.0
+
+
+def test_implied_vol_zero_maturity_raises():
+    with pytest.raises(NumericalError):
+        implied_vol_call(100.0, 100.0, 0.0, 5.0, 0.0, 0.0)
+
+
+def test_implied_vol_recovers_high_vol():
+    s, k, t, sig, r, q = 100.0, 100.0, 1.0, 1.5, 0.0, 0.0  # 150% vol > default bracket 10? no, but high
+    price = bs_call_price(s, k, t, sig, r, q)
+    assert implied_vol_call(s, k, t, price, r, q) == pytest.approx(sig, abs=1e-6)

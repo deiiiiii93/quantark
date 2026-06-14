@@ -119,14 +119,14 @@ def build_dupire_local_vol(
     if not np.isfinite(spot) or spot <= 0:
         raise ValidationError(f"spot must be positive and finite, got {spot}")
 
-    ln_k = safe_log(K)                                   # (nK,)
+    ln_k = np.asarray(safe_log(K), dtype=float)          # (nK,)
     r_zero = np.array([rate_curve.get_rate(t) for t in T])
     q_zero = np.array([div_yield(t) for t in T])
     if not (np.all(np.isfinite(r_zero)) and np.all(np.isfinite(q_zero))):
         raise ValidationError("rate_curve / div_yield returned non-finite values")
     carry_zero = r_zero - q_zero                         # zero cost-of-carry to T
-    fwd = spot * safe_exp(carry_zero * T)                # forward F_T (nT,)
-    ln_fwd = safe_log(fwd)                               # (nT,)
+    fwd = np.asarray(spot * safe_exp(carry_zero * T), dtype=float)   # forward F_T (nT,)
+    ln_fwd = np.asarray(safe_log(fwd), dtype=float)      # (nT,)
 
     w = iv ** 2 * T[:, None]                             # total variance (nT, nK)
     y = ln_k[None, :] - ln_fwd[:, None]                  # log-moneyness (nT, nK)
@@ -153,13 +153,14 @@ def build_dupire_local_vol(
             raise NumericalError(
                 f"calendar arbitrage: dw/dT|_y < 0 (moneyness) at nodes {idx.tolist()}"
             )
-        # Butterfly no-arbitrage requires a strictly positive denominator; a tiny
-        # positive denominator is a numerical-stability concern handled by the
-        # lv2 check below, not an arbitrage rejection.
-        if np.any(denom <= Tolerance.ZERO):
-            idx = np.argwhere(denom <= Tolerance.ZERO)
+        # Butterfly no-arbitrage requires a non-negative denominator. A strictly
+        # negative denominator is arbitrage; a tiny non-negative denominator is a
+        # numerical-stability concern handled by the lv2 check below (it yields a
+        # non-finite/blown-up local variance there), not an arbitrage rejection.
+        if np.any(denom < 0.0):
+            idx = np.argwhere(denom < 0.0)
             raise NumericalError(
-                f"butterfly arbitrage: Dupire denominator <= 0 at nodes {idx.tolist()}"
+                f"butterfly arbitrage: Dupire denominator < 0 at nodes {idx.tolist()}"
             )
 
     with np.errstate(divide="ignore", invalid="ignore"):

@@ -39,3 +39,21 @@ def test_non_flat_curve_forward_rates():
 def test_grid_rejects_nonfinite():
     with pytest.raises(ValidationError):
         forward_rates_on_grid(_TermCurve(), np.array([0.0, np.nan, 1.0]))
+
+
+def test_forward_rates_df_based_non_flat():
+    # LinearRateCurve with 2%@0.5y, 4%@1.0y -> DF-based forward over [0.5,1.0]:
+    # f = -(ln DF(1.0) - ln DF(0.5))/0.5 = -((-0.04) - (-0.01))/0.5 = 0.06
+    from quantark.param.rrf import LinearRateCurve
+    curve = LinearRateCurve([(0.5, 0.02), (1.0, 0.04)])
+    fwd = forward_rates_on_grid(curve, np.array([0.5, 1.0]))
+    assert fwd[0] == pytest.approx(0.06, abs=1e-12)
+
+
+def test_forward_rates_rejects_nonfinite_curve_output():
+    class _BadCurve:
+        def get_forward_rate(self, t0, t1):
+            return float("nan")
+    from quantark.util.exceptions import NumericalError
+    with pytest.raises(NumericalError):
+        forward_rates_on_grid(_BadCurve(), np.array([0.0, 0.5, 1.0]))

@@ -167,6 +167,8 @@ class GridVolSurface(VolatilitySurface):
 
     def get_vol(self, strike: float, time_to_maturity: float, spot: float) -> float:
         k, t = float(strike), float(time_to_maturity)
+        if not (np.isfinite(k) and np.isfinite(t)):
+            raise ValidationError("strike and time_to_maturity must be finite")
         strikes = np.asarray(self.strikes)
         mats = np.asarray(self.maturities)
         k_clamped = min(max(k, strikes[0]), strikes[-1])

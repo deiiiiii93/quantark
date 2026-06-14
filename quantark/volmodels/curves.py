@@ -11,7 +11,7 @@ from typing import Callable
 
 import numpy as np
 
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 
 
 def _validate_grid(t_grid: np.ndarray) -> np.ndarray:
@@ -34,9 +34,12 @@ def forward_rates_on_grid(rate_curve, t_grid: np.ndarray) -> np.ndarray:
     get_forward_rate(0, t1) = -ln(DF(t1))/t1 = the zero rate to t1.
     """
     t = _validate_grid(t_grid)
-    return np.array(
+    out = np.array(
         [float(rate_curve.get_forward_rate(t[i], t[i + 1])) for i in range(t.size - 1)]
     )
+    if not np.all(np.isfinite(out)):
+        raise NumericalError("rate_curve produced non-finite forward rates")
+    return out
 
 
 def forward_carry_on_grid(
@@ -53,4 +56,6 @@ def forward_carry_on_grid(
         t0, t1 = t[i], t[i + 1]
         w0 = 0.0 if t0 <= 0.0 else float(zero_yield(t0)) * t0
         out[i] = (float(zero_yield(t1)) * t1 - w0) / (t1 - t0)
+    if not np.all(np.isfinite(out)):
+        raise NumericalError("zero_yield produced non-finite forward carry")
     return out
