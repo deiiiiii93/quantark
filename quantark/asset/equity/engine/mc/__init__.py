@@ -12,8 +12,10 @@ from .barrier_option_mc_engine import BarrierOptionMCEngine
 from .single_sharkfin_option_mc_engine import SingleSharkfinOptionMCEngine
 from .double_sharkfin_option_mc_engine import DoubleSharkfinOptionMCEngine
 from .range_accrual_mc_engine import RangeAccrualMCEngine, RangeAccrualMCResult
+from .local_vol_mc_engine import LocalVolMCEngine
 
 __all__ = [
+    "LocalVolMCEngine",
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
     "AmericanMCResult",
