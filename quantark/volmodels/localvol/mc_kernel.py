@@ -1,0 +1,95 @@
+"""Monte Carlo pricer for European options under a LocalVolSurface (log-Euler).
+
+dS/S = (r(t) - carry(t)) dt + sigma_LV(S, t) dW. Vol is sampled at the start of each
+step; rates enter as per-step forwards and the price is discounted by the supplied
+terminal discount factor. Asset-neutral: carry = dividend yield (equity) or foreign
+rate (FX).
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Tuple, Union
+
+import numpy as np
+
+from quantark.util.exceptions import ValidationError
+from quantark.volmodels.localvol.surface import LocalVolSurface
+
+
+def price_european_lv_mc(
+    s0: float,
+    strike: float,
+    is_call: bool,
+    lv_surface: LocalVolSurface,
+    step_dt: np.ndarray,
+    r_fwd: np.ndarray,
+    carry_fwd: np.ndarray,
+    disc_factor: float,
+    num_paths: int = 50_000,
+    seed: Optional[int] = 42,
+    use_antithetic: bool = False,
+    return_stderr: bool = False,
+) -> Union[float, Tuple[float, float]]:
+    """Price a European vanilla under local volatility via Monte Carlo.
+
+    Args:
+        s0: spot at t=0 (> 0).
+        strike, is_call: option spec.
+        lv_surface: positive LocalVolSurface (sigma_LV(S, t)).
+        step_dt, r_fwd, carry_fwd: equal-length per-step arrays; time at step i is the
+            cumulative sum of step_dt[:i]. Drift over step i is r_fwd[i] - carry_fwd[i].
+        disc_factor: discount factor to maturity DF(T) in (0, 1].
+        num_paths, seed, use_antithetic, return_stderr: MC controls. With antithetic
+            sampling the stderr is computed from pair-average payoffs.
+    """
+    dt = np.asarray(step_dt, dtype=float)
+    rf = np.asarray(r_fwd, dtype=float)
+    cf = np.asarray(carry_fwd, dtype=float)
+    n = dt.size
+    if n < 1 or rf.size != n or cf.size != n:
+        raise ValidationError("step_dt, r_fwd, carry_fwd must be equal-length, length >= 1")
+    if not (np.all(np.isfinite(dt)) and np.all(dt > 0)):
+        raise ValidationError("step_dt must be finite and positive")
+    if not (np.all(np.isfinite(rf)) and np.all(np.isfinite(cf))):
+        raise ValidationError("r_fwd and carry_fwd must be finite")
+    if s0 <= 0 or strike <= 0:
+        raise ValidationError("s0 and strike must be positive")
+    if not np.isfinite(disc_factor) or disc_factor <= 0:
+        raise ValidationError("disc_factor must be finite and positive")
+    if num_paths <= 0:
+        raise ValidationError("num_paths must be positive")
+
+    rng = np.random.default_rng(seed)
+    half = (num_paths + 1) // 2
+    n_eff = 2 * half if use_antithetic else num_paths
+
+    s = np.full(n_eff, float(s0), dtype=float)
+    drift = rf - cf
+    sqrt_dt = np.sqrt(dt)
+    t = 0.0
+    for i in range(n):
+        sigma = np.asarray(lv_surface.local_vol(s, t), dtype=float)
+        if use_antithetic:
+            z_half = rng.standard_normal(half)
+            z = np.concatenate([z_half, -z_half])
+        else:
+            z = rng.standard_normal(n_eff)
+        s = s * np.exp((drift[i] - 0.5 * sigma * sigma) * dt[i] + sigma * sqrt_dt[i] * z)
+        t += dt[i]
+
+    payoff = np.maximum(s - strike, 0.0) if is_call else np.maximum(strike - s, 0.0)
+    discounted = float(disc_factor) * payoff
+
+    if use_antithetic:
+        pair = 0.5 * (discounted[:half] + discounted[half:2 * half])
+        price = float(np.mean(pair))
+        if return_stderr:
+            stderr = float(np.std(pair, ddof=1) / np.sqrt(half)) if half > 1 else 0.0
+            return price, stderr
+        return price
+
+    price = float(np.mean(discounted))
+    if return_stderr:
+        stderr = float(np.std(discounted, ddof=1) / np.sqrt(num_paths)) if num_paths > 1 else 0.0
+        return price, stderr
+    return price
