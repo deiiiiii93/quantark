@@ -52,3 +52,12 @@ def test_fx_heston_pde_matches_analytic():
     analytic = FxHestonAnalyticalEngine(P).price(opt, env)
     pde = FxHestonPDESolver(P, n_x=220, n_v=90, n_t=120).price(opt, env)
     assert pde == pytest.approx(analytic, rel=3e-3)
+
+
+def test_equity_heston_pde_gamma_positive_and_reasonable():
+    env = _eq_env()
+    opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    g = HestonPDESolver(P, n_x=320, n_v=120, n_t=140).calculate_greeks(opt, env)
+    # ATM call gamma must be clearly positive (the bilinear-bump bug produced ~0/garbage).
+    assert g["gamma"] > 0.005
+    assert g["theta"] < 0

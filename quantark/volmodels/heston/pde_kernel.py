@@ -20,8 +20,12 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from quantark.util.enum.engine_enums import ADIScheme
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.volmodels.heston.params import HestonParams
+
+# Below this vol-of-vol the variance is effectively deterministic and the ADI grid is
+# ill-conditioned; the exact deterministic-variance (BS) limit is used instead.
+_SIGMA_MIN = 1e-4
 
 
 class _HestonADI:
@@ -42,11 +46,15 @@ class _HestonADI:
 
     def _setup_grid(self, N_S, N_V, N_T):
         self.N_S, self.N_V, self.N_T = N_S, N_V, N_T
-        var_eff = max(self.theta, self.v0, 1e-12) + 0.25 * (self.sigma ** 2)
+        # Floor the variance used for DOMAIN sizing so the log-spot grid stays wide
+        # enough to resolve the payoff/boundaries even for low-variance parameters
+        # (this affects only the domain extent, not the dynamics).
+        var_eff = max(self.theta, self.v0, 0.25 * (self.sigma ** 2), 0.04)
         x_width = 8.0 * np.sqrt(var_eff * max(self.T, 1e-12))
         x_center = float(np.log(max(self._grid_spot, 1e-12)))
         self.x_min, self.x_max = x_center - x_width, x_center + x_width
-        self.V_max = max(5.0 * self.theta, 0.5)
+        # Variance domain must cover v0 and the long-run level.
+        self.V_max = max(5.0 * self.theta, 0.5, 2.0 * self.v0)
         self.X_grid = np.linspace(self.x_min, self.x_max, N_S)
         self.S_grid = np.exp(self.X_grid)
         self.S_max = float(np.exp(self.x_max))
@@ -271,6 +279,27 @@ class _HestonADI:
             + (1 - t) * u * U[i0, j1] + t * u * U[i1, j1]
         )
 
+    def price_delta_gamma(self, U, s0):
+        """Price and SPOT delta/gamma from the solved surface.
+
+        Gamma must come from the PDE solution itself (spatial derivatives on the S-grid),
+        not from re-bumping bilinearly-interpolated prices (which is piecewise linear and
+        yields meaningless curvature).
+        """
+        V = self.V_grid
+        v_val = min(max(self.v0, V[0]), V[-1])
+        j0 = max(min(int(np.searchsorted(V, v_val, side="right") - 1), len(V) - 2), 0)
+        j1 = j0 + 1
+        w = 0.0 if V[j1] == V[j0] else (v_val - V[j0]) / (V[j1] - V[j0])
+        v_curve = (1.0 - w) * U[:, j0] + w * U[:, j1]   # price vs S at v0
+        S = self.S_grid
+        price = float(np.interp(s0, S, v_curve))
+        dVdS = np.gradient(v_curve, S, edge_order=2)
+        d2VdS2 = np.gradient(dVdS, S, edge_order=2)
+        delta = float(np.interp(s0, S, dVdS))
+        gamma = float(np.interp(s0, S, d2VdS2))
+        return price, delta, gamma
+
 
 def price_european_heston_pde(
     s0: float,
@@ -302,11 +331,63 @@ def price_european_heston_pde(
         raise ValidationError("theta must be in [0, 1]")
     if not isinstance(scheme, ADIScheme):
         raise ValidationError("scheme must be an ADIScheme")
+    if scheme == ADIScheme.MCS:
+        raise ValidationError("MCS is not implemented for the Heston PDE; use CRAIG_SNEYD or DOUGLAS")
+    if params.sigma < _SIGMA_MIN:
+        return _deterministic_pde_price(s0, strike, is_call, T, params, r, carry)
     solver = _HestonADI(s0, strike, T, r, carry, params, n_x, n_v, n_t, use_sparse,
                         grid_spot=(grid_spot if grid_spot > 0 else None))
+    if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
+        raise ValidationError("s0 falls outside the PDE grid (grid_spot too far from s0)")
     U = solver.solve(is_call, scheme, theta, rannacher)
     price = solver.interpolate(U, float(np.log(s0)), params.v0)
     if not np.isfinite(price):
-        from quantark.util.exceptions import NumericalError
         raise NumericalError("Heston PDE produced a non-finite price")
     return price
+
+
+def price_delta_gamma_heston_pde(
+    s0: float, strike: float, is_call: bool, T: float, params: HestonParams,
+    r: float, carry: float, n_x: int = 200, n_v: int = 100, n_t: int = 100,
+    scheme: ADIScheme = ADIScheme.CRAIG_SNEYD, theta: float = 0.5, rannacher: bool = True,
+    use_sparse: bool = False, grid_spot: float = 0.0,
+) -> Tuple[float, float, float]:
+    """Return (price, spot-delta, spot-gamma) from a single PDE solve.
+
+    Delta/gamma are spatial derivatives of the solved surface (per unit of underlying);
+    callers scale by notional/contract size.
+    """
+    if scheme == ADIScheme.MCS:
+        raise ValidationError("MCS is not implemented for the Heston PDE; use CRAIG_SNEYD or DOUGLAS")
+    if params.sigma < _SIGMA_MIN:
+        from quantark.volmodels.black_scholes import bs_call_price, bs_put_price
+        eps = 1e-4 * s0
+        f = bs_call_price if is_call else bs_put_price
+        v_eff = _deterministic_vol(T, params)
+        p = f(s0, strike, T, v_eff, r, carry)
+        pu = f(s0 + eps, strike, T, v_eff, r, carry)
+        pd = f(s0 - eps, strike, T, v_eff, r, carry)
+        return p, (pu - pd) / (2 * eps), (pu - 2 * p + pd) / (eps * eps)
+    solver = _HestonADI(s0, strike, T, r, carry, params, n_x, n_v, n_t, use_sparse,
+                        grid_spot=(grid_spot if grid_spot > 0 else None))
+    U = solver.solve(is_call, scheme, theta, rannacher)
+    price, delta, gamma = solver.price_delta_gamma(U, s0)
+    if not (np.isfinite(price) and np.isfinite(delta) and np.isfinite(gamma)):
+        raise NumericalError("Heston PDE produced non-finite price/greeks")
+    return price, delta, gamma
+
+
+def _deterministic_vol(T, params: HestonParams) -> float:
+    if params.kappa > 1e-12:
+        integrated = params.theta * T + (params.v0 - params.theta) * (
+            -np.expm1(-params.kappa * T) / params.kappa
+        )
+    else:
+        integrated = params.v0 * T
+    return float(np.sqrt(max(integrated, 0.0) / T))
+
+
+def _deterministic_pde_price(s0, strike, is_call, T, params, r, carry) -> float:
+    from quantark.volmodels.black_scholes import bs_call_price, bs_put_price
+    v_eff = _deterministic_vol(T, params)
+    return (bs_call_price if is_call else bs_put_price)(s0, strike, T, v_eff, r, carry)

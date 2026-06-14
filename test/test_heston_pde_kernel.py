@@ -51,3 +51,29 @@ def test_invalid_inputs():
         price_european_heston_pde(100.0, 100.0, True, 1.0, P, 0.03, 0.01, n_x=2)
     with pytest.raises(ValidationError):
         price_european_heston_pde(-1.0, 100.0, True, 1.0, P, 0.03, 0.01)
+
+
+def test_mcs_rejected():
+    with pytest.raises(ValidationError):
+        price_european_heston_pde(100.0, 100.0, True, 1.0, P, 0.03, 0.01, scheme=ADIScheme.MCS)
+
+
+def test_low_volvol_matches_analytic_deterministic_limit():
+    from quantark.volmodels.black_scholes import bs_call_price
+    # sigma below threshold -> deterministic-variance BS limit.
+    p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=1e-6, rho=-0.5)
+    price = price_european_heston_pde(100.0, 100.0, True, 1.0, p, 0.03, 0.01)
+    assert price == pytest.approx(bs_call_price(100.0, 100.0, 1.0, 0.2, 0.03, 0.01), abs=1e-6)
+
+
+def test_grid_greeks_gamma_matches_analytic():
+    from quantark.volmodels.heston.pde_kernel import price_delta_gamma_heston_pde
+    from quantark.volmodels.heston import heston_call_price
+    s0, k, T, r, q = 100.0, 100.0, 1.0, 0.03, 0.01
+    _, delta, gamma = price_delta_gamma_heston_pde(s0, k, True, T, P, r, q, n_x=400, n_v=140, n_t=160)
+    h = 0.5
+    ana_gamma = (heston_call_price(s0 + h, k, T, P, r, q) - 2 * heston_call_price(s0, k, T, P, r, q)
+                 + heston_call_price(s0 - h, k, T, P, r, q)) / (h * h)
+    ana_delta = (heston_call_price(s0 + h, k, T, P, r, q) - heston_call_price(s0 - h, k, T, P, r, q)) / (2 * h)
+    assert delta == pytest.approx(ana_delta, abs=0.02)
+    assert gamma == pytest.approx(ana_gamma, abs=4e-3)  # positive, right magnitude
