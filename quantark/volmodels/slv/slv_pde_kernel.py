@@ -125,7 +125,7 @@ class _HestonSLVADI:
         L2 = self._L(t_mid) ** 2
         Y = np.empty_like(source)
         for j in range(self.N_V):
-            vj = max(float(self.V_grid[j]), 1e-12)
+            vj = max(float(self.V_grid[j]), 1e-10)
             c2 = 0.5 * (L2 * vj) / (self.dx * self.dx)
             c1 = ((self.r - self.q) - 0.5 * (L2 * vj)) / (2.0 * self.dx)
             a = np.zeros(N); b = np.ones(N); c = np.zeros(N)
@@ -139,7 +139,7 @@ class _HestonSLVADI:
 
     def _solve_V(self, source, A2U, dt_step, theta_loc, tau):
         N = self.N_V
-        v = np.maximum(self.V_grid, 1e-12)
+        v = np.maximum(self.V_grid, 1e-10)
         coef_d2 = 0.5 * self.sig_eff2 * v / (self.dV * self.dV)
         coef_d1 = self.kappa * (self.theta - v) / (2.0 * self.dV)
         a = np.zeros(N); b = np.zeros(N); c = np.zeros(N)
@@ -259,8 +259,18 @@ def price_delta_gamma_slv_pde(
     scheme: ADIScheme = ADIScheme.CRAIG_SNEYD, theta: float = 0.5, rannacher: bool = True,
 ) -> Tuple[float, float, float]:
     """(price, spot-delta, spot-gamma) from a single backward SLV PDE solve."""
+    if s0 <= 0 or strike <= 0 or T <= 0:
+        raise ValidationError("s0, strike, T must be positive")
+    if n_x < 3 or n_v < 3 or n_t < 1:
+        raise ValidationError("require n_x>=3, n_v>=3, n_t>=1")
+    if not 0.0 <= theta <= 1.0:
+        raise ValidationError("theta must be in [0, 1]")
+    if not isinstance(scheme, ADIScheme):
+        raise ValidationError("scheme must be an ADIScheme")
     if scheme == ADIScheme.MCS:
         raise ValidationError("MCS is not implemented for the SLV PDE; use CRAIG_SNEYD or DOUGLAS")
+    if eta < 0:
+        raise ValidationError("eta must be non-negative")
     solver = _HestonSLVADI(s0, strike, T, r, carry, params, lev_surface, eta, n_x, n_v, n_t)
     if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
         raise ValidationError("s0 falls outside the PDE grid")
