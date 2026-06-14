@@ -370,6 +370,8 @@ def price_delta_gamma_heston_pde(
         return p, (pu - pd) / (2 * eps), (pu - 2 * p + pd) / (eps * eps)
     solver = _HestonADI(s0, strike, T, r, carry, params, n_x, n_v, n_t, use_sparse,
                         grid_spot=(grid_spot if grid_spot > 0 else None))
+    if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
+        raise ValidationError("s0 falls outside the PDE grid (grid_spot too far from s0)")
     U = solver.solve(is_call, scheme, theta, rannacher)
     price, delta, gamma = solver.price_delta_gamma(U, s0)
     if not (np.isfinite(price) and np.isfinite(delta) and np.isfinite(gamma)):

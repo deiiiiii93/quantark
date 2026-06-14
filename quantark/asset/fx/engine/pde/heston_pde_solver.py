@@ -95,10 +95,17 @@ class FxHestonPDESolver(BaseFxEngine):
         env_fd.foreign_curve = ParallelShiftRateCurve(fx_env.foreign_curve, -rb)
         greeks["rho_for"] = (self._price(product, env_fu) - self._price(product, env_fd)) / (2.0 * rb) / 100.0
 
-        eff = min(self.params.theta_days / 365.0, 0.5 * T)
-        shifted = deepcopy(product)
-        shifted.maturity = T - eff
-        if getattr(shifted, "delivery", None) is not None:
-            shifted.delivery = shifted.delivery - eff
-        greeks["theta"] = (self._price(shifted, fx_env) - base) / (eff * 365.0)
+        maturity_attr = getattr(product, "maturity", None)
+        if maturity_attr is not None and maturity_attr > 0:
+            eff = min(self.params.theta_days / 365.0, 0.5 * float(maturity_attr))
+            shifted = deepcopy(product)
+            shifted.maturity = float(maturity_attr) - eff
+            if getattr(shifted, "delivery", None) is not None:
+                shifted.delivery = shifted.delivery - eff
+            greeks["theta"] = (self._price(shifted, fx_env) - base) / (eff * 365.0)
+        else:
+            from datetime import timedelta
+            env_fut = deepcopy(fx_env)
+            env_fut.valuation_date = fx_env.valuation_date + timedelta(days=self.params.theta_days)
+            greeks["theta"] = (self._price(product, env_fut) - base) / self.params.theta_days
         return greeks

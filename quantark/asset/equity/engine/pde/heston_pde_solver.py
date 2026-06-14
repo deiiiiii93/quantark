@@ -95,8 +95,16 @@ class HestonPDESolver(BaseEngine):
         env_rd.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, -bump.rate_bump)
         greeks["rho"] = (self._price(product, env_ru) - self._price(product, env_rd)) / (2.0 * bump.rate_bump) / 100.0
 
-        eff = min(bump.time_bump_days / 365.0, 0.5 * T)
-        shifted = deepcopy(product)
-        shifted.maturity = T - eff
-        greeks["theta"] = (self._price(shifted, pricing_env) - base) / (eff * 365.0)
+        # Theta: shrink a float maturity; for date-based products advance the valuation date.
+        maturity_attr = getattr(product, "maturity", None)
+        if maturity_attr is not None and maturity_attr > 0:
+            eff = min(bump.time_bump_days / 365.0, 0.5 * float(maturity_attr))
+            shifted = deepcopy(product)
+            shifted.maturity = float(maturity_attr) - eff
+            greeks["theta"] = (self._price(shifted, pricing_env) - base) / (eff * 365.0)
+        else:
+            from datetime import timedelta
+            env_fut = deepcopy(pricing_env)
+            env_fut.valuation_date = pricing_env.valuation_date + timedelta(days=bump.time_bump_days)
+            greeks["theta"] = (self._price(product, env_fut) - base) / bump.time_bump_days
         return greeks
