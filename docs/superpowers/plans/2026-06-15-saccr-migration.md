@@ -169,10 +169,12 @@ def test_supervisory_tables_immutable():
   - Replace `math.exp/log/sqrt` with `safe_exp/safe_log/safe_sqrt` from
     `quantark.util.numerical`.
   - **Domain-validate before safe-math** (raise `ValidationError`):
-    - `supervisory_duration` (explicit order, do NOT let flooring mask bad inputs):
+    - `supervisory_duration` (explicit order, flooring must NOT mask bad inputs):
       (1) validate raw `start_date >= 0` and raw `end_date >= 0` → else `ValidationError`;
-      (2) set `e = max(end_date, 10/250)`; (3) require `e > start_date` → else
-      `ValidationError`. (Never silently accept raw `end_date < start_date`.)
+      (2) validate **raw** `end_date >= start_date` → else `ValidationError`
+      (this catches e.g. `(0.02, 0.01)` BEFORE flooring can hide it);
+      (3) set `e = max(end_date, 10/250)`; (4) require `e > start_date` → else
+      `ValidationError`.
     - `maturity_factor_unmargined`: require `maturity` not None.
     - `supervisory_delta` (option branch): require `underlying_price > 0`,
       `strike_price > 0`, `supervisory_volatility > 0`, `exercise_date > 0`
@@ -216,6 +218,15 @@ def test_supervisory_delta_rejects_bad_domain():
         supervisory_delta(Position.LONG, is_option=True, option_type=OptionType.CALL,
             underlying_price=-1, strike_price=0.05, exercise_date=1.0,
             supervisory_volatility=0.5)
+
+def test_supervisory_duration_rejects_inverted_dates_even_with_floor():
+    import pytest
+    from quantark.util.exceptions import ValidationError
+    # raw end < start; flooring e to 10/250 would otherwise hide it -> must still raise
+    with pytest.raises(ValidationError):
+        supervisory_duration(0.02, 0.01)
+    with pytest.raises(ValidationError):
+        supervisory_duration(-1, 5)
 ```
 - [ ] **Step 3:** Run; expect PASS. (The option test above already pins the delta to the
   EXACT `scipy.stats.norm.cdf`, which is the whole point of the CDF change.)
@@ -414,6 +425,7 @@ from quantark.saccr.engines.addons.interest_rate import InterestRateAddOn
 from quantark.saccr.engines.addons.credit import CreditAddOn
 from quantark.saccr.engines.addons.commodity import CommodityAddOn
 from quantark.saccr.engines.addons.equity import EquityAddOn
+from quantark.saccr.engines.addons.fx import FXAddOn
 from quantark.saccr.parameters.supervisory import SupervisoryParameters as SP
 from quantark.saccr.models.trade import SACCRTrade
 from quantark.saccr.models.netting_set import SACCRNettingSet
@@ -473,6 +485,21 @@ def test_equity_single_name_addon_sign_and_sf():
     total, bd = EquityAddOn().calculate_with_breakdown([t], _ns([t]))
     # single-name SF=0.32, MF=1 (1y), delta=+1, adj notional=10_000 -> addon ~ 0.32*10_000
     assert total == pytest.approx(0.32 * 10_000, rel=0.05) and "EQUITY" in bd
+
+def test_fx_addon_value_and_distinct_pair_labels():
+    # FX add-on: per-currency-pair hedging set, SF_FX=0.04, MF=1 for 1y, delta=+1.
+    # A single long 1y FX trade -> addon ~ 0.04 * adjusted_notional (= notional).
+    one = SACCRTrade("FX1", AssetClass.FX, 10_000, 0, currency_pair="EUR/USD",
+                     start_date=0, end_date=1, maturity=1, position=Position.LONG)
+    total1, bd1 = FXAddOn().calculate_with_breakdown([one], _ns([one]))
+    assert total1 == pytest.approx(0.04 * 10_000, rel=0.05)
+    assert "FX:EUR/USD" in bd1
+    # EUR/USD and USD/EUR must NOT net into one hedging set (distinct keys, no offset)
+    two = [one, SACCRTrade("FX2", AssetClass.FX, 10_000, 0, currency_pair="USD/EUR",
+                           start_date=0, end_date=1, maturity=1, position=Position.SHORT)]
+    total2, bd2 = FXAddOn().calculate_with_breakdown(two, _ns(two))
+    assert {"FX:EUR/USD", "FX:USD/EUR"} <= set(bd2)
+    assert total2 == pytest.approx(2 * 0.04 * 10_000, rel=0.05)   # no cross-pair offset
 
 def test_commodity_unknown_type_rejected_via_supervisory_lookup():
     # CommodityType is a closed, fully-mapped enum, so an "unknown type" cannot be built
