@@ -108,7 +108,7 @@ def test_enums_and_commodity_map():
     assert OptionType.CALL is not OptionType.PUT
 ```
 - [ ] **Step 3:** Run `... -k test_enums_and_commodity_map`; expect PASS.
-- [ ] **Step 4: Commit** `git commit -am "feat(saccr): port enums; reuse util OptionType"`
+- [ ] **Step 4: Commit** `git add -A && git commit -m "feat(saccr): port enums; reuse util OptionType"`
 
 ---
 
@@ -151,7 +151,7 @@ def test_supervisory_tables_immutable():
         SP.SF_CREDIT_SINGLE[CreditRating.AA] = 0.0  # MappingProxyType is read-only
 ```
 - [ ] **Step 3:** Run those tests; expect PASS.
-- [ ] **Step 4: Commit** `git commit -am "feat(saccr): immutable, versioned supervisory params"`
+- [ ] **Step 4: Commit** `git add -A && git commit -m "feat(saccr): immutable, versioned supervisory params"`
 
 ---
 
@@ -169,7 +169,10 @@ def test_supervisory_tables_immutable():
   - Replace `math.exp/log/sqrt` with `safe_exp/safe_log/safe_sqrt` from
     `quantark.util.numerical`.
   - **Domain-validate before safe-math** (raise `ValidationError`):
-    - `supervisory_duration`: require `end_date >= start_date >= 0` after flooring.
+    - `supervisory_duration` (explicit order, do NOT let flooring mask bad inputs):
+      (1) validate raw `start_date >= 0` and raw `end_date >= 0` → else `ValidationError`;
+      (2) set `e = max(end_date, 10/250)`; (3) require `e > start_date` → else
+      `ValidationError`. (Never silently accept raw `end_date < start_date`.)
     - `maturity_factor_unmargined`: require `maturity` not None.
     - `supervisory_delta` (option branch): require `underlying_price > 0`,
       `strike_price > 0`, `supervisory_volatility > 0`, `exercise_date > 0`
@@ -214,21 +217,28 @@ def test_supervisory_delta_rejects_bad_domain():
             underlying_price=-1, strike_price=0.05, exercise_date=1.0,
             supervisory_volatility=0.5)
 ```
-- [ ] **Step 3:** Run; expect PASS.
-- [ ] **Step 4: A&S regression doc test** (documents the CDF change):
+- [ ] **Step 3:** Run; expect PASS. (The option test above already pins the delta to the
+  EXACT `scipy.stats.norm.cdf`, which is the whole point of the CDF change.)
+- [ ] **Step 4: CDF-correction documentation test** (documents WHY the legacy CDF was
+  replaced — it was materially inaccurate, NOT a negligible refinement):
 ```python
-def test_scipy_vs_abramowitz_stegun_negligible():
-    # legacy A&S 7-term approximation, inlined only for the regression assertion
-    def _as_cdf(x):
+def test_legacy_cdf_was_materially_inaccurate():
+    """The source's hand-rolled _normal_cdf mixed erf coefficients without the /sqrt(2)
+    scaling, giving errors up to ~3.7e-2 vs the exact normal CDF. This test documents
+    that switching to scipy.stats.norm.cdf is a CORRECTION (so we must NOT assert the two
+    agree). At the Example-1 swaption d1, legacy~0.2324 vs exact~0.2694."""
+    def _legacy_cdf(x):  # verbatim copy of the removed source approximation
         a1,a2,a3,a4,a5,p = 0.254829592,-0.284496736,1.421413741,-1.453152027,1.061405429,0.3275911
         s = 1 if x>=0 else -1; x=abs(x); t=1/(1+p*x)
         y=1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*math.exp(-x*x/2)
         return 0.5*(1+s*y)
-    for x in [-3,-1,-0.6147,0,0.5,2.5]:
-        assert abs(float(norm.cdf(x)) - _as_cdf(x)) < 1e-6
+    d1 = (math.log(0.06/0.05) + 0.5*0.5**2*1) / (0.5*1)
+    assert abs(float(norm.cdf(-d1)) - _legacy_cdf(-d1)) > 1e-2   # materially different
+    assert is_close(float(norm.cdf(-d1)), 0.269395, abs_tol=1e-5)  # exact value used
 ```
-- [ ] **Step 5:** Run; expect PASS. **Commit**
-  `git commit -am "feat(saccr): supervisory maths with scipy CDF + domain validation"`
+- [ ] **Step 5:** Run; expect PASS. Add a docstring note in `engines/maths.py` recording the
+  correction (legacy max error ~3.7e-2). **Commit**
+  `git add -A && git commit -m "feat(saccr): supervisory maths with exact scipy CDF + domain validation"`
 
 ---
 
@@ -269,7 +279,7 @@ def test_trade_rejects_bad_ccy_pair_and_notional():
     with pytest.raises(ValidationError):
         SACCRTrade("T", AssetClass.INTEREST_RATE, -1, 0.0, currency="USD")
 ```
-- [ ] **Step 3:** Run; expect PASS. **Commit** `git commit -am "feat(saccr): SACCRTrade model"`
+- [ ] **Step 3:** Run; expect PASS. **Commit** `git add -A && git commit -m "feat(saccr): SACCRTrade model"`
 
 ### Task 5: `models/netting_set.py` (`SACCRNettingSet`)
 
@@ -305,7 +315,7 @@ def test_netting_set_rejects_empty():
         SACCRNettingSet("NS", [])
 ```
 - [ ] **Step 3:** Run; expect PASS. **Commit**
-  `git commit -am "feat(saccr): SACCRNettingSet model"`
+  `git add -A && git commit -m "feat(saccr): SACCRNettingSet model"`
 
 ---
 
@@ -329,7 +339,7 @@ def test_rc_unmargined(): assert is_close(calculate_rc_unmargined(60, 0), 60)
 def test_rc_unmargined_floored(): assert is_close(calculate_rc_unmargined(-20, 0), 0)
 def test_rc_margined(): assert is_close(calculate_rc_margined(80, 79.5, 0, 1, 0), 1)
 ```
-- [ ] **Step 3:** Run; PASS. **Commit** `git commit -am "feat(saccr): replacement cost"`
+- [ ] **Step 3:** Run; PASS. **Commit** `git add -A && git commit -m "feat(saccr): replacement cost"`
 
 ### Task 7: `engines/pfe.py`
 
@@ -355,7 +365,7 @@ def test_multiplier_overcollateralized():
 
 def test_pfe(): assert is_close(calculate_pfe(282, 0.965), 282*0.965)
 ```
-- [ ] **Step 3:** Run; PASS. **Commit** `git commit -am "feat(saccr): PFE multiplier"`
+- [ ] **Step 3:** Run; PASS. **Commit** `git add -A && git commit -m "feat(saccr): PFE multiplier"`
 
 ### Task 8: `engines/addons/base.py`
 
@@ -371,7 +381,7 @@ def test_pfe(): assert is_close(calculate_pfe(282, 0.965), 282*0.965)
   Define `calculate_with_breakdown(trades, ns) -> tuple[float, dict[str,float]]` as the new
   contract; `calculate` returns just the total (calls `calculate_with_breakdown`).
 - [ ] **Step 2: Commit** (no standalone test; covered via add-on tasks)
-  `git commit -am "feat(saccr): add-on base contract with hedging-set breakdown"`
+  `git add -A && git commit -m "feat(saccr): add-on base contract with hedging-set breakdown"`
 
 ### Task 9: Per-asset-class add-ons
 
@@ -392,27 +402,86 @@ def test_pfe(): assert is_close(calculate_pfe(282, 0.965), 282*0.965)
   - Commodity: unknown `commodity_type` (not in `COMMODITY_TYPE_TO_HEDGING_SET`) →
     `ValidationError` (no silent OTHER bucket). [If source silently defaulted, this is the
     intentional upgrade per spec §5.5.]
-- [ ] **Step 2: Failing tests** (per-class, using Basel sub-values):
+- [ ] **Step 2: Failing tests** — at least one MEANINGFUL NUMERIC assertion per asset class,
+  anchored to the Basel Annex 4a sub-add-on figures (the most error-prone ported logic):
+  IR Example 1 → AddOn_IR ≈ 347; Credit Example 2 → AddOn_Credit ≈ 282; Commodity Example 3
+  → Energy ≈ 2041, Metals ≈ 1800 (total ≈ 3841); Equity → single-name SF=0.32 sanity.
 ```python
+import pytest
 from quantark.util.numerical import is_close
+from quantark.util.exceptions import ValidationError
 from quantark.saccr.engines.addons.interest_rate import InterestRateAddOn
+from quantark.saccr.engines.addons.credit import CreditAddOn
+from quantark.saccr.engines.addons.commodity import CommodityAddOn
+from quantark.saccr.engines.addons.equity import EquityAddOn
+from quantark.saccr.parameters.supervisory import SupervisoryParameters as SP
 from quantark.saccr.models.trade import SACCRTrade
 from quantark.saccr.models.netting_set import SACCRNettingSet
-from quantark.saccr.models.enums import AssetClass, Position
+from quantark.saccr.models.enums import (
+    AssetClass, Position, CreditRating, IndexGrade, CommodityType)
+from quantark.util.enum.option_enums import OptionType
 
-def test_ir_addon_partial_offset_breakdown():
+def _ns(trades): return SACCRNettingSet("NS", trades, is_margined=False)
+
+def test_ir_addon_matches_basel_example1():
     trades = [
         SACCRTrade("IR1", AssetClass.INTEREST_RATE, 10_000, 30, currency="USD",
                    start_date=0, end_date=10, maturity=10, position=Position.LONG),
         SACCRTrade("IR2", AssetClass.INTEREST_RATE, 10_000, -20, currency="USD",
                    start_date=0, end_date=4, maturity=4, position=Position.SHORT),
+        SACCRTrade("IR3", AssetClass.INTEREST_RATE, 5_000, 50, currency="EUR",
+                   start_date=1, end_date=11, maturity=5.5, position=Position.LONG,
+                   is_option=True, option_type=OptionType.PUT, underlying_price=0.06,
+                   strike_price=0.05, exercise_date=1.0),
     ]
-    ns = SACCRNettingSet("NS", trades, is_margined=False)
-    total, bd = InterestRateAddOn().calculate_with_breakdown(trades, ns)
-    assert total > 0 and "IR:USD" in bd and is_close(bd["IR:USD"], total)
+    total, bd = InterestRateAddOn().calculate_with_breakdown(trades, _ns(trades))
+    assert total == pytest.approx(347, rel=0.05)
+    assert {"IR:USD", "IR:EUR"} <= set(bd) and is_close(sum(bd.values()), total)
+
+def test_credit_addon_matches_basel_example2():
+    trades = [
+        SACCRTrade("CR1", AssetClass.CREDIT, 10_000, 20, reference_entity="A",
+                   credit_rating=CreditRating.AA, start_date=0, end_date=3, maturity=3,
+                   position=Position.LONG),
+        SACCRTrade("CR2", AssetClass.CREDIT, 10_000, -40, reference_entity="B",
+                   credit_rating=CreditRating.BBB, start_date=0, end_date=6, maturity=6,
+                   position=Position.SHORT),
+        SACCRTrade("CR3", AssetClass.CREDIT, 10_000, 0, reference_entity="CDX.IG",
+                   is_index=True, index_grade=IndexGrade.IG, start_date=0, end_date=5,
+                   maturity=5, position=Position.LONG),
+    ]
+    total, _ = CreditAddOn().calculate_with_breakdown(trades, _ns(trades))
+    assert total == pytest.approx(282, rel=0.05)
+
+def test_commodity_addon_matches_basel_example3():
+    trades = [
+        SACCRTrade("C1", AssetClass.COMMODITY, 10_000, -50, commodity_type=CommodityType.CRUDE_OIL,
+                   start_date=0, end_date=0.75, maturity=0.75, position=Position.LONG),
+        SACCRTrade("C2", AssetClass.COMMODITY, 20_000, -30, commodity_type=CommodityType.CRUDE_OIL,
+                   start_date=0, end_date=2, maturity=2, position=Position.SHORT),
+        SACCRTrade("C3", AssetClass.COMMODITY, 10_000, 100, commodity_type=CommodityType.SILVER,
+                   start_date=0, end_date=5, maturity=5, position=Position.LONG),
+    ]
+    total, bd = CommodityAddOn().calculate_with_breakdown(trades, _ns(trades))
+    assert total == pytest.approx(3841, rel=0.05)
+    assert bd["COMMODITY:ENERGY"] == pytest.approx(2041, rel=0.05)
+    assert bd["COMMODITY:METALS"] == pytest.approx(1800, rel=0.05)
+
+def test_equity_single_name_addon_sign_and_sf():
+    t = SACCRTrade("EQ", AssetClass.EQUITY, 10_000, 0, reference_entity="AAPL",
+                   start_date=0, end_date=1, maturity=1, position=Position.LONG)
+    total, bd = EquityAddOn().calculate_with_breakdown([t], _ns([t]))
+    # single-name SF=0.32, MF=1 (1y), delta=+1, adj notional=10_000 -> addon ~ 0.32*10_000
+    assert total == pytest.approx(0.32 * 10_000, rel=0.05) and "EQUITY" in bd
+
+def test_commodity_unknown_type_rejected_via_supervisory_lookup():
+    # CommodityType is a closed, fully-mapped enum, so an "unknown type" cannot be built
+    # through SACCRTrade. Test the upgrade at the parameter boundary instead: the getter
+    # must raise on a missing commodity_type rather than silently bucketing to OTHER.
+    with pytest.raises(ValidationError):
+        SP.get_supervisory_factor(AssetClass.COMMODITY, commodity_type=None)
 ```
-  (Add one analogous test for commodity unknown-type rejection raising `ValidationError`.)
-- [ ] **Step 3:** Run; PASS. **Commit** `git commit -am "feat(saccr): per-asset-class add-ons"`
+- [ ] **Step 3:** Run; PASS. **Commit** `git add -A && git commit -m "feat(saccr): per-asset-class add-ons"`
 
 ---
 
@@ -427,7 +496,7 @@ def test_ir_addon_partial_offset_breakdown():
   `ead_capped: bool`, `rc`, `pfe`, `multiplier`, `alpha`, `addon_aggregate`,
   `addon_by_asset_class: dict[str,float]`, `addon_by_hedging_set: dict[str,float]`,
   `v`, `c`, `nica`, `is_margined: bool`.
-- [ ] **Step 2: Commit** `git commit -am "feat(saccr): SACCRResult decomposition"`
+- [ ] **Step 2: Commit** `git add -A && git commit -m "feat(saccr): SACCRResult decomposition"`
 
 ### Task 11: `calculator.py` (`SACCRCalculator`)
 
@@ -440,14 +509,32 @@ def test_ir_addon_partial_offset_breakdown():
   - `addon_calculators` keyed by `AssetClass` → the new add-on classes.
   - Build `addon_by_asset_class` and `addon_by_hedging_set` via
     `calculate_with_breakdown`; aggregate.
-  - For margined sets compute `ead_uncapped` via the documented unmargined recomputation;
-    set `ead = min(ead_margined, ead_unmargined)`, `ead_capped = ead < ead_margined`.
-  - For unmargined sets, `ead_uncapped == ead`, `ead_capped = False`.
+  - **Explicit cap/result decomposition (no ambiguity):** the result's `rc`, `pfe`,
+    `multiplier`, `addon_aggregate`, `addon_by_asset_class`, `addon_by_hedging_set` ALWAYS
+    correspond to the **primary path** (margined path for margined sets; unmargined path
+    otherwise). The cap only affects the final scalar `ead`. Concretely:
+    ```python
+    ead_primary = alpha * (rc + pfe)                 # rc/pfe from the primary path
+    if netting_set.is_margined:
+        # recompute an unmargined twin (RC=max(V-C,0); add-ons with
+        # maturity_factor_unmargined(trade.maturity)); same V, C, multiplier formula)
+        ead_unmargined_cap = alpha * (rc_unmargined + pfe_unmargined)
+        ead = min(ead_primary, ead_unmargined_cap)
+        ead_uncapped = ead_primary                    # margined EAD BEFORE the cap
+        ead_capped = ead_unmargined_cap < ead_primary
+    else:
+        ead = ead_uncapped = ead_primary
+        ead_capped = False
+    ```
   - Populate all `SACCRResult` fields including `alpha=SupervisoryParameters.ALPHA`,
     `nica=netting_set.nica`.
-- [ ] **Step 2: Failing test** (Example 1 smoke through the orchestrator):
+- [ ] **Step 2: Failing test** (Example 1 smoke through the orchestrator). NOTE: imports come
+  from INTERNAL modules so this task does not depend on Task 12's public exports:
 ```python
-from quantark.saccr import SACCRCalculator, SACCRTrade, SACCRNettingSet, AssetClass, Position
+from quantark.saccr.calculator import SACCRCalculator
+from quantark.saccr.models.trade import SACCRTrade
+from quantark.saccr.models.netting_set import SACCRNettingSet
+from quantark.saccr.models.enums import AssetClass, Position
 def test_calculator_example1_smoke():
     ns = SACCRNettingSet("E1", [
         SACCRTrade("IR1", AssetClass.INTEREST_RATE, 10_000, 30, currency="USD",
@@ -456,9 +543,10 @@ def test_calculator_example1_smoke():
     r = SACCRCalculator().calculate(ns)
     assert r.alpha == 1.4 and r.is_margined is False and r.ead_capped is False
     assert "IR:USD" in r.addon_by_hedging_set
+    assert r.ead_uncapped == r.ead     # unmargined: no cap applied
 ```
-- [ ] **Step 3:** Run; PASS (depends on Task 12 exports). **Commit**
-  `git commit -am "feat(saccr): SACCRCalculator orchestrator with cap + breakdowns"`
+- [ ] **Step 3:** Run; PASS (uses internal imports only — independent of Task 12). **Commit**
+  `git add -A && git commit -m "feat(saccr): SACCRCalculator orchestrator with cap + breakdowns"`
 
 ### Task 12: Public API (`__init__.py`)
 
@@ -479,7 +567,7 @@ def test_public_api_surface():
         assert hasattr(m, name), name
     assert set(m.__all__) >= {"SACCRCalculator","SACCRTrade","SACCRNettingSet"}
 ```
-- [ ] **Step 3:** Run; PASS. **Commit** `git commit -am "feat(saccr): public API + __all__"`
+- [ ] **Step 3:** Run; PASS. **Commit** `git add -A && git commit -m "feat(saccr): public API + __all__"`
 
 ---
 
@@ -499,7 +587,7 @@ def test_public_api_surface():
   (EAD ≈ 569 / 381 / 5406 / 936 / 1879). If the scipy-CDF change shifts a value beyond
   tolerance, investigate (must not happen given tolerances) — do NOT loosen tolerances
   without justification.
-- [ ] **Step 3: Commit** `git commit -am "test(saccr): port 5 Basel Annex 4a examples"`
+- [ ] **Step 3: Commit** `git add -A && git commit -m "test(saccr): port 5 Basel Annex 4a examples"`
 
 ### Task 14: Methodology doc + module CLAUDE.md + root registration
 
@@ -514,7 +602,7 @@ def test_public_api_surface():
   versioning, the scipy-CDF note, deferred portfolio-adapter note, and the test command.
 - [ ] **Step 3:** Add to root `CLAUDE.md` supporting-modules table:
   `| SA-CCR | quantark/saccr/ | Basel SA-CCR counterparty EAD (RC+PFE); see saccr/CLAUDE.md |`
-- [ ] **Step 4: Commit** `git commit -am "docs(saccr): methodology doc, module + root CLAUDE.md"`
+- [ ] **Step 4: Commit** `git add -A && git commit -m "docs(saccr): methodology doc, module + root CLAUDE.md"`
 
 ### Task 15: Example script
 
@@ -527,7 +615,7 @@ def test_public_api_surface():
   `quantark.util.numerical.format_currency` where appropriate.
 - [ ] **Step 2:** Run `PYTHONPATH=$PWD <venv>/bin/python example/saccr_demo.py`; expect
   it prints EAD ≈ 569 and a hedging-set breakdown, exit 0.
-- [ ] **Step 3: Commit** `git commit -am "docs(saccr): runnable example/saccr_demo.py"`
+- [ ] **Step 3: Commit** `git add -A && git commit -m "docs(saccr): runnable example/saccr_demo.py"`
 
 ---
 
@@ -541,7 +629,7 @@ def test_public_api_surface():
 - [ ] **Step 2:** Grep for convention violations in `quantark/saccr/`:
   `grep -rnE "\bmath\.(log|exp|sqrt)\b|raise ValueError|from saccr|import saccr" quantark/saccr` → expect **no matches**.
 - [ ] **Step 3:** Confirm `example/saccr_demo.py` runs clean.
-- [ ] **Step 4: Commit** any cleanup `git commit -am "chore(saccr): final verification sweep"`
+- [ ] **Step 4: Commit** any cleanup `git add -A && git commit -m "chore(saccr): final verification sweep"`
 
 ---
 
