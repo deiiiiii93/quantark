@@ -70,17 +70,18 @@ class ForwardFPADI:
         except RuntimeError as exc:                      # singular factor -> refine grid, never clamp
             raise NumericalError(f"forward FP factorization failed: {exc}")
 
-    def step(self, f, L, dt, implicit=False, theta=0.5):
+    def step(self, f, L, dt, implicit=False, theta=0.5, b=None):
         """Advance the density one step.
 
         ``implicit=True`` does a fully-coupled backward-Euler solve (unconditionally stable; used
         for the Rannacher start-up to damp the singular Dirac). Otherwise a Craig-Sneyd ADI step:
         explicit predictor + two directional implicit correctors (each subtracting that direction's
         explicit contribution already in the predictor) + the mixed-term correction. Mirrors the
-        backward SLV PDE _cs_step.
+        backward SLV PDE _cs_step. ``b`` overrides the cost-of-carry for this step (per-step forwards).
         """
         L = np.asarray(L, float)
-        Ax, Az, Axz = build_directional_operators(self.x, self.z, L, self.params, self.eta, self.b)
+        b_eff = self.b if b is None else float(b)
+        Ax, Az, Axz = build_directional_operators(self.x, self.z, L, self.params, self.eta, b_eff)
         if implicit:
             out = self._splu(self._I - dt * (Ax + Az + Axz)).solve(f)
         else:
