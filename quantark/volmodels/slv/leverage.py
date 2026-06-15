@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Mapping, Optional
 
 import numpy as np
 
@@ -101,6 +102,7 @@ class LeverageSurface:
     time_grid: np.ndarray
     strike_grid: np.ndarray
     leverage_grid: np.ndarray  # shape (nT, nK)
+    diagnostics: Optional[Mapping[str, Any]] = None   # FFP fills this; MC-binning leaves None
 
     def __post_init__(self) -> None:
         self.time_grid = np.asarray(self.time_grid, dtype=float)
