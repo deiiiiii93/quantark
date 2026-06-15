@@ -444,6 +444,11 @@ class BaseVolModelRiskCalculator:
                 strike_span_stds=spec.strike_span_stds,
             )
         if spec.method is LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK:
+            # honor the spec's exposed n_strike_nodes when no explicit fp_config is supplied
+            fp_config = spec.fp_config
+            if fp_config is None:
+                from quantark.volmodels.slv.fokkerplanck.config import FpCalibrationConfig
+                fp_config = FpCalibrationConfig(n_strike_nodes=spec.n_strike_nodes)
             return calibrate_leverage_surface(
                 spot,
                 params,
@@ -453,7 +458,7 @@ class BaseVolModelRiskCalculator:
                 carry_fwd,
                 eta=eta,
                 method=LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK,
-                fp_config=spec.fp_config,
+                fp_config=fp_config,
             )
         raise ValidationError(f"unsupported leverage calibration method: {spec.method}")
 

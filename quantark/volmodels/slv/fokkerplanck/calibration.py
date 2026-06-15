@@ -46,7 +46,7 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
                                       step_dt=dt, config=config, vbar2=vbar2, b_steps=b_steps)
 
     S_nodes = np.exp(solver.x)
-    rows, mass_res, n_blend, n_clip = [], [], 0, 0
+    rows, mass_res, n_blend, n_clip, max_neg = [], [], 0, 0, 0.0
     f = solver.seed_dirac(s0, params.v0)
     for n in range(dt.size):
         t = record_times[n]
@@ -62,17 +62,25 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
         mass_res.append(diag["mass_residual"])
         n_blend += diag["n_tail_blended"]
         n_clip += diag["n_clipped"]
-        f = solver.step(f, L, dt[n], implicit=(n < config.rannacher_steps), b=float(rf[n] - cf[n]))
+        # Backward-Euler march: L-stable and positivity-near-preserving. The ADI/Craig-Sneyd variant
+        # is von-Neumann-unstable for this Dirac-seeded correlated forward density (negative mass
+        # grows under time refinement), so calibration uses the fully-coupled implicit solve.
+        f = solver.step(f, L, dt[n], implicit=True, b=float(rf[n] - cf[n]))
         m = solver.total_mass(f)
+        neg = float(solver.w @ np.maximum(-f, 0.0))
+        max_neg = max(max_neg, neg)
         if abs(m - 1.0) > config.mass_tol:
             raise NumericalError(f"FP density lost mass {m:.6f} at t={t_nodes[n + 1]:.4f} "
                                  f"(refine grid / extents)")
+        if neg > config.tol_neg:                          # also covers the terminal step (no read-off after)
+            raise NumericalError(f"FP negative probability mass {neg:.4f} at t={t_nodes[n + 1]:.4f} "
+                                 f"> tol_neg {config.tol_neg:.2f} (refine grid / steps)")
 
     sel = np.unique(np.linspace(0, solver.x.size - 1, config.n_strike_nodes).round().astype(int))
     strike_grid = S_nodes[sel]
     leverage_grid = np.vstack([row[sel] for row in rows])
     diagnostics = {"mass_residual": mass_res, "n_tail_blended": n_blend, "n_clipped": n_clip,
-                   "method": "forward_fokker_planck"}
+                   "max_negative_mass": max_neg, "method": "forward_fokker_planck"}
     return LeverageSurface(time_grid=record_times, strike_grid=strike_grid,
                            leverage_grid=leverage_grid, diagnostics=diagnostics)
 

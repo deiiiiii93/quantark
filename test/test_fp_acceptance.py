@@ -70,6 +70,21 @@ def test_ffp_mass_conserved_under_feller_violation():
     assert max(lev.diagnostics["mass_residual"]) < 1e-3   # mass conserved every slice
 
 
+def test_ffp_stable_under_time_refinement_and_high_correlation():
+    # backward-Euler march must NOT blow up with more steps or stronger rho (the ADI variant did:
+    # negative mass grew to 1e7+). Negative mass stays tiny and bounded across refinement.
+    p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
+    cfg = FpCalibrationConfig(n_x=161, n_z=101)
+    prev = None
+    for n in (40, 100):
+        lev = _calibrate(_surface(), p, n=n, fp_config=cfg)
+        neg = lev.diagnostics["max_negative_mass"]
+        assert neg < 1e-3                                  # tiny, not the 1e7 of the unstable ADI
+        if prev is not None:
+            assert neg < 10 * prev                         # bounded under refinement (no blow-up)
+        prev = neg
+
+
 def test_ffp_agrees_with_mc_binning_core():
     from quantark.util.enum.engine_enums import LeverageCalibrationMethod
     p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
