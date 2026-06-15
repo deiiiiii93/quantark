@@ -148,7 +148,7 @@ def price_european_slv_mc(
     return price
 
 
-def calibrate_leverage_surface(
+def _calibrate_mc_binning(
     s0: float, params: HestonParams, lv_surface,
     step_dt: np.ndarray, r_fwd: np.ndarray, carry_fwd: np.ndarray,
     eta: float = 1.0, num_paths: int = 50_000, num_bins: int = 20,
@@ -174,3 +174,31 @@ def calibrate_leverage_surface(
     record_times = np.concatenate([[0.0], np.cumsum(dt)])[:-1]  # t_0 .. t_{M-1}
     leverage_grid = np.vstack(records)
     return LeverageSurface(time_grid=record_times, strike_grid=strike_grid, leverage_grid=leverage_grid)
+
+
+def calibrate_leverage_surface(
+    s0, params, lv_surface, step_dt, r_fwd, carry_fwd, eta=1.0,
+    method=None, fp_config=None, **mc_kwargs,
+):
+    """Dispatch leverage calibration. Default: forward Fokker-Planck (deterministic).
+
+    MC-binning is retained as an independent cross-check (method=MC_BINNING). Method-specific
+    options are validated, never silently dropped: stray MC kwargs raise under FFP, and a stray
+    fp_config raises under MC_BINNING.
+    """
+    from quantark.util.enum.engine_enums import LeverageCalibrationMethod
+    if method is None:
+        method = LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK
+    if method is LeverageCalibrationMethod.MC_BINNING:
+        if fp_config is not None:
+            raise ValidationError("fp_config is not valid for MC_BINNING")
+        return _calibrate_mc_binning(s0, params, lv_surface, step_dt, r_fwd, carry_fwd,
+                                     eta=eta, **mc_kwargs)
+    if method is LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK:
+        if mc_kwargs:
+            raise ValidationError(
+                f"MC options {sorted(mc_kwargs)} are not valid for FORWARD_FOKKER_PLANCK")
+        from quantark.volmodels.slv.fokkerplanck.calibration import calibrate_leverage_surface_fp
+        return calibrate_leverage_surface_fp(s0, params, lv_surface, step_dt, r_fwd, carry_fwd,
+                                             eta=eta, config=fp_config)
+    raise ValidationError("UNCONDITIONAL_MEAN is not a calibration method")

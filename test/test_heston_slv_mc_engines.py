@@ -60,9 +60,11 @@ def test_equity_slv_engine_accepts_precomputed_leverage_surface():
     M = 50
     dt = np.full(M, 1.0 / M)
     from quantark.volmodels.slv import calibrate_leverage_surface
+    from quantark.util.enum.engine_enums import LeverageCalibrationMethod
 
     leverage = calibrate_leverage_surface(
         100.0, P, lv, dt, np.zeros(M), np.zeros(M),
+        method=LeverageCalibrationMethod.MC_BINNING,
         num_paths=20_000, num_bins=20, seed=5,
     )
     engine = HestonSLVMCEngine(

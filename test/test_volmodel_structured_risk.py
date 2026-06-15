@@ -30,6 +30,7 @@ from quantark.volmodels.risk import (
     SurfaceBump,
 )
 from quantark.volmodels.slv import calibrate_leverage_surface
+from quantark.util.enum.engine_enums import LeverageCalibrationMethod
 
 
 P = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.3, rho=-0.5)
@@ -161,6 +162,7 @@ def _slv_pde():
         np.full(steps, 1.0 / steps),
         np.full(steps, 0.02),
         np.full(steps, 0.01),
+        method=LeverageCalibrationMethod.MC_BINNING,
         num_paths=12_000,
         num_bins=15,
         seed=5,

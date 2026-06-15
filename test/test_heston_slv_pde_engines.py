@@ -15,6 +15,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import build_dupire_local_vol
 from quantark.volmodels.slv import calibrate_leverage_surface
+from quantark.util.enum.engine_enums import LeverageCalibrationMethod
 
 P = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.2, rho=-0.5)
 
@@ -29,6 +30,7 @@ def _lev(spot, rate_curve, div, rd_carry=0.0):
     rf = np.full(M, rd_carry)
     cf = np.zeros(M)
     return calibrate_leverage_surface(spot, P, lv, dt, rf, cf, eta=1.0,
+                                      method=LeverageCalibrationMethod.MC_BINNING,
                                       num_paths=40_000, num_bins=20, seed=5)
 
 

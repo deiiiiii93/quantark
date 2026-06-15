@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from quantark.param import GridVolSurface, FlatRateCurve
-from quantark.util.enum.engine_enums import ADIScheme
+from quantark.util.enum.engine_enums import ADIScheme, LeverageCalibrationMethod
 from quantark.util.exceptions import ValidationError, NumericalError
 from quantark.volmodels.black_scholes import bs_call_price
 from quantark.volmodels.localvol import build_dupire_local_vol
@@ -42,6 +42,7 @@ def test_slv_pde_consumes_mc_calibrated_leverage_reprices_vanilla():
     lv = _flat_lv(0.2)
     dt, rf, cf = _const(1.0, 60, 0.0, 0.0)
     lev = calibrate_leverage_surface(100.0, P, lv, dt, rf, cf, eta=1.0,
+                                     method=LeverageCalibrationMethod.MC_BINNING,
                                      num_paths=60_000, num_bins=20, seed=5)
     price = price_european_slv_pde(100.0, 100.0, True, 1.0, P, lev, r=0.0, carry=0.0,
                                    eta=1.0, n_x=220, n_v=90, n_t=100)

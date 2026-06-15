@@ -7,6 +7,9 @@ from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.slv import (
     BinMethod, LeverageSurface, calibrate_leverage_surface, price_european_slv_mc,
 )
+from quantark.util.enum.engine_enums import LeverageCalibrationMethod
+
+_MC = LeverageCalibrationMethod.MC_BINNING
 
 
 def _flat_lv_surface(vol=0.2):
@@ -55,7 +58,7 @@ def test_calibrate_leverage_surface_flat_is_near_one_over_sqrt_v():
     lv = _flat_lv_surface(0.2)
     p_feller = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.2, rho=-0.5)
     dt, rf, cf = _const(1.0, 80, 0.0, 0.0)
-    surf = calibrate_leverage_surface(100.0, p_feller, lv, dt, rf, cf, eta=1.0,
+    surf = calibrate_leverage_surface(100.0, p_feller, lv, dt, rf, cf, eta=1.0, method=_MC,
                                       num_paths=60_000, num_bins=20, seed=5)
     assert isinstance(surf, LeverageSurface)
     L_atm = float(surf.leverage(100.0, 0.5))
@@ -74,7 +77,7 @@ def test_slv_mc_accepts_precomputed_leverage_surface_deterministically():
     lv = _flat_lv_surface(0.2)
     dt, rf, cf = _const(1.0, 60, 0.0, 0.0)
     leverage = calibrate_leverage_surface(
-        100.0, P, lv, dt, rf, cf, eta=1.0, num_paths=30_000, num_bins=20, seed=5,
+        100.0, P, lv, dt, rf, cf, eta=1.0, method=_MC, num_paths=30_000, num_bins=20, seed=5,
     )
     kwargs = dict(
         s0=100.0,
