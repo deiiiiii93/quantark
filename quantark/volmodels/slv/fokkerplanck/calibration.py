@@ -25,21 +25,25 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
     dt, rf, cf = _validate_common(s0, s0, step_dt, r_fwd, carry_fwd, num_paths=2, num_bins=2, eta=eta)
     if config.rannacher_steps > dt.size:
         raise ValidationError("rannacher_steps must be <= number of time steps")
-    if params.v0 <= config.v_floor or params.theta <= config.v_floor:
-        raise ValidationError("FFP requires v0, theta > v_floor")
+    if params.v0 <= 0.0:
+        raise ValidationError("FFP requires v0 > 0")
     t_nodes = np.concatenate([[0.0], np.cumsum(dt)])
     record_times = t_nodes[:-1]                            # t_0 .. t_{M-1}
 
     sig_eff = eta * params.sigma
     if sig_eff == 0.0:                                     # exact deterministic-variance branch (no PDE)
         return _deterministic_surface(s0, params, lv_surface, record_times, config)
+    # stochastic-path requirements (log-variance grid + positive stationary exponent)
     if params.kappa <= 0:
         raise ValidationError("stochastic FFP requires kappa > 0")
+    if params.theta <= config.v_floor or params.v0 <= config.v_floor:
+        raise ValidationError("stochastic FFP requires v0, theta > v_floor")
 
     sup_lv2 = float(np.max(lv_surface.lv_grid) ** 2)
     vbar2 = max(params.v0, params.theta, sup_lv2)
-    solver = ForwardFPADI.from_config(s0, params, eta, b=float(np.mean(rf - cf)),
-                                      step_dt=dt, config=config, vbar2=vbar2)
+    b_steps = rf - cf
+    solver = ForwardFPADI.from_config(s0, params, eta, b=float(np.mean(b_steps)),
+                                      step_dt=dt, config=config, vbar2=vbar2, b_steps=b_steps)
 
     S_nodes = np.exp(solver.x)
     rows, mass_res, n_blend, n_clip = [], [], 0, 0

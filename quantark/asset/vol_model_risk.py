@@ -443,17 +443,19 @@ class BaseVolModelRiskCalculator:
                 n_strike_nodes=spec.n_strike_nodes,
                 strike_span_stds=spec.strike_span_stds,
             )
-        return calibrate_leverage_surface(
-            spot,
-            params,
-            local_vol,
-            np.diff(t_grid),
-            r_fwd,
-            carry_fwd,
-            eta=eta,
-            method=LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK,
-            fp_config=spec.fp_config,
-        )
+        if spec.method is LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK:
+            return calibrate_leverage_surface(
+                spot,
+                params,
+                local_vol,
+                np.diff(t_grid),
+                r_fwd,
+                carry_fwd,
+                eta=eta,
+                method=LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK,
+                fp_config=spec.fp_config,
+            )
+        raise ValidationError(f"unsupported leverage calibration method: {spec.method}")
 
     def _local_market_vega(
         self, product, env, engine, request: MarketVegaRequest

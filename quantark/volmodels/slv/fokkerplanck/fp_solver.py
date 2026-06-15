@@ -31,7 +31,9 @@ class ForwardFPADI:
 
     @classmethod
     def from_config(cls, s0, params: HestonParams, eta, b, step_dt,
-                    config: FpCalibrationConfig, vbar2: float = None):
+                    config: FpCalibrationConfig, vbar2: float = None, b_steps=None):
+        """Build grids/weights from config. ``b`` is the scalar carry stored as the step default;
+        ``b_steps`` (per-step cost-of-carry) sizes the x-extent drift envelope when forwards vary."""
         sig_eff2 = (eta * params.sigma) ** 2
         if sig_eff2 <= 0:
             raise ValidationError("ForwardFPADI requires eta*sigma > 0")
@@ -42,7 +44,8 @@ class ForwardFPADI:
                               config.z_concentration)
         if vbar2 is None:
             vbar2 = max(params.v0, params.theta)
-        b_fwd = np.full(step_dt.size, b - 0.5 * vbar2)   # forward log-drift envelope
+        carry = np.full(step_dt.size, b) if b_steps is None else np.asarray(b_steps, float)
+        b_fwd = carry - 0.5 * vbar2                      # per-step forward log-drift envelope
         x_min, x_max = x_extents(s0, b_fwd, step_dt, vbar2, config.x_span_stds)
         x = concentrated_grid(x_min, x_max, np.log(s0), config.n_x, config.x_concentration)
         return cls(x, z, params, eta, b, config)
