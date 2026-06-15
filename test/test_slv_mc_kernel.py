@@ -68,3 +68,31 @@ def test_slv_validation():
     dt, rf, cf = _const(1.0, 10, 0.0, 0.0)
     with pytest.raises(ValidationError):
         price_european_slv_mc(-1.0, 100.0, True, P, lv, dt, rf, cf, disc_factor=1.0, num_paths=100)
+
+
+def test_slv_mc_accepts_precomputed_leverage_surface_deterministically():
+    lv = _flat_lv_surface(0.2)
+    dt, rf, cf = _const(1.0, 60, 0.0, 0.0)
+    leverage = calibrate_leverage_surface(
+        100.0, P, lv, dt, rf, cf, eta=1.0, num_paths=30_000, num_bins=20, seed=5,
+    )
+    kwargs = dict(
+        s0=100.0,
+        strike=100.0,
+        is_call=True,
+        params=P,
+        lv_surface=lv,
+        step_dt=dt,
+        r_fwd=rf,
+        carry_fwd=cf,
+        disc_factor=1.0,
+        eta=1.0,
+        num_paths=30_000,
+        num_bins=20,
+        seed=11,
+        leverage_surface=leverage,
+    )
+    first = price_european_slv_mc(**kwargs)
+    second = price_european_slv_mc(**kwargs)
+    assert first == pytest.approx(second, abs=0.0)
+    assert first > 0.0

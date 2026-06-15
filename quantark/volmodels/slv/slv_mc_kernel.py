@@ -28,7 +28,8 @@ _KMIN = 1e-8
 
 
 def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
-                  num_paths, num_bins, bin_method, rng, record_grid=None):
+                  num_paths, num_bins, bin_method, rng, record_grid=None,
+                  leverage_surface=None):
     """Full-truncation log-Euler SLV with a shared correlated Brownian.
 
     Variance and the rho-correlated part of spot are driven by the SAME Brownian dW_v,
@@ -55,19 +56,27 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
         drift_i = r_fwd[i] - carry_fwd[i]
         S = np.exp(log_s)
 
-        boundaries, bin_means = bin_conditional(S, v, num_bins, bin_method)
-        econd = np.maximum(eval_binned(S, boundaries, bin_means), _KMIN)
-        sigma_lv = np.asarray(lv_surface.local_vol(S, t), dtype=float)
-        sigma_hat2 = np.clip(sigma_lv * sigma_lv / econd, 1e-8, 10.0)
-        sigma_hat = np.sqrt(sigma_hat2)
+        if leverage_surface is None:
+            boundaries, bin_means = bin_conditional(S, v, num_bins, bin_method)
+            econd = np.maximum(eval_binned(S, boundaries, bin_means), _KMIN)
+            sigma_lv = np.asarray(lv_surface.local_vol(S, t), dtype=float)
+            sigma_hat2 = np.clip(sigma_lv * sigma_lv / econd, 1e-8, 10.0)
+            sigma_hat = np.sqrt(sigma_hat2)
 
-        if record_grid is not None:
-            econd_nodes = np.maximum(eval_binned(record_grid, boundaries, bin_means), _KMIN)
-            lv_nodes = np.asarray(lv_surface.local_vol(record_grid, t), dtype=float)
-            # Same clip as the in-simulation sigma_hat^2 so the recorded leverage matches
-            # the effective leverage the MC used (consumed identically by the backward PDE).
-            sigma_hat2_nodes = np.clip(lv_nodes * lv_nodes / econd_nodes, 1e-8, 10.0)
-            records.append(np.sqrt(sigma_hat2_nodes))
+            if record_grid is not None:
+                econd_nodes = np.maximum(eval_binned(record_grid, boundaries, bin_means), _KMIN)
+                lv_nodes = np.asarray(lv_surface.local_vol(record_grid, t), dtype=float)
+                # Same clip as the in-simulation sigma_hat^2 so the recorded leverage matches
+                # the effective leverage the MC used (consumed identically by the backward PDE).
+                sigma_hat2_nodes = np.clip(lv_nodes * lv_nodes / econd_nodes, 1e-8, 10.0)
+                records.append(np.sqrt(sigma_hat2_nodes))
+        else:
+            sigma_hat = np.asarray(leverage_surface.leverage(S, t), dtype=float)
+            sigma_hat2 = sigma_hat * sigma_hat
+            if not np.all(np.isfinite(sigma_hat2)):
+                raise ValidationError("precomputed leverage returned non-finite values")
+            if record_grid is not None:
+                records.append(np.asarray(leverage_surface.leverage(record_grid, t), dtype=float))
 
         v_plus = np.maximum(v, 0.0)
         sqrt_vp = np.sqrt(v_plus)
@@ -111,15 +120,23 @@ def price_european_slv_mc(
     step_dt: np.ndarray, r_fwd: np.ndarray, carry_fwd: np.ndarray, disc_factor: float,
     eta: float = 1.0, num_paths: int = 50_000, num_bins: int = 20,
     bin_method: BinMethod = BinMethod.EQUAL_WEIGHTED, seed: Optional[int] = 42,
-    return_stderr: bool = False,
+    return_stderr: bool = False, leverage_surface: Optional[LeverageSurface] = None,
 ) -> Union[float, Tuple[float, float]]:
-    """Price a European vanilla under Heston SLV via Monte Carlo (on-the-fly leverage)."""
+    """Price a European vanilla under Heston SLV via MC.
+
+    Leverage is calibrated on-the-fly by default. Supplying ``leverage_surface`` uses
+    that precomputed artifact directly, which is required for reproducible structured
+    model risk under frozen/recalibrated leverage conventions.
+    """
     dt, rf, cf = _validate_common(s0, strike, step_dt, r_fwd, carry_fwd, num_paths, num_bins, eta)
     if not np.isfinite(disc_factor) or disc_factor <= 0:
         raise ValidationError("disc_factor must be finite and positive")
+    if leverage_surface is not None and not isinstance(leverage_surface, LeverageSurface):
+        raise ValidationError("leverage_surface must be a LeverageSurface when provided")
     rng = np.random.default_rng(seed)
     s_terminal, _ = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
-                                  num_paths, num_bins, bin_method, rng)
+                                  num_paths, num_bins, bin_method, rng,
+                                  leverage_surface=leverage_surface)
     if not np.all(np.isfinite(s_terminal)):
         from quantark.util.exceptions import NumericalError
         raise NumericalError("SLV MC produced non-finite terminal spots")

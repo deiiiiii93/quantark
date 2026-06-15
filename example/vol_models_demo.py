@@ -27,12 +27,15 @@ from quantark.asset.equity.engine.pde import (
     LocalVolPDESolver, HestonPDESolver, HestonSLVPDESolver,
 )
 from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.riskmeasures import VolModelRiskCalculator
 
 from quantark.asset.fx.product.option.fx_vanilla_option import FxVanillaOption
 from quantark.asset.fx.engine.analytical import GarmanKohlhagenEngine, FxHestonAnalyticalEngine
+from quantark.asset.fx.riskmeasures import FxVolModelRiskCalculator
 
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import build_dupire_local_vol
+from quantark.volmodels.risk import ModelRiskRequest, SlvLeverageRiskMode, SurfaceBump
 from quantark.volmodels.slv import calibrate_leverage_surface
 
 HESTON = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
@@ -68,7 +71,32 @@ def equity_demo():
     carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
     lev = calibrate_leverage_surface(100.0, HESTON, lv, np.diff(t_grid), r_fwd, carry_fwd,
                                      eta=1.0, num_paths=40_000, num_bins=20, seed=1)
-    print(f"  SLV  PDE (calib leverage): {HestonSLVPDESolver(HESTON, lev, eta=1.0, n_x=180, n_v=70, n_t=70).price(opt, env):.4f}")
+    slv_pde = HestonSLVPDESolver(HESTON, lev, eta=1.0, n_x=180, n_v=70, n_t=70)
+    print(f"  SLV  PDE (calib leverage): {slv_pde.price(opt, env):.4f}")
+
+    # Scalar vega remains absent from calculate_greeks(). Structured risk is explicit.
+    risk = VolModelRiskCalculator()
+    heston_risk = risk.calculate_model_risk(
+        opt, env, he, ModelRiskRequest(parameter_names=("v0", "rho"), surface_bumps=()),
+    )
+    print("  Heston model risk         : " + ", ".join(
+        f"{point.name}={point.derivative:.4f}" for point in heston_risk.successful_points
+    ))
+    local_market = risk.calculate_market_vega(
+        opt, env, LocalVolPDESolver(PDEParams(grid_size=180, time_steps=90)),
+    )
+    print(f"  Dupire market-IV vega     : {local_market.points[0].derivative:.4f}")
+    leverage_risk = risk.calculate_model_risk(
+        opt,
+        env,
+        slv_pde,
+        ModelRiskRequest(
+            parameter_names=(),
+            surface_bumps=(SurfaceBump.parallel(),),
+            slv_leverage_mode=SlvLeverageRiskMode.FROZEN,
+        ),
+    )
+    print(f"  SLV leverage parallel risk: {leverage_risk.points[0].derivative:.4f}")
 
 
 def fx_demo():
@@ -83,7 +111,14 @@ def fx_demo():
     opt = FxVanillaOption(strike=1.20, option_type=OptionType.CALL, maturity=1.0,
                           notional_foreign=1_000_000.0)
     print(f"  Garman-Kohlhagen (10%)   : {GarmanKohlhagenEngine().price(opt, env):,.2f}")
-    print(f"  FX Heston analytical     : {FxHestonAnalyticalEngine(HESTON).price(opt, env):,.2f}")
+    heston = FxHestonAnalyticalEngine(HESTON)
+    print(f"  FX Heston analytical     : {heston.price(opt, env):,.2f}")
+    risk = FxVolModelRiskCalculator().calculate_model_risk(
+        opt, env, heston, ModelRiskRequest(parameter_names=("v0", "rho"), surface_bumps=()),
+    )
+    print("  FX Heston model risk     : " + ", ".join(
+        f"{point.name}={point.derivative:,.2f}" for point in risk.successful_points
+    ))
 
 
 if __name__ == "__main__":

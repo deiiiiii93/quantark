@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple
+from typing import Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -38,8 +38,8 @@ class CalibrationResult:
 def calibrate_heston(
     s0: float,
     options: Sequence[MarketOption],
-    r: float,
-    carry: float,
+    r: Union[float, Callable[[float], float]],
+    carry: Union[float, Callable[[float], float]],
     initial: HestonParams,
     bounds: Tuple[
         Tuple[float, float, float, float, float],
@@ -51,6 +51,10 @@ def calibrate_heston(
     target: str = "price",
     regularize_feller: float = 1e-4,
     method: str = "gatheral",
+    max_nfev: int = 200,
+    xtol: float = 1e-6,
+    ftol: float = 1e-6,
+    gtol: float = 1e-6,
 ) -> CalibrationResult:
     """Calibrate (v0, kappa, theta, sigma, rho) to market options via least squares.
 
@@ -60,6 +64,7 @@ def calibrate_heston(
         bounds: (lower, upper) parameter bounds. target: "price" or "iv".
         regularize_feller: weight of the max(0, sigma^2 - 2 kappa theta) penalty.
         method: analytical CF method used inside the objective.
+        max_nfev, xtol, ftol, gtol: least-squares solver controls.
     """
     if target not in ("price", "iv"):
         raise ValidationError("target must be 'price' or 'iv'")
@@ -69,8 +74,17 @@ def calibrate_heston(
         raise ValidationError("regularize_feller must be finite and non-negative")
     if not (np.isfinite(s0) and s0 > 0):
         raise ValidationError("s0 must be finite and positive")
-    if not (np.isfinite(r) and np.isfinite(carry)):
-        raise ValidationError("r and carry must be finite")
+    def resolve(value, t: float, name: str) -> float:
+        resolved = value(t) if callable(value) else value
+        if not np.isfinite(resolved):
+            raise ValidationError(f"{name} must return finite values")
+        return float(resolved)
+
+    if max_nfev <= 0:
+        raise ValidationError("max_nfev must be positive")
+    for name, value in (("xtol", xtol), ("ftol", ftol), ("gtol", gtol)):
+        if not np.isfinite(value) or value <= 0:
+            raise ValidationError(f"{name} must be finite and positive")
     for opt in options:
         if opt.price is None and opt.iv is None:
             raise ValidationError("each MarketOption must set price or iv")
@@ -86,18 +100,24 @@ def calibrate_heston(
     Ks = np.array([opt.K for opt in options], dtype=float)
     Ts = np.array([opt.T for opt in options], dtype=float)
     w = np.array([opt.weight for opt in options], dtype=float)
+    rates = np.array([resolve(r, opt.T, "r") for opt in options], dtype=float)
+    carries = np.array([resolve(carry, opt.T, "carry") for opt in options], dtype=float)
 
     if target == "price":
         y = np.array([
             opt.price if opt.price is not None
-            else bs_call_price(s0, opt.K, opt.T, opt.iv if opt.iv is not None else 0.2, r, carry)
-            for opt in options
+            else bs_call_price(
+                s0, opt.K, opt.T, opt.iv if opt.iv is not None else 0.2, rate_i, carry_i
+            )
+            for opt, rate_i, carry_i in zip(options, rates, carries)
         ])
     else:
         y = np.array([
             opt.iv if opt.iv is not None
-            else implied_vol_call(s0, opt.K, opt.T, opt.price if opt.price is not None else 0.0, r, carry)
-            for opt in options
+            else implied_vol_call(
+                s0, opt.K, opt.T, opt.price if opt.price is not None else 0.0, rate_i, carry_i
+            )
+            for opt, rate_i, carry_i in zip(options, rates, carries)
         ])
 
     def unpack(x: np.ndarray) -> HestonParams:
@@ -111,11 +131,15 @@ def calibrate_heston(
     def residuals(x: np.ndarray) -> np.ndarray:
         p = unpack(x)
         if target == "price":
-            model = np.array([heston_call_price(s0, K, T, p, r, carry, method=method)
-                              for K, T in zip(Ks, Ts)])
+            model = np.array([
+                heston_call_price(s0, K, T, p, rate_i, carry_i, method=method)
+                for K, T, rate_i, carry_i in zip(Ks, Ts, rates, carries)
+            ])
         else:
-            model = np.array([heston_implied_vol(s0, K, T, p, r, carry, method=method)
-                              for K, T in zip(Ks, Ts)])
+            model = np.array([
+                heston_implied_vol(s0, K, T, p, rate_i, carry_i, method=method)
+                for K, T, rate_i, carry_i in zip(Ks, Ts, rates, carries)
+            ])
         res = (model - y) * np.sqrt(w)
         # Fixed-length residual: always append the penalty term when enabled (it is 0
         # when Feller is satisfied) so least_squares sees a constant dimension.
@@ -124,7 +148,15 @@ def calibrate_heston(
             res = np.concatenate([res, np.array([math.sqrt(regularize_feller) * feller_violation])])
         return res
 
-    res = least_squares(residuals, x0, bounds=(lower, upper), max_nfev=200,
-                        xtol=1e-6, ftol=1e-6, gtol=1e-6, verbose=0)
+    res = least_squares(
+        residuals,
+        x0,
+        bounds=(lower, upper),
+        max_nfev=max_nfev,
+        xtol=xtol,
+        ftol=ftol,
+        gtol=gtol,
+        verbose=0,
+    )
     return CalibrationResult(params=unpack(res.x), success=bool(res.success),
                              cost=float(res.cost), message=str(res.message), nfev=int(res.nfev))

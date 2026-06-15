@@ -18,7 +18,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.curves import forward_rates_on_grid
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface
-from quantark.volmodels.slv import BinMethod, price_european_slv_mc
+from quantark.volmodels.slv import BinMethod, LeverageSurface, price_european_slv_mc
 
 
 class FxHestonSLVMCEngine(BaseFxEngine):
@@ -31,19 +31,28 @@ class FxHestonSLVMCEngine(BaseFxEngine):
                  num_bins: int = 20, bin_method: BinMethod = BinMethod.EQUAL_WEIGHTED,
                  params: Optional[FxEngineParams] = None, num_paths: int = 60_000,
                  time_steps: int = 100, seed: int = 42,
-                 local_vol_surface: Optional[LocalVolSurface] = None):
+                 local_vol_surface: Optional[LocalVolSurface] = None,
+                 leverage_surface: Optional[LeverageSurface] = None):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams instance")
         if eta < 0:
             raise ValidationError("eta must be non-negative")
+        if leverage_surface is not None and not isinstance(leverage_surface, LeverageSurface):
+            raise ValidationError("leverage_surface must be a LeverageSurface when provided")
         super().__init__(params)
         self.model_params, self.eta = model_params, eta
         self.num_bins, self.bin_method = num_bins, bin_method
         self.num_paths, self.time_steps, self.seed = num_paths, time_steps, seed
         self._prebuilt = local_vol_surface
+        self._prebuilt_leverage = leverage_surface
 
     def _price_with_surface(self, product: BaseFxProduct, fx_env: FxPricingEnvironment,
                             lv: LocalVolSurface) -> float:
+        return self._price_with_artifacts(product, fx_env, lv, self._prebuilt_leverage)
+
+    def _price_with_artifacts(self, product: BaseFxProduct, fx_env: FxPricingEnvironment,
+                              lv: LocalVolSurface,
+                              leverage: Optional[LeverageSurface]) -> float:
         from quantark.asset.fx.product.option.fx_vanilla_option import FxVanillaOption
         if not isinstance(product, FxVanillaOption):
             raise PricingError("FxHestonSLVMCEngine supports FxVanillaOption only")
@@ -61,7 +70,7 @@ class FxHestonSLVMCEngine(BaseFxEngine):
             step_dt=np.diff(t_grid), r_fwd=r_fwd, carry_fwd=carry_fwd,
             disc_factor=float(fx_env.domestic_curve.get_discount_factor(T)), eta=self.eta,
             num_paths=self.num_paths, num_bins=self.num_bins, bin_method=self.bin_method,
-            seed=self.seed,
+            seed=self.seed, leverage_surface=leverage,
         )
         return fx_contract_value(product, fx_env, unit)
 

@@ -18,7 +18,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.curves import forward_carry_on_grid, forward_rates_on_grid
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
-from quantark.volmodels.slv import BinMethod, price_european_slv_mc
+from quantark.volmodels.slv import BinMethod, LeverageSurface, price_european_slv_mc
 
 
 class HestonSLVMCEngine(BaseEngine):
@@ -34,15 +34,19 @@ class HestonSLVMCEngine(BaseEngine):
     def __init__(self, model_params: HestonParams, eta: float = 1.0,
                  num_bins: int = 20, bin_method: BinMethod = BinMethod.EQUAL_WEIGHTED,
                  params: Optional[MCParams] = None,
-                 local_vol_surface: Optional[LocalVolSurface] = None):
+                 local_vol_surface: Optional[LocalVolSurface] = None,
+                 leverage_surface: Optional[LeverageSurface] = None):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams instance")
         if eta < 0:
             raise ValidationError("eta must be non-negative")
+        if leverage_surface is not None and not isinstance(leverage_surface, LeverageSurface):
+            raise ValidationError("leverage_surface must be a LeverageSurface when provided")
         super().__init__(params if params is not None else MCParams())
         self.model_params = model_params
         self.eta, self.num_bins, self.bin_method = eta, num_bins, bin_method
         self._prebuilt = local_vol_surface
+        self._prebuilt_leverage = leverage_surface
 
     def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
         if self._prebuilt is not None:
@@ -54,6 +58,11 @@ class HestonSLVMCEngine(BaseEngine):
 
     def _price_with_surface(self, product: BaseEquityProduct, env: PricingEnvironment,
                             lv: LocalVolSurface) -> float:
+        return self._price_with_artifacts(product, env, lv, self._prebuilt_leverage)
+
+    def _price_with_artifacts(self, product: BaseEquityProduct, env: PricingEnvironment,
+                              lv: LocalVolSurface,
+                              leverage: Optional[LeverageSurface]) -> float:
         from quantark.asset.equity.product.option import EuropeanVanillaOption
         if not isinstance(product, EuropeanVanillaOption):
             raise PricingError("HestonSLVMCEngine supports EuropeanVanillaOption only")
@@ -71,6 +80,7 @@ class HestonSLVMCEngine(BaseEngine):
             disc_factor=float(env.get_discount_factor(T)), eta=self.eta,
             num_paths=int(self.params.num_paths), num_bins=self.num_bins,
             bin_method=self.bin_method, seed=int(self.params.seed),
+            leverage_surface=leverage,
         )
         return unit * float(getattr(product, "contract_multiplier", 1.0))
 

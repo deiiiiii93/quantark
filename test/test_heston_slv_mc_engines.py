@@ -53,6 +53,27 @@ def test_equity_slv_greeks_no_vega():
     assert "vega" not in g
 
 
+def test_equity_slv_engine_accepts_precomputed_leverage_surface():
+    env = _grid_env()
+    opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    lv = HestonSLVMCEngine(P)._build_surface(env)
+    M = 50
+    dt = np.full(M, 1.0 / M)
+    from quantark.volmodels.slv import calibrate_leverage_surface
+
+    leverage = calibrate_leverage_surface(
+        100.0, P, lv, dt, np.zeros(M), np.zeros(M),
+        num_paths=20_000, num_bins=20, seed=5,
+    )
+    engine = HestonSLVMCEngine(
+        P,
+        params=MCParams(num_paths=20_000, time_steps=M, seed=7),
+        local_vol_surface=lv,
+        leverage_surface=leverage,
+    )
+    assert engine.price(opt, env) > 0.0
+
+
 def _fx_grid_env(vol=0.1, rd=0.0, rf=0.0):
     strikes = list(1.20 * np.exp(np.linspace(-0.5, 0.5, 9)))
     mats = list(np.linspace(0.1, 2.0, 6))

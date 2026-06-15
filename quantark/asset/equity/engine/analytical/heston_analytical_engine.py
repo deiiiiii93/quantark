@@ -38,7 +38,7 @@ class HestonAnalyticalEngine(BaseEngine):
 
     Model parameters (HestonParams) are supplied at construction; market data (spot,
     rate curve, dividend yield) comes from the pricing environment. Greeks expose
-    delta/gamma/theta/rho (no vega; vega for a parametric model is a follow-up).
+    delta/gamma/theta/rho (no scalar vega; structured volatility risk is separate).
     """
 
     engine_type = EngineType.ANALYTICAL
