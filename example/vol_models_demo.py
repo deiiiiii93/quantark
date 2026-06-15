@@ -36,7 +36,8 @@ from quantark.asset.fx.riskmeasures import FxVolModelRiskCalculator
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import build_dupire_local_vol
 from quantark.volmodels.risk import ModelRiskRequest, SlvLeverageRiskMode, SurfaceBump
-from quantark.volmodels.slv import calibrate_leverage_surface
+from quantark.volmodels.slv import calibrate_leverage_surface, FpCalibrationConfig
+from quantark.util.enum.engine_enums import LeverageCalibrationMethod
 
 HESTON = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
 
@@ -62,17 +63,23 @@ def equity_demo():
     print(f"  Heston PDE (Craig-Sneyd) : {HestonPDESolver(HESTON, n_x=200, n_v=80, n_t=80).price(opt, env):.4f}")
     print(f"  SLV  MC                  : {HestonSLVMCEngine(HESTON, eta=1.0, params=MCParams(num_paths=100_000, time_steps=100, seed=1)).price(opt, env):.4f}")
 
-    # SLV PDE consumes a leverage surface calibrated by MC binning.
+    # SLV PDE consumes a precomputed leverage surface. Two calibrators:
+    #   - MC binning (van der Stoep): leverage from a simulated (S, v) cloud.
+    #   - Forward Fokker-Planck (default): deterministic density evolution, no MC noise.
     lv = build_dupire_local_vol(surf, spot=100.0, rate_curve=env.rate_curve, div_yield=env.get_div_yield)
     n = 60
     t_grid = np.linspace(0.0, 1.0, n + 1)
     r_fwd = np.array([env.rate_curve.get_forward_rate(t_grid[i], t_grid[i + 1]) for i in range(n)])
     from quantark.volmodels.curves import forward_carry_on_grid
     carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
-    lev = calibrate_leverage_surface(100.0, HESTON, lv, np.diff(t_grid), r_fwd, carry_fwd,
-                                     eta=1.0, num_paths=40_000, num_bins=20, seed=1)
-    slv_pde = HestonSLVPDESolver(HESTON, lev, eta=1.0, n_x=180, n_v=70, n_t=70)
-    print(f"  SLV  PDE (calib leverage): {slv_pde.price(opt, env):.4f}")
+    lev_mc = calibrate_leverage_surface(100.0, HESTON, lv, np.diff(t_grid), r_fwd, carry_fwd,
+                                        eta=1.0, method=LeverageCalibrationMethod.MC_BINNING,
+                                        num_paths=40_000, num_bins=20, seed=1)
+    print(f"  SLV  PDE (MC leverage)   : {HestonSLVPDESolver(HESTON, lev_mc, eta=1.0, n_x=180, n_v=70, n_t=70).price(opt, env):.4f}")
+    lev_fp = calibrate_leverage_surface(100.0, HESTON, lv, np.diff(t_grid), r_fwd, carry_fwd,
+                                        eta=1.0, fp_config=FpCalibrationConfig(n_x=161, n_z=81))
+    print(f"  SLV  PDE (FFP leverage)  : {HestonSLVPDESolver(HESTON, lev_fp, eta=1.0, n_x=180, n_v=70, n_t=70).price(opt, env):.4f}")
+    slv_pde = HestonSLVPDESolver(HESTON, lev_fp, eta=1.0, n_x=180, n_v=70, n_t=70)
 
     # Scalar vega remains absent from calculate_greeks(). Structured risk is explicit.
     risk = VolModelRiskCalculator()
