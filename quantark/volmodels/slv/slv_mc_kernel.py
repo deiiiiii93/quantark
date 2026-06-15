@@ -178,26 +178,35 @@ def _calibrate_mc_binning(
 
 def calibrate_leverage_surface(
     s0, params, lv_surface, step_dt, r_fwd, carry_fwd, eta=1.0,
-    method=None, fp_config=None, **mc_kwargs,
+    num_paths=None, num_bins=None, bin_method=None, seed=None,
+    n_strike_nodes=None, strike_span_stds=None, *, method=None, fp_config=None,
 ):
     """Dispatch leverage calibration. Default: forward Fokker-Planck (deterministic).
 
-    MC-binning is retained as an independent cross-check (method=MC_BINNING). Method-specific
-    options are validated, never silently dropped: stray MC kwargs raise under FFP, and a stray
-    fp_config raises under MC_BINNING.
+    The MC options keep their original positional slots after ``eta`` (so old positional calls bind
+    correctly), while ``method``/``fp_config`` are keyword-only. MC-binning is retained as an
+    independent cross-check (method=MC_BINNING). Method-specific options are validated, never silently
+    dropped: any MC option under FFP raises, and a stray fp_config under MC_BINNING raises. NOTE: with
+    the FFP default, MC options require an explicit ``method=MC_BINNING`` (the deliberate consequence of
+    the default flip + mismatch rejection); they no longer auto-select MC.
     """
     from quantark.util.enum.engine_enums import LeverageCalibrationMethod
     if method is None:
         method = LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK
+    mc_opts = {k: v for k, v in dict(
+        num_paths=num_paths, num_bins=num_bins, bin_method=bin_method, seed=seed,
+        n_strike_nodes=n_strike_nodes, strike_span_stds=strike_span_stds,
+    ).items() if v is not None}
     if method is LeverageCalibrationMethod.MC_BINNING:
         if fp_config is not None:
             raise ValidationError("fp_config is not valid for MC_BINNING")
         return _calibrate_mc_binning(s0, params, lv_surface, step_dt, r_fwd, carry_fwd,
-                                     eta=eta, **mc_kwargs)
+                                     eta=eta, **mc_opts)
     if method is LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK:
-        if mc_kwargs:
+        if mc_opts:
             raise ValidationError(
-                f"MC options {sorted(mc_kwargs)} are not valid for FORWARD_FOKKER_PLANCK")
+                f"MC options {sorted(mc_opts)} are not valid for FORWARD_FOKKER_PLANCK; "
+                f"pass method=LeverageCalibrationMethod.MC_BINNING to use MC binning")
         from quantark.volmodels.slv.fokkerplanck.calibration import calibrate_leverage_surface_fp
         return calibrate_leverage_surface_fp(s0, params, lv_surface, step_dt, r_fwd, carry_fwd,
                                              eta=eta, config=fp_config)

@@ -52,8 +52,10 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
         t = record_times[n]
         sigma_lv_x = np.asarray(lv_surface.local_vol(S_nodes, t), float)
         if n == 0:
-            L = sigma_lv_x / np.sqrt(params.v0)            # exact t->0+ seed row
-            diag = {"n_tail_blended": 0, "n_clipped": 0, "mass_residual": 0.0}
+            L_raw = sigma_lv_x / np.sqrt(params.v0)        # exact t->0+ seed row
+            lo, hi = config.leverage_clip
+            L = np.clip(L_raw, lo, hi)
+            diag = {"n_tail_blended": 0, "n_clipped": int(np.sum(L != L_raw)), "mass_residual": 0.0}
         else:
             L, diag = leverage_from_slice(solver, f, sigma_lv_x, t, params, eta, config)
         rows.append(L)
@@ -82,12 +84,16 @@ def _deterministic_surface(s0, params: HestonParams, lv_surface, record_times,
         raise ValidationError("deterministic branch requires v0 > 0")
     x_lo, x_hi = np.log(s0) - 4.0, np.log(s0) + 4.0       # local-vol surface is the only vol scale here
     S_nodes = np.exp(np.linspace(x_lo, x_hi, config.n_strike_nodes))
-    rows = []
+    lo, hi = config.leverage_clip
+    rows, n_clip = [], 0
     for t in record_times:
         nu_det = params.theta + (params.v0 - params.theta) * np.exp(-params.kappa * t)
         if nu_det <= 0:
             raise ValidationError("deterministic variance hit zero; invalid params for eta=0 branch")
-        rows.append(np.asarray(lv_surface.local_vol(S_nodes, t), float) / np.sqrt(nu_det))
+        L_raw = np.asarray(lv_surface.local_vol(S_nodes, t), float) / np.sqrt(nu_det)
+        L = np.clip(L_raw, lo, hi)
+        n_clip += int(np.sum(L != L_raw))
+        rows.append(L)
     return LeverageSurface(time_grid=np.asarray(record_times, float), strike_grid=S_nodes,
                            leverage_grid=np.vstack(rows),
-                           diagnostics={"method": "deterministic_eta0"})
+                           diagnostics={"method": "deterministic_eta0", "n_clipped": n_clip})
