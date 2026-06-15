@@ -108,9 +108,13 @@ class InterestRateAddOn(BaseAddOn):
         )
 
     def _maturity_bucket(self, end_date: float) -> int:
-        """Maturity bucket from the end date (paragraph 166)."""
+        """Maturity bucket from the end date (paragraph 166).
+
+        Bucket 1: E < 1y; bucket 2: 1y <= E <= 5y; bucket 3: E > 5y. Exactly 5
+        years belongs to bucket 2 ("between one and five years").
+        """
         if end_date < self.BUCKET_1_MAX:
             return 1
-        if end_date < self.BUCKET_2_MAX:
+        if end_date <= self.BUCKET_2_MAX:
             return 2
         return 3

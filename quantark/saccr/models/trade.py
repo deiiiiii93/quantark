@@ -26,7 +26,7 @@ from quantark.saccr.models.enums import (
 )
 from quantark.util.enum.option_enums import OptionType
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import validate_positive
+from quantark.util.numerical import validate_positive, is_valid_number
 
 #: Minimum maturity: 10 business days, assuming 250 business days per year.
 MIN_MATURITY = 10 / 250
@@ -83,9 +83,31 @@ class SACCRTrade:
 
     def __post_init__(self):
         """Validate trade parameters (raises :class:`ValidationError`)."""
+        # Enum-type validation: invalid enums otherwise silently default to another
+        # meaning (e.g. an unknown asset class is dropped during aggregation).
+        if not isinstance(self.asset_class, AssetClass):
+            raise ValidationError(f"asset_class must be an AssetClass, got {self.asset_class!r}")
+        if not isinstance(self.position, Position):
+            raise ValidationError(f"position must be a Position, got {self.position!r}")
+        if not isinstance(self.transaction_type, TransactionType):
+            raise ValidationError(
+                f"transaction_type must be a TransactionType, got {self.transaction_type!r}")
+        # BASIS/VOLATILITY require separate hedging sets and SF multipliers
+        # (paragraphs 162-163) that are not implemented; reject rather than
+        # silently treating them as REGULAR.
+        # TODO(saccr): implement BASIS/VOLATILITY hedging-set treatment.
+        if self.transaction_type != TransactionType.REGULAR:
+            raise ValidationError(
+                f"transaction_type {self.transaction_type.name} is not yet supported")
+
         validate_positive(self.notional, "notional")
 
-        # Maturity floored at 10 business days.
+        # Maturity must be a valid, non-negative number BEFORE the regulatory floor,
+        # so a negative/invalid maturity is not masked by the 10-business-day floor.
+        if self.maturity is None or not is_valid_number(self.maturity):
+            raise ValidationError(f"maturity must be a finite number, got {self.maturity}")
+        if self.maturity < 0:
+            raise ValidationError(f"maturity must be non-negative, got {self.maturity}")
         if self.maturity < MIN_MATURITY:
             self.maturity = MIN_MATURITY
 
@@ -127,6 +149,9 @@ class SACCRTrade:
         if self.is_option:
             if self.option_type is None:
                 raise ValidationError("Options require option_type")
+            if not isinstance(self.option_type, OptionType):
+                raise ValidationError(
+                    f"option_type must be an OptionType, got {self.option_type!r}")
             if self.underlying_price is None:
                 raise ValidationError("Options require underlying_price")
             if self.strike_price is None:

@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from quantark.saccr.models.trade import SACCRTrade
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_valid_number
 
 #: Business days per year used for the MPOR year-fraction conversion.
 BUSINESS_DAYS_PER_YEAR = 250
@@ -48,6 +49,23 @@ class SACCRNettingSet:
     def __post_init__(self):
         if not self.trades:
             raise ValidationError("Netting set must contain at least one trade")
+        if self.threshold < 0:
+            raise ValidationError(f"threshold must be non-negative, got {self.threshold}")
+        if self.minimum_transfer_amount < 0:
+            raise ValidationError(
+                f"minimum_transfer_amount must be non-negative, "
+                f"got {self.minimum_transfer_amount}")
+        if self.mpor_days <= 0:
+            raise ValidationError(f"mpor_days must be positive, got {self.mpor_days}")
+        for name in ("threshold", "minimum_transfer_amount", "variation_margin",
+                     "independent_collateral_received", "independent_collateral_posted",
+                     "independent_collateral_posted_segregated"):
+            value = getattr(self, name)
+            if not is_valid_number(value):
+                raise ValidationError(f"{name} must be a finite number, got {value}")
+        if self.net_collateral is not None and not is_valid_number(self.net_collateral):
+            raise ValidationError(
+                f"net_collateral must be a finite number, got {self.net_collateral}")
 
     @property
     def market_value(self) -> float:

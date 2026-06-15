@@ -16,6 +16,7 @@ from quantark.saccr.models.enums import AssetClass
 from quantark.saccr.models.netting_set import SACCRNettingSet
 from quantark.saccr.models.trade import SACCRTrade
 from quantark.saccr.parameters.supervisory import SupervisoryParameters
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_sqrt
 
 
@@ -47,8 +48,14 @@ class EquityAddOn(BaseAddOn):
             trades_by_entity[trade.reference_entity].append(trade)
 
         entity_addons: List[Tuple[float, float]] = []
-        for entity_trades in trades_by_entity.values():
+        for entity, entity_trades in trades_by_entity.items():
             rep = entity_trades[0]
+            # One SF/correlation per reference entity; reject inconsistent index flags.
+            for t in entity_trades:
+                if t.is_index != rep.is_index:
+                    raise ValidationError(
+                        f"Inconsistent equity metadata for reference_entity {entity!r}: "
+                        "all trades must share is_index")
             effective_notional = 0.0
             for trade in entity_trades:
                 adjusted_notional = trade.notional

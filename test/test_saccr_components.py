@@ -91,9 +91,22 @@ def test_supervisory_delta_cdo_tranche():
     from quantark.saccr.models.enums import Position
     a, d = 0.03, 0.07
     expected = 15.0 / ((1 + 14 * a) * (1 + 14 * d))
+    # Sign follows the long/short convention, consistent with the linear branch.
     assert is_close(
         supervisory_delta(Position.LONG, is_cdo_tranche=True,
+                          attachment_point=a, detachment_point=d), expected)
+    assert is_close(
+        supervisory_delta(Position.SHORT, is_cdo_tranche=True,
                           attachment_point=a, detachment_point=d), -expected)
+
+
+def test_supervisory_delta_cdo_rejects_bad_domain():
+    from quantark.saccr.engines.maths import supervisory_delta
+    from quantark.saccr.models.enums import Position
+    for a, d in [(-0.1, 0.5), (0.5, 0.3), (0.5, 1.5), (0.3, 0.3)]:
+        with pytest.raises(ValidationError):
+            supervisory_delta(Position.LONG, is_cdo_tranche=True,
+                              attachment_point=a, detachment_point=d)
 
 
 def test_supervisory_delta_rejects_bad_domain():
@@ -312,6 +325,89 @@ def test_calculator_example1_smoke():
     assert r.alpha == 1.4 and r.is_margined is False and r.ead_capped is False
     assert "IR:USD" in r.addon_by_hedging_set
     assert r.ead_uncapped == r.ead
+
+
+def test_ir_bucket_boundary_five_years_is_bucket_two():
+    from quantark.saccr.engines.addons.interest_rate import InterestRateAddOn
+    addon = InterestRateAddOn()
+    assert addon._maturity_bucket(0.5) == 1
+    assert addon._maturity_bucket(1.0) == 2
+    assert addon._maturity_bucket(5.0) == 2   # exactly 5y -> bucket 2 (not 3)
+    assert addon._maturity_bucket(5.0001) == 3
+
+
+def test_trade_rejects_unsupported_transaction_type():
+    from quantark.saccr.models.trade import SACCRTrade
+    from quantark.saccr.models.enums import AssetClass, TransactionType
+    for tt in (TransactionType.BASIS, TransactionType.VOLATILITY):
+        with pytest.raises(ValidationError):
+            SACCRTrade("T", AssetClass.INTEREST_RATE, 1e6, 0.0, currency="USD",
+                       start_date=0, end_date=5, maturity=5, transaction_type=tt)
+
+
+def test_trade_rejects_negative_and_invalid_maturity():
+    from quantark.saccr.models.trade import SACCRTrade
+    from quantark.saccr.models.enums import AssetClass
+    with pytest.raises(ValidationError):
+        SACCRTrade("T", AssetClass.INTEREST_RATE, 1e6, 0.0, currency="USD",
+                   start_date=0, end_date=5, maturity=-1)
+    with pytest.raises(ValidationError):
+        SACCRTrade("T", AssetClass.INTEREST_RATE, 1e6, 0.0, currency="USD",
+                   start_date=0, end_date=5, maturity=float("nan"))
+
+
+def test_trade_rejects_non_enum_fields():
+    from quantark.saccr.models.trade import SACCRTrade
+    from quantark.saccr.models.enums import AssetClass
+    with pytest.raises(ValidationError):
+        SACCRTrade("T", "INTEREST_RATE", 1e6, 0.0, currency="USD")  # asset_class not enum
+    with pytest.raises(ValidationError):
+        SACCRTrade("T", AssetClass.INTEREST_RATE, 1e6, 0.0, currency="USD", position="LONG")
+
+
+def test_supervisory_duration_floors_forward_start():
+    from quantark.saccr.engines.maths import supervisory_duration, MIN_PERIOD
+    # tiny positive forward start is floored at 10/250 (paragraph 157)
+    floored = supervisory_duration(MIN_PERIOD, 5.0)
+    tiny = supervisory_duration(0.001, 5.0)
+    assert is_close(tiny, floored)
+    # already-started trade keeps S = 0 (different from the floored value)
+    assert not is_close(supervisory_duration(0.0, 5.0), floored)
+
+
+def test_commodity_map_is_immutable():
+    from quantark.saccr.models.enums import (
+        COMMODITY_TYPE_TO_HEDGING_SET, CommodityType, CommodityHedgingSet)
+    with pytest.raises(TypeError):
+        COMMODITY_TYPE_TO_HEDGING_SET[CommodityType.GOLD] = CommodityHedgingSet.OTHER
+
+
+def test_credit_addon_rejects_inconsistent_entity_metadata():
+    from quantark.saccr.engines.addons.credit import CreditAddOn
+    from quantark.saccr.models.trade import SACCRTrade
+    from quantark.saccr.models.enums import AssetClass, Position, CreditRating
+    trades = [
+        SACCRTrade("CR1", AssetClass.CREDIT, 10_000, 0, reference_entity="Firm A",
+                   credit_rating=CreditRating.AA, start_date=0, end_date=3, maturity=3,
+                   position=Position.LONG),
+        SACCRTrade("CR2", AssetClass.CREDIT, 10_000, 0, reference_entity="Firm A",
+                   credit_rating=CreditRating.BBB, start_date=0, end_date=3, maturity=3,
+                   position=Position.LONG),
+    ]
+    with pytest.raises(ValidationError):
+        CreditAddOn().calculate_with_breakdown(trades, _unmargined(trades))
+
+
+def test_netting_set_rejects_bad_margin_inputs():
+    from quantark.saccr.models.netting_set import SACCRNettingSet
+    from quantark.saccr.models.trade import SACCRTrade
+    from quantark.saccr.models.enums import AssetClass
+    t = SACCRTrade("T", AssetClass.INTEREST_RATE, 1e6, 0.0, currency="USD",
+                   start_date=0, end_date=5, maturity=5)
+    with pytest.raises(ValidationError):
+        SACCRNettingSet("NS", [t], threshold=-1)
+    with pytest.raises(ValidationError):
+        SACCRNettingSet("NS", [t], mpor_days=0)
 
 
 def test_public_api_surface():

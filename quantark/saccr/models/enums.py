@@ -9,6 +9,7 @@ whose semantics are identical to what the supervisory delta needs.
 """
 
 from enum import Enum, auto
+from types import MappingProxyType
 
 
 class AssetClass(Enum):
@@ -86,7 +87,8 @@ class CommodityType(Enum):
 
 
 # Mapping from CommodityType to CommodityHedgingSet (paragraph 161).
-COMMODITY_TYPE_TO_HEDGING_SET = {
+# Wrapped in MappingProxyType so the regulatory classification is immutable.
+COMMODITY_TYPE_TO_HEDGING_SET = MappingProxyType({
     CommodityType.CRUDE_OIL: CommodityHedgingSet.ENERGY,
     CommodityType.NATURAL_GAS: CommodityHedgingSet.ENERGY,
     CommodityType.COAL: CommodityHedgingSet.ENERGY,
@@ -100,7 +102,7 @@ COMMODITY_TYPE_TO_HEDGING_SET = {
     CommodityType.SOYBEANS: CommodityHedgingSet.AGRICULTURAL,
     CommodityType.COFFEE: CommodityHedgingSet.AGRICULTURAL,
     CommodityType.OTHER: CommodityHedgingSet.OTHER,
-}
+})
 
 
 class TransactionType(Enum):

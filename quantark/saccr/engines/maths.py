@@ -22,7 +22,7 @@ from quantark.saccr.models.enums import Position
 from quantark.util.enum.option_enums import OptionType
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import (
-    safe_log, safe_exp, safe_sqrt, safe_divide, validate_positive)
+    safe_log, safe_exp, safe_sqrt, safe_divide, validate_positive, is_valid_number)
 
 #: Minimum time period: 10 business days, assuming 250 business days per year.
 MIN_PERIOD = 10 / 250
@@ -34,14 +34,18 @@ def supervisory_duration(start_date: float, end_date: float) -> float:
     ``SD = (exp(-0.05 * S) - exp(-0.05 * E)) / 0.05``
 
     Validation order (flooring must not mask invalid raw inputs):
-      1. raw ``start_date >= 0`` and raw ``end_date >= 0``;
+      1. raw ``start_date`` / ``end_date`` finite and ``>= 0``;
       2. raw ``end_date >= start_date`` (catches inverted dates BEFORE flooring);
-      3. floor ``E = max(end_date, 10/250)``;
-      4. require ``E > start_date``.
+      3. floor both per paragraph 157: an already-started trade keeps ``S = 0``;
+         a positive forward start is floored at ``10/250``; ``E = max(E, 10/250)``;
+      4. require ``E > S``.
 
     Example (Annex 4a, Example 1): 10Y swap S=0, E=10 ->
     ``(1 - exp(-0.5)) / 0.05 = 7.8694``.
     """
+    if not is_valid_number(start_date) or not is_valid_number(end_date):
+        raise ValidationError(
+            f"start_date/end_date must be finite numbers, got {start_date}, {end_date}")
     if start_date < 0:
         raise ValidationError(f"start_date must be non-negative, got {start_date}")
     if end_date < 0:
@@ -50,12 +54,14 @@ def supervisory_duration(start_date: float, end_date: float) -> float:
         raise ValidationError(
             f"end_date ({end_date}) must be >= start_date ({start_date})")
 
+    # Paragraph 157: floor both S and E at 10 business days; S stays 0 if already started.
+    s = 0.0 if start_date == 0.0 else max(start_date, MIN_PERIOD)
     e = max(end_date, MIN_PERIOD)
-    if e <= start_date:
+    if e <= s:
         raise ValidationError(
-            f"floored end_date ({e}) must exceed start_date ({start_date})")
+            f"floored end_date ({e}) must exceed floored start_date ({s})")
 
-    return (float(safe_exp(-0.05 * start_date)) - float(safe_exp(-0.05 * e))) / 0.05
+    return (float(safe_exp(-0.05 * s)) - float(safe_exp(-0.05 * e))) / 0.05
 
 
 def maturity_factor_unmargined(maturity: float) -> float:
@@ -63,8 +69,12 @@ def maturity_factor_unmargined(maturity: float) -> float:
 
     ``MF = sqrt(min(max(M, 10/250), 1 year) / 1 year)``
     """
-    if maturity is None:
-        raise ValidationError("maturity is required for the unmargined maturity factor")
+    if maturity is None or not is_valid_number(maturity):
+        raise ValidationError(
+            f"maturity must be a finite number, got {maturity}")
+    if maturity < 0:
+        # A negative remaining maturity is invalid; do not let the floor mask it.
+        raise ValidationError(f"maturity must be non-negative, got {maturity}")
     m = max(maturity, MIN_PERIOD)
     m_capped = min(m, 1.0)
     return float(safe_sqrt(m_capped))
@@ -111,8 +121,17 @@ def supervisory_delta(
         if attachment_point is None or detachment_point is None:
             raise ValidationError(
                 "CDO tranche requires attachment_point and detachment_point")
+        if not is_valid_number(attachment_point) or not is_valid_number(detachment_point):
+            raise ValidationError(
+                "CDO attachment_point/detachment_point must be finite numbers")
+        if not (0.0 <= attachment_point < detachment_point <= 1.0):
+            raise ValidationError(
+                f"CDO requires 0 <= attachment ({attachment_point}) < detachment "
+                f"({detachment_point}) <= 1")
         delta_abs = 15.0 / ((1 + 14 * attachment_point) * (1 + 14 * detachment_point))
-        return -delta_abs if position == Position.LONG else delta_abs
+        # Sign follows the module's long/short primary-risk-factor convention,
+        # consistent with the linear branch (LONG -> positive).
+        return delta_abs if position == Position.LONG else -delta_abs
 
     # Option
     if is_option:
