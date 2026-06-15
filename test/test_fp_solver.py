@@ -24,7 +24,7 @@ def test_heston_density_oracle_reprices_analytic_call():
     f = solver.seed_dirac(s0, p.v0)
     L = np.ones(solver.x.size)                        # Heston: leverage = 1 everywhere
     for n in range(n_t):
-        f = solver.step(f, L, step_dt[n])             # backward-Euler every step in v1
+        f = solver.step(f, L, step_dt[n], implicit=(n < cfg.rannacher_steps))  # Rannacher start + CS
         assert abs(solver.total_mass(f) - 1.0) < cfg.mass_tol
     marg = solver.spot_marginal(f)                    # density in x = ln S
     S = np.exp(solver.x)

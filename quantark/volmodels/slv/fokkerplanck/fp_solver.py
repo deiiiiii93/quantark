@@ -16,9 +16,7 @@ from quantark.volmodels.slv.fokkerplanck.config import FpCalibrationConfig
 from quantark.volmodels.slv.fokkerplanck.coordinates import (
     concentrated_grid, trapezoid_weights, x_extents, z_extents,
 )
-from quantark.volmodels.slv.fokkerplanck.fp_operators import (
-    build_directional_operators, build_forward_operator,
-)
+from quantark.volmodels.slv.fokkerplanck.fp_operators import build_directional_operators
 
 
 class ForwardFPADI:
@@ -65,19 +63,38 @@ class ForwardFPADI:
         """Marginal density in x = ln S: integral over z of f(x, z) dz."""
         return f.reshape(self.nx, self.nz) @ self.wz
 
-    def step(self, f, L, dt, implicit=True):
-        """Backward-Euler step: (I - dt*A) f_next = f. Unconditionally stable; damps the Dirac.
-
-        The ``implicit`` flag is accepted for forward-compatibility with the Task 5b Craig-Sneyd
-        path; in v1 every step is backward-Euler.
-        """
-        A = build_forward_operator(self.x, self.z, np.asarray(L, float),
-                                   self.params, self.eta, self.b)
+    @staticmethod
+    def _splu(M):
         try:
-            lu = splu((self._I - dt * A).tocsc())
+            return splu(M.tocsc())
         except RuntimeError as exc:                      # singular factor -> refine grid, never clamp
-            raise NumericalError(f"forward FP backward-Euler factorization failed: {exc}")
-        out = lu.solve(f)
+            raise NumericalError(f"forward FP factorization failed: {exc}")
+
+    def step(self, f, L, dt, implicit=False, theta=0.5):
+        """Advance the density one step.
+
+        ``implicit=True`` does a fully-coupled backward-Euler solve (unconditionally stable; used
+        for the Rannacher start-up to damp the singular Dirac). Otherwise a Craig-Sneyd ADI step:
+        explicit predictor + two directional implicit correctors (each subtracting that direction's
+        explicit contribution already in the predictor) + the mixed-term correction. Mirrors the
+        backward SLV PDE _cs_step.
+        """
+        L = np.asarray(L, float)
+        Ax, Az, Axz = build_directional_operators(self.x, self.z, L, self.params, self.eta, self.b)
+        if implicit:
+            out = self._splu(self._I - dt * (Ax + Az + Axz)).solve(f)
+        else:
+            A = Ax + Az + Axz
+            lu_x = self._splu(self._I - theta * dt * Ax)
+            lu_z = self._splu(self._I - theta * dt * Az)
+            axf = theta * dt * (Ax @ f)
+            azf = theta * dt * (Az @ f)
+            Y0 = f + dt * (A @ f)                            # explicit predictor (full operator)
+            Y1 = lu_x.solve(Y0 - axf)                        # implicit in x (subtract explicit Ax part)
+            Y2 = lu_z.solve(Y1 - azf)                        # implicit in z
+            Ycorr = Y2 + 0.5 * dt * (Axz @ (Y2 - f))         # Craig-Sneyd mixed-term correction
+            Z1 = lu_x.solve(Ycorr - axf)
+            out = lu_z.solve(Z1 - azf)
         if not np.all(np.isfinite(out)):
             raise NumericalError("forward FP step produced non-finite density")
         return out
