@@ -73,20 +73,18 @@ class ForwardFPADI:
         except RuntimeError as exc:                      # singular factor -> refine grid, never clamp
             raise NumericalError(f"forward FP factorization failed: {exc}")
 
-    def step(self, f, L, dt, implicit=False, theta=0.5, b=None):
+    def step(self, f, L, dt, implicit=True, theta=0.5, b=None):
         """Advance the density one step.
 
-        ``implicit=True`` does a fully-coupled backward-Euler solve (unconditionally stable; used
-        for the Rannacher start-up to damp the singular Dirac). Otherwise a damped double-sweep ADI
-        step: explicit predictor + two directional implicit correctors (each subtracting that
-        direction's explicit contribution) + a mixed-term correction, then a second pair of sweeps.
+        ``implicit=True`` (default) does a fully-coupled backward-Euler solve: L-stable and
+        positivity-near-preserving. This is the scheme the calibration uses, because the ADI variant
+        below is von-Neumann-unstable for this Dirac-seeded correlated *forward* density (negative
+        mass grows under time refinement, to 1e7+ for strong correlation).
 
-        The mixed correction is applied off the directionally-swept ``Y2`` (not the predictor ``Y0``
-        as in textbook Craig-Sneyd). This is deliberate: for the singular Dirac-seeded *forward*
-        density, the textbook-CS correction off ``Y0`` is not positivity-preserving and develops
-        O(1e-3) negative oscillations near the steep front that corrupt the E[v|S] read-off, whereas
-        this more-damped variant stays non-negative and still reprices vanillas exactly (the defining
-        SLV property; see test_fp_acceptance). ``b`` overrides the per-step cost-of-carry.
+        ``implicit=False`` is a faster damped double-sweep ADI step (explicit predictor + directional
+        implicit correctors + a mixed correction off ``Y2``, then a second pair of sweeps). It is
+        retained for experimentation only and is NOT used for production calibration. ``b`` overrides
+        the per-step cost-of-carry.
         """
         L = np.asarray(L, float)
         b_eff = self.b if b is None else float(b)
