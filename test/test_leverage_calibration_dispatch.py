@@ -35,8 +35,31 @@ def test_mismatched_options_raise():
     with pytest.raises(ValidationError):                  # MC kwargs under FFP default
         calibrate_leverage_surface(100.0, p, _lv(), np.full(5, 0.1),
                                    np.zeros(5), np.zeros(5), eta=1.0, num_paths=10_000)
+    with pytest.raises(ValidationError):                  # explicit seed=None is still an MC option under FFP
+        calibrate_leverage_surface(100.0, p, _lv(), np.full(5, 0.1),
+                                   np.zeros(5), np.zeros(5), eta=1.0, seed=None)
     with pytest.raises(ValidationError):                  # fp_config under MC
         calibrate_leverage_surface(100.0, p, _lv(), np.full(5, 0.1),
                                    np.zeros(5), np.zeros(5), eta=1.0,
                                    method=LeverageCalibrationMethod.MC_BINNING,
                                    fp_config=FpCalibrationConfig())
+
+
+def test_positional_mc_options_bind_correctly():
+    # old positional slots (num_paths, num_bins) bind to MC options, not to method/fp_config
+    p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
+    surf = calibrate_leverage_surface(100.0, p, _lv(), np.full(20, 0.05),
+                                      np.zeros(20), np.zeros(20), 1.0, 15_000, 18,
+                                      method=LeverageCalibrationMethod.MC_BINNING)
+    assert surf.diagnostics is None                       # ran MC binning (positional num_paths/num_bins)
+
+
+def test_mc_seed_none_is_nondeterministic_not_dropped():
+    # explicit seed=None under MC means "no fixed seed" -> two runs differ (not silently seed=42)
+    p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
+    kw = dict(eta=1.0, method=LeverageCalibrationMethod.MC_BINNING, num_paths=8_000, seed=None)
+    a = calibrate_leverage_surface(100.0, p, _lv(), np.full(15, 1.0 / 15),
+                                   np.zeros(15), np.zeros(15), **kw)
+    b = calibrate_leverage_surface(100.0, p, _lv(), np.full(15, 1.0 / 15),
+                                   np.zeros(15), np.zeros(15), **kw)
+    assert not np.array_equal(a.leverage_grid, b.leverage_grid)

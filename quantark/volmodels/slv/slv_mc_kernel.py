@@ -176,10 +176,13 @@ def _calibrate_mc_binning(
     return LeverageSurface(time_grid=record_times, strike_grid=strike_grid, leverage_grid=leverage_grid)
 
 
+_UNSET = object()   # sentinel: distinguishes "MC option not provided" from an explicit value (e.g. seed=None)
+
+
 def calibrate_leverage_surface(
     s0, params, lv_surface, step_dt, r_fwd, carry_fwd, eta=1.0,
-    num_paths=None, num_bins=None, bin_method=None, seed=None,
-    n_strike_nodes=None, strike_span_stds=None, *, method=None, fp_config=None,
+    num_paths=_UNSET, num_bins=_UNSET, bin_method=_UNSET, seed=_UNSET,
+    n_strike_nodes=_UNSET, strike_span_stds=_UNSET, *, method=None, fp_config=None,
 ):
     """Dispatch leverage calibration. Default: forward Fokker-Planck (deterministic).
 
@@ -196,7 +199,7 @@ def calibrate_leverage_surface(
     mc_opts = {k: v for k, v in dict(
         num_paths=num_paths, num_bins=num_bins, bin_method=bin_method, seed=seed,
         n_strike_nodes=n_strike_nodes, strike_span_stds=strike_span_stds,
-    ).items() if v is not None}
+    ).items() if v is not _UNSET}
     if method is LeverageCalibrationMethod.MC_BINNING:
         if fp_config is not None:
             raise ValidationError("fp_config is not valid for MC_BINNING")
