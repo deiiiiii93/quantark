@@ -365,6 +365,40 @@ def test_trade_rejects_non_enum_fields():
         SACCRTrade("T", AssetClass.INTEREST_RATE, 1e6, 0.0, currency="USD", position="LONG")
 
 
+def test_trade_rejects_wrong_enum_subtypes():
+    from quantark.saccr.models.trade import SACCRTrade
+    from quantark.saccr.models.enums import AssetClass, CreditRating
+    # commodity_type of the wrong enum type
+    with pytest.raises(ValidationError):
+        SACCRTrade("T", AssetClass.COMMODITY, 1e6, 0.0, commodity_type="GOLD",
+                   start_date=0, end_date=5, maturity=5)
+    # credit_rating of the wrong type
+    with pytest.raises(ValidationError):
+        SACCRTrade("T", AssetClass.CREDIT, 1e6, 0.0, reference_entity="X",
+                   credit_rating="AA", start_date=0, end_date=5, maturity=5)
+    # is_index not a bool
+    with pytest.raises(ValidationError):
+        SACCRTrade("T", AssetClass.CREDIT, 1e6, 0.0, reference_entity="X",
+                   credit_rating=CreditRating.AA, is_index=1,
+                   start_date=0, end_date=5, maturity=5)
+
+
+def test_supervisory_delta_rejects_non_position():
+    from quantark.saccr.engines.maths import supervisory_delta
+    with pytest.raises(ValidationError):
+        supervisory_delta("LONG")
+
+
+def test_netting_set_rejects_non_numeric_collateral():
+    from quantark.saccr.models.netting_set import SACCRNettingSet
+    from quantark.saccr.models.trade import SACCRTrade
+    from quantark.saccr.models.enums import AssetClass
+    t = SACCRTrade("T", AssetClass.INTEREST_RATE, 1e6, 0.0, currency="USD",
+                   start_date=0, end_date=5, maturity=5)
+    with pytest.raises(ValidationError):  # string, not TypeError
+        SACCRNettingSet("NS", [t], threshold="oops")
+
+
 def test_supervisory_duration_floors_forward_start():
     from quantark.saccr.engines.maths import supervisory_duration, MIN_PERIOD
     # tiny positive forward start is floored at 10/250 (paragraph 157)

@@ -116,6 +116,9 @@ def supervisory_delta(
     Domain inputs are validated before any protected math (raises
     :class:`ValidationError`).
     """
+    if not isinstance(position, Position):
+        raise ValidationError(f"position must be a Position, got {position!r}")
+
     # CDO tranche
     if is_cdo_tranche:
         if attachment_point is None or detachment_point is None:

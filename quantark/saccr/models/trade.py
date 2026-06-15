@@ -92,6 +92,15 @@ class SACCRTrade:
         if not isinstance(self.transaction_type, TransactionType):
             raise ValidationError(
                 f"transaction_type must be a TransactionType, got {self.transaction_type!r}")
+        # bool discriminators must be real booleans (truthy strings/ints would
+        # otherwise flip supervisory-factor selection).
+        if not isinstance(self.is_index, bool):
+            raise ValidationError(f"is_index must be a bool, got {self.is_index!r}")
+        if not isinstance(self.is_option, bool):
+            raise ValidationError(f"is_option must be a bool, got {self.is_option!r}")
+        if not isinstance(self.is_cdo_tranche, bool):
+            raise ValidationError(
+                f"is_cdo_tranche must be a bool, got {self.is_cdo_tranche!r}")
         # BASIS/VOLATILITY require separate hedging sets and SF multipliers
         # (paragraphs 162-163) that are not implemented; reject rather than
         # silently treating them as REGULAR.
@@ -104,8 +113,11 @@ class SACCRTrade:
 
         # Maturity must be a valid, non-negative number BEFORE the regulatory floor,
         # so a negative/invalid maturity is not masked by the 10-business-day floor.
-        if self.maturity is None or not is_valid_number(self.maturity):
-            raise ValidationError(f"maturity must be a finite number, got {self.maturity}")
+        # (isinstance guard first: is_valid_number raises TypeError on non-numerics.)
+        if (isinstance(self.maturity, bool)
+                or not isinstance(self.maturity, (int, float))
+                or not is_valid_number(self.maturity)):
+            raise ValidationError(f"maturity must be a finite number, got {self.maturity!r}")
         if self.maturity < 0:
             raise ValidationError(f"maturity must be non-negative, got {self.maturity}")
         if self.maturity < MIN_MATURITY:
@@ -132,10 +144,18 @@ class SACCRTrade:
         elif self.asset_class == AssetClass.CREDIT:
             if not self.reference_entity:
                 raise ValidationError("Credit trades require reference_entity")
-            if self.is_index and not self.index_grade:
-                raise ValidationError("Credit index trades require index_grade")
-            if not self.is_index and not self.credit_rating:
-                raise ValidationError("Single-name credit trades require credit_rating")
+            if self.is_index:
+                if not self.index_grade:
+                    raise ValidationError("Credit index trades require index_grade")
+                if not isinstance(self.index_grade, IndexGrade):
+                    raise ValidationError(
+                        f"index_grade must be an IndexGrade, got {self.index_grade!r}")
+            else:
+                if not self.credit_rating:
+                    raise ValidationError("Single-name credit trades require credit_rating")
+                if not isinstance(self.credit_rating, CreditRating):
+                    raise ValidationError(
+                        f"credit_rating must be a CreditRating, got {self.credit_rating!r}")
 
         elif self.asset_class == AssetClass.EQUITY:
             if not self.reference_entity:
@@ -144,6 +164,14 @@ class SACCRTrade:
         elif self.asset_class == AssetClass.COMMODITY:
             if not self.commodity_type:
                 raise ValidationError("Commodity trades require commodity_type")
+            if not isinstance(self.commodity_type, CommodityType):
+                raise ValidationError(
+                    f"commodity_type must be a CommodityType, got {self.commodity_type!r}")
+            if (self.commodity_hedging_set is not None
+                    and not isinstance(self.commodity_hedging_set, CommodityHedgingSet)):
+                raise ValidationError(
+                    "commodity_hedging_set must be a CommodityHedgingSet, "
+                    f"got {self.commodity_hedging_set!r}")
 
         # Option parameters.
         if self.is_option:

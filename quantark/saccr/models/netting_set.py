@@ -22,6 +22,17 @@ from quantark.util.numerical import is_valid_number
 BUSINESS_DAYS_PER_YEAR = 250
 
 
+def _is_finite_number(x) -> bool:
+    """True iff ``x`` is a real (non-bool) int/float that is finite.
+
+    Guards ``is_valid_number`` (which raises ``TypeError`` on non-numerics) so that
+    bad-typed inputs surface as ``ValidationError`` rather than ``TypeError``.
+    """
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return False
+    return is_valid_number(x)
+
+
 @dataclass
 class SACCRNettingSet:
     """A netting set of trades for SA-CCR calculation (paragraphs 134-145)."""
@@ -49,6 +60,19 @@ class SACCRNettingSet:
     def __post_init__(self):
         if not self.trades:
             raise ValidationError("Netting set must contain at least one trade")
+        # Validate finiteness/type BEFORE any ordering comparison, so non-numeric
+        # inputs raise ValidationError rather than TypeError.
+        for name in ("threshold", "minimum_transfer_amount", "variation_margin",
+                     "independent_collateral_received", "independent_collateral_posted",
+                     "independent_collateral_posted_segregated"):
+            value = getattr(self, name)
+            if not _is_finite_number(value):
+                raise ValidationError(f"{name} must be a finite number, got {value!r}")
+        if self.net_collateral is not None and not _is_finite_number(self.net_collateral):
+            raise ValidationError(
+                f"net_collateral must be a finite number, got {self.net_collateral!r}")
+        if not isinstance(self.mpor_days, (int, float)) or isinstance(self.mpor_days, bool):
+            raise ValidationError(f"mpor_days must be a number, got {self.mpor_days!r}")
         if self.threshold < 0:
             raise ValidationError(f"threshold must be non-negative, got {self.threshold}")
         if self.minimum_transfer_amount < 0:
@@ -57,15 +81,6 @@ class SACCRNettingSet:
                 f"got {self.minimum_transfer_amount}")
         if self.mpor_days <= 0:
             raise ValidationError(f"mpor_days must be positive, got {self.mpor_days}")
-        for name in ("threshold", "minimum_transfer_amount", "variation_margin",
-                     "independent_collateral_received", "independent_collateral_posted",
-                     "independent_collateral_posted_segregated"):
-            value = getattr(self, name)
-            if not is_valid_number(value):
-                raise ValidationError(f"{name} must be a finite number, got {value}")
-        if self.net_collateral is not None and not is_valid_number(self.net_collateral):
-            raise ValidationError(
-                f"net_collateral must be a finite number, got {self.net_collateral}")
 
     @property
     def market_value(self) -> float:
