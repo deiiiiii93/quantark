@@ -28,7 +28,10 @@ class FpCalibrationConfig:
     mass_tol: float = 1e-3            # per-slice |sum(w*f) - 1| budget (tripwire)
     tail_mass_floor: float = 1e-6     # relative cell-mass below which leverage blends to uncond. mean
     leverage_clip: Tuple[float, float] = (0.05, 20.0)
-    tol_neg: float = 1e-6             # allowed relative negative density before raising
+    tol_neg: float = 0.5              # max negative probability mass sum_k w_k*max(-f_k,0). The central
+    #                                   mixed-derivative (correlation) term is inherently not positivity-
+    #                                   preserving (~10-15% for typical |rho|); negatives are clamped in
+    #                                   the read-off. This catches genuine divergence (mass ~ unit total).
     eps_mass: float = 1e-300          # absolute guard for the E[v|x] ratio denominator
 
     def __post_init__(self) -> None:

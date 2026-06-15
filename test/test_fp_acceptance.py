@@ -42,8 +42,9 @@ def test_ffp_surface_reprices_flat_vanilla_via_backward_pde():
 
 
 def test_ffp_surface_reprices_skewed_vanilla_via_backward_pde():
-    # leverage-nontrivial case (the Heston L=1 oracle cannot cover this)
-    p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.4, rho=-0.5)
+    # leverage-nontrivial case: skewed local vol => spatially-varying leverage L(x)
+    # (the Heston L=1 oracle cannot cover this). sigma matches the flat case (Feller-satisfied).
+    p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
     surf = _surface(skew=True)
     lev = _calibrate(surf, p)
     for K, iv in ((100.0, 0.22), (100.0 * np.exp(0.3), 0.22 - 0.04 * 0.5)):

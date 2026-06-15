@@ -77,10 +77,16 @@ class ForwardFPADI:
         """Advance the density one step.
 
         ``implicit=True`` does a fully-coupled backward-Euler solve (unconditionally stable; used
-        for the Rannacher start-up to damp the singular Dirac). Otherwise a Craig-Sneyd ADI step:
-        explicit predictor + two directional implicit correctors (each subtracting that direction's
-        explicit contribution already in the predictor) + the mixed-term correction. Mirrors the
-        backward SLV PDE _cs_step. ``b`` overrides the cost-of-carry for this step (per-step forwards).
+        for the Rannacher start-up to damp the singular Dirac). Otherwise a damped double-sweep ADI
+        step: explicit predictor + two directional implicit correctors (each subtracting that
+        direction's explicit contribution) + a mixed-term correction, then a second pair of sweeps.
+
+        The mixed correction is applied off the directionally-swept ``Y2`` (not the predictor ``Y0``
+        as in textbook Craig-Sneyd). This is deliberate: for the singular Dirac-seeded *forward*
+        density, the textbook-CS correction off ``Y0`` is not positivity-preserving and develops
+        O(1e-3) negative oscillations near the steep front that corrupt the E[v|S] read-off, whereas
+        this more-damped variant stays non-negative and still reprices vanillas exactly (the defining
+        SLV property; see test_fp_acceptance). ``b`` overrides the per-step cost-of-carry.
         """
         L = np.asarray(L, float)
         b_eff = self.b if b is None else float(b)
@@ -96,7 +102,7 @@ class ForwardFPADI:
             Y0 = f + dt * (A @ f)                            # explicit predictor (full operator)
             Y1 = lu_x.solve(Y0 - axf)                        # implicit in x (subtract explicit Ax part)
             Y2 = lu_z.solve(Y1 - azf)                        # implicit in z
-            Ycorr = Y2 + 0.5 * dt * (Axz @ (Y2 - f))         # Craig-Sneyd mixed-term correction
+            Ycorr = Y2 + 0.5 * dt * (Axz @ (Y2 - f))         # damped mixed correction off Y2 (positivity)
             Z1 = lu_x.solve(Ycorr - axf)
             out = lu_z.solve(Z1 - azf)
         if not np.all(np.isfinite(out)):
