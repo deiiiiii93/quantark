@@ -29,6 +29,10 @@ from .engine_enums import (
     AsianAnalyticalMethod,
     ConvertibleBondMethod,
     ConvertibleBondTrinomialVolScheme,
+    HestonAnalyticalMethod,
+    HestonMCScheme,
+    ADIScheme,
+    LeverageCalibrationMethod,
 )
 from .deltaone_enums import DeltaOneType
 from .fx_enums import FxPayoutCurrency
@@ -69,6 +73,10 @@ __all__ = [
     "AsianAnalyticalMethod",
     "ConvertibleBondMethod",
     "ConvertibleBondTrinomialVolScheme",
+    "HestonAnalyticalMethod",
+    "HestonMCScheme",
+    "ADIScheme",
+    "LeverageCalibrationMethod",
     # Delta-one enums
     "DeltaOneType",
     # FX enums
