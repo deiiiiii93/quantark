@@ -71,8 +71,8 @@ class SACCRNettingSet:
         if self.net_collateral is not None and not _is_finite_number(self.net_collateral):
             raise ValidationError(
                 f"net_collateral must be a finite number, got {self.net_collateral!r}")
-        if not isinstance(self.mpor_days, (int, float)) or isinstance(self.mpor_days, bool):
-            raise ValidationError(f"mpor_days must be a number, got {self.mpor_days!r}")
+        if not _is_finite_number(self.mpor_days):
+            raise ValidationError(f"mpor_days must be a finite number, got {self.mpor_days!r}")
         if self.threshold < 0:
             raise ValidationError(f"threshold must be non-negative, got {self.threshold}")
         if self.minimum_transfer_amount < 0:
