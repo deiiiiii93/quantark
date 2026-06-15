@@ -174,6 +174,7 @@ def test_slv_parameter_risk_requires_and_supports_both_leverage_modes():
     env, engine = _slv_pde()
     calc = VolModelRiskCalculator(
         slv_calibration_spec=SlvCalibrationSpec(
+            method=LeverageCalibrationMethod.MC_BINNING,
             num_paths=12_000, time_steps=30, num_bins=15, seed=5,
         )
     )
@@ -207,6 +208,7 @@ def test_slv_exposes_direct_leverage_bucket_and_market_iv_recalibration():
     env, engine = _slv_pde()
     calc = VolModelRiskCalculator(
         slv_calibration_spec=SlvCalibrationSpec(
+            method=LeverageCalibrationMethod.MC_BINNING,
             num_paths=6_000, time_steps=20, num_bins=12, seed=7,
         )
     )

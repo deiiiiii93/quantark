@@ -425,6 +425,24 @@ class BaseVolModelRiskCalculator:
             r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
             carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
             spot = float(env.spot)
+        from quantark.util.enum.engine_enums import LeverageCalibrationMethod
+        if spec.method is LeverageCalibrationMethod.MC_BINNING:
+            return calibrate_leverage_surface(
+                spot,
+                params,
+                local_vol,
+                np.diff(t_grid),
+                r_fwd,
+                carry_fwd,
+                eta=eta,
+                method=LeverageCalibrationMethod.MC_BINNING,
+                num_paths=spec.num_paths,
+                num_bins=spec.num_bins,
+                bin_method=BinMethod(spec.bin_method),
+                seed=spec.seed,
+                n_strike_nodes=spec.n_strike_nodes,
+                strike_span_stds=spec.strike_span_stds,
+            )
         return calibrate_leverage_surface(
             spot,
             params,
@@ -433,12 +451,8 @@ class BaseVolModelRiskCalculator:
             r_fwd,
             carry_fwd,
             eta=eta,
-            num_paths=spec.num_paths,
-            num_bins=spec.num_bins,
-            bin_method=BinMethod(spec.bin_method),
-            seed=spec.seed,
-            n_strike_nodes=spec.n_strike_nodes,
-            strike_span_stds=spec.strike_span_stds,
+            method=LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK,
+            fp_config=spec.fp_config,
         )
 
     def _local_market_vega(

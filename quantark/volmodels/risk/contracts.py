@@ -8,8 +8,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Optional, Tuple
 
+from quantark.util.enum.engine_enums import LeverageCalibrationMethod
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston.params import HestonParams
+from quantark.volmodels.slv.fokkerplanck.config import FpCalibrationConfig
 
 
 class SurfaceBucketKind(Enum):
@@ -334,9 +336,18 @@ class SlvCalibrationSpec:
     seed: int = 42
     n_strike_nodes: int = 41
     strike_span_stds: float = 4.0
+    method: LeverageCalibrationMethod = LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK
+    fp_config: Optional[FpCalibrationConfig] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bin_method", getattr(self.bin_method, "value", self.bin_method))
+        if not isinstance(self.method, LeverageCalibrationMethod):
+            raise ValidationError("method must be a LeverageCalibrationMethod")
+        if self.fp_config is not None:
+            if self.method is not LeverageCalibrationMethod.FORWARD_FOKKER_PLANCK:
+                raise ValidationError("fp_config is only valid for FORWARD_FOKKER_PLANCK")
+            if not isinstance(self.fp_config, FpCalibrationConfig):
+                raise ValidationError("fp_config must be an FpCalibrationConfig")
         if (
             not isinstance(self.num_paths, Integral)
             or not isinstance(self.time_steps, Integral)
