@@ -157,7 +157,7 @@ class SIMMDashboard:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SIMM Dashboard — v{getattr(self._r,'simm_version','2.6')}</title>
-<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js" integrity="sha384-7TVmlZWH60iKX5Uk7lSvQhjtcgw2tkFjuwLcXoRSR4zXTyWFJRm9aPAguMh7CIra" crossorigin="anonymous"></script>
 <style>
   :root {{
     --paper: {_NEUTRAL['paper']}; --paper-2: {_NEUTRAL['paper2']}; --paper-3: {_NEUTRAL['paper3']};
