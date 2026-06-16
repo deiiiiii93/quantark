@@ -117,3 +117,19 @@ def test_vanilla_greeks_flat_surface_unchanged():
     greeks = eng.calculate_greeks(_vanilla(), env)
     assert greeks["vega"] == greeks["vega"]
     assert greeks["price"] > 0.0
+
+
+def test_vanilla_and_digital_run_through_fx_var():
+    from quantark.asset.fx.product.option import FxDigitalOption
+    from quantark.asset.fx.engine.analytical import FxDigitalOptionAnalyticalEngine
+    from quantark.var.fx.revaluation import bump_env
+    env = _env()
+    gk = GarmanKohlhagenEngine()
+    dig = FxDigitalOptionAnalyticalEngine()
+    digital = FxDigitalOption(
+        strike=1.25, option_type=OptionType.CALL, payout=1.0, maturity=TAU
+    )
+    bumped = bump_env(env, spot_return=0.01, vol_change=0.01)
+    assert gk.price(_vanilla(), bumped) > 0.0
+    assert dig.price(digital, bumped) >= 0.0
+    assert all(v == v for v in dig.calculate_greeks(digital, env).values())
