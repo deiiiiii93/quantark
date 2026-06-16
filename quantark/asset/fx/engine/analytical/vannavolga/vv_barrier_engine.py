@@ -58,13 +58,16 @@ class VannaVolgaBarrierEngine(BaseFxEngine):
                 env, surface.quotes, product.barrier, product.is_up,
                 conv=surface.conv, premium_included_atm=surface.premium_included_atm,
             )
-            # price_vv_one_touch returns a UNIT one-touch; scale by the
-            # product payout so price and bump-and-reprice Greeks are correct.
+            # price_vv_one_touch returns a UNIT one-touch; scale every
+            # price-like field (including the greeks diagnostics) by the product
+            # payout so price, details, and bump-and-reprice Greeks all agree.
             if product.payout != 1.0:
+                p = product.payout
                 result = dataclasses.replace(
                     result,
-                    bstv=result.bstv * product.payout,
-                    vv=result.vv * product.payout,
+                    bstv=result.bstv * p,
+                    vv=result.vv * p,
+                    greeks={k: v * p for k, v in result.greeks.items()},
                 )
             return result
         if isinstance(product, FxBarrierOption):

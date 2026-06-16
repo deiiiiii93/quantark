@@ -13,6 +13,18 @@ SMILE = SmileQuotes(sigma_atm=0.10, rr25=-0.01, bf25_2vol=0.003)
 FLAT = SmileQuotes(sigma_atm=0.10, rr25=0.0, bf25_2vol=0.0)
 
 
+def test_breached_knock_in_returns_full_vv_vanilla():
+    # Spot already above an up-barrier: the KI is a plain vanilla, so the price
+    # must equal the FULL VV vanilla (including the vega term), not the
+    # vanna/volga-only barrier correction.
+    env = FXEnv(spot=1.40, rd=0.02, rf=0.01, tau=0.75)
+    res = price_vv_barrier(
+        env, SMILE, strike=1.20, barrier=1.35, is_up=True,
+        is_call=True, knock_in=True, conv=DeltaConvention.SPOT,
+    )
+    assert res.vv == pytest.approx(res.vanilla)
+
+
 def test_vv_reduces_to_bs_when_smile_flat():
     res = price_vv_barrier(
         ENV, FLAT, strike=1.20, barrier=1.35, is_up=True,

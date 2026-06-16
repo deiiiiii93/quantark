@@ -120,10 +120,36 @@ def price_vv_barrier(
         )
 
     conv = DeltaConvention(conv) if conv is not None else choose_delta_convention(env.tau)
+    omega, _ = compute_omega(env, quotes, conv, premium_included_atm=premium_included_atm)
+
+    # Already-triggered states are plain instruments, not barriers: the
+    # vanna/volga-only barrier correction (which drops the vanilla vega term) is
+    # wrong for them. A touched knock-in is a vanilla -> return the FULL VV
+    # vanilla price (vega included). A touched knock-out is dead -> only the
+    # rebate remains, with no smile correction (bstv already holds it).
+    breached = (is_up and env.spot >= barrier) or ((not is_up) and env.spot <= barrier)
+    if breached:
+        if knock_in:
+            vanilla_vv = _vv_vanilla(env, quotes, strike, is_call, omega)
+            result = VVBarrierResult(
+                bstv=bstv, vv=float(vanilla_vv), gamma=1.0,
+                p_vanna=0.0, p_volga=0.0, omega=omega,
+                greeks={"vega": 0.0, "vanna": 0.0, "volga": 0.0},
+            )
+            object.__setattr__(result, "vanilla", float(vanilla_vv))
+            return result
+        # touched knock-out: dead, worth only the rebate already in bstv.
+        result = VVBarrierResult(
+            bstv=bstv, vv=float(bstv), gamma=0.0,
+            p_vanna=0.0, p_volga=0.0, omega=omega,
+            greeks={"vega": 0.0, "vanna": 0.0, "volga": 0.0},
+        )
+        object.__setattr__(result, "vanilla", float(bstv))
+        return result
+
     gx = numeric_greeks_barrier(
         env, sigma, strike, barrier, is_up, is_call, knock_in, rebate, rebate_at_hit
     )
-    omega, _ = compute_omega(env, quotes, conv, premium_included_atm=premium_included_atm)
 
     barrier_low = None if is_up else barrier
     barrier_high = barrier if is_up else None

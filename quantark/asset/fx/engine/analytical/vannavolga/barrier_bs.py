@@ -171,7 +171,6 @@ def reiner_rubinstein_barrier(
     sqrt_t = math.sqrt(tau)
     vst = vol * sqrt_t
     mu = (b - 0.5 * vol * vol) / (vol * vol)
-    lam = math.sqrt(mu * mu + 2.0 * r / (vol * vol))
 
     S, X, H, K = spot, strike, barrier, rebate
     carry_df = math.exp((b - r) * tau)  # e^{(b-r)T}
@@ -181,11 +180,25 @@ def reiner_rubinstein_barrier(
     x2 = math.log(S / H) / vst + (1.0 + mu) * vst
     y1 = math.log(H * H / (S * X)) / vst + (1.0 + mu) * vst
     y2 = math.log(H / S) / vst + (1.0 + mu) * vst
-    z = math.log(H / S) / vst + lam * vst
 
     HS = H / S
 
+    # In this parameterization x1 is the standard d1, so the A term is exactly
+    # the plain (unbarriered) vanilla value.
     A = phi * S * carry_df * norm.cdf(phi * x1) - phi * X * dom_df * norm.cdf(phi * x1 - phi * vst)
+
+    # Spot already on the dead/alive side of the barrier (continuous monitoring):
+    # the closed-form A-F decomposition assumes spot has NOT yet touched, so the
+    # already-triggered state must be handled before it.
+    breached = (is_up and S >= H) or ((not is_up) and S <= H)
+    if breached:
+        if knock_in:
+            # Already knocked in -> the option is a plain vanilla now.
+            return float(A)
+        # Already knocked out -> only the rebate remains (paid now at hit, or
+        # discounted to expiry).
+        return float(K if rebate_at_hit else K * dom_df)
+
     B = phi * S * carry_df * norm.cdf(phi * x2) - phi * X * dom_df * norm.cdf(phi * x2 - phi * vst)
     C = (
         phi * S * carry_df * (HS ** (2.0 * (mu + 1.0))) * norm.cdf(eta * y1)
@@ -198,11 +211,6 @@ def reiner_rubinstein_barrier(
     # Rebate paid at expiry (used by KI, paid if never knocked in):
     E = K * dom_df * (
         norm.cdf(eta * x2 - eta * vst) - (HS ** (2.0 * mu)) * norm.cdf(eta * y2 - eta * vst)
-    )
-    # Rebate paid at hit (KO only):
-    F = K * (
-        (HS ** (mu + lam)) * norm.cdf(eta * z)
-        + (HS ** (mu - lam)) * norm.cdf(eta * z - 2.0 * eta * lam * vst)
     )
 
     strike_above_barrier = X >= H
@@ -222,11 +230,21 @@ def reiner_rubinstein_barrier(
         # At hit -> F (the touch term with lambda). At expiry -> the rebate
         # discounted times the touch probability. Do NOT reuse E here: E is the
         # knock-in "never touched" term and pays on the opposite states.
-        if rebate_at_hit:
-            reb = F
-        else:
+        if rebate_at_hit and K != 0.0:
+            # lam/z/F are only well-defined (and only needed) for a nonzero
+            # at-hit rebate; mu^2 + 2r/vol^2 can go negative for some valid
+            # negative-rate configs, so compute them lazily here, not above.
+            lam = math.sqrt(mu * mu + 2.0 * r / (vol * vol))
+            z = math.log(H / S) / vst + lam * vst
+            reb = K * (
+                (HS ** (mu + lam)) * norm.cdf(eta * z)
+                + (HS ** (mu - lam)) * norm.cdf(eta * z - 2.0 * eta * lam * vst)
+            )
+        elif K != 0.0:
             p_hit = one_touch_hit_prob(S, H, vol, tau, b, is_up)
             reb = K * dom_df * p_hit
+        else:
+            reb = 0.0
         if is_call and not is_up:        # down-and-out call
             val = (A - C + reb) if strike_above_barrier else (B - D + reb)
         elif is_call and is_up:          # up-and-out call
