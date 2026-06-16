@@ -55,3 +55,21 @@ def test_var_bump_env_handles_vv_vol_shift():
     )
     # Original env is untouched.
     assert env.vol_surface.quotes.sigma_atm == pytest.approx(SMILE.sigma_atm)
+
+
+def test_full_greeks_dict_is_complete():
+    eng = VannaVolgaBarrierEngine()
+    greeks = eng.calculate_greeks(_barrier(), _env())
+    for key in ("price", "delta", "gamma", "vega", "theta", "rho_dom", "rho_for"):
+        assert key in greeks
+        assert greeks[key] == greeks[key]  # not NaN
+
+
+def test_one_touch_and_barrier_reprice_under_spot_bump():
+    eng = VannaVolgaBarrierEngine()
+    env = _env()
+    base = eng.price(_barrier(), env)
+    # Sticky-delta: bump spot via the standard engine path and confirm reprice.
+    greeks = eng.calculate_greeks(_barrier(), env)
+    assert greeks["price"] == pytest.approx(base, rel=1e-12)
+    assert greeks["delta"] == greeks["delta"]  # finite

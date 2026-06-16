@@ -11,12 +11,12 @@ Assembles the VV-corrected one-touch price from:
 VV price = BSTV + p_vanna * vanna * Omega[vanna] + p_volga * volga * Omega[volga]
 (the vega term is dropped by construction).
 
-Scope note: the legacy source implements VV pricing only for the one-touch
-instrument; it provides no Black-Scholes vanilla knock-out pricer. Vanilla
-knock-out VV pricing (strike + call/put, using the ``BarrierPrices`` arbitrage
-clamps) is therefore intentionally deferred rather than fabricated here.
-# TODO(vanilla-KO): add a Reiner-Rubinstein FX knock-out pricer + VV correction
-# and wire enforce_single/double_barrier_arbitrage when that work is scheduled.
+Scope note: this module prices the one-touch instrument. Vanilla single-barrier
+knock-out / knock-in pricing (Reiner-Rubinstein baseline + Castagna-Mercurio VV
+correction, wiring ``enforce_single_barrier_arbitrage``) now lives in the
+sibling ``vv_vanilla_barrier`` module. Double-barrier / DKO pricing
+(Ikeda-Kunitomo) remains deferred and would wire
+``enforce_double_barrier_arbitrage`` when scheduled.
 """
 
 from __future__ import annotations
