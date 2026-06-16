@@ -164,7 +164,19 @@ def price_vv_barrier(
     a, b, c = _GAMMA_PRESETS[gamma_type]
     p_vanna, p_volga = p_vanna_p_volga_from_gamma(g, a, b, c, gamma_star)
 
-    adj = p_vanna * gx["vanna"] * float(omega[1]) + p_volga * gx["volga"] * float(omega[2])
+    # Canonical Castagna-Mercurio vanilla-barrier VV correction applies ALL
+    # THREE market terms (vega, vanna, volga) under survival attenuation -- the
+    # vega term is dropped only for one-touch / digital VV (see vv_barrier.py),
+    # NOT for vanilla barriers. The vega weight tends to 1 in the no-knock limit
+    # (gamma_surv -> 1), so a far-away barrier converges smoothly to the smile-
+    # consistent vanilla _vv_vanilla; near barriers, small gamma_surv suppresses
+    # it as expected. Use p_vega = gamma_surv, consistent with p_vanna = a*g.
+    p_vega = g
+    adj = (
+        p_vega * gx["vega"] * float(omega[0])
+        + p_vanna * gx["vanna"] * float(omega[1])
+        + p_volga * gx["volga"] * float(omega[2])
+    )
     raw = bstv + adj
 
     vanilla_vv = _vv_vanilla(env, quotes, strike, is_call, omega)

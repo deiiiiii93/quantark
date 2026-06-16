@@ -41,6 +41,26 @@ def test_vv_reduces_to_bs_when_smile_flat():
     assert res.vv == pytest.approx(bs, abs=1e-9)
 
 
+def test_far_ko_converges_to_vv_vanilla():
+    # Canonical CM correction (incl. survival-weighted vega) must make a far
+    # up-and-out call converge to the smile-consistent VV vanilla as H -> inf.
+    res_far = price_vv_barrier(
+        ENV, SMILE, strike=1.20, barrier=10.0, is_up=True,
+        is_call=True, knock_in=False, conv=DeltaConvention.SPOT,
+    )
+    assert res_far.vv == pytest.approx(res_far.vanilla, rel=1e-6)
+
+
+def test_near_ko_vega_term_suppressed_by_survival():
+    # Near the barrier, survival is low so the (now-present) vega term is
+    # attenuated: the KO stays well below the vanilla, not pinned to it.
+    res_near = price_vv_barrier(
+        ENV, SMILE, strike=1.20, barrier=1.35, is_up=True,
+        is_call=True, knock_in=False, conv=DeltaConvention.SPOT,
+    )
+    assert 0.0 < res_near.vv < 0.6 * res_near.vanilla
+
+
 def test_vv_ko_bounded_by_vanilla_and_nonneg():
     res = price_vv_barrier(
         ENV, SMILE, strike=1.20, barrier=1.35, is_up=True,
