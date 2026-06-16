@@ -698,8 +698,15 @@ def reiner_rubinstein_barrier(
         else:                            # up-and-in put
             val = (A - B + D + E) if strike_above_barrier else (C + E)
     else:
-        # Out-options: rebate F (at hit) or E (at expiry).
-        reb = F if rebate_at_hit else E
+        # Out-options: the rebate is paid because the barrier IS knocked out.
+        # At hit -> F (the touch term with lambda). At expiry -> the rebate
+        # discounted times the touch probability. Do NOT reuse E here: E is the
+        # knock-in "never touched" term and pays on the opposite states.
+        if rebate_at_hit:
+            reb = F
+        else:
+            p_hit = one_touch_hit_prob(S, H, vol, tau, b, is_up)
+            reb = K * dom_df * p_hit
         if is_call and not is_up:        # down-and-out call
             val = (A - C + reb) if strike_above_barrier else (B - D + reb)
         elif is_call and is_up:          # up-and-out call
@@ -735,10 +742,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 Append to `test/test_reiner_rubinstein.py`:
 
 ```python
-ql = pytest.importorskip("QuantLib")
-
-
 def test_rr_matches_quantlib_down_out_call():
+    pytest.importorskip("QuantLib")
     import QuantLib as q
     today = q.Date(15, 6, 2026)
     q.Settings.instance().evaluationDate = today
@@ -977,10 +982,17 @@ def price_vv_barrier(
     raw = bstv + adj
 
     vanilla_vv = _vv_vanilla(env, quotes, strike, is_call, omega)
-    clamped = enforce_single_barrier_arbitrage(
-        BarrierPrices(vanilla=vanilla_vv, ko=raw)
-    )
-    vv = clamped.ko if clamped.ko is not None else max(raw, 0.0)
+    if rebate > 0.0:
+        # A rebate is an extra cash leg on top of the option, so a barrier with
+        # a rebate can legitimately be worth MORE than the plain vanilla. The
+        # vanilla upper-bound clamp would underprice it, so enforce only the
+        # non-negativity floor for rebate structures.
+        vv = max(raw, 0.0)
+    else:
+        clamped = enforce_single_barrier_arbitrage(
+            BarrierPrices(vanilla=vanilla_vv, ko=raw)
+        )
+        vv = clamped.ko if clamped.ko is not None else max(raw, 0.0)
 
     result = VVBarrierResult(
         bstv=bstv, vv=float(vv), gamma=g, p_vanna=p_vanna, p_volga=p_volga,
@@ -1111,6 +1123,7 @@ standard BaseFxEngine contract (price + bump-and-reprice Greeks).
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Optional
 
 from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine, FxEngineParams
@@ -1159,10 +1172,19 @@ class VannaVolgaBarrierEngine(BaseFxEngine):
         env = self._build_fx_env(product, fx_env)
         surface = self._surface(fx_env)
         if isinstance(product, FxOneTouchOption):
-            return price_vv_one_touch(
+            result = price_vv_one_touch(
                 env, surface.quotes, product.barrier, product.is_up,
                 conv=surface.conv, premium_included_atm=surface.premium_included_atm,
             )
+            # price_vv_one_touch returns a UNIT one-touch; scale by the
+            # product payout so price and bump-and-reprice Greeks are correct.
+            if product.payout != 1.0:
+                result = dataclasses.replace(
+                    result,
+                    bstv=result.bstv * product.payout,
+                    vv=result.vv * product.payout,
+                )
+            return result
         if isinstance(product, FxBarrierOption):
             return price_vv_barrier(
                 env, surface.quotes, product.strike, product.barrier,
