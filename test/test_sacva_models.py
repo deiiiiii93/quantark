@@ -93,6 +93,38 @@ def test_bucket_and_tenor_type_validation():
                        tenor=float("nan"), credit_quality=CreditQuality.IG)
 
 
+def test_counterparty_tenor_must_be_on_grid():
+    ok = dict(risk_class=RiskClass.COUNTERPARTY_CREDIT, risk_type=RiskType.DELTA,
+              bucket=3, risk_factor="A", s_cva=1.0, name="A",
+              credit_quality=CreditQuality.IG)
+    CVASensitivity(tenor=5.0, **ok)
+    with pytest.raises(ValidationError):
+        CVASensitivity(tenor=7.0, **ok)   # off the {0.5,1,3,5,10} grid
+
+
+def test_counterparty_bucket8_requires_index_series():
+    base = dict(risk_class=RiskClass.COUNTERPARTY_CREDIT, risk_type=RiskType.DELTA,
+                bucket=8, risk_factor="CDX", s_cva=1.0, name="CDX", tenor=5.0,
+                credit_quality=CreditQuality.IG, is_index=True)
+    with pytest.raises(ValidationError):
+        CVASensitivity(**base)            # no index_series
+    CVASensitivity(index_series="S1", **base)
+
+
+def test_reference_credit_quality_consistency():
+    with pytest.raises(ValidationError):
+        CVASensitivity(risk_class=RiskClass.REFERENCE_CREDIT, risk_type=RiskType.DELTA,
+                       bucket=1, risk_factor="b1", s_cva=1.0, name="a",
+                       credit_quality=CreditQuality.HY_NR)  # bucket 1 is IG
+    CVASensitivity(risk_class=RiskClass.REFERENCE_CREDIT, risk_type=RiskType.DELTA,
+                   bucket=1, risk_factor="b1", s_cva=1.0, name="a",
+                   credit_quality=CreditQuality.IG)
+    # bucket 15 (other) has no defined quality -> any value accepted
+    CVASensitivity(risk_class=RiskClass.REFERENCE_CREDIT, risk_type=RiskType.DELTA,
+                   bucket=15, risk_factor="b15", s_cva=1.0, name="a",
+                   credit_quality=CreditQuality.HY_NR)
+
+
 def test_portfolio_fx_reporting_currency_excluded():
     fx = CVASensitivity(risk_class=RiskClass.FX, risk_type=RiskType.DELTA, bucket=0,
                         currency="USD", risk_factor="USD", s_cva=1.0, s_hdg=0.0)

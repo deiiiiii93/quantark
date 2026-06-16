@@ -25,6 +25,18 @@ _INDEX_BUCKETS = {
     RiskClass.EQUITY: {12, 13},
 }
 
+# Counterparty credit spread regulatory tenors (MAR50.65(1)).
+_COUNTERPARTY_TENORS = frozenset({0.5, 1.0, 3.0, 5.0, 10.0})
+
+
+def _ref_expected_quality(bucket: int):
+    """Credit quality implied by a reference-credit bucket (None for bucket 15)."""
+    if bucket in (1, 2, 3, 4, 5, 6, 7, 16):
+        return CreditQuality.IG
+    if bucket in (8, 9, 10, 11, 12, 13, 14, 17):
+        return CreditQuality.HY_NR
+    return None  # bucket 15 (other) has no defined quality
+
 
 @dataclass(frozen=True)
 class CVASensitivity:
@@ -78,12 +90,18 @@ class CVASensitivity:
                 raise ValidationError("Counterparty credit requires name")
             if self.tenor is None:
                 raise ValidationError("Counterparty credit requires tenor")
+            if self.tenor not in _COUNTERPARTY_TENORS:
+                raise ValidationError(
+                    f"Counterparty tenor must be one of {sorted(_COUNTERPARTY_TENORS)}, "
+                    f"got {self.tenor}")
             if not isinstance(self.credit_quality, CreditQuality):
                 raise ValidationError("Counterparty credit requires credit_quality")
             if self.bucket == 1 and self.sub_bucket not in ("a", "b"):
                 raise ValidationError("Counterparty bucket 1 requires sub_bucket 'a'/'b'")
             if self.bucket == 8 and not self.is_index:
                 raise ValidationError("Counterparty bucket 8 is index-only (is_index=True)")
+            if self.bucket == 8 and not self.index_series:
+                raise ValidationError("Counterparty bucket 8 requires index_series")
             if self.is_index and self.bucket != 8:
                 raise ValidationError("Counterparty is_index is only valid in bucket 8")
         elif rc == RiskClass.INTEREST_RATE:
@@ -98,3 +116,9 @@ class CVASensitivity:
                 raise ValidationError(f"{rc.name} bucket {self.bucket} requires is_index=True")
             if self.is_index and self.bucket not in idx:
                 raise ValidationError(f"{rc.name} bucket {self.bucket} is not an index bucket")
+            if rc == RiskClass.REFERENCE_CREDIT and self.credit_quality is not None:
+                expected = _ref_expected_quality(self.bucket)
+                if expected is not None and self.credit_quality != expected:
+                    raise ValidationError(
+                        f"reference-credit bucket {self.bucket} is {expected.name}, "
+                        f"got credit_quality {self.credit_quality.name}")
