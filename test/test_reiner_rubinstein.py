@@ -56,6 +56,23 @@ def test_at_hit_rebate_rejects_unsupported_negative_rate_config():
         )
 
 
+def test_negative_tau_rejected():
+    with pytest.raises(ValueError, match="tau >= 0"):
+        reiner_rubinstein_barrier(
+            S, 1.20, 1.35, VOL, -0.1, RD, RF,
+            is_up=True, is_call=True, knock_in=False,
+        )
+
+
+def test_zero_tau_uses_terminal_branch():
+    # tau == 0, not breached: KO call worth its intrinsic at expiry.
+    val = reiner_rubinstein_barrier(
+        1.25, 1.20, 1.35, VOL, 0.0, RD, RF,
+        is_up=True, is_call=True, knock_in=False,
+    )
+    assert val == pytest.approx(0.05)
+
+
 def test_breached_states_positive_tau():
     # Up barrier already touched (spot >= H) with time remaining.
     ko = reiner_rubinstein_barrier(

@@ -144,7 +144,11 @@ def reiner_rubinstein_barrier(
     Reference: Haug, The Complete Guide to Option Pricing Formulas, 2nd ed.,
     single-barrier chapter.
     """
-    if tau <= 0.0:
+    if tau < 0.0:
+        raise ValueError(
+            f"reiner_rubinstein_barrier requires tau >= 0, got {tau}."
+        )
+    if tau == 0.0:
         # No remaining time: knock-in cannot trigger; knock-out is the vanilla
         # unless already breached. Handle terminal value directly.
         intrinsic = max(spot - strike, 0.0) if is_call else max(strike - spot, 0.0)
