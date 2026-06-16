@@ -36,6 +36,7 @@ from .vv_barrier import (
     price_vv_one_touch,
 )
 from .vv_vanilla_barrier import numeric_greeks_barrier, price_vv_barrier
+from .vv_barrier_engine import VannaVolgaBarrierEngine
 
 __all__ = [
     "one_touch_hit_prob",
@@ -57,4 +58,5 @@ __all__ = [
     "price_vv_one_touch",
     "numeric_greeks_barrier",
     "price_vv_barrier",
+    "VannaVolgaBarrierEngine",
 ]

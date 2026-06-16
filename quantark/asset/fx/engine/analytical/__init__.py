@@ -7,7 +7,13 @@ from .fx_quanto_vanilla_engine import GarmanKohlhagenQuantoEngine
 from .fx_quanto_digital_engine import FxQuantoDigitalAnalyticalEngine
 from .fx_deltaone_engine import FxDeltaOneEngine
 from . import vannavolga
-from .vannavolga import price_vv_one_touch, BarrierGamma, VVBarrierResult
+from .vannavolga import (
+    price_vv_one_touch,
+    price_vv_barrier,
+    BarrierGamma,
+    VVBarrierResult,
+    VannaVolgaBarrierEngine,
+)
 from .fx_heston_analytical_engine import FxHestonAnalyticalEngine
 
 __all__ = [
@@ -18,7 +24,9 @@ __all__ = [
     'FxDeltaOneEngine',
     'vannavolga',
     'price_vv_one_touch',
+    'price_vv_barrier',
     'BarrierGamma',
     'VVBarrierResult',
+    'VannaVolgaBarrierEngine',
     'FxHestonAnalyticalEngine',
 ]
