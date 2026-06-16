@@ -51,15 +51,20 @@ def _shift_vol(surface, change: float):
             vols=[max(_MIN_VOL, float(v) + change) for v in surface.vols],
         )
     if isinstance(surface, VannaVolgaVolSurface):
-        # Additive parallel vol move: shift the ATM level and keep RR/BF fixed.
-        # RR (= sigma_25c - sigma_25p) and BF are invariant under an additive
-        # parallel shift, so moving only sigma_atm IS the full-quote move here.
+        # Additive parallel vol move. Shift the three ABSOLUTE vols (ATM, 25C,
+        # 25P) and floor each at _MIN_VOL, then rebuild ATM/RR/BF. Flooring only
+        # the ATM level (keeping RR/BF fixed) could leave a derived wing vol
+        # negative under a large negative shift, which SmileQuotes rejects.
         q = surface.quotes
+        sigma_25p, sigma_25c = q.sigma_25d()
+        atm = max(_MIN_VOL, q.sigma_atm + change)
+        s25c = max(_MIN_VOL, sigma_25c + change)
+        s25p = max(_MIN_VOL, sigma_25p + change)
         return surface.with_quotes(
             SmileQuotes(
-                sigma_atm=max(_MIN_VOL, q.sigma_atm + change),
-                rr25=q.rr25,
-                bf25_2vol=q.bf25_2vol,
+                sigma_atm=atm,
+                rr25=s25c - s25p,
+                bf25_2vol=0.5 * (s25c + s25p) - atm,
             )
         )
     raise ValidationError(

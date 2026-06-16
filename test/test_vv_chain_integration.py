@@ -57,6 +57,17 @@ def test_var_bump_env_handles_vv_vol_shift():
     assert env.vol_surface.quotes.sigma_atm == pytest.approx(SMILE.sigma_atm)
 
 
+def test_var_vol_shift_keeps_wing_vols_positive():
+    # A large negative VaR vol shift must not produce negative derived wing
+    # vols (which SmileQuotes would reject). Construct directly to confirm.
+    env = _env()
+    bumped = bump_env(env, spot_return=0.0, vol_change=-0.30)
+    surf = bumped.vol_surface
+    sigma_25p, sigma_25c = surf.quotes.sigma_25d()
+    assert sigma_25p > 0.0 and sigma_25c > 0.0
+    assert surf.quotes.sigma_atm > 0.0
+
+
 def test_full_greeks_dict_is_complete():
     eng = VannaVolgaBarrierEngine()
     greeks = eng.calculate_greeks(_barrier(), _env())

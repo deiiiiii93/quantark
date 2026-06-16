@@ -45,6 +45,17 @@ def test_no_rebate_pricing_survives_negative_rates():
     assert val == val and val >= 0.0  # finite, non-negative
 
 
+def test_at_hit_rebate_rejects_unsupported_negative_rate_config():
+    # mu ~ 0 with rd < 0 makes the radicand negative; at-hit rebate has no
+    # real-lambda form here and must raise a clear error, not crash opaquely.
+    with pytest.raises(ValueError, match="at-hit rebate"):
+        reiner_rubinstein_barrier(
+            S, 1.20, 1.35, 0.10, TAU, -0.001, -0.006,
+            is_up=True, is_call=True, knock_in=False,
+            rebate=0.02, rebate_at_hit=True,
+        )
+
+
 def test_breached_states_positive_tau():
     # Up barrier already touched (spot >= H) with time remaining.
     ko = reiner_rubinstein_barrier(

@@ -170,10 +170,14 @@ def price_vv_barrier(
     vanilla_vv = _vv_vanilla(env, quotes, strike, is_call, omega)
     if rebate > 0.0:
         # A rebate is an extra cash leg on top of the option, so a barrier with
-        # a rebate can legitimately be worth MORE than the plain vanilla. The
-        # vanilla upper-bound clamp would underprice it, so enforce only the
-        # non-negativity floor for rebate structures.
-        vv = max(raw, 0.0)
+        # a rebate can legitimately be worth MORE than the plain vanilla. It is
+        # still bounded: the rebate is paid at most once, so its PV is at most
+        # rebate * max(1, DF_dom) (DF_dom can exceed 1 under negative rd). Clamp
+        # to vanilla_vv plus that conservative max-rebate PV.
+        dom_df = float(np.exp(-env.rd * env.tau))
+        rebate_pv_max = rebate * max(1.0, dom_df)
+        upper = vanilla_vv + rebate_pv_max
+        vv = min(max(raw, 0.0), upper)
     else:
         clamped = enforce_single_barrier_arbitrage(
             BarrierPrices(vanilla=vanilla_vv, ko=raw)

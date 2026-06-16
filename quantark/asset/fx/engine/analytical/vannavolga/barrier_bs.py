@@ -234,7 +234,19 @@ def reiner_rubinstein_barrier(
             # lam/z/F are only well-defined (and only needed) for a nonzero
             # at-hit rebate; mu^2 + 2r/vol^2 can go negative for some valid
             # negative-rate configs, so compute them lazily here, not above.
-            lam = math.sqrt(mu * mu + 2.0 * r / (vol * vol))
+            radicand = mu * mu + 2.0 * r / (vol * vol)
+            if radicand < 0.0:
+                # The closed-form at-hit rebate term F has no real-lambda
+                # representation here (it would need an oscillatory/complex
+                # treatment). Reject explicitly rather than raising an opaque
+                # math-domain error or silently approximating.
+                raise ValueError(
+                    "at-hit rebate (rebate_at_hit=True) is not supported for "
+                    "this rate/vol configuration: mu^2 + 2*rd/vol^2 < 0 "
+                    f"(rd={rd}, rf={rf}, vol={vol}). Use rebate_at_hit=False "
+                    "(expiry-paid rebate) for these rates."
+                )
+            lam = math.sqrt(radicand)
             z = math.log(H / S) / vst + lam * vst
             reb = K * (
                 (HS ** (mu + lam)) * norm.cdf(eta * z)
