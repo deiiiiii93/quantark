@@ -233,9 +233,13 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
             if option.is_call():
                 base = asset_call
             else:
-                s_eff = fx_env.effective_spot()
-                df_for = fx_env.get_foreign_df(tau_delivery)
-                base = s_eff * df_for - asset_call
+                # Total asset-or-nothing PV (call + put = PV[S_T]) must use the
+                # SAME forward basis as the vanilla legs and the closed-form
+                # path (fwd * df_dom), not s_eff * df_for, so the two agree under
+                # a market_forward override or non-standard delivery.
+                tau_m = option.get_maturity(fx_env)
+                fwd = fx_env.get_forward(tau_m)
+                base = fwd * df_dom - asset_call
 
         return option.payout * base * option.participation_rate
 

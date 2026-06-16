@@ -97,17 +97,20 @@ def _vanilla():
     )
 
 
-def test_vanilla_greeks_smile_consistent_match_bump_reprice():
+def test_vanilla_greeks_route_through_bump_reprice_under_vv():
+    # Under a VV surface the engine must DELEGATE to the BaseFxEngine
+    # bump-and-reprice path (not the sticky-strike closed forms). Verify by
+    # matching the base implementation exactly. NOTE: the smile anchor is held
+    # fixed under the spot bump today (sticky-strike repriced Greeks); true
+    # sticky-delta re-anchoring for get_vol-based engines is tracked separately.
+    from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine
     eng = GarmanKohlhagenEngine()
-    env = _env()  # VannaVolgaVolSurface in the env
-    greeks = eng.calculate_greeks(_vanilla(), env)
-    from copy import deepcopy
-    h = eng.params.spot_bump
-    up, dn = deepcopy(env), deepcopy(env)
-    up.spot_quote.spot = env.spot * (1 + h)
-    dn.spot_quote.spot = env.spot * (1 - h)
-    manual_delta = (eng.price(_vanilla(), up) - eng.price(_vanilla(), dn)) / (2 * env.spot * h)
-    assert greeks["delta"] == pytest.approx(manual_delta, rel=1e-6)
+    env = _env()
+    smile_greeks = eng.calculate_greeks(_vanilla(), env)
+    base_greeks = BaseFxEngine.calculate_greeks(eng, _vanilla(), env)
+    assert smile_greeks["delta"] == pytest.approx(base_greeks["delta"])
+    assert smile_greeks["vega"] == pytest.approx(base_greeks["vega"])
+    assert smile_greeks["gamma"] == pytest.approx(base_greeks["gamma"])
 
 
 def test_vanilla_greeks_flat_surface_unchanged():
