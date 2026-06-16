@@ -148,6 +148,12 @@ class SupervisoryParameters:
             raise ValidationError(f"Unknown reference-credit bucket: {bucket!r}")
         return cls._REF_RW[bucket]
 
+    @classmethod
+    def refcredit_vega_rw(cls, bucket: int) -> float:
+        if bucket not in cls._REF_RW:
+            raise ValidationError(f"Unknown reference-credit bucket: {bucket!r}")
+        return 1.00
+
     @staticmethod
     def _ref_sector(bucket: int) -> int:
         if 1 <= bucket <= 7:

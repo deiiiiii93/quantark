@@ -24,7 +24,8 @@ class ReferenceCreditEngine(BaseRiskClassEngine):
         return s.bucket
 
     def risk_weight(self, s: CVASensitivity, risk_type: RiskType) -> float:
-        return 1.00 if risk_type == RiskType.VEGA else SP.refcredit_rw(s.bucket)
+        return SP.refcredit_vega_rw(s.bucket) if risk_type == RiskType.VEGA \
+            else SP.refcredit_rw(s.bucket)
 
     def group_buckets(self, sens: List[CVASensitivity], reporting_currency: str) -> Dict:
         out: Dict[int, List[CVASensitivity]] = {}

@@ -64,6 +64,9 @@ def test_reference_credit_rw_and_gamma():
     assert SP.refcredit_gamma(16, 17) == 0.75
     assert SP.refcredit_gamma(16, 3) == 0.45
     assert SP.refcredit_gamma(15, 3) == 0.0
+    assert SP.refcredit_vega_rw(3) == 1.00
+    with pytest.raises(ValidationError):
+        SP.refcredit_vega_rw(18)   # vega path validates bucket too
 
 
 def test_equity_rw_and_gamma():
