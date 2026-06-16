@@ -99,10 +99,8 @@ def _vanilla():
 
 def test_vanilla_greeks_route_through_bump_reprice_under_vv():
     # Under a VV surface the engine must DELEGATE to the BaseFxEngine
-    # bump-and-reprice path (not the sticky-strike closed forms). Verify by
-    # matching the base implementation exactly. NOTE: the smile anchor is held
-    # fixed under the spot bump today (sticky-strike repriced Greeks); true
-    # sticky-delta re-anchoring for get_vol-based engines is tracked separately.
+    # bump-and-reprice path (not the sticky-strike closed forms). The base path
+    # re-anchors the VV smile sticky-delta; verify the engine matches it exactly.
     from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine
     eng = GarmanKohlhagenEngine()
     env = _env()
@@ -111,6 +109,24 @@ def test_vanilla_greeks_route_through_bump_reprice_under_vv():
     assert smile_greeks["delta"] == pytest.approx(base_greeks["delta"])
     assert smile_greeks["vega"] == pytest.approx(base_greeks["vega"])
     assert smile_greeks["gamma"] == pytest.approx(base_greeks["gamma"])
+
+
+def test_vanilla_delta_is_sticky_delta_not_sticky_strike():
+    # With re-anchoring, the VV smile moves with spot, so the engine delta must
+    # differ from a sticky-strike bump that leaves the smile anchor fixed.
+    from copy import deepcopy
+    eng = GarmanKohlhagenEngine()
+    env = _env()
+    otm = FxVanillaOption(
+        strike=1.35, option_type=OptionType.CALL, maturity=TAU, notional_foreign=1.0
+    )
+    sd_delta = eng.calculate_greeks(otm, env)["delta"]
+    h = eng.params.spot_bump
+    up, dn = deepcopy(env), deepcopy(env)
+    up.spot_quote.spot = env.spot * (1 + h)   # no re-anchor -> sticky-strike
+    dn.spot_quote.spot = env.spot * (1 - h)
+    ss_delta = (eng.price(otm, up) - eng.price(otm, dn)) / (2 * env.spot * h)
+    assert sd_delta != pytest.approx(ss_delta, rel=1e-3)
 
 
 def test_vanilla_greeks_flat_surface_unchanged():

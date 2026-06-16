@@ -111,6 +111,26 @@ class BaseFxEngine(ABC):
     # Finite-difference building blocks
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _reanchor_vv_surface(env: FxPricingEnvironment) -> None:
+        """Re-anchor a VannaVolgaVolSurface to the env's current spot/rates.
+
+        The VV smile's ``get_vol`` treats the passed spot as advisory and uses
+        its stored anchor, so after a spot/rate bump the surface must be rebound
+        for sticky-delta Greeks: the smile re-anchors to the bumped market and
+        its 25-delta strikes recompute. The quotes are intrinsic and preserved;
+        the smile tenor (tau) is unchanged. No-op for non-VV surfaces.
+        """
+        surface = env.vol_surface
+        if isinstance(surface, VannaVolgaVolSurface):
+            tau = surface.env.tau
+            env.vol_surface = surface.rebound(
+                spot=env.spot,
+                rd=env.get_domestic_rate(tau),
+                rf=env.get_foreign_rate(tau),
+                tau=tau,
+            )
+
     def _fdm_delta_gamma(
         self,
         product: BaseFxProduct,
@@ -122,8 +142,10 @@ class BaseFxEngine(ABC):
 
         env_up = deepcopy(fx_env)
         env_up.spot_quote.spot = spot * (1 + h)
+        self._reanchor_vv_surface(env_up)
         env_down = deepcopy(fx_env)
         env_down.spot_quote.spot = spot * (1 - h)
+        self._reanchor_vv_surface(env_down)
 
         price_up = self.price(product, env_up)
         price_down = self.price(product, env_down)
@@ -220,6 +242,11 @@ class BaseFxEngine(ABC):
         else:
             env_up.foreign_curve = ParallelShiftRateCurve(fx_env.foreign_curve, h)
             env_down.foreign_curve = ParallelShiftRateCurve(fx_env.foreign_curve, -h)
+
+        # Re-anchor the VV smile to the bumped rates (its 25d strikes are located
+        # off the forward), consistent with the sticky-delta spot bump above.
+        self._reanchor_vv_surface(env_up)
+        self._reanchor_vv_surface(env_down)
 
         price_up = self.price(product, env_up)
         price_down = self.price(product, env_down)
