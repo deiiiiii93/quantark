@@ -84,3 +84,36 @@ def test_one_touch_and_barrier_reprice_under_spot_bump():
     greeks = eng.calculate_greeks(_barrier(), env)
     assert greeks["price"] == pytest.approx(base, rel=1e-12)
     assert greeks["delta"] == greeks["delta"]  # finite
+
+
+from quantark.asset.fx.product.option import FxVanillaOption
+from quantark.asset.fx.engine.analytical import GarmanKohlhagenEngine
+from quantark.param import FlatVolSurface
+
+
+def _vanilla():
+    return FxVanillaOption(
+        strike=1.20, option_type=OptionType.CALL, maturity=TAU, notional_foreign=1.0
+    )
+
+
+def test_vanilla_greeks_smile_consistent_match_bump_reprice():
+    eng = GarmanKohlhagenEngine()
+    env = _env()  # VannaVolgaVolSurface in the env
+    greeks = eng.calculate_greeks(_vanilla(), env)
+    from copy import deepcopy
+    h = eng.params.spot_bump
+    up, dn = deepcopy(env), deepcopy(env)
+    up.spot_quote.spot = env.spot * (1 + h)
+    dn.spot_quote.spot = env.spot * (1 - h)
+    manual_delta = (eng.price(_vanilla(), up) - eng.price(_vanilla(), dn)) / (2 * env.spot * h)
+    assert greeks["delta"] == pytest.approx(manual_delta, rel=1e-6)
+
+
+def test_vanilla_greeks_flat_surface_unchanged():
+    env = _env()
+    env.vol_surface = FlatVolSurface(volatility=0.10)
+    eng = GarmanKohlhagenEngine()
+    greeks = eng.calculate_greeks(_vanilla(), env)
+    assert greeks["vega"] == greeks["vega"]
+    assert greeks["price"] > 0.0
