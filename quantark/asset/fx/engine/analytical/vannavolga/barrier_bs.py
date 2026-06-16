@@ -119,4 +119,129 @@ def survival_probability_single(
     return max(0.0, min(1.0, 0.5 * (p_surv_d + p_surv_f)))
 
 
-__all__ = ["one_touch_hit_prob", "no_touch_price", "survival_probability_single"]
+def reiner_rubinstein_barrier(
+    spot: float,
+    strike: float,
+    barrier: float,
+    vol: float,
+    tau: float,
+    rd: float,
+    rf: float,
+    is_up: bool,
+    is_call: bool,
+    knock_in: bool,
+    rebate: float = 0.0,
+    rebate_at_hit: bool = False,
+) -> float:
+    """Reiner-Rubinstein continuously-monitored single-barrier option value.
+
+    Black-Scholes/Garman-Kohlhagen baseline (cost of carry b = rd - rf,
+    domestic discounting r = rd). Covers all 8 KO/KI types via the standard
+    A-F term decomposition with sign parameters phi (call/put) and eta
+    (barrier side). Rebate: for KO paid at hit (rebate_at_hit) or at expiry;
+    for KI paid at expiry if never knocked in.
+
+    Reference: Haug, The Complete Guide to Option Pricing Formulas, 2nd ed.,
+    single-barrier chapter.
+    """
+    if tau <= 0.0:
+        # No remaining time: knock-in cannot trigger; knock-out is the vanilla
+        # unless already breached. Handle terminal value directly.
+        intrinsic = max(spot - strike, 0.0) if is_call else max(strike - spot, 0.0)
+        breached = (is_up and spot >= barrier) or ((not is_up) and spot <= barrier)
+        if knock_in:
+            # Never knocked in over [0, T]: pay the expiry rebate; else the
+            # option is alive and worth its intrinsic value.
+            return intrinsic if breached else rebate
+        # knock-out: if breached it is dead (rebate already due, at expiry now);
+        # otherwise it survived and pays intrinsic.
+        return rebate if breached else intrinsic
+    if vol <= 0.0:
+        raise ValueError(
+            "reiner_rubinstein_barrier requires vol > 0; the zero-vol "
+            "deterministic limit is not implemented (would need a separate "
+            "monotonic-path treatment)."
+        )
+
+    phi = 1.0 if is_call else -1.0
+    eta = 1.0 if not is_up else -1.0  # +1 down-barrier, -1 up-barrier
+
+    b = rd - rf
+    r = rd
+    sqrt_t = math.sqrt(tau)
+    vst = vol * sqrt_t
+    mu = (b - 0.5 * vol * vol) / (vol * vol)
+    lam = math.sqrt(mu * mu + 2.0 * r / (vol * vol))
+
+    S, X, H, K = spot, strike, barrier, rebate
+    carry_df = math.exp((b - r) * tau)  # e^{(b-r)T}
+    dom_df = math.exp(-r * tau)
+
+    x1 = math.log(S / X) / vst + (1.0 + mu) * vst
+    x2 = math.log(S / H) / vst + (1.0 + mu) * vst
+    y1 = math.log(H * H / (S * X)) / vst + (1.0 + mu) * vst
+    y2 = math.log(H / S) / vst + (1.0 + mu) * vst
+    z = math.log(H / S) / vst + lam * vst
+
+    HS = H / S
+
+    A = phi * S * carry_df * norm.cdf(phi * x1) - phi * X * dom_df * norm.cdf(phi * x1 - phi * vst)
+    B = phi * S * carry_df * norm.cdf(phi * x2) - phi * X * dom_df * norm.cdf(phi * x2 - phi * vst)
+    C = (
+        phi * S * carry_df * (HS ** (2.0 * (mu + 1.0))) * norm.cdf(eta * y1)
+        - phi * X * dom_df * (HS ** (2.0 * mu)) * norm.cdf(eta * y1 - eta * vst)
+    )
+    D = (
+        phi * S * carry_df * (HS ** (2.0 * (mu + 1.0))) * norm.cdf(eta * y2)
+        - phi * X * dom_df * (HS ** (2.0 * mu)) * norm.cdf(eta * y2 - eta * vst)
+    )
+    # Rebate paid at expiry (used by KI, paid if never knocked in):
+    E = K * dom_df * (
+        norm.cdf(eta * x2 - eta * vst) - (HS ** (2.0 * mu)) * norm.cdf(eta * y2 - eta * vst)
+    )
+    # Rebate paid at hit (KO only):
+    F = K * (
+        (HS ** (mu + lam)) * norm.cdf(eta * z)
+        + (HS ** (mu - lam)) * norm.cdf(eta * z - 2.0 * eta * lam * vst)
+    )
+
+    strike_above_barrier = X >= H
+
+    if knock_in:
+        # In-options: rebate E (paid at expiry if not knocked in).
+        if is_call and not is_up:        # down-and-in call
+            val = (C + E) if strike_above_barrier else (A - B + D + E)
+        elif is_call and is_up:          # up-and-in call
+            val = (A + E) if strike_above_barrier else (B - C + D + E)
+        elif (not is_call) and not is_up:  # down-and-in put
+            val = (B - C + D + E) if strike_above_barrier else (A + E)
+        else:                            # up-and-in put
+            val = (A - B + D + E) if strike_above_barrier else (C + E)
+    else:
+        # Out-options: the rebate is paid because the barrier IS knocked out.
+        # At hit -> F (the touch term with lambda). At expiry -> the rebate
+        # discounted times the touch probability. Do NOT reuse E here: E is the
+        # knock-in "never touched" term and pays on the opposite states.
+        if rebate_at_hit:
+            reb = F
+        else:
+            p_hit = one_touch_hit_prob(S, H, vol, tau, b, is_up)
+            reb = K * dom_df * p_hit
+        if is_call and not is_up:        # down-and-out call
+            val = (A - C + reb) if strike_above_barrier else (B - D + reb)
+        elif is_call and is_up:          # up-and-out call
+            val = reb if strike_above_barrier else (A - B + C - D + reb)
+        elif (not is_call) and not is_up:  # down-and-out put
+            val = (A - B + C - D + reb) if strike_above_barrier else reb
+        else:                            # up-and-out put
+            val = (B - D + reb) if strike_above_barrier else (A - C + reb)
+
+    return float(val)
+
+
+__all__ = [
+    "one_touch_hit_prob",
+    "no_touch_price",
+    "survival_probability_single",
+    "reiner_rubinstein_barrier",
+]

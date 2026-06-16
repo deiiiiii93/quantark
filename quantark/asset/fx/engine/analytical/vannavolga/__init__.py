@@ -25,6 +25,7 @@ from .attenuation import (
 from .barrier_bs import (
     no_touch_price,
     one_touch_hit_prob,
+    reiner_rubinstein_barrier,
     survival_probability_single,
 )
 from .vv_barrier import (
@@ -39,6 +40,7 @@ __all__ = [
     "one_touch_hit_prob",
     "no_touch_price",
     "survival_probability_single",
+    "reiner_rubinstein_barrier",
     "gamma_surv",
     "gamma_surv_single",
     "gamma_fet",
