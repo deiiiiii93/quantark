@@ -235,3 +235,31 @@ def test_param_gk_matches_textbook_garman_kohlhagen():
         got = price_gk(is_call, GKInput(ENV.spot, strike, ENV.rd, ENV.rf, sigma, ENV.tau))
         ref = _reference_gk(is_call, ENV.spot, strike, ENV.rd, ENV.rf, sigma, ENV.tau)
         assert got == pytest.approx(ref, rel=1e-12)
+
+
+def test_rebound_reanchors_spot_and_rates():
+    surf = VannaVolgaVolSurface(ENV, QUOTES, DeltaConvention.SPOT)
+    bumped = surf.rebound(spot=1.25, rd=0.025, rf=0.012, tau=1.0)
+    assert bumped is not surf
+    assert bumped.env.spot == 1.25
+    assert bumped.env.rd == 0.025
+    assert bumped.env.rf == 0.012
+    # quotes + convention are preserved (intrinsic smile data)
+    assert bumped.quotes == QUOTES
+    assert bumped.conv == surf.conv
+    # original is untouched (immutable market data)
+    assert surf.env.spot == 1.20
+
+
+def test_with_quotes_shifts_all_three_quotes():
+    surf = VannaVolgaVolSurface(ENV, QUOTES, DeltaConvention.SPOT)
+    shifted = SmileQuotes(
+        sigma_atm=QUOTES.sigma_atm + 0.01,
+        rr25=QUOTES.rr25 + 0.01,
+        bf25_2vol=QUOTES.bf25_2vol + 0.01,
+    )
+    bumped = surf.with_quotes(shifted)
+    assert bumped is not surf
+    assert bumped.quotes == shifted
+    assert bumped.env.spot == surf.env.spot  # anchor unchanged
+    assert surf.quotes == QUOTES               # original untouched

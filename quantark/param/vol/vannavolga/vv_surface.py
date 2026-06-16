@@ -66,6 +66,36 @@ class VannaVolgaVolSurface(VolatilitySurface):
         )
         self._omega = omega
 
+    def rebound(
+        self, spot: float, rd: float, rf: float, tau: float
+    ) -> "VannaVolgaVolSurface":
+        """Return a new surface re-anchored to a different market snapshot.
+
+        The intrinsic smile data (quotes, delta convention, premium flag) is
+        preserved; only the FXEnv anchor changes. Immutable: the original
+        surface is left untouched. This is how the risk chain re-anchors the
+        smile under spot/rate bumps (sticky-delta).
+        """
+        return VannaVolgaVolSurface(
+            env=FXEnv(spot=spot, rd=rd, rf=rf, tau=tau),
+            quotes=self.quotes,
+            conv=self.conv,
+            premium_included_atm=self.premium_included_atm,
+        )
+
+    def with_quotes(self, quotes: SmileQuotes) -> "VannaVolgaVolSurface":
+        """Return a new surface with shifted ATM/RR/BF quotes (vega bump).
+
+        The market anchor is preserved; only the three quotes change. This is
+        the full-quote vega path used by the chain's vol-bump helpers.
+        """
+        return VannaVolgaVolSurface(
+            env=self.env,
+            quotes=quotes,
+            conv=self.conv,
+            premium_included_atm=self.premium_included_atm,
+        )
+
     def _vv_price(self, strike: float) -> Tuple[float, float]:
         """VV-adjusted call price at the strike and the BS vega (at ATM vol)."""
         sigma_atm = self.quotes.sigma_atm
