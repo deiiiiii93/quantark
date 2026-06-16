@@ -40,3 +40,18 @@ def test_vega_through_vv_surface_is_finite_and_nonzero():
     greeks = eng.calculate_greeks(_barrier(), _env())
     assert greeks["vega"] == greeks["vega"]      # not NaN
     assert abs(greeks["vega"]) > 0.0             # vol bump actually moved price
+
+
+from quantark.var.fx.revaluation import bump_env
+
+
+def test_var_bump_env_handles_vv_vol_shift():
+    env = _env()
+    bumped = bump_env(env, spot_return=0.0, vol_change=0.01)
+    # The VV surface survives a vol shift and the ATM vol moved by +0.01.
+    assert isinstance(bumped.vol_surface, VannaVolgaVolSurface)
+    assert bumped.vol_surface.quotes.sigma_atm == pytest.approx(
+        SMILE.sigma_atm + 0.01
+    )
+    # Original env is untouched.
+    assert env.vol_surface.quotes.sigma_atm == pytest.approx(SMILE.sigma_atm)
