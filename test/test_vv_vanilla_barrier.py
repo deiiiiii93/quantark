@@ -23,6 +23,10 @@ def test_breached_knock_in_returns_full_vv_vanilla():
         is_call=True, knock_in=True, conv=DeltaConvention.SPOT,
     )
     assert res.vv == pytest.approx(res.vanilla)
+    # Diagnostics must match a live vanilla: non-zero vega/vanna/volga.
+    assert res.greeks["vega"] > 0.0
+    assert res.greeks["vanna"] != 0.0
+    assert res.greeks["volga"] != 0.0
 
 
 def test_vv_reduces_to_bs_when_smile_flat():

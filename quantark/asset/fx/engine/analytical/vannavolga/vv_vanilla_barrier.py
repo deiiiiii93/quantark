@@ -131,10 +131,17 @@ def price_vv_barrier(
     if breached:
         if knock_in:
             vanilla_vv = _vv_vanilla(env, quotes, strike, is_call, omega)
+            # A touched KI is a live vanilla: report its actual vega/vanna/volga
+            # (not zeros) so the diagnostics match the returned price, and full
+            # vanna/volga weighting (gamma=1, survival certain) since the option
+            # is fully knocked in.
+            vg = greeks_gk(
+                is_call, GKInput(env.spot, strike, env.rd, env.rf, sigma, env.tau)
+            )
             result = VVBarrierResult(
                 bstv=bstv, vv=float(vanilla_vv), gamma=1.0,
-                p_vanna=0.0, p_volga=0.0, omega=omega,
-                greeks={"vega": 0.0, "vanna": 0.0, "volga": 0.0},
+                p_vanna=1.0, p_volga=1.0, omega=omega,
+                greeks={"vega": vg["vega"], "vanna": vg["vanna"], "volga": vg["volga"]},
             )
             object.__setattr__(result, "vanilla", float(vanilla_vv))
             return result
