@@ -23,6 +23,7 @@ from quantark.saccr.models.enums import (
     TransactionType,
 )
 from quantark.saccr.parameters.supervisory import SACCR_VERSION
+from quantark.saccr.dashboard import SACCRDashboard
 from quantark.util.enum.option_enums import OptionType
 
 __version__ = SACCR_VERSION
@@ -40,5 +41,6 @@ __all__ = [
     "CommodityType",
     "TransactionType",
     "OptionType",
+    "SACCRDashboard",
     "SACCR_VERSION",
 ]
