@@ -9,6 +9,7 @@ from typing import Dict, Optional
 
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.param import FlatVolSurface, TermStructureVolSurface
+from quantark.param.vol.vannavolga import VannaVolgaVolSurface, SmileQuotes
 from quantark.param.rrf import ParallelShiftRateCurve
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum.engine_enums import EngineType
@@ -160,6 +161,18 @@ class BaseFxEngine(ABC):
             env.vol_surface = TermStructureVolSurface(
                 times=list(surface.times),
                 vols=[float(v) * factor for v in surface.vols],
+            )
+        elif isinstance(surface, VannaVolgaVolSurface):
+            # Full-quote vega bump: scale ATM/RR/BF together so the whole smile
+            # shifts (sticky-delta). RR/BF can be zero or negative, so scaling
+            # by `factor` is the right multiplicative bump for all three.
+            q = surface.quotes
+            env.vol_surface = surface.with_quotes(
+                SmileQuotes(
+                    sigma_atm=q.sigma_atm * factor,
+                    rr25=q.rr25 * factor,
+                    bf25_2vol=q.bf25_2vol * factor,
+                )
             )
         else:
             raise PricingError(
