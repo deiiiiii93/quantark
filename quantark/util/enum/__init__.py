@@ -35,7 +35,7 @@ from .engine_enums import (
     LeverageCalibrationMethod,
 )
 from .deltaone_enums import DeltaOneType
-from .fx_enums import FxPayoutCurrency
+from .fx_enums import FxPayoutCurrency, FxBarrierType
 from .bond_enums import (
     PaymentFrequency,
     StubType,
@@ -81,6 +81,7 @@ __all__ = [
     "DeltaOneType",
     # FX enums
     "FxPayoutCurrency",
+    "FxBarrierType",
     # Bond enums
     "PaymentFrequency",
     "StubType",

@@ -21,3 +21,17 @@ class FxPayoutCurrency(Enum):
 
     def __str__(self):
         return self.value
+
+
+class FxBarrierType(Enum):
+    """Knock direction for a single-barrier FX option.
+
+    - KNOCK_OUT: the option ceases to exist if the barrier is touched.
+    - KNOCK_IN: the option only comes into existence if the barrier is touched.
+    """
+
+    KNOCK_OUT = "knock_out"
+    KNOCK_IN = "knock_in"
+
+    def __str__(self):
+        return self.value
