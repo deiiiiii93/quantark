@@ -120,14 +120,25 @@ class BaseRiskClassEngine(ABC):
             reps.append(rep)
         return factors, reps
 
+    def consistency_attrs(self) -> tuple:
+        """Attributes that netted rows for one factor must agree on.
+
+        Default is empty: for single-factor risk classes the whole bucket nets and
+        RW/correlation depend only on the bucket, so per-row metadata (e.g. an
+        optional ``credit_quality``) need not match. Multi-factor engines override
+        this to enforce the RW/correlation-driving attributes not already pinned by
+        ``factor_identity``.
+        """
+        return ()
+
     def _check_consistent(self, rows, rep):
-        """Reject netted rows with inconsistent classification/RW attributes."""
+        """Reject netted rows that disagree on RW/correlation-driving attributes."""
         for r in rows:
-            if (r.credit_quality != rep.credit_quality or r.sub_bucket != rep.sub_bucket
-                    or r.is_index != rep.is_index):
-                raise ValidationError(
-                    f"Inconsistent attributes among netted rows for factor "
-                    f"{rep.risk_factor!r}")
+            for attr in self.consistency_attrs():
+                if getattr(r, attr) != getattr(rep, attr):
+                    raise ValidationError(
+                        f"Inconsistent {attr} among netted rows for factor "
+                        f"{rep.risk_factor!r}")
 
     def _bucket_k(self, factors: List[_Factor], reps: List[CVASensitivity]):
         n = len(factors)

@@ -24,6 +24,11 @@ class CounterpartyCreditEngine(BaseRiskClassEngine):
     def factor_identity(self, s: CVASensitivity):
         return (s.bucket, s.name, s.tenor, s.index_series)
 
+    def consistency_attrs(self) -> tuple:
+        # Not pinned by factor_identity but drive RW (credit_quality, sub_bucket)
+        # and rho_name (legal_entity_group); is_index drives the bucket-8 path.
+        return ("credit_quality", "sub_bucket", "legal_entity_group", "is_index")
+
     def risk_weight(self, s: CVASensitivity, risk_type: RiskType) -> float:
         return SP.cpty_rw(s.bucket, s.credit_quality, s.sub_bucket)
 

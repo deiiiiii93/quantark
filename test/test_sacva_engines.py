@@ -6,6 +6,7 @@ import pytest
 from quantark.sacva.models.enums import RiskClass, RiskType, CreditQuality
 from quantark.sacva.models.sensitivity import CVASensitivity
 from quantark.sacva.engines.base import BaseRiskClassEngine
+from quantark.util.exceptions import ValidationError
 
 
 class _StubSingleFactor(BaseRiskClassEngine):
@@ -203,6 +204,27 @@ def test_reference_credit_diff_quality_gamma_halved():
     ws2 = 0.120 * 1000.0
     gamma = 0.10 / 2.0
     assert res.k == pytest.approx(math.sqrt(ws1**2 + ws2**2 + 2*gamma*ws1*ws2), rel=1e-9)
+
+
+def test_reference_credit_nets_rows_with_optional_quality_mismatch():
+    # Single-factor bucket: rows may carry an optional (or omitted) credit_quality;
+    # they must still net, not be rejected (credit_quality is bucket-implied here).
+    a = CVASensitivity(risk_class=RiskClass.REFERENCE_CREDIT, risk_type=RiskType.DELTA,
+                       bucket=1, risk_factor="b1a", s_cva=600.0, name="x")  # quality None
+    b = CVASensitivity(risk_class=RiskClass.REFERENCE_CREDIT, risk_type=RiskType.DELTA,
+                       bucket=1, risk_factor="b1b", s_cva=400.0, name="y",
+                       credit_quality=CreditQuality.IG)
+    res = ReferenceCreditEngine().calculate([a, b], RiskType.DELTA, "USD")
+    assert res.by_bucket[1] == pytest.approx(0.005 * 1000.0, rel=1e-12)
+
+
+def test_counterparty_inconsistent_legal_group_rejected():
+    # Same (bucket, name, tenor) but conflicting legal_entity_group -> reject,
+    # so the representative-row pick can't make rho_name order-dependent.
+    a = _cp(3, "A", 5.0, 1000.0, leg="G1")
+    b = _cp(3, "A", 5.0, 500.0, leg="G2")
+    with pytest.raises(ValidationError):
+        CounterpartyCreditEngine().calculate([a, b], RiskType.DELTA, "USD")
 
 
 def test_equity_vega_large_cap_rw():
