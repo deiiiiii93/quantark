@@ -35,6 +35,7 @@ from .vv_barrier import (
     price_ot_bstv,
     price_vv_one_touch,
 )
+from .vv_vanilla_barrier import numeric_greeks_barrier, price_vv_barrier
 
 __all__ = [
     "one_touch_hit_prob",
@@ -54,4 +55,6 @@ __all__ = [
     "price_ot_bstv",
     "numeric_greeks_ot",
     "price_vv_one_touch",
+    "numeric_greeks_barrier",
+    "price_vv_barrier",
 ]
