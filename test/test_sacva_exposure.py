@@ -163,3 +163,80 @@ def test_continuous_ko_rejected():
     with pytest.raises(ValidationError):
         BarrierStateMachine(ko_barrier=120.0, continuous_ko=True,
                             times=np.array([0.0, 1.0]))
+
+
+# --- Task 7: repricer ------------------------------------------------------
+
+def _alive_state(n_paths, n_t):
+    return {"alive": np.ones((n_paths, n_t), bool),
+            "knocked_in": np.zeros((n_paths, n_t), bool),
+            "ko_idx": np.full(n_paths, -1)}
+
+
+def test_repricer_applies_quantity_once():
+    from quantark.sacva.exposure.repricer import reprice_trade
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    sg = np.array([90., 100., 110.])
+    surf = np.array([0., 10., 20.])
+    vs = GridValueSurface(times=np.array([0.0, 1.0]),
+                          grids={1.0: {None: (sg, surf)}}, currency="USD")
+    spots = np.array([[100., 100.], [100., 110.]])
+    vals = reprice_trade(vs, spots, _alive_state(2, 2), times=np.array([0.0, 1.0]),
+                         quantity=2.0, exposure_idx=[1])
+    assert vals[0, 0] == 20.0 and vals[1, 0] == 40.0
+
+
+def test_repricer_negative_quantity_flips_sign_and_dead_zero():
+    from quantark.sacva.exposure.repricer import reprice_trade
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    sg = np.array([90., 110.])
+    surf = np.array([0., 20.])
+    vs = GridValueSurface(times=np.array([0.0, 1.0]),
+                          grids={1.0: {None: (sg, surf)}}, currency="USD")
+    spots = np.array([[100., 110.], [100., 110.]])
+    state = _alive_state(2, 2)
+    state["alive"][1, 1] = False                 # path1 dead at the exposure date
+    vals = reprice_trade(vs, spots, state, times=np.array([0.0, 1.0]),
+                         quantity=-1.0, exposure_idx=[1])
+    assert vals[0, 0] == -20.0 and vals[1, 0] == 0.0
+
+
+def test_repricer_selects_knocked_in_surface():
+    from quantark.sacva.exposure.repricer import reprice_trade
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    sg = np.array([90., 110.])
+    vs = GridValueSurface(times=np.array([0.0, 1.0]),
+                          grids={1.0: {"alive": (sg, np.array([1., 2.])),
+                                       "knocked_in": (sg, np.array([10., 20.]))}},
+                          currency="USD")
+    spots = np.array([[110., 110.], [110., 110.]])
+    state = _alive_state(2, 2)
+    state["knocked_in"][1, 1] = True
+    vals = reprice_trade(vs, spots, state, times=np.array([0.0, 1.0]), quantity=1.0,
+                         exposure_idx=[1], state_labels=("alive", "knocked_in"))
+    assert vals[0, 0] == 2.0 and vals[1, 0] == 20.0
+
+
+# --- Task 8c: pending receivable (undiscounted) ---------------------------
+
+def test_ko_pending_receivable_undiscounted_until_settlement():
+    from quantark.sacva.exposure.repricer import pending_receivable_exposure
+    pe = pending_receivable_exposure(np.array([1, -1]), redemption=100.0,
+                                     n_dates=4, settlement_idx=2)
+    assert pe[0, 1] == 100.0
+    assert pe[0, 2] == 0.0 and pe[0, 3] == 0.0
+    assert np.all(pe[1] == 0.0)
+
+
+def test_pending_receivable_per_path_settlement_offset():
+    from quantark.sacva.exposure.repricer import pending_receivable_exposure
+    pe = pending_receivable_exposure(np.array([1, 2]), redemption=50.0, n_dates=5,
+                                     settlement_offset_steps=1)
+    assert pe[0, 1] == 50.0 and pe[0, 2] == 0.0     # KO@1 -> settle@2
+    assert pe[1, 2] == 50.0 and pe[1, 3] == 0.0     # KO@2 -> settle@3
+
+
+def test_pending_receivable_requires_one_settlement_spec():
+    from quantark.sacva.exposure.repricer import pending_receivable_exposure
+    with pytest.raises(ValidationError):
+        pending_receivable_exposure(np.array([1]), 100.0, 3)
