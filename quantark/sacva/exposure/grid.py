@@ -40,6 +40,11 @@ class ExposureGrid:
         ev_raw = [float(t) for t in event_times]
         if any(not np.isfinite(t) for t in ev_raw):
             raise ValidationError("event_times must be finite")
+        # fail fast on out-of-range events: silently dropping a coupon/KO/settlement
+        # date past the horizon would understate exposure
+        if any(t < 0.0 or t > horizon for t in ev_raw):
+            raise ValidationError(
+                f"event_times must lie in [0, horizon={horizon}]; widen the horizon")
         base = np.linspace(0.0, float(horizon), n_steps + 1)
         ev = np.array([t for t in ev_raw if 0.0 < t <= horizon], dtype=float)
         times = np.unique(np.concatenate([base, ev, [0.0]]))

@@ -30,8 +30,10 @@ class GridValueSurface:
     def __init__(self, times, grids: Dict[float, Dict[Optional[str], Tuple]],
                  currency: str):
         self.times = np.asarray(times, dtype=float)
-        if self.times.ndim != 1 or not np.all(np.isfinite(self.times)):
-            raise ValidationError("times must be a finite 1-D array")
+        if self.times.ndim != 1 or self.times.size == 0 or not np.all(np.isfinite(self.times)):
+            raise ValidationError("times must be a finite non-empty 1-D array")
+        if not grids:
+            raise ValidationError("grids must be non-empty")
         if self.times.size > 1 and np.any(np.diff(self.times) <= 0):
             raise ValidationError("times must be strictly increasing")
         for key in grids:  # every grid slice must correspond to a declared time
@@ -91,6 +93,12 @@ class AnalyticValueSurface:
         self.currency = currency
 
     def value_at(self, states, t, discrete_state):
+        if discrete_state is not None:
+            # single-state backend: a discrete state would be silently ignored,
+            # mispricing stateful trades. Those must use a per-state GridValueSurface.
+            raise ValidationError(
+                "AnalyticValueSurface is single-state; stateful (KI/KO) trades require "
+                "a per-state GridValueSurface")
         states = np.asarray(states, dtype=float)
         if not np.all(np.isfinite(states)) or not np.isfinite(t):
             raise ValidationError("states and t must be finite")

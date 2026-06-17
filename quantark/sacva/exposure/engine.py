@@ -78,6 +78,8 @@ def aggregate_epe(trade_value_arrays, enforceable, df):
             raise ValidationError("trade value arrays must all share the same shape")
         if not np.all(np.isfinite(a)):
             raise ValidationError("trade value arrays must be finite")
+    if shape0[0] < 1:
+        raise ValidationError("trade value arrays must have >= 1 path")
     n_dates = shape0[1]
     df = np.asarray(df, dtype=float)
     if df.ndim != 1 or df.shape != (n_dates,):

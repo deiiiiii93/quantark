@@ -105,6 +105,12 @@ def test_counterparty_requires_credit_curve_and_bucket():
                      credit_curve=_Stub(), bucket="2", credit_quality=CreditQuality.IG)
 
 
+def test_counterparty_rejects_non_nettingset_elements():
+    with pytest.raises(ValidationError):
+        Counterparty(name="A", netting_sets=[_Stub(set_id="n1")],
+                     credit_curve=_Stub(), bucket=2, credit_quality=CreditQuality.IG)
+
+
 def test_portfolio_requires_counterparty_and_currency():
     cp = Counterparty(name="A", netting_sets=[NettingSet("n1", [_trade()])],
                       credit_curve=_Stub(), bucket=2, credit_quality=CreditQuality.IG)

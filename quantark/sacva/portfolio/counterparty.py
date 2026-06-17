@@ -25,6 +25,8 @@ class Counterparty:
             raise ValidationError("Counterparty requires a name")
         if not self.netting_sets:
             raise ValidationError(f"{self.name}: no netting sets")
+        if not all(isinstance(ns, NettingSet) for ns in self.netting_sets):
+            raise ValidationError(f"{self.name}: netting_sets must be NettingSet instances")
         set_ids = [ns.set_id for ns in self.netting_sets]
         if len(set_ids) != len(set(set_ids)):
             raise ValidationError(f"{self.name}: duplicate netting set_id")

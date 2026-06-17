@@ -31,6 +31,14 @@ def test_grid_rejects_bad_nsteps_and_nonfinite_event():
         ExposureGrid.build(horizon=2.0, n_steps=4, event_times=[float("nan")])
 
 
+def test_grid_rejects_event_beyond_horizon():
+    from quantark.sacva.exposure.grid import ExposureGrid
+    with pytest.raises(ValidationError):     # event past horizon would be silently dropped
+        ExposureGrid.build(horizon=2.0, n_steps=4, event_times=[2.5])
+    with pytest.raises(ValidationError):     # negative event date is malformed
+        ExposureGrid.build(horizon=2.0, n_steps=4, event_times=[-0.5])
+
+
 def test_paths_empty_grid_times_raises_validation():
     from quantark.sacva.exposure.paths import StatePathGenerator
     with pytest.raises(ValidationError):
@@ -145,6 +153,21 @@ def test_grid_value_surface_rejects_unsorted_or_mismatched_grid():
                            currency="USD")
     with pytest.raises(ValidationError):
         vs2.value_at(np.array([100.0]), t=1.0, discrete_state=None)
+
+
+def test_analytic_value_surface_rejects_stateful_pricing():
+    # the analytic backend is single-state (vanilla); a discrete state would be
+    # silently ignored -> state-insensitive exposure, so it must raise instead
+    from quantark.sacva.exposure.value_surface import AnalyticValueSurface
+
+    class Eng:
+        def price(self, product, env):
+            return 1.0
+
+    vs = AnalyticValueSurface(engine=Eng(), product=object(), base_env=object(),
+                              as_of_env=lambda e, s, t: e, currency="USD")
+    with pytest.raises(ValidationError):
+        vs.value_at(np.array([100.0]), t=0.5, discrete_state="knocked_in")
 
 
 def test_analytic_value_surface_rejects_nonfinite_state():
@@ -503,6 +526,18 @@ def test_aggregate_epe_requires_bool_enforceable():
     from quantark.sacva.exposure.engine import aggregate_epe
     with pytest.raises(ValidationError):
         aggregate_epe([np.array([[1.0]])], enforceable="False", df=np.array([1.0]))
+
+
+def test_aggregate_epe_rejects_zero_paths():
+    from quantark.sacva.exposure.engine import aggregate_epe
+    with pytest.raises(ValidationError):
+        aggregate_epe([np.zeros((0, 1))], enforceable=True, df=np.array([1.0]))
+
+
+def test_grid_value_surface_rejects_empty_grids():
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    with pytest.raises(ValidationError):
+        GridValueSurface(times=np.array([0.0, 1.0]), grids={}, currency="USD")
 
 
 # --- Task 8: ExposureProfile + aggregate_epe ------------------------------
