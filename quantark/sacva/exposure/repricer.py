@@ -47,12 +47,22 @@ def reprice_trade(surface, spots, state, times, quantity, exposure_idx,
             raise ValidationError("exposure_idx entries must be integers")
         if j < 0 or j >= n_t:
             raise ValidationError("exposure_idx out of range")
+    labels = tuple(state_labels)
+    if not labels or len(set(labels)) != len(labels) \
+            or any(lbl not in (None, "alive", "knocked_in") for lbl in labels):
+        raise ValidationError(
+            "state_labels must be unique and drawn from (None, 'alive', 'knocked_in')")
+    has_ki = "knocked_in" in labels
+    # single-state labels cannot represent KI value: refuse if any path is knocked-in
+    if not has_ki and bool(masks["knocked_in"].any()):
+        raise ValidationError(
+            "trade has knocked-in paths but state_labels is single-state; pass "
+            "('alive', 'knocked_in') with a per-state surface")
     out = np.zeros((n_paths, len(exposure_idx)), dtype=float)
-    has_ki = "knocked_in" in state_labels
     for col, j in enumerate(exposure_idx):
         alive = masks["alive"][:, j]
         ki = masks["knocked_in"][:, j]
-        for label in state_labels:
+        for label in labels:
             if has_ki:
                 sel = alive & (ki if label == "knocked_in" else ~ki)
             else:
@@ -75,9 +85,11 @@ def pending_receivable_exposure(ko_idx, redemption, n_dates,
     """UNDISCOUNTED receivable exposure, shape (num_paths, n_dates).
 
     For paths that knocked out (``ko_idx >= 0``), the ``redemption`` is carried at
-    exposure dates in ``[ko_idx, settle)`` and 0 from settlement on. Exactly one
-    of ``settlement_idx`` (fixed) / ``settlement_offset_steps`` (per-path offset
-    from the KO date) must be supplied.
+    exposure dates in ``[ko_idx, settle)`` and 0 from settlement on. Settlement must
+    be a represented grid index ``< n_dates`` (the grid runs to final settlement);
+    an off-grid settlement raises rather than clamping, which would omit the
+    post-last-node default interval from CVA. Exactly one of ``settlement_idx``
+    (fixed) / ``settlement_offset_steps`` (per-path offset from KO) must be supplied.
     """
     if (settlement_idx is None) == (settlement_offset_steps is None):
         raise ValidationError(
@@ -88,8 +100,8 @@ def pending_receivable_exposure(ko_idx, redemption, n_dates,
         raise ValidationError("redemption must be finite")
     if settlement_idx is not None:
         if isinstance(settlement_idx, bool) or not isinstance(settlement_idx, int) \
-                or not (0 <= settlement_idx <= n_dates):
-            raise ValidationError("settlement_idx must be an int in [0, n_dates]")
+                or not (0 <= settlement_idx < n_dates):
+            raise ValidationError("settlement_idx must be an int in [0, n_dates)")
     else:
         if isinstance(settlement_offset_steps, bool) \
                 or not isinstance(settlement_offset_steps, int) \
@@ -113,6 +125,10 @@ def pending_receivable_exposure(ko_idx, redemption, n_dates,
                     f"settlement_idx {settlement_idx} precedes KO date {k}")
             settle = settlement_idx
         else:
-            settle = min(k + settlement_offset_steps, n_dates)
+            settle = k + settlement_offset_steps
+            if settle >= n_dates:  # off-grid: extend the grid, don't clamp
+                raise ValidationError(
+                    f"KO@{k} + offset {settlement_offset_steps} settles off-grid "
+                    f"(>= n_dates={n_dates}); extend the exposure grid")
         out[p, k:settle] = redemption
     return out

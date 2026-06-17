@@ -490,6 +490,16 @@ def test_pending_receivable_rejects_noninteger_ko_idx():
         pending_receivable_exposure(np.array([1.9]), 100.0, 5, settlement_idx=3)
 
 
+def test_pending_receivable_rejects_offgrid_settlement():
+    from quantark.sacva.exposure.repricer import pending_receivable_exposure
+    # settlement at n_dates is off-grid: redemption never zeroes on a represented node
+    with pytest.raises(ValidationError):
+        pending_receivable_exposure(np.array([1]), 100.0, 4, settlement_idx=4)
+    # offset settlement overflowing the grid must raise (extend the grid), not clamp
+    with pytest.raises(ValidationError):
+        pending_receivable_exposure(np.array([3]), 100.0, 4, settlement_offset_steps=2)
+
+
 def test_repricer_rejects_nonbool_state_and_bad_exposure_idx():
     from quantark.sacva.exposure.repricer import reprice_trade
     from quantark.sacva.exposure.value_surface import GridValueSurface
@@ -508,6 +518,34 @@ def test_repricer_rejects_nonbool_state_and_bad_exposure_idx():
     with pytest.raises(ValidationError):
         reprice_trade(vs, spots, good, times=np.array([0.0, 1.0]),
                       quantity=1.0, exposure_idx=[1.0])
+
+
+def test_repricer_rejects_single_state_labels_with_knocked_in_paths():
+    # a stateful (KI) trade priced with default single-state labels would silently
+    # price knocked-in paths as alive; must raise so caller passes both states
+    from quantark.sacva.exposure.repricer import reprice_trade
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    vs = GridValueSurface(times=np.array([0.0, 1.0]),
+                          grids={1.0: {None: (np.array([90., 110.]), np.array([0., 20.]))}},
+                          currency="USD")
+    state = _alive_state(2, 2)
+    state["knocked_in"][1, 1] = True
+    spots = np.array([[100.0, 105.0], [100.0, 105.0]])
+    with pytest.raises(ValidationError):
+        reprice_trade(vs, spots, state, times=np.array([0.0, 1.0]),
+                      quantity=1.0, exposure_idx=[1])   # state_labels defaults to (None,)
+
+
+def test_repricer_rejects_invalid_state_labels():
+    from quantark.sacva.exposure.repricer import reprice_trade
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    vs = GridValueSurface(times=np.array([0.0, 1.0]),
+                          grids={1.0: {None: (np.array([90., 110.]), np.array([0., 20.]))}},
+                          currency="USD")
+    spots = np.array([[100.0, 105.0]])
+    with pytest.raises(ValidationError):
+        reprice_trade(vs, spots, _alive_state(1, 2), times=np.array([0.0, 1.0]),
+                      quantity=1.0, exposure_idx=[1], state_labels=("alive", "bogus"))
 
 
 def test_repricer_rejects_nonfinite_spots():
@@ -532,6 +570,12 @@ def test_aggregate_epe_rejects_zero_paths():
     from quantark.sacva.exposure.engine import aggregate_epe
     with pytest.raises(ValidationError):
         aggregate_epe([np.zeros((0, 1))], enforceable=True, df=np.array([1.0]))
+
+
+def test_aggregate_epe_rejects_zero_date_columns():
+    from quantark.sacva.exposure.engine import aggregate_epe
+    with pytest.raises(ValidationError):
+        aggregate_epe([np.zeros((2, 0))], enforceable=True, df=np.zeros(0))
 
 
 def test_grid_value_surface_rejects_empty_grids():

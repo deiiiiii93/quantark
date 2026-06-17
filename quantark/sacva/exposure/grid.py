@@ -37,7 +37,10 @@ class ExposureGrid:
             raise ValidationError("n_steps must be an int")
         if n_steps < 1:
             raise ValidationError("n_steps must be >= 1")
-        ev_raw = [float(t) for t in event_times]
+        try:
+            ev_raw = [float(t) for t in event_times]
+        except (TypeError, ValueError):
+            raise ValidationError("event_times must be an iterable of numbers")
         if any(not np.isfinite(t) for t in ev_raw):
             raise ValidationError("event_times must be finite")
         # fail fast on out-of-range events: silently dropping a coupon/KO/settlement
