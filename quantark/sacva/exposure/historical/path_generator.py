@@ -49,7 +49,11 @@ class HistoricalPathGenerator:
             raise ValidationError("grid_times must start at 0")
         if np.any(np.diff(grid) <= 0):
             raise ValidationError("grid_times must be strictly increasing")
-        days = np.rint(np.diff(grid) * self.business_days_per_year).astype(int)
+        # Round CUMULATIVE day boundaries, then difference, so the terminal day
+        # count depends only on grid[-1] — not on how many report nodes are inserted
+        # (per-interval rounding would let grid granularity change EE/PFE).
+        bounds = np.rint(grid * self.business_days_per_year).astype(int)
+        days = np.diff(bounds)
         if np.any(days < 1):
             raise ValidationError("grid interval shorter than one business day")
         return days

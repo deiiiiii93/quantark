@@ -47,10 +47,12 @@ class PFEProfileAssembler:
         pfe = {}
         for bps in self.confidences_bps:
             conf = bps / 10000.0
-            if bps < 10000 and n * (1.0 - conf) < self.m_tail_min:
+            # integer tail-adequacy check (avoids float rounding falsely rejecting
+            # exact thresholds, e.g. bps=9999, n=100000, m_tail_min=10)
+            if bps < 10000 and n * (10000 - bps) < self.m_tail_min * 10000:
                 raise ValidationError(
                     f"insufficient tail paths for {bps}bps: "
-                    f"{n * (1 - conf):.1f} < {self.m_tail_min}")
+                    f"{n * (10000 - bps) / 10000:.1f} < {self.m_tail_min}")
             pfe[bps] = np.quantile(E, conf, axis=0, method=self.quantile_method)
         trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # 2.x removed trapz
         return {"ee_undiscounted": ee, "pfe": pfe, "epe": float(trapz(ee, T))}

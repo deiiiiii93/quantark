@@ -483,3 +483,24 @@ def test_float_block_length_rejected():
     with pytest.raises(ValidationError):
         Resampler(ResamplingScheme.STATIONARY_BLOCK,
                   expected_block_length=float("nan")).sample(z, 10, 5)
+
+
+# ---------------------------------------------------------------------------
+# ZenMux review fixes (iteration 2)
+# ---------------------------------------------------------------------------
+def test_grid_refinement_keeps_terminal_horizon():
+    # same final maturity must use the same total day count regardless of how many
+    # intermediate report nodes are inserted (cumulative-boundary rounding).
+    r = 0.001
+    cal, S0 = _const_cal(r)
+    g = HistoricalPathGenerator(cal, ("EQ_A",), {"EQ_A": S0}, min_replay_windows=5)
+    coarse = g.generate(PathMode.REPLAY_RAW, np.array([0.0, 1.0]))
+    fine = g.generate(PathMode.REPLAY_RAW, np.linspace(0.0, 1.0, 11))
+    assert np.allclose(coarse[:, -1, 0], fine[:, -1, 0])     # terminal grid-invariant
+
+
+def test_tail_adequacy_exact_threshold_not_rejected():
+    E = np.abs(np.random.default_rng(5).standard_normal((100000, 2)))
+    asm = PFEProfileAssembler(confidences_bps=(9999,), m_tail_min=10)   # exactly 10 tail paths
+    res = asm.assemble(E, np.array([0., 1.]))
+    assert 9999 in res["pfe"]
