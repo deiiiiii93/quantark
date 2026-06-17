@@ -110,3 +110,36 @@ def test_aggregate_epe_exact_values():
 def test_trade_capability_flags_default_supported():
     tr = CVATrade("t", AnalyticValueSurface(lambda S, t, ds: S), "EQ_A")
     assert not tr.requires_continuous_barrier and not tr.requires_fx_conversion
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — HistoricalMarketDataSet
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure.historical.calibration import HistoricalMarketDataSet
+
+
+def _series(n=300, start=100.0, seed=0, end="2021-01-01"):
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range(end=end, periods=n)
+    return pd.Series(start * np.exp(np.cumsum(rng.normal(0, 0.01, n))), index=idx)
+
+
+def test_alignment_intersects_and_returns_len():
+    a, b = _series(300, 100, 1), _series(300, 1.1, 2)
+    ds = HistoricalMarketDataSet({"EQ_A": a, "FX_B": b})
+    r = ds.log_returns()
+    assert set(r.columns) == {"EQ_A", "FX_B"} and len(r) == 299
+
+
+def test_insufficient_history_raises():
+    with pytest.raises(ValidationError):
+        HistoricalMarketDataSet({"EQ_A": _series(50, 100, 3)}, min_raw_obs=250).log_returns()
+
+
+def test_today_level_uses_common_valuation_date():
+    a = _series(300, 100, 4, end="2021-01-01")
+    b = _series(310, 1.1, 5, end="2021-01-08")          # b extends past a
+    ds = HistoricalMarketDataSet({"EQ_A": a, "FX_B": b})
+    vd = ds.valuation_date()
+    assert ds.today_level("FX_B") == float(b.loc[vd])   # common aligned date
+    assert ds.today_level("FX_B") != float(b.iloc[-1])
