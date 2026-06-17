@@ -48,10 +48,11 @@ def reprice_trade(surface, spots, state, times, quantity, exposure_idx,
         if j < 0 or j >= n_t:
             raise ValidationError("exposure_idx out of range")
     labels = tuple(state_labels)
-    if not labels or len(set(labels)) != len(labels) \
-            or any(lbl not in (None, "alive", "knocked_in") for lbl in labels):
+    # only two supported modes; partial sets would silently zero or double-price
+    if labels != (None,) and set(labels) != {"alive", "knocked_in"}:
         raise ValidationError(
-            "state_labels must be unique and drawn from (None, 'alive', 'knocked_in')")
+            "state_labels must be exactly (None,) [single-state] or "
+            "('alive', 'knocked_in') [stateful]")
     has_ki = "knocked_in" in labels
     # single-state labels cannot represent KI value: refuse if any path is knocked-in
     if not has_ki and bool(masks["knocked_in"].any()):

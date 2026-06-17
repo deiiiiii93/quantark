@@ -44,9 +44,13 @@ class BarrierStateMachine:
             raise ValidationError("vol must be non-negative and finite")
         if self.continuous and self.vol <= 0:
             raise ValidationError("continuous monitoring requires vol > 0 (bridge variance)")
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise ValidationError("seed must be an int (deterministic CRN)")
+        if self.times is None:
+            raise ValidationError("times is required")
         t = np.asarray(self.times, dtype=float)
-        if t.ndim != 1 or not np.all(np.isfinite(t)) or np.any(np.diff(t) <= 0):
-            raise ValidationError("times must be 1-D strictly increasing and finite")
+        if t.ndim != 1 or t.size == 0 or not np.all(np.isfinite(t)) or np.any(np.diff(t) <= 0):
+            raise ValidationError("times must be a finite, strictly-increasing 1-D array")
         self.times = t
         # KI and KO may follow different schedules (e.g. snowball: continuous daily
         # KI vs discrete monthly KO); each falls back to the shared monitoring_idx.
@@ -54,6 +58,11 @@ class BarrierStateMachine:
                         else self.monitoring_idx)
         self._ko_idx = (self.ko_monitoring_idx if self.ko_monitoring_idx is not None
                         else self.monitoring_idx)
+        # a set barrier with an empty schedule would be silently never monitored
+        if self.ki_barrier is not None and len(self._ki_idx) == 0:
+            raise ValidationError("ki_barrier set but its monitoring schedule is empty")
+        if self.ko_barrier is not None and len(self._ko_idx) == 0:
+            raise ValidationError("ko_barrier set but its monitoring schedule is empty")
 
     def run(self, spots: np.ndarray) -> dict:
         spots = np.asarray(spots, dtype=float)

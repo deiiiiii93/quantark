@@ -15,6 +15,9 @@ class CVATradePortfolio:
     reporting_currency: str = "USD"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.counterparties, (list, tuple)) \
+                or not isinstance(self.hedges, (list, tuple)):
+            raise ValidationError("counterparties and hedges must be lists")
         if not self.counterparties:
             raise ValidationError("CVATradePortfolio requires >=1 counterparty")
         if not all(isinstance(c, Counterparty) for c in self.counterparties):

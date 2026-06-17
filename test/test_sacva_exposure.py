@@ -368,6 +368,24 @@ def test_continuous_ki_window_starting_after_origin():
     assert sm.run(spots)["knocked_in"][0, -1] == False
 
 
+def test_state_machine_rejects_barrier_with_empty_schedule():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    with pytest.raises(ValidationError):     # KI barrier set but never monitored
+        BarrierStateMachine(ki_barrier=90.0, monitoring_idx=[], times=np.array([0.0, 1.0]))
+    with pytest.raises(ValidationError):     # KO barrier set but never monitored
+        BarrierStateMachine(ko_barrier=120.0, ko_monitoring_idx=[],
+                            monitoring_idx=[1], times=np.array([0.0, 1.0]))
+
+
+def test_state_machine_rejects_none_times_and_bad_seed():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    with pytest.raises(ValidationError):
+        BarrierStateMachine(ki_barrier=90.0, monitoring_idx=[1], times=None)
+    with pytest.raises(ValidationError):
+        BarrierStateMachine(ki_barrier=90.0, monitoring_idx=[1],
+                            times=np.array([0.0, 1.0]), seed=None)
+
+
 def test_continuous_ki_rejects_noncontiguous_schedule():
     from quantark.sacva.exposure.statemachine import BarrierStateMachine
     # continuous KI with a gapped schedule would silently skip bridge intervals
@@ -543,9 +561,11 @@ def test_repricer_rejects_invalid_state_labels():
                           grids={1.0: {None: (np.array([90., 110.]), np.array([0., 20.]))}},
                           currency="USD")
     spots = np.array([[100.0, 105.0]])
-    with pytest.raises(ValidationError):
-        reprice_trade(vs, spots, _alive_state(1, 2), times=np.array([0.0, 1.0]),
-                      quantity=1.0, exposure_idx=[1], state_labels=("alive", "bogus"))
+    times = np.array([0.0, 1.0])
+    for bad in (("alive", "bogus"), ("knocked_in",), (None, "alive"), ("alive",)):
+        with pytest.raises(ValidationError):
+            reprice_trade(vs, spots, _alive_state(1, 2), times=times,
+                          quantity=1.0, exposure_idx=[1], state_labels=bad)
 
 
 def test_repricer_rejects_nonfinite_spots():

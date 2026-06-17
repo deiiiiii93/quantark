@@ -56,6 +56,8 @@ def test_portfolio_hedges_must_be_cvahedges():
                       credit_curve=_Stub(), bucket=2, credit_quality=CreditQuality.IG)
     with pytest.raises(ValidationError):
         CVATradePortfolio(counterparties=[cp], hedges=[_trade()])   # plain trade, not a hedge
+    with pytest.raises(ValidationError):
+        CVATradePortfolio(counterparties=[cp], hedges=None)         # None, not a list
 
 
 def test_trade_currency_normalized():
