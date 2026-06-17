@@ -210,3 +210,18 @@ def test_discrete_fewer_fixings_worth_more_for_ko():
                          observation_times=[round(0.1 * k, 4) for k in range(1, 11)])
     eng = lambda: FxBarrierMCEngine(params=FxMCParams(num_paths=120_000, time_steps=200, seed=8))
     assert eng().price(sparse, env) >= eng().price(dense, env) - 5e-4
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Greeks smoke
+# ---------------------------------------------------------------------------
+
+
+def test_greeks_finite():
+    env = _smile_env()
+    opt = _ccy_barrier()
+    greeks = FxBarrierMCEngine(
+        params=FxMCParams(num_paths=60_000, time_steps=100, seed=2)
+    ).calculate_greeks(opt, env)
+    for key in ("price", "delta", "gamma", "vega", "theta", "rho_dom", "rho_for"):
+        assert key in greeks and math.isfinite(greeks[key])
