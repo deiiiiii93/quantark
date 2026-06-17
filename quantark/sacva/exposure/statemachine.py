@@ -1,0 +1,94 @@
+"""Per-path barrier state machine (spec §3.2).
+
+Propagates discrete contractual state (alive / knocked_in) along each simulated
+path. Between-node barrier transitions are pathwise-sampled with a Brownian
+bridge (common random numbers), not endpoint-only — removing the systematic
+one-directional KI under-count. v1 supports continuous KI via the bridge;
+continuous KO (needs a crossing time for settlement) is deferred and raises.
+"""
+
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+import numpy as np
+
+from quantark.util.exceptions import ValidationError
+
+
+@dataclass
+class BarrierStateMachine:
+    ki_barrier: Optional[float] = None
+    ki_direction: str = "down"
+    ko_barrier: Optional[float] = None
+    ko_direction: str = "up"
+    monitoring_idx: List[int] = field(default_factory=list)
+    times: object = None
+    seed: int = 999
+    continuous: bool = False
+    continuous_ko: bool = False
+    vol: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.ki_direction not in ("up", "down"):
+            raise ValidationError("ki_direction must be 'up'/'down'")
+        if self.ko_direction not in ("up", "down"):
+            raise ValidationError("ko_direction must be 'up'/'down'")
+        if self.continuous_ko:
+            raise ValidationError("continuous KO is deferred in v1 (needs crossing time)")
+        t = np.asarray(self.times, dtype=float)
+        if t.ndim != 1 or np.any(np.diff(t) <= 0):
+            raise ValidationError("times must be 1-D strictly increasing")
+        self.times = t
+
+    def run(self, spots: np.ndarray) -> dict:
+        spots = np.asarray(spots, dtype=float)
+        if np.any(spots <= 0):
+            raise ValidationError("spots must be positive")
+        n_paths, n_t = spots.shape
+        if any(j < 0 or j >= n_t for j in self.monitoring_idx):
+            raise ValidationError("monitoring_idx out of range")
+        knocked_in = np.zeros((n_paths, n_t), dtype=bool)
+        alive = np.ones((n_paths, n_t), dtype=bool)
+        ko_idx = np.full(n_paths, -1, dtype=int)
+        rng = np.random.default_rng(self.seed)
+        ki = np.zeros(n_paths, dtype=bool)
+        dead = np.zeros(n_paths, dtype=bool)
+        for j in range(n_t):
+            if self.ki_barrier is not None and j in self.monitoring_idx:
+                hit = ((spots[:, j] <= self.ki_barrier) if self.ki_direction == "down"
+                       else (spots[:, j] >= self.ki_barrier))
+                if self.continuous and j > 0:
+                    hit = hit | self._bridge_cross(
+                        spots[:, j - 1], spots[:, j], self.ki_barrier,
+                        float(self.times[j] - self.times[j - 1]), self.ki_direction, rng)
+                ki = ki | hit
+            if self.ko_barrier is not None and j in self.monitoring_idx:
+                hit = ((spots[:, j] >= self.ko_barrier) if self.ko_direction == "up"
+                       else (spots[:, j] <= self.ko_barrier))
+                newly = hit & ~dead
+                ko_idx[newly] = j
+                dead = dead | hit
+            knocked_in[:, j] = ki
+            alive[:, j] = ~dead
+        return {"knocked_in": knocked_in, "alive": alive, "ko_idx": ko_idx}
+
+    def _bridge_cross(self, s0, s1, barrier, dt, direction, rng):
+        # First-passage probability for a step whose BOTH endpoints are strictly
+        # on the safe side (wrong-side endpoints are caught by the node check).
+        var = (self.vol ** 2) * dt
+        out = np.zeros_like(s0, dtype=bool)
+        if var <= 0:
+            return out
+        x0, x1, b = np.log(s0), np.log(s1), np.log(barrier)
+        if direction == "down":          # barrier below; safe side = above b
+            safe = (x0 > b) & (x1 > b)
+            arg = -2.0 * (x0 - b) * (x1 - b) / var
+        else:                            # up barrier; safe side = below b
+            safe = (x0 < b) & (x1 < b)
+            arg = -2.0 * (b - x0) * (b - x1) / var
+        p = np.zeros_like(s0)
+        p[safe] = np.exp(np.minimum(arg[safe], 0.0))
+        if np.any(p[safe] < -1e-9) or np.any(p[safe] > 1.0 + 1e-9):
+            raise ValidationError("bridge crossing probability out of [0,1]")
+        out[safe] = rng.random(int(np.count_nonzero(safe))) < np.clip(p[safe], 0.0, 1.0)
+        return out

@@ -104,3 +104,62 @@ def test_state_paths_length_guards():
     with pytest.raises(ValidationError):
         StatePathGenerator(keys=["EQ:A"], spots=[100.0, 1.0], vols=[0.2], rates=[0.03],
                            divs=[0.0], corr=[[1.0]], grid_times=np.linspace(0, 1, 5))
+
+
+# --- Task 6: BarrierStateMachine ------------------------------------------
+
+def test_state_machine_knock_in_at_node():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    spots = np.array([[100., 85.], [100., 95.], [100., 80.]])
+    sm = BarrierStateMachine(ki_barrier=90.0, ki_direction="down",
+                             monitoring_idx=[1], times=np.array([0.0, 1.0]), seed=1)
+    state = sm.run(spots)
+    assert list(state["knocked_in"][:, 1]) == [True, False, True]
+
+
+def test_state_machine_ko_terminates_and_records_index():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    spots = np.array([[100., 130., 100.], [100., 100., 100.]])
+    sm = BarrierStateMachine(ko_barrier=120.0, ko_direction="up",
+                             monitoring_idx=[1, 2], times=np.array([0., 1., 2.]), seed=1)
+    st = sm.run(spots)
+    assert st["ko_idx"][0] == 1 and st["ko_idx"][1] == -1
+    assert st["alive"][0, 2] == False and st["alive"][1, 2] == True
+
+
+def test_bridge_probability_matches_analytic_formula():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    sm = BarrierStateMachine(ki_barrier=95.0, ki_direction="down",
+                             monitoring_idx=[1], times=np.array([0.0, 1.0]),
+                             seed=3, continuous=True, vol=0.25)
+    s0 = np.full(200000, 100.0)
+    s1 = np.full(200000, 100.0)
+    var = 0.25 ** 2 * 1.0
+    x0 = np.log(100.0)
+    b = np.log(95.0)
+    p_expected = np.exp(-2.0 * (x0 - b) * (x0 - b) / var)
+    crossed = sm._bridge_cross(s0, s1, 95.0, 1.0, "down", np.random.default_rng(3))
+    assert abs(crossed.mean() - p_expected) < 0.01
+    assert 0.0 < p_expected < 1.0          # NOT 1.0 (the inverted-formula bug)
+
+
+def test_bridge_increases_ki_probability_vs_endpoint():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    rng = np.random.default_rng(0)
+    spots = 100 * np.exp(np.cumsum(
+        0.3 * np.sqrt(1 / 50) * rng.standard_normal((4000, 51)), axis=1))
+    spots = np.column_stack([np.full(4000, 100.0), spots[:, 1:]])
+    times = np.linspace(0, 1, 51)
+    sm = BarrierStateMachine(ki_barrier=85.0, ki_direction="down",
+                             monitoring_idx=list(range(51)), times=times, seed=2,
+                             continuous=True, vol=0.3)
+    ki_bridge = sm.run(spots)["knocked_in"][:, -1].mean()
+    ki_endpoint = ((spots <= 85.0).any(axis=1)).mean()
+    assert ki_bridge >= ki_endpoint
+
+
+def test_continuous_ko_rejected():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    with pytest.raises(ValidationError):
+        BarrierStateMachine(ko_barrier=120.0, continuous_ko=True,
+                            times=np.array([0.0, 1.0]))
