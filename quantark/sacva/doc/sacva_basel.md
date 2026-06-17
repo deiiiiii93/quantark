@@ -144,3 +144,39 @@ The `max(0, ·)` floor on the bucket and cross-bucket radicands is the prescribe
 SBA numerical treatment: the supervisory correlation matrices (ρ, γ) are not
 guaranteed positive semi-definite, so the radicand can be negative and is floored
 at zero. This is the regulator's own SBA semantics, not an approximation.
+
+## Computing CVA and sensitivities from a portfolio (MAR50.32–50.35)
+
+The SBA engine above consumes `CVASensitivity` records. Those can be supplied
+directly, or **computed from a real trade portfolio** by the integration layer
+(`quantark.sacva.SACVAEngine`), which wires the existing pricing engines "like SIMM
+does":
+
+1. **Exposure (MAR50.32–50.35).** `MonteCarloExposureEngine` simulates risk-neutral
+   GBM spot paths (one constant-vol factor per underlying; FX drift `r_dom − r_for`)
+   and reprices each trade on a deterministic value surface at every exposure node —
+   the analytic surface re-evaluates the trade's own engine at the rolled-down
+   `(spot, τ)` (no nested MC, no LSMC). Pathwise values are aggregated to a
+   discounted EPE profile with netting **within** enforceable sets and summed
+   **across** sets (MAR50.35). Risk-neutral drift is mandatory (MAR50.34(1)); the
+   profile is tagged `RISK_NEUTRAL` / `regulatory_eligible`. A real-world / PFE
+   `HistoricalExposureEngine` (non-eligible) is a separate, parallel backend.
+
+2. **Unilateral CVA (MAR50.32).** `RegulatoryCVAEngine` integrates
+   `CVA = ELGD · Σ_i ½(EE*_{i−1}+EE*_i)·(S(t_{i−1}) − S(t_i))`, where `EE*` is the
+   discounted expected positive exposure and `S` the counterparty survival
+   probability (`ELGD = 1 − R`).
+
+3. **Sensitivities (MAR50.63).** `CVASensitivityEngine` produces the counterparty
+   credit-spread delta per regulatory tenor by a one-sided 1bp key-rate hazard bump
+   (`Δλ = 1bp / ELGD`, chain rule `s = λ(1−R)`) and re-running step 2 — the exposure
+   is invariant to the counterparty hazard, so no MC re-run is needed. The divisor
+   is `1e-4`.
+
+`SACVAEngine.compute(portfolio)` runs 1→3 per counterparty and feeds the resulting
+`CVASensitivity` records to the unchanged SBA calculator. v1 covers equity and
+reporting-vs-foreign-FX spot under deterministic rates, single reporting currency,
+uncollateralized; it emits counterparty credit-spread delta. Equity/IR market
+delta+vega (which move the exposure and need an MC re-run with common random
+numbers) and stateful (snowball/phoenix) grid exposure are scoped extensions and
+**raise** rather than silently approximate. See `example/sacva_portfolio_demo.py`.
