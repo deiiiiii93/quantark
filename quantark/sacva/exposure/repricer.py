@@ -33,16 +33,25 @@ def reprice_trade(surface, spots, state, times, quantity, exposure_idx,
     n_paths, n_t = spots.shape
     if times.shape != (n_t,):
         raise ValidationError("times length must match spots' time axis")
+    masks = {}
     for key in ("alive", "knocked_in"):
-        if key not in state or np.asarray(state[key]).shape != (n_paths, n_t):
-            raise ValidationError(f"state['{key}'] must have shape (num_paths, n_times)")
-    if any(j < 0 or j >= n_t for j in exposure_idx):
-        raise ValidationError("exposure_idx out of range")
+        if key not in state:
+            raise ValidationError(f"state must contain '{key}'")
+        arr = np.asarray(state[key])
+        if arr.dtype != np.bool_ or arr.shape != (n_paths, n_t):
+            raise ValidationError(
+                f"state['{key}'] must be a boolean array of shape (num_paths, n_times)")
+        masks[key] = arr
+    for j in exposure_idx:
+        if isinstance(j, bool) or not isinstance(j, (int, np.integer)):
+            raise ValidationError("exposure_idx entries must be integers")
+        if j < 0 or j >= n_t:
+            raise ValidationError("exposure_idx out of range")
     out = np.zeros((n_paths, len(exposure_idx)), dtype=float)
     has_ki = "knocked_in" in state_labels
     for col, j in enumerate(exposure_idx):
-        alive = state["alive"][:, j]
-        ki = state["knocked_in"][:, j]
+        alive = masks["alive"][:, j]
+        ki = masks["knocked_in"][:, j]
         for label in state_labels:
             if has_ki:
                 sel = alive & (ki if label == "knocked_in" else ~ki)
@@ -50,7 +59,13 @@ def reprice_trade(surface, spots, state, times, quantity, exposure_idx,
                 sel = alive
             if not sel.any():
                 continue
-            out[sel, col] = surface.value_at(spots[sel, j], float(times[j]), label)
+            vals = np.asarray(surface.value_at(spots[sel, j], float(times[j]), label),
+                              dtype=float)
+            if vals.shape != (int(sel.sum()),) or not np.all(np.isfinite(vals)):
+                raise ValidationError(
+                    "surface.value_at must return a finite 1-D array of the selected "
+                    "path count")
+            out[sel, col] = vals
         # dead paths stay 0 (their cashflow is handled by pending_receivable)
     return out * float(quantity)
 

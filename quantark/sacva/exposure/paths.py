@@ -16,6 +16,7 @@ from quantark.asset.equity.process.bsm.qmc_path_generator import (
     MultiAssetGBMPathGenerator,
 )
 from quantark.asset.equity.process.bsm.qmc_sobol import PseudoRandomNormalGenerator
+from quantark.sacva.exposure.correlation import CorrelationModel
 from quantark.util.exceptions import ValidationError
 
 
@@ -49,8 +50,10 @@ class StatePathGenerator:
             raise ValidationError("spots must be positive")
         if np.any(np.asarray(self.vols, dtype=float) < 0):
             raise ValidationError("vols must be non-negative")
-        if not np.all(np.isfinite(np.asarray(self.corr, dtype=float))):
-            raise ValidationError("correlation matrix must be finite")
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise ValidationError("seed must be an int (deterministic CRN)")
+        # full correlation validation (shape/symmetry/unit-diagonal/bounds/PD)
+        CorrelationModel(keys=list(self.keys), matrix=self.corr).cholesky()
         if isinstance(self.num_paths, bool) or not isinstance(self.num_paths, int):
             raise ValidationError("num_paths must be an int")
         if self.num_paths < 1:

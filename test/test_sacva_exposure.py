@@ -38,6 +38,22 @@ def test_paths_empty_grid_times_raises_validation():
                            divs=[0.0], corr=[[1.0]], grid_times=[])
 
 
+def test_paths_rejects_nonint_seed():
+    from quantark.sacva.exposure.paths import StatePathGenerator
+    with pytest.raises(ValidationError):
+        StatePathGenerator(keys=["EQ:A"], spots=[100.0], vols=[0.2], rates=[0.03],
+                           divs=[0.0], corr=[[1.0]], grid_times=np.linspace(0, 1, 5),
+                           seed=None)
+
+
+def test_exposure_grid_direct_construction_validates_times():
+    from quantark.sacva.exposure.grid import ExposureGrid
+    with pytest.raises(ValidationError):     # not starting at origin
+        ExposureGrid(times=np.array([0.5, 1.0]))
+    with pytest.raises(ValidationError):     # not strictly increasing
+        ExposureGrid(times=np.array([0.0, 1.0, 1.0]))
+
+
 # --- Task 3: CorrelationModel ---------------------------------------------
 
 def test_correlation_cholesky_and_pd_guard():
@@ -187,6 +203,16 @@ def test_state_paths_length_guards():
                            divs=[0.0], corr=[[1.0]], grid_times=np.linspace(0, 1, 5))
 
 
+def test_state_paths_reject_malformed_correlation():
+    from quantark.sacva.exposure.paths import StatePathGenerator
+    base = dict(spots=[100.0, 100.0], vols=[0.2, 0.2], rates=[0.03, 0.03],
+                divs=[0.0, 0.0], grid_times=np.linspace(0, 1, 5))
+    with pytest.raises(ValidationError):     # non-unit diagonal -> not a corr matrix
+        StatePathGenerator(keys=["A", "B"], corr=[[2.0, 0.3], [0.3, 2.0]], **base)
+    with pytest.raises(ValidationError):     # not positive definite
+        StatePathGenerator(keys=["A", "B"], corr=[[1.0, 1.0], [1.0, 1.0]], **base)
+
+
 def test_state_paths_reject_nonfinite_and_duplicate_keys():
     from quantark.sacva.exposure.paths import StatePathGenerator
     base = dict(rates=[0.03], divs=[0.0], corr=[[1.0]], grid_times=np.linspace(0, 1, 5))
@@ -266,6 +292,20 @@ def test_state_machine_rejects_nonpositive_barrier_and_bad_vol():
     with pytest.raises(ValidationError):
         BarrierStateMachine(ki_barrier=90.0, continuous=True, vol=-0.2,
                             times=np.array([0.0, 1.0]))
+
+
+def test_state_machine_rejects_noninteger_schedule_and_time_mismatch():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    # non-integer monitoring index silently never matches the int loop variable
+    sm = BarrierStateMachine(ki_barrier=90.0, ki_direction="down",
+                             monitoring_idx=[1.9], times=np.array([0.0, 1.0]), seed=1)
+    with pytest.raises(ValidationError):
+        sm.run(np.full((2, 2), 100.0))
+    # times length must equal the spot time axis
+    sm2 = BarrierStateMachine(ki_barrier=90.0, ki_direction="down",
+                              monitoring_idx=[1], times=np.array([0.0, 1.0]), seed=1)
+    with pytest.raises(ValidationError):
+        sm2.run(np.full((2, 3), 100.0))
 
 
 def test_state_machine_rejects_nonfinite_or_non2d_spots():
@@ -427,6 +467,26 @@ def test_pending_receivable_rejects_noninteger_ko_idx():
         pending_receivable_exposure(np.array([1.9]), 100.0, 5, settlement_idx=3)
 
 
+def test_repricer_rejects_nonbool_state_and_bad_exposure_idx():
+    from quantark.sacva.exposure.repricer import reprice_trade
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    vs = GridValueSurface(times=np.array([0.0, 1.0]),
+                          grids={1.0: {None: (np.array([90., 110.]), np.array([0., 20.]))}},
+                          currency="USD")
+    spots = np.array([[100.0, 105.0]])
+    # integer (non-bool) state masks would be read as fancy indices, not masks
+    bad_state = {"alive": np.ones((1, 2), dtype=int),
+                 "knocked_in": np.zeros((1, 2), dtype=int), "ko_idx": np.full(1, -1)}
+    with pytest.raises(ValidationError):
+        reprice_trade(vs, spots, bad_state, times=np.array([0.0, 1.0]),
+                      quantity=1.0, exposure_idx=[1])
+    # non-integer exposure_idx
+    good = _alive_state(1, 2)
+    with pytest.raises(ValidationError):
+        reprice_trade(vs, spots, good, times=np.array([0.0, 1.0]),
+                      quantity=1.0, exposure_idx=[1.0])
+
+
 def test_repricer_rejects_nonfinite_spots():
     from quantark.sacva.exposure.repricer import reprice_trade
     from quantark.sacva.exposure.value_surface import GridValueSurface
@@ -477,6 +537,10 @@ def test_exposure_profile_requires_grid_origin_and_measure_type():
     with pytest.raises(ValidationError):
         ExposureProfile(times=np.array([0., np.inf]), epe_discounted=np.array([0., 1.]),
                         measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
+    # regulatory_eligible must be a real bool (truthiness would mis-gate CVA)
+    with pytest.raises(ValidationError):
+        ExposureProfile(times=np.array([0., 1.]), epe_discounted=np.array([0., 1.]),
+                        measure=Measure.RISK_NEUTRAL, regulatory_eligible=1)
 
 
 def test_aggregate_epe_rejects_bad_df_and_nonfinite():

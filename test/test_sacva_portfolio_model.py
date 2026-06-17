@@ -46,6 +46,18 @@ def test_netting_enforceable_must_be_bool():
         NettingSet(set_id="n1", trades=[_trade()], netting_enforceable="yes")
 
 
+def test_trade_hedge_flag_must_be_bool():
+    with pytest.raises(ValidationError):
+        _trade(hedge="yes")
+
+
+def test_portfolio_hedges_must_be_cvahedges():
+    cp = Counterparty(name="A", netting_sets=[NettingSet("n1", [_trade()])],
+                      credit_curve=_Stub(), bucket=2, credit_quality=CreditQuality.IG)
+    with pytest.raises(ValidationError):
+        CVATradePortfolio(counterparties=[cp], hedges=[_trade()])   # plain trade, not a hedge
+
+
 def test_trade_currency_normalized():
     assert _trade().trade_currency == "USD"
 

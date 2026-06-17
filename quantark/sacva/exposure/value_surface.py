@@ -28,7 +28,7 @@ class GridValueSurface:
     """PDE/QUAD backend: interpolate a precomputed value grid per (t, state)."""
 
     def __init__(self, times, grids: Dict[float, Dict[Optional[str], Tuple]],
-                 currency: str, allow_extrapolation: bool = False):
+                 currency: str):
         self.times = np.asarray(times, dtype=float)
         if self.times.ndim != 1 or not np.all(np.isfinite(self.times)):
             raise ValidationError("times must be a finite 1-D array")
@@ -39,7 +39,6 @@ class GridValueSurface:
                 raise ValidationError(f"grid time {key} not present in times")
         self.grids = grids
         self.currency = currency
-        self.allow_extrapolation = allow_extrapolation
 
     def value_at(self, states, t, discrete_state):
         per_t = self.grids.get(t)
@@ -64,10 +63,10 @@ class GridValueSurface:
         states = np.asarray(states, dtype=float)
         if not np.all(np.isfinite(states)):
             raise ValidationError("states must be finite")
-        if not self.allow_extrapolation and (
-            np.any(states < spot_grid[0]) or np.any(states > spot_grid[-1])
-        ):
-            raise ValidationError("state outside value-surface grid (extrapolation off)")
+        # outside-grid states are a hard error: np.interp would silently flat-clamp,
+        # a hidden approximation. The cure for an out-of-range path is a wider grid.
+        if np.any(states < spot_grid[0]) or np.any(states > spot_grid[-1]):
+            raise ValidationError("state outside value-surface grid (widen the grid)")
         out = np.interp(states, spot_grid, vals)
         if not np.all(np.isfinite(out)):
             raise ValidationError("grid value_at produced non-finite values")

@@ -21,6 +21,8 @@ class NettingSet:
             raise ValidationError("NettingSet requires a set_id")
         if not self.trades:
             raise ValidationError(f"{self.set_id}: netting set has no trades")
+        if not all(isinstance(t, CVATrade) for t in self.trades):
+            raise ValidationError(f"{self.set_id}: trades must be CVATrade instances")
         if not isinstance(self.netting_enforceable, bool):
             raise ValidationError(f"{self.set_id}: netting_enforceable must be bool")
         if not isinstance(self.collateralized, bool):

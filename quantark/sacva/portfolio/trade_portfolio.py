@@ -17,6 +17,10 @@ class CVATradePortfolio:
     def __post_init__(self) -> None:
         if not self.counterparties:
             raise ValidationError("CVATradePortfolio requires >=1 counterparty")
+        if not all(isinstance(c, Counterparty) for c in self.counterparties):
+            raise ValidationError("counterparties must be Counterparty instances")
+        if not all(isinstance(h, CVAHedge) for h in self.hedges):
+            raise ValidationError("hedges must be CVAHedge instances")
         if not self.reporting_currency:
             raise ValidationError("reporting_currency required")
         self.reporting_currency = self.reporting_currency.upper()

@@ -18,6 +18,12 @@ class ExposureGrid:
 
     def __post_init__(self) -> None:
         t = np.asarray(self.times, dtype=float).copy()
+        if t.ndim != 1 or t.size == 0 or not np.all(np.isfinite(t)):
+            raise ValidationError("times must be a finite non-empty 1-D array")
+        if t[0] != 0.0:
+            raise ValidationError("times must start at the valuation origin (t0=0)")
+        if t.size > 1 and np.any(np.diff(t) <= 0):
+            raise ValidationError("times must be strictly increasing")
         t.flags.writeable = False
         object.__setattr__(self, "times", t)
 

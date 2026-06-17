@@ -38,6 +38,8 @@ class CVATrade:
             raise ValidationError(f"{self.trade_id}: quantity must be non-zero")
         if not self.trade_currency:
             raise ValidationError(f"{self.trade_id}: trade_currency required")
+        if not isinstance(self.hedge, bool):
+            raise ValidationError(f"{self.trade_id}: hedge must be bool")
         self.trade_currency = self.trade_currency.upper()
 
 

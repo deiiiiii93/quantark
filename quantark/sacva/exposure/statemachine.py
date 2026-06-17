@@ -64,9 +64,14 @@ class BarrierStateMachine:
         if np.any(spots <= 0):
             raise ValidationError("spots must be positive")
         n_paths, n_t = spots.shape
+        if self.times.shape != (n_t,):
+            raise ValidationError("times length must match spots' time axis")
         for nm, idx in (("ki", self._ki_idx), ("ko", self._ko_idx)):
-            if any(j < 0 or j >= n_t for j in idx):
-                raise ValidationError(f"{nm}_monitoring_idx out of range")
+            for j in idx:
+                if isinstance(j, bool) or not isinstance(j, (int, np.integer)):
+                    raise ValidationError(f"{nm}_monitoring_idx entries must be integers")
+                if j < 0 or j >= n_t:
+                    raise ValidationError(f"{nm}_monitoring_idx out of range")
         ki_set = set(self._ki_idx)
         # Continuous KI samples the bridge on every interval of its window; a gapped
         # schedule would silently skip intervals and undercount first passages.

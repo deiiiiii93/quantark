@@ -30,6 +30,8 @@ class ExposureProfile:
     def __post_init__(self) -> None:
         if not isinstance(self.measure, Measure):
             raise ValidationError("measure must be a Measure enum")
+        if not isinstance(self.regulatory_eligible, bool):
+            raise ValidationError("regulatory_eligible must be a bool")
         t = np.asarray(self.times, dtype=float)
         ee = np.asarray(self.epe_discounted, dtype=float)
         if t.shape != ee.shape:
@@ -87,7 +89,10 @@ def aggregate_epe(trade_value_arrays, enforceable, df):
         netted = np.maximum(stacked.sum(axis=0), 0.0)
     else:
         netted = np.maximum(stacked, 0.0).sum(axis=0)
-    return df * netted.mean(axis=0)
+    epe = df * netted.mean(axis=0)
+    if not np.all(np.isfinite(epe)):
+        raise ValidationError("aggregated EPE is non-finite (overflow?)")
+    return epe
 
 
 class ExposureEngine(ABC):
