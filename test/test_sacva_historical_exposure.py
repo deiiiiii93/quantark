@@ -230,3 +230,60 @@ def test_block_requires_length_and_validates_inputs():
         Resampler(ResamplingScheme.IID_RAW, seed=1).sample(z.ravel(), 10, 5)   # 1D
     with pytest.raises(ValidationError):
         Resampler(ResamplingScheme.STATIONARY_BLOCK, expected_block_length=8, overlap=True)
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — HistoricalPathGenerator
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure.historical.path_generator import HistoricalPathGenerator, PathMode
+
+
+def _const_cal(r=0.001, n=300):
+    idx = pd.bdate_range("2019-01-01", periods=n)
+    lvl = 100.0 * np.exp(r * np.arange(n))
+    cal = HistoricalCalibration(HistoricalMarketDataSet({"EQ_A": pd.Series(lvl, index=idx)}))
+    return cal, float(lvl[-1])
+
+
+def test_no_sqrt_t_exact_reconstruction():
+    r = 0.001
+    cal, S0 = _const_cal(r)
+    g = HistoricalPathGenerator(cal, ("EQ_A",), {"EQ_A": S0}, min_replay_windows=5)
+    s = g.generate(PathMode.REPLAY_RAW, np.array([0., 2 / 252, 5 / 252]))
+    assert np.allclose(s[:, 1, 0], S0 * np.exp(2 * r))   # 2 daily log-returns compounded
+    assert np.allclose(s[:, 2, 0], S0 * np.exp(5 * r))   # 5 total — NOT sqrt-scaled
+    assert np.allclose(s[:, 0, 0], S0)
+
+
+def test_replay_deterministic_and_bootstrap_seeded():
+    a_s = _series(400, 100, 9)
+    b_s = _series(400, 1.1, 10)
+    cal2 = HistoricalCalibration(HistoricalMarketDataSet({"EQ_A": a_s, "FX_B": b_s}))
+    g = HistoricalPathGenerator(cal2, ("EQ_A", "FX_B"),
+                                {"EQ_A": float(a_s.iloc[-1]), "FX_B": float(b_s.iloc[-1])})
+    grid = np.array([0., 0.5, 1.0])
+    modes = {"EQ_A": DriftMode.ZERO_LOG_MEAN, "FX_B": DriftMode.ZERO_LOG_MEAN}
+    a = g.generate(PathMode.BOOTSTRAP, grid, scheme=ResamplingScheme.BLOCK_FHS,
+                   block_length=10, n_paths=500, seed=7, drift_modes=modes)
+    b = g.generate(PathMode.BOOTSTRAP, grid, scheme=ResamplingScheme.BLOCK_FHS,
+                   block_length=10, n_paths=500, seed=7, drift_modes=modes)
+    c = g.generate(PathMode.BOOTSTRAP, grid, scheme=ResamplingScheme.BLOCK_FHS,
+                   block_length=10, n_paths=500, seed=99, drift_modes=modes)
+    assert np.array_equal(a, b) and a.shape == (500, 3, 2)        # seed reproducible
+    assert not np.array_equal(a, c)                               # different seed differs
+    assert np.allclose(a[:, 0, :], [g.today_levels["EQ_A"], g.today_levels["FX_B"]])
+    assert a[:, -1, 0].std() > 0                                  # terminal not constant
+
+
+def test_replay_insufficient_windows_raises():
+    cal, S0 = _const_cal(n=300)
+    g = HistoricalPathGenerator(cal, ("EQ_A",), {"EQ_A": S0}, min_replay_windows=10_000)
+    with pytest.raises(ValidationError):
+        g.generate(PathMode.REPLAY_RAW, np.array([0., 0.5]))
+
+
+def test_grid_start_must_be_zero():
+    cal, S0 = _const_cal()
+    g = HistoricalPathGenerator(cal, ("EQ_A",), {"EQ_A": S0}, min_replay_windows=5)
+    with pytest.raises(ValidationError):
+        g.generate(PathMode.REPLAY_RAW, np.array([0.1, 0.5]))
