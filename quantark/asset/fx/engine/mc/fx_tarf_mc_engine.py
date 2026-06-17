@@ -44,14 +44,14 @@ class FxTarnMCResult:
     std_error: Optional[float]
     num_paths: int
     sigma: float
-    mean_redemption_fraction: float  # fraction of paths that redeemed early
+    mean_redemption_fraction: float  # fraction redeemed before the final fixing
 
 
 class FxTarnForwardMCEngine(BaseFxEngine):
     """Constant-vol GK Monte Carlo for FxTargetRedemptionForward."""
 
     engine_type = EngineType.MONTE_CARLO
-    _ACC_TOL = 1e-12
+    _HIT_RTOL = 1e-12
 
     def __init__(
         self,
@@ -122,8 +122,8 @@ class FxTarnForwardMCEngine(BaseFxEngine):
     # -- pathwise target redemption -------------------------------------
 
     def _accumulate(self, opt, spots: np.ndarray, df_pay: np.ndarray):
-        """Walk periods pathwise; return (pv_per_path, redeemed_early_mask)."""
-        n_paths = spots.shape[0]
+        """Walk periods pathwise; return (pv_per_path, early_redemption_mask)."""
+        n_paths, n_periods = spots.shape
         sign = 1.0 if opt.is_buy_base else -1.0
         diff = sign * (spots - opt.strike)  # (P, M); >0 favorable
         favorable = opt.notional * np.maximum(diff, 0.0)
@@ -132,20 +132,31 @@ class FxTarnForwardMCEngine(BaseFxEngine):
         acc = np.zeros(n_paths)
         alive = np.ones(n_paths, dtype=bool)
         pv = np.zeros(n_paths)
+        early = np.zeros(n_paths, dtype=bool)
         target = opt.target
+        tol = self._hit_tol(target)
 
-        for i in range(spots.shape[1]):
+        for i in range(n_periods):
             fav_i, unf_i = favorable[:, i], unfavorable[:, i]
             remaining = target - acc  # capacity left (inf if unbounded target)
             fav_eff = np.where(alive, np.minimum(fav_i, remaining), 0.0)
             cf = fav_eff - opt.gearing * np.where(alive, unf_i, 0.0)
             pv += alive * cf * df_pay[i]
             acc = acc + fav_eff
-            hit = acc >= target - self._ACC_TOL  # never True when target=inf
+            # Relative tolerance so a small target is not falsely hit at acc=0;
+            # never fires for target=inf (acc >= inf is always False).
+            hit = acc >= target - tol
+            newly = alive & hit
+            if i < n_periods - 1:
+                early |= newly  # a final-period hit is not an early redemption
             alive = alive & ~hit
 
-        redeemed_early = ~alive
-        return pv, redeemed_early
+        return pv, early
+
+    @staticmethod
+    def _hit_tol(target: float) -> float:
+        """Target-relative hit tolerance; 0 for an unbounded target."""
+        return 0.0 if math.isinf(target) else abs(target) * FxTarnForwardMCEngine._HIT_RTOL
 
     # -- helpers ---------------------------------------------------------
 

@@ -182,6 +182,28 @@ class TestRedemption:
         eng.price(_tarf(target=math.inf), env)
         assert eng.get_last_result().mean_redemption_fraction == 0.0
 
+    def test_subtolerance_target_does_not_falsely_redeem(self):
+        # Sell-base with forwards above strike -> favorable amount is always 0,
+        # so the target is never reached. A sub-absolute-tolerance target must
+        # NOT trigger a spurious redemption (relative hit tolerance).
+        env = _env(vol=1e-7)
+        opt = _tarf(strike=1.10, is_buy_base=False, target=1e-15)
+        eng = FxTarnForwardMCEngine(params=_mc(num_paths=10_000))
+        eng.price(opt, env)
+        assert eng.get_last_result().mean_redemption_fraction == 0.0
+
+    def test_final_period_hit_is_not_early(self):
+        # sigma~0: favorable per period is deterministic; size the target so the
+        # cumulative favorable reaches it exactly on the LAST fixing -> the deal
+        # redeems at maturity, which is not an early redemption.
+        env = _env(vol=1e-7)
+        opt = _tarf(strike=1.18)
+        fwd, _ = _forwards_and_df(env, opt)
+        total_fav = sum(max(F - 1.18, 0.0) for F in fwd)
+        eng = FxTarnForwardMCEngine(params=_mc(num_paths=10_000))
+        eng.price(_tarf(strike=1.18, target=total_fav), env)
+        assert eng.get_last_result().mean_redemption_fraction == 0.0
+
 
 # ---------------------------------------------------------------------------
 # Product validation

@@ -42,7 +42,7 @@ class FxTargetRedemptionNoteMCEngine(BaseFxEngine):
     """Constant-vol GK Monte Carlo for FxTargetRedemptionNote."""
 
     engine_type = EngineType.MONTE_CARLO
-    _ACC_TOL = 1e-12
+    _HIT_RTOL = 1e-12
 
     def __init__(
         self,
@@ -122,7 +122,9 @@ class FxTargetRedemptionNoteMCEngine(BaseFxEngine):
         acc = np.zeros(n_paths)
         alive = np.ones(n_paths, dtype=bool)
         pv = np.zeros(n_paths)
+        early = np.zeros(n_paths, dtype=bool)
         target = opt.target
+        tol = self._hit_tol(target)
         include_principal = opt.include_principal
 
         for i in range(n_periods):
@@ -132,17 +134,30 @@ class FxTargetRedemptionNoteMCEngine(BaseFxEngine):
             c_eff = np.where(alive, np.minimum(coupon, remaining), 0.0)
             pv += alive * c_eff * df_pay[i]
             acc = acc + c_eff
-            hit = acc >= target - self._ACC_TOL  # never True when target=inf
+            # Relative tolerance so a small target is not falsely hit with no
+            # coupon accrual; never fires for target=inf.
+            hit = acc >= target - tol
+            newly = alive & hit
             if include_principal:
-                pv += (alive & hit) * opt.notional * df_pay[i]
+                pv += newly * opt.notional * df_pay[i]
+            if i < n_periods - 1:
+                early |= newly  # a final-period hit is not an early redemption
             alive = alive & ~hit
 
         # Paths that never redeemed early repay principal at final maturity.
         if include_principal:
             pv += alive * opt.notional * df_pay[-1]
 
-        redeemed_early = ~alive
-        return pv, redeemed_early
+        return pv, early
+
+    @staticmethod
+    def _hit_tol(target: float) -> float:
+        """Target-relative hit tolerance; 0 for an unbounded target."""
+        return (
+            0.0
+            if math.isinf(target)
+            else abs(target) * FxTargetRedemptionNoteMCEngine._HIT_RTOL
+        )
 
     def _condition_mask(self, opt, spots: np.ndarray) -> np.ndarray:
         if opt.is_band:

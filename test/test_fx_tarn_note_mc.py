@@ -185,6 +185,28 @@ class TestRedemption:
         eng.price(opt, env)
         assert eng.get_last_result().mean_redemption_fraction > 0.9
 
+    def test_subtolerance_target_does_not_falsely_redeem(self):
+        # Condition never holds (S<=strike with forwards above strike) -> no
+        # coupon accrues, so a sub-absolute-tolerance target must not trigger a
+        # spurious redemption (relative hit tolerance).
+        env = _env(vol=1e-7)
+        opt = _note(strike=1.10, is_above=False, target=1e-15)
+        eng = FxTargetRedemptionNoteMCEngine(params=_mc(num_paths=10_000))
+        eng.price(opt, env)
+        assert eng.get_last_result().mean_redemption_fraction == 0.0
+
+    def test_final_period_hit_is_not_early(self):
+        # sigma~0: every period pays a deterministic coupon; size the target so
+        # the cumulative coupon reaches it exactly on the LAST fixing -> the note
+        # redeems at maturity, which is not an early redemption.
+        env = _env(vol=1e-7)
+        opt = _note(strike=1.10, coupon_rate=0.10)  # forwards > 1.10 -> all pay
+        total_coupon = sum(opt.full_coupon(i) for i in range(len(opt.fixing_times)))
+        eng = FxTargetRedemptionNoteMCEngine(params=_mc(num_paths=10_000))
+        eng.price(
+            _note(strike=1.10, coupon_rate=0.10, target=total_coupon), env)
+        assert eng.get_last_result().mean_redemption_fraction == 0.0
+
 
 # ---------------------------------------------------------------------------
 # Product validation
