@@ -107,6 +107,28 @@ class EngineType(Enum):
         return self
 
 
+class FxRangeAccrualMethod(Enum):
+    """Per-observation digital pricing method for FX range accrual engines.
+
+    Both methods price the same range digital ``P(L < X_t < U)``; they differ
+    only in how the digital is evaluated against the volatility surface:
+
+    - DIGITAL_COMBINATION: closed-form ``N(d2_L) - N(d2_U)`` using the implied
+      vol read from the surface at each barrier strike. Exact under a flat /
+      Black-Scholes surface; under a smile it is the *sticky-strike,
+      level-only* approximation (it ignores the ``-vega * dσ/dK`` skew term).
+    - CALL_PUT_SPREAD: static replication ``[C(K-h) - C(K+h)] / (2h)`` with the
+      two vanilla legs priced through the surface, so the smile slope is
+      captured. Converges to DIGITAL_COMBINATION as ``h -> 0`` under flat vol.
+    """
+
+    DIGITAL_COMBINATION = "digital_combination"
+    CALL_PUT_SPREAD = "call_put_spread"
+
+    def __str__(self):
+        return self.value
+
+
 class QuadratureMethod(Enum):
     """Quadrature methods for numerical integration pricing."""
 

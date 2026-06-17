@@ -3,5 +3,15 @@
 from .local_vol_mc_engine import FxLocalVolMCEngine
 from .heston_mc_engine import FxHestonMCEngine
 from .heston_slv_mc_engine import FxHestonSLVMCEngine
+from .fx_range_accrual_mc_engine import (
+    FxRangeAccrualMCEngine,
+    FxRangeAccrualMCResult,
+)
 
-__all__ = ["FxLocalVolMCEngine", "FxHestonMCEngine", "FxHestonSLVMCEngine"]
+__all__ = [
+    "FxLocalVolMCEngine",
+    "FxHestonMCEngine",
+    "FxHestonSLVMCEngine",
+    "FxRangeAccrualMCEngine",
+    "FxRangeAccrualMCResult",
+]

@@ -8,7 +8,7 @@ from .vol_surface import (
     GridVolSurface,
 )
 from .sabr import SABRVolSurface
-from .vannavolga import VannaVolgaVolSurface
+from .vannavolga import VannaVolgaVolSurface, TermStructureVannaVolgaVolSurface
 
 __all__ = [
     "VolatilitySurface",
@@ -17,4 +17,5 @@ __all__ = [
     "GridVolSurface",
     "SABRVolSurface",
     "VannaVolgaVolSurface",
+    "TermStructureVannaVolgaVolSurface",
 ]

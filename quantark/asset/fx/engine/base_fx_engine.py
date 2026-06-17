@@ -9,7 +9,11 @@ from typing import Dict, Optional
 
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.param import FlatVolSurface, TermStructureVolSurface
-from quantark.param.vol.vannavolga import VannaVolgaVolSurface, SmileQuotes
+from quantark.param.vol.vannavolga import (
+    VannaVolgaVolSurface,
+    TermStructureVannaVolgaVolSurface,
+    SmileQuotes,
+)
 from quantark.param.rrf import ParallelShiftRateCurve
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum.engine_enums import EngineType
@@ -130,6 +134,12 @@ class BaseFxEngine(ABC):
                 rf=env.get_foreign_rate(tau),
                 tau=tau,
             )
+        elif isinstance(surface, TermStructureVannaVolgaVolSurface):
+            # Rebound every tenor slice to the bumped spot/rates, each at its
+            # own tenor — the term-structure analogue of the single-tenor case.
+            env.vol_surface = surface.reanchor(
+                env.spot, env.get_domestic_rate, env.get_foreign_rate
+            )
 
     def _fdm_delta_gamma(
         self,
@@ -196,6 +206,9 @@ class BaseFxEngine(ABC):
                     bf25_2vol=q.bf25_2vol * factor,
                 )
             )
+        elif isinstance(surface, TermStructureVannaVolgaVolSurface):
+            # Scale every tenor slice's quotes together (sticky-delta vega bump).
+            env.vol_surface = surface.with_scaled_quotes(factor)
         else:
             raise PricingError(
                 f"Vol bumping not supported for surface type "

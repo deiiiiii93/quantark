@@ -30,6 +30,7 @@ from .vv_core import (
     vv_adjustment_simple,
 )
 from .vv_surface import VannaVolgaVolSurface
+from .vv_term_structure import TermStructureVannaVolgaVolSurface
 
 __all__ = [
     "FXEnv",
@@ -50,4 +51,5 @@ __all__ = [
     "vv_adjustment_simple",
     "vv_adjustment_matrix",
     "VannaVolgaVolSurface",
+    "TermStructureVannaVolgaVolSurface",
 ]

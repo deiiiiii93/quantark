@@ -8,6 +8,11 @@ from .option import (
     FxDigitalOption,
     FxQuantoVanillaOption,
     FxQuantoDigitalOption,
+    FxRangeAccrualOption,
+    FxQuantoRangeAccrualOption,
+    FxForeignRangeAccrualOption,
+    FxRangeAccrualConfig,
+    FxRangeAccrualObservationRecord,
 )
 from .deltaone import BaseFxDeltaOneProduct, FxSpot, FxForward, FxSwap
 
@@ -18,6 +23,11 @@ __all__ = [
     'FxDigitalOption',
     'FxQuantoVanillaOption',
     'FxQuantoDigitalOption',
+    'FxRangeAccrualOption',
+    'FxQuantoRangeAccrualOption',
+    'FxForeignRangeAccrualOption',
+    'FxRangeAccrualConfig',
+    'FxRangeAccrualObservationRecord',
     'BaseFxDeltaOneProduct',
     'FxSpot',
     'FxForward',
