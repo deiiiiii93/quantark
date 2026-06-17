@@ -158,9 +158,14 @@ class AccumulatorOption(BaseEquityOption):
         self.business_days_in_year = business_days_in_year
 
         # Derive daily shares from notional when not explicitly provided.
-        if is_zero(daily_share_accumulation):
-            if not is_zero(notional) and initial_price > 0.0:
-                daily_share_accumulation = notional / initial_price
+        if is_zero(daily_share_accumulation) and not is_zero(notional):
+            if initial_price <= 0.0:
+                raise ValidationError(
+                    "Cannot derive daily_share_accumulation from a nonzero notional "
+                    "without a positive initial_price; provide initial_price or set "
+                    "daily_share_accumulation explicitly."
+                )
+            daily_share_accumulation = notional / initial_price
         self.daily_share_accumulation = daily_share_accumulation
 
         super().__init__(
@@ -259,10 +264,20 @@ class AccumulatorOption(BaseEquityOption):
             observation_dates=self.observation_dates,
             default_barrier=self.knock_out_barrier,
             default_payoff=0.0,
-            aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
+            aggregation_mode=self._aggregation_mode(),
             frequency=self.observation_frequency,
         )
         self.observation_dates = self.observation_schedule.times
+
+    def _aggregation_mode(self) -> ObservationAggregation:
+        """Aggregation semantics implied by the knock-out type.
+
+        TERMINATION stops at the first barrier hit; SINGLE_DAY cancels only the
+        breached observation and keeps accruing, so observations accumulate.
+        """
+        if self.knock_out_type == AccumulatorKnockOutType.TERMINATION:
+            return ObservationAggregation.STOP_FIRST_HIT
+        return ObservationAggregation.ACCUMULATE
 
     def _validate_observation_times(self, times: Sequence[float]) -> None:
         """Validate numeric observation times when present."""
@@ -272,6 +287,12 @@ class AccumulatorOption(BaseEquityOption):
             raise ValidationError(
                 "Observation dates must be sorted in ascending order."
             )
+        if self.maturity is not None and self.maturity > 0:
+            if any(t > self.maturity for t in times):
+                raise ValidationError(
+                    "Observation dates must fall within the option maturity "
+                    f"({self.maturity}); got a later observation in {list(times)}."
+                )
 
     def _generate_observation_dates(self) -> List[float]:
         """Generate a regular discrete schedule from ``observation_frequency``."""
@@ -346,19 +367,25 @@ class AccumulatorOption(BaseEquityOption):
         """
         Locked-in accrual from realized past observations (rate-free).
 
-        Only observations that have not knocked out (``spot < KO``) contribute.
-        Discounting (if settlement is deferred to expiry) is applied by the
-        pricing engine.
+        Observations are processed in chronological order. A breach
+        (``spot >= KO``) never accrues. For TERMINATION the contract ends at the
+        first breach, so later observations are excluded; for SINGLE_DAY only the
+        breached observation is skipped and accrual continues. Discounting (if
+        settlement is deferred to expiry) is applied by the pricing engine.
 
         Returns:
             Sum of per-observation settlements for realized observations.
         """
         if not self.past_observations:
             return 0.0
+        terminates = self.knock_out_type == AccumulatorKnockOutType.TERMINATION
         total = 0.0
-        for _, spot in self.past_observations:
-            if spot < self.knock_out_barrier:
-                total += self.get_observation_payoff(spot)
+        for _, spot in sorted(self.past_observations, key=lambda obs: obs[0]):
+            if spot >= self.knock_out_barrier:
+                if terminates:
+                    break
+                continue
+            total += self.get_observation_payoff(spot)
         return total
 
     def get_observation_times(self) -> List[float]:

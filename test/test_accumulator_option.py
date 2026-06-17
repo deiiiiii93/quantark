@@ -11,6 +11,7 @@ import pytest
 from quantark.asset.equity.product.option import AccumulatorOption
 from quantark.util.enum import (
     AccumulatorKnockOutType,
+    ObservationAggregation,
     ObservationFrequency,
     ObservationType,
     OptionType,
@@ -121,6 +122,73 @@ def test_observation_times_returned_sorted():
 def test_unsorted_observation_dates_rejected():
     with pytest.raises(ValidationError, match="ascending"):
         AccumulatorOption(**_base_kwargs(observation_dates=[1.0, 0.25, 0.5]))
+
+
+# ---------------------------------------------------------------------------
+# Review findings (Gate 1 zenmux): correctness of KO/schedule/derivation
+# ---------------------------------------------------------------------------
+
+def test_termination_realized_accrual_stops_at_first_ko():
+    # Chronological past observations: gain, gain, KO breach, then a later gain.
+    # Under TERMINATION the contract ends at the first breach, so the post-KO
+    # observation must not accrue.
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            daily_share_accumulation=1.0,
+            knock_out_type=AccumulatorKnockOutType.TERMINATION,
+            past_observations=[(0.1, 100.0), (0.2, 110.0), (0.3, 102.0)],
+        )
+    )
+    # Only the first observation (S=100 < KO=105) accrues; S=110 is the KO,
+    # and S=102 is after termination.
+    assert acc.get_realized_accrual() == pytest.approx(5.0)
+
+
+def test_single_day_realized_accrual_skips_only_breached_day():
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            daily_share_accumulation=1.0,
+            knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+            past_observations=[(0.1, 100.0), (0.2, 110.0), (0.3, 102.0)],
+        )
+    )
+    # S=100 -> +5, S=110 -> skipped (>= KO), S=102 -> +7. Total = 12.
+    assert acc.get_realized_accrual() == pytest.approx(12.0)
+
+
+def test_single_day_schedule_uses_accumulate_aggregation():
+    acc = AccumulatorOption(
+        **_base_kwargs(knock_out_type=AccumulatorKnockOutType.SINGLE_DAY)
+    )
+    assert (
+        acc.observation_schedule.aggregation_mode == ObservationAggregation.ACCUMULATE
+    )
+
+
+def test_termination_schedule_uses_stop_first_hit_aggregation():
+    acc = AccumulatorOption(
+        **_base_kwargs(knock_out_type=AccumulatorKnockOutType.TERMINATION)
+    )
+    assert (
+        acc.observation_schedule.aggregation_mode
+        == ObservationAggregation.STOP_FIRST_HIT
+    )
+
+
+def test_notional_without_initial_price_is_rejected():
+    with pytest.raises(ValidationError, match="initial_price"):
+        AccumulatorOption(
+            **_base_kwargs(
+                daily_share_accumulation=0.0, notional=1_000_000.0, initial_price=0.0
+            )
+        )
+
+
+def test_observation_dates_after_maturity_rejected():
+    with pytest.raises(ValidationError, match="maturity"):
+        AccumulatorOption(
+            **_base_kwargs(maturity=1.0, observation_dates=[0.5, 2.0])
+        )
 
 
 def test_generated_daily_schedule():
