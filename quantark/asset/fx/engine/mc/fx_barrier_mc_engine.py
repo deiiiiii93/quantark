@@ -33,6 +33,16 @@ from quantark.util.numerical import is_zero
 
 
 @dataclass
+class _BarrierSim:
+    """Per-path simulation primitives shared by barrier and sharkfin payoffs."""
+
+    paths: np.ndarray
+    terminal: np.ndarray
+    survival: np.ndarray  # P(not hit) per path; 0/1 for discrete monitoring
+    first_hit_disc: Optional[np.ndarray]  # E[DF at first hit]; None if unavailable
+
+
+@dataclass
 class FxBarrierMCResult:
     """Breakdown of an FX barrier Monte Carlo run."""
 
@@ -94,10 +104,11 @@ class FxBarrierMCEngine(BaseFxEngine):
         if sigma <= 0:
             raise ValidationError(f"vol must be positive, got {sigma}")
 
-        if opt.monitoring == ObservationType.DISCRETE:
-            payoffs = self._discrete_payoffs(opt, fx_env, T, T_pay, df_pay, sigma)
-        else:
-            payoffs = self._continuous_payoffs(opt, fx_env, T, T_pay, df_pay, sigma)
+        sim = self._barrier_sim(opt, fx_env, T, sigma)
+        vanilla = self._vanilla_payoff(opt, sim.terminal)
+        payoffs = self._assemble_ko_ki(
+            opt.knock_type, opt.rebate, opt.rebate_at_hit, sim, vanilla, df_pay
+        )
 
         price = float(payoffs.mean())
         if self.mc.method == MonteCarloMethod.QUASI:
@@ -136,31 +147,58 @@ class FxBarrierMCEngine(BaseFxEngine):
             use_brownian_bridge=use_bb, vr_config=vr, is_qmc=is_qmc,
         )
 
-    # -- continuous monitoring ------------------------------------------
+    # -- barrier simulation (shared with the sharkfin engine) -----------
 
-    def _continuous_payoffs(self, opt, fx_env, T, T_pay, df_pay, sigma) -> np.ndarray:
+    def _barrier_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
+        """Simulate paths and return per-path survival + first-hit discount.
+
+        Works for any product exposing ``barrier``, ``is_up``, ``monitoring``
+        and ``observation_times`` (FxBarrierOption and FxSharkfinOption), so the
+        sharkfin engine reuses it.
+        """
+        if product.monitoring == ObservationType.DISCRETE:
+            return self._discrete_sim(product, fx_env, T, sigma)
+        return self._continuous_sim(product, fx_env, T, sigma)
+
+    def _continuous_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
         n = int(self.mc.time_steps)
         times = np.linspace(0.0, T, n + 1)[1:]
         use_bb = self.use_brownian_bridge and sigma > self.MIN_VOL
         gen = self._make_generator(fx_env, fx_env.effective_spot(), sigma, times, use_bb)
         paths, _ = gen.generate_paths()
-
-        vanilla = self._vanilla_payoff(opt, paths[:, -1])
-
+        terminal = paths[:, -1]
         if use_bb:
-            p = compute_step_crossing_probabilities(paths, opt.barrier, sigma, times)
+            p = compute_step_crossing_probabilities(paths, product.barrier, sigma, times)
             survival = np.prod(1.0 - p, axis=1)
-            return self._combine(
-                opt, survival, vanilla, df_pay,
-                first_hit_disc=self._bb_first_hit_discount(p, times, fx_env),
-            )
-
-        # sigma ~ 0 or BB disabled: discrete-grid hit detection on dense grid.
+            first_hit_disc = self._bb_first_hit_discount(p, times, fx_env)
+            return _BarrierSim(paths, terminal, survival, first_hit_disc)
+        # sigma ~ 0 or BB disabled: dense-grid hit detection (no pay-at-hit DF).
         hit_matrix = (
-            paths[:, 1:] >= opt.barrier if opt.is_up else paths[:, 1:] <= opt.barrier
+            paths[:, 1:] >= product.barrier if product.is_up else paths[:, 1:] <= product.barrier
         )
         survival = (~hit_matrix.any(axis=1)).astype(float)
-        return self._combine(opt, survival, vanilla, df_pay, first_hit_disc=None)
+        return _BarrierSim(paths, terminal, survival, None)
+
+    def _discrete_sim(self, product, fx_env, T, sigma) -> "_BarrierSim":
+        obs = np.array(product.observation_times, dtype=float)
+        times = obs if np.isclose(obs[-1], T) else np.concatenate([obs, [T]])
+        obs_idx = np.arange(obs.size)
+        gen = self._make_generator(
+            fx_env, fx_env.effective_spot(), sigma, times, use_bb=False
+        )
+        paths, _ = gen.generate_paths()
+        terminal = paths[:, -1]
+        obs_prices = paths[:, obs_idx + 1]
+        hit_matrix = (
+            obs_prices >= product.barrier if product.is_up else obs_prices <= product.barrier
+        )
+        hit_any = hit_matrix.any(axis=1)
+        survival = (~hit_any).astype(float)
+        first_idx = np.argmax(hit_matrix, axis=1)
+        hit_time = times[obs_idx][first_idx]
+        df_hit = np.array([fx_env.get_domestic_df(float(t)) for t in hit_time])
+        first_hit_disc = np.where(hit_any, df_hit, 0.0)
+        return _BarrierSim(paths, terminal, survival, first_hit_disc)
 
     def _bb_first_hit_discount(self, p, times, fx_env) -> np.ndarray:
         """Discretized rebate-at-detection: first-hit prob * DF(step time)."""
@@ -172,49 +210,24 @@ class FxBarrierMCEngine(BaseFxEngine):
         df_steps = np.array([fx_env.get_domestic_df(float(t)) for t in times])
         return np.sum(first_hit * df_steps[None, :], axis=1)
 
-    # -- discrete monitoring (Task 7) -----------------------------------
+    # -- payoff assembly (shared) ---------------------------------------
 
-    def _discrete_payoffs(self, opt, fx_env, T, T_pay, df_pay, sigma) -> np.ndarray:
-        obs = np.array(opt.observation_times, dtype=float)
-        if np.isclose(obs[-1], T):
-            times = obs
-        else:
-            times = np.concatenate([obs, [T]])
-        obs_idx = np.arange(obs.size)
-        gen = self._make_generator(
-            fx_env, fx_env.effective_spot(), sigma, times, use_bb=False
-        )
-        paths, _ = gen.generate_paths()
+    def _assemble_ko_ki(
+        self, knock_type, rebate, rebate_at_hit, sim, terminal_payoff, df_pay
+    ) -> np.ndarray:
+        """Combine survival + first-hit legs into discounted KO/KI payoffs.
 
-        obs_prices = paths[:, obs_idx + 1]
-        hit_matrix = (
-            obs_prices >= opt.barrier if opt.is_up else obs_prices <= opt.barrier
-        )
-        hit_any = hit_matrix.any(axis=1)
-        vanilla = self._vanilla_payoff(opt, paths[:, -1])
-
-        is_ko = opt.knock_type == FxBarrierType.KNOCK_OUT
+        ``terminal_payoff`` is the value paid on surviving paths (vanilla for a
+        barrier; capped vanilla + no-hit bonus for a sharkfin).
+        """
+        survival = sim.survival
+        is_ko = knock_type == FxBarrierType.KNOCK_OUT
         if is_ko:
-            if opt.rebate_at_hit and opt.rebate > 0.0:
-                first_idx = np.argmax(hit_matrix, axis=1)
-                hit_time = times[obs_idx][first_idx]
-                df_hit = np.array([fx_env.get_domestic_df(float(t)) for t in hit_time])
-                rebate_leg = np.where(hit_any, opt.rebate * df_hit, 0.0)
-                return np.where(hit_any, rebate_leg, vanilla * df_pay)
-            return np.where(hit_any, opt.rebate, vanilla) * df_pay
-        # KNOCK_IN: vanilla if knocked in, else rebate.
-        return np.where(hit_any, vanilla * df_pay, opt.rebate * df_pay)
-
-    # -- payoff assembly -------------------------------------------------
-
-    def _combine(self, opt, survival, vanilla, df_pay, first_hit_disc) -> np.ndarray:
-        is_ko = opt.knock_type == FxBarrierType.KNOCK_OUT
-        if is_ko:
-            if opt.rebate_at_hit and opt.rebate > 0.0 and first_hit_disc is not None:
-                return first_hit_disc * opt.rebate + survival * vanilla * df_pay
-            return (survival * vanilla + (1.0 - survival) * opt.rebate) * df_pay
-        # KNOCK_IN: rebate paid at expiry iff never knocked in.
-        return ((1.0 - survival) * vanilla + survival * opt.rebate) * df_pay
+            if rebate_at_hit and rebate > 0.0 and sim.first_hit_disc is not None:
+                return rebate * sim.first_hit_disc + survival * terminal_payoff * df_pay
+            return survival * terminal_payoff * df_pay + (1.0 - survival) * rebate * df_pay
+        # KNOCK_IN: terminal if knocked in, else rebate paid at expiry.
+        return (1.0 - survival) * terminal_payoff * df_pay + survival * rebate * df_pay
 
     def _vanilla_payoff(self, opt, terminal: np.ndarray) -> np.ndarray:
         if opt.is_call():
