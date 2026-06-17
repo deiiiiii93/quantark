@@ -55,3 +55,82 @@ class HistoricalMarketDataSet:
         if not is_close(self.today_level(key), env_spot):
             raise ValidationError(
                 f"factor {key}: today level {self.today_level(key)} != env spot {env_spot}")
+
+
+class DriftMode(Enum):
+    EMPIRICAL_MEAN = "empirical_mean"
+    ZERO_LOG_MEAN = "zero_log_mean"
+    USER_SUPPLIED = "user_supplied"
+
+
+@dataclass
+class HistoricalCalibration:
+    """Real-world calibration: adjusted log-return drift, EWMA conditional vol, and
+    a correlation *diagnostic* (never used to recolour generated paths)."""
+
+    data: HistoricalMarketDataSet
+    user_drift: dict = field(default_factory=dict)   # {key: daily log drift} for USER_SUPPLIED
+    vol_floor: float = 1e-8
+
+    def __post_init__(self):
+        self._r = self.data.log_returns()
+        if len(self._r) < 2:
+            raise ValidationError("need >= 2 returns")
+
+    def mu_hat(self, key) -> float:
+        return float(self._r[key].mean())
+
+    def _target_mu(self, key, mode) -> float:
+        if mode is DriftMode.EMPIRICAL_MEAN:
+            return self.mu_hat(key)
+        if mode is DriftMode.ZERO_LOG_MEAN:
+            return 0.0
+        if mode is DriftMode.USER_SUPPLIED:
+            if key not in self.user_drift:
+                raise ValidationError(f"USER_SUPPLIED drift missing for {key}")
+            return float(self.user_drift[key])
+        raise ValidationError(f"unknown drift mode {mode}")
+
+    def adjusted_log_returns(self, keys, modes):
+        out = self._r[list(keys)].copy()
+        for key in keys:
+            if key not in modes:
+                raise ValidationError(f"no drift mode for factor {key}")
+            out[key] = out[key] - self.mu_hat(key) + self._target_mu(key, modes[key])
+        return out
+
+    def ewma_sigma(self, key, lam=0.94) -> np.ndarray:
+        if not (0.0 < lam < 1.0):
+            raise ValidationError("EWMA lambda must be in (0,1)")
+        r = self._r[key].to_numpy()
+        mu = self.mu_hat(key)
+        var = np.empty(len(r))
+        var[0] = np.var(r, ddof=1)                   # sample variance seed
+        for t in range(1, len(r)):
+            var[t] = lam * var[t - 1] + (1 - lam) * (r[t - 1] - mu) ** 2
+        return np.maximum(np.sqrt(var), self.vol_floor)
+
+    def ewma_sigma_today(self, key, lam=0.94) -> float:
+        r = self._r[key].to_numpy()
+        mu = self.mu_hat(key)
+        sig = self.ewma_sigma(key, lam)
+        var_today = lam * sig[-1] ** 2 + (1 - lam) * (r[-1] - mu) ** 2
+        return float(max(np.sqrt(var_today), self.vol_floor))
+
+    def standardized_residuals(self, key, lam=0.94) -> np.ndarray:
+        r = self._r[key].to_numpy()
+        mu = self.mu_hat(key)
+        return (r - mu) / self.ewma_sigma(key, lam)
+
+    def correlation_diagnostic(self) -> np.ndarray:
+        # DIAGNOSTIC ONLY — never a recolouring step; co-movement comes from the
+        # multivariate common-time-index resampling in path_generator.
+        from quantark.util.numerical import Tolerance
+        Z = np.column_stack([self.standardized_residuals(k) for k in self._r.columns])
+        with np.errstate(invalid="ignore", divide="ignore"):   # degenerate factor -> NaN, caught below
+            C = np.atleast_2d(np.corrcoef(Z, rowvar=False))
+        if not np.all(np.isfinite(C)):
+            raise ValidationError("non-finite correlation diagnostic (degenerate factor)")
+        if np.min(np.linalg.eigvalsh(C)) < -Tolerance.ZERO:
+            raise ValidationError("correlation diagnostic is not PSD")
+        return C

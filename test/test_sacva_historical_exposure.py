@@ -143,3 +143,37 @@ def test_today_level_uses_common_valuation_date():
     vd = ds.valuation_date()
     assert ds.today_level("FX_B") == float(b.loc[vd])   # common aligned date
     assert ds.today_level("FX_B") != float(b.iloc[-1])
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — HistoricalCalibration
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure.historical.calibration import HistoricalCalibration, DriftMode
+
+
+def _cal(n=400, seed=5):
+    return HistoricalCalibration(HistoricalMarketDataSet(
+        {"EQ_A": _series(n, 100, seed), "FX_B": _series(n, 1.1, seed + 1)}))
+
+
+def test_drift_modes_and_subset():
+    cal = _cal()
+    r = cal.adjusted_log_returns(["EQ_A"], {"EQ_A": DriftMode.ZERO_LOG_MEAN})
+    assert abs(r["EQ_A"].mean()) < 1e-12 and list(r.columns) == ["EQ_A"]
+
+
+def test_ewma_seed_sample_variance_and_today_vol():
+    cal = _cal()
+    sig = cal.ewma_sigma("EQ_A", 0.94)
+    assert np.isclose(sig[0], max(np.sqrt(np.var(cal._r["EQ_A"], ddof=1)), cal.vol_floor))
+    assert cal.ewma_sigma_today("EQ_A", 0.94) > 0
+
+
+def test_correlation_diagnostic_psd_and_nan_guard():
+    cal = _cal()
+    C = cal.correlation_diagnostic()
+    assert C.shape == (2, 2) and np.min(np.linalg.eigvalsh(C)) > -1e-10
+    flat = pd.Series(np.full(400, 7.0), index=_series(400).index)        # constant
+    cal2 = HistoricalCalibration(HistoricalMarketDataSet({"EQ_A": _series(400), "C": flat}))
+    with pytest.raises(ValidationError):
+        cal2.correlation_diagnostic()
