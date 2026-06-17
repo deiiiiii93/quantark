@@ -35,6 +35,13 @@ class BarrierStateMachine:
             raise ValidationError("ko_direction must be 'up'/'down'")
         if self.continuous_ko:
             raise ValidationError("continuous KO is deferred in v1 (needs crossing time)")
+        for name, b in (("ki_barrier", self.ki_barrier), ("ko_barrier", self.ko_barrier)):
+            if b is not None and not (np.isfinite(b) and b > 0):
+                raise ValidationError(f"{name} must be a positive finite level")
+        if not (np.isfinite(self.vol) and self.vol >= 0):
+            raise ValidationError("vol must be non-negative and finite")
+        if self.continuous and self.vol <= 0:
+            raise ValidationError("continuous monitoring requires vol > 0 (bridge variance)")
         t = np.asarray(self.times, dtype=float)
         if t.ndim != 1 or np.any(np.diff(t) <= 0):
             raise ValidationError("times must be 1-D strictly increasing")

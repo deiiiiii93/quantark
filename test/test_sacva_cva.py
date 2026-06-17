@@ -62,3 +62,23 @@ def test_cva_rejects_full_recovery():
                            Measure.RISK_NEUTRAL, True)
     with pytest.raises(ValidationError):
         RegulatoryCVAEngine().compute(FlatCurve(0.02, recovery=1.0), prof)
+
+
+def test_cva_rejects_negative_recovery():
+    prof = ExposureProfile(np.array([0., 1.]), np.array([0., 1.]),
+                           Measure.RISK_NEUTRAL, True)
+    with pytest.raises(ValidationError):  # negative recovery => ELGD > 1
+        RegulatoryCVAEngine().compute(FlatCurve(0.02, recovery=-0.1), prof)
+
+
+def test_cva_rejects_survival_not_unity_at_origin():
+    class BadOrigin:
+        recovery_rate = 0.4
+
+        def get_survival_probability(self, t):
+            return 0.9 * float(np.exp(-0.02 * t))   # S(0) = 0.9, not 1
+
+    prof = ExposureProfile(np.array([0., 1.]), np.array([0., 100.]),
+                           Measure.RISK_NEUTRAL, True)
+    with pytest.raises(ValidationError):
+        RegulatoryCVAEngine().compute(BadOrigin(), prof)

@@ -21,6 +21,9 @@ class NettingSet:
             raise ValidationError("NettingSet requires a set_id")
         if not self.trades:
             raise ValidationError(f"{self.set_id}: netting set has no trades")
+        ids = [t.trade_id for t in self.trades]
+        if len(ids) != len(set(ids)):
+            raise ValidationError(f"{self.set_id}: duplicate trade_id in netting set")
         if self.collateralized:
             raise ValidationError(
                 f"{self.set_id}: collateralized sets are deferred (v1, spec §6)"

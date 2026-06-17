@@ -25,6 +25,9 @@ class Counterparty:
             raise ValidationError("Counterparty requires a name")
         if not self.netting_sets:
             raise ValidationError(f"{self.name}: no netting sets")
+        set_ids = [ns.set_id for ns in self.netting_sets]
+        if len(set_ids) != len(set(set_ids)):
+            raise ValidationError(f"{self.name}: duplicate netting set_id")
         if self.credit_curve is None:
             raise ValidationError(f"{self.name}: credit_curve required (PD/ELGD)")
         if isinstance(self.bucket, bool) or not isinstance(self.bucket, int):

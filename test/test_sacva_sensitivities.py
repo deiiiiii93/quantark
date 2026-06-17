@@ -56,3 +56,25 @@ def test_bump_rejects_non_pillar_curve():
 
     with pytest.raises(ValidationError):
         bump_hazard_pillar(NoPillars(), tenor=1.0, spread_bp=1.0, elgd=0.6)
+
+
+def test_bump_rejects_elgd_inconsistent_with_recovery():
+    c = PillarCreditCurve([1.0, 3.0], [0.02, 0.02], recovery=0.4)  # 1-R = 0.6
+    with pytest.raises(ValidationError):
+        bump_hazard_pillar(c, tenor=1.0, spread_bp=1.0, elgd=0.55)
+
+
+def test_bump_rejects_unsorted_pillars():
+    c = PillarCreditCurve([3.0, 1.0], [0.02, 0.02], recovery=0.4)
+    with pytest.raises(ValidationError):
+        bump_hazard_pillar(c, tenor=3.0, spread_bp=1.0, elgd=0.6)
+
+
+def test_bump_rejects_curve_without_survival_method():
+    class OnlyPillars:
+        tenors = np.array([1.0, 3.0])
+        hazards = np.array([0.02, 0.02])
+        recovery_rate = 0.4
+
+    with pytest.raises(ValidationError):
+        bump_hazard_pillar(OnlyPillars(), tenor=1.0, spread_bp=1.0, elgd=0.6)

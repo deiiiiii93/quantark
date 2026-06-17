@@ -59,6 +59,19 @@ def test_empty_netting_set_rejected():
         NettingSet(set_id="n1", trades=[])
 
 
+def test_netting_set_rejects_duplicate_trade_ids():
+    with pytest.raises(ValidationError):
+        NettingSet(set_id="n1", trades=[_trade(trade_id="dup"), _trade(trade_id="dup")])
+
+
+def test_counterparty_rejects_duplicate_netting_set_ids():
+    with pytest.raises(ValidationError):
+        Counterparty(name="A",
+                     netting_sets=[NettingSet("n1", [_trade()]),
+                                   NettingSet("n1", [_trade(trade_id="t2")])],
+                     credit_curve=_Stub(), bucket=2, credit_quality=CreditQuality.IG)
+
+
 def test_counterparty_requires_credit_curve_and_bucket():
     with pytest.raises(ValidationError):
         Counterparty(name="A", netting_sets=[NettingSet("n1", [_trade()])],

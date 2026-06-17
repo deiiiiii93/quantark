@@ -42,6 +42,19 @@ def test_correlation_shape_and_symmetry_guards():
         CorrelationModel(keys=["a", "b"], matrix=[[1.0, 0.2], [0.4, 1.0]])
 
 
+def test_correlation_rejects_non_unit_diagonal_and_bounds():
+    from quantark.sacva.exposure.correlation import CorrelationModel
+    # symmetric & positive-definite but NOT a correlation matrix (diag != 1)
+    with pytest.raises(ValidationError):
+        CorrelationModel(keys=["a", "b"], matrix=[[2.0, 0.3], [0.3, 2.0]])
+    # off-diagonal outside [-1, 1]
+    with pytest.raises(ValidationError):
+        CorrelationModel(keys=["a", "b"], matrix=[[1.0, 1.2], [1.2, 1.0]])
+    # non-finite entry
+    with pytest.raises(ValidationError):
+        CorrelationModel(keys=["a", "b"], matrix=[[1.0, np.nan], [np.nan, 1.0]])
+
+
 # --- Task 4: ValueSurface backends ----------------------------------------
 
 def test_grid_value_surface_interpolates():
@@ -61,6 +74,22 @@ def test_grid_value_surface_rejects_extrapolation():
                           currency="USD")
     with pytest.raises(ValidationError):
         vs.value_at(np.array([200.0]), t=1.0, discrete_state=None)
+
+
+def test_grid_value_surface_rejects_unsorted_or_mismatched_grid():
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    # spot_grid not strictly increasing -> np.interp would silently mis-interpolate
+    vs = GridValueSurface(times=np.array([1.0]),
+                          grids={1.0: {None: (np.array([110., 90.]), np.array([0., 20.]))}},
+                          currency="USD")
+    with pytest.raises(ValidationError):
+        vs.value_at(np.array([100.0]), t=1.0, discrete_state=None)
+    # spot_grid / vals length mismatch
+    vs2 = GridValueSurface(times=np.array([1.0]),
+                           grids={1.0: {None: (np.array([90., 100., 110.]), np.array([0., 20.]))}},
+                           currency="USD")
+    with pytest.raises(ValidationError):
+        vs2.value_at(np.array([100.0]), t=1.0, discrete_state=None)
 
 
 def test_analytic_value_surface_matches_engine():
@@ -165,6 +194,15 @@ def test_continuous_ko_rejected():
                             times=np.array([0.0, 1.0]))
 
 
+def test_state_machine_rejects_nonpositive_barrier_and_bad_vol():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    with pytest.raises(ValidationError):
+        BarrierStateMachine(ki_barrier=-90.0, times=np.array([0.0, 1.0]))
+    with pytest.raises(ValidationError):
+        BarrierStateMachine(ki_barrier=90.0, continuous=True, vol=-0.2,
+                            times=np.array([0.0, 1.0]))
+
+
 # --- Task 7: repricer ------------------------------------------------------
 
 def _alive_state(n_paths, n_t):
@@ -256,6 +294,39 @@ def test_eligible_must_be_risk_neutral():
     with pytest.raises(ValidationError):
         ExposureProfile(times=np.array([0., 1.]), epe_discounted=np.array([0., 1.]),
                         measure=Measure.REAL_WORLD, regulatory_eligible=True)
+
+
+def test_exposure_profile_requires_grid_origin_and_measure_type():
+    from quantark.sacva.exposure.engine import ExposureProfile, Measure
+    # times must start at valuation (t0 = 0); else CVA drops the [0, t0] interval
+    with pytest.raises(ValidationError):
+        ExposureProfile(times=np.array([0.5, 1.0]), epe_discounted=np.array([1., 1.]),
+                        measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
+    # measure must be a Measure enum
+    with pytest.raises(ValidationError):
+        ExposureProfile(times=np.array([0., 1.]), epe_discounted=np.array([0., 1.]),
+                        measure="risk_neutral", regulatory_eligible=True)
+
+
+def test_aggregate_epe_rejects_bad_df_and_nonfinite():
+    from quantark.sacva.exposure.engine import aggregate_epe
+    v = [np.array([[10.], [-10.]])]
+    # df must be 1-D of length n_dates: a column df would broadcast to a matrix
+    with pytest.raises(ValidationError):
+        aggregate_epe(v, enforceable=True, df=np.array([[1.0]]))
+    # df length mismatch
+    with pytest.raises(ValidationError):
+        aggregate_epe(v, enforceable=True, df=np.array([1.0, 0.9]))
+    # non-finite trade value
+    with pytest.raises(ValidationError):
+        aggregate_epe([np.array([[np.inf], [1.0]])], enforceable=True, df=np.array([1.0]))
+    # non-2D trade array
+    with pytest.raises(ValidationError):
+        aggregate_epe([np.array([1.0, 2.0])], enforceable=True, df=np.array([1.0, 1.0]))
+    # ragged trade arrays
+    with pytest.raises(ValidationError):
+        aggregate_epe([np.array([[1.0]]), np.array([[1.0, 2.0]])],
+                      enforceable=True, df=np.array([1.0]))
 
 
 def test_netting_positive_part_is_pathwise_before_averaging():

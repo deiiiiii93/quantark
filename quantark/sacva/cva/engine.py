@@ -21,15 +21,19 @@ class RegulatoryCVAEngine:
         if not profile.regulatory_eligible or profile.measure is not Measure.RISK_NEUTRAL:
             raise ValidationError(
                 "CVA requires a regulatory-eligible RISK_NEUTRAL ExposureProfile")
-        elgd = 1.0 - float(credit_curve.recovery_rate)
-        if not (elgd > 0):
-            raise ValidationError("ELGD must be > 0")
+        recovery = float(credit_curve.recovery_rate)
+        if not (0.0 <= recovery < 1.0):
+            raise ValidationError("recovery_rate must be in [0, 1)")
+        elgd = 1.0 - recovery  # in (0, 1]
 
         t = np.asarray(profile.times, dtype=float)
         ee = np.asarray(profile.epe_discounted, dtype=float)
+        # ExposureProfile guarantees t[0] == 0 (no dropped [0, t0] default interval)
         S = np.array([float(credit_curve.get_survival_probability(float(x))) for x in t])
         if np.any(~np.isfinite(S)) or np.any(S < -1e-12) or np.any(S > 1.0 + 1e-12):
             raise ValidationError("survival probabilities must be finite in [0, 1]")
+        if t[0] == 0.0 and abs(S[0] - 1.0) > 1e-9:
+            raise ValidationError("survival probability at t0=0 must be 1")
         if np.any(np.diff(S) > 1e-12):
             raise ValidationError("survival probabilities must be non-increasing")
 

@@ -22,8 +22,14 @@ class CorrelationModel:
         n = len(self.keys)
         if self.matrix.shape != (n, n):
             raise ValidationError("correlation matrix shape must match keys")
+        if not np.all(np.isfinite(self.matrix)):
+            raise ValidationError("correlation matrix must be finite")
         if not np.allclose(self.matrix, self.matrix.T):
             raise ValidationError("correlation matrix must be symmetric")
+        if not np.allclose(np.diag(self.matrix), 1.0):
+            raise ValidationError("correlation matrix must have unit diagonal")
+        if np.any(np.abs(self.matrix) > 1.0 + 1e-12):
+            raise ValidationError("correlation entries must lie in [-1, 1]")
 
     def cholesky(self) -> np.ndarray:
         try:

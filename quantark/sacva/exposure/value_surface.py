@@ -47,6 +47,13 @@ class GridValueSurface:
             raise ValidationError(f"no surface for state {discrete_state!r} at t={t}")
         spot_grid, vals = per_t[discrete_state]
         spot_grid = np.asarray(spot_grid, dtype=float)
+        vals = np.asarray(vals, dtype=float)
+        if spot_grid.ndim != 1 or vals.ndim != 1 or spot_grid.shape != vals.shape:
+            raise ValidationError("spot_grid and vals must be equal-length 1-D arrays")
+        if not (np.all(np.isfinite(spot_grid)) and np.all(np.isfinite(vals))):
+            raise ValidationError("value-surface grid must be finite")
+        if np.any(np.diff(spot_grid) <= 0):
+            raise ValidationError("spot_grid must be strictly increasing (np.interp)")
         states = np.asarray(states, dtype=float)
         if not self.allow_extrapolation and (
             np.any(states < spot_grid[0]) or np.any(states > spot_grid[-1])
