@@ -34,14 +34,23 @@ class StatePathGenerator:
     def __post_init__(self) -> None:
         self.grid_times = np.asarray(self.grid_times, dtype=float)
         n = len(self.keys)
+        if n == 0:
+            raise ValidationError("keys must be non-empty")
+        if len(set(self.keys)) != n:
+            raise ValidationError("keys must be unique (duplicates collide in output)")
         for name, arr in (("spots", self.spots), ("vols", self.vols),
                           ("rates", self.rates), ("divs", self.divs)):
+            a = np.asarray(arr, dtype=float)
             if len(arr) != n:
                 raise ValidationError(f"{name} length {len(arr)} != keys {n}")
+            if not np.all(np.isfinite(a)):
+                raise ValidationError(f"{name} must be finite")
         if np.any(np.asarray(self.spots, dtype=float) <= 0):
             raise ValidationError("spots must be positive")
         if np.any(np.asarray(self.vols, dtype=float) < 0):
             raise ValidationError("vols must be non-negative")
+        if not np.all(np.isfinite(np.asarray(self.corr, dtype=float))):
+            raise ValidationError("correlation matrix must be finite")
         if isinstance(self.num_paths, bool) or not isinstance(self.num_paths, int):
             raise ValidationError("num_paths must be an int")
         if self.num_paths < 1:

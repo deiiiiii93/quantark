@@ -70,7 +70,22 @@ def test_correlation_rejects_non_unit_diagonal_and_bounds():
         CorrelationModel(keys=["a", "b"], matrix=[[1.0, np.nan], [np.nan, 1.0]])
 
 
+def test_correlation_rejects_duplicate_keys():
+    from quantark.sacva.exposure.correlation import CorrelationModel
+    with pytest.raises(ValidationError):
+        CorrelationModel(keys=["a", "a"], matrix=[[1.0, 0.0], [0.0, 1.0]])
+
+
 # --- Task 4: ValueSurface backends ----------------------------------------
+
+def test_grid_value_surface_rejects_unsorted_times_and_unknown_grid_key():
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    g = {1.0: {None: (np.array([90., 110.]), np.array([0., 20.]))}}
+    with pytest.raises(ValidationError):     # times not strictly increasing
+        GridValueSurface(times=np.array([1.0, 1.0]), grids=g, currency="USD")
+    with pytest.raises(ValidationError):     # grid time key absent from times
+        GridValueSurface(times=np.array([0.0, 2.0]), grids=g, currency="USD")
+
 
 def test_grid_value_surface_interpolates():
     from quantark.sacva.exposure.value_surface import GridValueSurface
@@ -116,6 +131,19 @@ def test_grid_value_surface_rejects_unsorted_or_mismatched_grid():
         vs2.value_at(np.array([100.0]), t=1.0, discrete_state=None)
 
 
+def test_analytic_value_surface_rejects_nonfinite_state():
+    from quantark.sacva.exposure.value_surface import AnalyticValueSurface
+
+    class Eng:
+        def price(self, product, env):
+            return 1.0
+
+    vs = AnalyticValueSurface(engine=Eng(), product=object(), base_env=object(),
+                              as_of_env=lambda e, s, t: e, currency="USD")
+    with pytest.raises(ValidationError):
+        vs.value_at(np.array([np.nan]), t=0.5, discrete_state=None)
+
+
 def test_analytic_value_surface_matches_engine():
     from quantark.sacva.exposure.value_surface import AnalyticValueSurface
 
@@ -157,6 +185,19 @@ def test_state_paths_length_guards():
     with pytest.raises(ValidationError):
         StatePathGenerator(keys=["EQ:A"], spots=[100.0, 1.0], vols=[0.2], rates=[0.03],
                            divs=[0.0], corr=[[1.0]], grid_times=np.linspace(0, 1, 5))
+
+
+def test_state_paths_reject_nonfinite_and_duplicate_keys():
+    from quantark.sacva.exposure.paths import StatePathGenerator
+    base = dict(rates=[0.03], divs=[0.0], corr=[[1.0]], grid_times=np.linspace(0, 1, 5))
+    with pytest.raises(ValidationError):     # NaN vol slips past vols < 0
+        StatePathGenerator(keys=["EQ:A"], spots=[100.0], vols=[float("nan")], **base)
+    with pytest.raises(ValidationError):     # inf spot slips past spots <= 0
+        StatePathGenerator(keys=["EQ:A"], spots=[float("inf")], vols=[0.2], **base)
+    with pytest.raises(ValidationError):     # duplicate keys collide in output dict
+        StatePathGenerator(keys=["EQ:A", "EQ:A"], spots=[100.0, 100.0], vols=[0.2, 0.2],
+                           rates=[0.03, 0.03], divs=[0.0, 0.0],
+                           corr=[[1.0, 0.0], [0.0, 1.0]], grid_times=np.linspace(0, 1, 5))
 
 
 # --- Task 6: BarrierStateMachine ------------------------------------------
@@ -225,6 +266,43 @@ def test_state_machine_rejects_nonpositive_barrier_and_bad_vol():
     with pytest.raises(ValidationError):
         BarrierStateMachine(ki_barrier=90.0, continuous=True, vol=-0.2,
                             times=np.array([0.0, 1.0]))
+
+
+def test_state_machine_rejects_nonfinite_or_non2d_spots():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    sm = BarrierStateMachine(ki_barrier=90.0, ki_direction="down",
+                             monitoring_idx=[1], times=np.array([0.0, 1.0]), seed=1)
+    with pytest.raises(ValidationError):     # NaN spot defeats <= 0 check -> silent miss
+        sm.run(np.array([[100.0, float("nan")]]))
+    with pytest.raises(ValidationError):     # 1-D spots
+        sm.run(np.array([100.0, 95.0]))
+
+
+def test_bridge_up_barrier_matches_analytic_formula():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    sm = BarrierStateMachine(ki_barrier=105.0, ki_direction="up",
+                             monitoring_idx=[1], times=np.array([0.0, 1.0]),
+                             seed=4, continuous=True, vol=0.25)
+    s0 = np.full(200000, 100.0)
+    s1 = np.full(200000, 100.0)
+    var = 0.25 ** 2 * 1.0
+    b, x0 = np.log(105.0), np.log(100.0)
+    p_expected = np.exp(-2.0 * (b - x0) * (b - x0) / var)
+    crossed = sm._bridge_cross(s0, s1, 105.0, 1.0, "up", np.random.default_rng(4))
+    assert abs(crossed.mean() - p_expected) < 0.01
+    assert 0.0 < p_expected < 1.0
+
+
+def test_continuous_ki_window_starting_after_origin():
+    # KI activates at node 2; a dip during interval [0,1] (pre-window) must NOT knock in
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    times = np.linspace(0, 1, 5)
+    spots = np.full((1, 5), 100.0)
+    spots[0, 1] = 80.0                       # breach before the KI window opens
+    sm = BarrierStateMachine(ki_barrier=85.0, ki_direction="down",
+                             ki_monitoring_idx=[2, 3, 4], times=times,
+                             continuous=True, vol=0.2, seed=1)
+    assert sm.run(spots)["knocked_in"][0, -1] == False
 
 
 def test_continuous_ki_rejects_noncontiguous_schedule():
@@ -342,6 +420,31 @@ def test_pending_receivable_rejects_bad_settlement_and_redemption():
         pending_receivable_exposure(np.array([1]), float("nan"), 5, settlement_idx=2)
 
 
+def test_pending_receivable_rejects_noninteger_ko_idx():
+    from quantark.sacva.exposure.repricer import pending_receivable_exposure
+    # float KO indices would be silently truncated (1.9 -> 1) onto the wrong date
+    with pytest.raises(ValidationError):
+        pending_receivable_exposure(np.array([1.9]), 100.0, 5, settlement_idx=3)
+
+
+def test_repricer_rejects_nonfinite_spots():
+    from quantark.sacva.exposure.repricer import reprice_trade
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    vs = GridValueSurface(times=np.array([0.0, 1.0]),
+                          grids={1.0: {None: (np.array([90., 110.]), np.array([0., 20.]))}},
+                          currency="USD")
+    spots = np.array([[100.0, float("nan")]])
+    with pytest.raises(ValidationError):
+        reprice_trade(vs, spots, _alive_state(1, 2), times=np.array([0.0, 1.0]),
+                      quantity=1.0, exposure_idx=[1])
+
+
+def test_aggregate_epe_requires_bool_enforceable():
+    from quantark.sacva.exposure.engine import aggregate_epe
+    with pytest.raises(ValidationError):
+        aggregate_epe([np.array([[1.0]])], enforceable="False", df=np.array([1.0]))
+
+
 # --- Task 8: ExposureProfile + aggregate_epe ------------------------------
 
 def test_exposure_profile_carries_measure_tag():
@@ -349,6 +452,8 @@ def test_exposure_profile_carries_measure_tag():
     p = ExposureProfile(times=np.array([0., 1.]), epe_discounted=np.array([5., 3.]),
                         measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
     assert p.regulatory_eligible and p.measure is Measure.RISK_NEUTRAL
+    assert p.times.flags.writeable is False        # validated arrays are immutable
+    assert p.epe_discounted.flags.writeable is False
 
 
 def test_eligible_must_be_risk_neutral():

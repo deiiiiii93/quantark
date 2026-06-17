@@ -20,6 +20,10 @@ class CorrelationModel:
     def __post_init__(self) -> None:
         self.matrix = np.asarray(self.matrix, dtype=float)
         n = len(self.keys)
+        if n == 0:
+            raise ValidationError("keys must be non-empty")
+        if len(set(self.keys)) != n:
+            raise ValidationError("keys must be unique")
         if self.matrix.shape != (n, n):
             raise ValidationError("correlation matrix shape must match keys")
         if not np.all(np.isfinite(self.matrix)):

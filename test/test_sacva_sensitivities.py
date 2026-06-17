@@ -70,6 +70,21 @@ def test_bump_rejects_unsorted_pillars():
         bump_hazard_pillar(c, tenor=3.0, spread_bp=1.0, elgd=0.6)
 
 
+def test_bump_rejects_curve_that_ignores_mutated_hazards():
+    # a curve caching survival and ignoring the bumped hazards must be caught,
+    # otherwise the credit-spread sensitivity is silently zero
+    class CachedCurve:
+        tenors = np.array([1.0, 3.0])
+        hazards = np.array([0.02, 0.02])
+        recovery_rate = 0.4
+
+        def get_survival_probability(self, t):
+            return float(np.exp(-0.02 * t))     # ignores self.hazards
+
+    with pytest.raises(ValidationError):
+        bump_hazard_pillar(CachedCurve(), tenor=3.0, spread_bp=1.0, elgd=0.6)
+
+
 def test_bump_rejects_nonfinite_tenor_and_spread():
     c = PillarCreditCurve([1.0, 3.0], [0.02, 0.02], recovery=0.4)
     with pytest.raises(ValidationError):

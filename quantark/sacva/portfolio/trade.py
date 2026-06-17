@@ -6,6 +6,7 @@ applied once by the repricer (bank-perspective MtM, positive when the bank is
 exposed to the counterparty).
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,6 +32,8 @@ class CVATrade:
             raise ValidationError(f"{self.trade_id}: product/engine/env required")
         if isinstance(self.quantity, bool) or not isinstance(self.quantity, (int, float)):
             raise ValidationError(f"{self.trade_id}: quantity must be numeric")
+        if not math.isfinite(self.quantity):
+            raise ValidationError(f"{self.trade_id}: quantity must be finite")
         if self.quantity == 0.0:
             raise ValidationError(f"{self.trade_id}: quantity must be non-zero")
         if not self.trade_currency:

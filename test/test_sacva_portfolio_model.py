@@ -34,6 +34,18 @@ def test_trade_zero_quantity_rejected():
         _trade(quantity=0.0)
 
 
+def test_trade_nonfinite_quantity_rejected():
+    with pytest.raises(ValidationError):
+        _trade(quantity=float("nan"))
+    with pytest.raises(ValidationError):
+        _trade(quantity=float("inf"))
+
+
+def test_netting_enforceable_must_be_bool():
+    with pytest.raises(ValidationError):
+        NettingSet(set_id="n1", trades=[_trade()], netting_enforceable="yes")
+
+
 def test_trade_currency_normalized():
     assert _trade().trade_currency == "USD"
 

@@ -30,6 +30,13 @@ class GridValueSurface:
     def __init__(self, times, grids: Dict[float, Dict[Optional[str], Tuple]],
                  currency: str, allow_extrapolation: bool = False):
         self.times = np.asarray(times, dtype=float)
+        if self.times.ndim != 1 or not np.all(np.isfinite(self.times)):
+            raise ValidationError("times must be a finite 1-D array")
+        if self.times.size > 1 and np.any(np.diff(self.times) <= 0):
+            raise ValidationError("times must be strictly increasing")
+        for key in grids:  # every grid slice must correspond to a declared time
+            if not np.any(np.abs(self.times - key) <= 1e-9):
+                raise ValidationError(f"grid time {key} not present in times")
         self.grids = grids
         self.currency = currency
         self.allow_extrapolation = allow_extrapolation
@@ -86,6 +93,8 @@ class AnalyticValueSurface:
 
     def value_at(self, states, t, discrete_state):
         states = np.asarray(states, dtype=float)
+        if not np.all(np.isfinite(states)) or not np.isfinite(t):
+            raise ValidationError("states and t must be finite")
         out = np.empty_like(states)
         for i, s in enumerate(states):
             env = self.as_of_env(self.base_env, float(s), float(t))

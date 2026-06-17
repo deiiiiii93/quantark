@@ -22,10 +22,14 @@ def reprice_trade(surface, spots, state, times, quantity, exposure_idx,
     spots = np.asarray(spots, dtype=float)
     if spots.ndim != 2:
         raise ValidationError("spots must be 2-D (num_paths, n_times)")
+    if not np.all(np.isfinite(spots)):
+        raise ValidationError("spots must be finite")
     if isinstance(quantity, bool) or not isinstance(quantity, (int, float)) \
             or not np.isfinite(quantity):
         raise ValidationError("quantity must be a finite number")
     times = np.asarray(times, dtype=float)
+    if not np.all(np.isfinite(times)):
+        raise ValidationError("times must be finite")
     n_paths, n_t = spots.shape
     if times.shape != (n_t,):
         raise ValidationError("times length must match spots' time axis")
@@ -76,11 +80,14 @@ def pending_receivable_exposure(ko_idx, redemption, n_dates,
                 or not isinstance(settlement_offset_steps, int) \
                 or settlement_offset_steps < 1:
             raise ValidationError("settlement_offset_steps must be an int >= 1")
-    ko_idx = np.asarray(ko_idx, dtype=int)
-    if ko_idx.ndim != 1:
+    ko_in = np.asarray(ko_idx)
+    if ko_in.ndim != 1:
         raise ValidationError("ko_idx must be 1-D")
-    if np.any(ko_idx >= n_dates):
-        raise ValidationError("ko_idx out of range for n_dates")
+    if not np.issubdtype(ko_in.dtype, np.integer):  # float KO idx would be truncated
+        raise ValidationError("ko_idx must have integer dtype")
+    ko_idx = ko_in.astype(int)
+    if np.any(ko_idx < -1) or np.any(ko_idx >= n_dates):
+        raise ValidationError("ko_idx entries must be -1 or in [0, n_dates)")
     out = np.zeros((ko_idx.shape[0], n_dates), dtype=float)
     for p, k in enumerate(ko_idx):
         if k < 0:

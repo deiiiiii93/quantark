@@ -51,4 +51,13 @@ def bump_hazard_pillar(curve, tenor, spread_bp, elgd):
         raise ValidationError("bumped survival must be finite in [0, 1]")
     if np.any(np.diff(S) > 1e-12):
         raise ValidationError("bumped survival not monotone non-increasing")
+    # a non-zero bump must move survival at the bumped tenor; catches cached curve
+    # implementations that re-derive survival without reading the mutated hazards
+    if dlam != 0.0:
+        s_before = float(curve.get_survival_probability(float(tenor)))
+        moved = (S[idx] < s_before) if dlam > 0 else (S[idx] > s_before)
+        if not moved:
+            raise ValidationError(
+                "bumped survival did not respond at the bumped tenor "
+                "(curve may cache survival independent of 'hazards')")
     return bumped

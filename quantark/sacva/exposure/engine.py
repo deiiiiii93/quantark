@@ -49,6 +49,11 @@ class ExposureProfile:
         if self.regulatory_eligible and self.measure is not Measure.RISK_NEUTRAL:
             raise ValidationError(
                 "regulatory_eligible profile must be RISK_NEUTRAL measure")
+        # store immutable validated copies so the invariants cannot be mutated away
+        t = t.copy(); t.flags.writeable = False
+        ee = ee.copy(); ee.flags.writeable = False
+        object.__setattr__(self, "times", t)
+        object.__setattr__(self, "epe_discounted", ee)
 
 
 def aggregate_epe(trade_value_arrays, enforceable, df):
@@ -58,6 +63,8 @@ def aggregate_epe(trade_value_arrays, enforceable, df):
     else         ⇒ df·mean_paths(Σ_trades max(V, 0))  (MAR50.35).
     Positive-part is taken PATHWISE before averaging.
     """
+    if not isinstance(enforceable, bool):  # truthiness would silently mis-net (MAR50.35)
+        raise ValidationError("enforceable must be a bool")
     if not trade_value_arrays:
         raise ValidationError("no trade value arrays to aggregate")
     arrays = [np.asarray(a, dtype=float) for a in trade_value_arrays]

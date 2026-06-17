@@ -16,6 +16,11 @@ from quantark.util.exceptions import ValidationError
 class ExposureGrid:
     times: np.ndarray
 
+    def __post_init__(self) -> None:
+        t = np.asarray(self.times, dtype=float).copy()
+        t.flags.writeable = False
+        object.__setattr__(self, "times", t)
+
     @staticmethod
     def build(horizon: float, n_steps: int, event_times) -> "ExposureGrid":
         if isinstance(horizon, bool) or not isinstance(horizon, (int, float)):

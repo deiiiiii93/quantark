@@ -57,6 +57,10 @@ class BarrierStateMachine:
 
     def run(self, spots: np.ndarray) -> dict:
         spots = np.asarray(spots, dtype=float)
+        if spots.ndim != 2:
+            raise ValidationError("spots must be 2-D (num_paths, n_times)")
+        if not np.all(np.isfinite(spots)):  # NaN would defeat the <= 0 / barrier checks
+            raise ValidationError("spots must be finite")
         if np.any(spots <= 0):
             raise ValidationError("spots must be positive")
         n_paths, n_t = spots.shape
