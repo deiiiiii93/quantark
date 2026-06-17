@@ -181,6 +181,25 @@ does":
 records to the unchanged SBA calculator. v1 covers equity and reporting-vs-foreign-FX
 spot under deterministic rates, single reporting currency, uncollateralized; it emits
 counterparty credit-spread delta and equity delta+vega (every trade must declare its
-`equity_bucket` for the market legs — all-or-none). IR/FX market sensitivities and
-stateful (snowball/phoenix) grid exposure are scoped extensions that **raise** rather
-than silently approximate. See `example/sacva_portfolio_demo.py`.
+`equity_bucket` for the market legs — all-or-none). See `example/sacva_portfolio_demo.py`.
+
+### Stateful (autocallable) exposure (MAR50.32, snowball)
+
+Path-dependent trades (`SnowballOption` priced by `SnowballQuadEngine`) are valued
+without re-pricing per node. The QUAD engine runs a two-regime backward recursion —
+`v_out` (not yet knocked in) and `v_in` (knock-in has occurred) — on one
+inception-anchored, full-maturity-width spot grid; with the opt-in
+`record_backward_grids` flag it now exposes those per-observation continuation
+surfaces. `build_snowball_surface` reads them into a per-`(t, state)`
+`GridValueSurface`, and `MonteCarloExposureEngine` resolves each path's knock-in
+history and knock-out termination with `BarrierStateMachine` (Brownian-bridge
+continuous KI), selecting `v_in`/`v_out` for live paths and zeroing knocked-out paths
+(immediate settlement). The wide QUAD grid covers the simulated spot cloud, so no
+extrapolation is needed. Correctness is pinned by a value-process martingale:
+`E[ df·V_alive(t) + redemption·df at KO ] = price₀` at every node.
+
+v1 stateful scope (raise, never approximate): a single `SnowballOption` per
+counterparty, plain `SnowballQuadEngine` only (Phoenix / KO-reset carry richer state),
+constant KO/KI barriers, and immediate KO settlement (delayed settlement needs the
+`pending_receivable_exposure` machinery). IR/FX market sensitivities remain scoped
+extensions that **raise** rather than silently approximate.

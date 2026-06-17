@@ -28,6 +28,9 @@ from quantark.sacva.exposure.engine import (
 )
 from quantark.sacva.exposure.grid import ExposureGrid
 from quantark.sacva.exposure.paths import StatePathGenerator
+from quantark.sacva.exposure.repricer import reprice_trade
+from quantark.sacva.exposure.snowball_surface import build_snowball_surface
+from quantark.sacva.exposure.statemachine import BarrierStateMachine
 from quantark.sacva.exposure.value_surface import AnalyticValueSurface
 from quantark.util.exceptions import ValidationError
 
@@ -74,12 +77,11 @@ class MonteCarloExposureEngine(ExposureEngine):
         if not trades:
             raise ValidationError(f"{counterparty.name}: no trades")
 
-        # stateful (grid) trades are deferred within this engine version
-        for t in trades:
-            if getattr(t.engine, "supports_spot_greeks_grid", False):
-                raise ValidationError(
-                    f"{t.trade_id}: grid/stateful (snowball/phoenix) exposure needs the "
-                    "GridValueSurface + BarrierStateMachine wiring (next integration step)")
+        # stateful (grid) trades take the snowball backward-grid + state-machine path
+        stateful = [t for t in trades
+                    if getattr(t.engine, "supports_spot_greeks_grid", False)]
+        if stateful:
+            return self._compute_stateful(counterparty, trades, stateful)
 
         # per-underlying market (constant-vol GBM factor), taken from the first trade
         # on that key; horizon = max maturity across the counterparty
@@ -135,6 +137,55 @@ class MonteCarloExposureEngine(ExposureEngine):
             arrays = [trade_values[id(t)] for t in ns.trades]
             epe = epe + aggregate_epe(arrays, enforceable=ns.netting_enforceable, df=df)
 
+        return ExposureProfile(times=times, epe_discounted=epe,
+                               measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
+
+    def _compute_stateful(self, counterparty, trades, stateful) -> ExposureProfile:
+        """Snowball exposure: backward-grid surface + per-path KI/KO state machine.
+
+        v1 handles a single stateful trade per counterparty (no netting with other
+        trades yet); mixing or multiple stateful trades raises rather than guessing
+        a shared exposure grid.
+        """
+        if len(trades) != 1 or len(stateful) != 1:
+            raise ValidationError(
+                f"{counterparty.name}: v1 stateful (snowball) exposure supports exactly "
+                "one trade per counterparty (netting with other/multiple stateful trades "
+                "is deferred)")
+        trade = stateful[0]
+        spec = build_snowball_surface(trade)
+        times = spec.times
+        key = self._underlying_key(trade)
+        horizon = float(times[-1])
+        spot0 = float(trade.env.spot)
+
+        # GBM paths at the SAME vol the surface was priced at (strike vol), so the
+        # simulated cloud and the value surface are mutually consistent.
+        gen = StatePathGenerator(
+            keys=[key], spots=[spot0], vols=[spec.vol],
+            rates=[float(trade.env.get_rate(horizon))],
+            divs=[float(trade.env.get_div_yield(horizon))],
+            corr=[[1.0]], grid_times=times,
+            num_paths=self.config.num_paths, seed=self.config.seed)
+        spots = gen.generate()[key]
+
+        state = BarrierStateMachine(
+            ki_barrier=spec.ki_barrier, ki_direction=spec.ki_direction,
+            ko_barrier=spec.ko_barrier, ko_direction=spec.ko_direction,
+            ki_monitoring_idx=spec.ki_monitoring_idx,
+            ko_monitoring_idx=spec.ko_monitoring_idx,
+            times=times, seed=self.config.seed,
+            continuous=spec.ki_continuous, vol=spec.vol).run(spots)
+
+        df = np.array([float(trade.env.get_discount_factor(float(ti))) for ti in times])
+        vals = reprice_trade(
+            spec.surface, spots, state, times, float(trade.quantity),
+            exposure_idx=list(range(len(times))),
+            state_labels=("alive", "knocked_in"))
+
+        ns = next(s for s in counterparty.netting_sets
+                  for t in s.trades if t is trade)
+        epe = aggregate_epe([vals], enforceable=ns.netting_enforceable, df=df)
         return ExposureProfile(times=times, epe_discounted=epe,
                                measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
 
