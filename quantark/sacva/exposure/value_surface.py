@@ -55,11 +55,16 @@ class GridValueSurface:
         if np.any(np.diff(spot_grid) <= 0):
             raise ValidationError("spot_grid must be strictly increasing (np.interp)")
         states = np.asarray(states, dtype=float)
+        if not np.all(np.isfinite(states)):
+            raise ValidationError("states must be finite")
         if not self.allow_extrapolation and (
             np.any(states < spot_grid[0]) or np.any(states > spot_grid[-1])
         ):
             raise ValidationError("state outside value-surface grid (extrapolation off)")
-        return np.interp(states, spot_grid, np.asarray(vals, dtype=float))
+        out = np.interp(states, spot_grid, vals)
+        if not np.all(np.isfinite(out)):
+            raise ValidationError("grid value_at produced non-finite values")
+        return out
 
 
 class AnalyticValueSurface:

@@ -17,6 +17,8 @@ from quantark.util.exceptions import ValidationError
 def bump_hazard_pillar(curve, tenor, spread_bp, elgd):
     if not (elgd > 0):
         raise ValidationError("ELGD must be > 0 for spread->hazard conversion")
+    if not (np.isfinite(tenor) and np.isfinite(spread_bp)):
+        raise ValidationError("tenor and spread_bp must be finite")
     if not hasattr(curve, "tenors") or not hasattr(curve, "hazards"):
         raise ValidationError(
             "credit curve must expose pillar 'tenors'/'hazards' (PillarCreditCurve)")
@@ -45,6 +47,8 @@ def bump_hazard_pillar(curve, tenor, spread_bp, elgd):
         raise ValidationError("bumped hazard negative")
     bumped.hazards = hazards
     S = np.array([float(bumped.get_survival_probability(float(t))) for t in tenors])
+    if not np.all(np.isfinite(S)) or np.any(S < -1e-12) or np.any(S > 1.0 + 1e-12):
+        raise ValidationError("bumped survival must be finite in [0, 1]")
     if np.any(np.diff(S) > 1e-12):
         raise ValidationError("bumped survival not monotone non-increasing")
     return bumped

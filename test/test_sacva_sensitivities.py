@@ -70,6 +70,14 @@ def test_bump_rejects_unsorted_pillars():
         bump_hazard_pillar(c, tenor=3.0, spread_bp=1.0, elgd=0.6)
 
 
+def test_bump_rejects_nonfinite_tenor_and_spread():
+    c = PillarCreditCurve([1.0, 3.0], [0.02, 0.02], recovery=0.4)
+    with pytest.raises(ValidationError):
+        bump_hazard_pillar(c, tenor=float("nan"), spread_bp=1.0, elgd=0.6)
+    with pytest.raises(ValidationError):
+        bump_hazard_pillar(c, tenor=1.0, spread_bp=float("inf"), elgd=0.6)
+
+
 def test_bump_rejects_curve_without_survival_method():
     class OnlyPillars:
         tenors = np.array([1.0, 3.0])

@@ -34,8 +34,10 @@ class ExposureProfile:
         ee = np.asarray(self.epe_discounted, dtype=float)
         if t.shape != ee.shape:
             raise ValidationError("times and epe_discounted must have equal shape")
-        if t.ndim != 1 or (t.size > 1 and np.any(np.diff(t) <= 0)):
-            raise ValidationError("times must be 1-D strictly increasing")
+        if t.ndim != 1 or not np.all(np.isfinite(t)):
+            raise ValidationError("times must be a finite 1-D array")
+        if t.size > 1 and np.any(np.diff(t) <= 0):
+            raise ValidationError("times must be strictly increasing")
         if t.size == 0 or t[0] != 0.0:
             raise ValidationError(
                 "times must start at valuation (t0=0); else the [0, t0] default "

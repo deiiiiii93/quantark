@@ -42,10 +42,16 @@ class StatePathGenerator:
             raise ValidationError("spots must be positive")
         if np.any(np.asarray(self.vols, dtype=float) < 0):
             raise ValidationError("vols must be non-negative")
+        if isinstance(self.num_paths, bool) or not isinstance(self.num_paths, int):
+            raise ValidationError("num_paths must be an int")
         if self.num_paths < 1:
             raise ValidationError("num_paths must be >= 1")
-        if self.grid_times.ndim != 1 or self.grid_times[0] != 0.0:
-            raise ValidationError("grid_times must be 1-D starting at 0.0")
+        if self.grid_times.ndim != 1 or self.grid_times.size == 0:
+            raise ValidationError("grid_times must be a non-empty 1-D array")
+        if not np.all(np.isfinite(self.grid_times)):
+            raise ValidationError("grid_times must be finite")
+        if self.grid_times[0] != 0.0:
+            raise ValidationError("grid_times must start at 0.0")
 
     def generate(self):
         t = self.grid_times

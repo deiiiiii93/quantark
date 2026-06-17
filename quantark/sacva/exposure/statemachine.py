@@ -22,6 +22,8 @@ class BarrierStateMachine:
     ko_barrier: Optional[float] = None
     ko_direction: str = "up"
     monitoring_idx: List[int] = field(default_factory=list)
+    ki_monitoring_idx: Optional[List[int]] = None
+    ko_monitoring_idx: Optional[List[int]] = None
     times: object = None
     seed: int = 999
     continuous: bool = False
@@ -43,17 +45,32 @@ class BarrierStateMachine:
         if self.continuous and self.vol <= 0:
             raise ValidationError("continuous monitoring requires vol > 0 (bridge variance)")
         t = np.asarray(self.times, dtype=float)
-        if t.ndim != 1 or np.any(np.diff(t) <= 0):
-            raise ValidationError("times must be 1-D strictly increasing")
+        if t.ndim != 1 or not np.all(np.isfinite(t)) or np.any(np.diff(t) <= 0):
+            raise ValidationError("times must be 1-D strictly increasing and finite")
         self.times = t
+        # KI and KO may follow different schedules (e.g. snowball: continuous daily
+        # KI vs discrete monthly KO); each falls back to the shared monitoring_idx.
+        self._ki_idx = (self.ki_monitoring_idx if self.ki_monitoring_idx is not None
+                        else self.monitoring_idx)
+        self._ko_idx = (self.ko_monitoring_idx if self.ko_monitoring_idx is not None
+                        else self.monitoring_idx)
 
     def run(self, spots: np.ndarray) -> dict:
         spots = np.asarray(spots, dtype=float)
         if np.any(spots <= 0):
             raise ValidationError("spots must be positive")
         n_paths, n_t = spots.shape
-        if any(j < 0 or j >= n_t for j in self.monitoring_idx):
-            raise ValidationError("monitoring_idx out of range")
+        for nm, idx in (("ki", self._ki_idx), ("ko", self._ko_idx)):
+            if any(j < 0 or j >= n_t for j in idx):
+                raise ValidationError(f"{nm}_monitoring_idx out of range")
+        ki_set = set(self._ki_idx)
+        # Continuous KI samples the bridge on every interval of its window; a gapped
+        # schedule would silently skip intervals and undercount first passages.
+        if self.continuous and self.ki_barrier is not None:
+            mi = sorted(ki_set)
+            if mi and mi != list(range(mi[0], mi[-1] + 1)):
+                raise ValidationError(
+                    "continuous KI requires a contiguous monitoring schedule (no gaps)")
         knocked_in = np.zeros((n_paths, n_t), dtype=bool)
         alive = np.ones((n_paths, n_t), dtype=bool)
         ko_idx = np.full(n_paths, -1, dtype=int)
@@ -61,15 +78,17 @@ class BarrierStateMachine:
         ki = np.zeros(n_paths, dtype=bool)
         dead = np.zeros(n_paths, dtype=bool)
         for j in range(n_t):
-            if self.ki_barrier is not None and j in self.monitoring_idx:
+            if self.ki_barrier is not None and j in ki_set:
                 hit = ((spots[:, j] <= self.ki_barrier) if self.ki_direction == "down"
                        else (spots[:, j] >= self.ki_barrier))
-                if self.continuous and j > 0:
+                # bridge only across an interval interior to the KI window (both
+                # endpoints monitored) so the pre-activation interval is not sampled
+                if self.continuous and j > 0 and (j - 1) in ki_set:
                     hit = hit | self._bridge_cross(
                         spots[:, j - 1], spots[:, j], self.ki_barrier,
                         float(self.times[j] - self.times[j - 1]), self.ki_direction, rng)
                 ki = ki | hit
-            if self.ko_barrier is not None and j in self.monitoring_idx:
+            if self.ko_barrier is not None and j in self._ko_idx:
                 hit = ((spots[:, j] >= self.ko_barrier) if self.ko_direction == "up"
                        else (spots[:, j] <= self.ko_barrier))
                 newly = hit & ~dead

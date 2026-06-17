@@ -23,6 +23,21 @@ def test_grid_rejects_nonpositive_horizon():
         ExposureGrid.build(horizon=0.0, n_steps=4, event_times=[])
 
 
+def test_grid_rejects_bad_nsteps_and_nonfinite_event():
+    from quantark.sacva.exposure.grid import ExposureGrid
+    with pytest.raises(ValidationError):
+        ExposureGrid.build(horizon=2.0, n_steps=True, event_times=[])   # bool n_steps
+    with pytest.raises(ValidationError):
+        ExposureGrid.build(horizon=2.0, n_steps=4, event_times=[float("nan")])
+
+
+def test_paths_empty_grid_times_raises_validation():
+    from quantark.sacva.exposure.paths import StatePathGenerator
+    with pytest.raises(ValidationError):
+        StatePathGenerator(keys=["EQ:A"], spots=[100.0], vols=[0.2], rates=[0.03],
+                           divs=[0.0], corr=[[1.0]], grid_times=[])
+
+
 # --- Task 3: CorrelationModel ---------------------------------------------
 
 def test_correlation_cholesky_and_pd_guard():
@@ -74,6 +89,15 @@ def test_grid_value_surface_rejects_extrapolation():
                           currency="USD")
     with pytest.raises(ValidationError):
         vs.value_at(np.array([200.0]), t=1.0, discrete_state=None)
+
+
+def test_grid_value_surface_rejects_nonfinite_state():
+    from quantark.sacva.exposure.value_surface import GridValueSurface
+    vs = GridValueSurface(times=np.array([1.0]),
+                          grids={1.0: {None: (np.array([90., 110.]), np.array([0., 20.]))}},
+                          currency="USD")
+    with pytest.raises(ValidationError):
+        vs.value_at(np.array([np.nan]), t=1.0, discrete_state=None)
 
 
 def test_grid_value_surface_rejects_unsorted_or_mismatched_grid():
@@ -203,6 +227,34 @@ def test_state_machine_rejects_nonpositive_barrier_and_bad_vol():
                             times=np.array([0.0, 1.0]))
 
 
+def test_continuous_ki_rejects_noncontiguous_schedule():
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    # continuous KI with a gapped schedule would silently skip bridge intervals
+    sm = BarrierStateMachine(ki_barrier=90.0, ki_direction="down",
+                             monitoring_idx=[0, 1, 3], times=np.linspace(0, 1, 4),
+                             continuous=True, vol=0.2, seed=1)
+    with pytest.raises(ValidationError):
+        sm.run(np.full((2, 4), 100.0))
+
+
+def test_snowball_separate_ki_ko_schedules():
+    # KO discrete (monthly nodes), KI continuous (every node) — distinct schedules.
+    from quantark.sacva.exposure.statemachine import BarrierStateMachine
+    times = np.linspace(0, 1, 13)                    # 12 monthly steps
+    # path dips below KI between nodes 1-2 but never on a KO node; ends high
+    spots = np.full((1, 13), 105.0)
+    spots[0, 2] = 88.0                               # KI breach (node 2, not a KO node)
+    sm = BarrierStateMachine(
+        ki_barrier=90.0, ki_direction="down",
+        ko_barrier=120.0, ko_direction="up",
+        ki_monitoring_idx=list(range(13)),           # continuous KI
+        ko_monitoring_idx=[6, 12],                   # discrete KO (semi-annual)
+        times=times, continuous=True, vol=0.2, seed=1)
+    st = sm.run(spots)
+    assert st["knocked_in"][0, -1] == True           # KI caught on the daily schedule
+    assert st["ko_idx"][0] == -1                     # never KO'd (105 < 120 on KO nodes)
+
+
 # --- Task 7: repricer ------------------------------------------------------
 
 def _alive_state(n_paths, n_t):
@@ -280,6 +332,16 @@ def test_pending_receivable_requires_one_settlement_spec():
         pending_receivable_exposure(np.array([1]), 100.0, 3)
 
 
+def test_pending_receivable_rejects_bad_settlement_and_redemption():
+    from quantark.sacva.exposure.repricer import pending_receivable_exposure
+    with pytest.raises(ValidationError):       # settlement before KO
+        pending_receivable_exposure(np.array([2]), 100.0, 5, settlement_idx=1)
+    with pytest.raises(ValidationError):       # negative offset
+        pending_receivable_exposure(np.array([1]), 100.0, 5, settlement_offset_steps=-1)
+    with pytest.raises(ValidationError):       # non-finite redemption
+        pending_receivable_exposure(np.array([1]), float("nan"), 5, settlement_idx=2)
+
+
 # --- Task 8: ExposureProfile + aggregate_epe ------------------------------
 
 def test_exposure_profile_carries_measure_tag():
@@ -306,6 +368,10 @@ def test_exposure_profile_requires_grid_origin_and_measure_type():
     with pytest.raises(ValidationError):
         ExposureProfile(times=np.array([0., 1.]), epe_discounted=np.array([0., 1.]),
                         measure="risk_neutral", regulatory_eligible=True)
+    # non-finite time rejected
+    with pytest.raises(ValidationError):
+        ExposureProfile(times=np.array([0., np.inf]), epe_discounted=np.array([0., 1.]),
+                        measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
 
 
 def test_aggregate_epe_rejects_bad_df_and_nonfinite():
