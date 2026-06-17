@@ -18,6 +18,7 @@ from .option_enums import (
     PostKOScheduleMode,
     AveragingType,
     AsianStrikeType,
+    AccumulatorKnockOutType,
 )
 from .engine_enums import (
     EngineType,
@@ -59,6 +60,7 @@ __all__ = [
     "PostKOScheduleMode",
     "AveragingType",
     "AsianStrikeType",
+    "AccumulatorKnockOutType",
     # Engine enums
     "EngineType",
     "GreeksCalculationMode",

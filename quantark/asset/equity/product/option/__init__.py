@@ -49,6 +49,7 @@ from .range_accrual_helpers import (
 )
 from .single_sharkfin_option import SingleSharkfinOption
 from .double_sharkfin_option import DoubleSharkfinOption
+from .accumulator_option import AccumulatorOption
 
 __all__ = [
     "BaseEquityOption",
@@ -101,4 +102,6 @@ __all__ = [
     "SingleSharkfinOption",
     # Double Sharkfin option
     "DoubleSharkfinOption",
+    # Accumulator option
+    "AccumulatorOption",
 ]
