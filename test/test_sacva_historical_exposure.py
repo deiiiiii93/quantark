@@ -413,3 +413,42 @@ def test_engine_rejects_out_of_scope_and_bad_config():
     with pytest.raises(ValidationError):                       # empty netting set
         HistoricalExposureEngine(cal, cfg).compute(
             Counterparty("E", [NettingSet("n", [], True)]))
+
+
+# ---------------------------------------------------------------------------
+# Task 9 — Regulatory guard + merge gate (the keystone)
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure.historical.regulatory_guard import (
+    assert_regulatory_eligible, ProvisionalRegulatoryCVAStub,
+)
+
+
+def test_historical_profile_rejected_by_capital_path():
+    cal, S0 = _normal_return_cal()
+    surf = AnalyticValueSurface(lambda S, t, ds: S - 1.0)
+    cp = Counterparty("CP", [NettingSet("ns", [CVATrade("f", surf, "FX_B")], True)])
+    cfg = HistoricalExposureConfig(
+        path_mode="BOOTSTRAP", scheme="BLOCK_FHS", block_length=5, n_paths=2000, seed=1,
+        grid_times=(0., 0.5, 1.0), confidences_bps=(9900,), factor_keys=("FX_B",),
+        today_levels={"FX_B": S0}, drift_modes={"FX_B": "ZERO_LOG_MEAN"})
+    prof = HistoricalExposureEngine(cal, cfg).compute(cp)
+    with pytest.raises(ValidationError):
+        assert_regulatory_eligible(prof)
+    with pytest.raises(ValidationError):
+        ProvisionalRegulatoryCVAStub().compute(cp, prof)
+
+
+def test_guard_accepts_risk_neutral_eligible():
+    rn = ExposureProfile(np.array([0., 1.]), np.array([5., 3.]), Measure.RISK_NEUTRAL, True)
+    assert_regulatory_eligible(rn)
+
+
+def test_merge_gate_provisional_removed_once_canonical_exists():
+    import importlib, importlib.util, inspect, pkgutil
+    if importlib.util.find_spec("quantark.sacva.exposure.engine") is None:
+        pytest.skip("canonical contract not yet landed by MC session")
+    import quantark.sacva.exposure.historical as hist
+    for mi in pkgutil.walk_packages(hist.__path__, hist.__name__ + "."):
+        src = inspect.getsource(importlib.import_module(mi.name))
+        assert "_contract_provisional" not in src, \
+            f"{mi.name} still imports provisional contract"
