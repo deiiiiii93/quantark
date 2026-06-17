@@ -25,6 +25,7 @@ class CVATrade:
     trade_currency: str = "USD"
     hedge: bool = False
     equity_bucket: Optional[int] = None   # SA-CVA equity bucket (MAR50.70), for market sens
+    fx_currency: Optional[str] = None     # SA-CVA FX factor (MAR50.59): the foreign ccy
 
     def __post_init__(self) -> None:
         if not self.trade_id:
@@ -45,6 +46,14 @@ class CVATrade:
                 isinstance(self.equity_bucket, bool)
                 or not isinstance(self.equity_bucket, int) or self.equity_bucket < 1):
             raise ValidationError(f"{self.trade_id}: equity_bucket must be a positive int")
+        if self.fx_currency is not None:
+            if not isinstance(self.fx_currency, str) or not self.fx_currency:
+                raise ValidationError(f"{self.trade_id}: fx_currency must be a non-empty str")
+            self.fx_currency = self.fx_currency.upper()
+        if self.equity_bucket is not None and self.fx_currency is not None:
+            raise ValidationError(
+                f"{self.trade_id}: a trade declares one market factor — equity_bucket "
+                "XOR fx_currency, not both")
         self.trade_currency = self.trade_currency.upper()
 
 
