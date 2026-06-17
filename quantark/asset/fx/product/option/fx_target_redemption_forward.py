@@ -96,11 +96,13 @@ class FxTargetRedemptionForward(BaseFxProduct):
             raise ValidationError("fixing_times must be ascending")
         if len(set(fixings)) != len(fixings):
             raise ValidationError("fixing_times must be unique")
-        if any(t <= 0.0 for t in fixings):
-            raise ValidationError("fixing_times must be strictly positive")
+        if any((not math.isfinite(t)) or t <= 0.0 for t in fixings):
+            raise ValidationError("fixing_times must be positive and finite")
         if len(pays) != len(fixings):
             raise ValidationError("pay_times must align 1:1 with fixing_times")
         for tf, tp in zip(fixings, pays):
+            if not math.isfinite(tp):
+                raise ValidationError(f"pay time {tp} must be finite")
             if tp < tf:
                 raise ValidationError(
                     f"pay time {tp} precedes its fixing {tf}"

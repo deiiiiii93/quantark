@@ -246,6 +246,14 @@ class TestProduct:
         with pytest.raises(ValidationError, match="non-decreasing"):
             _note(fixing_times=[0.5, 1.0], pay_times=[2.0, 1.0])
 
+    def test_rejects_non_finite_fixing_time(self):
+        with pytest.raises(ValidationError, match="finite"):
+            _note(fixing_times=[0.5, math.inf])
+
+    def test_rejects_non_finite_accrual_factor(self):
+        with pytest.raises(ValidationError, match="finite"):
+            _note(fixing_times=[0.5, 1.0], accrual_factors=[0.5, math.inf])
+
 
 # ---------------------------------------------------------------------------
 # Engine mechanics
