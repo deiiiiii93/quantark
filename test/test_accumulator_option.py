@@ -191,6 +191,79 @@ def test_observation_dates_after_maturity_rejected():
         )
 
 
+# ---------------------------------------------------------------------------
+# Review findings (Gate 1 zenmux, iter 2): KO-aware payoff + rebate on schedule
+# ---------------------------------------------------------------------------
+
+def test_get_payoff_zero_on_knock_out_single_day():
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            daily_share_accumulation=1.0,
+            knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        )
+    )
+    # spot at/above barrier: that day's accrual is cancelled -> zero
+    assert acc.get_payoff(105.0) == pytest.approx(0.0)
+    assert acc.get_payoff(110.0) == pytest.approx(0.0)
+
+
+def test_get_payoff_rebate_on_knock_out_termination():
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            daily_share_accumulation=1.0,
+            notional=1_000_000.0,
+            knock_out_type=AccumulatorKnockOutType.TERMINATION,
+            knock_out_rebate_rate=0.02,
+        )
+    )
+    # rebate cash = rate * notional = 20_000
+    assert acc.get_payoff(110.0) == pytest.approx(20_000.0)
+
+
+def test_get_payoff_zero_on_termination_ko_without_rebate():
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            daily_share_accumulation=1.0,
+            knock_out_type=AccumulatorKnockOutType.TERMINATION,
+            knock_out_rebate_rate=0.0,
+        )
+    )
+    assert acc.get_payoff(110.0) == pytest.approx(0.0)
+
+
+def test_get_payoff_below_barrier_unchanged():
+    acc = AccumulatorOption(**_base_kwargs(daily_share_accumulation=1.0))
+    assert acc.get_payoff(100.0) == pytest.approx(5.0)
+
+
+def test_termination_schedule_carries_rebate_payoff():
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            notional=1_000_000.0,
+            knock_out_type=AccumulatorKnockOutType.TERMINATION,
+            knock_out_rebate_rate=0.02,
+        )
+    )
+    assert all(
+        rec.payoff == pytest.approx(20_000.0)
+        for rec in acc.observation_schedule.records
+    )
+
+
+def test_single_day_schedule_has_zero_rebate_payoff():
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            notional=1_000_000.0,
+            knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+            knock_out_rebate_rate=0.02,
+        )
+    )
+    assert all(
+        rec.payoff == pytest.approx(0.0)
+        for rec in acc.observation_schedule.records
+    )
+
+
 def test_generated_daily_schedule():
     acc = AccumulatorOption(
         **_base_kwargs(

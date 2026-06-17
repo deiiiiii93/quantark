@@ -263,7 +263,7 @@ class AccumulatorOption(BaseEquityOption):
         self.observation_schedule = ObservationSchedule.from_legacy(
             observation_dates=self.observation_dates,
             default_barrier=self.knock_out_barrier,
-            default_payoff=0.0,
+            default_payoff=self.get_knock_out_rebate_cash(),
             aggregation_mode=self._aggregation_mode(),
             frequency=self.observation_frequency,
         )
@@ -353,14 +353,29 @@ class AccumulatorOption(BaseEquityOption):
             * self.contract_multiplier
         )
 
+    def get_knock_out_rebate_cash(self) -> float:
+        """
+        Cash rebate paid once on a TERMINATION knock-out (per contract).
+
+        Expressed as ``knock_out_rebate_rate * notional``. Returns zero for
+        SINGLE_DAY, where the rebate is documented as ignored.
+        """
+        if self.knock_out_type != AccumulatorKnockOutType.TERMINATION:
+            return 0.0
+        return self.knock_out_rebate_rate * self.notional
+
     def get_payoff(self, spot: float) -> float:
         """
-        Single-observation settlement.
+        Single-observation settlement, knock-out aware.
 
-        An accumulator has no single terminal payoff; this delegates to
-        :meth:`get_observation_payoff` so the base-class contract is satisfied
-        and near-expiry valuation can reuse the per-observation settlement.
+        An accumulator has no single terminal payoff; this returns the
+        settlement for one observation. A breach (``spot >= KO``) does not accrue
+        the linear/geared leg: SINGLE_DAY pays zero and TERMINATION pays the
+        knock-out rebate (zero if none configured). Otherwise it delegates to
+        :meth:`get_observation_payoff`.
         """
+        if spot >= self.knock_out_barrier:
+            return self.get_knock_out_rebate_cash() * self.contract_multiplier
         return self.get_observation_payoff(spot)
 
     def get_realized_accrual(self) -> float:
