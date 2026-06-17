@@ -240,3 +240,37 @@ def test_pending_receivable_requires_one_settlement_spec():
     from quantark.sacva.exposure.repricer import pending_receivable_exposure
     with pytest.raises(ValidationError):
         pending_receivable_exposure(np.array([1]), 100.0, 3)
+
+
+# --- Task 8: ExposureProfile + aggregate_epe ------------------------------
+
+def test_exposure_profile_carries_measure_tag():
+    from quantark.sacva.exposure.engine import ExposureProfile, Measure
+    p = ExposureProfile(times=np.array([0., 1.]), epe_discounted=np.array([5., 3.]),
+                        measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
+    assert p.regulatory_eligible and p.measure is Measure.RISK_NEUTRAL
+
+
+def test_eligible_must_be_risk_neutral():
+    from quantark.sacva.exposure.engine import ExposureProfile, Measure
+    with pytest.raises(ValidationError):
+        ExposureProfile(times=np.array([0., 1.]), epe_discounted=np.array([0., 1.]),
+                        measure=Measure.REAL_WORLD, regulatory_eligible=True)
+
+
+def test_netting_positive_part_is_pathwise_before_averaging():
+    from quantark.sacva.exposure.engine import aggregate_epe
+    v = [np.array([[10.], [-10.]]), np.array([[-4.], [4.]])]
+    netted = aggregate_epe(v, enforceable=True, df=np.array([1.0]))
+    assert netted[0] == pytest.approx(3.0)        # mean(max(+6,0),max(-6,0)); not 0
+    gross = aggregate_epe(v, enforceable=False, df=np.array([1.0]))
+    assert gross[0] == pytest.approx(7.0)         # mean(10, 4)
+
+
+def test_pending_receivable_then_aggregate_discounts_once():
+    from quantark.sacva.exposure.repricer import pending_receivable_exposure
+    from quantark.sacva.exposure.engine import aggregate_epe
+    pe = pending_receivable_exposure(np.array([1]), redemption=100.0,
+                                     n_dates=3, settlement_idx=2)
+    epe = aggregate_epe([pe], enforceable=True, df=np.array([1.0, 0.97, 0.95]))
+    assert epe[1] == pytest.approx(0.97 * 100.0)   # discounted exactly once
