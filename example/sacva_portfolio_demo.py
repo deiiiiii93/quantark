@@ -60,7 +60,8 @@ def build_portfolio():
     trade_a = CVATrade(
         trade_id="A-call-3y",
         product=_option(100.0, datetime(2029, 6, 16)),
-        engine=BlackScholesEngine(), env=env_a, quantity=50.0, trade_currency="USD")
+        engine=BlackScholesEngine(), env=env_a, quantity=50.0, trade_currency="USD",
+        equity_bucket=5)
     cp_a = Counterparty(
         name="ACME_BANK",
         netting_sets=[NettingSet("A-ns", [trade_a])],
@@ -73,7 +74,8 @@ def build_portfolio():
     trade_b = CVATrade(
         trade_id="B-put-5y",
         product=_option(80.0, datetime(2031, 6, 16), OptionType.PUT),
-        engine=BlackScholesEngine(), env=env_b, quantity=80.0, trade_currency="USD")
+        engine=BlackScholesEngine(), env=env_b, quantity=80.0, trade_currency="USD",
+        equity_bucket=6)
     cp_b = Counterparty(
         name="GLOBEX_LLC",
         netting_sets=[NettingSet("B-ns", [trade_b])],

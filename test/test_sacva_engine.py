@@ -23,6 +23,7 @@ from quantark.asset.equity.engine.analytical.black_scholes_engine import (
 )
 from quantark.util.enum import OptionType
 from quantark.util.calendar import DayCountConvention
+from quantark.util.exceptions import ValidationError
 
 from quantark.sacva.exposure.simulator import (
     MonteCarloExposureConfig,
@@ -50,11 +51,12 @@ def _env():
         day_count_convention=DayCountConvention.CALENDAR_DAYS)
 
 
-def _counterparty():
+def _counterparty(equity_bucket=None):
     opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL,
                                 exercise_date=EXP_5Y)
     trade = CVATrade(trade_id="t1", product=opt, engine=BlackScholesEngine(),
-                     env=_env(), quantity=10.0, trade_currency="USD")
+                     env=_env(), quantity=10.0, trade_currency="USD",
+                     equity_bucket=equity_bucket)
     curve = PillarHazardCurve(tenors=REG_TENORS, hazards=[0.02] * 5, recovery_rate=0.4)
     return Counterparty(name="ACME_CP", netting_sets=[NettingSet("n1", [trade])],
                         credit_curve=curve, bucket=2, credit_quality=CreditQuality.IG)
@@ -71,6 +73,34 @@ def test_portfolio_to_capital_end_to_end():
     assert result.vega_capital == 0.0          # no vega risk factors emitted in v1
     assert result.counterparty_cva["ACME_CP"] > 0.0
     assert "ACME_CP" in result.exposure_profiles
+
+
+def test_equity_market_sensitivities_produced():
+    portfolio = CVATradePortfolio(counterparties=[_counterparty(equity_bucket=5)],
+                                  hedges=[])
+    eng = SACVAEngine(exposure_engine=MonteCarloExposureEngine(
+        MonteCarloExposureConfig(num_paths=8000, n_steps=12, seed=21)))
+    result = eng.compute(portfolio)
+    # long call CVA rises with both spot and vol -> positive equity delta + vega capital
+    assert result.delta_capital > 0.0
+    assert result.vega_capital > 0.0
+    assert result.total_capital == pytest.approx(
+        result.delta_capital + result.vega_capital)
+
+
+def test_market_sensitivities_all_or_none():
+    env = _env()
+    opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL,
+                                exercise_date=EXP_5Y)
+    tagged = CVATrade("a", opt, BlackScholesEngine(), env, equity_bucket=5)
+    untagged = CVATrade("b", opt, BlackScholesEngine(), env)   # no equity_bucket
+    curve = PillarHazardCurve(REG_TENORS, [0.02] * 5, recovery_rate=0.4)
+    cp = Counterparty("CP", [NettingSet("n1", [tagged, untagged])], curve, 2,
+                      CreditQuality.IG)
+    with pytest.raises(ValidationError):
+        SACVAEngine(exposure_engine=MonteCarloExposureEngine(
+            MonteCarloExposureConfig(num_paths=2000, n_steps=4))).compute(
+            CVATradePortfolio([cp], []))
 
 
 def test_credit_spread_deltas_localise_to_trade_maturity():

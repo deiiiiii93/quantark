@@ -8,7 +8,7 @@ exposed to the counterparty).
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from quantark.util.exceptions import ValidationError
 
@@ -24,6 +24,7 @@ class CVATrade:
     quantity: float = 1.0
     trade_currency: str = "USD"
     hedge: bool = False
+    equity_bucket: Optional[int] = None   # SA-CVA equity bucket (MAR50.70), for market sens
 
     def __post_init__(self) -> None:
         if not self.trade_id:
@@ -40,6 +41,10 @@ class CVATrade:
             raise ValidationError(f"{self.trade_id}: trade_currency required")
         if not isinstance(self.hedge, bool):
             raise ValidationError(f"{self.trade_id}: hedge must be bool")
+        if self.equity_bucket is not None and (
+                isinstance(self.equity_bucket, bool)
+                or not isinstance(self.equity_bucket, int) or self.equity_bucket < 1):
+            raise ValidationError(f"{self.trade_id}: equity_bucket must be a positive int")
         self.trade_currency = self.trade_currency.upper()
 
 

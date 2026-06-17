@@ -167,16 +167,20 @@ does":
    discounted expected positive exposure and `S` the counterparty survival
    probability (`ELGD = 1 − R`).
 
-3. **Sensitivities (MAR50.63).** `CVASensitivityEngine` produces the counterparty
-   credit-spread delta per regulatory tenor by a one-sided 1bp key-rate hazard bump
-   (`Δλ = 1bp / ELGD`, chain rule `s = λ(1−R)`) and re-running step 2 — the exposure
-   is invariant to the counterparty hazard, so no MC re-run is needed. The divisor
-   is `1e-4`.
+3. **Sensitivities.**
+   - *Counterparty credit-spread delta* (MAR50.63, per entity × tenor): one-sided 1bp
+     key-rate hazard bump (`Δλ = 1bp / ELGD`, chain rule `s = λ(1−R)`) re-running
+     step 2 only — the exposure is invariant to the counterparty hazard, so no MC
+     re-run is needed. Divisor `1e-4`.
+   - *Equity delta + vega* (MAR50.70, single factor per bucket): a +1% relative bump
+     to the bucket's spot / volatility **moves the exposure**, so each is a
+     portfolio-wide re-run of the MC exposure (with common random numbers) for every
+     counterparty exposed to that bucket, summing ΔCVA. Divisor `1e-2`.
 
-`SACVAEngine.compute(portfolio)` runs 1→3 per counterparty and feeds the resulting
-`CVASensitivity` records to the unchanged SBA calculator. v1 covers equity and
-reporting-vs-foreign-FX spot under deterministic rates, single reporting currency,
-uncollateralized; it emits counterparty credit-spread delta. Equity/IR market
-delta+vega (which move the exposure and need an MC re-run with common random
-numbers) and stateful (snowball/phoenix) grid exposure are scoped extensions and
-**raise** rather than silently approximate. See `example/sacva_portfolio_demo.py`.
+`SACVAEngine.compute(portfolio)` runs 1→3 and feeds the resulting `CVASensitivity`
+records to the unchanged SBA calculator. v1 covers equity and reporting-vs-foreign-FX
+spot under deterministic rates, single reporting currency, uncollateralized; it emits
+counterparty credit-spread delta and equity delta+vega (every trade must declare its
+`equity_bucket` for the market legs — all-or-none). IR/FX market sensitivities and
+stateful (snowball/phoenix) grid exposure are scoped extensions that **raise** rather
+than silently approximate. See `example/sacva_portfolio_demo.py`.
