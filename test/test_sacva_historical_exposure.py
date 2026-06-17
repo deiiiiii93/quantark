@@ -75,3 +75,38 @@ def test_pfe_and_epe_validation():
     with pytest.raises(ValidationError):           # bad bps key
         ExposureProfile(np.array([0., 1.]), None, Measure.REAL_WORLD, False,
                         ee_undiscounted=np.array([1., 1.]), pfe={12000: np.array([1., 2.])})
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — provisional repricing scaffold
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure._contract_provisional import (
+    AnalyticValueSurface, BoundedAnalyticValueSurface, aggregate_epe, CVATrade,
+    NettingSet, Counterparty,
+)
+
+
+def test_analytic_forward_surface_linear():
+    surf = AnalyticValueSurface(lambda S, t, ds: S - 100.0)
+    v = surf.value_at(np.array([90., 110.]), 0.5, None)
+    assert np.allclose(v, [-10., 10.])
+
+
+def test_bounded_surface_raises_out_of_bounds():
+    surf = BoundedAnalyticValueSurface(lambda S, t, ds: S - 100.0, low=50., high=150.)
+    with pytest.raises(ValidationError):
+        surf.value_at(np.array([200.]), 0.5, None)
+
+
+def test_aggregate_epe_exact_values():
+    a = np.array([[5., -3.], [-2., 4.]]); b = np.array([[-4., 1.], [6., -1.]])
+    enf = aggregate_epe([a, b], True, np.array([1., 1.]))
+    gross = aggregate_epe([a, b], False, np.array([1., 1.]))
+    assert np.allclose(enf, [2.5, 1.5])      # hand-computed netted EPE
+    assert np.allclose(gross, [5.5, 2.5])    # hand-computed gross EPE
+    assert np.all(gross >= enf)
+
+
+def test_trade_capability_flags_default_supported():
+    tr = CVATrade("t", AnalyticValueSurface(lambda S, t, ds: S), "EQ_A")
+    assert not tr.requires_continuous_barrier and not tr.requires_fx_conversion

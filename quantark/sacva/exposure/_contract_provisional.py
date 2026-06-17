@@ -118,3 +118,77 @@ class ExposureProfile:
 class ExposureEngine(ABC):
     @abstractmethod
     def compute(self, counterparty) -> ExposureProfile: ...
+
+
+# ---------------------------------------------------------------------------
+# PROVISIONAL repricing scaffold (throwaway-at-merge): a single-factor analytic
+# value surface, minimal portfolio containers, and the netting aggregation, so
+# the historical engine is testable before the MC repricer exists.
+# ---------------------------------------------------------------------------
+@runtime_checkable
+class ValueSurface(Protocol):
+    def value_at(self, states: np.ndarray, t: float, discrete_state) -> np.ndarray: ...
+
+
+@dataclass
+class AnalyticValueSurface:
+    """Wraps a vectorized closed-form kernel ``kernel(S_array, t, discrete_state)``."""
+
+    kernel: object
+    state_labels: tuple = (None,)
+
+    def value_at(self, states, t, discrete_state):
+        v = np.asarray(self.kernel(np.asarray(states, float), float(t), discrete_state), float)
+        if not np.all(np.isfinite(v)):
+            raise ValidationError("analytic value_at produced non-finite values")
+        return v
+
+
+@dataclass
+class BoundedAnalyticValueSurface(AnalyticValueSurface):
+    low: float = -np.inf
+    high: float = np.inf
+    extrapolate: bool = False
+
+    def value_at(self, states, t, discrete_state):
+        s = np.asarray(states, float)
+        if not self.extrapolate and (np.any(s < self.low) or np.any(s > self.high)):
+            raise ValidationError(
+                "state out of value-surface bounds (no silent clip; size the surface "
+                "to the realized path range or enable extrapolate)")
+        return super().value_at(s, t, discrete_state)
+
+
+@dataclass
+class CVATrade:
+    trade_id: str
+    surface: object
+    factor_key: str
+    quantity: float = 1.0
+    # capability flags (spec §3.2 scope guard)
+    requires_continuous_barrier: bool = False
+    requires_fx_conversion: bool = False
+    foreign_underlying: bool = False
+    n_state_factors: int = 1
+
+
+@dataclass
+class NettingSet:
+    set_id: str
+    trades: list
+    netting_enforceable: bool = True
+
+
+@dataclass
+class Counterparty:
+    name: str
+    netting_sets: list
+
+
+def aggregate_epe(trade_value_arrays, enforceable, df):
+    stacked = np.stack(trade_value_arrays, axis=0)     # (n_trades, n_paths, n_dates)
+    if enforceable:
+        netted = np.maximum(stacked.sum(axis=0), 0.0)
+    else:
+        netted = np.maximum(stacked, 0.0).sum(axis=0)
+    return np.asarray(df, float) * netted.mean(axis=0)
