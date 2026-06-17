@@ -227,6 +227,14 @@ class TestProduct:
         with pytest.raises(ValidationError, match="gearing"):
             _tarf(gearing=-1.0)
 
+    def test_rejects_nan_strike(self):
+        with pytest.raises(ValidationError, match="finite"):
+            _tarf(strike=float("nan"))
+
+    def test_rejects_non_decreasing_pay_times(self):
+        with pytest.raises(ValidationError, match="non-decreasing"):
+            _tarf(fixing_times=[0.5, 1.0], pay_times=[2.0, 1.0])
+
 
 # ---------------------------------------------------------------------------
 # Engine mechanics

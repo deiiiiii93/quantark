@@ -77,12 +77,13 @@ class FxTargetRedemptionForward(BaseFxProduct):
         self.validate()
 
     def validate(self) -> None:
-        if self.strike <= 0:
-            raise ValidationError(f"strike must be positive, got {self.strike}")
-        if self.notional <= 0:
-            raise ValidationError(f"notional must be positive, got {self.notional}")
-        if self.gearing < 0:
-            raise ValidationError(f"gearing must be non-negative, got {self.gearing}")
+        for name, v in (("strike", self.strike), ("notional", self.notional)):
+            if not math.isfinite(v) or v <= 0:
+                raise ValidationError(f"{name} must be positive and finite, got {v}")
+        if not math.isfinite(self.gearing) or self.gearing < 0:
+            raise ValidationError(
+                f"gearing must be non-negative and finite, got {self.gearing}"
+            )
         if not (self.target > 0):  # rejects 0, negatives, and NaN; inf passes
             raise ValidationError(f"target must be positive, got {self.target}")
         self._validate_schedule()
@@ -104,6 +105,8 @@ class FxTargetRedemptionForward(BaseFxProduct):
                 raise ValidationError(
                     f"pay time {tp} precedes its fixing {tf}"
                 )
+        if list(pays) != sorted(pays):
+            raise ValidationError("pay_times must be non-decreasing")
 
     def time_shift(self, time_bump: float) -> None:
         """Roll fixing/pay times (and maturity/delivery) forward for theta."""

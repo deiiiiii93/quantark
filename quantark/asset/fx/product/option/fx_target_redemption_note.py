@@ -101,12 +101,9 @@ class FxTargetRedemptionNote(BaseFxProduct):
         self.validate()
 
     def validate(self) -> None:
-        if self.notional <= 0:
-            raise ValidationError(f"notional must be positive, got {self.notional}")
-        if self.coupon_rate <= 0:
-            raise ValidationError(
-                f"coupon_rate must be positive, got {self.coupon_rate}"
-            )
+        for name, v in (("notional", self.notional), ("coupon_rate", self.coupon_rate)):
+            if not math.isfinite(v) or v <= 0:
+                raise ValidationError(f"{name} must be positive and finite, got {v}")
         if not (self.target > 0):  # rejects 0, negatives, NaN; inf passes
             raise ValidationError(f"target must be positive, got {self.target}")
         self._validate_condition()
@@ -121,11 +118,15 @@ class FxTargetRedemptionNote(BaseFxProduct):
             )
         if not band and not one_sided:
             raise ValidationError("a coupon condition (strike or band) is required")
-        if one_sided and self.strike <= 0:
-            raise ValidationError(f"strike must be positive, got {self.strike}")
+        if one_sided and (not math.isfinite(self.strike) or self.strike <= 0):
+            raise ValidationError(
+                f"strike must be positive and finite, got {self.strike}"
+            )
         if band:
             if self.lower is None or self.upper is None:
                 raise ValidationError("band requires both lower and upper")
+            if not math.isfinite(self.lower) or not math.isfinite(self.upper):
+                raise ValidationError("band bounds must be finite")
             if self.lower <= 0 or self.upper <= 0:
                 raise ValidationError("band bounds must be positive")
             if self.lower >= self.upper:
@@ -146,6 +147,8 @@ class FxTargetRedemptionNote(BaseFxProduct):
         for tf, tp in zip(fixings, pays):
             if tp < tf:
                 raise ValidationError(f"pay time {tp} precedes its fixing {tf}")
+        if list(pays) != sorted(pays):
+            raise ValidationError("pay_times must be non-decreasing")
         if len(accruals) != len(fixings):
             raise ValidationError("accrual_factors must align 1:1 with fixing_times")
         if any(a <= 0.0 for a in accruals):

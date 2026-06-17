@@ -234,6 +234,18 @@ class TestProduct:
         opt = _note(fixing_times=[0.5, 1.0, 1.5])
         assert opt.accrual_factors == pytest.approx([0.5, 0.5, 0.5])
 
+    def test_rejects_nan_coupon_rate(self):
+        with pytest.raises(ValidationError, match="finite"):
+            _note(coupon_rate=float("nan"))
+
+    def test_rejects_nan_strike(self):
+        with pytest.raises(ValidationError, match="finite"):
+            _note(strike=float("nan"))
+
+    def test_rejects_non_decreasing_pay_times(self):
+        with pytest.raises(ValidationError, match="non-decreasing"):
+            _note(fixing_times=[0.5, 1.0], pay_times=[2.0, 1.0])
+
 
 # ---------------------------------------------------------------------------
 # Engine mechanics
