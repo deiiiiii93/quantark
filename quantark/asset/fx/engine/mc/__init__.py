@@ -7,6 +7,7 @@ from .fx_range_accrual_mc_engine import (
     FxRangeAccrualMCEngine,
     FxRangeAccrualMCResult,
 )
+from .fx_barrier_mc_engine import FxBarrierMCEngine, FxBarrierMCResult
 
 __all__ = [
     "FxLocalVolMCEngine",
@@ -14,4 +15,6 @@ __all__ = [
     "FxHestonSLVMCEngine",
     "FxRangeAccrualMCEngine",
     "FxRangeAccrualMCResult",
+    "FxBarrierMCEngine",
+    "FxBarrierMCResult",
 ]
