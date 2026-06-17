@@ -239,3 +239,77 @@ def test_two_snowballs_raise():
     eng = MonteCarloExposureEngine(MonteCarloExposureConfig(num_paths=2000))
     with pytest.raises(Exception):
         eng.compute(_counterparty([_snowball_trade(), _snowball_trade()]))
+
+
+# --- review fixes: seasoned KI, deferred features, shared-underlying drift -----
+
+def _discrete_ki_snowball(disable_ko_after_ki=False):
+    cfg = BarrierConfig(
+        ko_barrier=103.0, ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+        ki_barrier=75.0, ki_observation_type=ObservationType.DISCRETE,
+        ki_observation_dates=[0.5, 1.0], ki_continuous=False,
+        disable_ko_after_ki=disable_ko_after_ki)
+    return SnowballOption(initial_price=100.0, strike=100.0, barrier_config=cfg,
+                          contract_multiplier=1.0, maturity=1.0, is_reverse=False)
+
+
+def test_seasoned_knocked_in_carried_to_state():
+    trade = _snowball_trade()
+    trade.product._otc_lifecycle_knocked_in = True   # knocked in before valuation
+    spec = build_snowball_surface(trade)
+    assert spec.initial_knocked_in is True
+    # the state machine seeds the KI history so t0 is knocked-in (selects v_in)
+    sm = BarrierStateMachine(
+        ki_barrier=spec.ki_barrier, ki_direction=spec.ki_direction,
+        ko_barrier=spec.ko_barrier, ko_direction=spec.ko_direction,
+        ki_monitoring_idx=spec.ki_monitoring_idx,
+        ko_monitoring_idx=spec.ko_monitoring_idx, times=spec.times, seed=1,
+        continuous=spec.ki_continuous, vol=spec.vol, initial_knocked_in=True)
+    st = sm.run(np.full((8, len(spec.times)), 100.0))
+    assert st["knocked_in"][:, 0].all()
+
+
+def test_disable_ko_after_ki_deferred():
+    trade = CVATrade("s", _discrete_ki_snowball(disable_ko_after_ki=True),
+                     SnowballQuadEngine(params=QuadParams(grid_points=301)), _env(),
+                     trade_currency="USD")
+    with pytest.raises(Exception):
+        build_snowball_surface(trade)
+
+
+def test_bgk_ki_mode_deferred():
+    from quantark.util.enum.engine_enums import KnockInMonitoringMode
+    eng = SnowballQuadEngine(params=QuadParams(
+        grid_points=301, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION))
+    trade = CVATrade("s", _discrete_ki_snowball(), eng, _env(), trade_currency="USD")
+    with pytest.raises(Exception):
+        build_snowball_surface(trade)
+
+
+def test_snowball_drift_sourced_from_its_own_env_not_co_netted_vanilla():
+    # a co-netted vanilla on the SAME underlying with a very different dividend and
+    # negligible quantity must NOT change the snowball's drift (the snowball sources
+    # rate/div from its own env). With the fix the profile matches snowball-alone.
+    from quantark.asset.equity.product.option.european_vanilla_option import (
+        EuropeanVanillaOption,
+    )
+    from quantark.asset.equity.engine.analytical.black_scholes_engine import (
+        BlackScholesEngine,
+    )
+    from quantark.util.enum import OptionType
+
+    cfg = MonteCarloExposureConfig(num_paths=12000, seed=4)
+    alone = MonteCarloExposureEngine(cfg).compute(
+        _counterparty([_snowball_trade(quantity=1.0)]))
+
+    snow = _snowball_trade(quantity=1.0)
+    bad_env = _env(div=0.10)                      # same underlying "UND", div 10% vs 2%
+    van = CVATrade("van", EuropeanVanillaOption(strike=100.0,
+                   option_type=OptionType.PUT, maturity=1.0),
+                   BlackScholesEngine(), bad_env, quantity=1e-9, trade_currency="USD")
+    # vanilla FIRST in the set: with the old bug the snowball would inherit its div
+    netted = MonteCarloExposureEngine(cfg).compute(_counterparty([van, snow]))
+
+    assert np.allclose(netted.epe_discounted, alone.epe_discounted, rtol=1e-3, atol=1e-6)

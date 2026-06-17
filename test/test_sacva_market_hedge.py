@@ -122,6 +122,20 @@ def test_hedge_without_market_factor_raises():
         _engine().compute(CVATradePortfolio([cp], [hedge], reporting_currency="USD"))
 
 
+def test_tagged_hedge_with_untagged_trades_raises():
+    # untagged trade + tagged hedge: the trade's own market CVA would be silently
+    # dropped while the hedge's s_hdg is capitalised -> require all-or-none.
+    env = _env(spot=100.0, vol=0.25, rate=0.03, div=0.0, asset="ACME")
+    trade = CVATrade("eq", _call(), BlackScholesEngine(), env, quantity=50.0,
+                     trade_currency="USD")            # NO equity_bucket
+    cp = Counterparty("EQ_CP", [NettingSet("n", [trade])], _curve(), 2,
+                      CreditQuality.IG)
+    hedge = CVAHedge("h", _call(), BlackScholesEngine(), env, quantity=1.0,
+                     trade_currency="USD", equity_bucket=5)
+    with pytest.raises(ValidationError):
+        _engine().compute(CVATradePortfolio([cp], [hedge], reporting_currency="USD"))
+
+
 def test_mixed_equity_and_fx_factors_both_emitted():
     eq = _equity_cp()
     fxenv = _env(spot=1.10, vol=0.12, rate=0.03, div=0.01, asset="EURUSD")

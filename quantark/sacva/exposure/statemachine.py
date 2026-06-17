@@ -29,6 +29,7 @@ class BarrierStateMachine:
     continuous: bool = False
     continuous_ko: bool = False
     vol: float = 0.0
+    initial_knocked_in: bool = False   # seasoned: knocked in before valuation
 
     def __post_init__(self) -> None:
         if self.ki_direction not in ("up", "down"):
@@ -46,6 +47,8 @@ class BarrierStateMachine:
             raise ValidationError("continuous monitoring requires vol > 0 (bridge variance)")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise ValidationError("seed must be an int (deterministic CRN)")
+        if not isinstance(self.initial_knocked_in, bool):
+            raise ValidationError("initial_knocked_in must be a bool")
         if self.times is None:
             raise ValidationError("times is required")
         t = np.asarray(self.times, dtype=float)
@@ -93,7 +96,10 @@ class BarrierStateMachine:
         alive = np.ones((n_paths, n_t), dtype=bool)
         ko_idx = np.full(n_paths, -1, dtype=int)
         rng = np.random.default_rng(self.seed)
-        ki = np.zeros(n_paths, dtype=bool)
+        # seasoned trades may already be knocked in at valuation (the QUAD engine
+        # prices such a trade from v_in); seed the KI history so t0 and every later
+        # node select v_in even if the spot has since recovered above the barrier.
+        ki = np.full(n_paths, self.initial_knocked_in, dtype=bool)
         dead = np.zeros(n_paths, dtype=bool)
         for j in range(n_t):
             if self.ki_barrier is not None and j in ki_set:

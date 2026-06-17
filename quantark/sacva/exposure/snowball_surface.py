@@ -25,6 +25,7 @@ from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadE
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.sacva.exposure.value_surface import GridValueSurface
 from quantark.util.enum import ObservationType
+from quantark.util.enum.engine_enums import KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
 
 _TOL = 1e-9
@@ -44,6 +45,7 @@ class SnowballExposureSurface:
     ki_monitoring_idx: List[int]
     ki_continuous: bool
     vol: float                        # bridge variance for continuous KI
+    initial_knocked_in: bool = False  # lifecycle: knocked in before valuation
 
 
 def _grid_index(times: np.ndarray, t_obs: float) -> int:
@@ -67,29 +69,26 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
             "stateful exposure v1 supports only the plain SnowballQuadEngine "
             f"(got {type(engine).__name__}); Phoenix/KO-reset are deferred")
 
-    # one recorded price call -> per-observation (spot_grid, v_in, v_out)
-    prev = getattr(engine, "record_backward_grids", False)
-    engine.record_backward_grids = True
-    try:
-        engine.price(product, env)
-    finally:
-        engine.record_backward_grids = prev
-    grids = dict(engine._backward_grids)
-    if not grids:
+    # ---- v1 fences, validated BEFORE the expensive priced recording ----------
+    # KO disabled after KI: the state machine cannot suppress KO for knocked-in
+    # paths yet, while the recorded v_in surface assumes it can — would mis-zero.
+    if product.barrier_config.disable_ko_after_ki:
         raise ValidationError(
-            f"{trade.trade_id}: no backward grids recorded — the snowball is already "
-            "terminated (immediate KO or zero maturity) at valuation")
+            f"{trade.trade_id}: disable_ko_after_ki exposure is deferred in v1 (the "
+            "state machine would wrongly knock out an already-knocked-in path)")
 
-    # KO schedule: immediate settlement + constant barrier (v1)
+    # KO schedule: immediate settlement + constant barrier (v1). settlement_time is
+    # None for immediate settlement in the engine's own _ko_discount convention.
     ko_records = product.resolve_ko_observations(env)
     if not ko_records:
         raise ValidationError(f"{trade.trade_id}: empty KO observation schedule")
     for rec in ko_records:
-        if abs(float(rec.settlement_time) - float(rec.observation_time)) > _TOL:
+        settle = rec.observation_time if rec.settlement_time is None else rec.settlement_time
+        if abs(float(settle) - float(rec.observation_time)) > _TOL:
             raise ValidationError(
                 f"{trade.trade_id}: delayed KO settlement (obs={rec.observation_time}, "
-                f"settle={rec.settlement_time}) is deferred in v1 — needs the pending-"
-                "receivable machinery")
+                f"settle={settle}) is deferred in v1 — needs the pending-receivable "
+                "machinery")
     ko_levels = {round(float(rec.barrier), 12) for rec in ko_records}
     if len(ko_levels) != 1:
         raise ValidationError(
@@ -110,6 +109,14 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
                 raise ValidationError("continuous KI must have a scalar barrier")
             ki_barrier = float(kib)
         else:
+            # BGK mode rewrites discrete KI to a shifted CONTINUOUS barrier inside the
+            # engine, so the recorded surface would no longer match a discrete state
+            # machine (and the dense KI dates are not recorded grid nodes). Defer it.
+            if engine._ki_monitoring_mode() is KnockInMonitoringMode.BGK_APPROXIMATION:
+                raise ValidationError(
+                    f"{trade.trade_id}: BGK_APPROXIMATION KI monitoring is deferred in v1 "
+                    "(surface is continuous-shifted but the state machine is discrete); "
+                    "use KnockInMonitoringMode.EXACT_DISCRETE")
             ki_records = product.resolve_ki_observations(env)
             if not ki_records:
                 raise ValidationError(
@@ -120,6 +127,21 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
                     f"{trade.trade_id}: v1 requires a constant KI barrier")
             ki_barrier = float(ki_records[0].barrier)
     ki_direction = "up" if product.is_reverse else "down"
+    # seasoned lifecycle: knocked in before valuation (engine prices from v_in)
+    initial_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
+
+    # ---- one recorded price call -> per-observation (spot_grid, v_in, v_out) --
+    prev = getattr(engine, "record_backward_grids", False)
+    engine.record_backward_grids = True
+    try:
+        engine.price(product, env)
+    finally:
+        engine.record_backward_grids = prev
+    grids = dict(engine._backward_grids)
+    if not grids:
+        raise ValidationError(
+            f"{trade.trade_id}: no backward grids recorded — the snowball is already "
+            "terminated (immediate KO or zero maturity) at valuation")
 
     # exposure grid = sorted recorded times; per-(t, state) surface
     times = np.array(sorted(grids), dtype=float)
@@ -150,4 +172,5 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
         times=times, surface=surface, ko_barrier=ko_barrier,
         ko_direction=ko_direction, ko_monitoring_idx=ko_monitoring_idx,
         ki_barrier=ki_barrier, ki_direction=ki_direction,
-        ki_monitoring_idx=ki_monitoring_idx, ki_continuous=ki_continuous, vol=vol)
+        ki_monitoring_idx=ki_monitoring_idx, ki_continuous=ki_continuous, vol=vol,
+        initial_knocked_in=initial_knocked_in)

@@ -9,8 +9,10 @@ v1 scope: equity (and reporting-vs-foreign FX) spot underlyings, deterministic
 rates, single reporting currency, uncollateralized. Vanilla (single-state) trades
 are priced via the analytic value surface (full vol surface re-evaluated, terminal
 payoff exact). Stateful trades whose engine advertises ``supports_spot_greeks_grid``
-need the grid value-surface + barrier state machine wiring and currently raise with
-a clear message (next integration step). Unsupported products raise, never approximate.
+(snowball) take the backward-grid value surface + ``BarrierStateMachine`` path (see
+``_compute_stateful`` and ``snowball_surface``); one such trade defines the exposure
+grid and vanillas may net on it. Unsupported products / out-of-scope features raise,
+never approximate.
 """
 
 from dataclasses import dataclass
@@ -173,11 +175,19 @@ class MonteCarloExposureEngine(ExposureEngine):
                     f"{horizon}; netting a longer-dated trade with a snowball needs a "
                     "merged exposure grid (deferred)")
 
-        # per-underlying market on the SHARED grid. The snowball underlying must use
-        # the vol its surface was priced at (strike vol) so the simulated cloud and
-        # the value surface are mutually consistent; other underlyings use term vol.
+        # per-underlying market on the SHARED grid. The snowball underlying is seeded
+        # FIRST and sourced entirely from snow.env (spot/rate/div + the surface's strike
+        # vol) so the simulated drift matches the env the value surface was priced under,
+        # regardless of trade order; a co-netted trade on the same underlying must agree
+        # on spot. Other underlyings use their own env at term vol.
         keys, spots, vols, rates, divs = [], [], [], [], []
-        seen = {}
+        snow_spot = float(snow.env.spot)
+        seen = {snow_key: snow_spot}
+        keys.append(snow_key)
+        spots.append(snow_spot)
+        vols.append(spec.vol)
+        rates.append(float(snow.env.get_rate(horizon)))
+        divs.append(float(snow.env.get_div_yield(horizon)))
         for t in trades:
             k = self._underlying_key(t)
             if k in seen:
@@ -188,8 +198,7 @@ class MonteCarloExposureEngine(ExposureEngine):
             seen[k] = float(t.env.spot)
             keys.append(k)
             spots.append(float(t.env.spot))
-            vols.append(spec.vol if k == snow_key
-                        else float(t.env.get_vol(float(t.env.spot), horizon)))
+            vols.append(float(t.env.get_vol(float(t.env.spot), horizon)))
             rates.append(float(t.env.get_rate(horizon)))
             divs.append(float(t.env.get_div_yield(horizon)))
         paths = StatePathGenerator(
@@ -197,13 +206,17 @@ class MonteCarloExposureEngine(ExposureEngine):
             corr=self._corr_matrix(keys), grid_times=times,
             num_paths=self.config.num_paths, seed=self.config.seed).generate()
 
+        # bridge RNG on a separate deterministic stream (seed+1) so the knock-in
+        # bridge uniforms are not coupled to the path-generator draws (MC hygiene),
+        # while staying common across base/bumped re-runs.
         snow_state = BarrierStateMachine(
             ki_barrier=spec.ki_barrier, ki_direction=spec.ki_direction,
             ko_barrier=spec.ko_barrier, ko_direction=spec.ko_direction,
             ki_monitoring_idx=spec.ki_monitoring_idx,
             ko_monitoring_idx=spec.ko_monitoring_idx,
-            times=times, seed=self.config.seed,
-            continuous=spec.ki_continuous, vol=spec.vol).run(paths[snow_key])
+            times=times, seed=self.config.seed + 1,
+            continuous=spec.ki_continuous, vol=spec.vol,
+            initial_knocked_in=spec.initial_knocked_in).run(paths[snow_key])
 
         values = {id(snow): reprice_trade(
             spec.surface, paths[snow_key], snow_state, times, float(snow.quantity),

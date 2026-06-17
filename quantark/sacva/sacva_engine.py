@@ -75,12 +75,16 @@ class SACVAEngine:
         trades = [t for cp in portfolio.counterparties
                   for ns in cp.netting_sets for t in ns.trades]
         tagged = [t for t in trades if cls._trade_factor(t) is not None]
-        if not tagged:
+        # a tagged HEDGE also requests market mode: otherwise an untagged trade's own
+        # market CVA would be silently dropped while the hedge's s_hdg is capitalised.
+        hedges_tagged = any(cls._trade_factor(h) is not None for h in portfolio.hedges)
+        if not tagged and not hedges_tagged:
             return []                          # credit-only run
-        if len(tagged) != len(trades):
+        if trades and len(tagged) != len(trades):
             raise ValidationError(
                 "market sensitivities require every trade to declare a market factor "
-                "(equity_bucket or fx_currency); mixed tagging is ambiguous")
+                "(equity_bucket or fx_currency) when any trade or hedge does; mixed "
+                "tagging is ambiguous")
         reporting = portfolio.reporting_currency.upper()
         factors = {}
         for t in tagged:

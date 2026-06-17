@@ -100,6 +100,14 @@ class SnowballQuadEngine(BaseEngine):
 
         self._validate_product(product)
 
+        # Reset the opt-in backward-grid capture up front, BEFORE any early return
+        # (zero maturity / immediate KO). Otherwise a terminated bumped re-price would
+        # leave the previous trade's surfaces in _backward_grids for the CVA exposure
+        # layer to read as if live — a silent corruption of bumped sensitivities.
+        record_grids = getattr(self, "record_backward_grids", False)
+        if record_grids:
+            self._backward_grids = {}
+
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
@@ -221,10 +229,6 @@ class SnowballQuadEngine(BaseEngine):
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
 
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
-
-        record_grids = getattr(self, "record_backward_grids", False)
-        if record_grids:
-            self._backward_grids = {}
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
