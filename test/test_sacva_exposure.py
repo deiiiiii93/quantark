@@ -82,3 +82,25 @@ def test_analytic_value_surface_matches_engine():
                               as_of_env=as_of, currency="USD")
     v = vs.value_at(np.array([95., 80.]), t=0.5, discrete_state=None)
     assert v[0] == 5.0 and v[1] == 0.0
+
+
+# --- Task 5: StatePathGenerator -------------------------------------------
+
+def test_state_paths_shape_and_determinism():
+    from quantark.sacva.exposure.paths import StatePathGenerator
+    g = StatePathGenerator(keys=["EQ:A"], spots=[100.0], vols=[0.2], rates=[0.03],
+                           divs=[0.0], corr=[[1.0]],
+                           grid_times=np.linspace(0, 1, 13), num_paths=4000, seed=7)
+    p1 = g.generate()
+    p2 = g.generate()
+    assert p1["EQ:A"].shape == (4000, 13)
+    assert np.allclose(p1["EQ:A"], p2["EQ:A"])           # seeded determinism / CRN
+    fwd = 100.0 * np.exp((0.03 - 0.0) * 1.0)
+    assert abs(p1["EQ:A"][:, -1].mean() - fwd) / fwd < 0.05   # ~ risk-neutral forward
+
+
+def test_state_paths_length_guards():
+    from quantark.sacva.exposure.paths import StatePathGenerator
+    with pytest.raises(ValidationError):
+        StatePathGenerator(keys=["EQ:A"], spots=[100.0, 1.0], vols=[0.2], rates=[0.03],
+                           divs=[0.0], corr=[[1.0]], grid_times=np.linspace(0, 1, 5))
