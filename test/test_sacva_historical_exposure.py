@@ -177,3 +177,56 @@ def test_correlation_diagnostic_psd_and_nan_guard():
     cal2 = HistoricalCalibration(HistoricalMarketDataSet({"EQ_A": _series(400), "C": flat}))
     with pytest.raises(ValidationError):
         cal2.correlation_diagnostic()
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — Resampler
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure.historical.resampling import Resampler, ResamplingScheme
+
+
+def _excess_kurtosis(x):
+    x = x.ravel(); m = x.mean(); v = x.var()
+    return float(((x - m) ** 4).mean() / v ** 2 - 3.0)
+
+
+def _resid(seed=11):
+    rng = np.random.default_rng(seed)
+    z = rng.standard_t(4, size=(400, 2))
+    z[:, 1] = 0.8 * z[:, 0] + 0.2 * z[:, 1]
+    return z
+
+
+def test_iid_preserves_comovement():
+    z = _resid()
+    samp = Resampler(ResamplingScheme.IID_RAW, seed=1).sample(z, 2000, 50)
+    c_src = np.corrcoef(z, rowvar=False)[0, 1]
+    c_samp = np.corrcoef(samp.reshape(-1, 2), rowvar=False)[0, 1]
+    assert abs(c_src - c_samp) < 0.05
+
+
+def test_block_preserves_fat_tails():
+    z = _resid()
+    samp = Resampler(ResamplingScheme.BLOCK_FHS, block_length=10, seed=2).sample(z, 3000, 60)
+    assert _excess_kurtosis(samp[..., 0]) > 1.0
+
+
+def test_stationary_positive_path():
+    z = _resid()
+    r = Resampler(ResamplingScheme.STATIONARY_BLOCK, expected_block_length=8, seed=1)
+    samp = r.sample(z, 100, 20)
+    assert samp.shape == (100, 20, 2)
+
+
+def test_block_requires_length_and_validates_inputs():
+    z = _resid()
+    with pytest.raises(ValidationError):
+        Resampler(ResamplingScheme.BLOCK_FHS).sample(z, 10, 5)          # no block_length
+    with pytest.raises(ValidationError):
+        Resampler(ResamplingScheme.STATIONARY_BLOCK).sample(z, 10, 5)   # no expected len
+    with pytest.raises(ValidationError):
+        Resampler(ResamplingScheme.IID_RAW, seed=1).sample(z[:20], 10, 5, min_raw_obs=250)
+    with pytest.raises(ValidationError):
+        Resampler(ResamplingScheme.IID_RAW, seed=1).sample(z.ravel(), 10, 5)   # 1D
+    with pytest.raises(ValidationError):
+        Resampler(ResamplingScheme.STATIONARY_BLOCK, expected_block_length=8, overlap=True)
