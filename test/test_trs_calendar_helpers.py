@@ -57,6 +57,13 @@ def test_working_days_accepts_datetime_inputs(cal):
     assert [d.strftime("%Y-%m-%d") for d in days] == ["2024-01-05", "2024-01-09"]
 
 
+def test_working_days_left_keeps_interior_trading_day_when_endpoint_nonbusiness(cal):
+    # Fri 2024-01-05 -> Sat 2024-01-06; side="left" drops the Saturday calendar
+    # endpoint (a non-business day), so the Friday trading day is retained.
+    days = cal.get_working_days("2024-01-05", "2024-01-06", side="left")
+    assert [d.strftime("%Y-%m-%d") for d in days] == ["2024-01-05"]
+
+
 # ---------------------------------------------------------------------------
 # get_next_trading_date
 # ---------------------------------------------------------------------------
@@ -81,3 +88,9 @@ def test_num_calendar_days_sides(cal):
     assert cal.get_num_of_calendar_days("2024-01-01", "2024-01-05", side="left") == 4
     assert cal.get_num_of_calendar_days("2024-01-01", "2024-01-05", side="both") == 5
     assert cal.get_num_of_calendar_days("2024-01-01", "2024-01-05", side="neither") == 3
+
+
+def test_num_calendar_days_empty_interval_not_negative(cal):
+    # Degenerate (start == end) open interval must not return a negative count.
+    assert cal.get_num_of_calendar_days("2024-01-01", "2024-01-01", side="neither") == 0
+    assert cal.get_num_of_calendar_days("2024-01-01", "2024-01-01", side="both") == 1

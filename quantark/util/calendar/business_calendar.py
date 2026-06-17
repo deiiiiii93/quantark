@@ -314,22 +314,16 @@ class Calendar:
         """
         Return the business days in ``[start_date, end_date]``.
 
-        Business days exclude weekends and holidays. The ``side`` argument
-        trims the endpoints of the resulting (sorted) list, matching
-        :meth:`get_calendar_days`.
+        The ``side`` argument trims the *calendar* interval endpoints (matching
+        :meth:`get_calendar_days`) before business days are filtered, so an
+        excluded endpoint that happens to be a weekend/holiday never removes an
+        interior trading day.
 
         Returns:
             List of ``datetime`` objects at midnight.
         """
-        start = self._to_datetime(start_date)
-        end = self._to_datetime(end_date)
-        days = []
-        current = start
-        while current <= end:
-            if self.is_business_day(current):
-                days.append(current)
-            current = current + timedelta(days=1)
-        return self._apply_side(days, side)
+        calendar_days = self.get_calendar_days(start_date, end_date, side=side)
+        return [d for d in calendar_days if self.is_business_day(d)]
 
     def get_next_trading_date(
         self, date, n: int = 1, only_holidays: bool = True
@@ -401,11 +395,14 @@ class Calendar:
         """
         start = self._to_datetime(start_date)
         end = self._to_datetime(end_date)
-        raw = (end - start).days
+        # A reversed or zero-length interval has no calendar days to span.
+        raw = max((end - start).days, 0)
         if side == "both":
             return raw + 1
         if side == "neither":
-            return raw - 1
+            # Open interval: clamp the degenerate (empty) case to zero rather
+            # than returning a negative count that could accrue negative interest.
+            return max(raw - 1, 0)
         if side in ("left", "right"):
             return raw
         raise ValidationError(
