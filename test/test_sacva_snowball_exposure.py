@@ -206,3 +206,36 @@ def test_snowball_end_to_end_capital():
     assert result.delta_capital > 0.0
     assert result.counterparty_cva["CP"] > 0.0
     assert result.exposure_profiles["CP"].epe_discounted[0] > 0.0
+
+
+def test_snowball_nets_with_vanilla_on_shared_grid():
+    # a snowball nets with a vanilla on the same underlying, both on the snowball
+    # observation grid; at t0 the netted exposure is the positive part of the sum.
+    from quantark.asset.equity.product.option.european_vanilla_option import (
+        EuropeanVanillaOption,
+    )
+    from quantark.asset.equity.engine.analytical.black_scholes_engine import (
+        BlackScholesEngine,
+    )
+    from quantark.util.enum import OptionType
+
+    snow = _snowball_trade(quantity=1.0)
+    van_opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.PUT,
+                                    maturity=1.0)
+    van = CVATrade("van", van_opt, BlackScholesEngine(), _env(), quantity=2.0,
+                   trade_currency="USD")
+    prof = MonteCarloExposureEngine(
+        MonteCarloExposureConfig(num_paths=16000, seed=4)).compute(
+        _counterparty([snow, van]))
+
+    p_snow = SnowballQuadEngine(params=QuadParams(grid_points=301)).price(
+        snow.product, snow.env)
+    p_van = BlackScholesEngine().price(van.product, van.env)
+    expected0 = max(1.0 * p_snow + 2.0 * p_van, 0.0)
+    assert prof.epe_discounted[0] == pytest.approx(expected0, rel=3e-3)
+
+
+def test_two_snowballs_raise():
+    eng = MonteCarloExposureEngine(MonteCarloExposureConfig(num_paths=2000))
+    with pytest.raises(Exception):
+        eng.compute(_counterparty([_snowball_trade(), _snowball_trade()]))

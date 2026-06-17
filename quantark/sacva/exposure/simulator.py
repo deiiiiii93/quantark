@@ -103,18 +103,7 @@ class MonteCarloExposureEngine(ExposureEngine):
             rates.append(float(t.env.get_rate(horizon)))
             divs.append(float(t.env.get_div_yield(horizon)))
 
-        if len(keys) == 1:
-            corr = [[1.0]]
-        else:
-            if self.config.correlation is None:
-                raise ValidationError(
-                    "multi-underlying counterparty requires a correlation matrix in "
-                    "MonteCarloExposureConfig (independence is not assumed)")
-            cm = self.config.correlation
-            if list(cm.keys) != keys:
-                raise ValidationError(
-                    f"correlation keys {list(cm.keys)} must match underlyings {keys}")
-            corr = cm.matrix
+        corr = self._corr_matrix(keys)
 
         grid = ExposureGrid.build(horizon=horizon, n_steps=self.config.n_steps,
                                   event_times=[])
@@ -140,52 +129,97 @@ class MonteCarloExposureEngine(ExposureEngine):
         return ExposureProfile(times=times, epe_discounted=epe,
                                measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
 
+    def _corr_matrix(self, keys):
+        """Correlation matrix for the underlyings; identity for a single factor."""
+        if len(keys) == 1:
+            return [[1.0]]
+        if self.config.correlation is None:
+            raise ValidationError(
+                "multi-underlying counterparty requires a correlation matrix in "
+                "MonteCarloExposureConfig (independence is not assumed)")
+        cm = self.config.correlation
+        if list(cm.keys) != keys:
+            raise ValidationError(
+                f"correlation keys {list(cm.keys)} must match underlyings {keys}")
+        return cm.matrix
+
     def _compute_stateful(self, counterparty, trades, stateful) -> ExposureProfile:
         """Snowball exposure: backward-grid surface + per-path KI/KO state machine.
 
-        v1 handles a single stateful trade per counterparty (no netting with other
-        trades yet); mixing or multiple stateful trades raises rather than guessing
-        a shared exposure grid.
+        One stateful (snowball) trade defines the exposure grid (its observation
+        times). Vanilla trades in the counterparty ride on the SAME grid — their
+        analytic value surface evaluates at any node — so a snowball nets with
+        vanillas. Multiple stateful trades (different observation schedules) would
+        need a merged grid and raise rather than guessing one.
         """
-        if len(trades) != 1 or len(stateful) != 1:
+        if len(stateful) != 1:
             raise ValidationError(
-                f"{counterparty.name}: v1 stateful (snowball) exposure supports exactly "
-                "one trade per counterparty (netting with other/multiple stateful trades "
-                "is deferred)")
-        trade = stateful[0]
-        spec = build_snowball_surface(trade)
+                f"{counterparty.name}: v1 supports at most one stateful (snowball) trade "
+                "per counterparty; multiple autocallables need a merged observation grid")
+        snow = stateful[0]
+        spec = build_snowball_surface(snow)
         times = spec.times
-        key = self._underlying_key(trade)
+        snow_key = self._underlying_key(snow)
         horizon = float(times[-1])
-        spot0 = float(trade.env.spot)
 
-        # GBM paths at the SAME vol the surface was priced at (strike vol), so the
-        # simulated cloud and the value surface are mutually consistent.
-        gen = StatePathGenerator(
-            keys=[key], spots=[spot0], vols=[spec.vol],
-            rates=[float(trade.env.get_rate(horizon))],
-            divs=[float(trade.env.get_div_yield(horizon))],
-            corr=[[1.0]], grid_times=times,
-            num_paths=self.config.num_paths, seed=self.config.seed)
-        spots = gen.generate()[key]
+        # a co-netted trade maturing past the snowball horizon would have exposure
+        # beyond the shared grid that we cannot see -> raise (needs a merged grid)
+        for t in trades:
+            if t is snow:
+                continue
+            if self._trade_maturity(t) > horizon + 1e-9:
+                raise ValidationError(
+                    f"{t.trade_id}: maturity exceeds the stateful trade's horizon "
+                    f"{horizon}; netting a longer-dated trade with a snowball needs a "
+                    "merged exposure grid (deferred)")
 
-        state = BarrierStateMachine(
+        # per-underlying market on the SHARED grid. The snowball underlying must use
+        # the vol its surface was priced at (strike vol) so the simulated cloud and
+        # the value surface are mutually consistent; other underlyings use term vol.
+        keys, spots, vols, rates, divs = [], [], [], [], []
+        seen = {}
+        for t in trades:
+            k = self._underlying_key(t)
+            if k in seen:
+                if abs(seen[k] - float(t.env.spot)) > 1e-9:
+                    raise ValidationError(
+                        f"inconsistent spot for underlying {k} across trades")
+                continue
+            seen[k] = float(t.env.spot)
+            keys.append(k)
+            spots.append(float(t.env.spot))
+            vols.append(spec.vol if k == snow_key
+                        else float(t.env.get_vol(float(t.env.spot), horizon)))
+            rates.append(float(t.env.get_rate(horizon)))
+            divs.append(float(t.env.get_div_yield(horizon)))
+        paths = StatePathGenerator(
+            keys=keys, spots=spots, vols=vols, rates=rates, divs=divs,
+            corr=self._corr_matrix(keys), grid_times=times,
+            num_paths=self.config.num_paths, seed=self.config.seed).generate()
+
+        snow_state = BarrierStateMachine(
             ki_barrier=spec.ki_barrier, ki_direction=spec.ki_direction,
             ko_barrier=spec.ko_barrier, ko_direction=spec.ko_direction,
             ki_monitoring_idx=spec.ki_monitoring_idx,
             ko_monitoring_idx=spec.ko_monitoring_idx,
             times=times, seed=self.config.seed,
-            continuous=spec.ki_continuous, vol=spec.vol).run(spots)
+            continuous=spec.ki_continuous, vol=spec.vol).run(paths[snow_key])
 
-        df = np.array([float(trade.env.get_discount_factor(float(ti))) for ti in times])
-        vals = reprice_trade(
-            spec.surface, spots, state, times, float(trade.quantity),
+        values = {id(snow): reprice_trade(
+            spec.surface, paths[snow_key], snow_state, times, float(snow.quantity),
             exposure_idx=list(range(len(times))),
-            state_labels=("alive", "knocked_in"))
+            state_labels=("alive", "knocked_in"))}
+        for t in trades:
+            if t is snow:
+                continue
+            values[id(t)] = self._trade_value_array(t, paths, times)
 
-        ns = next(s for s in counterparty.netting_sets
-                  for t in s.trades if t is trade)
-        epe = aggregate_epe([vals], enforceable=ns.netting_enforceable, df=df)
+        ref_curve = trades[0].env
+        df = np.array([float(ref_curve.get_discount_factor(float(ti))) for ti in times])
+        epe = np.zeros(len(times))
+        for ns in counterparty.netting_sets:
+            arrays = [values[id(t)] for t in ns.trades]
+            epe = epe + aggregate_epe(arrays, enforceable=ns.netting_enforceable, df=df)
         return ExposureProfile(times=times, epe_discounted=epe,
                                measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
 
