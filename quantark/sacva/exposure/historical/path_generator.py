@@ -96,7 +96,9 @@ class HistoricalPathGenerator:
         if drift_modes is None:
             raise ValidationError("BOOTSTRAP requires explicit drift_modes")
         modes = drift_modes
-        min_obs = self.calibration.data.min_raw_obs
+        # min_raw_obs counts aligned LEVELS; resampled vectors are RETURNS (one fewer),
+        # so the equivalent return-vector minimum is min_raw_obs - 1.
+        min_obs = max(self.calibration.data.min_raw_obs - 1, 0)
         if scheme is ResamplingScheme.BLOCK_FHS:
             Z = np.column_stack(
                 [self.calibration.standardized_residuals(k, self.lam) for k in keys])

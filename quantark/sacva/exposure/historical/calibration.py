@@ -31,6 +31,8 @@ class HistoricalMarketDataSet:
                 raise ValidationError(f"factor {k}: index must be a DatetimeIndex")
             if not s.index.is_monotonic_increasing or s.index.has_duplicates:
                 raise ValidationError(f"factor {k}: index must be strictly increasing dates")
+            if not np.isfinite(s.to_numpy(dtype=float)).all():
+                raise ValidationError(f"factor {k}: non-finite level")
             if (s <= 0).any():
                 raise ValidationError(f"factor {k}: non-positive level (log return undefined)")
 

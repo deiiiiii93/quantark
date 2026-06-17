@@ -452,3 +452,34 @@ def test_merge_gate_provisional_removed_once_canonical_exists():
         src = inspect.getsource(importlib.import_module(mi.name))
         assert "_contract_provisional" not in src, \
             f"{mi.name} still imports provisional contract"
+
+
+# ---------------------------------------------------------------------------
+# ZenMux review fixes (iteration 1)
+# ---------------------------------------------------------------------------
+def test_non_finite_level_rejected():
+    s = _series(300, 100, 1).copy()
+    s.iloc[-1] = np.inf
+    with pytest.raises(ValidationError):
+        HistoricalMarketDataSet({"EQ_A": s})
+
+
+def test_bootstrap_accepts_exact_minimum_history():
+    # min_raw_obs levels -> min_raw_obs-1 returns; bootstrap must not reject the
+    # exact advertised minimum (return-vector count mismatch fix).
+    cal = HistoricalCalibration(HistoricalMarketDataSet(
+        {"FX_B": _series(250, 1.1, 7)}, min_raw_obs=250))
+    g = HistoricalPathGenerator(cal, ("FX_B",), {"FX_B": float(_series(250, 1.1, 7).iloc[-1])})
+    s = g.generate(PathMode.BOOTSTRAP, np.array([0., 0.5, 1.0]),
+                   scheme=ResamplingScheme.IID_RAW, n_paths=100, seed=1,
+                   drift_modes={"FX_B": DriftMode.ZERO_LOG_MEAN})
+    assert s.shape == (100, 3, 1)
+
+
+def test_float_block_length_rejected():
+    z = _resid()
+    with pytest.raises(ValidationError):
+        Resampler(ResamplingScheme.BLOCK_FHS, block_length=10.0).sample(z, 10, 5)
+    with pytest.raises(ValidationError):
+        Resampler(ResamplingScheme.STATIONARY_BLOCK,
+                  expected_block_length=float("nan")).sample(z, 10, 5)

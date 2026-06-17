@@ -52,16 +52,17 @@ class Resampler:
         if self.scheme is ResamplingScheme.IID_RAW:
             return rng.integers(0, n_obs, size=(n_paths, n_steps))
         if self.scheme is ResamplingScheme.BLOCK_FHS:
-            if self.block_length is None or self.block_length < 1:
-                raise ValidationError("BLOCK_FHS requires explicit block_length >= 1")
+            if not isinstance(self.block_length, (int, np.integer)) or self.block_length < 1:
+                raise ValidationError("BLOCK_FHS requires an explicit integer block_length >= 1")
             if self.block_length > n_obs:
                 raise ValidationError("block_length exceeds history")
             return self._fixed_block_idx(
-                rng, n_obs, n_paths, n_steps, self.block_length,
+                rng, n_obs, n_paths, n_steps, int(self.block_length),
                 overlap=(True if self.overlap is None else self.overlap))
         if self.scheme is ResamplingScheme.STATIONARY_BLOCK:
-            if self.expected_block_length is None or self.expected_block_length < 1:
-                raise ValidationError("STATIONARY_BLOCK requires expected_block_length >= 1")
+            if self.expected_block_length is None or not np.isfinite(self.expected_block_length) \
+                    or self.expected_block_length < 1:
+                raise ValidationError("STATIONARY_BLOCK requires finite expected_block_length >= 1")
             return self._stationary_idx(rng, n_obs, n_paths, n_steps)
         raise ValidationError(f"unknown scheme {self.scheme}")
 
