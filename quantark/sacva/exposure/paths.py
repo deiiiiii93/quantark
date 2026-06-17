@@ -77,7 +77,7 @@ class StatePathGenerator:
             divs=np.asarray(self.divs, dtype=float),
             correlation_matrix=np.asarray(self.corr, dtype=float),
             maturity=float(t[-1]), time_steps=len(dt), num_paths=self.num_paths,
-            model="gbm", dt_array=dt,
+            model="bsm", dt_array=dt,  # bsm drift = rrfs - divs (risk-neutral r-q)
             random_stream=PseudoRandomNormalGenerator(seed=self.seed),
         )
         paths = gen.generate_paths()  # return_aux defaults False -> ndarray

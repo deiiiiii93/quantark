@@ -215,8 +215,10 @@ def test_state_paths_shape_and_determinism():
     p2 = g.generate()
     assert p1["EQ:A"].shape == (4000, 13)
     assert np.allclose(p1["EQ:A"], p2["EQ:A"])           # seeded determinism / CRN
-    fwd = 100.0 * np.exp((0.03 - 0.0) * 1.0)
-    assert abs(p1["EQ:A"][:, -1].mean() - fwd) / fwd < 0.05   # ~ risk-neutral forward
+    fwd = 100.0 * np.exp((0.03 - 0.0) * 1.0)             # risk-neutral drift r - q
+    term = p1["EQ:A"][:, -1].mean()
+    assert abs(term - fwd) / fwd < 0.02                  # close to the RN forward
+    assert term > 101.5                                  # NOT the driftless mean (~100)
 
 
 def test_state_paths_length_guards():
