@@ -287,3 +287,52 @@ def test_grid_start_must_be_zero():
     g = HistoricalPathGenerator(cal, ("EQ_A",), {"EQ_A": S0}, min_replay_windows=5)
     with pytest.raises(ValidationError):
         g.generate(PathMode.REPLAY_RAW, np.array([0.1, 0.5]))
+
+
+# ---------------------------------------------------------------------------
+# Task 7 — PFEProfileAssembler + Kupiec
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure.historical.pfe import PFEProfileAssembler, kupiec_pof
+
+
+def test_pfe_nonneg_monotone_max_and_epe():
+    rng = np.random.default_rng(31)
+    E = np.abs(rng.standard_normal((5000, 4)))
+    asm = PFEProfileAssembler(confidences_bps=(9500, 9900, 10000), m_tail_min=10)
+    res = asm.assemble(E, np.array([0., 1., 2., 3.]))
+    assert np.all(res["ee_undiscounted"] >= 0)
+    assert np.all(res["pfe"][9900] >= res["pfe"][9500] - 1e-9)
+    assert np.allclose(res["pfe"][10000], E.max(axis=0))
+    asm2 = PFEProfileAssembler(confidences_bps=(9900,), m_tail_min=1)
+    assert np.isclose(asm2.assemble(np.ones((100, 3)), np.array([0., 1., 2.]))["epe"], 2.0)
+
+
+def test_pfe_validation():
+    asm = PFEProfileAssembler(confidences_bps=(9900,), m_tail_min=10)
+    with pytest.raises(ValidationError):
+        asm.assemble(np.abs(np.random.default_rng(3).standard_normal((50, 3))),
+                     np.array([0., .5, 1.]))                      # tail too thin
+    with pytest.raises(ValidationError):
+        asm.assemble(np.ones((100, 3)), np.array([0., 1.]))       # times length mismatch
+    with pytest.raises(ValidationError):
+        PFEProfileAssembler(confidences_bps=(12000,)).assemble(np.ones((100, 2)),
+                                                               np.array([0., 1.]))
+    with pytest.raises(ValidationError):
+        asm.assemble(np.ones((100, 3)), np.array([0., 1., 0.5]))  # non-increasing times
+
+
+def test_quantile_method_order_statistic():
+    E = np.arange(10, dtype=float)[:, None]
+    lin = PFEProfileAssembler((9500,), quantile_method="linear", m_tail_min=0).assemble(
+        E, np.array([0.]))["pfe"][9500][0]
+    cons = PFEProfileAssembler((9500,), quantile_method="inverted_cdf", m_tail_min=0).assemble(
+        E, np.array([0.]))["pfe"][9500][0]
+    assert cons == 9.0
+    assert lin <= cons
+
+
+def test_kupiec_deterministic():
+    assert not kupiec_pof(10, 1000, 0.99)[1]      # ~expected -> accept
+    assert kupiec_pof(100, 1000, 0.99)[1]         # 10% at 99% -> reject
+    with pytest.raises(ValidationError):
+        kupiec_pof(2000, 1000, 0.99)              # x > n
