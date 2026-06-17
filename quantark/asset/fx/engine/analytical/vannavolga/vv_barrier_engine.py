@@ -71,6 +71,12 @@ class VannaVolgaBarrierEngine(BaseFxEngine):
                 )
             return result
         if isinstance(product, FxBarrierOption):
+            from quantark.util.enum import ObservationType
+            if getattr(product, "monitoring", ObservationType.CONTINUOUS) != ObservationType.CONTINUOUS:
+                raise PricingError(
+                    "VannaVolgaBarrierEngine prices continuously-monitored "
+                    "barriers only; use FxBarrierMCEngine for discrete monitoring."
+                )
             return price_vv_barrier(
                 env, surface.quotes, product.strike, product.barrier,
                 product.is_up, product.is_call(),
