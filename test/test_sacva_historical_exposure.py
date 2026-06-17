@@ -336,3 +336,80 @@ def test_kupiec_deterministic():
     assert kupiec_pof(100, 1000, 0.99)[1]         # 10% at 99% -> reject
     with pytest.raises(ValidationError):
         kupiec_pof(2000, 1000, 0.99)              # x > n
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — HistoricalExposureEngine
+# ---------------------------------------------------------------------------
+from quantark.sacva.exposure.historical.engine import (
+    HistoricalExposureEngine, HistoricalExposureConfig,
+)
+
+
+def _Phi(x):
+    return 0.5 * (1.0 + erf(x / sqrt(2.0)))
+
+
+def _normal_return_cal(sigma_d=0.01, n=2000, seed=3):
+    rng = np.random.default_rng(seed)
+    r = rng.normal(0.0, sigma_d, n)
+    lvl = 1.0 * np.exp(np.cumsum(r))
+    idx = pd.bdate_range("2010-01-01", periods=n + 1)
+    s = pd.Series(np.concatenate([[1.0], lvl]), index=idx)
+    return HistoricalCalibration(HistoricalMarketDataSet({"FX_B": s})), float(s.iloc[-1])
+
+
+def test_engine_forward_EE_matches_lognormal_closed_form():
+    # IID_RAW (not FHS) so the terminal law is ~lognormal with deterministic variance.
+    sigma_d = 0.01
+    cal, S0 = _normal_return_cal(sigma_d)
+    K = S0
+    surf = AnalyticValueSurface(lambda S, t, ds: S - K)
+    cp = Counterparty("CP", [NettingSet("ns", [CVATrade("fwd", surf, "FX_B")], True)])
+    cfg = HistoricalExposureConfig(
+        path_mode="BOOTSTRAP", scheme="IID_RAW", n_paths=60000, seed=5,
+        grid_times=(0.0, 1.0), confidences_bps=(9900,), factor_keys=("FX_B",),
+        today_levels={"FX_B": S0}, drift_modes={"FX_B": "ZERO_LOG_MEAN"})
+    prof = HistoricalExposureEngine(cal, cfg).compute(cp)
+    n_days = 252
+    v = n_days * float(np.var(cal._r["FX_B"].to_numpy(), ddof=1))
+    a = log(S0)
+    d1 = (a - log(K) + v) / sqrt(v)
+    d2 = d1 - sqrt(v)
+    ee_cf = exp(a + 0.5 * v) * _Phi(d1) - K * _Phi(d2)
+    assert abs(prof.ee_undiscounted[-1] - ee_cf) / ee_cf < 0.05
+    assert prof.measure is Measure.REAL_WORLD and not prof.regulatory_eligible
+    assert prof.epe_discounted is None and prof.metadata["path_mode"] == "BOOTSTRAP"
+
+
+def test_engine_rejects_today_level_mismatch():
+    cal, S0 = _normal_return_cal()
+    surf = AnalyticValueSurface(lambda S, t, ds: S - S0)
+    cp = Counterparty("CP", [NettingSet("ns", [CVATrade("f", surf, "FX_B")], True)])
+    cfg = HistoricalExposureConfig(
+        path_mode="BOOTSTRAP", scheme="IID_RAW", n_paths=500, seed=1,
+        grid_times=(0., 1.), factor_keys=("FX_B",),
+        today_levels={"FX_B": S0 * 1.10}, drift_modes={"FX_B": "ZERO_LOG_MEAN"})
+    with pytest.raises(ValidationError):
+        HistoricalExposureEngine(cal, cfg).compute(cp)
+
+
+def test_engine_rejects_out_of_scope_and_bad_config():
+    cal, S0 = _normal_return_cal()
+    surf = AnalyticValueSurface(lambda S, t, ds: S - 1.0)
+    bad = CVATrade("x", surf, "FX_B", requires_continuous_barrier=True)
+    cp = Counterparty("CP", [NettingSet("ns", [bad], True)])
+    cfg = HistoricalExposureConfig(
+        path_mode="BOOTSTRAP", scheme="BLOCK_FHS", block_length=5, n_paths=100, seed=1,
+        grid_times=(0., 1.), factor_keys=("FX_B",), today_levels={"FX_B": S0},
+        drift_modes={"FX_B": "ZERO_LOG_MEAN"})
+    with pytest.raises(ValidationError):
+        HistoricalExposureEngine(cal, cfg).compute(cp)
+    with pytest.raises(ValidationError):                       # bad scheme -> ValidationError
+        HistoricalExposureConfig(
+            path_mode="BOOTSTRAP", scheme="NOPE", block_length=5, n_paths=100,
+            grid_times=(0., 1.), factor_keys=("FX_B",), today_levels={"FX_B": S0},
+            drift_modes={"FX_B": "ZERO_LOG_MEAN"})
+    with pytest.raises(ValidationError):                       # empty netting set
+        HistoricalExposureEngine(cal, cfg).compute(
+            Counterparty("E", [NettingSet("n", [], True)]))
