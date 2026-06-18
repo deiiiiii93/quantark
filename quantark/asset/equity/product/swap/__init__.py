@@ -20,6 +20,8 @@ from quantark.asset.equity.product.swap.trs_params import (
     PricingParams,
     TRSParams,
 )
+from quantark.asset.equity.product.swap.base_swap import BaseSwap
+from quantark.asset.equity.product.swap.one_asset_trs import OneAssetTotalReturnSwap
 
 __all__ = [
     "SwapState",
@@ -33,4 +35,6 @@ __all__ = [
     "MarginParams",
     "PricingParams",
     "TRSParams",
+    "BaseSwap",
+    "OneAssetTotalReturnSwap",
 ]

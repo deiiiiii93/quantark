@@ -8,6 +8,9 @@ from quantark.asset.equity.engine.cashflow.accrual_calculator import (
     LastMarketValueAccrualCalculator,
     AccrualCalculatorFactory,
 )
+from quantark.asset.equity.engine.cashflow.total_return_swap_engine import (
+    TotalReturnSwapEngine,
+)
 
 __all__ = [
     "AccrualCalculator",
@@ -16,4 +19,5 @@ __all__ = [
     "MarketValueAccrualCalculator",
     "LastMarketValueAccrualCalculator",
     "AccrualCalculatorFactory",
+    "TotalReturnSwapEngine",
 ]
