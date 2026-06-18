@@ -81,6 +81,69 @@ def reprice_trade(surface, spots, state, times, quantity, exposure_idx,
     return out * float(quantity)
 
 
+def reprice_phoenix(surface, spots, state, times, quantity, exposure_idx):
+    """Pathwise Phoenix values, shape (num_paths, len(exposure_idx)).
+
+    Selects the per-(KI, memory) surface slice for each path at each node. The surface
+    keys are tuples ``(label, memory)`` with ``label in {"alive","knocked_in"}``; the
+    memory is the post-resolution missed-coupon count from ``PhoenixStateMachine``. Dead
+    (knocked-out) paths value to 0 — their redemption is a settled cashflow (immediate
+    KO settlement in v1).
+    """
+    spots = np.asarray(spots, dtype=float)
+    if spots.ndim != 2:
+        raise ValidationError("spots must be 2-D (num_paths, n_times)")
+    if not np.all(np.isfinite(spots)):
+        raise ValidationError("spots must be finite")
+    if isinstance(quantity, bool) or not isinstance(quantity, (int, float)) \
+            or not np.isfinite(quantity):
+        raise ValidationError("quantity must be a finite number")
+    times = np.asarray(times, dtype=float)
+    n_paths, n_t = spots.shape
+    if times.shape != (n_t,):
+        raise ValidationError("times length must match spots' time axis")
+    for key in ("alive", "knocked_in", "memory"):
+        if key not in state:
+            raise ValidationError(f"state must contain '{key}'")
+    alive_all = np.asarray(state["alive"])
+    ki_all = np.asarray(state["knocked_in"])
+    mem_all = np.asarray(state["memory"])
+    for nm, arr in (("alive", alive_all), ("knocked_in", ki_all), ("memory", mem_all)):
+        if arr.shape != (n_paths, n_t):
+            raise ValidationError(f"state['{nm}'] must have shape (num_paths, n_times)")
+    if alive_all.dtype != np.bool_ or ki_all.dtype != np.bool_:
+        raise ValidationError("alive/knocked_in must be boolean arrays")
+    if not np.issubdtype(mem_all.dtype, np.integer):
+        raise ValidationError("memory must be an integer array")
+    out = np.zeros((n_paths, len(exposure_idx)), dtype=float)
+    for col, j in enumerate(exposure_idx):
+        if isinstance(j, bool) or not isinstance(j, (int, np.integer)):
+            raise ValidationError("exposure_idx entries must be integers")
+        if j < 0 or j >= n_t:
+            raise ValidationError("exposure_idx out of range")
+        av = alive_all[:, j]
+        if not av.any():
+            continue
+        ki = ki_all[:, j]
+        mem = mem_all[:, j]
+        for label, base_sel in (("alive", av & ~ki), ("knocked_in", av & ki)):
+            if not base_sel.any():
+                continue
+            for m in np.unique(mem[base_sel]):
+                sel = base_sel & (mem == m)
+                if not sel.any():
+                    continue
+                vals = np.asarray(
+                    surface.value_at(spots[sel, j], float(times[j]), (label, int(m))),
+                    dtype=float)
+                if vals.shape != (int(sel.sum()),) or not np.all(np.isfinite(vals)):
+                    raise ValidationError(
+                        "surface.value_at must return a finite 1-D array of the "
+                        "selected path count")
+                out[sel, col] = vals
+    return out * float(quantity)
+
+
 def pending_receivable_exposure(ko_idx, redemption, n_dates,
                                 settlement_idx=None, settlement_offset_steps=None):
     """UNDISCOUNTED receivable exposure, shape (num_paths, n_dates).

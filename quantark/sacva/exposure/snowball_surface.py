@@ -111,11 +111,13 @@ def _validate_ko_leg(records, trade_id, maturity, leg="") -> float:
                 "terminal-payoff settlement tail (no continuation surface past maturity)")
         if rec.payoff is None or not np.isfinite(float(rec.payoff)):
             raise ValidationError(f"{trade_id}: non-finite {leg}KO payoff")
-    levels = {round(float(rec.barrier), 12) for rec in records}
-    if len(levels) != 1:
+    # Exact constancy: compare the RAW configured levels (before non-injective float()
+    # coercion) and raise on any difference — no silent rounding collapse.
+    raw = [rec.barrier for rec in records]
+    if any(b != raw[0] for b in raw):
         raise ValidationError(
             f"{trade_id}: v1 requires a constant {leg}KO barrier across observations")
-    return float(records[0].barrier)
+    return float(raw[0])
 
 
 def _index_ko_leg(records, times: np.ndarray, maturity: float):
@@ -212,11 +214,11 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
             if not ki_records:
                 raise ValidationError(
                     f"{trade.trade_id}: KI barrier set but empty KI schedule")
-            ki_levels = {round(float(r.barrier), 12) for r in ki_records}
-            if len(ki_levels) != 1:
+            ki_raw = [r.barrier for r in ki_records]
+            if any(b != ki_raw[0] for b in ki_raw):
                 raise ValidationError(
                     f"{trade.trade_id}: v1 requires a constant KI barrier")
-            ki_barrier = float(ki_records[0].barrier)
+            ki_barrier = float(ki_raw[0])
     ki_direction = "up" if product.is_reverse else "down"
     # seasoned lifecycle: knocked in before valuation (engine prices from v_in)
     initial_knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))

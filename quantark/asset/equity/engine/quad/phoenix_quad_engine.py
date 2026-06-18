@@ -47,6 +47,17 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         self._validate_product(product)
 
+        # Opt-in per-memory backward-grid capture for the CVA exposure layer. Phoenix
+        # pays coupons WHILE ALIVE, so the exposure value at an observation must be the
+        # EX-coupon continuation: we record the surfaces at the TOP of each step (before
+        # that observation's coupon/KO jump), indexed by the post-resolution memory state
+        # (= the diffused surfaces from the next observation). Stored as
+        # observation_time -> (spot_grid, [v_in_k...], [v_out_k...]). Reset BEFORE any
+        # early return so a terminated bumped re-price cannot leave stale surfaces.
+        record_grids = getattr(self, "record_backward_grids", False)
+        if record_grids:
+            self._backward_grids = {}
+
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
         if is_zero(maturity, tol=Tolerance.ZERO):
@@ -220,6 +231,17 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
+
+            # EX-coupon recording: capture the per-memory continuation surfaces BEFORE
+            # this observation's coupon/KO jump, indexed by post-resolution memory k
+            # (= the value a path carries INTO the next period). A KO'd path is handled
+            # by the state machine (dead -> 0), so these surfaces value only survivors.
+            if record_grids:
+                self._backward_grids[float(obs_time)] = (
+                    spot_grid.copy(),
+                    [arr.copy() for arr in v_in_list],
+                    [arr.copy() for arr in v_out_list],
+                )
 
             # Identify if this time step is a KO/Coupon observation
             ko_weight = None
@@ -442,6 +464,15 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         beta,
                         tau_step,
                     )
+
+        # t0 surfaces (memory 0, no observation at valuation): the exposure grid's
+        # valuation-date slice. v_*_list has only the memory-0 state here.
+        if record_grids:
+            self._backward_grids[0.0] = (
+                spot_grid.copy(),
+                [arr.copy() for arr in v_in_list],
+                [arr.copy() for arr in v_out_list],
+            )
 
         # Final result is value at t=0 with 0 accumulated coupons.
         value_surface = (

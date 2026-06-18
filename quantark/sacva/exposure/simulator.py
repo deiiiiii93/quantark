@@ -30,13 +30,18 @@ from quantark.sacva.exposure.engine import (
 )
 from quantark.sacva.exposure.grid import ExposureGrid
 from quantark.sacva.exposure.paths import StatePathGenerator
-from quantark.sacva.exposure.repricer import reprice_trade
+from quantark.sacva.exposure.phoenix_surface import (
+    PhoenixTerminatedAtValuation,
+    build_phoenix_surface,
+)
+from quantark.sacva.exposure.repricer import reprice_phoenix, reprice_trade
 from quantark.sacva.exposure.snowball_surface import (
     SnowballTerminatedAtValuation,
     build_snowball_surface,
 )
-from quantark.sacva.exposure.statemachine import BarrierStateMachine
+from quantark.sacva.exposure.statemachine import BarrierStateMachine, PhoenixStateMachine
 from quantark.sacva.exposure.value_surface import AnalyticValueSurface
+from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.util.exceptions import ValidationError
 
 # tau below this (in years, ~1 calendar day) is treated as the terminal node and
@@ -82,6 +87,17 @@ class MonteCarloExposureEngine(ExposureEngine):
         if not trades:
             raise ValidationError(f"{counterparty.name}: no trades")
 
+        # Phoenix (memory-coupon) is a distinct 3-D state (spot, KI, memory) and takes
+        # its own path; it must be checked before the snowball two-regime dispatch
+        # (PhoenixQuadEngine subclasses SnowballQuadEngine).
+        phoenix = [t for t in trades if isinstance(t.engine, PhoenixQuadEngine)]
+        if phoenix:
+            if len(phoenix) != 1:
+                raise ValidationError(
+                    f"{counterparty.name}: v1 supports at most one Phoenix trade per "
+                    "counterparty")
+            return self._compute_phoenix(counterparty, trades, phoenix[0])
+
         # stateful (grid) trades take the snowball backward-grid + state-machine path
         stateful = [t for t in trades
                     if getattr(t.engine, "supports_spot_greeks_grid", False)]
@@ -89,6 +105,52 @@ class MonteCarloExposureEngine(ExposureEngine):
             return self._compute_stateful(counterparty, trades, stateful)
 
         return self._compute_grid(counterparty, trades)
+
+    def _compute_phoenix(self, counterparty, trades, phoenix) -> ExposureProfile:
+        """Phoenix exposure: per-(t, KI, memory) surface + PhoenixStateMachine.
+
+        v1 prices a single Phoenix trade per counterparty (co-netting with other trades
+        is deferred — the snowball shared-grid path handles vanilla co-netting). The
+        memory dimension makes the surface 3-D, so the value is selected per path by
+        (KI state, accumulated missed-coupon count).
+        """
+        if len(trades) != 1:
+            raise ValidationError(
+                f"{counterparty.name}: Phoenix exposure v1 supports a single Phoenix "
+                "trade per counterparty (co-netting is deferred)")
+        try:
+            spec = build_phoenix_surface(phoenix)
+        except PhoenixTerminatedAtValuation:
+            return self._compute_grid(counterparty, trades, zero_trades=[phoenix])
+        times = spec.times
+        self._check_market_consistency(trades, times)
+        key = self._underlying_key(phoenix)
+        env = phoenix.env
+        horizon = float(times[-1])
+        paths = StatePathGenerator(
+            keys=[key], spots=[float(env.spot)], vols=[spec.vol],
+            rates=[float(env.get_rate(horizon))], divs=[float(env.get_div_yield(horizon))],
+            corr=[[1.0]], grid_times=times, num_paths=self.config.num_paths,
+            seed=self.config.seed).generate()
+        state = PhoenixStateMachine(
+            coupon_barrier=spec.coupon_barrier, ko_barrier=spec.ko_barrier,
+            direction=spec.direction, obs_idx=spec.obs_idx, num_obs=spec.num_obs,
+            ki_barrier=spec.ki_barrier, ki_direction=spec.ki_direction,
+            ki_monitoring_idx=spec.ki_monitoring_idx, times=times,
+            seed=self.config.seed + 1, continuous=spec.ki_continuous, vol=spec.vol,
+            use_memory=spec.use_memory,
+            initial_knocked_in=spec.initial_knocked_in).run(paths[key])
+        snow_value = reprice_phoenix(
+            spec.surface, paths[key], state, times, float(phoenix.quantity),
+            exposure_idx=list(range(len(times))))
+        df = np.array([float(env.get_discount_factor(float(t))) for t in times])
+        values = {id(phoenix): snow_value}
+        epe = np.zeros(len(times))
+        for ns in counterparty.netting_sets:
+            arrays = [values[id(t)] for t in ns.trades]
+            epe = epe + aggregate_epe(arrays, enforceable=ns.netting_enforceable, df=df)
+        return ExposureProfile(times=times, epe_discounted=epe,
+                               measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
 
     def _compute_grid(self, counterparty, trades, zero_trades=()) -> ExposureProfile:
         """Vanilla (analytic-surface) exposure on a uniform grid over ``trades``.
