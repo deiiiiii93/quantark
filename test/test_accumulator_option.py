@@ -8,7 +8,10 @@ the strike and an upper knock-out barrier.
 
 import pytest
 
-from quantark.asset.equity.product.option import AccumulatorOption
+from quantark.asset.equity.product.option import (
+    AccumulatorOption,
+    ObservationSchedule,
+)
 from quantark.util.enum import (
     AccumulatorKnockOutType,
     ObservationAggregation,
@@ -262,6 +265,64 @@ def test_single_day_schedule_has_zero_rebate_payoff():
         rec.payoff == pytest.approx(0.0)
         for rec in acc.observation_schedule.records
     )
+
+
+# ---------------------------------------------------------------------------
+# Review findings (Gate 1 zenmux, iter 3): rebate scaling + schedule consistency
+# ---------------------------------------------------------------------------
+
+def test_schedule_rebate_consistent_with_get_payoff_under_multiplier():
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            notional=1_000_000.0,
+            contract_multiplier=10.0,
+            knock_out_type=AccumulatorKnockOutType.TERMINATION,
+            knock_out_rebate_rate=0.02,
+        )
+    )
+    # rebate cash = 0.02 * 1e6 * multiplier(10) = 200_000, consistent both ways
+    expected = 200_000.0
+    assert acc.get_payoff(110.0) == pytest.approx(expected)
+    assert all(
+        rec.payoff == pytest.approx(expected)
+        for rec in acc.observation_schedule.records
+    )
+
+
+def test_supplied_schedule_must_match_knock_out_aggregation():
+    stop_first_hit = ObservationSchedule.from_legacy(
+        observation_dates=[0.25, 0.5, 0.75, 1.0],
+        default_barrier=105.0,
+        default_payoff=0.0,
+        aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
+        frequency=ObservationFrequency.CUSTOM,
+    )
+    with pytest.raises(ValidationError, match="aggregation"):
+        AccumulatorOption(
+            **_base_kwargs(
+                observation_dates=None,
+                observation_schedule=stop_first_hit,
+                knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+            )
+        )
+
+
+def test_supplied_schedule_matching_aggregation_accepted():
+    stop_first_hit = ObservationSchedule.from_legacy(
+        observation_dates=[0.25, 0.5, 0.75, 1.0],
+        default_barrier=105.0,
+        default_payoff=0.0,
+        aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
+        frequency=ObservationFrequency.CUSTOM,
+    )
+    acc = AccumulatorOption(
+        **_base_kwargs(
+            observation_dates=None,
+            observation_schedule=stop_first_hit,
+            knock_out_type=AccumulatorKnockOutType.TERMINATION,
+        )
+    )
+    assert acc.get_observation_times()[-1] == pytest.approx(1.0)
 
 
 def test_generated_daily_schedule():

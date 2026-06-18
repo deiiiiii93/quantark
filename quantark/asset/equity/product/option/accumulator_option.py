@@ -251,6 +251,13 @@ class AccumulatorOption(BaseEquityOption):
             return
 
         if self.observation_schedule is not None:
+            if self.observation_schedule.aggregation_mode != self._aggregation_mode():
+                raise ValidationError(
+                    "Supplied observation_schedule aggregation "
+                    f"({self.observation_schedule.aggregation_mode}) is inconsistent "
+                    f"with knock_out_type {self.knock_out_type}; expected "
+                    f"{self._aggregation_mode()}."
+                )
             self._validate_observation_times(self.observation_schedule.times)
             if self.observation_schedule.times:
                 self.observation_dates = self.observation_schedule.times
@@ -263,7 +270,7 @@ class AccumulatorOption(BaseEquityOption):
         self.observation_schedule = ObservationSchedule.from_legacy(
             observation_dates=self.observation_dates,
             default_barrier=self.knock_out_barrier,
-            default_payoff=self.get_knock_out_rebate_cash(),
+            default_payoff=self.get_knock_out_rebate_cash() * self.contract_multiplier,
             aggregation_mode=self._aggregation_mode(),
             frequency=self.observation_frequency,
         )
@@ -287,7 +294,7 @@ class AccumulatorOption(BaseEquityOption):
             raise ValidationError(
                 "Observation dates must be sorted in ascending order."
             )
-        if self.maturity is not None and self.maturity > 0:
+        if self.maturity is not None:
             if any(t > self.maturity for t in times):
                 raise ValidationError(
                     "Observation dates must fall within the option maturity "
