@@ -131,7 +131,9 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             per_contract += leg
 
         per_contract += self._price_rebate_leg(product, pricing_env, times)
-        per_contract += self._price_extra_shares_leg(product, pricing_env, times)
+        per_contract += self._price_extra_shares_leg(
+            product, pricing_env, times, maturity
+        )
 
         value = per_contract * product.contract_multiplier + realized
         return value
@@ -227,6 +229,8 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         """
         if product.observation_type == ObservationType.CONTINUOUS:
             return ObservationType.CONTINUOUS, None
+        if product.observation_type == ObservationType.EXPIRY:
+            return ObservationType.EXPIRY, None
         if len(sub_dates) <= 1:
             return ObservationType.EXPIRY, None
         return ObservationType.DISCRETE, list(sub_dates)
@@ -276,22 +280,24 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         product: AccumulatorOption,
         pricing_env: PricingEnvironment,
         times: List[float],
+        maturity: float,
     ) -> float:
         """Subtract the extra-shares-at-expiry up-and-out put leg, per contract."""
         extra = product.extra_shares_at_expiry
         if extra <= 0.0:
             return 0.0
 
-        # The terminal extra-shares leg follows the same knock-out treatment as a
-        # gain leg maturing at T: expiry-only for SINGLE_DAY (no cumulative
-        # knockout), cumulative discrete monitoring for TERMINATION.
-        obs_type, obs_dates = self._call_leg_monitoring(product, times, times[-1])
+        # The terminal extra-shares leg matures at the contract maturity and
+        # follows the same knock-out treatment as a gain leg maturing at T:
+        # expiry-only for SINGLE_DAY (no cumulative knockout), cumulative discrete
+        # monitoring for TERMINATION.
+        obs_type, obs_dates = self._call_leg_monitoring(product, times, maturity)
         put_leg = BarrierOption(
             strike=product.strike,
             option_type=OptionType.PUT,
             barrier=product.knock_out_barrier,
             barrier_type=BarrierType.UP_OUT,
-            maturity=times[-1],
+            maturity=maturity,
             rebate=0.0,
             participation_rate=1.0,
             pay_at_hit=False,
