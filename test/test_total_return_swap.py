@@ -227,6 +227,49 @@ def test_same_day_int_redemptions_do_not_over_realize(cal):
     assert realized <= 1.0
 
 
+def test_fixed_leg_stops_at_its_own_maturity(cal):
+    # Fixed leg ends 2024-01-19 (Fri); float leg ends 2024-01-31. The fixed leg
+    # must not accrue past its own maturity.
+    asset = AssetParams("T", INITIAL_PRICE, _prices(100.0))
+    fix_leg = FixLegParams(
+        rate=RATE, notional=NOTIONAL, initial_notional=NOTIONAL,
+        start_date=START, end_date="2024-01-19", payment_calendar=cal, direction=-1,
+    )
+    float_leg = FloatLegParams(
+        notional=NOTIONAL, initial_notional=NOTIONAL,
+        start_date=START, end_date=END, payment_calendar=cal, direction=1,
+    )
+    params = TRSParams(
+        contract_id="x", asset=asset, fix_leg=fix_leg, float_leg=float_leg,
+        pricing=PricingParams(valuation_date=VAL, output_mode="full"),
+    )
+    trs = OneAssetTotalReturnSwap(params)
+    schedule = trs.engine.create_notional_schedule(params)
+    fixed = trs.engine.price_fixed_leg(params, schedule)
+    assert max(row["period_start"] for row in fixed) <= "2024-01-19"
+
+
+def test_over_redemption_raises(cal):
+    # Redeeming more than the outstanding notional must fail loudly.
+    events = EventParams(redemption_events=[
+        {"date": "2024-01-15", "redeem_notional": 5000.0, "redeem_price": 100.0,
+         "redeem_fee_rate": 0.0, "redeem_settle_option": ["asset"]},
+    ])
+    with pytest.raises(Exception):
+        _build(cal, _prices(100.0), events=events)
+
+
+def test_multiple_same_day_upfront_fees_accumulate(cal):
+    events = EventParams(upfront_fee_events=[
+        {"date": "2024-01-03", "upfront_fee_rate": 0.001, "upfront_fee_type": "notional"},
+        {"date": "2024-01-03", "upfront_fee_rate": 0.002, "upfront_fee_type": "notional"},
+    ])
+    trs = _build(cal, _prices(100.0), events=events)
+    schedule = {r["date"]: r for r in trs.engine.create_notional_schedule(trs.params)}
+    # notional = initial_price * qty = 100 * 10 = 1000; fees: (0.001+0.002)*1000 = 3.
+    assert schedule["2024-01-03"]["upfront_fee"] == pytest.approx(3.0)
+
+
 def test_non_business_day_redemption_raises(cal):
     # 2024-01-06 is a Saturday; an instantaneous redemption there would be
     # dropped by the working-day merge -> must fail loudly at pricing.

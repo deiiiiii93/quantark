@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from quantark.util.exceptions import MarketDataError, ValidationError
-from quantark.util.numerical import safe_divide
+from quantark.util.numerical import safe_divide, Tolerance
 from quantark.asset.equity.product.swap.trs_params import (
     TRSParams,
     AccrualType,
@@ -108,20 +108,23 @@ class TotalReturnSwapEngine:
             if upfront_fee_events is not None:
                 for fee_event in upfront_fee_events:
                     if pivot_date == fee_event["date"]:
-                        upfront_fee = self._compute_fee(
+                        # Accumulate so multiple same-day fees are all charged.
+                        upfront_fee += self._compute_fee(
                             params, fee_event, "upfront_fee",
                             asset_initial_price, asset_quantity, pivot_date,
                         )
-                        contract_event.append("UPFRONT_FEE")
+                        if "UPFRONT_FEE" not in contract_event:
+                            contract_event.append("UPFRONT_FEE")
 
             if unwind_fee_events is not None:
                 for fee_event in unwind_fee_events:
                     if pivot_date == fee_event["date"]:
-                        unwind_fee = self._compute_fee(
+                        unwind_fee += self._compute_fee(
                             params, fee_event, "unwind_fee",
                             asset_initial_price, asset_quantity, pivot_date,
                         )
-                        contract_event.append("UNWIND_FEE")
+                        if "UNWIND_FEE" not in contract_event:
+                            contract_event.append("UNWIND_FEE")
 
             if cash_div_events is not None:
                 for div_event in cash_div_events:
@@ -183,6 +186,11 @@ class TotalReturnSwapEngine:
                     this_price = redm_event.get("redeem_price")
                     this_fee_rate = redm_event.get("redeem_fee_rate")
                     settle_option = redm_event.get("redeem_settle_option")
+                    if this_notional - fix_notional > Tolerance.ZERO:
+                        raise ValidationError(
+                            f"redemption notional {this_notional} on {pivot_date} "
+                            f"exceeds the outstanding notional {fix_notional}"
+                        )
                     this_quantity = safe_divide(this_notional, asset_initial_price)
                     this_ratio = redm_event.get(
                         "redeem_ratio", safe_divide(this_quantity, asset_quantity)
@@ -308,21 +316,21 @@ class TotalReturnSwapEngine:
                     )
 
     @staticmethod
-    def _effective_valuation_date(params: TRSParams) -> str:
-        """Cap the valuation date at contract maturity.
+    def _effective_valuation_date(params: TRSParams, leg_end_date: str) -> str:
+        """Cap the valuation date at a leg's maturity.
 
         The notional schedule is only built through the contract end date, so a
-        valuation date past maturity (a matured contract) must not extend the leg
-        pricing range beyond it.
+        valuation date past a leg's maturity must not extend that leg's pricing
+        range beyond its own end (otherwise interest would accrue past maturity
+        when the two legs have different end dates).
         """
-        contract_end_date = max(params.fix_leg.end_date, params.float_leg.end_date)
-        return min(params.pricing.valuation_date, contract_end_date)
+        return min(params.pricing.valuation_date, leg_end_date)
 
     def price_fixed_leg(
         self, params: TRSParams, notional_schedule: Optional[List[Dict]] = None
     ) -> List[Dict]:
         """Compute the fixed (financing) leg accrual schedule."""
-        effective_val = self._effective_valuation_date(params)
+        effective_val = self._effective_valuation_date(params, params.fix_leg.end_date)
         if params.fix_leg.accrual_type == AccrualType.LAST_MARKET_VALUE:
             range_start = params.fix_leg.payment_calendar.get_next_trading_date(
                 params.fix_leg.start_date, n=-1, only_holidays=False
@@ -445,7 +453,9 @@ class TotalReturnSwapEngine:
         self, params: TRSParams, notional_schedule: Optional[List[Dict]] = None
     ) -> List[Dict]:
         """Compute the floating (total-return) leg mark-to-market schedule."""
-        effective_val = self._effective_valuation_date(params)
+        effective_val = self._effective_valuation_date(
+            params, params.float_leg.end_date
+        )
         if params.fix_leg.accrual_type == AccrualType.LAST_MARKET_VALUE:
             range_start = params.float_leg.payment_calendar.get_next_trading_date(
                 params.float_leg.start_date, n=-1, only_holidays=False

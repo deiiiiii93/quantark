@@ -94,6 +94,8 @@ class OneAssetTotalReturnSwapDualCcy(OneAssetTotalReturnSwap):
         fx = pd.to_numeric(df[fx_col], errors="coerce")
         for base in ("present_value", "outstanding_margin", "margin_mtm"):
             values = pd.to_numeric(df[base], errors="coerce")
-            df[f"{base}_{self.settle_ccy}"] = (values * fx).round(precision)
+            df[f"{base}_{self.settle_ccy}"] = values * fx
 
-        return df
+        # Round the full frame (base asset-currency and converted columns) to the
+        # caller's requested precision; non-numeric columns are left untouched.
+        return df.round(precision)

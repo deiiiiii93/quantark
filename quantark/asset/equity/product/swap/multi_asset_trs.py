@@ -109,7 +109,7 @@ class MultiAssetTRS:
                     else 0
                 ),
                 margin_events=self._filter_margin_events_for_asset(
-                    params.margin.margin_events, asset.asset_id
+                    params.margin.margin_events, asset.asset_id, weight
                 ),
                 settle_type=params.margin.settle_type,
             )
@@ -153,11 +153,20 @@ class MultiAssetTRS:
 
     @staticmethod
     def _filter_margin_events_for_asset(
-        margin_events: List[Dict], asset_id: str
+        margin_events: List[Dict], asset_id: str, weight: float
     ) -> List[Dict]:
         if not margin_events:
             return []
-        return [e for e in margin_events if e.get("asset_id") == asset_id]
+        result: List[Dict] = []
+        for event in margin_events:
+            if event.get("asset_id") == asset_id:
+                result.append(event)
+            elif event.get("asset_id") is None:
+                # Contract-level event: allocate the amount by notional weight.
+                allocated = dict(event)
+                allocated["amount"] = event.get("amount", 0) * weight
+                result.append(allocated)
+        return result
 
     def _create_merged_margin_account(self) -> Dict:
         initial_margin = sum(
