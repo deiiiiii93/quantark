@@ -113,7 +113,8 @@ def build_portfolio():
 def main():
     portfolio = build_portfolio()
     engine = SACVAEngine(exposure_engine=MonteCarloExposureEngine(
-        MonteCarloExposureConfig(num_paths=20000, n_steps=24, seed=2026)))
+        MonteCarloExposureConfig(num_paths=20000, n_steps=24, seed=2026)),
+        include_ir_delta=False)  # flat-curve demo portfolio: IR delta omitted
     result = engine.compute(portfolio)
 
     print("=" * 64)

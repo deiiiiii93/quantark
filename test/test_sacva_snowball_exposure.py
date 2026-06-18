@@ -200,8 +200,8 @@ def test_snowball_end_to_end_capital():
 
     trade = _snowball_trade(quantity=100.0)
     portfolio = CVATradePortfolio(counterparties=[_counterparty([trade])], hedges=[])
-    result = SACVAEngine(exposure_engine=_Eng(_Cfg(num_paths=12000, seed=9))).compute(
-        portfolio)
+    result = SACVAEngine(exposure_engine=_Eng(_Cfg(num_paths=12000, seed=9)),
+                         include_ir_delta=False).compute(portfolio)
     assert result.total_capital > 0.0
     assert result.delta_capital > 0.0
     assert result.counterparty_cva["CP"] > 0.0

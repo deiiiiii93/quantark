@@ -61,8 +61,10 @@ def _curve():
 
 
 def _engine(seed=11):
+    # flat-curve fixtures: IR delta intentionally omitted (tests equity/FX/hedge factors)
     return SACVAEngine(exposure_engine=MonteCarloExposureEngine(
-        MonteCarloExposureConfig(num_paths=8000, n_steps=12, seed=seed)))
+        MonteCarloExposureConfig(num_paths=8000, n_steps=12, seed=seed)),
+        include_ir_delta=False)
 
 
 def test_fx_market_sensitivities_produced():

@@ -14,6 +14,8 @@ from dataclasses import replace
 from datetime import timedelta
 
 from quantark.param import SpotQuote
+from quantark.param.rrf.rate_curve import InterpolatedRateCurve
+from quantark.sacva.exposure.curves import ForwardRateCurve
 from quantark.util.calendar import DayCountConvention
 from quantark.util.exceptions import ValidationError
 
@@ -39,4 +41,11 @@ def equity_asof_env(base_env, spot, t):
     new_val = base_env.valuation_date + timedelta(days=days)
     new_spot = SpotQuote(spot=float(spot),
                          asset_name=getattr(base_env.spot_quote, "asset_name", None))
-    return replace(base_env, valuation_date=new_val, spot_quote=new_spot)
+    out = replace(base_env, valuation_date=new_val, spot_quote=new_spot)
+    # For a term-structure curve, the env at a future date must see the FORWARD curve
+    # (curve from t onward), not the original curve re-anchored to the new date. Flat
+    # curves are unaffected (their forward equals themselves), so only wrap term curves.
+    curve = getattr(base_env, "rate_curve", None)
+    if isinstance(curve, InterpolatedRateCurve):
+        out = replace(out, rate_curve=ForwardRateCurve(curve, float(t)))
+    return out

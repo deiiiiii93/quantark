@@ -65,7 +65,8 @@ def _counterparty(equity_bucket=None):
 def test_portfolio_to_capital_end_to_end():
     portfolio = CVATradePortfolio(counterparties=[_counterparty()], hedges=[])
     eng = SACVAEngine(exposure_engine=MonteCarloExposureEngine(
-        MonteCarloExposureConfig(num_paths=8000, n_steps=20, seed=11)))
+        MonteCarloExposureConfig(num_paths=8000, n_steps=20, seed=11)),
+        include_ir_delta=False)  # flat-curve portfolio: IR delta intentionally omitted
     result = eng.compute(portfolio)
 
     assert result.total_capital > 0.0
@@ -79,7 +80,8 @@ def test_equity_market_sensitivities_produced():
     portfolio = CVATradePortfolio(counterparties=[_counterparty(equity_bucket=5)],
                                   hedges=[])
     eng = SACVAEngine(exposure_engine=MonteCarloExposureEngine(
-        MonteCarloExposureConfig(num_paths=8000, n_steps=12, seed=21)))
+        MonteCarloExposureConfig(num_paths=8000, n_steps=12, seed=21)),
+        include_ir_delta=False)  # flat-curve portfolio: IR delta intentionally omitted
     result = eng.compute(portfolio)
     # long call CVA rises with both spot and vol -> positive equity delta + vega capital
     assert result.delta_capital > 0.0
@@ -99,8 +101,8 @@ def test_market_sensitivities_all_or_none():
                       CreditQuality.IG)
     with pytest.raises(ValidationError):
         SACVAEngine(exposure_engine=MonteCarloExposureEngine(
-            MonteCarloExposureConfig(num_paths=2000, n_steps=4))).compute(
-            CVATradePortfolio([cp], []))
+            MonteCarloExposureConfig(num_paths=2000, n_steps=4)),
+            include_ir_delta=False).compute(CVATradePortfolio([cp], []))
 
 
 def test_credit_spread_deltas_localise_to_trade_maturity():

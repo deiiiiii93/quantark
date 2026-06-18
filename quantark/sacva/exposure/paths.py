@@ -31,6 +31,12 @@ class StatePathGenerator:
     grid_times: object
     num_paths: int = 10000
     seed: int = 12345
+    # Term-structure mode (#3): per-(asset, step) forward rates/divs. When provided, the
+    # drift over [t_j, t_{j+1}] is the exact integrated forward (rate - div), so the spot
+    # distribution at every node matches a deterministic term-structure curve — required
+    # for exact IR delta. ``rates``/``divs`` (the flat-drift path) are ignored then.
+    step_rates: object = None      # shape (n_assets, n_steps) or None
+    step_divs: object = None       # shape (n_assets, n_steps) or None
 
     def __post_init__(self) -> None:
         self.grid_times = np.asarray(self.grid_times, dtype=float)
@@ -64,12 +70,27 @@ class StatePathGenerator:
             raise ValidationError("grid_times must be finite")
         if self.grid_times[0] != 0.0:
             raise ValidationError("grid_times must start at 0.0")
+        self._term = self.step_rates is not None or self.step_divs is not None
+        if self._term:
+            n_steps = self.grid_times.size - 1
+            for nm, arr in (("step_rates", self.step_rates), ("step_divs", self.step_divs)):
+                if arr is None:
+                    raise ValidationError(
+                        "term-structure mode requires both step_rates and step_divs")
+                a = np.asarray(arr, dtype=float)
+                if a.shape != (n, n_steps):
+                    raise ValidationError(
+                        f"{nm} shape {a.shape} != (n_assets={n}, n_steps={n_steps})")
+                if not np.all(np.isfinite(a)):
+                    raise ValidationError(f"{nm} must be finite")
 
     def generate(self):
         t = self.grid_times
         dt = np.diff(t)
         if np.any(dt <= 0):
             raise ValidationError("grid_times must be strictly increasing")
+        if self._term:
+            return self._generate_term_structure(dt)
         gen = MultiAssetGBMPathGenerator(
             initial_values=np.asarray(self.spots, dtype=float),
             vols=np.asarray(self.vols, dtype=float),
@@ -88,3 +109,33 @@ class StatePathGenerator:
             raise ValidationError(
                 f"unexpected path shape {paths.shape}; expected {expected}")
         return {k: paths[i] for i, k in enumerate(self.keys)}
+
+    def _generate_term_structure(self, dt):
+        """Exact deterministic-term-structure GBM: per-step drift = forward(rate-div).
+
+        S_{j+1} = S_j * exp((f_r[a,j] - f_q[a,j] - 0.5 vol_a^2) dt_j + vol_a sqrt(dt_j) Z),
+        with Z correlated across assets via the Cholesky factor. Pseudo-random normals are
+        seeded deterministically (common random numbers across base/bumped re-runs).
+        """
+        n = len(self.keys)
+        n_steps = dt.shape[0]
+        vols = np.asarray(self.vols, dtype=float)              # (n,)
+        spots = np.asarray(self.spots, dtype=float)            # (n,)
+        sr = np.asarray(self.step_rates, dtype=float)          # (n, n_steps)
+        sd = np.asarray(self.step_divs, dtype=float)           # (n, n_steps)
+        chol = np.asarray(
+            CorrelationModel(keys=list(self.keys), matrix=self.corr).cholesky(), float)
+        rng = np.random.default_rng(self.seed)
+        z = rng.standard_normal((self.num_paths, n_steps, n))  # (p, step, asset)
+        zc = z @ chol.T                                        # correlate across assets
+        drift = (sr - sd).T - 0.5 * (vols ** 2)[None, :]       # (n_steps, n)
+        log_inc = drift * dt[:, None] + zc * (vols[None, None, :]
+                                              * np.sqrt(dt)[None, :, None])
+        log_cum = np.cumsum(log_inc, axis=1)                   # (p, step, n)
+        out = {}
+        for a, k in enumerate(self.keys):
+            path = np.empty((self.num_paths, n_steps + 1), dtype=float)
+            path[:, 0] = spots[a]
+            path[:, 1:] = spots[a] * np.exp(log_cum[:, :, a])
+            out[k] = path
+        return out

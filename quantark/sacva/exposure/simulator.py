@@ -42,6 +42,7 @@ from quantark.sacva.exposure.snowball_surface import (
 from quantark.sacva.exposure.statemachine import BarrierStateMachine, PhoenixStateMachine
 from quantark.sacva.exposure.value_surface import AnalyticValueSurface
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+from quantark.param.rrf.rate_curve import InterpolatedRateCurve
 from quantark.util.exceptions import ValidationError
 
 # tau below this (in years, ~1 calendar day) is treated as the terminal node and
@@ -192,9 +193,16 @@ class MonteCarloExposureEngine(ExposureEngine):
                                   event_times=[])
         times = grid.times
         self._check_market_consistency(priced, times)
+        # Term-structure-consistent drift: when any underlying's discount curve is a term
+        # structure (InterpolatedRateCurve), the per-step drift is the exact integrated
+        # forward (rate-div) so the spot distribution at every node is exact (required for
+        # IR delta). Flat curves keep the scalar-drift path (byte-identical), so existing
+        # flat-curve exposure is unchanged.
+        step_rates, step_divs = self._step_forwards(keys, market_env, times)
         gen = StatePathGenerator(keys=keys, spots=spots, vols=vols, rates=rates,
                                  divs=divs, corr=corr, grid_times=times,
-                                 num_paths=self.config.num_paths, seed=self.config.seed)
+                                 num_paths=self.config.num_paths, seed=self.config.seed,
+                                 step_rates=step_rates, step_divs=step_divs)
         paths = gen.generate()
 
         # discount factors on the reporting curve (single currency v1)
@@ -247,6 +255,40 @@ class MonteCarloExposureEngine(ExposureEngine):
                         "ambiguous")
             else:
                 by_key[k] = market
+
+    def _step_forwards(self, keys, market_env, times):
+        """Per-(asset, step) forward rate/div for term-structure drift, or (None, None).
+
+        Activated only when some underlying carries an InterpolatedRateCurve discount
+        curve. The integrated rate R(t)=-ln DF(t) and integrated dividend Q(t)=q(t)*t are
+        differenced over each step: forward = (X(t_{j+1})-X(t_j))/dt_j. For a flat curve
+        this reproduces the constant rate, so flat-only portfolios are left on the scalar
+        path (returns None) and are byte-identical to before.
+        """
+        term = any(isinstance(getattr(market_env[k], "rate_curve", None),
+                              InterpolatedRateCurve) for k in keys)
+        if not term:
+            return None, None
+        dt = np.diff(np.asarray(times, dtype=float))
+        step_rates, step_divs = [], []
+        for k in keys:
+            e = market_env[k]
+            df = np.array([float(e.get_discount_factor(float(t))) for t in times])
+            if np.any(df <= 0):
+                raise ValidationError(f"non-positive discount factor on underlying {k}")
+            step_rates.append(np.diff(-np.log(df)) / dt)
+            # The as-of repricer rolls only the RATE curve forward (ForwardRateCurve), so a
+            # non-flat dividend would make the simulated drift and the node repricing
+            # inconsistent. Require an EXACTLY flat dividend (raise, not approximate): check
+            # the SOURCE yields for exact equality rather than approximate-comparing
+            # computed forwards. The forward-dividend roll-down is a deferred extension.
+            qs = [float(e.get_div_yield(float(t))) for t in times if float(t) > 0.0]
+            if any(q != qs[0] for q in qs):
+                raise ValidationError(
+                    f"term-structure exposure requires a flat dividend on underlying {k}; "
+                    "a term-structure dividend roll-down is not supported")
+            step_divs.append(np.full(dt.shape[0], qs[0]))
+        return np.asarray(step_rates), np.asarray(step_divs)
 
     def _corr_matrix(self, keys):
         """Principal correlation submatrix for ``keys`` (identity for one factor).
