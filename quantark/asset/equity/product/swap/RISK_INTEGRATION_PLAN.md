@@ -52,8 +52,18 @@ changes to those engines — the impedance mismatch is absorbed in one place.
 ## Status
 - [x] Gate 1 (review clean, 1 iter)
 - [x] Gate 2 (review 3 iters; 1 known limitation below)
-- [ ] Gate 3  - [ ] Gate 4
-- [ ] Gate 5  - [ ] Gate 6  - [ ] Gate 7
+- [x] Gate 3 (no engine changes — stress + dynamic are already duck-typed)
+- [ ] Gate 4  - [ ] Gate 5  - [ ] Gate 6  - [ ] Gate 7
+
+### Gate 3 note
+The `EquityStressEngine`, `StressApplicator`, and `DynamicScenarioEngine` are
+already position-agnostic (they bump pricing environments and value through the
+`BasePosition` interface). A swap drops in with no engine changes; the
+dynamic-scenario `LifecycleManager` tracks only autocallable/barrier options and
+silently skips a TRS (marked to market each day against that day's spot). A swap
+marks against its fixed contractual valuation date with the day's spot
+substituted — capturing the delta-one PnL evolution; intra-path financing carry
+is not advanced (consistent with the mark-at-valuation-date semantics).
 
 ## Known limitations
 - **Parametric component / incremental / marginal VaR attribution is spot-delta
