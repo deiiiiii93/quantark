@@ -12,6 +12,7 @@ from .barrier_option_mc_engine import BarrierOptionMCEngine
 from .single_sharkfin_option_mc_engine import SingleSharkfinOptionMCEngine
 from .double_sharkfin_option_mc_engine import DoubleSharkfinOptionMCEngine
 from .range_accrual_mc_engine import RangeAccrualMCEngine, RangeAccrualMCResult
+from .accumulator_mc_engine import AccumulatorMCEngine
 
 __all__ = [
     "EuropeanMCEngine",
@@ -28,4 +29,5 @@ __all__ = [
     "DoubleSharkfinOptionMCEngine",
     "RangeAccrualMCEngine",
     "RangeAccrualMCResult",
+    "AccumulatorMCEngine",
 ]
