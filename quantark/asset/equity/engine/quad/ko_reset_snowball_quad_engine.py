@@ -58,6 +58,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         self._validate_product(product)
 
+        # Opt-in backward-grid capture for the CVA exposure layer (see SnowballQuadEngine).
+        # Reset BEFORE any early return so a terminated bumped re-price cannot leave a
+        # previous trade's surfaces behind for the exposure layer to read as if live.
+        record_grids = getattr(self, "record_backward_grids", False)
+        if record_grids:
+            self._backward_grids = {}
+
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
         validate_positive(spot, "spot")
@@ -115,6 +122,12 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         )
         if not times:
             raise PricingError("Observation time grid is empty for KOResetSnowballQuadEngine.")
+
+        # When recording for CVA exposure, diffuse through (and record at) delayed KO
+        # settlement times from BOTH the pre-KI and post-KI schedules (no-event nodes).
+        if record_grids:
+            times = self._insert_settlement_times(
+                times, list(pre_ko_records) + list(post_ko_records), maturity)
 
         align_log = self._select_alignment_log(spot, product)
         fft_padding_factor = self._resolve_fft_padding_factor()
@@ -239,6 +252,12 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     )
                     v_out[ki_mask] = v_in[ki_mask]
 
+            # Post-event continuation surfaces at obs_time (v_out = pre-KI/not-yet-KI,
+            # v_in = post-KI/knocked-in), before diffusing back to the previous step.
+            if record_grids:
+                self._backward_grids[float(obs_time)] = (
+                    spot_grid.copy(), v_in.copy(), v_out.copy())
+
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(
@@ -289,6 +308,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     beta,
                     tau_step,
                 )
+
+        if record_grids:
+            self._backward_grids[0.0] = (spot_grid.copy(), v_in.copy(), v_out.copy())
 
         self._last_spot_greeks_grid = (spot_grid.copy(), v_out.copy())
         return math_utils.interpolate(v_out, x=0.0)

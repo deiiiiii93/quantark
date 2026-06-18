@@ -24,6 +24,13 @@ class BarrierStateMachine:
     monitoring_idx: List[int] = field(default_factory=list)
     ki_monitoring_idx: Optional[List[int]] = None
     ko_monitoring_idx: Optional[List[int]] = None
+    # KO-reset: a knocked-in path follows a DIFFERENT (post-KI) KO barrier/schedule.
+    # When post_ko_barrier is None the trade is a plain snowball and the single KO
+    # (ko_barrier/ko_monitoring_idx) applies to every alive path regardless of KI.
+    # When set, the pre-KI barrier applies only to not-yet-KI paths and the post-KI
+    # barrier only to knocked-in paths (mirrors the engine's v_out/v_in KO split).
+    post_ko_barrier: Optional[float] = None
+    post_ko_monitoring_idx: Optional[List[int]] = None
     times: object = None
     seed: int = 999
     continuous: bool = False
@@ -38,9 +45,14 @@ class BarrierStateMachine:
             raise ValidationError("ko_direction must be 'up'/'down'")
         if self.continuous_ko:
             raise ValidationError("continuous KO is deferred in v1 (needs crossing time)")
-        for name, b in (("ki_barrier", self.ki_barrier), ("ko_barrier", self.ko_barrier)):
+        for name, b in (("ki_barrier", self.ki_barrier), ("ko_barrier", self.ko_barrier),
+                        ("post_ko_barrier", self.post_ko_barrier)):
             if b is not None and not (np.isfinite(b) and b > 0):
                 raise ValidationError(f"{name} must be a positive finite level")
+        if self.post_ko_barrier is not None and self.ki_barrier is None:
+            raise ValidationError(
+                "post_ko_barrier (KO reset) requires a ki_barrier: the reset is "
+                "triggered by knock-in")
         if not (np.isfinite(self.vol) and self.vol >= 0):
             raise ValidationError("vol must be non-negative and finite")
         if self.continuous and self.vol <= 0:
@@ -61,11 +73,16 @@ class BarrierStateMachine:
                         else self.monitoring_idx)
         self._ko_idx = (self.ko_monitoring_idx if self.ko_monitoring_idx is not None
                         else self.monitoring_idx)
+        self._post_ko_idx = (self.post_ko_monitoring_idx
+                             if self.post_ko_monitoring_idx is not None else [])
         # a set barrier with an empty schedule would be silently never monitored
         if self.ki_barrier is not None and len(self._ki_idx) == 0:
             raise ValidationError("ki_barrier set but its monitoring schedule is empty")
         if self.ko_barrier is not None and len(self._ko_idx) == 0:
             raise ValidationError("ko_barrier set but its monitoring schedule is empty")
+        if self.post_ko_barrier is not None and len(self._post_ko_idx) == 0:
+            raise ValidationError(
+                "post_ko_barrier set but its monitoring schedule is empty")
 
     def run(self, spots: np.ndarray) -> dict:
         spots = np.asarray(spots, dtype=float)
@@ -78,7 +95,8 @@ class BarrierStateMachine:
         n_paths, n_t = spots.shape
         if self.times.shape != (n_t,):
             raise ValidationError("times length must match spots' time axis")
-        for nm, idx in (("ki", self._ki_idx), ("ko", self._ko_idx)):
+        for nm, idx in (("ki", self._ki_idx), ("ko", self._ko_idx),
+                        ("post_ko", self._post_ko_idx)):
             for j in idx:
                 if isinstance(j, bool) or not isinstance(j, (int, np.integer)):
                     raise ValidationError(f"{nm}_monitoring_idx entries must be integers")
@@ -101,7 +119,15 @@ class BarrierStateMachine:
         # node select v_in even if the spot has since recovered above the barrier.
         ki = np.full(n_paths, self.initial_knocked_in, dtype=bool)
         dead = np.zeros(n_paths, dtype=bool)
+        # ko_post[p] records whether path p knocked out under the POST-KI (reset)
+        # barrier (vs the pre-KI barrier), so the receivable can pick the right payoff.
+        ko_post = np.zeros(n_paths, dtype=bool)
+        post_active = self.post_ko_barrier is not None
+        post_ko_set = set(self._post_ko_idx)
         for j in range(n_t):
+            # KI is resolved FIRST so a path that knocks in at this node already uses
+            # the post-KI (reset) KO barrier here, matching the engine's v_out<-v_in
+            # copy that happens after the per-surface KO at the same observation.
             if self.ki_barrier is not None and j in ki_set:
                 hit = ((spots[:, j] <= self.ki_barrier) if self.ki_direction == "down"
                        else (spots[:, j] >= self.ki_barrier))
@@ -115,12 +141,26 @@ class BarrierStateMachine:
             if self.ko_barrier is not None and j in self._ko_idx:
                 hit = ((spots[:, j] >= self.ko_barrier) if self.ko_direction == "up"
                        else (spots[:, j] <= self.ko_barrier))
+                # pre-KI barrier applies to NOT-yet-KI paths when a reset is configured;
+                # to ALL alive paths for a plain snowball (post_ko_barrier is None).
+                if post_active:
+                    hit = hit & ~ki
                 newly = hit & ~dead
                 ko_idx[newly] = j
                 dead = dead | hit
+            if post_active and j in post_ko_set:
+                hit = ((spots[:, j] >= self.post_ko_barrier)
+                       if self.ko_direction == "up"
+                       else (spots[:, j] <= self.post_ko_barrier))
+                hit = hit & ki                 # post-KI barrier applies to KI'd paths
+                newly = hit & ~dead
+                ko_idx[newly] = j
+                ko_post[newly] = True
+                dead = dead | hit
             knocked_in[:, j] = ki
             alive[:, j] = ~dead
-        return {"knocked_in": knocked_in, "alive": alive, "ko_idx": ko_idx}
+        return {"knocked_in": knocked_in, "alive": alive, "ko_idx": ko_idx,
+                "ko_post": ko_post}
 
     def _bridge_cross(self, s0, s1, barrier, dt, direction, rng):
         # First-passage probability for a step whose BOTH endpoints are strictly

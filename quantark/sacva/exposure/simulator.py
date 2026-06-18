@@ -298,6 +298,9 @@ class MonteCarloExposureEngine(ExposureEngine):
             ko_barrier=spec.ko_barrier, ko_direction=spec.ko_direction,
             ki_monitoring_idx=spec.ki_monitoring_idx,
             ko_monitoring_idx=spec.ko_monitoring_idx,
+            post_ko_barrier=spec.post_ko_barrier,
+            post_ko_monitoring_idx=(spec.post_ko_monitoring_idx
+                                    if spec.post_ko_barrier is not None else None),
             times=times, seed=self.config.seed + 1,
             continuous=spec.ki_continuous, vol=spec.vol,
             initial_knocked_in=spec.initial_knocked_in).run(paths[snow_key])
@@ -313,8 +316,19 @@ class MonteCarloExposureEngine(ExposureEngine):
         # until settlement, so carry payoff*DF(t_j, settle) on [obs, settle) as a
         # deterministic receivable (df[j] from the aggregator then yields the constant
         # t0 value payoff*DF(0, settle)). Immediate settlement (settle==obs) adds nothing.
-        snow_value = snow_value + float(snow.quantity) * self._ko_receivable(
-            spec, snow_state["ko_idx"], df)
+        # KO-reset: a path that knocked out under the post-KI barrier (ko_post) uses the
+        # post-leg payoff/settlement; otherwise the pre-leg.
+        ko_idx = snow_state["ko_idx"]
+        ko_post = snow_state.get("ko_post")
+        pre_mask = ~ko_post if ko_post is not None else None
+        recv = self._ko_receivable(
+            ko_idx, df, spec.ko_monitoring_idx, spec.ko_payoffs, spec.ko_settle_idx,
+            regime_mask=pre_mask)
+        if spec.post_ko_barrier is not None:
+            recv = recv + self._ko_receivable(
+                ko_idx, df, spec.post_ko_monitoring_idx, spec.post_ko_payoffs,
+                spec.post_ko_settle_idx, regime_mask=ko_post)
+        snow_value = snow_value + float(snow.quantity) * recv
         values = {id(snow): snow_value}
         for t in trades:
             if t is snow:
@@ -328,8 +342,9 @@ class MonteCarloExposureEngine(ExposureEngine):
         return ExposureProfile(times=times, epe_discounted=epe,
                                measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
 
-    def _ko_receivable(self, spec, ko_idx, df):
-        """Pending-receivable exposure for delayed-settlement KO, shape (n_paths, n_t).
+    def _ko_receivable(self, ko_idx, df, monitoring_idx, payoffs, settle_idx,
+                       regime_mask=None):
+        """Pending-receivable exposure for one delayed-settlement KO leg, (n_paths, n_t).
 
         A path that knocks out at observation grid index ``obs`` with settlement at grid
         index ``settle > obs`` is owed ``payoff`` until settlement; its time-t_j value is
@@ -337,14 +352,16 @@ class MonteCarloExposureEngine(ExposureEngine):
         The value is left UNDISCOUNTED-to-t0 (aggregator convention): the aggregator's
         ``df[j]`` collapses it to the constant t0 value ``payoff*df[settle]``. Immediate
         settlement (``settle == obs``) contributes nothing — the redemption is paid at KO.
+
+        ``regime_mask`` (KO-reset) restricts the leg to paths that knocked out under its
+        regime (pre-KI vs post-KI), so a node KO'd under the other regime is not paid here.
         """
         ko_idx = np.asarray(ko_idx)
         n_t = df.shape[0]
         if np.any(df <= 0.0):  # df divides below; a non-positive curve point is invalid
             raise ValidationError("discount factors must be positive for KO receivable")
         out = np.zeros((ko_idx.shape[0], n_t), dtype=float)
-        for obs, payoff, settle in zip(
-                spec.ko_monitoring_idx, spec.ko_payoffs, spec.ko_settle_idx):
+        for obs, payoff, settle in zip(monitoring_idx, payoffs, settle_idx):
             if not (0 <= obs < n_t) or not (0 <= settle < n_t):
                 raise ValidationError(
                     f"KO receivable obs/settle index out of range (obs={obs}, "
@@ -352,6 +369,8 @@ class MonteCarloExposureEngine(ExposureEngine):
             if settle <= obs:
                 continue
             sel = ko_idx == obs
+            if regime_mask is not None:
+                sel = sel & regime_mask
             if not sel.any():
                 continue
             for j in range(obs, settle):
