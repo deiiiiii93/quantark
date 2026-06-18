@@ -108,3 +108,51 @@ def test_dual_ccy_invalid_obs_type_raises(cal):
         OneAssetTotalReturnSwapDualCcy(
             params, asset_ccy="CNY", settle_ccy="HKD", fx_rate_obs_type="bogus",
         )
+
+
+def test_dual_ccy_zero_fixed_fx_rejected(cal):
+    # A cross-currency fixed trade must not accept a zero FX rate (divide by zero).
+    params = _base_params(cal, _prices(110.0))
+    with pytest.raises(Exception):
+        OneAssetTotalReturnSwapDualCcy(
+            params, asset_ccy="CNY", settle_ccy="HKD",
+            fx_rate_obs_type="fixed", fx_rate=0.0,
+        )
+
+
+def test_dual_ccy_observed_fx_uses_valuation_date_for_spot(cal):
+    params = _base_params(cal, _prices(110.0))  # spot output mode
+    records = {VAL: 0.95}
+    trs = OneAssetTotalReturnSwapDualCcy(
+        params, asset_ccy="CNY", settle_ccy="HKD",
+        fx_rate_obs_type="close", fx_rate_obs_records=records,
+    )
+    df = trs.price()
+    row = df.iloc[-1]
+    assert float(row["fx_rate_HKD/CNY"]) == pytest.approx(0.95)
+    assert float(row["present_value_HKD"]) == pytest.approx(
+        float(row["present_value"]) / 0.95, abs=0.01
+    )
+
+
+def test_multi_asset_full_mode_has_no_blank_period_end_rows(cal):
+    asset = AssetParams("A", 100.0, _prices(110.0))
+    fix_leg = FixLegParams(
+        rate=0.05, notional=1000, initial_notional=1000,
+        start_date=START, end_date=END, payment_calendar=cal, direction=-1,
+    )
+    float_leg = FloatLegParams(
+        notional=1000, initial_notional=1000,
+        start_date=START, end_date=END, payment_calendar=cal, direction=1,
+    )
+    full_params = TRSParams(
+        contract_id="C", asset=asset, fix_leg=fix_leg, float_leg=float_leg,
+        pricing=PricingParams(valuation_date=VAL, output_mode="full"),
+    )
+    assets = [MultiAssetInfo("A1", 100.0, _prices(110.0), notional=1000)]
+    df = MultiAssetTRS(full_params, assets).price()
+    # Every row must carry the single asset's present value (no blank rows from
+    # period-end-only index entries).
+    pv_col = "present_value_A1"
+    assert pv_col in df.columns
+    assert (df[pv_col] != "-").all()

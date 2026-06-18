@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 import pandas as pd
 
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import MarketDataError, ValidationError
 from quantark.asset.equity.product.swap.trs_params import TRSParams
 from quantark.asset.equity.product.swap.one_asset_trs import OneAssetTotalReturnSwap
 
@@ -42,11 +42,33 @@ class OneAssetTotalReturnSwapDualCcy(OneAssetTotalReturnSwap):
         self.fx_rate = 1 if asset_ccy == settle_ccy else fx_rate
         self.fx_rate_obs_records = fx_rate_obs_records
 
-        if self.fx_rate_obs_type != "fixed" and self.fx_rate_obs_records is None:
+        cross_currency = asset_ccy != settle_ccy
+        if cross_currency and self.fx_rate_obs_type == "fixed" and not self.fx_rate > 0:
+            raise ValidationError(
+                "fx_rate must be a positive number for a fixed cross-currency "
+                f"trade ({asset_ccy} -> {settle_ccy}); got {fx_rate!r}"
+            )
+        if cross_currency and self.fx_rate_obs_type != "fixed" and (
+            self.fx_rate_obs_records is None
+        ):
             raise ValidationError(
                 "fx_rate_obs_records must be provided for a non-fixed "
                 f"fx_rate_obs_type ({self.fx_rate_obs_type!r})"
             )
+
+    def _lookup_fx(self, date: str) -> float:
+        """Return the observed FX fixing on ``date`` or raise ``MarketDataError``."""
+        records = self.fx_rate_obs_records or {}
+        if date not in records:
+            raise MarketDataError(
+                f"fx_rate_obs_records is missing a required fixing date: {date!r}"
+            )
+        rate = records[date]
+        if not rate > 0:
+            raise MarketDataError(
+                f"observed FX fixing on {date!r} must be positive; got {rate!r}"
+            )
+        return rate
 
     def price(self, precision: int = 2) -> pd.DataFrame:
         """Price the TRS and add settlement-currency columns."""
@@ -55,10 +77,11 @@ class OneAssetTotalReturnSwapDualCcy(OneAssetTotalReturnSwap):
         fx_col = f"fx_rate_{self.settle_ccy}/{self.asset_ccy}"
         if self.fx_rate_obs_type == "fixed" or self.asset_ccy == self.settle_ccy:
             df[fx_col] = self.fx_rate
+        elif self.params.pricing.output_mode.lower() == "spot":
+            # A spot view settles on the valuation date, so use that fixing.
+            df[fx_col] = self._lookup_fx(self.params.pricing.valuation_date)
         else:
-            df[fx_col] = df["period_start"].map(
-                lambda d: self.fx_rate_obs_records[d]
-            )
+            df[fx_col] = df["period_start"].map(self._lookup_fx)
 
         fx = pd.to_numeric(df[fx_col], errors="coerce")
         for base in ("present_value", "outstanding_margin", "margin_mtm"):

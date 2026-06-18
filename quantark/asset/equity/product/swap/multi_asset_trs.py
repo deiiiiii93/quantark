@@ -196,12 +196,13 @@ class MultiAssetTRS:
         return merged.round(precision).fillna("-")
 
     def _merge_full_results(self, price_results: List[pd.DataFrame]) -> pd.DataFrame:
+        # Align on period_start only - the date each asset's row is written to.
+        # Including period_end here would create blank rows for any period end
+        # that is not also a period start.
         all_dates = set()
         for result in price_results:
             if "period_start" in result.columns:
                 all_dates.update(result["period_start"])
-            if "period_end" in result.columns:
-                all_dates.update(result["period_end"])
 
         merged_df = pd.DataFrame(index=sorted(all_dates))
         merged_df.index.name = "date"
