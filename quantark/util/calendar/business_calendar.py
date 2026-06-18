@@ -393,21 +393,24 @@ class Calendar:
         Returns:
             Calendar-day count as an ``int``.
         """
+        if side not in ("left", "right", "both", "neither"):
+            raise ValidationError(
+                f"side must be one of 'left', 'right', 'both', 'neither', "
+                f"got: {side!r}"
+            )
         start = self._to_datetime(start_date)
         end = self._to_datetime(end_date)
-        # A reversed or zero-length interval has no calendar days to span.
-        raw = max((end - start).days, 0)
+        delta = (end - start).days
+        # A reversed interval spans no calendar days (consistent with
+        # get_calendar_days, which yields an empty list) -> zero, never negative.
+        if delta < 0:
+            return 0
         if side == "both":
-            return raw + 1
+            return delta + 1
         if side == "neither":
-            # Open interval: clamp the degenerate (empty) case to zero rather
-            # than returning a negative count that could accrue negative interest.
-            return max(raw - 1, 0)
-        if side in ("left", "right"):
-            return raw
-        raise ValidationError(
-            f"side must be one of 'left', 'right', 'both', 'neither', got: {side!r}"
-        )
+            # Open interval: clamp the degenerate (empty) case to zero.
+            return max(delta - 1, 0)
+        return delta  # left or right
 
     def __repr__(self):
         return f"Calendar(name={self.name}, holidays={len(self.holidays)})"

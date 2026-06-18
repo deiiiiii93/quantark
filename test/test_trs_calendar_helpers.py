@@ -94,3 +94,10 @@ def test_num_calendar_days_empty_interval_not_negative(cal):
     # Degenerate (start == end) open interval must not return a negative count.
     assert cal.get_num_of_calendar_days("2024-01-01", "2024-01-01", side="neither") == 0
     assert cal.get_num_of_calendar_days("2024-01-01", "2024-01-01", side="both") == 1
+
+
+def test_num_calendar_days_reversed_interval_is_zero(cal):
+    # A reversed range spans no days for any side (matches get_calendar_days).
+    for side in ("left", "right", "both", "neither"):
+        assert cal.get_num_of_calendar_days(
+            "2024-01-05", "2024-01-01", side=side) == 0
