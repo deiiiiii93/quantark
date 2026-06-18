@@ -26,7 +26,12 @@ from quantark.param import (
     SpotQuote,
 )
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import AccumulatorKnockOutType, MonteCarloMethod, OptionType
+from quantark.util.enum import (
+    AccumulatorKnockOutType,
+    MonteCarloMethod,
+    ObservationType,
+    OptionType,
+)
 from quantark.util.exceptions import PricingError
 
 
@@ -137,6 +142,48 @@ def test_mc_matches_analytical_termination_active_barrier_with_rebate():
     # TERMINATION price vs the exact MC benchmark (the no-barrier and SINGLE_DAY
     # cases, which carry no barrier shift, agree far more tightly).
     assert mc == pytest.approx(analytic, rel=3e-2)
+
+
+def test_mc_zero_maturity_includes_extra_shares():
+    # At expiry the extra-shares leg has a deterministic terminal value even
+    # though there is no remaining accrual.
+    env = _pricing_env(spot=90.0)
+    acc = AccumulatorOption(
+        strike=95.0,
+        knock_out_barrier=108.0,
+        option_type=OptionType.CALL,
+        maturity=1e-12,
+        daily_share_accumulation=1.0,
+        observation_dates=[1e-12],
+        knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        extra_shares_at_expiry=1.0,
+    )
+    price = AccumulatorMCEngine().price(acc, env)
+    # short up-and-out put: -(K - S)+ = -(95 - 90) = -5
+    assert price == pytest.approx(-5.0, abs=1e-9)
+
+
+def test_mc_empty_observations_still_prices_extra_shares():
+    # An accumulator with no accrual fixings but a terminal extra-shares leg must
+    # still value that leg; cross-check against the analytical engine.
+    env = _pricing_env()
+    acc = AccumulatorOption(
+        strike=98.0,
+        knock_out_barrier=108.0,
+        option_type=OptionType.CALL,
+        maturity=1.0,
+        daily_share_accumulation=1.0,
+        observation_type=ObservationType.EXPIRY,
+        observation_dates=[],
+        knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        extra_shares_at_expiry=1.0,
+    )
+    analytic = AccumulatorAnalyticalEngine().price(acc, env)
+    assert analytic != pytest.approx(0.0)  # the extra leg is non-trivial
+    mc = AccumulatorMCEngine(
+        MCParams(num_paths=200_000, seed=9), method=MonteCarloMethod.QUASI
+    ).price(acc, env)
+    assert mc == pytest.approx(analytic, rel=5e-3)
 
 
 def test_mc_contract_multiplier_scales_price():

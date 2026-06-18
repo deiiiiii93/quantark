@@ -106,13 +106,19 @@ class AccumulatorMCEngine(BaseEngine):
             realized *= float(pricing_env.get_discount_factor(maturity))
 
         if is_zero(maturity):
+            # At expiry only locked-in accrual and the deterministic terminal
+            # extra-shares leg remain.
             self._last_std_error = 0.0
-            return realized
+            return realized + self._extra_shares_intrinsic(product, spot)
 
         times = product.get_observation_times()
         if not times:
-            self._last_std_error = 0.0
-            return realized
+            # No accrual fixings, but a terminal extra-shares leg may still pay.
+            extra_val, std_error = self._price_terminal_extra(
+                product, pricing_env, spot, strike, maturity, rate, div, vol
+            )
+            self._last_std_error = std_error
+            return realized + extra_val
 
         price, std_error = self._price_mc(
             product, pricing_env, spot, strike, maturity, rate, div, vol, times
@@ -120,6 +126,30 @@ class AccumulatorMCEngine(BaseEngine):
         price += realized
         self._last_std_error = std_error
         return price
+
+    def _extra_shares_intrinsic(self, product: AccumulatorOption, spot: float) -> float:
+        """Deterministic terminal value of the extra-shares leg at expiry."""
+        extra = product.extra_shares_at_expiry
+        if extra <= 0.0 or spot >= product.knock_out_barrier:
+            return 0.0
+        return -extra * max(product.strike - spot, 0.0) * product.contract_multiplier
+
+    def _price_terminal_extra(
+        self, product, pricing_env, spot, strike, maturity, rate, div, vol
+    ) -> Tuple[float, float]:
+        """Value the terminal extra-shares leg alone (no accrual fixings)."""
+        extra = product.extra_shares_at_expiry
+        if extra <= 0.0:
+            return 0.0, 0.0
+        dt_array = np.array([maturity], dtype=float)
+        generator = self._create_path_generator(spot, rate, div, vol, maturity, dt_array)
+        paths, _ = generator.generate_paths(return_aux=True)
+        terminal = paths[:, -1]
+        put = np.maximum(strike - terminal, 0.0)
+        alive = terminal < product.knock_out_barrier  # expiry up-and-out check
+        df_T = float(pricing_env.get_discount_factor(maturity))
+        discounted = -extra * put * product.contract_multiplier * df_T * alive
+        return self._mean_and_std_error(discounted)
 
     # ------------------------------------------------------------------
     # Monte Carlo core

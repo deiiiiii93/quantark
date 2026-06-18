@@ -112,12 +112,11 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             realized *= safe_exp(-rate * maturity)
 
         if maturity < self.MIN_MATURITY:
-            return realized
+            # At expiry only the locked-in accrual and the deterministic terminal
+            # extra-shares leg remain.
+            return realized + self._extra_shares_intrinsic(product, spot)
 
         times = product.get_observation_times()
-        if not times:
-            return realized
-
         daily = product.daily_share_accumulation
         df_maturity = pricing_env.get_discount_factor(maturity)
         per_contract = 0.0
@@ -130,13 +129,23 @@ class AccumulatorAnalyticalEngine(BaseEngine):
                 leg *= df_maturity / pricing_env.get_discount_factor(t_i)
             per_contract += leg
 
-        per_contract += self._price_rebate_leg(product, pricing_env, times)
+        # The rebate is conditional on a knock-out observation; with no accrual
+        # fixings there is nothing to monitor.
+        if times:
+            per_contract += self._price_rebate_leg(product, pricing_env, times)
         per_contract += self._price_extra_shares_leg(
             product, pricing_env, times, maturity
         )
 
         value = per_contract * product.contract_multiplier + realized
         return value
+
+    def _extra_shares_intrinsic(self, product: AccumulatorOption, spot: float) -> float:
+        """Deterministic terminal value of the extra-shares leg at expiry."""
+        extra = product.extra_shares_at_expiry
+        if extra <= 0.0 or spot >= product.knock_out_barrier:
+            return 0.0
+        return -extra * max(product.strike - spot, 0.0) * product.contract_multiplier
 
     # ------------------------------------------------------------------
     # Leg pricing
