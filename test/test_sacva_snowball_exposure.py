@@ -288,10 +288,7 @@ def test_bgk_ki_mode_deferred():
         build_snowball_surface(trade)
 
 
-def test_snowball_drift_sourced_from_its_own_env_not_co_netted_vanilla():
-    # a co-netted vanilla on the SAME underlying with a very different dividend and
-    # negligible quantity must NOT change the snowball's drift (the snowball sources
-    # rate/div from its own env). With the fix the profile matches snowball-alone.
+def _vanilla(env, div_env=None, rate=None, quantity=1.0, asset_div=None):
     from quantark.asset.equity.product.option.european_vanilla_option import (
         EuropeanVanillaOption,
     )
@@ -299,17 +296,27 @@ def test_snowball_drift_sourced_from_its_own_env_not_co_netted_vanilla():
         BlackScholesEngine,
     )
     from quantark.util.enum import OptionType
+    return CVATrade("van", EuropeanVanillaOption(strike=100.0,
+                    option_type=OptionType.PUT, maturity=1.0),
+                    BlackScholesEngine(), env, quantity=quantity, trade_currency="USD")
 
-    cfg = MonteCarloExposureConfig(num_paths=12000, seed=4)
-    alone = MonteCarloExposureEngine(cfg).compute(
-        _counterparty([_snowball_trade(quantity=1.0)]))
 
+def test_inconsistent_same_underlying_market_data_raises():
+    # a co-netted vanilla on the SAME underlying with a different dividend is ambiguous
+    # (one GBM factor per underlying) -> raise rather than produce an order-dependent CVA
     snow = _snowball_trade(quantity=1.0)
-    bad_env = _env(div=0.10)                      # same underlying "UND", div 10% vs 2%
-    van = CVATrade("van", EuropeanVanillaOption(strike=100.0,
-                   option_type=OptionType.PUT, maturity=1.0),
-                   BlackScholesEngine(), bad_env, quantity=1e-9, trade_currency="USD")
-    # vanilla FIRST in the set: with the old bug the snowball would inherit its div
-    netted = MonteCarloExposureEngine(cfg).compute(_counterparty([van, snow]))
+    van = _vanilla(_env(div=0.10))               # same underlying "UND", div 10% vs 2%
+    with pytest.raises(Exception):
+        MonteCarloExposureEngine(
+            MonteCarloExposureConfig(num_paths=4000, seed=4)).compute(
+            _counterparty([van, snow]))
 
-    assert np.allclose(netted.epe_discounted, alone.epe_discounted, rtol=1e-3, atol=1e-6)
+
+def test_inconsistent_discount_curve_raises():
+    # two different reporting discount curves in one counterparty -> raise
+    snow = _snowball_trade(quantity=1.0)
+    van = _vanilla(_env(rate=0.07))              # rate 7% vs snowball's 5%
+    with pytest.raises(Exception):
+        MonteCarloExposureEngine(
+            MonteCarloExposureConfig(num_paths=4000, seed=4)).compute(
+            _counterparty([van, snow]))

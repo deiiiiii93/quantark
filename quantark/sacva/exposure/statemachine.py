@@ -140,5 +140,9 @@ class BarrierStateMachine:
         p[safe] = np.exp(np.minimum(arg[safe], 0.0))
         if np.any(p[safe] < -1e-9) or np.any(p[safe] > 1.0 + 1e-9):
             raise ValidationError("bridge crossing probability out of [0,1]")
-        out[safe] = rng.random(int(np.count_nonzero(safe))) < np.clip(p[safe], 0.0, 1.0)
+        # draw ONE uniform per path for this interval (not per-safe-subset), so the
+        # CRN stream stays aligned across base/bumped re-runs even when the safe set
+        # shifts — preserving common-random-number variance reduction.
+        u = rng.random(s0.shape[0])
+        out[safe] = u[safe] < np.clip(p[safe], 0.0, 1.0)
         return out

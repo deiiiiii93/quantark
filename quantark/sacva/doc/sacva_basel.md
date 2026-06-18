@@ -208,7 +208,11 @@ extrapolation is needed. Correctness is pinned by a value-process martingale:
 `E[ df·V_alive(t) + redemption·df at KO ] = price₀` at every node.
 
 v1 stateful scope (raise, never approximate): a single `SnowballOption` per
-counterparty, plain `SnowballQuadEngine` only (Phoenix / KO-reset carry richer state),
-constant KO/KI barriers, and immediate KO settlement (delayed settlement needs the
-`pending_receivable_exposure` machinery). IR/FX market sensitivities remain scoped
-extensions that **raise** rather than silently approximate.
+counterparty (vanillas may net on its grid), plain `SnowballQuadEngine` only (Phoenix /
+KO-reset carry richer state), constant KO/KI barriers, immediate KO settlement (delayed
+settlement needs the `pending_receivable_exposure` machinery), `disable_ko_after_ki` and
+BGK knock-in monitoring deferred. A counterparty's trades must share one reporting
+discount curve and agree on per-underlying market data (one GBM factor per underlying),
+else the engine raises rather than producing an order-dependent result. **IR** market
+sensitivities remain a scoped extension (they need a key-rate-bumpable term curve) that
+**raises** rather than silently approximating; FX spot delta+vega is supported.

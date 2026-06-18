@@ -110,6 +110,7 @@ class MonteCarloExposureEngine(ExposureEngine):
         grid = ExposureGrid.build(horizon=horizon, n_steps=self.config.n_steps,
                                   event_times=[])
         times = grid.times
+        self._check_market_consistency(trades, times)
         gen = StatePathGenerator(keys=keys, spots=spots, vols=vols, rates=rates,
                                  divs=divs, corr=corr, grid_times=times,
                                  num_paths=self.config.num_paths, seed=self.config.seed)
@@ -130,6 +131,39 @@ class MonteCarloExposureEngine(ExposureEngine):
 
         return ExposureProfile(times=times, epe_discounted=epe,
                                measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
+
+    def _check_market_consistency(self, trades, times):
+        """Reject ambiguous portfolios so exposure is independent of trade order.
+
+        A counterparty's trades must share ONE reporting discount curve (v1 single
+        reporting currency), and all trades on the same underlying must agree on the
+        GBM factor inputs (spot/rate/div/vol over the horizon) — there is exactly one
+        simulated process per underlying, so disagreeing market data is ill-defined
+        rather than something to silently pick one of.
+        """
+        horizon = float(times[-1])
+        ref_df = np.array([float(trades[0].env.get_discount_factor(float(t)))
+                           for t in times])
+        by_key = {}
+        for tr in trades:
+            dfk = np.array([float(tr.env.get_discount_factor(float(t))) for t in times])
+            if not np.allclose(dfk, ref_df, rtol=1e-9, atol=1e-12):
+                raise ValidationError(
+                    f"{tr.trade_id}: all trades in a counterparty must share one "
+                    "reporting discount curve (v1 single reporting currency)")
+            k = self._underlying_key(tr)
+            sp = float(tr.env.spot)
+            market = (sp, float(tr.env.get_rate(horizon)),
+                      float(tr.env.get_div_yield(horizon)),
+                      float(tr.env.get_vol(sp, horizon)))
+            if k in by_key:
+                if not np.allclose(by_key[k], market, rtol=1e-9, atol=1e-12):
+                    raise ValidationError(
+                        f"trades on underlying {k} must agree on spot/rate/div/vol "
+                        "(one GBM factor per underlying); differing market data is "
+                        "ambiguous")
+            else:
+                by_key[k] = market
 
     def _corr_matrix(self, keys):
         """Correlation matrix for the underlyings; identity for a single factor."""
@@ -161,6 +195,7 @@ class MonteCarloExposureEngine(ExposureEngine):
         snow = stateful[0]
         spec = build_snowball_surface(snow)
         times = spec.times
+        self._check_market_consistency(trades, times)
         snow_key = self._underlying_key(snow)
         horizon = float(times[-1])
 
