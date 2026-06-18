@@ -14,10 +14,12 @@ import pytest
 
 from quantark.asset.equity.engine.analytical import (
     AccumulatorAnalyticalEngine,
+    BarrierAnalyticalEngine,
     BlackScholesEngine,
 )
 from quantark.asset.equity.product.option import (
     AccumulatorOption,
+    BarrierOption,
     EuropeanVanillaOption,
 )
 from quantark.param import (
@@ -26,8 +28,14 @@ from quantark.param import (
     FlatVolSurface,
     SpotQuote,
 )
+from quantark.param.rrf.rate_curve import LinearRateCurve
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import AccumulatorKnockOutType, OptionType
+from quantark.util.enum import (
+    AccumulatorKnockOutType,
+    BarrierType,
+    ObservationType,
+    OptionType,
+)
 from quantark.util.exceptions import PricingError
 
 
@@ -117,3 +125,109 @@ def test_realized_accrual_adds_to_price():
         AccumulatorOption(**common, past_observations=[(-0.1, 100.0)]), env
     )
     assert with_past - without == pytest.approx(5.0, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Review findings (Gate 2 zenmux, iter 1)
+# ---------------------------------------------------------------------------
+
+def _single_day_strip_value(env, strike, barrier, obs_times, daily, gearing):
+    """Reference SINGLE_DAY price: each call leg is a single-day (expiry) up-out
+    call; each put leg is a plain vanilla put. Legs are independent across days."""
+    bs = BlackScholesEngine()
+    barrier_engine = BarrierAnalyticalEngine()
+    total = 0.0
+    for t in obs_times:
+        call = BarrierOption(
+            strike=strike,
+            option_type=OptionType.CALL,
+            barrier=barrier,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=t,
+            observation_type=ObservationType.EXPIRY,
+            contract_multiplier=daily,
+        )
+        put = EuropeanVanillaOption(
+            strike=strike,
+            option_type=OptionType.PUT,
+            maturity=t,
+            contract_multiplier=daily * gearing,
+        )
+        total += barrier_engine.price(call, env) - bs.price(put, env)
+    return total
+
+
+def test_single_day_legs_are_independent_per_day():
+    env = _pricing_env()
+    obs = [0.25, 0.5, 0.75, 1.0]
+    acc = AccumulatorOption(
+        strike=95.0,
+        knock_out_barrier=108.0,  # active barrier so DISCRETE vs EXPIRY differ
+        option_type=OptionType.CALL,
+        maturity=1.0,
+        daily_share_accumulation=1.0,
+        gearing=2.0,
+        knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        observation_dates=obs,
+    )
+    price = AccumulatorAnalyticalEngine().price(acc, env)
+    expected = _single_day_strip_value(
+        env, 95.0, 108.0, obs, daily=1.0, gearing=2.0
+    )
+    assert price == pytest.approx(expected, rel=1e-9)
+
+
+def test_single_day_price_ignores_rebate_rate():
+    env = _pricing_env()
+    obs = [0.25, 0.5, 0.75, 1.0]
+    common = dict(
+        strike=95.0,
+        knock_out_barrier=108.0,
+        option_type=OptionType.CALL,
+        maturity=1.0,
+        initial_price=100.0,
+        notional=1_000_000.0,
+        knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        observation_dates=obs,
+    )
+    engine = AccumulatorAnalyticalEngine()
+    no_rebate = engine.price(AccumulatorOption(**common, knock_out_rebate_rate=0.0), env)
+    with_rebate = engine.price(
+        AccumulatorOption(**common, knock_out_rebate_rate=0.05), env
+    )
+    assert with_rebate == pytest.approx(no_rebate, rel=1e-12)
+
+
+def test_settlement_at_expiry_uses_curve_discount_factors():
+    # Non-flat curve: deferral factor must be DF(0,T)/DF(0,t_i), not exp(-r_T*(T-t_i)).
+    env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        rate_curve=LinearRateCurve([(0.25, 0.02), (1.0, 0.06)]),
+        vol_surface=FlatVolSurface(volatility=0.25),
+        div_yield=ContinuousDividendYield(div_yield=0.01),
+        valuation_date=datetime(2024, 1, 1),
+    )
+    obs = [0.25, 0.5, 0.75, 1.0]
+    daily, gearing, strike = 1.0, 2.0, 95.0
+    acc = AccumulatorOption(
+        strike=strike,
+        knock_out_barrier=1.0e6,  # no barrier -> exact vanilla strip
+        option_type=OptionType.CALL,
+        maturity=1.0,
+        daily_share_accumulation=daily,
+        gearing=gearing,
+        knock_out_type=AccumulatorKnockOutType.TERMINATION,
+        observation_dates=obs,
+        settlement_at_expiry=True,
+    )
+    price = AccumulatorAnalyticalEngine().price(acc, env)
+
+    bs = BlackScholesEngine()
+    df_T = env.get_discount_factor(1.0)
+    expected = 0.0
+    for t in obs:
+        call = EuropeanVanillaOption(strike=strike, option_type=OptionType.CALL, maturity=t)
+        put = EuropeanVanillaOption(strike=strike, option_type=OptionType.PUT, maturity=t)
+        instant = daily * (bs.price(call, env) - gearing * bs.price(put, env))
+        expected += instant * df_T / env.get_discount_factor(t)
+    assert price == pytest.approx(expected, rel=1e-4)

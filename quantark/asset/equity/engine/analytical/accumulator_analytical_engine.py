@@ -119,12 +119,15 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             return realized
 
         daily = product.daily_share_accumulation
+        df_maturity = pricing_env.get_discount_factor(maturity)
         per_contract = 0.0
         for idx, t_i in enumerate(times):
             sub_dates = times[: idx + 1]
             leg = self._price_leg(product, pricing_env, sub_dates, t_i, daily)
             if product.settlement_at_expiry:
-                leg *= safe_exp(-rate * (maturity - t_i))
+                # Defer the leg's payoff from t_i to T using curve discount
+                # factors: DF(0, T) / DF(0, t_i) (curve-consistent, not flat-only).
+                leg *= df_maturity / pricing_env.get_discount_factor(t_i)
             per_contract += leg
 
         per_contract += self._price_rebate_leg(product, pricing_env, times)
@@ -163,7 +166,7 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         daily: float,
     ) -> float:
         """Up-and-out call gain leg scaled by ``daily`` shares."""
-        obs_type, obs_dates = self._leg_monitoring(product, sub_dates)
+        obs_type, obs_dates = self._call_leg_monitoring(product, sub_dates, maturity_i)
         call_leg = BarrierOption(
             strike=product.strike,
             option_type=OptionType.CALL,
@@ -228,6 +231,20 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             return ObservationType.EXPIRY, None
         return ObservationType.DISCRETE, list(sub_dates)
 
+    def _call_leg_monitoring(
+        self, product: AccumulatorOption, sub_dates: List[float], maturity_i: float
+    ):
+        """Monitoring for the gain (call) leg of one observation.
+
+        SINGLE_DAY only cancels that day's accrual, so the call leg's barrier is
+        checked solely on its own observation date (expiry monitoring). For
+        TERMINATION an earlier breach extinguishes the leg, so the cumulative
+        observation sub-schedule is monitored.
+        """
+        if product.knock_out_type == AccumulatorKnockOutType.SINGLE_DAY:
+            return ObservationType.EXPIRY, None
+        return self._leg_monitoring(product, sub_dates)
+
     def _price_rebate_leg(
         self,
         product: AccumulatorOption,
@@ -235,6 +252,8 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         times: List[float],
     ) -> float:
         """Value the TERMINATION knock-out cash rebate as a one-touch, per contract."""
+        if product.knock_out_type != AccumulatorKnockOutType.TERMINATION:
+            return 0.0
         rebate_cash = product.get_knock_out_rebate_cash()
         if rebate_cash <= 0.0:
             return 0.0
