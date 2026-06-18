@@ -79,6 +79,14 @@ class SnowballQuadEngine(BaseEngine):
                 f"params must be QuadParams instance, got {type(params).__name__}"
             )
         super().__init__(params)
+        # Opt-in capture of the per-observation backward-induction value surfaces
+        # (the v_in / v_out continuation grids on the inception-anchored spot grid).
+        # Off by default so normal pricing pays no memory cost; the CVA exposure
+        # layer enables it to read a per-node x per-state value surface straight off
+        # the backward sweep, with no re-pricing. Maps observation_time ->
+        # (spot_grid, v_in, v_out), plus key 0.0 for the valuation-date surfaces.
+        self.record_backward_grids = False
+        self._backward_grids: dict = {}
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -91,6 +99,14 @@ class SnowballQuadEngine(BaseEngine):
             raise PricingError("PricingEnvironment is required for SnowballQuadEngine.")
 
         self._validate_product(product)
+
+        # Reset the opt-in backward-grid capture up front, BEFORE any early return
+        # (zero maturity / immediate KO). Otherwise a terminated bumped re-price would
+        # leave the previous trade's surfaces in _backward_grids for the CVA exposure
+        # layer to read as if live — a silent corruption of bumped sensitivities.
+        record_grids = getattr(self, "record_backward_grids", False)
+        if record_grids:
+            self._backward_grids = {}
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -271,6 +287,15 @@ class SnowballQuadEngine(BaseEngine):
                         ki_weight = ki_weight * (1.0 - ko_weight)
                     v_out = (1.0 - ki_weight) * v_out + ki_weight * v_in
 
+            # Post-event continuation surfaces AT obs_time (before diffusing back to
+            # the previous step): v_out = value of a not-yet-knocked-in contract,
+            # v_in = value once knock-in has occurred, both as a function of spot on
+            # spot_grid. These are exactly the per-(t, state) value slices the CVA
+            # exposure layer needs; the diffusion below rolls them to the prior step.
+            if record_grids:
+                self._backward_grids[float(obs_time)] = (
+                    spot_grid.copy(), v_in.copy(), v_out.copy())
+
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
@@ -319,6 +344,12 @@ class SnowballQuadEngine(BaseEngine):
                     beta,
                     tau_step,
                 )
+
+        # After the full backward sweep, v_in/v_out are the valuation-date (t=0)
+        # surfaces; record them so the exposure grid has a t0 slice for both states.
+        if record_grids:
+            self._backward_grids[0.0] = (
+                spot_grid.copy(), v_in.copy(), v_out.copy())
 
         value_surface = v_in if knocked_in_at_valuation else v_out
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())

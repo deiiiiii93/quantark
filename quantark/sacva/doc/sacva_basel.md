@@ -144,3 +144,75 @@ The `max(0, ·)` floor on the bucket and cross-bucket radicands is the prescribe
 SBA numerical treatment: the supervisory correlation matrices (ρ, γ) are not
 guaranteed positive semi-definite, so the radicand can be negative and is floored
 at zero. This is the regulator's own SBA semantics, not an approximation.
+
+## Computing CVA and sensitivities from a portfolio (MAR50.32–50.35)
+
+The SBA engine above consumes `CVASensitivity` records. Those can be supplied
+directly, or **computed from a real trade portfolio** by the integration layer
+(`quantark.sacva.SACVAEngine`), which wires the existing pricing engines "like SIMM
+does":
+
+1. **Exposure (MAR50.32–50.35).** `MonteCarloExposureEngine` simulates risk-neutral
+   GBM spot paths (one constant-vol factor per underlying; FX drift `r_dom − r_for`)
+   and reprices each trade on a deterministic value surface at every exposure node —
+   the analytic surface re-evaluates the trade's own engine at the rolled-down
+   `(spot, τ)` (no nested MC, no LSMC). Pathwise values are aggregated to a
+   discounted EPE profile with netting **within** enforceable sets and summed
+   **across** sets (MAR50.35). Risk-neutral drift is mandatory (MAR50.34(1)); the
+   profile is tagged `RISK_NEUTRAL` / `regulatory_eligible`. A real-world / PFE
+   `HistoricalExposureEngine` (non-eligible) is a separate, parallel backend.
+
+2. **Unilateral CVA (MAR50.32).** `RegulatoryCVAEngine` integrates
+   `CVA = ELGD · Σ_i ½(EE*_{i−1}+EE*_i)·(S(t_{i−1}) − S(t_i))`, where `EE*` is the
+   discounted expected positive exposure and `S` the counterparty survival
+   probability (`ELGD = 1 − R`).
+
+3. **Sensitivities.**
+   - *Counterparty credit-spread delta* (MAR50.63, per entity × tenor): one-sided 1bp
+     key-rate hazard bump (`Δλ = 1bp / ELGD`, chain rule `s = λ(1−R)`) re-running
+     step 2 only — the exposure is invariant to the counterparty hazard, so no MC
+     re-run is needed. Divisor `1e-4`.
+   - *Equity / FX spot delta + vega* (MAR50.59, MAR50.70, single factor per equity
+     bucket / foreign currency): a +1% relative bump to the factor's spot /
+     volatility **moves the exposure**, so each is a portfolio-wide re-run of the MC
+     exposure (with common random numbers) for every counterparty exposed to that
+     factor, summing ΔCVA. Divisor `1e-2`. FX spot is a GBM factor (rate=domestic,
+     div=foreign); a trade declares one market factor — `equity_bucket` XOR
+     `fx_currency` — and `fx_currency` may not equal the reporting currency.
+   - *Eligible-hedge market value* (`S_k^Hdg`, MAR50.29): each `CVAHedge` is priced
+     and bumped on the SAME factor; the sensitivity is emitted with `s_cva=0` so the
+     SBA risk-factor netting forms `WS = RW·(s_cva − s_hdg)` and the hedge
+     disallowance `R·Σ(WS^Hdg)²`.
+
+`SACVAEngine.compute(portfolio)` runs 1→3 and feeds the resulting `CVASensitivity`
+records to the unchanged SBA calculator. v1 covers equity and reporting-vs-foreign-FX
+spot under deterministic rates, single reporting currency, uncollateralized; it emits
+counterparty credit-spread delta, equity/FX spot delta+vega, and eligible-hedge MV
+sensitivities (every trade must declare its market factor for the market legs —
+all-or-none). IR market sensitivities need a key-rate-bumpable term curve and are a
+scoped extension. See `example/sacva_portfolio_demo.py`.
+
+### Stateful (autocallable) exposure (MAR50.32, snowball)
+
+Path-dependent trades (`SnowballOption` priced by `SnowballQuadEngine`) are valued
+without re-pricing per node. The QUAD engine runs a two-regime backward recursion —
+`v_out` (not yet knocked in) and `v_in` (knock-in has occurred) — on one
+inception-anchored, full-maturity-width spot grid; with the opt-in
+`record_backward_grids` flag it now exposes those per-observation continuation
+surfaces. `build_snowball_surface` reads them into a per-`(t, state)`
+`GridValueSurface`, and `MonteCarloExposureEngine` resolves each path's knock-in
+history and knock-out termination with `BarrierStateMachine` (Brownian-bridge
+continuous KI), selecting `v_in`/`v_out` for live paths and zeroing knocked-out paths
+(immediate settlement). The wide QUAD grid covers the simulated spot cloud, so no
+extrapolation is needed. Correctness is pinned by a value-process martingale:
+`E[ df·V_alive(t) + redemption·df at KO ] = price₀` at every node.
+
+v1 stateful scope (raise, never approximate): a single `SnowballOption` per
+counterparty (vanillas may net on its grid), plain `SnowballQuadEngine` only (Phoenix /
+KO-reset carry richer state), constant KO/KI barriers, immediate KO settlement (delayed
+settlement needs the `pending_receivable_exposure` machinery), `disable_ko_after_ki` and
+BGK knock-in monitoring deferred. A counterparty's trades must share one reporting
+discount curve and agree on per-underlying market data (one GBM factor per underlying),
+else the engine raises rather than producing an order-dependent result. **IR** market
+sensitivities remain a scoped extension (they need a key-rate-bumpable term curve) that
+**raises** rather than silently approximating; FX spot delta+vega is supported.

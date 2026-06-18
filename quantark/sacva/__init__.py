@@ -13,9 +13,27 @@ from quantark.sacva.models.portfolio import CVAPortfolio
 from quantark.sacva.parameters.supervisory import SACVA_VERSION
 from quantark.sacva.dashboard import SACVADashboard
 
+# portfolio/engine integration: compute CVA + sensitivities from a real portfolio
+from quantark.sacva.sacva_engine import SACVAEngine
+from quantark.sacva.exposure.simulator import (
+    MonteCarloExposureConfig,
+    MonteCarloExposureEngine,
+)
+from quantark.sacva.cva.engine import RegulatoryCVAEngine
+from quantark.sacva.sensitivities.engine import CVASensitivityEngine
+from quantark.sacva.portfolio.trade import CVAHedge, CVATrade
+from quantark.sacva.portfolio.netting import NettingSet
+from quantark.sacva.portfolio.counterparty import Counterparty
+from quantark.sacva.portfolio.trade_portfolio import CVATradePortfolio
+from quantark.sacva.portfolio.credit_curve import PillarHazardCurve
+
 __version__ = SACVA_VERSION
 
 __all__ = [
     "SACVACalculator", "SACVAResult", "CVASensitivity", "CVAPortfolio",
     "RiskClass", "RiskType", "CreditQuality", "SACVADashboard", "SACVA_VERSION",
+    # portfolio/engine integration
+    "SACVAEngine", "MonteCarloExposureEngine", "MonteCarloExposureConfig",
+    "RegulatoryCVAEngine", "CVASensitivityEngine", "CVATrade", "CVAHedge",
+    "NettingSet", "Counterparty", "CVATradePortfolio", "PillarHazardCurve",
 ]
