@@ -233,6 +233,7 @@ class EquitySwapPosition:
         *,
         equity_bucket: int,
         trade_currency: str = "USD",
+        allow_approx_financing: bool = False,
     ) -> Any:
         """Map this TRS to a SA-CVA exposure trade (``CVATrade``).
 
@@ -250,19 +251,29 @@ class EquitySwapPosition:
                 forward from there to maturity.
             equity_bucket: SA-CVA equity bucket (MAR50.70) the underlying maps to.
             trade_currency: Trade (and reporting) currency.
+            allow_approx_financing: Opt in to the **approximate** pathwise repricer
+                for market-value financing accrual (financing is path-dependent and
+                approximated by a coarse-grid trapezoid — not byte-exact). The
+                returned trade must then be valued by ``TRSPathwiseExposureEngine``
+                (it raises on the Markovian value surface). Ignored for NOTIONAL
+                accrual, which always uses the exact repricer.
 
         Raises:
             ValidationError: if the swap has matured (no future exposure), is
-                dual-currency, or is a path-dependent variant unsupported by the
-                single-state value surface (delegated to ``build_trs_cva_components``).
+                forward-starting, is dual-currency, or is a path-dependent variant
+                unsupported by the chosen repricer (delegated to the builders).
         """
         from datetime import datetime
 
         from quantark.sacva.portfolio.trade import CVATrade
         from quantark.asset.equity.engine.cashflow.trs_cva_repricer import (
             build_trs_cva_components,
+            build_trs_pathwise_cva_components,
         )
-        from quantark.asset.equity.product.swap.trs_params import SwapState
+        from quantark.asset.equity.product.swap.trs_params import (
+            AccrualType,
+            SwapState,
+        )
         from quantark.asset.equity.product.swap.one_asset_trs_dual_ccy import (
             OneAssetTotalReturnSwapDualCcy,
         )
@@ -307,7 +318,16 @@ class EquitySwapPosition:
                 "currency swap"
             )
 
-        product, engine = build_trs_cva_components(self._params)
+        market_value_accrual = (
+            self._params.fix_leg.accrual_type
+            in (AccrualType.MARKET_VALUE, AccrualType.LAST_MARKET_VALUE)
+        )
+        if market_value_accrual and allow_approx_financing:
+            product, engine = build_trs_pathwise_cva_components(self._params)
+        else:
+            # NOTIONAL -> exact; market-value without opt-in -> build raises with guidance
+            product, engine = build_trs_cva_components(self._params)
+
         return CVATrade(
             trade_id=self.position_id,
             product=product,

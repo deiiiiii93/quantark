@@ -37,6 +37,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Dict, Tuple
 
+import numpy as np
 import pandas as pd
 
 from quantark.asset.equity.product.swap.trs_params import (
@@ -46,7 +47,10 @@ from quantark.asset.equity.product.swap.trs_params import (
 from quantark.asset.equity.engine.cashflow.total_return_swap_engine import (
     TotalReturnSwapEngine,
 )
+from quantark.asset.equity.engine.cashflow.trs_valuation import TRSValuationEngine
 from quantark.util.exceptions import MarketDataError, ValidationError
+
+_MARKET_VALUE_ACCRUALS = (AccrualType.MARKET_VALUE, AccrualType.LAST_MARKET_VALUE)
 
 _DATE_FMT = "%Y-%m-%d"
 # High extraction precision so the spot-independent baseline is not perturbed by
@@ -157,7 +161,9 @@ class TRSCVAProduct:
     is delta-one, so the terminal payoff is its full as-of value at maturity.
     """
 
-    def __init__(self, repricer: TRSCVARepricer) -> None:
+    def __init__(
+        self, repricer: "TRSCVARepricer | TRSPathwiseCVARepricer"
+    ) -> None:
         self._repricer = repricer
         self._contract_end = repricer._contract_end
 
@@ -211,4 +217,141 @@ def build_trs_cva_components(
             "stateful exposure path"
         )
     repricer = TRSCVARepricer(params)
+    return TRSCVAProduct(repricer), repricer
+
+
+# ---------------------------------------------------------------------------- #
+# Phase B: path-dependent (market-value financing) — explicit APPROXIMATION
+# ---------------------------------------------------------------------------- #
+class TRSPathwiseCVARepricer:
+    """Pathwise as-of repricer for a market-value-financing TRS — APPROXIMATION.
+
+    Under market-value (or last-market-value) financing accrual the financing leg
+    accrues on the *daily* market value, so the future financing at node ``t`` is
+    ``fix_dir · rate · q · ∫_today^t S_u du`` — path-dependent, hence not Markovian
+    in the current spot. This repricer values the whole spot-path array at once
+    (``value_paths``), accumulating the financing integral by the **trapezoid rule
+    over the coarse SA-CVA exposure grid**.
+
+    This is an explicit, opt-in approximation: the trapezoid over coarse grid nodes
+    is NOT byte-exact versus ``TotalReturnSwapEngine``'s daily left-endpoint accrual
+    (exactness would require a daily exposure grid). Use the exact
+    :class:`TRSCVARepricer` for NOTIONAL accrual when daily fidelity matters; this
+    mode is reached only when the caller opts in (``allow_approx_financing=True``).
+
+    Value functional (per contract, undiscounted, reporting currency)::
+
+        V(S_t, t) = V_today + float_dir · q · (S_t − S_today)
+                            + fix_dir · rate · q · ∫_today^t S_u du
+
+    ``V_today`` is the realized mark-to-market at the valuation date (from the
+    observed path, via :class:`TRSValuationEngine`); the equity increment and the
+    financing integral together reconstruct the full as-of value with no
+    double-counting (``V_today`` already carries the equity and financing accrued up
+    to today).
+    """
+
+    #: Routes this trade through the pathwise exposure path (not the Markovian
+    #: value surface). See :class:`TRSPathwiseExposureEngine`.
+    supports_pathwise_value = True
+
+    def __init__(self, base_params: TRSParams) -> None:
+        if base_params.pricing is None:
+            raise ValidationError("TRS pricing parameters must be provided")
+        self._s0 = float(base_params.asset.asset_initial_price)
+        if not (self._s0 > 0.0):
+            raise ValidationError("asset_initial_price must be positive")
+        self._q = float(base_params.float_leg.initial_notional) / self._s0
+        self._float_dir = int(base_params.float_leg.direction)
+        self._fix_dir = int(base_params.fix_leg.direction)
+        self._rate = float(base_params.fix_leg.rate)
+        self._contract_start = min(
+            base_params.fix_leg.start_date, base_params.float_leg.start_date
+        )
+        self._contract_end = max(
+            base_params.fix_leg.end_date, base_params.float_leg.end_date
+        )
+        # realized mark-to-market at the valuation date (observed path)
+        self._bridge = TRSValuationEngine(base_params)
+
+    def value_at(self, spot: float, as_of: str) -> float:  # noqa: D401
+        """Not supported: financing is path-dependent (use ``value_paths``)."""
+        raise ValidationError(
+            "TRSPathwiseCVARepricer values whole paths (market-value financing is "
+            "path-dependent); a single (spot, t) point is ill-defined"
+        )
+
+    def price(self, product: "TRSCVAProduct", env) -> float:
+        # Guard against silent mis-pricing: a path-dependent TRS routed through the
+        # Markovian value surface (plain MonteCarloExposureEngine) would drop the
+        # financing path-dependence. Fail loudly — require the pathwise engine.
+        raise ValidationError(
+            "market-value-financing TRS is path-dependent and cannot be priced on "
+            "the single-state value surface; run it through TRSPathwiseExposureEngine"
+        )
+
+    def value_paths(self, product, spots, times, env) -> np.ndarray:
+        """Per-contract undiscounted value over all paths/nodes, shape (n_paths, n_t)."""
+        spots = np.asarray(spots, dtype=float)
+        times = np.asarray(times, dtype=float)
+        if spots.ndim != 2:
+            raise ValidationError("pathwise TRS expects a 2-D (n_paths, n_t) spot array")
+        if spots.shape[1] != times.shape[0]:
+            raise ValidationError("spot time axis must match the exposure grid times")
+        if not np.all(np.isfinite(spots)):
+            raise ValidationError("pathwise TRS received non-finite spots")
+
+        v_today = self._bridge.mark_to_market(env)
+        s_today = float(env.spot)
+        # equity increment from today (Markovian): float_dir · q · (S_t − S_today)
+        equity = self._float_dir * self._q * (spots - s_today)
+        # future financing on market value (APPROX: trapezoid over coarse nodes)
+        dt = np.diff(times)
+        trap = 0.5 * (spots[:, 1:] + spots[:, :-1]) * dt
+        integral = np.concatenate(
+            [np.zeros((spots.shape[0], 1)), np.cumsum(trap, axis=1)], axis=1
+        )
+        financing = self._fix_dir * self._rate * self._q * integral
+        values = v_today + equity + financing
+
+        # Cap at maturity: after the swap settles it carries no exposure. Nodes past
+        # the remaining tenor are zeroed (mirrors the base value array's tau<0 -> 0),
+        # so a matured TRS netted on a longer-dated grid stops contributing.
+        as_of = env.valuation_date.strftime(_DATE_FMT)
+        remaining = _act365_years(as_of, self._contract_end)
+        values[:, times > remaining + 1e-9] = 0.0
+        return values
+
+
+def build_trs_pathwise_cva_components(
+    params: TRSParams,
+) -> Tuple[TRSCVAProduct, "TRSPathwiseCVARepricer"]:
+    """Build ``(product, engine)`` for a market-value-financing TRS (APPROX mode).
+
+    Only ``MARKET_VALUE`` / ``LAST_MARKET_VALUE`` financing accrual belongs here —
+    NOTIONAL accrual has an exact Markovian repricer (:func:`build_trs_cva_components`)
+    and must not use the approximation. As in the exact path, intermediate
+    redemptions, share dividends and cash dividends are out of scope and raise (the
+    value functional assumes a constant quantity and folds realized dividends into
+    ``V_today`` only — future dividends are not modelled here).
+    """
+    if params.fix_leg.accrual_type not in _MARKET_VALUE_ACCRUALS:
+        raise ValidationError(
+            "the pathwise (approximate) TRS CVA repricer is for market-value "
+            f"financing accrual only; {params.fix_leg.accrual_type.value!r} has an "
+            "exact repricer — use build_trs_cva_components"
+        )
+    events = params.events.events or {}
+    for kind, label in (
+        ("redm", "intermediate redemptions"),
+        ("div_share", "share dividends / splits"),
+        ("div_cash", "cash dividends"),
+    ):
+        if events.get(kind):
+            raise ValidationError(
+                f"pathwise TRS CVA repricing does not support {label} (deferred); "
+                "the value functional assumes a constant quantity and no future "
+                "dividends"
+            )
+    repricer = TRSPathwiseCVARepricer(params)
     return TRSCVAProduct(repricer), repricer

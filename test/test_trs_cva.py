@@ -255,11 +255,107 @@ def test_forward_starting_swap_deferred():
         pos.to_cva_trade(early, equity_bucket=2)
 
 
-def test_market_value_accrual_routes_to_stateful():
+def test_market_value_accrual_without_optin_raises():
+    """Market-value financing is path-dependent: the exact (default) path rejects it."""
     pos = EquitySwapPosition(
         product=_make_trs(long=True, accrual_type=AccrualType.MARKET_VALUE), quantity=1.0)
     with pytest.raises(ValidationError):
-        pos.to_cva_trade(_env(), equity_bucket=2)
+        pos.to_cva_trade(_env(), equity_bucket=2)  # allow_approx_financing defaults False
+
+
+# --- Phase B: opt-in approximate pathwise exposure (market-value financing) ---
+
+def test_pathwise_engine_required_for_market_value_trs():
+    """A market-value-financing TRS routed through the Markovian engine fails loudly
+    (its repricer.price raises) rather than silently dropping financing path-dependence."""
+    from quantark.asset.equity.engine.cashflow.trs_cva_repricer import (
+        build_trs_pathwise_cva_components,
+    )
+    trs = _make_trs(long=True, accrual_type=AccrualType.MARKET_VALUE)
+    product, engine = build_trs_pathwise_cva_components(trs.params)
+    with pytest.raises(ValidationError):
+        engine.price(product, _env())  # Markovian value-surface entry point is barred
+
+
+def test_pathwise_value_equals_realized_mtm_at_t0():
+    """At the first grid node the pathwise value collapses to the realized MtM today."""
+    from quantark.asset.equity.engine.cashflow.trs_cva_repricer import (
+        build_trs_pathwise_cva_components,
+    )
+    from quantark.asset.equity.engine.cashflow.trs_valuation import TRSValuationEngine
+
+    trs = _make_trs(long=True, accrual_type=AccrualType.MARKET_VALUE)
+    _, engine = build_trs_pathwise_cva_components(trs.params)
+    env = _env(spot=108.0)
+    import numpy as np
+    times = np.array([0.0, 0.25, 0.5, 0.75])
+    spots = np.full((5, 4), 108.0)  # all paths start at env.spot
+    vals = engine.value_paths(None, spots, times, env)
+    v_today = TRSValuationEngine(trs.params).mark_to_market(env)
+    assert vals[:, 0] == pytest.approx(v_today)  # t0 column == realized MtM
+
+
+def test_pathwise_value_zeroes_after_maturity():
+    """A matured TRS netted on a longer grid must stop contributing exposure."""
+    from quantark.asset.equity.engine.cashflow.trs_cva_repricer import (
+        build_trs_pathwise_cva_components,
+    )
+    import numpy as np
+
+    trs = _make_trs(long=True, accrual_type=AccrualType.MARKET_VALUE)
+    _, engine = build_trs_pathwise_cva_components(trs.params)
+    env = _env(spot=100.0)
+    # swap matures ~0.997y from START; grid runs out to 2y
+    times = np.array([0.0, 0.5, 0.99, 1.5, 2.0])
+    spots = np.full((4, 5), 110.0)
+    vals = engine.value_paths(None, spots, times, env)
+    assert np.any(vals[:, 2] != 0.0)          # node within life carries value
+    assert np.all(vals[:, 3] == 0.0)          # past maturity -> zero
+    assert np.all(vals[:, 4] == 0.0)
+
+
+def test_pathwise_trs_portfolio_to_capital_end_to_end():
+    from quantark.asset.equity.engine.cashflow.trs_cva_exposure import (
+        TRSPathwiseExposureEngine,
+    )
+    from quantark.sacva.exposure.simulator import MonteCarloExposureConfig
+
+    pos = EquitySwapPosition(
+        product=_make_trs(long=True, accrual_type=AccrualType.MARKET_VALUE), quantity=1.0)
+    trade = pos.to_cva_trade(_env(), equity_bucket=2, allow_approx_financing=True)
+    curve = PillarHazardCurve(tenors=REG_TENORS, hazards=[0.03] * 5, recovery_rate=0.4)
+    cp = Counterparty(name="CP", netting_sets=[NettingSet("n1", [trade])],
+                      credit_curve=curve, bucket=2, credit_quality=CreditQuality.IG)
+    eng = SACVAEngine(
+        exposure_engine=TRSPathwiseExposureEngine(
+            MonteCarloExposureConfig(num_paths=8000, n_steps=16, seed=11)),
+        include_ir_delta=False)
+    result = eng.compute(CVATradePortfolio(counterparties=[cp], hedges=[]))
+    assert result.total_capital > 0.0
+    assert result.counterparty_cva["CP"] > 0.0
+
+
+def test_pathwise_engine_leaves_notional_trs_unchanged():
+    """The pathwise engine subclass delegates non-pathwise trades to the base engine,
+    so a NOTIONAL TRS gives the same EPE under both engines (common random numbers)."""
+    from quantark.asset.equity.engine.cashflow.trs_cva_exposure import (
+        TRSPathwiseExposureEngine,
+    )
+    from quantark.sacva.exposure.simulator import MonteCarloExposureConfig
+
+    pos = EquitySwapPosition(product=_make_trs(long=True), quantity=1.0)
+    cfg = MonteCarloExposureConfig(num_paths=6000, n_steps=12, seed=9)
+    base = MonteCarloExposureEngine(cfg).compute(_counterparty(pos, _env()))
+    sub = TRSPathwiseExposureEngine(cfg).compute(_counterparty(pos, _env()))
+    assert sub.epe_discounted == pytest.approx(base.epe_discounted)
+
+
+def test_pathwise_builder_rejects_notional():
+    from quantark.asset.equity.engine.cashflow.trs_cva_repricer import (
+        build_trs_pathwise_cva_components,
+    )
+    with pytest.raises(ValidationError):
+        build_trs_pathwise_cva_components(_make_trs(long=True).params)  # NOTIONAL accrual
 
 
 def test_intermediate_redemption_routes_to_stateful():
