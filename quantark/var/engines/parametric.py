@@ -13,6 +13,7 @@ from scipy import stats
 from quantark.portfolio.equity.portfolio import EquityPortfolio
 from quantark.portfolio.fi.portfolio import FIPortfolio
 from quantark.util.exceptions import ValidationError, MarketDataError
+from quantark.util.numerical import is_zero
 from quantark.var.results import IncrementalVaRResult, VaRResult
 from quantark.var.config import VaRConfig, VaRMethod, EquityRiskFactorConfig
 from quantark.var.risk_factors import (
@@ -583,47 +584,53 @@ class ParametricVaREngine:
     def _compute_equity_sensitivities(
         self, portfolio: EquityPortfolio
     ) -> Dict[str, float]:
-        """Compute portfolio-level sensitivities for equity."""
-        from quantark.asset.equity.riskmeasures import GreeksCalculator
+        """Compute portfolio-level sensitivities for equity.
 
-        calculator = GreeksCalculator()
+        Greeks are sourced from each position's own ``get_risk_measures`` (already
+        quantity-scaled), keeping the engine agnostic to how a position prices:
+        ``EquityPosition`` returns analytical option greeks, ``EquitySwapPosition``
+        returns the TRS delta-one / funding-rate sensitivities. The dollar
+        spot-return sensitivity multiplies the scaled delta by the underlying spot.
+        """
+        from quantark.portfolio.equity.swap_position import EquitySwapPosition
+
         factors_config = self.config.equity_factors or EquityRiskFactorConfig()
 
-        sensitivities = {}
+        sensitivities: Dict[str, float] = {}
+        per_position_greeks = {
+            position.position_id: position.get_risk_measures(
+                portfolio.pricing_environments[position.underlying]
+            )
+            for position in portfolio.positions.values()
+        }
 
         if factors_config.include_spot:
             total_delta = 0.0
             for position in portfolio.positions.values():
                 pricing_env = portfolio.pricing_environments[position.underlying]
-                greeks = calculator.calculate_analytical_greeks(
-                    position.product, pricing_env
-                )
-                total_delta += greeks["delta"] * position.quantity * pricing_env.spot
+                greeks = per_position_greeks[position.position_id]
+                total_delta += greeks["delta"] * pricing_env.spot
             sensitivities["spot_return"] = total_delta
 
         if factors_config.include_vol:
-            total_vega = 0.0
-            for position in portfolio.positions.values():
-                pricing_env = portfolio.pricing_environments[position.underlying]
-                greeks = calculator.calculate_analytical_greeks(
-                    position.product, pricing_env
-                )
-                total_vega += greeks["vega"] * position.quantity
-            sensitivities["vol_change"] = total_vega
+            sensitivities["vol_change"] = sum(
+                per_position_greeks[p.position_id].get("vega", 0.0)
+                for p in portfolio.positions.values()
+            )
 
         if factors_config.include_rate:
-            total_rho = 0.0
-            for position in portfolio.positions.values():
-                pricing_env = portfolio.pricing_environments[position.underlying]
-                greeks = calculator.calculate_analytical_greeks(
-                    position.product, pricing_env
-                )
-                total_rho += greeks["rho"] * position.quantity
-            sensitivities["rate_shift"] = total_rho
+            sensitivities["rate_shift"] = sum(
+                per_position_greeks[p.position_id].get("rho", 0.0)
+                for p in portfolio.positions.values()
+            )
 
         if factors_config.include_div_yield:
             total_psi = 0.0
             for position in portfolio.positions.values():
+                # A realized-cashflow TRS has no risk-neutral dividend-yield
+                # sensitivity in this model; only payoff-on-spot products do.
+                if isinstance(position, EquitySwapPosition):
+                    continue
                 pricing_env = portfolio.pricing_environments[position.underlying]
                 psi = self._calculate_div_yield_sensitivity(
                     position.product, pricing_env
@@ -777,27 +784,15 @@ class ParametricVaREngine:
         # Calculate position P&L for each scenario
         position_pnls = {}
         if isinstance(portfolio, EquityPortfolio):
-            from quantark.asset.equity.riskmeasures import GreeksCalculator
-
-            calculator = GreeksCalculator()
-
             for pos_id, position in portfolio.positions.items():
                 pricing_env = portfolio.pricing_environments[position.underlying]
-                # Get position market value
-                option_price = position.engine.price(position.product, pricing_env)
-                pos_value = option_price * position.quantity
-
-                # Get position return sensitivity (delta)
-                greeks = calculator.calculate_analytical_greeks(
-                    position.product, pricing_env
-                )
-                pos_return_sensitivity = greeks["delta"]
-
-                # Calculate P&L for each scenario
-                pos_return = (
-                    factor_returns[:, 0] * pos_return_sensitivity
-                )  # Use spot_return
-                pos_pnl = pos_return * pos_value
+                # Dollar P&L per scenario = spot_return × (delta_$ × spot), the
+                # quantity-scaled dollar delta sensitivity — consistent with
+                # _compute_equity_sensitivities and the dollar-sensitivities loop
+                # below, and dimensionally correct for both options and TRS. Uses
+                # the scaled delta directly, so no division by quantity is needed.
+                scaled = position.get_risk_measures(pricing_env)
+                pos_pnl = factor_returns[:, 0] * scaled["delta"] * pricing_env.spot
                 position_pnls[pos_id] = pos_pnl
 
         # Calculate portfolio variance and VaR
@@ -819,19 +814,11 @@ class ParametricVaREngine:
             # Calculate position-level dollar sensitivities
             position_dollar_sensitivities = {}
             if isinstance(portfolio, EquityPortfolio):
-                from quantark.asset.equity.riskmeasures import GreeksCalculator
-
-                calculator = GreeksCalculator()
-
                 for pos_id, position in portfolio.positions.items():
                     pricing_env = portfolio.pricing_environments[position.underlying]
-                    greeks = calculator.calculate_analytical_greeks(
-                        position.product, pricing_env
-                    )
-                    # Position dollar sensitivity (delta × spot × quantity)
-                    pos_dollar_sensitivity = (
-                        greeks["delta"] * pricing_env.spot * position.quantity
-                    )
+                    # Quantity-scaled delta × spot = delta × spot × quantity.
+                    scaled = position.get_risk_measures(pricing_env)
+                    pos_dollar_sensitivity = scaled["delta"] * pricing_env.spot
                     position_dollar_sensitivities[pos_id] = pos_dollar_sensitivity
 
             # Calculate Component VaR
@@ -883,25 +870,18 @@ class ParametricVaREngine:
         # Calculate marginal VaR for each position
         marginal_var = {}
         for pos_id, position in portfolio.positions.items():
+            # A flat position contributes no marginal risk (and must not divide
+            # by a zero quantity when recovering the per-unit delta below).
+            if is_zero(position.quantity):
+                marginal_var[pos_id] = 0.0
+                continue
+
             pricing_env = portfolio.pricing_environments[position.underlying]
 
-            # Get position market value
-            if hasattr(position.product, "strike"):
-                # Option: use pricing engine
-                option_price = position.engine.price(position.product, pricing_env)
-                pos_value = option_price * position.quantity
-            else:
-                # Stock: spot × quantity
-                pos_value = pricing_env.spot * position.quantity
-
-            # Get position-level sensitivity
-            from quantark.asset.equity.riskmeasures import GreeksCalculator
-
-            calculator = GreeksCalculator()
-            greeks = calculator.calculate_analytical_greeks(
-                position.product, pricing_env
-            )
-            pos_sensitivity = greeks["delta"] * pricing_env.spot
+            # Per-unit delta × spot, recovered from the quantity-scaled risk
+            # measures so options and swaps are handled uniformly.
+            scaled = position.get_risk_measures(pricing_env)
+            pos_sensitivity = (scaled["delta"] / position.quantity) * pricing_env.spot
 
             # Marginal VaR ≈ Component VaR for parametric method
             # Use the same formula as Component VaR

@@ -50,5 +50,15 @@ changes to those engines — the impedance mismatch is absorbed in one place.
   Tests.
 
 ## Status
-- [ ] Gate 1  - [ ] Gate 2  - [ ] Gate 3  - [ ] Gate 4
+- [x] Gate 1 (review clean, 1 iter)
+- [x] Gate 2 (review 3 iters; 1 known limitation below)
+- [ ] Gate 3  - [ ] Gate 4
 - [ ] Gate 5  - [ ] Gate 6  - [ ] Gate 7
+
+## Known limitations
+- **Parametric component / incremental / marginal VaR attribution is spot-delta
+  only** (pre-existing; the per-position P&L decomposition uses `factor_returns[
+  :,0]·delta`). Portfolio-total VaR correctly includes vega/rho, but the
+  per-position split understates non-spot factors. Immaterial for a TRS
+  (vega=0; rate risk only under opt-in funding flow-through). Flagged by the
+  Gate 2 review (iter 3); deferred — not a regression.

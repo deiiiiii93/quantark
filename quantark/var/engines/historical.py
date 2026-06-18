@@ -428,9 +428,11 @@ class HistoricalVaREngine:
 
             stressed_env = self._create_stressed_environment(base_env, scenario)
 
-            stressed_price = position.engine.price(position.product, stressed_env)
-
-            total_value += stressed_price * position.quantity
+            # Revalue through the position's own BasePosition interface so the
+            # engine stays agnostic to how a position prices (option engine vs
+            # TRS cashflow re-run). Equivalent to engine.price * quantity for
+            # payoff-on-spot positions.
+            total_value += position.get_market_value(stressed_env)
 
         return total_value
 
@@ -578,13 +580,14 @@ class HistoricalVaREngine:
         for pos_id, position in portfolio.positions.items():
             base_env = portfolio.pricing_environments[position.underlying]
 
-            # Get current (un-stressed) price of the position
-            current_price = position.engine.price(position.product, base_env)
+            # Get current (un-stressed) price of the position (per unit) via the
+            # BasePosition interface so swaps and options are handled uniformly.
+            current_price = position.get_current_price(base_env)
 
             pnls = []
             for idx, scenario in scenarios.iterrows():
                 stressed_env = self._create_stressed_environment(base_env, scenario)
-                stressed_price = position.engine.price(position.product, stressed_env)
+                stressed_price = position.get_current_price(stressed_env)
                 pnl = stressed_price * position.quantity - (
                     position.quantity * current_price
                 )

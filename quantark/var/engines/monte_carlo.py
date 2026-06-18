@@ -396,9 +396,10 @@ class MonteCarloVaREngine:
             base_env = portfolio.pricing_environments[position.underlying]
             stressed_env = self._create_stressed_environment(base_env, scenario)
 
-            stressed_price = position.engine.price(position.product, stressed_env)
-
-            total_value += stressed_price * position.quantity
+            # Revalue through the BasePosition interface (engine-agnostic;
+            # equivalent to engine.price * quantity for options, routes a TRS
+            # through its cashflow valuator).
+            total_value += position.get_market_value(stressed_env)
 
         return total_value
 
@@ -546,12 +547,13 @@ class MonteCarloVaREngine:
             position_pnls = []
             base_env = portfolio.pricing_environments[position.underlying]
 
-            # Get current (un-stressed) price of the position
-            current_price = position.engine.price(position.product, base_env)
+            # Get current (un-stressed) price of the position (per unit) via the
+            # BasePosition interface so swaps and options are handled uniformly.
+            current_price = position.get_current_price(base_env)
 
             for idx, scenario in scenarios.iterrows():
                 stressed_env = self._create_stressed_environment(base_env, scenario)
-                stressed_price = position.engine.price(position.product, stressed_env)
+                stressed_price = position.get_current_price(stressed_env)
                 pnl = stressed_price * position.quantity - (
                     position.quantity * current_price
                 )
