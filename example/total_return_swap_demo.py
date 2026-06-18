@@ -96,7 +96,7 @@ def main():
     dc_params = build_params(calendar, "IDX", 3400.0, 3560.0, 50_000_000, "spot")
     dual = OneAssetTotalReturnSwapDualCcy(
         dc_params, asset_ccy="CNY", settle_ccy="HKD",
-        fx_rate_obs_type="fixed", fx_rate=0.92,
+        fx_rate_obs_type="fixed", fx_rate=1.09,  # HKD per CNY
     )
     dc_df = dual.price()
     row = dc_df.iloc[-1]

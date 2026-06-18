@@ -203,7 +203,14 @@ class TotalReturnSwapEngine:
                         cash_div_realized += this_div_realized
                         cash_div_accrual_cum -= this_div_realized
                     if "int" in settle_option:
-                        fix_interest_realized += this_ratio
+                        # Combine the fraction of accrued interest realized across
+                        # same-day redemptions multiplicatively: each ratio is
+                        # against the then-remaining position, so summing would
+                        # over-realize. 1 - (1 - f)(1 - r) gives the cumulative
+                        # fraction of the day-opening accrual settled.
+                        fix_interest_realized = 1 - (1 - fix_interest_realized) * (
+                            1 - this_ratio
+                        )
                     if "MAT" not in contract_event:
                         if abs(this_notional) > 0:
                             if "REDM" not in contract_event:
@@ -269,24 +276,36 @@ class TotalReturnSwapEngine:
         )
 
     @staticmethod
-    def _validate_business_day_maturity(params: TRSParams) -> None:
-        """Reject a non-business-day contract maturity.
+    def _validate_business_day_dates(params: TRSParams) -> None:
+        """Reject non-business-day maturity and instantaneous event dates.
 
         The per-period leg tables are built from working days and merged onto the
-        notional schedule by exact pivot date. A maturity that falls on a
-        weekend/holiday would therefore have no matching pricing row, silently
-        dropping the maturity redemption, realized interest and dividends. Rather
-        than mis-price, fail loudly; callers should set the contract end to the
-        intended settlement trading date.
+        notional schedule by exact pivot date. Instantaneous cashflows (the
+        maturity redemption, explicit redemptions and upfront/unwind fees) that
+        fall on a weekend/holiday would have no matching pricing row and be
+        silently dropped from the present value and margin ledger. Rather than
+        mis-price, fail loudly; callers should set these to trading dates.
         """
         calendar = params.fix_leg.payment_calendar
+
         contract_end_date = max(params.fix_leg.end_date, params.float_leg.end_date)
-        end_dt = calendar._to_datetime(contract_end_date)
-        if not calendar.is_business_day(end_dt):
+        if not calendar.is_business_day(calendar._to_datetime(contract_end_date)):
             raise ValidationError(
                 f"contract maturity {contract_end_date!r} is not a business day; "
                 "set the contract end to a trading (settlement) date"
             )
+
+        events = params.events.events or {}
+        for key in ("redm", "upfront_fee", "unwind_fee"):
+            for event in events.get(key, []):
+                date = event.get("date")
+                if date is not None and not calendar.is_business_day(
+                    calendar._to_datetime(date)
+                ):
+                    raise ValidationError(
+                        f"{key} event date {date!r} is not a business day; "
+                        "instantaneous cashflows must fall on trading dates"
+                    )
 
     @staticmethod
     def _effective_valuation_date(params: TRSParams) -> str:
@@ -484,7 +503,7 @@ class TotalReturnSwapEngine:
 
     def price(self, params: TRSParams, precision: int = 2) -> pd.DataFrame:
         """Compute the combined per-period cashflow table and present value."""
-        self._validate_business_day_maturity(params)
+        self._validate_business_day_dates(params)
         notional_schedule = self.create_notional_schedule(params)
         fix_leg_price_res = self.price_fixed_leg(params, notional_schedule)
         float_leg_price_res = self.price_float_leg(params, notional_schedule)

@@ -223,17 +223,23 @@ class MultiAssetTRS:
 
     def _merge_spot_results(self, price_results: List[pd.DataFrame]) -> pd.DataFrame:
         merged_df = pd.concat(price_results, ignore_index=True)
+
+        def _col_sum(name):
+            return (
+                pd.to_numeric(merged_df[name], errors="coerce").sum()
+                if name in merged_df.columns
+                else None
+            )
+
         total_row = {
             "contract_id": self.contract_id,
             "valuation_date": self.valuation_date,
-            "fix_notional": self.fix_notional,
-            "float_notional": self.float_notional,
-            "present_value": merged_df["present_value"].astype(float).sum(),
-            "margin_mtm": (
-                merged_df["margin_mtm"].astype(float).sum()
-                if "margin_mtm" in merged_df.columns
-                else None
-            ),
+            # Sum the per-asset current notionals so the total reflects
+            # redemptions to date rather than the initial basket notional.
+            "fix_notional": _col_sum("fix_notional"),
+            "float_notional": _col_sum("float_notional"),
+            "present_value": _col_sum("present_value"),
+            "margin_mtm": _col_sum("margin_mtm"),
         }
         return pd.concat([merged_df, pd.DataFrame([total_row])], ignore_index=True)
 

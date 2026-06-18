@@ -211,6 +211,34 @@ def test_same_day_redemptions_accumulate(cal):
     assert row["redeem_fee"] == pytest.approx(4.0)
 
 
+def test_same_day_int_redemptions_do_not_over_realize(cal):
+    # Two same-day redemptions settling 'int' must combine multiplicatively:
+    # r1 = 3/10 = 0.3, then r2 = 3/7; combined opening fraction = 6/10 = 0.6.
+    events = EventParams(redemption_events=[
+        {"date": "2024-01-15", "redeem_notional": 300.0, "redeem_price": 100.0,
+         "redeem_fee_rate": 0.0, "redeem_settle_option": ["int"]},
+        {"date": "2024-01-15", "redeem_notional": 300.0, "redeem_price": 100.0,
+         "redeem_fee_rate": 0.0, "redeem_settle_option": ["int"]},
+    ])
+    trs = _build(cal, _prices(100.0), events=events)
+    schedule = {r["date"]: r for r in trs.engine.create_notional_schedule(trs.params)}
+    realized = schedule["2024-01-15"]["fix_interest_realized"]
+    assert realized == pytest.approx(0.6, abs=1e-9)
+    assert realized <= 1.0
+
+
+def test_non_business_day_redemption_raises(cal):
+    # 2024-01-06 is a Saturday; an instantaneous redemption there would be
+    # dropped by the working-day merge -> must fail loudly at pricing.
+    events = EventParams(redemption_events=[
+        {"date": "2024-01-06", "redeem_notional": 200.0, "redeem_price": 100.0,
+         "redeem_fee_rate": 0.0, "redeem_settle_option": ["asset"]},
+    ])
+    trs = _build(cal, _prices(100.0), events=events)
+    with pytest.raises(Exception):
+        trs.price()
+
+
 def test_share_dividend_adjusts_quantity(cal):
     events = EventParams(share_dividend_events=[
         {"date": "2024-01-10", "share_div_per_share": 0.1},

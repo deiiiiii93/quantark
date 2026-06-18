@@ -10,6 +10,7 @@ from quantark.asset.equity.product.swap.trs_params import (
     FloatLegParams,
     PricingParams,
     TRSParams,
+    EventParams,
 )
 from quantark.asset.equity.product.swap.multi_asset_trs import (
     MultiAssetTRS,
@@ -87,9 +88,9 @@ def test_dual_ccy_fixed_fx_converts_present_value(cal):
     )
     df = trs.price()  # spot mode -> single live valuation row
     row = df.iloc[-1]
-    # present_value_HKD is rounded to the requested precision (default 2dp).
+    # Rate is quoted settle-per-asset; PV is multiplied. Rounded to 2dp.
     assert float(row["present_value_HKD"]) == pytest.approx(
-        float(row["present_value"]) / 0.9, abs=0.01
+        float(row["present_value"]) * 0.9, abs=0.01
     )
 
 
@@ -131,8 +132,22 @@ def test_dual_ccy_observed_fx_uses_valuation_date_for_spot(cal):
     row = df.iloc[-1]
     assert float(row["fx_rate_HKD/CNY"]) == pytest.approx(0.95)
     assert float(row["present_value_HKD"]) == pytest.approx(
-        float(row["present_value"]) / 0.95, abs=0.01
+        float(row["present_value"]) * 0.95, abs=0.01
     )
+
+
+def test_multi_asset_spot_total_uses_current_notionals(cal):
+    # A constituent redeems before valuation; the total row must report the
+    # reduced (current) notional, not the initial basket notional.
+    params = _base_params(cal, _prices(100.0))
+    redemption = [{"asset_id": "A1", "date": "2024-01-15", "redeem_notional": 400.0,
+                   "redeem_price": 100.0, "redeem_fee_rate": 0.0,
+                   "redeem_settle_option": ["asset"]}]
+    params.events = EventParams(redemption_events=redemption)
+    assets = [MultiAssetInfo("A1", 100.0, _prices(100.0), notional=1000)]
+    df = MultiAssetTRS(params, assets).price()
+    total = df[df["contract_id"] == "C"].iloc[0]
+    assert float(total["fix_notional"]) == pytest.approx(600.0, abs=1e-6)
 
 
 def test_multi_asset_full_mode_has_no_blank_period_end_rows(cal):

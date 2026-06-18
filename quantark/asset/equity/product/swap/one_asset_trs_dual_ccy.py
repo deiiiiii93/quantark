@@ -10,7 +10,7 @@ from typing import Dict, Optional
 import pandas as pd
 
 from quantark.util.exceptions import MarketDataError, ValidationError
-from quantark.asset.equity.product.swap.trs_params import TRSParams
+from quantark.asset.equity.product.swap.trs_params import TRSParams, AccrualType
 from quantark.asset.equity.product.swap.one_asset_trs import OneAssetTotalReturnSwap
 
 _VALID_FX_OBS_TYPES = ("fixed", "spot", "close", "bfix")
@@ -74,6 +74,8 @@ class OneAssetTotalReturnSwapDualCcy(OneAssetTotalReturnSwap):
         """Price the TRS and add settlement-currency columns."""
         df = super().price(precision=4)
 
+        # The stored rate is quoted as settlement currency per unit of asset
+        # currency (fx_rate_{settle}/{asset}), so asset amounts are multiplied.
         fx_col = f"fx_rate_{self.settle_ccy}/{self.asset_ccy}"
         if self.fx_rate_obs_type == "fixed" or self.asset_ccy == self.settle_ccy:
             df[fx_col] = self.fx_rate
@@ -81,11 +83,17 @@ class OneAssetTotalReturnSwapDualCcy(OneAssetTotalReturnSwap):
             # A spot view settles on the valuation date, so use that fixing.
             df[fx_col] = self._lookup_fx(self.params.pricing.valuation_date)
         else:
-            df[fx_col] = df["period_start"].map(self._lookup_fx)
+            # Use the same pivot the engine keyed each row to.
+            pivot_col = (
+                "period_end"
+                if self.params.fix_leg.accrual_type == AccrualType.LAST_MARKET_VALUE
+                else "period_start"
+            )
+            df[fx_col] = df[pivot_col].map(self._lookup_fx)
 
         fx = pd.to_numeric(df[fx_col], errors="coerce")
         for base in ("present_value", "outstanding_margin", "margin_mtm"):
             values = pd.to_numeric(df[base], errors="coerce")
-            df[f"{base}_{self.settle_ccy}"] = (values / fx).round(precision)
+            df[f"{base}_{self.settle_ccy}"] = (values * fx).round(precision)
 
         return df
