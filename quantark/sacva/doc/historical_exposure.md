@@ -22,10 +22,10 @@ measures and different consumers**.
 
 Regulatory CVA is a risk-neutral price. This engine uses **historical (real-world)
 drifts**, so every `ExposureProfile` it emits carries `measure = REAL_WORLD` and
-`regulatory_eligible = False`. The eligibility **guard**
-(`regulatory_guard.assert_regulatory_eligible`, and in production the MC-owned
-`RegulatoryCVAEngine` / adapter / facade) **raises** on a non-eligible profile, so
-a historical exposure can never feed the SA-CVA capital number. The two-measure
+`regulatory_eligible = False`. The eligibility **guard** lives in the capital-path
+consumer: `RegulatoryCVAEngine.compute` **raises** on any non-eligible / non
+risk-neutral profile, so a historical exposure can never feed the SA-CVA capital
+number. The two-measure
 PFE convention is followed: **real-world path generation, risk-neutral valuation**
 at each horizon (reused value-surface layer).
 

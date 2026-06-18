@@ -20,6 +20,10 @@ from quantark.sacva.exposure.simulator import (
     MonteCarloExposureEngine,
 )
 from quantark.sacva.cva.engine import RegulatoryCVAEngine
+from quantark.sacva.exposure.historical.engine import (
+    HistoricalExposureConfig,
+    HistoricalExposureEngine,
+)
 from quantark.sacva.sensitivities.engine import CVASensitivityEngine
 from quantark.sacva.portfolio.trade import CVAHedge, CVATrade
 from quantark.sacva.portfolio.netting import NettingSet
@@ -36,4 +40,6 @@ __all__ = [
     "SACVAEngine", "MonteCarloExposureEngine", "MonteCarloExposureConfig",
     "RegulatoryCVAEngine", "CVASensitivityEngine", "CVATrade", "CVAHedge",
     "NettingSet", "Counterparty", "CVATradePortfolio", "PillarHazardCurve",
+    # non-regulatory real-world PFE/EE (never SA-CVA eligible)
+    "HistoricalExposureEngine", "HistoricalExposureConfig",
 ]

@@ -447,38 +447,38 @@ def test_engine_rejects_missing_factor_and_bad_config():
 # ---------------------------------------------------------------------------
 # Task 9 — Regulatory guard + merge gate (the keystone)
 # ---------------------------------------------------------------------------
-from quantark.sacva.exposure.historical.regulatory_guard import (
-    assert_regulatory_eligible, ProvisionalRegulatoryCVAStub,
-)
 from quantark.sacva.cva.engine import RegulatoryCVAEngine
 
 
 def test_historical_profile_rejected_by_capital_path():
+    # the keystone: the real MC-owned RegulatoryCVAEngine must reject a real-world
+    # (historical) profile so it can never fund SA-CVA capital (MAR50.34(1)).
     cal = _hist_cal("ACME", 100.0, seed=3)
     cp = _counterparty([NettingSet("n1", [_call_trade("c1", env=_env(asset="ACME"))])])
     prof = HistoricalExposureEngine(cal, _cfg(n_paths=2000)).compute(cp)
-    with pytest.raises(ValidationError):
-        assert_regulatory_eligible(prof)
-    with pytest.raises(ValidationError):
-        ProvisionalRegulatoryCVAStub().compute(cp, prof)
-    # the real MC-owned RegulatoryCVAEngine must also reject a real-world profile
+    assert prof.measure is Measure.REAL_WORLD and not prof.regulatory_eligible
     with pytest.raises(ValidationError):
         RegulatoryCVAEngine().compute(_FlatCreditCurve(), prof)
 
 
-def test_guard_accepts_risk_neutral_eligible():
+def test_capital_path_accepts_risk_neutral_eligible():
     rn = ExposureProfile(np.array([0., 1.]), np.array([5., 3.]), Measure.RISK_NEUTRAL, True)
-    assert_regulatory_eligible(rn)
+    # a risk-neutral, regulatory-eligible profile is consumed without error
+    assert RegulatoryCVAEngine().compute(_FlatCreditCurve(), rn) >= 0.0
 
 
-def test_merge_gate_no_provisional_import():
-    # the provisional contract is gone: no historical module may import it.
+def test_merge_gate_no_provisional_artifacts():
+    # the provisional contract AND the provisional regulatory-guard stub are gone.
     import importlib, inspect, pkgutil
     import quantark.sacva.exposure.historical as hist
+    names = []
     for mi in pkgutil.walk_packages(hist.__path__, hist.__name__ + "."):
+        names.append(mi.name)
         src = inspect.getsource(importlib.import_module(mi.name))
         assert "_contract_provisional" not in src, \
             f"{mi.name} still imports the provisional contract"
+    assert not any(n.endswith(".regulatory_guard") for n in names), \
+        "provisional regulatory_guard stub must be deleted at merge"
 
 
 # ---------------------------------------------------------------------------

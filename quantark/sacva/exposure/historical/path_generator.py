@@ -1,12 +1,13 @@
 """Historical forward path generation: replay (raw / drift-adjusted) and
 bootstrap (IID / block-FHS / stationary). Output is a real-world state tensor
-``states[n_paths, n_grid, n_factors]`` consumed unchanged by the (provisional)
-repricer.
+``states[n_paths, n_grid, n_factors]`` consumed by ``HistoricalExposureEngine``'s
+analytic-surface repricer (the same repricing as the MC vanilla path).
 
-Provisional-grid note: the grid is **year-fraction** based; each interval is
-mapped to a deterministic business-day count and levels are built by compounding
-that many daily log-returns (NO sqrt-t scaling). A full calendar/event grid is
-the MC session's ``ExposureGrid`` (merge follow-up).
+Grid note: the exposure grid (the canonical ``ExposureGrid``) is **year-fraction**
+based; each interval is mapped to a deterministic business-day count and levels are
+built by compounding that many daily log-returns (NO sqrt-t scaling). Cumulative day
+boundaries are rounded then differenced, so the terminal horizon is invariant to how
+many report nodes are inserted.
 """
 from __future__ import annotations
 
