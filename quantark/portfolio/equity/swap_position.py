@@ -163,6 +163,67 @@ class EquitySwapPosition:
             [self], market_data, config
         )
 
+    # ------------------------------------------------------------------ #
+    # SA-CCR interface
+    # ------------------------------------------------------------------ #
+    def to_saccr_trade(
+        self, pricing_env: PricingEnvironment, *, is_index: bool = False
+    ) -> Any:
+        """Map this TRS to a SA-CCR equity-derivative trade (paragraphs 176-178).
+
+        A TRS is a linear (delta-one) equity trade: its SA-CCR adjusted notional
+        is ``current spot x number of shares`` and its supervisory delta is +/-1
+        by economic direction. The current mark-to-market feeds the netting set's
+        replacement cost.
+
+        Args:
+            pricing_env: Environment supplying the current spot / MtM.
+            is_index: True if the underlying is an equity index (drives the 20%
+                index supervisory factor vs 32% single-name).
+        """
+        from quantark.saccr.models.trade import SACCRTrade, MIN_MATURITY
+        from quantark.saccr.models.enums import AssetClass, Position
+        from quantark.asset.equity.product.swap.trs_params import SwapState
+
+        # A matured swap (valuation date past contract end) carries no future
+        # counterparty exposure; do not fabricate a floored 10-business-day trade
+        # for it. remaining_tenor() floors at zero, so check the lifecycle state.
+        if getattr(self.product, "state", None) == SwapState.MATURED:
+            raise ValidationError(
+                f"TRS {self.position_id} has matured (valuation date past contract "
+                "end); a matured swap carries no SA-CCR counterparty exposure"
+            )
+
+        shares = (
+            self._params.float_leg.initial_notional
+            / self._params.asset.asset_initial_price
+        ) * abs(self.quantity)
+        adjusted_notional = pricing_env.spot * shares
+
+        # Economic long/short = quantity sign x the float (total-return) leg
+        # direction; the supervisory delta carries this sign, so the notional is
+        # the absolute exposure.
+        economic_direction = self.quantity * self._params.float_leg.direction
+        position = Position.LONG if economic_direction >= 0 else Position.SHORT
+
+        # Floor the remaining tenor at SA-CCR's 10-business-day minimum and use the
+        # floored value for both maturity (M_i) and end_date (E_i) so the trade is
+        # internally consistent (M_i <= E_i) for near-expiry swaps. SACCRTrade also
+        # floors maturity, but not end_date — set both here explicitly.
+        maturity = max(self._valuator.remaining_tenor(), MIN_MATURITY)
+        return SACCRTrade(
+            trade_id=self.position_id,
+            asset_class=AssetClass.EQUITY,
+            notional=adjusted_notional,
+            market_value=self.get_market_value(pricing_env),
+            maturity=maturity,
+            start_date=0.0,
+            end_date=maturity,
+            reference_entity=self.underlying,
+            is_index=is_index,
+            position=position,
+        )
+
     def is_long(self) -> bool:
         return self.quantity > 0
 

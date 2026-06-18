@@ -55,7 +55,34 @@ changes to those engines — the impedance mismatch is absorbed in one place.
 - [x] Gate 3 (no engine changes — stress + dynamic are already duck-typed)
 - [x] Gate 4 (backtest: swap-aware position init; step loop already duck-typed)
 - [x] Gate 5 (SIMM: EquitySwapPosition.get_simm_sensitivities -> EquityDelta)
-- [ ] Gate 6  - [ ] Gate 7
+- [x] Gate 6 (SA-CCR: EquitySwapPosition.to_saccr_trade -> EQUITY trade)
+- [~] Gate 7 (SA-CVA: not applicable in this branch — see note)
+
+### Gate 7 note (SA-CVA) — not integrated here
+Two reasons, both blocking and both outside the scope of this branch:
+1. **Module absent.** There is no `quantark/sacva` in this codebase; the Basel
+   SA-CVA (MAR50) SBA engine lives only on the separate, unmerged
+   `worktree-sacva` branch. Pulling it in would conflate two independent
+   unmerged feature efforts in this diff.
+2. **No per-instrument hook by design.** The SA-CVA SBA engine consumes
+   *supplied* CVA and CVA-hedge sensitivities (delta/vega per risk factor); it
+   does not derive them from instruments/positions. So unlike VaR/SIMM/SA-CCR
+   there is no `position -> engine` seam to add. Producing a TRS's equity (and,
+   for floating funding, IR) CVA sensitivities requires a CVA model (expected-
+   exposure simulation over the swap's life), which is a separate workstream.
+
+What *is* delivered toward counterparty/CVA capital: the TRS's
+counterparty-exposure path — SA-CCR EAD (Gate 6) — which is the exposure input a
+CVA framework builds on. A follow-up on top of `worktree-sacva` can feed
+TRS-derived CVA sensitivities into the SBA engine.
+
+### Gate 6 note
+`EquitySwapPosition.to_saccr_trade(env, is_index=)` maps the TRS to a SA-CCR
+`AssetClass.EQUITY` trade: adjusted notional = current spot x shares, supervisory
+delta +/-1 by economic direction (quantity x float-leg direction), maturity =
+remaining tenor (floored to the 10-business-day SA-CCR minimum), market value =
+current MtM. Single-name (32%) vs index (20%) supervisory factor via `is_index`.
+The trade flows through SACCRNettingSet -> SACCRCalculator to an EAD.
 
 ### Gate 5 note
 `EquitySwapPosition.get_simm_sensitivities` mirrors `EquityPosition`'s: the

@@ -99,7 +99,7 @@ class TRSValuationEngine:
     # ------------------------------------------------------------------ #
     # Public mark-to-market / greeks
     # ------------------------------------------------------------------ #
-    def _remaining_tenor(self) -> float:
+    def remaining_tenor(self) -> float:
         """Year fraction from the valuation date to contract maturity (ACT/365)."""
         end = max(self._base.fix_leg.end_date, self._base.float_leg.end_date)
         start = datetime.strptime(self._val_date, "%Y-%m-%d")
@@ -110,7 +110,7 @@ class TRSValuationEngine:
         """Financing rate implied by the env, or ``None`` to keep contractual."""
         if self._funding_rate_ref is None or pricing_env is None:
             return None
-        env_rate = pricing_env.get_rate(self._remaining_tenor())
+        env_rate = pricing_env.get_rate(self.remaining_tenor())
         return self._base.fix_leg.rate + (env_rate - self._funding_rate_ref)
 
     def mark_to_market(
