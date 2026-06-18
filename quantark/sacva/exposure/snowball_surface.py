@@ -31,6 +31,13 @@ from quantark.util.exceptions import ValidationError
 _TOL = 1e-9
 
 
+class SnowballTerminatedAtValuation(Exception):
+    """The snowball is already terminated at valuation (immediate KO triggered by the
+    valuation spot, or zero maturity), so it has no forward value surface. The exposure
+    engine treats it as zero future exposure rather than a hard error — a +1% market
+    bump can validly tip a near-barrier snowball over a valuation-date KO."""
+
+
 @dataclass
 class SnowballExposureSurface:
     """Everything the MC engine needs to expose a stateful snowball trade."""
@@ -83,14 +90,6 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
     if not ko_records:
         raise ValidationError(f"{trade.trade_id}: empty KO observation schedule")
     for rec in ko_records:
-        # A KO observation AT the valuation date makes price() return the immediate-KO
-        # payoff with no recorded backward grids (so a spot bump that tips the trade
-        # over the barrier would crash the exposure build). Such a trade is already
-        # terminating at valuation; reject it in v1 rather than special-casing.
-        if abs(float(rec.observation_time)) <= _TOL:
-            raise ValidationError(
-                f"{trade.trade_id}: a KO observation at the valuation date is not "
-                "supported in v1 exposure (immediate KO has no recorded surface)")
         settle = rec.observation_time if rec.settlement_time is None else rec.settlement_time
         if abs(float(settle) - float(rec.observation_time)) > _TOL:
             raise ValidationError(
@@ -147,9 +146,10 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
         engine.record_backward_grids = prev
     grids = dict(engine._backward_grids)
     if not grids:
-        raise ValidationError(
-            f"{trade.trade_id}: no backward grids recorded — the snowball is already "
-            "terminated (immediate KO or zero maturity) at valuation")
+        # immediate KO (valuation spot breaches a t0 KO barrier) or zero maturity:
+        # no forward surface exists. Signal termination; the exposure engine maps it
+        # to zero future exposure (and still prices any co-netted vanillas).
+        raise SnowballTerminatedAtValuation(trade.trade_id)
 
     # exposure grid = sorted recorded times; per-(t, state) surface
     times = np.array(sorted(grids), dtype=float)

@@ -332,14 +332,38 @@ def test_co_netted_vol_mismatch_on_snowball_underlying_raises():
             _counterparty([snow, van]))
 
 
-def test_t0_ko_observation_deferred():
+def _t0_ko_snowball(ko_barrier):
     cfg = BarrierConfig(
-        ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+        ko_barrier=ko_barrier, ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
         ko_observation_dates=[0.0, 0.5, 1.0], ki_barrier=75.0,
         ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True)
-    prod = SnowballOption(initial_price=100.0, strike=100.0, barrier_config=cfg,
+    return SnowballOption(initial_price=100.0, strike=100.0, barrier_config=cfg,
                           contract_multiplier=1.0, maturity=1.0, is_reverse=False)
-    trade = CVATrade("s", prod, SnowballQuadEngine(params=QuadParams(grid_points=301)),
-                     _env(), trade_currency="USD")
-    with pytest.raises(Exception):
+
+
+def test_t0_ko_below_barrier_builds_normally():
+    # a valuation-date KO observation with spot BELOW the barrier is a live, valid
+    # snowball -> it must build a surface and produce exposure (not be rejected).
+    trade = CVATrade("s", _t0_ko_snowball(ko_barrier=103.0),
+                     SnowballQuadEngine(params=QuadParams(grid_points=301)), _env(),
+                     trade_currency="USD")
+    spec = build_snowball_surface(trade)        # spot 100 < 103: does not raise
+    assert 0.0 in [round(float(t), 9) for t in spec.times]
+    profile = MonteCarloExposureEngine(
+        MonteCarloExposureConfig(num_paths=8000, seed=7)).compute(_counterparty([trade]))
+    assert np.all(np.isfinite(profile.epe_discounted))
+
+
+def test_immediate_ko_terminates_to_zero_exposure():
+    # valuation spot 100 breaches a t0 KO barrier of 95 -> immediate KO -> the snowball
+    # is terminated at valuation: build signals termination, exposure is zero.
+    from quantark.sacva.exposure.snowball_surface import SnowballTerminatedAtValuation
+    trade = CVATrade("s", _t0_ko_snowball(ko_barrier=95.0),
+                     SnowballQuadEngine(params=QuadParams(grid_points=301)), _env(),
+                     trade_currency="USD")
+    with pytest.raises(SnowballTerminatedAtValuation):
         build_snowball_surface(trade)
+    profile = MonteCarloExposureEngine(
+        MonteCarloExposureConfig(num_paths=4000, seed=7)).compute(_counterparty([trade]))
+    assert np.allclose(profile.epe_discounted, 0.0)

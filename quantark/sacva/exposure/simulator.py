@@ -31,7 +31,10 @@ from quantark.sacva.exposure.engine import (
 from quantark.sacva.exposure.grid import ExposureGrid
 from quantark.sacva.exposure.paths import StatePathGenerator
 from quantark.sacva.exposure.repricer import reprice_trade
-from quantark.sacva.exposure.snowball_surface import build_snowball_surface
+from quantark.sacva.exposure.snowball_surface import (
+    SnowballTerminatedAtValuation,
+    build_snowball_surface,
+)
 from quantark.sacva.exposure.statemachine import BarrierStateMachine
 from quantark.sacva.exposure.value_surface import AnalyticValueSurface
 from quantark.util.exceptions import ValidationError
@@ -85,12 +88,28 @@ class MonteCarloExposureEngine(ExposureEngine):
         if stateful:
             return self._compute_stateful(counterparty, trades, stateful)
 
+        return self._compute_grid(counterparty, trades)
+
+    def _compute_grid(self, counterparty, trades, zero_trades=()) -> ExposureProfile:
+        """Vanilla (analytic-surface) exposure on a uniform grid over ``trades``.
+
+        ``zero_trades`` are carried at zero value (used for a snowball that terminated
+        at valuation): they still appear in their netting set so the set aggregation is
+        correct, but contribute no exposure. If nothing is left to price, the profile
+        is a single t0 node of zero exposure (CVA integrates to zero).
+        """
+        zero_ids = {id(t) for t in zero_trades}
+        priced = [t for t in trades if id(t) not in zero_ids]
+        if not priced:
+            return ExposureProfile(times=np.array([0.0]), epe_discounted=np.array([0.0]),
+                                   measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
+
         # per-underlying market (constant-vol GBM factor), taken from the first trade
-        # on that key; horizon = max maturity across the counterparty
-        horizon = max(self._trade_maturity(t) for t in trades)
+        # on that key; horizon = max maturity across the priced trades
+        horizon = max(self._trade_maturity(t) for t in priced)
         keys, spots, vols, rates, divs = [], [], [], [], []
         market_env = {}
-        for t in trades:
+        for t in priced:
             k = self._underlying_key(t)
             if k in market_env:
                 if abs(market_env[k].spot - t.env.spot) > 1e-9:
@@ -110,23 +129,25 @@ class MonteCarloExposureEngine(ExposureEngine):
         grid = ExposureGrid.build(horizon=horizon, n_steps=self.config.n_steps,
                                   event_times=[])
         times = grid.times
-        self._check_market_consistency(trades, times)
+        self._check_market_consistency(priced, times)
         gen = StatePathGenerator(keys=keys, spots=spots, vols=vols, rates=rates,
                                  divs=divs, corr=corr, grid_times=times,
                                  num_paths=self.config.num_paths, seed=self.config.seed)
         paths = gen.generate()
 
         # discount factors on the reporting curve (single currency v1)
-        ref_curve = trades[0].env
+        ref_curve = priced[0].env
         df = np.array([float(ref_curve.get_discount_factor(float(ti))) for ti in times])
 
-        # pathwise undiscounted values per trade
-        trade_values = {id(t): self._trade_value_array(t, paths, times) for t in trades}
+        # pathwise undiscounted values per trade; zero_trades carried at zero
+        values = {id(t): self._trade_value_array(t, paths, times) for t in priced}
+        for t in zero_trades:
+            values[id(t)] = np.zeros((self.config.num_paths, len(times)))
 
         # counterparty EPE = sum over sets of set-level discounted EPE (MAR50.35)
         epe = np.zeros(len(times))
         for ns in counterparty.netting_sets:
-            arrays = [trade_values[id(t)] for t in ns.trades]
+            arrays = [values[id(t)] for t in ns.trades]
             epe = epe + aggregate_epe(arrays, enforceable=ns.netting_enforceable, df=df)
 
         return ExposureProfile(times=times, epe_discounted=epe,
@@ -193,7 +214,12 @@ class MonteCarloExposureEngine(ExposureEngine):
                 f"{counterparty.name}: v1 supports at most one stateful (snowball) trade "
                 "per counterparty; multiple autocallables need a merged observation grid")
         snow = stateful[0]
-        spec = build_snowball_surface(snow)
+        try:
+            spec = build_snowball_surface(snow)
+        except SnowballTerminatedAtValuation:
+            # the snowball is already terminated at valuation (immediate KO / zero
+            # maturity): zero future exposure, but co-netted vanillas still price.
+            return self._compute_grid(counterparty, trades, zero_trades=[snow])
         times = spec.times
         self._check_market_consistency(trades, times)
         snow_key = self._underlying_key(snow)
