@@ -118,6 +118,7 @@ class EventParams:
     """Lifecycle events (dividends, redemptions, fees) grouped by type."""
 
     dividend_events: List[Dict] = field(default_factory=list)
+    share_dividend_events: List[Dict] = field(default_factory=list)
     redemption_events: List[Dict] = field(default_factory=list)
     upfront_fee_events: List[Dict] = field(default_factory=list)
     unwind_fee_events: List[Dict] = field(default_factory=list)
@@ -126,6 +127,8 @@ class EventParams:
         self.events: Dict[str, List[Dict]] = {}
         if self.dividend_events:
             self.events["div_cash"] = self.dividend_events
+        if self.share_dividend_events:
+            self.events["div_share"] = self.share_dividend_events
         if self.redemption_events:
             self.events["redm"] = self.redemption_events
         if self.upfront_fee_events:
@@ -147,6 +150,12 @@ class MarginParams:
         self.settle_type = _coerce_enum(
             self.settle_type, SettleType, "settle_type"
         )
+        # If only an initial margin is posted, treat it as the opening outstanding
+        # balance so pricing reflects the collateral (the engine reads
+        # outstanding_margin). When both are supplied, the explicit outstanding
+        # balance is authoritative.
+        if self.outstanding_margin == 0 and self.initial_margin > 0:
+            self.outstanding_margin = self.initial_margin
 
 
 @dataclass

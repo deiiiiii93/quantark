@@ -170,47 +170,51 @@ class TotalReturnSwapEngine:
                     }
                 )
 
+            # Multiple redemptions can fall on the same date (e.g. an explicit
+            # redemption plus the synthetic maturity redemption). Accumulate their
+            # cashflows so none is overwritten before the schedule row is built.
             for redm_event in redm_events:
                 if redm_event.get("date") == pivot_date:
                     if redm_event.get("_maturity"):
                         # Redeem the outstanding notional remaining at maturity.
-                        redeem_notional = fix_notional
+                        this_notional = fix_notional
                     else:
-                        redeem_notional = redm_event.get("redeem_notional")
-                    redeem_price = redm_event.get("redeem_price")
-                    redeem_fee_rate = redm_event.get("redeem_fee_rate")
-                    redeem_settle_option = redm_event.get("redeem_settle_option")
-                    redeem_quantity = safe_divide(redeem_notional, asset_initial_price)
-                    redeem_ratio = redm_event.get(
-                        "redeem_ratio", safe_divide(redeem_quantity, asset_quantity)
+                        this_notional = redm_event.get("redeem_notional")
+                    this_price = redm_event.get("redeem_price")
+                    this_fee_rate = redm_event.get("redeem_fee_rate")
+                    settle_option = redm_event.get("redeem_settle_option")
+                    this_quantity = safe_divide(this_notional, asset_initial_price)
+                    this_ratio = redm_event.get(
+                        "redeem_ratio", safe_divide(this_quantity, asset_quantity)
                     )
-                    fix_notional -= redeem_notional
-                    float_notional -= redeem_notional
-                    asset_quantity -= redeem_quantity
-                    redeem_fee = redeem_fee_rate * redeem_price * redeem_quantity
-                    asset_interest_realized = (
-                        (redeem_price - asset_initial_price)
-                        * params.float_leg.direction
-                        * redeem_quantity
-                        if "asset" in redeem_settle_option
-                        else 0
-                    )
-                    cash_div_realized = (
-                        redeem_ratio * cash_div_accrual_cum
-                        if "cash_div" in redeem_settle_option
-                        else 0
-                    )
-                    fix_interest_realized = (
-                        redeem_ratio if "int" in redeem_settle_option else 0
-                    )
-                    cash_div_accrual_cum -= cash_div_realized
+                    fix_notional -= this_notional
+                    float_notional -= this_notional
+                    asset_quantity -= this_quantity
+                    redeem_notional += this_notional
+                    redeem_fee += this_fee_rate * this_price * this_quantity
+                    if "asset" in settle_option:
+                        asset_interest_realized += (
+                            (this_price - asset_initial_price)
+                            * params.float_leg.direction
+                            * this_quantity
+                        )
+                    if "cash_div" in settle_option:
+                        this_div_realized = this_ratio * cash_div_accrual_cum
+                        cash_div_realized += this_div_realized
+                        cash_div_accrual_cum -= this_div_realized
+                    if "int" in settle_option:
+                        fix_interest_realized += this_ratio
                     if "MAT" not in contract_event:
-                        if abs(redeem_notional) > 0:
-                            contract_event.append("REDM")
+                        if abs(this_notional) > 0:
+                            if "REDM" not in contract_event:
+                                contract_event.append("REDM")
                         else:
-                            if "cash_div" in redeem_settle_option:
+                            if (
+                                "cash_div" in settle_option
+                                and "CASH_DIV" not in contract_event
+                            ):
                                 contract_event.append("CASH_DIV")
-                            if "int" in redeem_settle_option:
+                            if "int" in settle_option and "INT" not in contract_event:
                                 contract_event.append("INT")
 
             if params.margin.margin_events:

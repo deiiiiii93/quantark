@@ -194,6 +194,33 @@ def test_maturity_redemption_handles_same_day_explicit_redemption(cal):
     assert trs.price() is not None
 
 
+def test_same_day_redemptions_accumulate(cal):
+    # Two redemptions on the same date must accumulate (not overwrite) their
+    # notional and fees in the schedule row.
+    events = EventParams(redemption_events=[
+        {"date": "2024-01-15", "redeem_notional": 200.0, "redeem_price": 100.0,
+         "redeem_fee_rate": 0.01, "redeem_settle_option": ["asset"]},
+        {"date": "2024-01-15", "redeem_notional": 200.0, "redeem_price": 100.0,
+         "redeem_fee_rate": 0.01, "redeem_settle_option": ["asset"]},
+    ])
+    trs = _build(cal, _prices(100.0), events=events)
+    schedule = {r["date"]: r for r in trs.engine.create_notional_schedule(trs.params)}
+    row = schedule["2024-01-15"]
+    assert row["redeem_notional"] == pytest.approx(400.0)
+    # qty per leg = 200/100 = 2; fee = 0.01*100*2 = 2 each -> 4 total.
+    assert row["redeem_fee"] == pytest.approx(4.0)
+
+
+def test_share_dividend_adjusts_quantity(cal):
+    events = EventParams(share_dividend_events=[
+        {"date": "2024-01-10", "share_div_per_share": 0.1},
+    ])
+    trs = _build(cal, _prices(100.0), events=events)
+    schedule = {r["date"]: r for r in trs.engine.create_notional_schedule(trs.params)}
+    # Quantity steps from 10 to 10 * 1.1 = 11 on the share-dividend date.
+    assert schedule["2024-01-10"]["asset_quantity"] == pytest.approx(11.0)
+
+
 def test_redemption_reduces_fixed_notional(cal):
     events = EventParams(redemption_events=[{
         "date": "2024-01-15",

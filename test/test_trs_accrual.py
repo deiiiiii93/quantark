@@ -16,6 +16,7 @@ from quantark.asset.equity.product.swap.trs_params import (
     PricingParams,
     TRSParams,
     FloatLegParams,
+    MarginParams,
 )
 from quantark.asset.equity.engine.cashflow.accrual_calculator import (
     StandardAccrualCalculator,
@@ -139,6 +140,16 @@ def test_accrual_type_invalid_raises():
 def test_asset_params_requires_series():
     with pytest.raises(ValidationError):
         AssetParams(asset_id="X", asset_initial_price=100, asset_prices=[1, 2, 3])
+
+
+def test_margin_initial_seeds_outstanding_when_zero():
+    m = MarginParams(initial_margin=1000.0)
+    assert m.outstanding_margin == pytest.approx(1000.0)
+
+
+def test_margin_explicit_outstanding_is_authoritative():
+    m = MarginParams(initial_margin=1000.0, outstanding_margin=500.0)
+    assert m.outstanding_margin == pytest.approx(500.0)
 
 
 def test_pricing_output_mode_validation():
