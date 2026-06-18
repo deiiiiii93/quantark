@@ -19,8 +19,11 @@ class MarginAccount:
         self.history = pd.DataFrame(columns=["date", "amount", "type", "balance"])
 
         if self.initial_margin > 0:
+            # Record the opening balance as the running outstanding margin so the
+            # ledger's balance column reconciles with subsequent apply_cashflow
+            # calls (which start from self.outstanding_margin).
             self._add_history_record(
-                None, self.initial_margin, "INITIAL", self.initial_margin
+                None, self.initial_margin, "INITIAL", self.outstanding_margin
             )
 
     def _add_history_record(self, date, amount, event_type, balance):

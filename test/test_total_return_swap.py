@@ -139,6 +139,61 @@ def test_engine_package_imports_first_without_circular_error():
     assert hasattr(mod, "TotalReturnSwapEngine")
 
 
+def test_dividend_without_deliver_ratio_defaults_to_one(cal):
+    # Omitting deliver_ratio must default to 1.0 (not crash with TypeError).
+    events = EventParams(dividend_events=[{
+        "date": "2024-01-10", "cash_div_per_share": 1.0,
+    }])
+    trs = _build(cal, _prices(100.0), events=events)
+    df = trs.price()  # must not raise
+    assert df is not None
+
+
+def test_dividend_missing_per_share_raises(cal):
+    # Building the product constructs the notional schedule, where the missing
+    # required field is detected.
+    events = EventParams(dividend_events=[{"date": "2024-01-10"}])
+    with pytest.raises(Exception):
+        _build(cal, _prices(100.0), events=events).price()
+
+
+def test_non_business_day_maturity_raises(cal):
+    # 2024-01-06 is a Saturday -> must fail loudly rather than drop cashflows.
+    asset = AssetParams(
+        asset_id="TEST", asset_initial_price=INITIAL_PRICE, asset_prices=_prices(100.0),
+    )
+    fix_leg = FixLegParams(
+        rate=RATE, notional=NOTIONAL, initial_notional=NOTIONAL,
+        start_date=START, end_date="2024-01-06", payment_calendar=cal, direction=-1,
+    )
+    float_leg = FloatLegParams(
+        notional=NOTIONAL, initial_notional=NOTIONAL,
+        start_date=START, end_date="2024-01-06", payment_calendar=cal, direction=1,
+    )
+    trs = OneAssetTotalReturnSwap(
+        TRSParams(
+            contract_id="w1", asset=asset, fix_leg=fix_leg, float_leg=float_leg,
+            pricing=PricingParams(valuation_date="2024-01-06", output_mode="full"),
+        )
+    )
+    with pytest.raises(Exception):
+        trs.price()
+
+
+def test_maturity_redemption_handles_same_day_explicit_redemption(cal):
+    # An explicit redemption ON the maturity date must not be double-counted by
+    # the synthetic maturity redemption; final fixed notional settles to zero.
+    events = EventParams(redemption_events=[{
+        "date": END, "redeem_notional": 400.0, "redeem_price": 100.0,
+        "redeem_fee_rate": 0.0, "redeem_settle_option": ["asset"],
+    }])
+    trs = _build(cal, _prices(100.0), events=events)
+    schedule = trs.engine.create_notional_schedule(trs.params)
+    last = schedule[-1]
+    assert last["fix_notional"] == pytest.approx(0.0, abs=1e-6)
+    assert trs.price() is not None
+
+
 def test_redemption_reduces_fixed_notional(cal):
     events = EventParams(redemption_events=[{
         "date": "2024-01-15",

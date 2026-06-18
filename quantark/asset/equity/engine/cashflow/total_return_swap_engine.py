@@ -126,8 +126,13 @@ class TotalReturnSwapEngine:
             if cash_div_events is not None:
                 for div_event in cash_div_events:
                     if div_event.get("date") == pivot_date:
+                        if div_event.get("cash_div_per_share") is None:
+                            raise ValidationError(
+                                "cash dividend event is missing required field "
+                                f"'cash_div_per_share': {div_event!r}"
+                            )
                         cash_div_per_share = div_event.get("cash_div_per_share")
-                        deliver_ratio = div_event.get("deliver_ratio")
+                        deliver_ratio = div_event.get("deliver_ratio", 1.0)
                         cash_div_accrual_cum += (
                             cash_div_per_share
                             * asset_quantity
@@ -151,19 +156,27 @@ class TotalReturnSwapEngine:
                 asset_price_at_maturity = self._price_at(
                     params, min(contract_end_date, params.pricing.valuation_date)
                 )
+                # Appended last so any explicit same-day redemptions are processed
+                # first; the maturity event then redeems whatever notional remains
+                # (resolved at processing time via the ``_maturity`` flag).
                 redm_events.append(
                     {
                         "date": pivot_date,
-                        "redeem_notional": fix_notional,
+                        "redeem_notional": None,
                         "redeem_price": asset_price_at_maturity,
                         "redeem_fee_rate": 0,
                         "redeem_settle_option": ["asset", "int", "cash_div"],
+                        "_maturity": True,
                     }
                 )
 
             for redm_event in redm_events:
                 if redm_event.get("date") == pivot_date:
-                    redeem_notional = redm_event.get("redeem_notional")
+                    if redm_event.get("_maturity"):
+                        # Redeem the outstanding notional remaining at maturity.
+                        redeem_notional = fix_notional
+                    else:
+                        redeem_notional = redm_event.get("redeem_notional")
                     redeem_price = redm_event.get("redeem_price")
                     redeem_fee_rate = redm_event.get("redeem_fee_rate")
                     redeem_settle_option = redm_event.get("redeem_settle_option")
@@ -250,6 +263,26 @@ class TotalReturnSwapEngine:
             f"invalid {fee_kind}_type: {fee_type!r}; expected one of "
             f"'notional', 'marketvalue', 'initial_notional'"
         )
+
+    @staticmethod
+    def _validate_business_day_maturity(params: TRSParams) -> None:
+        """Reject a non-business-day contract maturity.
+
+        The per-period leg tables are built from working days and merged onto the
+        notional schedule by exact pivot date. A maturity that falls on a
+        weekend/holiday would therefore have no matching pricing row, silently
+        dropping the maturity redemption, realized interest and dividends. Rather
+        than mis-price, fail loudly; callers should set the contract end to the
+        intended settlement trading date.
+        """
+        calendar = params.fix_leg.payment_calendar
+        contract_end_date = max(params.fix_leg.end_date, params.float_leg.end_date)
+        end_dt = calendar._to_datetime(contract_end_date)
+        if not calendar.is_business_day(end_dt):
+            raise ValidationError(
+                f"contract maturity {contract_end_date!r} is not a business day; "
+                "set the contract end to a trading (settlement) date"
+            )
 
     @staticmethod
     def _effective_valuation_date(params: TRSParams) -> str:
@@ -447,6 +480,7 @@ class TotalReturnSwapEngine:
 
     def price(self, params: TRSParams, precision: int = 2) -> pd.DataFrame:
         """Compute the combined per-period cashflow table and present value."""
+        self._validate_business_day_maturity(params)
         notional_schedule = self.create_notional_schedule(params)
         fix_leg_price_res = self.price_fixed_leg(params, notional_schedule)
         float_leg_price_res = self.price_float_leg(params, notional_schedule)
