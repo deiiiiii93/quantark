@@ -6,8 +6,10 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import pandas as pd
 from .position import EquityPosition
+from .swap_position import EquitySwapPosition
 from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.swap.base_swap import BaseSwap
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.util.exceptions import ValidationError
@@ -86,7 +88,52 @@ class EquityPortfolio:
         
         self.positions[position.position_id] = position
         return position
-    
+
+    def add_swap_position(
+        self,
+        product: BaseSwap,
+        quantity: float = 1.0,
+        underlying: Optional[str] = None,
+        entry_price: float = 0.0,
+        funding_rate_ref: Optional[float] = None,
+        entry_timestamp: Optional[datetime] = None,
+    ) -> EquitySwapPosition:
+        """Add a Total Return Swap position to the portfolio.
+
+        The TRS is marked through the cashflow engine via
+        :class:`EquitySwapPosition`; it lives in the same portfolio as
+        payoff-on-spot ``EquityPosition`` holdings and aggregates with them.
+
+        Args:
+            product: The TRS product (exposes ``params``).
+            quantity: Whole-swap multiplier (positive=long, negative=short).
+            underlying: Underlying identifier; defaults to the product's asset id.
+            entry_price: Mark-to-market at entry.
+            funding_rate_ref: Reference funding rate for env rate flow-through
+                (``None`` keeps the contractual fixed financing rate).
+            entry_timestamp: Entry time (defaults to now).
+
+        Raises:
+            ValidationError: If the resolved underlying has no pricing environment.
+        """
+        position = EquitySwapPosition(
+            product=product,
+            quantity=quantity,
+            underlying=underlying,
+            entry_price=entry_price,
+            funding_rate_ref=funding_rate_ref,
+            entry_timestamp=entry_timestamp or datetime.now(),
+        )
+        if position.underlying not in self.pricing_environments:
+            raise ValidationError(
+                f"Underlying '{position.underlying}' not found in pricing "
+                f"environments. Available: {list(self.pricing_environments.keys())}"
+            )
+        # Stored in the shared, duck-typed positions map; EquitySwapPosition
+        # satisfies the same BasePosition call sites as EquityPosition.
+        self.positions[position.position_id] = position  # type: ignore[assignment]
+        return position
+
     def remove_position(self, position_id: str) -> Optional[EquityPosition]:
         """
         Remove a position from the portfolio.

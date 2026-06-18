@@ -29,6 +29,7 @@ from .base import BasePosition, BasePortfolio
 # Equity implementations (with backward-compatible aliases)
 from .equity import (
     EquityPosition,
+    EquitySwapPosition,
     EquityPortfolio,
     Position,  # Backward compatibility alias
     Portfolio,  # Backward compatibility alias
@@ -62,6 +63,7 @@ __all__ = [
     "BasePortfolio",
     # Equity
     "EquityPosition",
+    "EquitySwapPosition",
     "EquityPortfolio",
     # Fixed Income
     "FIPosition",
