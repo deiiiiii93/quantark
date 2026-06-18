@@ -54,7 +54,16 @@ changes to those engines — the impedance mismatch is absorbed in one place.
 - [x] Gate 2 (review 3 iters; 1 known limitation below)
 - [x] Gate 3 (no engine changes — stress + dynamic are already duck-typed)
 - [x] Gate 4 (backtest: swap-aware position init; step loop already duck-typed)
-- [ ] Gate 5  - [ ] Gate 6  - [ ] Gate 7
+- [x] Gate 5 (SIMM: EquitySwapPosition.get_simm_sensitivities -> EquityDelta)
+- [ ] Gate 6  - [ ] Gate 7
+
+### Gate 5 note
+`EquitySwapPosition.get_simm_sensitivities` mirrors `EquityPosition`'s: the
+equity sensitivity engine is already duck-typed on `get_greeks`/`underlying`, so
+it derives the SIMM EquityDelta (`0.01 * spot * delta_$`) from the swap's
+delta-one greek. No vega (TRS has none). Flows through SIMMPortfolioAdapter ->
+SIMMCalculator to an IM number. IR (financing) SIMM delta is out of scope here
+(would require the opt-in floating-funding curve sensitivity).
 
 ### Gate 4 note
 `BacktestEngine._initialize` now registers `EquitySwapPosition`s via

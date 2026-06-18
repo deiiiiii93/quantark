@@ -128,6 +128,41 @@ class EquitySwapPosition:
             pricing_env, greeks_calculator, use_analytical, **kwargs
         )
 
+    # ------------------------------------------------------------------ #
+    # SIMM interface (SIMMSensitivityProvider)
+    # ------------------------------------------------------------------ #
+    def get_simm_sensitivities(self, config: Any, market_data: Any):
+        """Return ISDA SIMM equity sensitivities for this TRS position.
+
+        A TRS is delta-one equity exposure, so the equity sensitivity engine
+        derives a single EquityDelta from the position's (quantity-scaled) delta
+        via ``get_greeks`` — the same duck-typed path used for option positions.
+        Vega is zero (no volatility dependence). ``market_data`` is the
+        per-underlying pricing-environment map.
+        """
+        from quantark.simm.engines.risk_class.equity_engine import (
+            EquitySensitivityEngine,
+        )
+
+        if config.calculation_currency.upper() != "USD":
+            raise ValidationError(
+                "Built-in equity SIMM generation assumes USD-valued pricing "
+                "environments; supply explicit translated sensitivities for "
+                f"calculation currency {config.calculation_currency}"
+            )
+        if not isinstance(market_data, dict):
+            raise ValidationError(
+                "Equity SIMM sensitivity generation requires pricing environments "
+                "mapped by underlying"
+            )
+        if self.underlying not in market_data:
+            raise ValidationError(
+                f"Missing equity pricing environment for {self.underlying}"
+            )
+        return EquitySensitivityEngine(config).calculate_sensitivities(
+            [self], market_data, config
+        )
+
     def is_long(self) -> bool:
         return self.quantity > 0
 
