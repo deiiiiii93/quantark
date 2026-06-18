@@ -46,7 +46,8 @@ changes to those engines — the impedance mismatch is absorbed in one place.
   floating financing). Tests.
 - **Gate 6 — SA-CCR**: TRS → equity-derivative trade (adjusted notional,
   supervisory delta/factor, maturity factor) in a netting set. Tests.
-- **Gate 7 — SA-CVA**: consume supplied/derived equity + IR CVA sensitivities.
+- **Gate 7 — SA-CVA**: `to_cva_trade` -> CVATrade -> MC exposure -> SBA capital.
+  Phase A exact (single-period); Phase B opt-in approx (market-value financing).
   Tests.
 
 ## Status
@@ -56,25 +57,53 @@ changes to those engines — the impedance mismatch is absorbed in one place.
 - [x] Gate 4 (backtest: swap-aware position init; step loop already duck-typed)
 - [x] Gate 5 (SIMM: EquitySwapPosition.get_simm_sensitivities -> EquityDelta)
 - [x] Gate 6 (SA-CCR: EquitySwapPosition.to_saccr_trade -> EQUITY trade)
-- [~] Gate 7 (SA-CVA: not applicable in this branch — see note)
+- [x] Gate 7 (SA-CVA: EquitySwapPosition.to_cva_trade -> CVATrade; two phases)
 
-### Gate 7 note (SA-CVA) — not integrated here
-Two reasons, both blocking and both outside the scope of this branch:
-1. **Module absent.** There is no `quantark/sacva` in this codebase; the Basel
-   SA-CVA (MAR50) SBA engine lives only on the separate, unmerged
-   `worktree-sacva` branch. Pulling it in would conflate two independent
-   unmerged feature efforts in this diff.
-2. **No per-instrument hook by design.** The SA-CVA SBA engine consumes
-   *supplied* CVA and CVA-hedge sensitivities (delta/vega per risk factor); it
-   does not derive them from instruments/positions. So unlike VaR/SIMM/SA-CCR
-   there is no `position -> engine` seam to add. Producing a TRS's equity (and,
-   for floating funding, IR) CVA sensitivities requires a CVA model (expected-
-   exposure simulation over the swap's life), which is a separate workstream.
+### Gate 7 note (SA-CVA) — integrated (supersedes the earlier "not applicable")
+The earlier rationale (module absent; no per-instrument hook) is **obsolete**:
+`quantark/sacva` is now merged to `main`, and the SA-CVA exposure engine does in
+fact derive sensitivities from instruments — it reprices each `CVATrade` over
+simulated paths to a discounted EPE profile, then bumps risk factors. So the seam
+is the `CVATrade` (`product` + `engine`), exactly like VaR/SIMM/SA-CCR.
 
-What *is* delivered toward counterparty/CVA capital: the TRS's
-counterparty-exposure path — SA-CCR EAD (Gate 6) — which is the exposure input a
-CVA framework builds on. A follow-up on top of `worktree-sacva` can feed
-TRS-derived CVA sensitivities into the SBA engine.
+The hard part is that the SA-CVA MC exposure engine reprices each trade as a
+**Markovian value surface** `engine.price(product, as_of_env(base, spot, t))` — it
+hands a single spot at a future node, not the path. The realized-cashflow
+`TotalReturnSwapEngine` is path-reading (it reads the whole daily series and
+raises on missing pivots), so it cannot serve this directly.
+
+**Phase A — exact, single-period TRS** (`engine/cashflow/trs_cva_repricer.py`):
+the realized PV decomposes as `accrual_interest_cum + float_interest +
+cash_div_accrual`, and only `float_interest = float_dir·q·(S−S0)` depends on the
+valuation-date spot. So `V(S,t) = baseline(t) + float_dir·q·(S−S0)`, where
+`baseline(t)` is the realized engine's PV on a **flat-S0 path** (the float term is
+identically zero there, so this is the genuine spot-independent
+accrual+dividends, computed with the engine's own conventions — not an
+approximation). Validated `== TotalReturnSwapEngine` to 1e-4.
+`EquitySwapPosition.to_cva_trade -> CVATrade(product=TRSCVAProduct,
+engine=TRSCVARepricer)`; the baseline is cached by as-of date (invariant to
+spot/vol/IR bumps). Guards (raise, never approximate): matured (judged on the
+supplied env), forward-starting, dual-currency, and the path-dependent variants
+below.
+
+**Phase B — path-dependent, market-value financing** (opt-in APPROXIMATION):
+under `MARKET_VALUE` / `LAST_MARKET_VALUE` accrual the financing leg accrues on
+the daily market value, so the future financing at `t` is `fix_dir·rate·q·∫_today^t
+S du` — path-dependent. `TRSPathwiseCVARepricer.value_paths` values the whole
+path array: `V = V_today + float_dir·q·(S_t−S_today) + fix_dir·rate·q·∫S du`, with
+`V_today` the realized MtM (no double-counting). The integral is a **coarse-grid
+trapezoid** — an explicit, opt-in approximation (NOT byte-exact vs the engine's
+daily left-endpoint accrual; exactness needs a daily exposure grid). Reached only
+via `to_cva_trade(allow_approx_financing=True)` + `TRSPathwiseExposureEngine`
+(a thin `MonteCarloExposureEngine` subclass overriding only the per-trade value
+step). The pathwise repricer's Markovian `price()` raises, so a market-value TRS
+on the plain engine fails loudly rather than silently dropping the path
+dependence. Values are zeroed past maturity (a matured TRS netted on a longer
+grid stops contributing). Capital path (netting/discounting/SBA) is unchanged.
+
+**Still deferred (raise, not approximate):** intermediate redemptions, share
+dividends/splits and future cash dividends (quantity / dividend-schedule
+path-dependence), and dual-currency (the FX conversion is a second risk factor).
 
 ### Gate 6 note
 `EquitySwapPosition.to_saccr_trade(env, is_index=)` maps the TRS to a SA-CCR
