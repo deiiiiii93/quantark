@@ -35,6 +35,19 @@ from quantark.util.enum import (
 from quantark.util.exceptions import PricingError
 
 
+class _ZeroNearExpiryVol(FlatVolSurface):
+    """Vol surface that returns 0 for very short maturities (undefined at expiry).
+
+    Used to verify that pricing an expired contract does not touch the vol
+    surface or require a positive vol.
+    """
+
+    def get_vol(self, strike, time_to_maturity, spot):
+        if time_to_maturity < 1e-6:
+            return 0.0
+        return super().get_vol(strike, time_to_maturity, spot)
+
+
 def _pricing_env(spot=100.0, rate=0.03, div=0.01, vol=0.22) -> PricingEnvironment:
     return PricingEnvironment(
         spot_quote=SpotQuote(spot=spot),
@@ -184,6 +197,29 @@ def test_mc_empty_observations_still_prices_extra_shares():
         MCParams(num_paths=200_000, seed=9), method=MonteCarloMethod.QUASI
     ).price(acc, env)
     assert mc == pytest.approx(analytic, rel=5e-3)
+
+
+def test_mc_expired_does_not_require_volatility():
+    # An expired accumulator must price deterministically without a vol lookup.
+    env = PricingEnvironment(
+        spot_quote=SpotQuote(spot=90.0),
+        rate_curve=FlatRateCurve(rate=0.03),
+        vol_surface=_ZeroNearExpiryVol(volatility=0.22),
+        div_yield=ContinuousDividendYield(div_yield=0.01),
+        valuation_date=datetime(2024, 1, 1),
+    )
+    acc = AccumulatorOption(
+        strike=95.0,
+        knock_out_barrier=108.0,
+        option_type=OptionType.CALL,
+        maturity=1e-12,
+        daily_share_accumulation=1.0,
+        observation_dates=[1e-12],
+        knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        extra_shares_at_expiry=1.0,
+    )
+    # short up-and-out put at expiry: -(95 - 90) = -5 (no vol needed)
+    assert AccumulatorMCEngine().price(acc, env) == pytest.approx(-5.0, abs=1e-9)
 
 
 def test_mc_contract_multiplier_scales_price():

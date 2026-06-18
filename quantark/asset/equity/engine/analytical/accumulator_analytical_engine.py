@@ -99,6 +99,14 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         spot = pricing_env.spot
         strike = product.strike
         maturity = product.get_maturity(pricing_env)
+
+        if maturity < self.MIN_MATURITY:
+            # At expiry only the locked-in accrual and the deterministic terminal
+            # extra-shares leg remain -- no rate/dividend/volatility needed.
+            return product.get_realized_accrual() + self._extra_shares_intrinsic(
+                product, spot
+            )
+
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(strike, maturity)
@@ -108,13 +116,8 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         # Realized accrual from past observations is locked in (rate-free part is
         # supplied by the product; discounting is applied here).
         realized = product.get_realized_accrual()
-        if product.settlement_at_expiry and maturity >= self.MIN_MATURITY:
+        if product.settlement_at_expiry:
             realized *= safe_exp(-rate * maturity)
-
-        if maturity < self.MIN_MATURITY:
-            # At expiry only the locked-in accrual and the deterministic terminal
-            # extra-shares leg remain.
-            return realized + self._extra_shares_intrinsic(product, spot)
 
         times = product.get_observation_times()
         daily = product.daily_share_accumulation

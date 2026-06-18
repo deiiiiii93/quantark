@@ -95,6 +95,15 @@ class AccumulatorMCEngine(BaseEngine):
         spot = pricing_env.spot
         strike = product.strike
         maturity = product.get_maturity(pricing_env)
+
+        if is_zero(maturity):
+            # At expiry only locked-in accrual and the deterministic terminal
+            # extra-shares leg remain -- no rate/dividend/volatility needed.
+            self._last_std_error = 0.0
+            return product.get_realized_accrual() + self._extra_shares_intrinsic(
+                product, spot
+            )
+
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(strike, maturity)
@@ -102,14 +111,8 @@ class AccumulatorMCEngine(BaseEngine):
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product)
 
         realized = product.get_realized_accrual()
-        if product.settlement_at_expiry and not is_zero(maturity):
+        if product.settlement_at_expiry:
             realized *= float(pricing_env.get_discount_factor(maturity))
-
-        if is_zero(maturity):
-            # At expiry only locked-in accrual and the deterministic terminal
-            # extra-shares leg remain.
-            self._last_std_error = 0.0
-            return realized + self._extra_shares_intrinsic(product, spot)
 
         times = product.get_observation_times()
         if not times:
