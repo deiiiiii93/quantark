@@ -9,6 +9,7 @@ from scipy.stats import norm
 from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine, FxEngineParams
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.asset.fx.product.option.fx_vanilla_option import FxVanillaOption
+from quantark.param.vol.vannavolga import VannaVolgaVolSurface
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
@@ -98,6 +99,14 @@ class GarmanKohlhagenEngine(BaseFxEngine):
             - rho_dom / rho_for: dV/dr / 100
         """
         option = self._check_product(product)
+
+        # Under a Vanna-Volga smile the closed-form Greeks (which hold sigma(K)
+        # fixed) are not smile-consistent: they ignore how the smile re-anchors
+        # with spot and shifts with the quotes. Route through bump-and-reprice,
+        # which re-anchors the VV surface sticky-delta and shifts all quotes for
+        # vega. Flat/term surfaces keep the exact closed forms below.
+        if isinstance(fx_env.vol_surface, VannaVolgaVolSurface):
+            return super().calculate_greeks(option, fx_env)
 
         tau = option.get_maturity(fx_env)
         tau_delivery = option.get_delivery(fx_env)

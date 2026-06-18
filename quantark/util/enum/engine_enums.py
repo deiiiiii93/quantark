@@ -107,6 +107,28 @@ class EngineType(Enum):
         return self
 
 
+class FxRangeAccrualMethod(Enum):
+    """Per-observation digital pricing method for FX range accrual engines.
+
+    Both methods price the same range digital ``P(L < X_t < U)``; they differ
+    only in how the digital is evaluated against the volatility surface:
+
+    - DIGITAL_COMBINATION: closed-form ``N(d2_L) - N(d2_U)`` using the implied
+      vol read from the surface at each barrier strike. Exact under a flat /
+      Black-Scholes surface; under a smile it is the *sticky-strike,
+      level-only* approximation (it ignores the ``-vega * dσ/dK`` skew term).
+    - CALL_PUT_SPREAD: static replication ``[C(K-h) - C(K+h)] / (2h)`` with the
+      two vanilla legs priced through the surface, so the smile slope is
+      captured. Converges to DIGITAL_COMBINATION as ``h -> 0`` under flat vol.
+    """
+
+    DIGITAL_COMBINATION = "digital_combination"
+    CALL_PUT_SPREAD = "call_put_spread"
+
+    def __str__(self):
+        return self.value
+
+
 class QuadratureMethod(Enum):
     """Quadrature methods for numerical integration pricing."""
 
@@ -159,3 +181,47 @@ class GreeksCalculationMode(Enum):
 
     def __str__(self):
         return self.value
+
+
+class HestonAnalyticalMethod(Enum):
+    """Semi-analytical Heston European pricers (second level of EngineType.ANALYTICAL)."""
+
+    LEWIS = auto()
+    GATHERAL = auto()
+    WEBER = auto()
+
+    def __str__(self):
+        return self.name.title()
+
+
+class HestonMCScheme(Enum):
+    """Heston MC time-discretization scheme (orthogonal to MonteCarloMethod RNG)."""
+
+    EULER = auto()       # full-truncation Euler on variance
+    EULERLOG = auto()    # Euler in log-spot
+    QUADEXP = auto()     # Andersen (2008) quadratic-exponential
+
+    def __str__(self):
+        return self.name.title()
+
+
+class ADIScheme(Enum):
+    """Operator-splitting scheme for 2D ADI PDE solvers (Heston and SLV)."""
+
+    DOUGLAS = auto()
+    CRAIG_SNEYD = auto()
+    MCS = auto()         # modified Craig-Sneyd
+
+    def __str__(self):
+        return self.name.replace("_", " ").title()
+
+
+class LeverageCalibrationMethod(Enum):
+    """How the SLV leverage surface L(S,t) is calibrated."""
+
+    MC_BINNING = auto()              # conditional E[v|S] via nonparametric binning (v1 default)
+    FORWARD_FOKKER_PLANCK = auto()   # deferred project (full.md); not implemented in v1
+    UNCONDITIONAL_MEAN = auto()      # opt-in approximation: E[v] (CIR mean), NOT conditional
+
+    def __str__(self):
+        return self.name.replace("_", " ").title()

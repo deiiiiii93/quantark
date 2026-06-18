@@ -9,6 +9,11 @@ from typing import Dict, Optional
 
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.param import FlatVolSurface, TermStructureVolSurface
+from quantark.param.vol.vannavolga import (
+    VannaVolgaVolSurface,
+    TermStructureVannaVolgaVolSurface,
+    SmileQuotes,
+)
 from quantark.param.rrf import ParallelShiftRateCurve
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.enum.engine_enums import EngineType
@@ -110,6 +115,32 @@ class BaseFxEngine(ABC):
     # Finite-difference building blocks
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _reanchor_vv_surface(env: FxPricingEnvironment) -> None:
+        """Re-anchor a VannaVolgaVolSurface to the env's current spot/rates.
+
+        The VV smile's ``get_vol`` treats the passed spot as advisory and uses
+        its stored anchor, so after a spot/rate bump the surface must be rebound
+        for sticky-delta Greeks: the smile re-anchors to the bumped market and
+        its 25-delta strikes recompute. The quotes are intrinsic and preserved;
+        the smile tenor (tau) is unchanged. No-op for non-VV surfaces.
+        """
+        surface = env.vol_surface
+        if isinstance(surface, VannaVolgaVolSurface):
+            tau = surface.env.tau
+            env.vol_surface = surface.rebound(
+                spot=env.spot,
+                rd=env.get_domestic_rate(tau),
+                rf=env.get_foreign_rate(tau),
+                tau=tau,
+            )
+        elif isinstance(surface, TermStructureVannaVolgaVolSurface):
+            # Rebound every tenor slice to the bumped spot/rates, each at its
+            # own tenor — the term-structure analogue of the single-tenor case.
+            env.vol_surface = surface.reanchor(
+                env.spot, env.get_domestic_rate, env.get_foreign_rate
+            )
+
     def _fdm_delta_gamma(
         self,
         product: BaseFxProduct,
@@ -121,8 +152,10 @@ class BaseFxEngine(ABC):
 
         env_up = deepcopy(fx_env)
         env_up.spot_quote.spot = spot * (1 + h)
+        self._reanchor_vv_surface(env_up)
         env_down = deepcopy(fx_env)
         env_down.spot_quote.spot = spot * (1 - h)
+        self._reanchor_vv_surface(env_down)
 
         price_up = self.price(product, env_up)
         price_down = self.price(product, env_down)
@@ -161,6 +194,21 @@ class BaseFxEngine(ABC):
                 times=list(surface.times),
                 vols=[float(v) * factor for v in surface.vols],
             )
+        elif isinstance(surface, VannaVolgaVolSurface):
+            # Full-quote vega bump: scale ATM/RR/BF together so the whole smile
+            # shifts (sticky-delta). RR/BF can be zero or negative, so scaling
+            # by `factor` is the right multiplicative bump for all three.
+            q = surface.quotes
+            env.vol_surface = surface.with_quotes(
+                SmileQuotes(
+                    sigma_atm=q.sigma_atm * factor,
+                    rr25=q.rr25 * factor,
+                    bf25_2vol=q.bf25_2vol * factor,
+                )
+            )
+        elif isinstance(surface, TermStructureVannaVolgaVolSurface):
+            # Scale every tenor slice's quotes together (sticky-delta vega bump).
+            env.vol_surface = surface.with_scaled_quotes(factor)
         else:
             raise PricingError(
                 f"Vol bumping not supported for surface type "
@@ -207,6 +255,11 @@ class BaseFxEngine(ABC):
         else:
             env_up.foreign_curve = ParallelShiftRateCurve(fx_env.foreign_curve, h)
             env_down.foreign_curve = ParallelShiftRateCurve(fx_env.foreign_curve, -h)
+
+        # Re-anchor the VV smile to the bumped rates (its 25d strikes are located
+        # off the forward), consistent with the sticky-delta spot bump above.
+        self._reanchor_vv_surface(env_up)
+        self._reanchor_vv_surface(env_down)
 
         price_up = self.price(product, env_up)
         price_down = self.price(product, env_down)

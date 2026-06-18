@@ -21,8 +21,10 @@ from .range_accrual_analytical_engine import (
     RangeAccrualAnalyticalResult,
 )
 from .accumulator_analytical_engine import AccumulatorAnalyticalEngine
+from .heston_analytical_engine import HestonAnalyticalEngine
 
 __all__ = [
+    "HestonAnalyticalEngine",
     "BlackScholesEngine",
     "DeltaOneEngine",
     "AmericanOptionAnalyticalEngine",

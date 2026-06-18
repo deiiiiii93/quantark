@@ -19,6 +19,7 @@ from quantark.param import (
     TermStructureVolSurface,
 )
 from quantark.param.rrf.rate_curve import InterpolatedRateCurve
+from quantark.param.vol.vannavolga import VannaVolgaVolSurface, SmileQuotes
 from quantark.priceenv import FxPricingEnvironment
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
@@ -48,6 +49,23 @@ def _shift_vol(surface, change: float):
         return TermStructureVolSurface(
             times=list(surface.times),
             vols=[max(_MIN_VOL, float(v) + change) for v in surface.vols],
+        )
+    if isinstance(surface, VannaVolgaVolSurface):
+        # Additive parallel vol move. Shift the three ABSOLUTE vols (ATM, 25C,
+        # 25P) and floor each at _MIN_VOL, then rebuild ATM/RR/BF. Flooring only
+        # the ATM level (keeping RR/BF fixed) could leave a derived wing vol
+        # negative under a large negative shift, which SmileQuotes rejects.
+        q = surface.quotes
+        sigma_25p, sigma_25c = q.sigma_25d()
+        atm = max(_MIN_VOL, q.sigma_atm + change)
+        s25c = max(_MIN_VOL, sigma_25c + change)
+        s25p = max(_MIN_VOL, sigma_25p + change)
+        return surface.with_quotes(
+            SmileQuotes(
+                sigma_atm=atm,
+                rr25=s25c - s25p,
+                bf25_2vol=0.5 * (s25c + s25p) - atm,
+            )
         )
     raise ValidationError(
         f"Cannot bump FX vol surface type {type(surface).__name__} for VaR."
