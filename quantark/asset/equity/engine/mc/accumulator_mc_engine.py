@@ -245,12 +245,16 @@ class AccumulatorMCEngine(BaseEngine):
             )
             discounted = discounted + np.where(hit_any, rebate_full * df_hit, 0.0)
 
-        # Extra shares at expiry: short up-and-out put, alive only if never hit.
+        # Extra shares at expiry: short up-and-out put, alive only if neither an
+        # observation nor the terminal spot breached the barrier. (The terminal
+        # check is uniform with the SINGLE_DAY and no-fixings paths; it never
+        # changes the payoff here since KO > strike makes the put zero whenever
+        # the terminal barrier is breached.)
         extra = product.extra_shares_at_expiry
         if extra > 0.0:
             put = np.maximum(strike - terminal_prices, 0.0)
             df_T = float(pricing_env.get_discount_factor(maturity))
-            alive = ~hit_any
+            alive = (~hit_any) & (terminal_prices < product.knock_out_barrier)
             discounted = discounted - extra * put * mult * df_T * alive
 
         return discounted
