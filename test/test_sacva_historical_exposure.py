@@ -13,12 +13,36 @@ from math import erf, sqrt, log, exp
 from quantark.util.exceptions import ValidationError
 
 
-# ---------------------------------------------------------------------------
-# Task 1 — provisional ExposureProfile contract
-# ---------------------------------------------------------------------------
-from quantark.sacva.exposure._contract_provisional import (
-    Measure, ExposureProfile, CONTRACT_VERSION,
+from datetime import datetime
+
+# real quant-ark objects for engine tests
+from quantark.param import (
+    ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote,
 )
+from quantark.priceenv.pricing_environment import PricingEnvironment
+from quantark.asset.equity.product.option.european_vanilla_option import (
+    EuropeanVanillaOption,
+)
+from quantark.asset.equity.engine.analytical.black_scholes_engine import (
+    BlackScholesEngine,
+)
+from quantark.util.enum import OptionType
+from quantark.util.calendar import DayCountConvention
+
+# canonical exposure contract (post-merge) + portfolio model
+from quantark.sacva.exposure.engine import Measure, ExposureProfile
+from quantark.sacva.portfolio.trade import CVATrade
+from quantark.sacva.portfolio.netting import NettingSet
+from quantark.sacva.portfolio.counterparty import Counterparty
+from quantark.sacva.models.enums import CreditQuality
+
+VAL = datetime(2026, 6, 17)
+EXP_1Y = datetime(2027, 6, 17)
+
+
+# ---------------------------------------------------------------------------
+# Canonical ExposureProfile — additive historical fields + invariants (spec §5)
+# ---------------------------------------------------------------------------
 
 
 def test_mc_positional_construction_still_works():
@@ -37,9 +61,11 @@ def test_eligible_requires_epe_discounted():
         ExposureProfile(np.array([0., 1.]), None, Measure.RISK_NEUTRAL, True)
 
 
-def test_real_world_must_not_populate_epe_discounted():
-    with pytest.raises(ValidationError):
-        ExposureProfile(np.array([0., 1.]), np.array([5., 3.]), Measure.REAL_WORLD, False)
+def test_real_world_profile_is_never_eligible():
+    # a REAL_WORLD profile may carry epe_discounted (MC rejected-fixture pattern) but
+    # can never be regulatory_eligible, so it can never feed the capital path.
+    p = ExposureProfile(np.array([0., 1.]), np.array([5., 3.]), Measure.REAL_WORLD, False)
+    assert not p.regulatory_eligible
 
 
 def test_shape_invariants():
@@ -59,13 +85,11 @@ def test_arrays_and_metadata_are_immutable():
         p.metadata["k"] = "x"
 
 
-def test_historical_profile_ok_and_version():
+def test_historical_profile_ok():
     p = ExposureProfile(np.array([0., 1.]), None, Measure.REAL_WORLD, False,
                         ee_undiscounted=np.array([2., 1.]),
                         pfe={9900: np.array([4., 3.])}, epe=1.5)
-    assert not p.regulatory_eligible and p.pfe[9900][0] == 4.0
-    assert p.epe_scalar == 1.5                     # back-compat alias
-    assert isinstance(CONTRACT_VERSION, str) and CONTRACT_VERSION
+    assert not p.regulatory_eligible and p.pfe[9900][0] == 4.0 and p.epe == 1.5
 
 
 def test_pfe_and_epe_validation():
@@ -75,41 +99,6 @@ def test_pfe_and_epe_validation():
     with pytest.raises(ValidationError):           # bad bps key
         ExposureProfile(np.array([0., 1.]), None, Measure.REAL_WORLD, False,
                         ee_undiscounted=np.array([1., 1.]), pfe={12000: np.array([1., 2.])})
-
-
-# ---------------------------------------------------------------------------
-# Task 2 — provisional repricing scaffold
-# ---------------------------------------------------------------------------
-from quantark.sacva.exposure._contract_provisional import (
-    AnalyticValueSurface, BoundedAnalyticValueSurface, aggregate_epe, CVATrade,
-    NettingSet, Counterparty,
-)
-
-
-def test_analytic_forward_surface_linear():
-    surf = AnalyticValueSurface(lambda S, t, ds: S - 100.0)
-    v = surf.value_at(np.array([90., 110.]), 0.5, None)
-    assert np.allclose(v, [-10., 10.])
-
-
-def test_bounded_surface_raises_out_of_bounds():
-    surf = BoundedAnalyticValueSurface(lambda S, t, ds: S - 100.0, low=50., high=150.)
-    with pytest.raises(ValidationError):
-        surf.value_at(np.array([200.]), 0.5, None)
-
-
-def test_aggregate_epe_exact_values():
-    a = np.array([[5., -3.], [-2., 4.]]); b = np.array([[-4., 1.], [6., -1.]])
-    enf = aggregate_epe([a, b], True, np.array([1., 1.]))
-    gross = aggregate_epe([a, b], False, np.array([1., 1.]))
-    assert np.allclose(enf, [2.5, 1.5])      # hand-computed netted EPE
-    assert np.allclose(gross, [5.5, 2.5])    # hand-computed gross EPE
-    assert np.all(gross >= enf)
-
-
-def test_trade_capability_flags_default_supported():
-    tr = CVATrade("t", AnalyticValueSurface(lambda S, t, ds: S), "EQ_A")
-    assert not tr.requires_continuous_barrier and not tr.requires_fx_conversion
 
 
 # ---------------------------------------------------------------------------
@@ -339,80 +328,120 @@ def test_kupiec_deterministic():
 
 
 # ---------------------------------------------------------------------------
-# Task 8 — HistoricalExposureEngine
+# Task 8 — HistoricalExposureEngine (real quant-ark objects)
 # ---------------------------------------------------------------------------
 from quantark.sacva.exposure.historical.engine import (
     HistoricalExposureEngine, HistoricalExposureConfig,
 )
 
 
+class _FlatCreditCurve:
+    def __init__(self, hazard=0.02, recovery=0.4):
+        self.h, self.R = hazard, recovery
+
+    def get_survival_probability(self, t):
+        return float(np.exp(-self.h * t))
+
+    @property
+    def recovery_rate(self):
+        return self.R
+
+
+def _env(spot=100.0, vol=0.2, rate=0.0, asset="ACME"):
+    return PricingEnvironment(
+        rate_curve=FlatRateCurve(rate), valuation_date=VAL,
+        spot_quote=SpotQuote(spot=spot, asset_name=asset),
+        vol_surface=FlatVolSurface(vol), div_yield=ContinuousDividendYield(0.0),
+        day_count_convention=DayCountConvention.CALENDAR_DAYS)
+
+
+def _call_trade(trade_id="t1", strike=100.0, qty=1.0, env=None):
+    env = env if env is not None else _env()
+    opt = EuropeanVanillaOption(strike=strike, option_type=OptionType.CALL,
+                                exercise_date=EXP_1Y)
+    return CVATrade(trade_id=trade_id, product=opt, engine=BlackScholesEngine(),
+                    env=env, quantity=qty, trade_currency="USD")
+
+
+def _counterparty(netting_sets):
+    return Counterparty(name="CP", netting_sets=netting_sets,
+                        credit_curve=_FlatCreditCurve(), bucket=2,
+                        credit_quality=CreditQuality.IG)
+
+
+def _hist_cal(asset="ACME", spot=100.0, sigma_d=0.01, n=2000, seed=3):
+    """Historical calibration for ``asset`` whose last level == ``spot`` exactly (so
+    today-level reconciliation passes) and whose log-returns are ~N(0, sigma_d**2)."""
+    rng = np.random.default_rng(seed)
+    rel = np.exp(np.cumsum(rng.normal(0.0, sigma_d, n)))
+    lvl = spot * rel / rel[-1]                      # scale to last==spot; log-returns unchanged
+    s = pd.Series(lvl, index=pd.bdate_range(end="2026-06-17", periods=n))
+    return HistoricalCalibration(HistoricalMarketDataSet({asset: s}))
+
+
+def _cfg(**kw):
+    base = dict(path_mode="BOOTSTRAP", scheme="IID_RAW", n_paths=4000, seed=5,
+                n_steps=4, drift_modes={"ACME": "ZERO_LOG_MEAN"}, confidences_bps=(9900,))
+    base.update(kw)
+    return HistoricalExposureConfig(**base)
+
+
 def _Phi(x):
     return 0.5 * (1.0 + erf(x / sqrt(2.0)))
 
 
-def _normal_return_cal(sigma_d=0.01, n=2000, seed=3):
-    rng = np.random.default_rng(seed)
-    r = rng.normal(0.0, sigma_d, n)
-    lvl = 1.0 * np.exp(np.cumsum(r))
-    idx = pd.bdate_range("2010-01-01", periods=n + 1)
-    s = pd.Series(np.concatenate([[1.0], lvl]), index=idx)
-    return HistoricalCalibration(HistoricalMarketDataSet({"FX_B": s})), float(s.iloc[-1])
-
-
-def test_engine_forward_EE_matches_lognormal_closed_form():
-    # IID_RAW (not FHS) so the terminal law is ~lognormal with deterministic variance.
-    sigma_d = 0.01
-    cal, S0 = _normal_return_cal(sigma_d)
-    K = S0
-    surf = AnalyticValueSurface(lambda S, t, ds: S - K)
-    cp = Counterparty("CP", [NettingSet("ns", [CVATrade("fwd", surf, "FX_B")], True)])
-    cfg = HistoricalExposureConfig(
-        path_mode="BOOTSTRAP", scheme="IID_RAW", n_paths=60000, seed=5,
-        grid_times=(0.0, 1.0), confidences_bps=(9900,), factor_keys=("FX_B",),
-        today_levels={"FX_B": S0}, drift_modes={"FX_B": "ZERO_LOG_MEAN"})
-    prof = HistoricalExposureEngine(cal, cfg).compute(cp)
-    n_days = 252
-    v = n_days * float(np.var(cal._r["FX_B"].to_numpy(), ddof=1))
-    a = log(S0)
-    d1 = (a - log(K) + v) / sqrt(v)
-    d2 = d1 - sqrt(v)
+def test_engine_call_terminal_EE_matches_lognormal():
+    # terminal node prices the contractual payoff max(S_T-K,0); under IID_RAW the
+    # terminal law is ~lognormal, so undiscounted terminal EE matches the closed form.
+    sigma_d, S0, K = 0.01, 100.0, 100.0
+    cal = _hist_cal("ACME", S0, sigma_d, n=2000, seed=3)
+    trade = _call_trade("c1", strike=K, env=_env(spot=S0, rate=0.0, asset="ACME"))
+    prof = HistoricalExposureEngine(cal, _cfg(n_paths=20000)).compute(
+        _counterparty([NettingSet("n1", [trade])]))
+    v = 252 * float(np.var(cal._r["ACME"].to_numpy(), ddof=1))
+    a = log(S0); d1 = (a - log(K) + v) / sqrt(v); d2 = d1 - sqrt(v)
     ee_cf = exp(a + 0.5 * v) * _Phi(d1) - K * _Phi(d2)
-    assert abs(prof.ee_undiscounted[-1] - ee_cf) / ee_cf < 0.05
+    assert abs(prof.ee_undiscounted[-1] - ee_cf) / ee_cf < 0.06
     assert prof.measure is Measure.REAL_WORLD and not prof.regulatory_eligible
     assert prof.epe_discounted is None and prof.metadata["path_mode"] == "BOOTSTRAP"
+    assert np.all(prof.pfe[9900] >= 0)
+
+
+def test_engine_deterministic():
+    cal = _hist_cal("ACME", 100.0, seed=3)
+    cp = _counterparty([NettingSet("n1", [_call_trade("c1", env=_env(asset="ACME"))])])
+    p1 = HistoricalExposureEngine(cal, _cfg(n_paths=3000)).compute(cp)
+    p2 = HistoricalExposureEngine(cal, _cfg(n_paths=3000)).compute(cp)
+    assert np.allclose(p1.ee_undiscounted, p2.ee_undiscounted)        # seed determinism
+    assert p1.ee_undiscounted[-1] > 0                                 # long call has positive EE
+
+
+def test_engine_netting_le_gross():
+    cal = _hist_cal("ACME", 100.0, seed=3)
+    env = _env(spot=100.0, asset="ACME")
+    trades = [_call_trade("L", 100.0, 1.0, env), _call_trade("S", 100.0, -1.0, env)]
+    eng = HistoricalExposureEngine(cal, _cfg(n_paths=3000))
+    pn = eng.compute(_counterparty([NettingSet("n1", trades, netting_enforceable=True)]))
+    pg = eng.compute(_counterparty([NettingSet("n1", trades, netting_enforceable=False)]))
+    assert np.all(pn.ee_undiscounted <= pg.ee_undiscounted + 1e-9)
+    assert np.allclose(pn.ee_undiscounted, 0.0)                       # perfect offset nets to 0
 
 
 def test_engine_rejects_today_level_mismatch():
-    cal, S0 = _normal_return_cal()
-    surf = AnalyticValueSurface(lambda S, t, ds: S - S0)
-    cp = Counterparty("CP", [NettingSet("ns", [CVATrade("f", surf, "FX_B")], True)])
-    cfg = HistoricalExposureConfig(
-        path_mode="BOOTSTRAP", scheme="IID_RAW", n_paths=500, seed=1,
-        grid_times=(0., 1.), factor_keys=("FX_B",),
-        today_levels={"FX_B": S0 * 1.10}, drift_modes={"FX_B": "ZERO_LOG_MEAN"})
-    with pytest.raises(ValidationError):
-        HistoricalExposureEngine(cal, cfg).compute(cp)
+    cal = _hist_cal("ACME", 100.0, seed=3)
+    cp = _counterparty([NettingSet("n1", [_call_trade("c1", env=_env(spot=110.0, asset="ACME"))])])
+    with pytest.raises(ValidationError):                             # env spot 110 != calib 100
+        HistoricalExposureEngine(cal, _cfg()).compute(cp)
 
 
-def test_engine_rejects_out_of_scope_and_bad_config():
-    cal, S0 = _normal_return_cal()
-    surf = AnalyticValueSurface(lambda S, t, ds: S - 1.0)
-    bad = CVATrade("x", surf, "FX_B", requires_continuous_barrier=True)
-    cp = Counterparty("CP", [NettingSet("ns", [bad], True)])
-    cfg = HistoricalExposureConfig(
-        path_mode="BOOTSTRAP", scheme="BLOCK_FHS", block_length=5, n_paths=100, seed=1,
-        grid_times=(0., 1.), factor_keys=("FX_B",), today_levels={"FX_B": S0},
-        drift_modes={"FX_B": "ZERO_LOG_MEAN"})
-    with pytest.raises(ValidationError):
-        HistoricalExposureEngine(cal, cfg).compute(cp)
-    with pytest.raises(ValidationError):                       # bad scheme -> ValidationError
-        HistoricalExposureConfig(
-            path_mode="BOOTSTRAP", scheme="NOPE", block_length=5, n_paths=100,
-            grid_times=(0., 1.), factor_keys=("FX_B",), today_levels={"FX_B": S0},
-            drift_modes={"FX_B": "ZERO_LOG_MEAN"})
-    with pytest.raises(ValidationError):                       # empty netting set
-        HistoricalExposureEngine(cal, cfg).compute(
-            Counterparty("E", [NettingSet("n", [], True)]))
+def test_engine_rejects_missing_factor_and_bad_config():
+    cal = _hist_cal("ACME", 100.0, seed=3)
+    cp = _counterparty([NettingSet("n1", [_call_trade("c1", env=_env(spot=100.0, asset="OTHER"))])])
+    with pytest.raises(ValidationError):                             # factor not in calibration
+        HistoricalExposureEngine(cal, _cfg(drift_modes={"OTHER": "ZERO_LOG_MEAN"})).compute(cp)
+    with pytest.raises(ValidationError):                             # bad scheme
+        HistoricalExposureConfig(path_mode="BOOTSTRAP", scheme="NOPE", n_paths=100,
+                                 drift_modes={"ACME": "ZERO_LOG_MEAN"})
 
 
 # ---------------------------------------------------------------------------
@@ -421,21 +450,20 @@ def test_engine_rejects_out_of_scope_and_bad_config():
 from quantark.sacva.exposure.historical.regulatory_guard import (
     assert_regulatory_eligible, ProvisionalRegulatoryCVAStub,
 )
+from quantark.sacva.cva.engine import RegulatoryCVAEngine
 
 
 def test_historical_profile_rejected_by_capital_path():
-    cal, S0 = _normal_return_cal()
-    surf = AnalyticValueSurface(lambda S, t, ds: S - 1.0)
-    cp = Counterparty("CP", [NettingSet("ns", [CVATrade("f", surf, "FX_B")], True)])
-    cfg = HistoricalExposureConfig(
-        path_mode="BOOTSTRAP", scheme="BLOCK_FHS", block_length=5, n_paths=2000, seed=1,
-        grid_times=(0., 0.5, 1.0), confidences_bps=(9900,), factor_keys=("FX_B",),
-        today_levels={"FX_B": S0}, drift_modes={"FX_B": "ZERO_LOG_MEAN"})
-    prof = HistoricalExposureEngine(cal, cfg).compute(cp)
+    cal = _hist_cal("ACME", 100.0, seed=3)
+    cp = _counterparty([NettingSet("n1", [_call_trade("c1", env=_env(asset="ACME"))])])
+    prof = HistoricalExposureEngine(cal, _cfg(n_paths=2000)).compute(cp)
     with pytest.raises(ValidationError):
         assert_regulatory_eligible(prof)
     with pytest.raises(ValidationError):
         ProvisionalRegulatoryCVAStub().compute(cp, prof)
+    # the real MC-owned RegulatoryCVAEngine must also reject a real-world profile
+    with pytest.raises(ValidationError):
+        RegulatoryCVAEngine().compute(_FlatCreditCurve(), prof)
 
 
 def test_guard_accepts_risk_neutral_eligible():
@@ -443,15 +471,14 @@ def test_guard_accepts_risk_neutral_eligible():
     assert_regulatory_eligible(rn)
 
 
-def test_merge_gate_provisional_removed_once_canonical_exists():
-    import importlib, importlib.util, inspect, pkgutil
-    if importlib.util.find_spec("quantark.sacva.exposure.engine") is None:
-        pytest.skip("canonical contract not yet landed by MC session")
+def test_merge_gate_no_provisional_import():
+    # the provisional contract is gone: no historical module may import it.
+    import importlib, inspect, pkgutil
     import quantark.sacva.exposure.historical as hist
     for mi in pkgutil.walk_packages(hist.__path__, hist.__name__ + "."):
         src = inspect.getsource(importlib.import_module(mi.name))
         assert "_contract_provisional" not in src, \
-            f"{mi.name} still imports provisional contract"
+            f"{mi.name} still imports the provisional contract"
 
 
 # ---------------------------------------------------------------------------

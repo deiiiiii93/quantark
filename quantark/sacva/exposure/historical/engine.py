@@ -1,9 +1,18 @@
 """HistoricalExposureEngine — non-regulatory, real-world EE/PFE.
 
-Wires calibrate -> generate -> reprice (provisional scaffold) -> PFE assembly
-into an ``ExposureProfile(measure=REAL_WORLD, regulatory_eligible=False)``. The
-single most important property: this engine NEVER produces a regulatory-eligible
-profile, so it cannot feed the SA-CVA capital path (MAR50.34(1)).
+Re-uses the canonical exposure machinery (``AnalyticValueSurface`` repricing,
+``ExposureGrid``, the as-of roll-down) but swaps the **path generation**: instead
+of risk-neutral GBM, state paths come from historical replay/bootstrap
+(``HistoricalPathGenerator``), and the output is undiscounted EE + PFE quantiles
+rather than a discounted EPE profile.
+
+The single most important property: this engine NEVER produces a regulatory-eligible
+profile (``measure=REAL_WORLD``, ``regulatory_eligible=False``, ``epe_discounted=None``),
+so it cannot feed the SA-CVA capital path (MAR50.34(1)).
+
+v1 scope mirrors the MC engine's vanilla path: equity / reporting-vs-foreign FX
+spot underlyings priced via the analytic value surface. Stateful (snowball) trades
+are deferred and raise.
 """
 from __future__ import annotations
 
@@ -13,27 +22,30 @@ from typing import Optional
 import numpy as np
 
 from quantark.util.exceptions import ValidationError
-from quantark.sacva.exposure._contract_provisional import (
-    ExposureEngine, ExposureProfile, Measure, CONTRACT_VERSION,
-)
+from quantark.sacva.exposure.engine import ExposureEngine, ExposureProfile, Measure
+from quantark.sacva.exposure.grid import ExposureGrid
+from quantark.sacva.exposure.value_surface import AnalyticValueSurface
+from quantark.sacva.exposure.asof import equity_asof_env
 from quantark.sacva.exposure.historical.calibration import DriftMode
 from quantark.sacva.exposure.historical.path_generator import HistoricalPathGenerator, PathMode
 from quantark.sacva.exposure.historical.resampling import ResamplingScheme
 from quantark.sacva.exposure.historical.pfe import PFEProfileAssembler
 
+# tau below this (~1 calendar day) is the terminal node: value by contractual payoff,
+# sidestepping the engine's exercise-date guard (mirrors the MC simulator).
+_TAU_FLOOR = 1.0 / 365.0
+
 
 @dataclass
 class HistoricalExposureConfig:
     path_mode: str
-    grid_times: tuple
-    factor_keys: tuple
-    today_levels: dict
-    drift_modes: dict
+    drift_modes: dict                       # {underlying_key: DriftMode name}
     scheme: Optional[str] = None
     block_length: Optional[int] = None
     expected_block_length: Optional[float] = None
     n_paths: Optional[int] = None
     seed: int = 0
+    n_steps: int = 24
     confidences_bps: tuple = (9500, 9900)
     quantile_method: str = "linear"
     lam: float = 0.94
@@ -46,11 +58,6 @@ class HistoricalExposureConfig:
         for k, v in self.drift_modes.items():
             if v not in DriftMode.__members__:
                 raise ValidationError(f"unknown drift mode {v} for {k}")
-        for k in self.factor_keys:
-            if k not in self.drift_modes:
-                raise ValidationError(f"missing drift mode for factor {k}")
-            if k not in self.today_levels:
-                raise ValidationError(f"missing today level for factor {k}")
         if self.path_mode == "BOOTSTRAP":
             if self.scheme is None or self.scheme not in ResamplingScheme.__members__:
                 raise ValidationError("BOOTSTRAP requires a valid scheme (no default)")
@@ -76,75 +83,110 @@ class HistoricalExposureEngine(ExposureEngine):
     calibration: object
     config: HistoricalExposureConfig
 
-    def _check_scope(self, trade):
-        if trade.requires_continuous_barrier:
+    # -- risk-factor extraction (mirrors the MC engine) -------------------------
+    def _underlying_key(self, trade):
+        sq = getattr(trade.env, "spot_quote", None)
+        key = getattr(sq, "asset_name", None) if sq is not None else None
+        if not key:
             raise ValidationError(
-                f"trade {trade.trade_id}: continuous barrier not supported (no GBM bridge)")
-        if trade.requires_fx_conversion or trade.foreign_underlying:
-            raise ValidationError(
-                f"trade {trade.trade_id}: FX-conversion/foreign-underlying out of scope")
-        if trade.n_state_factors != 1:
-            raise ValidationError(f"trade {trade.trade_id}: only single-factor trades supported")
+                f"{trade.trade_id}: env.spot_quote.asset_name is required to identify "
+                "the underlying risk factor")
+        return key
 
-    def _validate(self, counterparty, cfg):
-        if not counterparty.netting_sets:
-            raise ValidationError("counterparty has no netting sets")
-        missing = set(cfg.factor_keys) - set(self.calibration._r.columns)
+    def _trade_maturity(self, trade):
+        T = float(trade.product.get_maturity(trade.env))
+        if not (T > 0):
+            raise ValidationError(f"{trade.trade_id}: non-positive maturity {T}")
+        return T
+
+    def compute(self, counterparty) -> ExposureProfile:
+        cfg = self.config
+        trades = [t for ns in counterparty.netting_sets for t in ns.trades]
+        if not trades:
+            raise ValidationError(f"{counterparty.name}: no trades")
+        for t in trades:
+            if getattr(t.engine, "supports_spot_greeks_grid", False):
+                raise ValidationError(
+                    f"{t.trade_id}: stateful (snowball) trades are deferred in the "
+                    "historical engine v1; only vanilla analytic-surface trades are supported")
+
+        # per-underlying spot/key, with market consistency (one spot per underlying)
+        keys, today_levels = [], {}
+        for t in trades:
+            k = self._underlying_key(t)
+            spot = float(t.env.spot)
+            if k in today_levels:
+                if abs(today_levels[k] - spot) > 1e-9:
+                    raise ValidationError(f"inconsistent spot for underlying {k} across trades")
+            else:
+                today_levels[k] = spot
+                keys.append(k)
+
+        # factors must exist in the calibration; reconcile today level to history
+        missing = set(keys) - set(self.calibration._r.columns)
         if missing:
             raise ValidationError(f"factors not in calibration: {missing}")
-        for k in cfg.factor_keys:                       # reconcile today level to data
-            self.calibration.data.reconcile_today(k, cfg.today_levels[k])
-        col = set(cfg.factor_keys)
-        for ns in counterparty.netting_sets:            # scope-check BEFORE path gen
-            if not ns.trades:
-                raise ValidationError(f"netting set {ns.set_id} has no trades")
-            for tr in ns.trades:
-                self._check_scope(tr)
-                if tr.factor_key not in col:
-                    raise ValidationError(
-                        f"trade {tr.trade_id}: factor {tr.factor_key} not simulated")
-                if not hasattr(tr.surface, "value_at"):
-                    raise ValidationError(f"trade {tr.trade_id}: surface has no value_at")
-                if not np.isfinite(tr.quantity):
-                    raise ValidationError(f"trade {tr.trade_id}: non-finite quantity")
+        for k in keys:
+            if k not in cfg.drift_modes:
+                raise ValidationError(f"missing drift mode for factor {k}")
+            self.calibration.data.reconcile_today(k, today_levels[k])
 
-    def compute(self, counterparty):
-        cfg = self.config
-        self._validate(counterparty, cfg)
-        grid = np.array(cfg.grid_times, float)
-        modes = {k: DriftMode[v] for k, v in cfg.drift_modes.items()}
-        gen = HistoricalPathGenerator(self.calibration, tuple(cfg.factor_keys),
-                                      dict(cfg.today_levels), lam=cfg.lam)
+        # exposure grid: uniform to the longest maturity (mirrors MC _compute_grid)
+        horizon = max(self._trade_maturity(t) for t in trades)
+        times = ExposureGrid.build(horizon=horizon, n_steps=cfg.n_steps, event_times=[]).times
+
+        modes = {k: DriftMode[cfg.drift_modes[k]] for k in keys}
+        gen = HistoricalPathGenerator(self.calibration, tuple(keys),
+                                      {k: today_levels[k] for k in keys}, lam=cfg.lam)
         kw = {}
         if cfg.path_mode == "BOOTSTRAP":
             kw = dict(scheme=ResamplingScheme[cfg.scheme], n_paths=cfg.n_paths, seed=cfg.seed,
                       block_length=cfg.block_length,
                       expected_block_length=cfg.expected_block_length)
-        states = gen.generate(PathMode[cfg.path_mode], grid, drift_modes=modes, **kw)
-        col = {k: i for i, k in enumerate(cfg.factor_keys)}
+        states = gen.generate(PathMode[cfg.path_mode], times, drift_modes=modes, **kw)
+        paths = {k: states[:, :, i] for i, k in enumerate(keys)}
 
+        # pathwise undiscounted reporting-currency values per trade, netted per set
+        values = {id(t): self._trade_value_array(t, paths, times) for t in trades}
         total = None
         for ns in counterparty.netting_sets:
-            trade_vals = []
-            for tr in ns.trades:                        # scope already validated in _validate
-                S = states[:, :, col[tr.factor_key]]
-                vals = np.empty_like(S)
-                for j in range(S.shape[1]):
-                    vals[:, j] = tr.surface.value_at(S[:, j], grid[j], None) * tr.quantity
-                trade_vals.append(vals)
-            stacked = np.stack(trade_vals, axis=0)
+            arrays = [values[id(t)] for t in ns.trades]
+            stacked = np.stack(arrays, axis=0)
             netted = (np.maximum(stacked.sum(axis=0), 0.0) if ns.netting_enforceable
                       else np.maximum(stacked, 0.0).sum(axis=0))
             total = netted if total is None else total + netted
 
         asm = PFEProfileAssembler(confidences_bps=tuple(cfg.confidences_bps),
                                   quantile_method=cfg.quantile_method, m_tail_min=cfg.m_tail_min)
-        out = asm.assemble(total, grid)
-        meta = {"contract_version": CONTRACT_VERSION, "path_mode": cfg.path_mode,
-                "scheme": cfg.scheme, "block_length": cfg.block_length,
+        out = asm.assemble(total, times)
+        meta = {"path_mode": cfg.path_mode, "scheme": cfg.scheme,
+                "block_length": cfg.block_length,
                 "expected_block_length": cfg.expected_block_length, "seed": cfg.seed,
                 "lam": cfg.lam, "drift_modes": dict(cfg.drift_modes), "n_paths": cfg.n_paths,
-                "quantile_method": cfg.quantile_method, "non_production": cfg._demo}
-        return ExposureProfile(times=grid, epe_discounted=None, measure=Measure.REAL_WORLD,
+                "n_steps": cfg.n_steps, "quantile_method": cfg.quantile_method,
+                "non_production": cfg._demo}
+        return ExposureProfile(times=times, epe_discounted=None, measure=Measure.REAL_WORLD,
                                regulatory_eligible=False, ee_undiscounted=out["ee_undiscounted"],
                                pfe=out["pfe"], epe=out["epe"], metadata=meta)
+
+    def _trade_value_array(self, trade, paths, times):
+        """Pathwise UNDISCOUNTED reporting-currency value, shape (num_paths, n_t).
+        Identical repricing to the MC engine (analytic value surface + terminal payoff)."""
+        key = self._underlying_key(trade)
+        spots = paths[key]
+        T = self._trade_maturity(trade)
+        surface = AnalyticValueSurface(
+            engine=trade.engine, product=trade.product, base_env=trade.env,
+            as_of_env=equity_asof_env, currency=trade.trade_currency)
+        out = np.zeros_like(spots)
+        for j, tj in enumerate(times):
+            tau = T - float(tj)
+            col = spots[:, j]
+            if tau >= _TAU_FLOOR:
+                out[:, j] = surface.value_at(col, float(tj), None)
+            elif tau >= 0.0:
+                if not hasattr(trade.product, "get_payoff"):
+                    raise ValidationError(
+                        f"{trade.trade_id}: product lacks get_payoff for terminal node")
+                out[:, j] = np.array([trade.product.get_payoff(float(s)) for s in col])
+        return out * float(trade.quantity)

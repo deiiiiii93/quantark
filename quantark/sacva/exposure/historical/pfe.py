@@ -8,8 +8,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from quantark.util.exceptions import ValidationError
-from quantark.sacva.exposure._contract_provisional import _NEG_TOL
+from quantark.util.numerical import Tolerance
 
+_NEG_TOL = Tolerance.ZERO
 CHI2_95_DF1 = 3.841458820694124   # χ²(0.95, df=1); avoids a scipy dependency
 # "linear" = Hyndman-Fan type 7 (interpolated, default); "inverted_cdf" = HF type 1
 # (conservative upper order statistic); "higher" is also conservative.

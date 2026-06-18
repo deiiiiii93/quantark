@@ -9,6 +9,8 @@ backend (real-world, non-eligible) ships from a separate worktree.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
+from typing import Optional
 
 import numpy as np
 
@@ -22,10 +24,27 @@ class Measure(Enum):
 
 @dataclass(frozen=True)
 class ExposureProfile:
+    """Exposure profile shared by the MC (regulatory) and historical (non-regulatory)
+    backends.
+
+    Risk-neutral MC populates ``epe_discounted`` (the only field SA-CVA capital
+    reads). The real-world historical backend leaves ``epe_discounted = None`` and
+    populates the additive, explicitly non-regulatory fields ``ee_undiscounted`` /
+    ``discounted_ee_nonreg`` / ``pfe`` / ``epe`` (PFE/limits/backtesting). The
+    eligibility invariant is enforced both ways so a real-world profile can never
+    look regulatory (MAR50.34(1)).
+    """
+
     times: np.ndarray
-    epe_discounted: np.ndarray
+    epe_discounted: Optional[np.ndarray]   # regulatory field; None on historical profiles
     measure: Measure
     regulatory_eligible: bool
+    # --- additive (historical / non-regulatory) ---
+    ee_undiscounted: Optional[np.ndarray] = None
+    discounted_ee_nonreg: Optional[np.ndarray] = None
+    pfe: Optional[dict] = None             # {confidence_bps: np.ndarray}
+    epe: Optional[float] = None            # scalar time-weighted EPE
+    metadata: Optional[dict] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.measure, Measure):
@@ -33,9 +52,6 @@ class ExposureProfile:
         if not isinstance(self.regulatory_eligible, bool):
             raise ValidationError("regulatory_eligible must be a bool")
         t = np.asarray(self.times, dtype=float)
-        ee = np.asarray(self.epe_discounted, dtype=float)
-        if t.shape != ee.shape:
-            raise ValidationError("times and epe_discounted must have equal shape")
         if t.ndim != 1 or not np.all(np.isfinite(t)):
             raise ValidationError("times must be a finite 1-D array")
         if t.size > 1 and np.any(np.diff(t) <= 0):
@@ -44,18 +60,57 @@ class ExposureProfile:
             raise ValidationError(
                 "times must start at valuation (t0=0); else the [0, t0] default "
                 "interval is dropped from the CVA integral")
-        if not np.all(np.isfinite(ee)):
-            raise ValidationError("non-finite EPE")
-        if np.any(ee < -1e-9):
-            raise ValidationError("EPE must be >= 0")
-        if self.regulatory_eligible and self.measure is not Measure.RISK_NEUTRAL:
-            raise ValidationError(
-                "regulatory_eligible profile must be RISK_NEUTRAL measure")
-        # store immutable validated copies so the invariants cannot be mutated away
         t = t.copy(); t.flags.writeable = False
-        ee = ee.copy(); ee.flags.writeable = False
         object.__setattr__(self, "times", t)
-        object.__setattr__(self, "epe_discounted", ee)
+        n = t.size
+
+        # validate + freeze each optional non-negative array against the time axis
+        for name in ("epe_discounted", "ee_undiscounted", "discounted_ee_nonreg"):
+            v = getattr(self, name)
+            if v is not None:
+                arr = np.asarray(v, dtype=float)
+                if arr.shape != (n,):
+                    raise ValidationError(f"{name} must have shape ({n},)")
+                if not np.all(np.isfinite(arr)):
+                    raise ValidationError(f"non-finite {name}")
+                if np.any(arr < -1e-9):
+                    raise ValidationError(f"{name} must be >= 0")
+                arr = arr.copy(); arr.flags.writeable = False
+                object.__setattr__(self, name, arr)
+
+        if self.pfe is not None:
+            frozen = {}
+            for bps, arr in self.pfe.items():
+                if not isinstance(bps, int) or isinstance(bps, bool) or not (0 <= bps <= 10000):
+                    raise ValidationError(f"pfe key must be integer bps in [0,10000], got {bps}")
+                a = np.asarray(arr, dtype=float)
+                if a.shape != (n,):
+                    raise ValidationError(f"pfe[{bps}] must have shape ({n},)")
+                if not np.all(np.isfinite(a)) or np.any(a < -1e-9):
+                    raise ValidationError(f"pfe[{bps}] must be finite and >= 0")
+                a = a.copy(); a.flags.writeable = False
+                frozen[int(bps)] = a
+            object.__setattr__(self, "pfe", MappingProxyType(frozen))
+        if self.epe is not None and (not np.isfinite(self.epe) or self.epe < -1e-9):
+            raise ValidationError("epe must be finite and >= 0")
+        if self.metadata is not None:
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+        # eligibility invariant (two-directional): only a RISK_NEUTRAL profile that
+        # actually carries the regulatory discounted-EE field may be eligible.
+        if self.regulatory_eligible:
+            if self.measure is not Measure.RISK_NEUTRAL:
+                raise ValidationError(
+                    "regulatory_eligible profile must be RISK_NEUTRAL measure")
+            if self.epe_discounted is None:
+                raise ValidationError("regulatory_eligible profile requires epe_discounted")
+        # Note: a REAL_WORLD profile is always regulatory_eligible=False (the check
+        # above), and RegulatoryCVAEngine consumes only regulatory_eligible profiles,
+        # so the capital boundary holds via the eligibility flag. A REAL_WORLD profile
+        # MAY still carry epe_discounted (used by MC tests as a rejected fixture); the
+        # historical engine leaves it None by construction.
+        if self.epe_discounted is None and self.ee_undiscounted is None:
+            raise ValidationError("profile needs epe_discounted or ee_undiscounted")
 
 
 def aggregate_epe(trade_value_arrays, enforceable, df):

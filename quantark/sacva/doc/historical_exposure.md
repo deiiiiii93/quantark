@@ -75,22 +75,19 @@ The regulatory `epe_discounted` field is **always `None`** on historical profile
 `RegulatoryCVAEngine` reads only `epe_discounted`, never `discounted_ee_nonreg`
 (field-identity audit).
 
-## Provisional contract & merge reconciliation
+## Canonical contract (reconciled)
 
-`_contract_provisional.py` is an **additive superset** of the MC-owned exposure
-contract, marked *MC-owned; reconcile at merge*. When the MC session lands the
-canonical `quantark.sacva.exposure.engine` / `value_surface` / repricer / portfolio
-modules:
+The engine consumes the **canonical** MC-owned contract directly: it reprices
+canonical `CVATrade(product, engine, env)` via `AnalyticValueSurface` on
+`ExposureGrid` (the same repricing the MC engine uses), and returns the shared
+`ExposureProfile` — extended additively with `ee_undiscounted` / `pfe` / `epe` /
+`metadata`, with `epe_discounted = None` on real-world profiles. The provisional
+contract has been removed; `test_merge_gate_no_provisional_import` enforces that no
+`historical/*` module imports it.
 
-1. repoint `historical/*` imports to the canonical modules and **delete**
-   `_contract_provisional.py`;
-2. wire the real calendar/event `ExposureGrid` and add real-engine
-   (Garman–Kohlhagen forward, discrete-monitoring snowball/phoenix) tests plus
-   continuous-barrier/foreign-underlying rejection against the **real** surfaces.
-
-The merge-gate test (`test_merge_gate_provisional_removed_once_canonical_exists`)
-**skips** until the canonical module exists, then enforces that no `historical/*`
-module still imports the provisional copy.
+**Deferred follow-ups:** stateful (snowball) historical exposure (raises in v1),
+and a calendar/event-driven exposure grid (the engine uses a uniform year-fraction
+grid to the longest maturity, mirroring the MC vanilla path).
 
 ## Scope (v1, mirrors MC v1)
 

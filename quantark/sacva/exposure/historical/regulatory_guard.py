@@ -6,7 +6,7 @@ is a PROVISIONAL stand-in so the guard can be tested from this worktree.
 from __future__ import annotations
 
 from quantark.util.exceptions import ValidationError
-from quantark.sacva.exposure._contract_provisional import Measure
+from quantark.sacva.exposure.engine import Measure
 
 
 def assert_regulatory_eligible(profile) -> None:
