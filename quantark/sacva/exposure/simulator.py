@@ -187,7 +187,14 @@ class MonteCarloExposureEngine(ExposureEngine):
                 by_key[k] = market
 
     def _corr_matrix(self, keys):
-        """Correlation matrix for the underlyings; identity for a single factor."""
+        """Principal correlation submatrix for ``keys`` (identity for one factor).
+
+        The configured matrix may be a SUPERSET of the underlyings needed for a given
+        run: the requested keys are looked up by name and the principal submatrix is
+        extracted in requested order. This lets one config serve both the full stateful
+        run and a terminated-snowball fallback that prices only the remaining vanillas
+        (a strict whole-key match would make the bumped terminated state unpriceable).
+        """
         if len(keys) == 1:
             return [[1.0]]
         if self.config.correlation is None:
@@ -195,10 +202,14 @@ class MonteCarloExposureEngine(ExposureEngine):
                 "multi-underlying counterparty requires a correlation matrix in "
                 "MonteCarloExposureConfig (independence is not assumed)")
         cm = self.config.correlation
-        if list(cm.keys) != keys:
+        cm_keys = list(cm.keys)
+        missing = [k for k in keys if k not in cm_keys]
+        if missing:
             raise ValidationError(
-                f"correlation keys {list(cm.keys)} must match underlyings {keys}")
-        return cm.matrix
+                f"correlation matrix missing underlyings {missing}; "
+                f"available keys {cm_keys}")
+        idx = [cm_keys.index(k) for k in keys]
+        return np.asarray(cm.matrix, dtype=float)[np.ix_(idx, idx)].tolist()
 
     def _compute_stateful(self, counterparty, trades, stateful) -> ExposureProfile:
         """Snowball exposure: backward-grid surface + per-path KI/KO state machine.

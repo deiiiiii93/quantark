@@ -322,6 +322,21 @@ def test_inconsistent_discount_curve_raises():
             _counterparty([van, snow]))
 
 
+def test_corr_matrix_extracts_principal_submatrix():
+    # one configured (superset) correlation serves both the full run and a
+    # terminated-snowball fallback that prices only a subset of underlyings.
+    from quantark.sacva.exposure.correlation import CorrelationModel
+    cm = CorrelationModel(keys=["S", "A", "B"],
+                          matrix=[[1.0, 0.3, 0.2], [0.3, 1.0, 0.4], [0.2, 0.4, 1.0]])
+    eng = MonteCarloExposureEngine(MonteCarloExposureConfig(correlation=cm))
+    assert np.allclose(eng._corr_matrix(["S", "A", "B"]),
+                       [[1.0, 0.3, 0.2], [0.3, 1.0, 0.4], [0.2, 0.4, 1.0]])
+    assert np.allclose(eng._corr_matrix(["A", "B"]), [[1.0, 0.4], [0.4, 1.0]])
+    assert np.allclose(eng._corr_matrix(["B", "A"]), [[1.0, 0.4], [0.4, 1.0]])  # reorder
+    with pytest.raises(Exception):
+        eng._corr_matrix(["A", "Z"])                # missing underlying
+
+
 def test_co_netted_vol_mismatch_on_snowball_underlying_raises():
     # a co-netted trade on the snowball underlying must ride the snowball path vol
     snow = _snowball_trade(quantity=1.0)         # UND, flat vol 0.20 = spec.vol
