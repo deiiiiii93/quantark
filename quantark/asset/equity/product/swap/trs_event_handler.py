@@ -21,6 +21,10 @@ class TRSEventHandler:
         self.scheduler = scheduler
         self.margin_account = margin_account
 
+    def _direction(self) -> int:
+        """Float-leg direction (+1 long total return, -1 short)."""
+        return self.scheduler.params.float_leg.direction
+
     def handle_dividend(self, event: Dict) -> None:
         """Record a cash-dividend cashflow on the margin account."""
         date = event.get("date")
@@ -30,7 +34,10 @@ class TRSEventHandler:
         schedule = self.scheduler.get_schedule_by_date(date)
         asset_quantity = schedule.get("asset_quantity", 0)
 
-        dividend_amount = cash_div_per_share * asset_quantity * deliver_ratio
+        # Match the engine, which scales dividends by the float-leg direction.
+        dividend_amount = (
+            cash_div_per_share * asset_quantity * deliver_ratio * self._direction()
+        )
         self.margin_account.apply_cashflow(date, dividend_amount, "CASH_DIV")
 
     def handle_share_dividend(self, event: Dict) -> None:
@@ -56,7 +63,11 @@ class TRSEventHandler:
 
         asset_interest = 0
         if "asset" in redeem_settle_option:
-            asset_interest = (redeem_price - asset_initial_price) * redeem_quantity
+            asset_interest = (
+                (redeem_price - asset_initial_price)
+                * redeem_quantity
+                * self._direction()
+            )
 
         total_cashflow = asset_interest - redeem_fee
         self.margin_account.apply_cashflow(date, total_cashflow, "REDM")

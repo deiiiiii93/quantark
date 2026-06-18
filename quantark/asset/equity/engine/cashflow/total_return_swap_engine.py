@@ -251,19 +251,31 @@ class TotalReturnSwapEngine:
             f"'notional', 'marketvalue', 'initial_notional'"
         )
 
+    @staticmethod
+    def _effective_valuation_date(params: TRSParams) -> str:
+        """Cap the valuation date at contract maturity.
+
+        The notional schedule is only built through the contract end date, so a
+        valuation date past maturity (a matured contract) must not extend the leg
+        pricing range beyond it.
+        """
+        contract_end_date = max(params.fix_leg.end_date, params.float_leg.end_date)
+        return min(params.pricing.valuation_date, contract_end_date)
+
     def price_fixed_leg(
         self, params: TRSParams, notional_schedule: Optional[List[Dict]] = None
     ) -> List[Dict]:
         """Compute the fixed (financing) leg accrual schedule."""
+        effective_val = self._effective_valuation_date(params)
         if params.fix_leg.accrual_type == AccrualType.LAST_MARKET_VALUE:
             range_start = params.fix_leg.payment_calendar.get_next_trading_date(
                 params.fix_leg.start_date, n=-1, only_holidays=False
             )
-            range_end = params.pricing.valuation_date
+            range_end = effective_val
         else:
             range_start = params.fix_leg.start_date
             range_end = params.fix_leg.payment_calendar.get_next_trading_date(
-                params.pricing.valuation_date, only_holidays=False
+                effective_val, only_holidays=False
             )
 
         date_range = params.fix_leg.payment_calendar.get_working_days(
@@ -377,15 +389,16 @@ class TotalReturnSwapEngine:
         self, params: TRSParams, notional_schedule: Optional[List[Dict]] = None
     ) -> List[Dict]:
         """Compute the floating (total-return) leg mark-to-market schedule."""
+        effective_val = self._effective_valuation_date(params)
         if params.fix_leg.accrual_type == AccrualType.LAST_MARKET_VALUE:
             range_start = params.float_leg.payment_calendar.get_next_trading_date(
                 params.float_leg.start_date, n=-1, only_holidays=False
             )
-            range_end = params.pricing.valuation_date
+            range_end = effective_val
         else:
             range_start = params.float_leg.start_date
             range_end = params.float_leg.payment_calendar.get_next_trading_date(
-                params.pricing.valuation_date, only_holidays=False
+                effective_val, only_holidays=False
             )
 
         date_range = params.float_leg.payment_calendar.get_working_days(

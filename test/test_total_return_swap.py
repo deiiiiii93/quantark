@@ -106,6 +106,39 @@ def test_state_is_active_before_maturity(cal):
     assert trs.state == SwapState.ACTIVE
 
 
+def test_matured_contract_prices_without_error(cal):
+    # Valuation strictly after the contract end -> MATURED; pricing must not
+    # index past the (maturity-capped) notional schedule.
+    asset = AssetParams(
+        asset_id="TEST", asset_initial_price=INITIAL_PRICE, asset_prices=_prices(100.0),
+    )
+    fix_leg = FixLegParams(
+        rate=RATE, notional=NOTIONAL, initial_notional=NOTIONAL,
+        start_date=START, end_date="2024-01-15", payment_calendar=cal, direction=-1,
+    )
+    float_leg = FloatLegParams(
+        notional=NOTIONAL, initial_notional=NOTIONAL,
+        start_date=START, end_date="2024-01-15", payment_calendar=cal, direction=1,
+    )
+    trs = OneAssetTotalReturnSwap(
+        TRSParams(
+            contract_id="m1", asset=asset, fix_leg=fix_leg, float_leg=float_leg,
+            pricing=PricingParams(valuation_date="2024-01-31", output_mode="full"),
+        )
+    )
+    assert trs.state == SwapState.MATURED
+    df = trs.price()
+    assert len(df) > 0
+
+
+def test_engine_package_imports_first_without_circular_error():
+    # Importing the engine package first must not trigger a product<->engine
+    # circular import (regression guard).
+    import importlib
+    mod = importlib.import_module("quantark.asset.equity.engine.cashflow")
+    assert hasattr(mod, "TotalReturnSwapEngine")
+
+
 def test_redemption_reduces_fixed_notional(cal):
     events = EventParams(redemption_events=[{
         "date": "2024-01-15",
