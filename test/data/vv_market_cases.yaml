@@ -1,0 +1,30 @@
+usdchf_1y:
+  date: "2009-01-08"
+  spot: 1.0902
+  tau_years: 1.0
+  rd: 0.013
+  rf: 0.0203
+  sigma_atm: 0.1685
+  rr25: -0.013
+  bf25_2vol: 0.011
+  # Reference strikes from Table 1 (two rows correspond to 2vol and 1vol strangles respectively)
+  k25p_2vol: 0.9586
+  k25c_2vol: 1.2132
+  k25p_1vol: 0.9630
+  k25c_1vol: 1.2179
+
+usdjpy_1y:
+  date: "2008-11-28"
+  spot: 95.47
+  tau_years: 1.0
+  rd: 0.0174
+  rf: 0.0374
+  sigma_atm: 0.1485
+  rr25: -0.094
+  bf25_2vol: 0.0145
+  k25p_2vol: 82.28
+  k25c_2vol: 101.25
+  k25p_1vol: 85.24
+  k25c_1vol: 103.53
+
+

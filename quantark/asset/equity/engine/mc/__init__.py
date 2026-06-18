@@ -12,8 +12,15 @@ from .barrier_option_mc_engine import BarrierOptionMCEngine
 from .single_sharkfin_option_mc_engine import SingleSharkfinOptionMCEngine
 from .double_sharkfin_option_mc_engine import DoubleSharkfinOptionMCEngine
 from .range_accrual_mc_engine import RangeAccrualMCEngine, RangeAccrualMCResult
+from .accumulator_mc_engine import AccumulatorMCEngine
+from .local_vol_mc_engine import LocalVolMCEngine
+from .heston_mc_engine import HestonMCEngine
+from .heston_slv_mc_engine import HestonSLVMCEngine
 
 __all__ = [
+    "LocalVolMCEngine",
+    "HestonMCEngine",
+    "HestonSLVMCEngine",
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
     "AmericanMCResult",
@@ -28,4 +35,5 @@ __all__ = [
     "DoubleSharkfinOptionMCEngine",
     "RangeAccrualMCEngine",
     "RangeAccrualMCResult",
+    "AccumulatorMCEngine",
 ]

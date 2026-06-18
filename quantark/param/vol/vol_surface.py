@@ -116,3 +116,71 @@ class TermStructureVolSurface(VolatilitySurface):
 
     def __repr__(self):
         return "TermStructureVolSurface(points=%d)" % len(self.times)
+
+
+@dataclass
+class GridVolSurface(VolatilitySurface):
+    """Market implied-volatility surface on a strike x maturity grid.
+
+    Interpolation: linear in total variance w(T)=sigma^2*T across maturities; linear in
+    strike at each maturity (``strike_interpolation`` reserved for future schemes). Flat
+    extrapolation (clamp to nearest edge) on both axes. This is MARKET DATA (implied vols),
+    the input to the Dupire builder; it is NOT a derived local-vol surface.
+
+    Attributes:
+        strikes: strictly increasing strike grid (length nK >= 2).
+        maturities: strictly increasing maturity grid in years (length nT >= 2).
+        iv_grid: implied vols, shape (nT, nK), axis 0 = maturity, axis 1 = strike.
+        strike_interpolation: only "linear" supported in v1.
+    """
+
+    strikes: list[float]
+    maturities: list[float]
+    iv_grid: np.ndarray
+    strike_interpolation: str = "linear"
+
+    def __post_init__(self) -> None:
+        self.strikes = [float(k) for k in self.strikes]
+        self.maturities = [float(t) for t in self.maturities]
+        self.iv_grid = np.asarray(self.iv_grid, dtype=float)
+        nT, nK = len(self.maturities), len(self.strikes)
+        if nK < 2 or nT < 2:
+            raise ValidationError("GridVolSurface needs >= 2 strikes and >= 2 maturities")
+        if self.iv_grid.shape != (nT, nK):
+            raise ValidationError(
+                f"iv_grid shape {self.iv_grid.shape} must equal (nT, nK)=({nT}, {nK})"
+            )
+        if not all(np.isfinite(k) and k > 0 for k in self.strikes):
+            raise ValidationError("strikes must be finite and positive")
+        if not all(np.isfinite(t) for t in self.maturities):
+            raise ValidationError("maturities must be finite")
+        if any(self.strikes[i] >= self.strikes[i + 1] for i in range(nK - 1)):
+            raise ValidationError("strikes must be strictly increasing")
+        if any(self.maturities[i] >= self.maturities[i + 1] for i in range(nT - 1)):
+            raise ValidationError("maturities must be strictly increasing")
+        if any(t <= 0 for t in self.maturities):
+            raise ValidationError("maturities must be positive")
+        if not np.all(np.isfinite(self.iv_grid)) or np.any(self.iv_grid <= 0):
+            raise ValidationError("iv_grid must be finite and strictly positive")
+        if self.strike_interpolation != "linear":
+            raise ValidationError("only 'linear' strike_interpolation is supported in v1")
+
+    def get_vol(self, strike: float, time_to_maturity: float, spot: float) -> float:
+        k, t = float(strike), float(time_to_maturity)
+        if not (np.isfinite(k) and np.isfinite(t)):
+            raise ValidationError("strike and time_to_maturity must be finite")
+        strikes = np.asarray(self.strikes)
+        mats = np.asarray(self.maturities)
+        k_clamped = min(max(k, strikes[0]), strikes[-1])
+        vols_by_T = np.array(
+            [float(np.interp(k_clamped, strikes, self.iv_grid[i])) for i in range(mats.size)]
+        )
+        if t <= mats[0]:
+            return float(vols_by_T[0])
+        if t >= mats[-1]:
+            return float(vols_by_T[-1])
+        w = float(np.interp(t, mats, vols_by_T ** 2 * mats))
+        return float(safe_sqrt(safe_divide(w, t)))
+
+    def __repr__(self):
+        return f"GridVolSurface(nK={len(self.strikes)}, nT={len(self.maturities)})"

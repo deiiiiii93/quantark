@@ -9,6 +9,7 @@ from .analytical import (
     OneTouchAnalyticalEngine,
     AsianOptionAnalyticalEngine,
     DoubleSharkfinOptionAnalyticalEngine,
+    HestonAnalyticalEngine,
 )
 from .pde_engine import PDEEngine
 from .mc import (
@@ -19,6 +20,9 @@ from .mc import (
     DigitalOptionMCEngine,
     BarrierOptionMCEngine,
     DoubleSharkfinOptionMCEngine,
+    LocalVolMCEngine,
+    HestonMCEngine,
+    HestonSLVMCEngine,
 )
 from .pde import (
     BasePDESolver,
@@ -30,6 +34,9 @@ from .pde import (
     DoubleOneTouchPDESolver,
     KOResetSnowballPDESolver,
     PhoenixPDESolver,
+    LocalVolPDESolver,
+    HestonPDESolver,
+    HestonSLVPDESolver,
     TimeGrid,
     SpatialGrid,
 )
@@ -51,6 +58,7 @@ __all__ = [
     "OneTouchAnalyticalEngine",
     "AsianOptionAnalyticalEngine",
     "DoubleSharkfinOptionAnalyticalEngine",
+    "HestonAnalyticalEngine",
     # Monte Carlo
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
@@ -59,6 +67,9 @@ __all__ = [
     "DigitalOptionMCEngine",
     "BarrierOptionMCEngine",
     "DoubleSharkfinOptionMCEngine",
+    "LocalVolMCEngine",
+    "HestonMCEngine",
+    "HestonSLVMCEngine",
     # Unified PDE Engine
     "PDEEngine",
     # PDE Solvers
@@ -71,6 +82,9 @@ __all__ = [
     "DoubleOneTouchPDESolver",
     "KOResetSnowballPDESolver",
     "PhoenixPDESolver",
+    "LocalVolPDESolver",
+    "HestonPDESolver",
+    "HestonSLVPDESolver",
     # Grid utilities
     "TimeGrid",
     "SpatialGrid",

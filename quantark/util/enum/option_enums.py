@@ -219,3 +219,22 @@ class AsianStrikeType(Enum):
 
     def __str__(self):
         return self.name.capitalize()
+
+
+class AccumulatorKnockOutType(Enum):
+    """Knock-out behavior for an accumulator.
+
+    TERMINATION: breaching the barrier terminates the whole contract (an optional
+        rebate may be paid). Each daily leg is monitored up to its observation
+        date.
+    SINGLE_DAY: breaching the barrier on an observation date cancels only that
+        day's accrual; the contract continues. The upper call leg is monitored
+        only on its observation date and the lower (geared) put leg is unaffected
+        by the upper barrier.
+    """
+
+    TERMINATION = auto()
+    SINGLE_DAY = auto()
+
+    def __str__(self):
+        return self.name.capitalize()

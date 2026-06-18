@@ -1,0 +1,51 @@
+import numpy as np
+import pytest
+
+from quantark.volmodels.heston import (
+    HestonParams,
+    MarketOption,
+    calibrate_heston,
+    heston_implied_vol,
+)
+
+
+def test_heston_calibration_accepts_maturity_dependent_rate_and_carry():
+    spot = 100.0
+    true = HestonParams(v0=0.05, kappa=1.5, theta=0.05, sigma=0.3, rho=-0.5)
+
+    def rate(t):
+        return 0.01 + 0.01 * t
+
+    def carry(t):
+        return 0.002 + 0.003 * t
+
+    options = [
+        MarketOption(
+            K=k,
+            T=t,
+            iv=heston_implied_vol(spot, k, t, true, rate(t), carry(t)),
+        )
+        for t in (0.5, 1.0, 1.5)
+        for k in (85.0, 100.0, 115.0)
+    ]
+    initial = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.2)
+    result = calibrate_heston(
+        spot,
+        options,
+        rate,
+        carry,
+        initial,
+        target="iv",
+        regularize_feller=0.0,
+        max_nfev=400,
+        xtol=1e-8,
+        ftol=1e-8,
+        gtol=1e-8,
+    )
+    assert result.success
+    fitted = np.array([
+        heston_implied_vol(spot, option.K, option.T, result.params, rate(option.T), carry(option.T))
+        for option in options
+    ])
+    expected = np.array([option.iv for option in options])
+    assert np.max(np.abs(fitted - expected)) < 2e-3

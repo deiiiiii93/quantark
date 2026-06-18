@@ -252,6 +252,166 @@ class Calendar:
             current += timedelta(days=1)
         return count
 
+    # ------------------------------------------------------------------
+    # Trading-day range helpers (used by the equity TRS cashflow engine)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _to_datetime(date) -> datetime:
+        """Coerce a ``YYYY-MM-DD`` string or datetime/date to a midnight datetime."""
+        if isinstance(date, datetime):
+            return Calendar._normalize_date(date)
+        if isinstance(date, str):
+            try:
+                parsed = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError as exc:
+                raise ValidationError(
+                    f"Date must be in 'YYYY-MM-DD' format, got: {date!r}"
+                ) from exc
+            return parsed
+        # datetime.date (but not datetime, handled above)
+        if hasattr(date, "year") and hasattr(date, "month") and hasattr(date, "day"):
+            return datetime(date.year, date.month, date.day)
+        raise ValidationError(f"Unsupported date value: {date!r}")
+
+    @staticmethod
+    def _apply_side(days: list, side: str) -> list:
+        """Trim a sorted day list according to the inclusion ``side``."""
+        if side == "left":
+            return days[:-1]
+        if side == "right":
+            return days[1:]
+        if side == "both":
+            return days
+        if side == "neither":
+            return days[1:-1]
+        raise ValidationError(
+            f"side must be one of 'left', 'right', 'both', 'neither', got: {side!r}"
+        )
+
+    def get_calendar_days(self, start_date, end_date, side: str = "both") -> list:
+        """
+        Return every calendar day in ``[start_date, end_date]``.
+
+        Args:
+            start_date: Range start (``YYYY-MM-DD`` string or datetime).
+            end_date: Range end (inclusive).
+            side: Endpoint inclusion - ``left`` drops the last day, ``right``
+                drops the first, ``both`` keeps all, ``neither`` drops both.
+
+        Returns:
+            List of ``datetime`` objects at midnight.
+        """
+        start = self._to_datetime(start_date)
+        end = self._to_datetime(end_date)
+        days = []
+        current = start
+        while current <= end:
+            days.append(current)
+            current = current + timedelta(days=1)
+        return self._apply_side(days, side)
+
+    def get_working_days(self, start_date, end_date, side: str = "both") -> list:
+        """
+        Return the business days in ``[start_date, end_date]``.
+
+        The ``side`` argument trims the *calendar* interval endpoints (matching
+        :meth:`get_calendar_days`) before business days are filtered, so an
+        excluded endpoint that happens to be a weekend/holiday never removes an
+        interior trading day.
+
+        Returns:
+            List of ``datetime`` objects at midnight.
+        """
+        calendar_days = self.get_calendar_days(start_date, end_date, side=side)
+        return [d for d in calendar_days if self.is_business_day(d)]
+
+    def get_next_trading_date(
+        self, date, n: int = 1, only_holidays: bool = True
+    ) -> str:
+        """
+        Return the nth trading date from ``date`` as a ``YYYY-MM-DD`` string.
+
+        Preserves the legacy stepping semantics:
+
+        - ``n == 0`` returns ``date`` unchanged.
+        - ``n > 0``: if ``date`` is not a business day, roll to the nearest
+          following business day then advance ``n - 1`` business days; if
+          ``date`` is already a business day, advancing depends on
+          ``only_holidays`` - with ``only_holidays=True`` an already-trading
+          base date stays put (the roll is a no-op so it advances ``n - 1``),
+          with ``only_holidays=False`` it advances the full ``n`` days.
+        - ``n < 0``: symmetric, rolling backward.
+
+        Args:
+            date: Base date (``YYYY-MM-DD`` string or datetime).
+            n: Number of trading days to shift (may be negative).
+            only_holidays: See stepping semantics above.
+
+        Returns:
+            The resulting trading date as ``YYYY-MM-DD``.
+        """
+        base = self._to_datetime(date)
+        if n == 0:
+            return base.strftime("%Y-%m-%d")
+
+        is_bus = self.is_business_day(base)
+
+        if n > 0:
+            if not is_bus:
+                # Roll to the next business day, then advance n-1 more.
+                result = self._adjust_following(base)
+                result = self.add_business_days(result, n - 1)
+            elif only_holidays:
+                # Already trading: roll is a no-op, advance n-1.
+                result = self.add_business_days(base, n - 1)
+            else:
+                result = self.add_business_days(base, n)
+        else:
+            if not is_bus:
+                # Roll to the previous business day, then advance n+1 more.
+                result = self._adjust_preceding(base)
+                result = self.add_business_days(result, n + 1)
+            elif only_holidays:
+                result = self.add_business_days(base, n + 1)
+            else:
+                result = self.add_business_days(base, n)
+
+        return result.strftime("%Y-%m-%d")
+
+    def get_num_of_calendar_days(
+        self, start_date, end_date, side: str = "left"
+    ) -> int:
+        """
+        Return the number of calendar days between two dates.
+
+        Args:
+            start_date: Range start (``YYYY-MM-DD`` string or datetime).
+            end_date: Range end.
+            side: ``both`` adds 1 (both endpoints), ``neither`` subtracts 1,
+                ``left``/``right`` return the raw day difference.
+
+        Returns:
+            Calendar-day count as an ``int``.
+        """
+        if side not in ("left", "right", "both", "neither"):
+            raise ValidationError(
+                f"side must be one of 'left', 'right', 'both', 'neither', "
+                f"got: {side!r}"
+            )
+        start = self._to_datetime(start_date)
+        end = self._to_datetime(end_date)
+        delta = (end - start).days
+        # A reversed interval spans no calendar days (consistent with
+        # get_calendar_days, which yields an empty list) -> zero, never negative.
+        if delta < 0:
+            return 0
+        if side == "both":
+            return delta + 1
+        if side == "neither":
+            # Open interval: clamp the degenerate (empty) case to zero.
+            return max(delta - 1, 0)
+        return delta  # left or right
+
     def __repr__(self):
         return f"Calendar(name={self.name}, holidays={len(self.holidays)})"
 

@@ -7,10 +7,13 @@ from typing import Dict, Optional, Tuple
 from scipy.stats import norm
 
 from quantark.asset.fx.engine.base_fx_engine import BaseFxEngine, FxEngineParams
+from quantark.asset.fx.engine.analytical.garman_kohlhagen_engine import GarmanKohlhagenEngine
 from quantark.asset.fx.product.base_fx_product import BaseFxProduct
 from quantark.asset.fx.product.option.fx_digital_option import FxDigitalOption
+from quantark.asset.fx.product.option.fx_vanilla_option import FxVanillaOption
+from quantark.param.vol.vannavolga import VannaVolgaVolSurface
 from quantark.priceenv import FxPricingEnvironment
-from quantark.util.enum import FxPayoutCurrency
+from quantark.util.enum import FxPayoutCurrency, OptionType
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close, is_zero, safe_exp, safe_log, safe_sqrt
@@ -35,8 +38,13 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
 
     engine_type = EngineType.ANALYTICAL
 
+    # Strike bump for the call-spread replication of the digital (-dC/dK).
+    _H_REL = 1e-4
+    _H_FLOOR = 1e-6
+
     def __init__(self, params: Optional[FxEngineParams] = None):
         super().__init__(params)
+        self._vanilla_engine = GarmanKohlhagenEngine()
 
     def price(self, product: BaseFxProduct, fx_env: FxPricingEnvironment) -> float:
         """
@@ -55,6 +63,12 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
             return option.get_payoff(spot) * fx_env.get_domestic_df(
                 option.get_delivery(fx_env)
             )
+
+        # Under a Vanna-Volga smile the level-only N(d2) digital misses the
+        # skew term (-vega * d-sigma/d-K). Price by static replication off the
+        # smile-consistent vanilla instead.
+        if isinstance(fx_env.vol_surface, VannaVolgaVolSurface):
+            return self._replicated_digital(option, fx_env)
 
         tau_delivery = option.get_delivery(fx_env)
         d1, d2 = self._d1_d2(option, fx_env, tau)
@@ -82,6 +96,13 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
         daily decay, rho = dV/dr / 100.
         """
         option = self._check_product(product)
+
+        # Under a VV smile, route Greeks through bump-and-reprice (price() then
+        # uses replication, capturing skew); the closed forms below are
+        # sticky-strike at sigma(K) and miss the smile dynamics.
+        if isinstance(fx_env.vol_surface, VannaVolgaVolSurface):
+            return super().calculate_greeks(option, fx_env)
+
         if option.payout_currency != FxPayoutCurrency.DOMESTIC:
             return super().calculate_greeks(option, fx_env)
 
@@ -165,6 +186,62 @@ class FxDigitalOptionAnalyticalEngine(BaseFxEngine):
                 f"got {type(product).__name__}"
             )
         return product
+
+    def _vanilla_call_price(
+        self, option: FxDigitalOption, fx_env: FxPricingEnvironment, strike: float
+    ) -> float:
+        """Smile-consistent unit-notional vanilla CALL price at `strike`."""
+        vanilla = FxVanillaOption(
+            strike=strike,
+            option_type=OptionType.CALL,
+            currency_pair=option.currency_pair,
+            maturity=option.maturity,
+            expiry_date=option.expiry_date,
+            delivery=option.delivery,
+            delivery_date=option.delivery_date,
+            notional_foreign=1.0,
+        )
+        return self._vanilla_engine.price(vanilla, fx_env)
+
+    def _replicated_digital(
+        self, option: FxDigitalOption, fx_env: FxPricingEnvironment
+    ) -> float:
+        """Smile-consistent digital via static replication (-dC/dK call spread).
+
+        Captures the smile skew because the two vanilla legs are priced at
+        sigma(K +/- h) through the surface. Derives all four digital variants
+        from the cash-or-nothing call atom by no-arbitrage identities.
+        """
+        K = option.strike
+        h = max(self._H_FLOOR, self._H_REL * K)
+        if K - h <= 0.0:
+            raise PricingError(
+                f"Replication strike bump h={h} too large for strike {K}"
+            )
+        c_up = self._vanilla_call_price(option, fx_env, K + h)
+        c_dn = self._vanilla_call_price(option, fx_env, K - h)
+        cash_call = (c_dn - c_up) / (2.0 * h)  # = -dC/dK
+
+        tau_delivery = option.get_delivery(fx_env)
+        df_dom = fx_env.get_domestic_df(tau_delivery)
+
+        if option.payout_currency == FxPayoutCurrency.DOMESTIC:
+            base = cash_call if option.is_call() else (df_dom - cash_call)
+        else:
+            c_k = self._vanilla_call_price(option, fx_env, K)
+            asset_call = c_k + K * cash_call
+            if option.is_call():
+                base = asset_call
+            else:
+                # Total asset-or-nothing PV (call + put = PV[S_T]) must use the
+                # SAME forward basis as the vanilla legs and the closed-form
+                # path (fwd * df_dom), not s_eff * df_for, so the two agree under
+                # a market_forward override or non-standard delivery.
+                tau_m = option.get_maturity(fx_env)
+                fwd = fx_env.get_forward(tau_m)
+                base = fwd * df_dom - asset_call
+
+        return option.payout * base * option.participation_rate
 
     @staticmethod
     def _d1_d2(
