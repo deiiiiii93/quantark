@@ -224,6 +224,100 @@ class EquitySwapPosition:
             position=position,
         )
 
+    # ------------------------------------------------------------------ #
+    # SA-CVA interface
+    # ------------------------------------------------------------------ #
+    def to_cva_trade(
+        self,
+        pricing_env: PricingEnvironment,
+        *,
+        equity_bucket: int,
+        trade_currency: str = "USD",
+    ) -> Any:
+        """Map this TRS to a SA-CVA exposure trade (``CVATrade``).
+
+        The SA-CVA Monte-Carlo exposure engine reprices the trade as a Markovian
+        value surface ``V(spot, t)``; a single-period delta-one TRS supports this
+        via :func:`build_trs_cva_components` (a closed-form as-of repricer). The
+        returned trade flows through ``Counterparty -> NettingSet ->
+        MonteCarloExposureEngine`` to a discounted EPE profile and on to SA-CVA
+        capital. ``quantity`` is applied once by the exposure repricer.
+
+        Args:
+            pricing_env: Environment supplying today's spot, valuation date,
+                vol/rate term structures that diffuse the counterparty-exposure
+                paths. Its ``valuation_date`` is "today" — exposure is measured
+                forward from there to maturity.
+            equity_bucket: SA-CVA equity bucket (MAR50.70) the underlying maps to.
+            trade_currency: Trade (and reporting) currency.
+
+        Raises:
+            ValidationError: if the swap has matured (no future exposure), is
+                dual-currency, or is a path-dependent variant unsupported by the
+                single-state value surface (delegated to ``build_trs_cva_components``).
+        """
+        from datetime import datetime
+
+        from quantark.sacva.portfolio.trade import CVATrade
+        from quantark.asset.equity.engine.cashflow.trs_cva_repricer import (
+            build_trs_cva_components,
+        )
+        from quantark.asset.equity.product.swap.trs_params import SwapState
+        from quantark.asset.equity.product.swap.one_asset_trs_dual_ccy import (
+            OneAssetTotalReturnSwapDualCcy,
+        )
+
+        # Maturity is judged against the SUPPLIED environment's valuation date
+        # ("today"), not the product's stored state: exposure is measured forward
+        # from this env, and a swap already at/past its end carries no future
+        # exposure (and would yield a degenerate, non-positive exposure grid /
+        # an out-of-range baseline path, which is built only through contract end).
+        contract_start = min(
+            self._params.fix_leg.start_date, self._params.float_leg.start_date
+        )
+        contract_end = max(
+            self._params.fix_leg.end_date, self._params.float_leg.end_date
+        )
+        start_date = datetime.strptime(contract_start, "%Y-%m-%d")
+        end_date = datetime.strptime(contract_end, "%Y-%m-%d")
+        if pricing_env.valuation_date >= end_date:
+            raise ValidationError(
+                f"TRS {self.position_id} valuation date "
+                f"{pricing_env.valuation_date:%Y-%m-%d} is at/after contract end "
+                f"{contract_end}; a matured swap carries no future SA-CVA exposure"
+            )
+        if pricing_env.valuation_date < start_date:
+            # A forward-starting swap (valued before inception) has no realized
+            # cashflows yet; its pre-start value is a forward exposure the realized
+            # repricer cannot express. Defer rather than fail mid-simulation.
+            raise ValidationError(
+                f"TRS {self.position_id} valuation date "
+                f"{pricing_env.valuation_date:%Y-%m-%d} is before contract start "
+                f"{contract_start}; forward-starting TRS CVA exposure is deferred"
+            )
+        if getattr(self.product, "state", None) == SwapState.MATURED:
+            raise ValidationError(
+                f"TRS {self.position_id} has matured (valuation date past contract "
+                "end); a matured swap carries no future SA-CVA exposure"
+            )
+        if isinstance(self.product, OneAssetTotalReturnSwapDualCcy):
+            raise ValidationError(
+                f"TRS {self.position_id}: dual-currency TRS CVA exposure is deferred "
+                "(the FX conversion is a second risk factor) — supply a single-"
+                "currency swap"
+            )
+
+        product, engine = build_trs_cva_components(self._params)
+        return CVATrade(
+            trade_id=self.position_id,
+            product=product,
+            engine=engine,
+            env=pricing_env,
+            quantity=self.quantity,
+            trade_currency=trade_currency,
+            equity_bucket=equity_bucket,
+        )
+
     def is_long(self) -> bool:
         return self.quantity > 0
 
