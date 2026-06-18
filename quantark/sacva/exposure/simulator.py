@@ -199,22 +199,34 @@ class MonteCarloExposureEngine(ExposureEngine):
         snow_key = self._underlying_key(snow)
         horizon = float(times[-1])
 
-        # a co-netted trade maturing past the snowball horizon would have exposure
-        # beyond the shared grid that we cannot see -> raise (needs a merged grid)
         for t in trades:
             if t is snow:
                 continue
+            # a co-netted trade maturing past the snowball horizon would have exposure
+            # beyond the shared grid that we cannot see -> raise (needs a merged grid)
             if self._trade_maturity(t) > horizon + 1e-9:
                 raise ValidationError(
                     f"{t.trade_id}: maturity exceeds the stateful trade's horizon "
                     f"{horizon}; netting a longer-dated trade with a snowball needs a "
                     "merged exposure grid (deferred)")
+            # a co-netted trade on the SNOWBALL underlying is repriced via its own vol
+            # surface but rides the snowball's constant-vol (spec.vol) path; require the
+            # surface to be flat at spec.vol there (true for a flat surface), else the
+            # path and the repricing vols silently disagree under skew.
+            if self._underlying_key(t) == snow_key:
+                tv = float(t.env.get_vol(float(t.env.spot), horizon))
+                if not np.isclose(tv, spec.vol, rtol=1e-9, atol=1e-12):
+                    raise ValidationError(
+                        f"{t.trade_id}: co-netted on the snowball underlying but its vol "
+                        f"{tv:g} != the snowball path vol {spec.vol:g}; co-netting on a "
+                        "snowball underlying requires a flat vol at the snowball pricing vol")
 
         # per-underlying market on the SHARED grid. The snowball underlying is seeded
         # FIRST and sourced entirely from snow.env (spot/rate/div + the surface's strike
         # vol) so the simulated drift matches the env the value surface was priced under,
-        # regardless of trade order; a co-netted trade on the same underlying must agree
-        # on spot. Other underlyings use their own env at term vol.
+        # regardless of trade order. Co-netted trades must agree on the full market data
+        # for a shared underlying (enforced by _check_market_consistency + the vol guard
+        # above). Other underlyings use their own env at term vol.
         keys, spots, vols, rates, divs = [], [], [], [], []
         snow_spot = float(snow.env.spot)
         seen = {snow_key: snow_spot}

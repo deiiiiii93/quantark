@@ -38,7 +38,8 @@ from quantark.sacva.sensitivities.shifts import (
 from quantark.util.exceptions import ValidationError
 
 _EQUITY_INDEX_BUCKETS = {12, 13}
-_MARKET_SHIFT = EQUITY_SPOT_SHIFT  # 1% relative for spot & vol (MAR50.63), divisor 1e-2
+# 1% relative shift for equity/FX spot & vega (MAR50.59 FX, MAR50.70 equity); divisor 1e-2
+_MARKET_SHIFT = EQUITY_SPOT_SHIFT
 
 
 class SACVAEngine:
@@ -119,6 +120,36 @@ class SACVAEngine:
             risk_class=risk_class, risk_type=risk_type, bucket=0, currency=key,
             risk_factor=f"FX:{key}:{kind}", s_cva=s_cva, s_hdg=s_hdg)
 
+    @staticmethod
+    def _validate_fx_identity(portfolio):
+        """FX is one factor per foreign currency, backed by exactly one GBM underlying.
+
+        The SBA groups FX sensitivities by ``fx_currency`` while the exposure engine
+        keys paths by ``env.spot_quote.asset_name``; enforce a 1:1 currency<->underlying
+        map so a single regulatory FX factor cannot secretly span several simulated
+        FX processes (equity buckets, by contrast, legitimately hold many names).
+        """
+        items = [t for cp in portfolio.counterparties
+                 for ns in cp.netting_sets for t in ns.trades]
+        items += list(portfolio.hedges)
+        ccy_to_asset, asset_to_ccy = {}, {}
+        for t in items:
+            if t.fx_currency is None:
+                continue
+            sq = getattr(t.env, "spot_quote", None)
+            asset = getattr(sq, "asset_name", None) if sq is not None else None
+            if not asset:
+                raise ValidationError(
+                    f"{t.trade_id}: FX trade requires env.spot_quote.asset_name")
+            if ccy_to_asset.setdefault(t.fx_currency, asset) != asset:
+                raise ValidationError(
+                    f"FX currency {t.fx_currency} maps to multiple underlyings "
+                    f"({ccy_to_asset[t.fx_currency]}, {asset}); one currency = one factor")
+            if asset_to_ccy.setdefault(asset, t.fx_currency) != t.fx_currency:
+                raise ValidationError(
+                    f"underlying {asset} maps to multiple FX currencies "
+                    f"({asset_to_ccy[asset]}, {t.fx_currency})")
+
     def _market_sensitivities(self, portfolio, base_cva):
         sens = []
         for risk_class, key in self._market_factors(portfolio):
@@ -168,6 +199,7 @@ class SACVAEngine:
         Returns the SBA ``SACVAResult``; per-counterparty EE profiles and base CVA
         are attached for inspection/audit.
         """
+        self._validate_fx_identity(portfolio)
         sensitivities = []
         profiles = {}
         base_cva = {}

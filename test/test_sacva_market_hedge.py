@@ -136,6 +136,20 @@ def test_tagged_hedge_with_untagged_trades_raises():
         _engine().compute(CVATradePortfolio([cp], [hedge], reporting_currency="USD"))
 
 
+def test_fx_currency_with_multiple_underlyings_raises():
+    # one FX currency must map to exactly one simulated underlying (single factor)
+    eA = _env(spot=1.10, vol=0.12, rate=0.03, div=0.01, asset="EURUSD_A")
+    eB = _env(spot=1.10, vol=0.12, rate=0.03, div=0.01, asset="EURUSD_B")
+    tA = CVATrade("a", _call(1.10), BlackScholesEngine(), eA, quantity=1.0,
+                  trade_currency="USD", fx_currency="EUR")
+    tB = CVATrade("b", _call(1.10), BlackScholesEngine(), eB, quantity=1.0,
+                  trade_currency="USD", fx_currency="EUR")
+    cpA = Counterparty("A", [NettingSet("na", [tA])], _curve(), 4, CreditQuality.IG)
+    cpB = Counterparty("B", [NettingSet("nb", [tB])], _curve(), 4, CreditQuality.IG)
+    with pytest.raises(ValidationError):
+        _engine().compute(CVATradePortfolio([cpA, cpB], [], reporting_currency="USD"))
+
+
 def test_mixed_equity_and_fx_factors_both_emitted():
     eq = _equity_cp()
     fxenv = _env(spot=1.10, vol=0.12, rate=0.03, div=0.01, asset="EURUSD")

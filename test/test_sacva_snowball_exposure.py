@@ -320,3 +320,26 @@ def test_inconsistent_discount_curve_raises():
         MonteCarloExposureEngine(
             MonteCarloExposureConfig(num_paths=4000, seed=4)).compute(
             _counterparty([van, snow]))
+
+
+def test_co_netted_vol_mismatch_on_snowball_underlying_raises():
+    # a co-netted trade on the snowball underlying must ride the snowball path vol
+    snow = _snowball_trade(quantity=1.0)         # UND, flat vol 0.20 = spec.vol
+    van = _vanilla(_env(vol=0.35))               # UND, flat vol 0.35
+    with pytest.raises(Exception):
+        MonteCarloExposureEngine(
+            MonteCarloExposureConfig(num_paths=4000, seed=4)).compute(
+            _counterparty([snow, van]))
+
+
+def test_t0_ko_observation_deferred():
+    cfg = BarrierConfig(
+        ko_barrier=103.0, ko_rate=0.15, ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.0, 0.5, 1.0], ki_barrier=75.0,
+        ki_observation_type=ObservationType.CONTINUOUS, ki_continuous=True)
+    prod = SnowballOption(initial_price=100.0, strike=100.0, barrier_config=cfg,
+                          contract_multiplier=1.0, maturity=1.0, is_reverse=False)
+    trade = CVATrade("s", prod, SnowballQuadEngine(params=QuadParams(grid_points=301)),
+                     _env(), trade_currency="USD")
+    with pytest.raises(Exception):
+        build_snowball_surface(trade)
