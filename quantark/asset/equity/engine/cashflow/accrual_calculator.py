@@ -10,9 +10,25 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 from quantark.util.exceptions import ValidationError
-from quantark.asset.equity.product.swap.trs_params import AccrualType
+from quantark.asset.equity.product.swap.trs_params import AccrualType, AccrualSide
 
 _INTEREST_BASIS_DAYS = {"act/365": 365, "act/360": 360}
+
+
+def _resolve_basis_days(day_count_basis: str) -> int:
+    """Return the denominator for ``day_count_basis`` or raise on an unknown value."""
+    key = day_count_basis.lower() if isinstance(day_count_basis, str) else day_count_basis
+    if key not in _INTEREST_BASIS_DAYS:
+        raise ValidationError(
+            f"Unsupported day_count_basis: {day_count_basis!r}; "
+            f"expected one of {sorted(_INTEREST_BASIS_DAYS)}"
+        )
+    return _INTEREST_BASIS_DAYS[key]
+
+
+def _normalize_side(side: Any) -> str:
+    """Accept an ``AccrualSide`` enum or a string and return the calendar side string."""
+    return side.value if isinstance(side, AccrualSide) else side
 
 
 class AccrualCalculator(ABC):
@@ -51,11 +67,11 @@ class StandardAccrualCalculator(AccrualCalculator):
         **kwargs: Any,
     ) -> float:
         accrual_days = calendar.get_num_of_calendar_days(
-            start_date, end_date, side=side
+            start_date, end_date, side=_normalize_side(side)
         )
         if force_no_zero:
             accrual_days = max(accrual_days, 1)
-        basis = _INTEREST_BASIS_DAYS.get(day_count_basis, 365)
+        basis = _resolve_basis_days(day_count_basis)
         return notional * interest_rate * accrual_days / basis
 
 

@@ -80,6 +80,33 @@ def test_last_market_value_accrual(cal):
     assert val == pytest.approx(100 * 40 * 0.10 * 30 / 365)
 
 
+def test_accrual_accepts_accrualside_enum(cal):
+    # An AccrualSide enum must be accepted (normalized) just like its string value.
+    from_enum = StandardAccrualCalculator().calculate_accrual(
+        1_000_000, "2024-01-01", "2024-01-05", 0.10, cal, side=AccrualSide.BOTH,
+    )
+    from_str = StandardAccrualCalculator().calculate_accrual(
+        1_000_000, "2024-01-01", "2024-01-05", 0.10, cal, side="both",
+    )
+    assert from_enum == pytest.approx(from_str)
+
+
+def test_accrual_rejects_unknown_basis(cal):
+    with pytest.raises(ValidationError):
+        StandardAccrualCalculator().calculate_accrual(
+            1_000_000, "2024-01-01", "2024-01-05", 0.10, cal,
+            day_count_basis="act/999",
+        )
+
+
+def test_accrual_basis_is_case_insensitive(cal):
+    val = StandardAccrualCalculator().calculate_accrual(
+        1_000_000, "2024-01-01", "2024-04-10", 0.10, cal,
+        side="left", day_count_basis="ACT/360",
+    )
+    assert val == pytest.approx(1_000_000 * 0.10 * 100 / 360)
+
+
 def test_factory_dispatch(cal):
     assert isinstance(
         AccrualCalculatorFactory.create_calculator(AccrualType.NOTIONAL),
