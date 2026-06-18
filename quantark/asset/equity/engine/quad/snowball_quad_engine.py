@@ -173,6 +173,14 @@ class SnowballQuadEngine(BaseEngine):
         if not times:
             raise PricingError("Observation time grid is empty for SnowballQuadEngine.")
 
+        # When the CVA exposure layer is recording surfaces, also diffuse through (and
+        # record at) delayed KO-settlement times so a still-alive path can be valued at
+        # the settlement node. These are pure recording nodes (no KO/KI event matches
+        # them), so the recursion records the bare continuation surface there. Gated on
+        # record_grids: normal pricing keeps its exact observation-only time grid.
+        if record_grids:
+            times = self._insert_settlement_times(times, ko_records, maturity)
+
         align_log = self._select_alignment_log(
             spot, product, ki_barrier_override=ki_barrier_continuous
         )
@@ -1042,6 +1050,33 @@ class SnowballQuadEngine(BaseEngine):
         if is_zero(delay, tol=Tolerance.ZERO):
             return 1.0
         return safe_exp(-rate * delay)
+
+    def _insert_settlement_times(
+        self, times: Sequence[float], ko_records: Sequence, maturity: float
+    ) -> list[float]:
+        """Merge delayed KO-settlement times (within (obs, maturity]) into ``times``.
+
+        Used only when recording backward grids for CVA exposure: a KO that settles
+        after its observation creates a pending receivable whose default window ends at
+        settlement, so the exposure grid needs a node there, and a still-alive path
+        needs a continuation surface at that node. Settlements beyond maturity are not
+        added here (no diffusion exists past the terminal node); the exposure builder
+        rejects those rather than approximating.
+        """
+        merged = list(times)
+        for rec in ko_records:
+            st = rec.settlement_time
+            if st is None:
+                continue
+            st = float(st)
+            if st <= float(rec.observation_time) + Tolerance.PRECISION:
+                continue  # immediate settlement: already an observation node
+            if is_greater_than(st, maturity, abs_tol=Tolerance.PRECISION):
+                continue  # post-maturity tail: handled (rejected) by the exposure layer
+            st = min(st, float(maturity))
+            if not any(is_close(st, t, abs_tol=Tolerance.PRECISION) for t in merged):
+                merged.append(st)
+        return sorted(merged)
 
     def _merge_times(
         self, ko_times: Sequence[float], ki_times: Sequence[float], maturity: float

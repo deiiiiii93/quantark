@@ -27,8 +27,14 @@ from quantark.sacva.exposure.value_surface import GridValueSurface
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import Tolerance
 
 _TOL = 1e-9
+# Settlement classification (immediate vs delayed vs post-maturity) MUST use the same
+# tolerance the QUAD engine uses when it decides whether to insert a settlement
+# recording node (SnowballQuadEngine._insert_settlement_times), otherwise a sub-
+# tolerance delay could be a node on one side and not the other.
+_SETTLE_TOL = Tolerance.PRECISION
 
 
 class SnowballTerminatedAtValuation(Exception):
@@ -47,6 +53,8 @@ class SnowballExposureSurface:
     ko_barrier: float
     ko_direction: str                 # "up" (standard) / "down" (reverse)
     ko_monitoring_idx: List[int]
+    ko_payoffs: List[float]           # KO redemption per observation (aligned to ko_monitoring_idx)
+    ko_settle_idx: List[int]          # settlement grid index per obs (== obs idx if immediate)
     ki_barrier: Optional[float]
     ki_direction: str                 # "down" (standard) / "up" (reverse)
     ki_monitoring_idx: List[int]
@@ -84,18 +92,29 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
             f"{trade.trade_id}: disable_ko_after_ki exposure is deferred in v1 (the "
             "state machine would wrongly knock out an already-knocked-in path)")
 
-    # KO schedule: immediate settlement + constant barrier (v1). settlement_time is
-    # None for immediate settlement in the engine's own _ko_discount convention.
+    # KO schedule: a single constant barrier (v1). Settlement may be delayed: each KO
+    # redemption is carried as a pending receivable over [obs, settle) by the exposure
+    # engine, valued off the engine's settlement-node surfaces. Only settlement BEYOND
+    # maturity is deferred (no diffusion exists past the terminal node, and it entangles
+    # the maturity-payoff settlement tail) -> reject rather than approximate.
+    maturity = float(product.get_maturity(env))
     ko_records = product.resolve_ko_observations(env)
     if not ko_records:
         raise ValidationError(f"{trade.trade_id}: empty KO observation schedule")
     for rec in ko_records:
-        settle = rec.observation_time if rec.settlement_time is None else rec.settlement_time
-        if abs(float(settle) - float(rec.observation_time)) > _TOL:
+        obs_t = float(rec.observation_time)
+        settle = obs_t if rec.settlement_time is None else float(rec.settlement_time)
+        if not np.isfinite(settle):
+            raise ValidationError(f"{trade.trade_id}: non-finite KO settlement time")
+        if settle < obs_t - _SETTLE_TOL:
             raise ValidationError(
-                f"{trade.trade_id}: delayed KO settlement (obs={rec.observation_time}, "
-                f"settle={settle}) is deferred in v1 — needs the pending-receivable "
-                "machinery")
+                f"{trade.trade_id}: KO settlement precedes observation "
+                f"(obs={obs_t}, settle={settle})")
+        if settle > maturity + _SETTLE_TOL:
+            raise ValidationError(
+                f"{trade.trade_id}: post-maturity KO settlement (obs={rec.observation_time}, "
+                f"settle={settle}, maturity={maturity}) is deferred — it needs the "
+                "terminal-payoff settlement tail (no continuation surface past maturity)")
     ko_levels = {round(float(rec.barrier), 12) for rec in ko_records}
     if len(ko_levels) != 1:
         raise ValidationError(
@@ -163,6 +182,22 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
 
     ko_monitoring_idx = [_grid_index(times, float(rec.observation_time))
                          for rec in ko_records]
+    # per-observation KO redemption + settlement node (for the pending receivable).
+    # settlement_time None == immediate (settle at observation); the engine has
+    # recorded a surface node at every settlement time <= maturity above.
+    ko_payoffs = [float(rec.payoff) for rec in ko_records]
+    if not all(np.isfinite(p) for p in ko_payoffs):
+        raise ValidationError(f"{trade.trade_id}: non-finite KO payoff")
+    ko_settle_idx = []
+    for obs_i, rec in zip(ko_monitoring_idx, ko_records):
+        if rec.settlement_time is None:
+            ko_settle_idx.append(obs_i)              # immediate settlement
+            continue
+        settle = min(float(rec.settlement_time), maturity)
+        if settle <= float(rec.observation_time) + _SETTLE_TOL:
+            ko_settle_idx.append(obs_i)              # sub-tolerance delay == immediate
+        else:
+            ko_settle_idx.append(_grid_index(times, settle))
     if ki_continuous:
         # continuous monitoring over the whole life: every interval is sampled
         # (the state machine bridges between nodes); schedule must be contiguous.
@@ -173,12 +208,12 @@ def build_snowball_surface(trade) -> SnowballExposureSurface:
     else:
         ki_monitoring_idx = []
 
-    maturity = float(product.get_maturity(env))
     vol = float(env.get_vol(product.strike, maturity))
 
     return SnowballExposureSurface(
         times=times, surface=surface, ko_barrier=ko_barrier,
         ko_direction=ko_direction, ko_monitoring_idx=ko_monitoring_idx,
+        ko_payoffs=ko_payoffs, ko_settle_idx=ko_settle_idx,
         ki_barrier=ki_barrier, ki_direction=ki_direction,
         ki_monitoring_idx=ki_monitoring_idx, ki_continuous=ki_continuous, vol=vol,
         initial_knocked_in=initial_knocked_in)

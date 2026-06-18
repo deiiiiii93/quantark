@@ -382,3 +382,195 @@ def test_immediate_ko_terminates_to_zero_exposure():
     profile = MonteCarloExposureEngine(
         MonteCarloExposureConfig(num_paths=4000, seed=7)).compute(_counterparty([trade]))
     assert np.allclose(profile.epe_discounted, 0.0)
+
+
+# --- #2 delayed KO settlement -----------------------------------------------
+
+from datetime import timedelta
+
+from quantark.asset.equity.product.option.observation_schedule import (
+    ObservationRecord,
+    ObservationSchedule,
+)
+from quantark.asset.equity.product.option.snowball_config import AccrualConfig
+from quantark.util.enum import CouponPayType
+
+
+def _certain_ko_snowball(pay_type, ko_obs=0.5, maturity=1.0):
+    # KO barrier far below spot -> certain knock-out at the FIRST observation; no KI.
+    # The exposure profile is then a closed form (deterministic redemption), an exact
+    # oracle for the settlement timing. INSTANT settles at the obs; EXPIRY at maturity.
+    cfg = BarrierConfig(
+        ko_barrier=1.0, ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[ko_obs])
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, barrier_config=cfg,
+        accrual_config=AccrualConfig(coupon_pay_type=pay_type),
+        contract_multiplier=1.0, maturity=maturity, is_reverse=False)
+
+
+def _certain_ko_trade(pay_type, quantity=1.0):
+    return CVATrade(
+        trade_id="cko", product=_certain_ko_snowball(pay_type),
+        engine=SnowballQuadEngine(params=QuadParams(grid_points=301)),
+        env=_env(), quantity=quantity, trade_currency="USD")
+
+
+def test_immediate_ko_certain_exposure_oracle():
+    # certain KO at obs=0.5, settled immediately: discounted EE = q*R*DF(0,0.5) at t0,
+    # zero once the redemption is paid (no forward exposure).
+    trade = _certain_ko_trade(CouponPayType.INSTANT, quantity=3.0)
+    env = trade.env
+    R = float(trade.product.resolve_ko_observations(env)[0].payoff)
+    profile = MonteCarloExposureEngine(
+        MonteCarloExposureConfig(num_paths=20000, seed=11)).compute(
+            _counterparty([trade]))
+    times = profile.times
+    df_obs = float(env.get_discount_factor(0.5))
+    target = 3.0 * R * df_obs
+    obs_idx = int(np.argmin(np.abs(times - 0.5)))
+    assert profile.epe_discounted[0] == pytest.approx(target, rel=3e-3)
+    # at and after the KO observation the cash is settled -> zero exposure
+    for j in range(obs_idx, len(times)):
+        assert profile.epe_discounted[j] == pytest.approx(0.0, abs=target * 3e-3)
+
+
+def test_delayed_ko_settlement_expiry_exposure_oracle():
+    # certain KO at obs=0.5, redemption settled at maturity (EXPIRY): the counterparty
+    # owes R@T from t0 to T, so discounted EE is the CONSTANT q*R*DF(0,T) at every node
+    # before maturity (continuation value pre-KO, pending receivable post-KO), 0 at T.
+    trade = _certain_ko_trade(CouponPayType.EXPIRY, quantity=3.0)
+    env = trade.env
+    R = float(trade.product.resolve_ko_observations(env)[0].payoff)
+    profile = MonteCarloExposureEngine(
+        MonteCarloExposureConfig(num_paths=20000, seed=11)).compute(
+            _counterparty([trade]))
+    times = profile.times
+    target = 3.0 * R * float(env.get_discount_factor(1.0))
+    for j, t in enumerate(times):
+        if t < 1.0 - 1e-9:
+            assert profile.epe_discounted[j] == pytest.approx(target, rel=3e-3), \
+                f"node {t}"
+        else:
+            assert profile.epe_discounted[j] == pytest.approx(0.0, abs=target * 3e-3)
+
+
+def _date_settled_ko_snowball(obs_days=182, settle_days=189, maturity=1.0):
+    """Certain-KO snowball whose single KO observation settles ``settle_days`` after
+    valuation (strictly between the observation and maturity) -> the QUAD engine must
+    record a continuation surface at the settlement node."""
+    val = datetime(2024, 1, 1)
+    rec = ObservationRecord(
+        observation_date=val + timedelta(days=obs_days),
+        settlement_date=val + timedelta(days=settle_days),
+        barrier=1.0, return_rate=0.15, is_rate_annualized=False)
+    schedule = ObservationSchedule(records=[rec])
+    cfg = BarrierConfig(
+        ko_barrier=1.0, ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_schedule=schedule)
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, barrier_config=cfg,
+        contract_multiplier=1.0, maturity=maturity, is_reverse=False)
+
+
+def test_delayed_ko_settlement_records_settlement_node():
+    # An intermediate settlement (obs ~0.498y, settle ~0.518y) is not an observation
+    # node, so the engine must insert it as a recording node; the exposure profile is
+    # then the closed-form q*R*DF(0,settle) up to settlement and 0 after.
+    product = _date_settled_ko_snowball(obs_days=182, settle_days=189)
+    trade = CVATrade(
+        trade_id="dko", product=product,
+        engine=SnowballQuadEngine(params=QuadParams(grid_points=301)),
+        env=_env(), quantity=2.0, trade_currency="USD")
+    env = trade.env
+    rec = product.resolve_ko_observations(env)[0]
+    obs_t, settle_t, R = (float(rec.observation_time),
+                          float(rec.settlement_time), float(rec.payoff))
+    assert settle_t > obs_t  # genuinely delayed
+    spec = build_snowball_surface(trade)
+    # the settlement time is a recorded grid node (engine diffused through it)
+    assert any(abs(float(t) - settle_t) <= 1e-9 for t in spec.times), \
+        "settlement node not recorded by the engine"
+    profile = MonteCarloExposureEngine(
+        MonteCarloExposureConfig(num_paths=20000, seed=5)).compute(
+            _counterparty([trade]))
+    times = profile.times
+    target = 2.0 * R * float(env.get_discount_factor(settle_t))
+    for j, t in enumerate(times):
+        if t < settle_t - 1e-9:
+            assert profile.epe_discounted[j] == pytest.approx(target, rel=4e-3), \
+                f"node {t}"
+        else:
+            assert profile.epe_discounted[j] == pytest.approx(0.0, abs=target * 4e-3)
+
+
+def test_value_process_martingale_delayed_settlement():
+    # EXPIRY: every KO redemption settles at maturity. The discounted value process
+    # including the realized redemption (discounted to t0 via its SETTLEMENT node) must
+    # stay a Q-martingale on a realistic probabilistic-KO+KI snowball -> the recorded
+    # delayed-settlement surfaces are consistent (no value leaked at the KO boundary).
+    cfg = BarrierConfig(
+        ko_barrier=103.0, ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+        ki_barrier=75.0, ki_observation_type=ObservationType.CONTINUOUS,
+        ki_continuous=True)
+    product = SnowballOption(
+        initial_price=100.0, strike=100.0, barrier_config=cfg,
+        accrual_config=AccrualConfig(coupon_pay_type=CouponPayType.EXPIRY),
+        contract_multiplier=1.0, maturity=1.0, is_reverse=False)
+    trade = CVATrade("snowd", product,
+                     SnowballQuadEngine(params=QuadParams(grid_points=301)),
+                     _env(), 1.0, "USD")
+    env = trade.env
+    price0 = SnowballQuadEngine(params=QuadParams(grid_points=301)).price(product, env)
+    spec = build_snowball_surface(trade)
+    times = spec.times
+    n_paths = 40000
+
+    from quantark.sacva.exposure.paths import StatePathGenerator
+    spots = StatePathGenerator(
+        keys=["UND"], spots=[float(env.spot)], vols=[spec.vol],
+        rates=[float(env.get_rate(float(times[-1])))],
+        divs=[float(env.get_div_yield(float(times[-1])))],
+        corr=[[1.0]], grid_times=times, num_paths=n_paths, seed=3).generate()["UND"]
+    state = BarrierStateMachine(
+        ki_barrier=spec.ki_barrier, ki_direction=spec.ki_direction,
+        ko_barrier=spec.ko_barrier, ko_direction=spec.ko_direction,
+        ki_monitoring_idx=spec.ki_monitoring_idx,
+        ko_monitoring_idx=spec.ko_monitoring_idx, times=times, seed=3,
+        continuous=spec.ki_continuous, vol=spec.vol).run(spots)
+
+    df = np.array([float(env.get_discount_factor(float(t))) for t in times])
+    ko_idx = state["ko_idx"]
+    # redemption per KO observation, discounted to t0 via its settlement node
+    redemption_t0 = np.zeros(len(times))
+    for obs, pay, settle in zip(
+            spec.ko_monitoring_idx, spec.ko_payoffs, spec.ko_settle_idx):
+        redemption_t0[obs] = pay * df[settle]
+    realized = np.where(ko_idx >= 0, redemption_t0[ko_idx], 0.0)
+
+    for j in (len(times) - 1, len(times) // 2):
+        alive = state["alive"][:, j]
+        ki = state["knocked_in"][:, j]
+        v = np.zeros(n_paths)
+        for label, sel in (("alive", alive & ~ki), ("knocked_in", alive & ki)):
+            if sel.any():
+                v[sel] = spec.surface.value_at(spots[sel, j], float(times[j]), label)
+        dead_by_j = (ko_idx >= 0) & (ko_idx <= j)
+        total = df[j] * v + np.where(dead_by_j, realized, 0.0)
+        assert total.mean() == pytest.approx(price0, rel=0.03), f"leak at node {j}"
+
+
+def test_post_maturity_ko_settlement_deferred_raises():
+    # a KO settling AFTER maturity has no continuation surface past the terminal node
+    # -> the builder rejects it (deferred), rather than approximating.
+    product = _date_settled_ko_snowball(obs_days=360, settle_days=400, maturity=1.0)
+    trade = CVATrade(
+        trade_id="pmk", product=product,
+        engine=SnowballQuadEngine(params=QuadParams(grid_points=301)),
+        env=_env(), quantity=1.0, trade_currency="USD")
+    with pytest.raises(Exception, match="post-maturity"):
+        build_snowball_surface(trade)

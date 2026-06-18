@@ -302,23 +302,61 @@ class MonteCarloExposureEngine(ExposureEngine):
             continuous=spec.ki_continuous, vol=spec.vol,
             initial_knocked_in=spec.initial_knocked_in).run(paths[snow_key])
 
-        values = {id(snow): reprice_trade(
+        ref_curve = trades[0].env
+        df = np.array([float(ref_curve.get_discount_factor(float(ti))) for ti in times])
+
+        snow_value = reprice_trade(
             spec.surface, paths[snow_key], snow_state, times, float(snow.quantity),
             exposure_idx=list(range(len(times))),
-            state_labels=("alive", "knocked_in"))}
+            state_labels=("alive", "knocked_in"))
+        # delayed-settlement KO redemptions: a knocked-out path is owed its redemption
+        # until settlement, so carry payoff*DF(t_j, settle) on [obs, settle) as a
+        # deterministic receivable (df[j] from the aggregator then yields the constant
+        # t0 value payoff*DF(0, settle)). Immediate settlement (settle==obs) adds nothing.
+        snow_value = snow_value + float(snow.quantity) * self._ko_receivable(
+            spec, snow_state["ko_idx"], df)
+        values = {id(snow): snow_value}
         for t in trades:
             if t is snow:
                 continue
             values[id(t)] = self._trade_value_array(t, paths, times)
 
-        ref_curve = trades[0].env
-        df = np.array([float(ref_curve.get_discount_factor(float(ti))) for ti in times])
         epe = np.zeros(len(times))
         for ns in counterparty.netting_sets:
             arrays = [values[id(t)] for t in ns.trades]
             epe = epe + aggregate_epe(arrays, enforceable=ns.netting_enforceable, df=df)
         return ExposureProfile(times=times, epe_discounted=epe,
                                measure=Measure.RISK_NEUTRAL, regulatory_eligible=True)
+
+    def _ko_receivable(self, spec, ko_idx, df):
+        """Pending-receivable exposure for delayed-settlement KO, shape (n_paths, n_t).
+
+        A path that knocks out at observation grid index ``obs`` with settlement at grid
+        index ``settle > obs`` is owed ``payoff`` until settlement; its time-t_j value is
+        ``payoff*DF(t_j, settle) = payoff*df[settle]/df[j]``, carried on ``[obs, settle)``.
+        The value is left UNDISCOUNTED-to-t0 (aggregator convention): the aggregator's
+        ``df[j]`` collapses it to the constant t0 value ``payoff*df[settle]``. Immediate
+        settlement (``settle == obs``) contributes nothing — the redemption is paid at KO.
+        """
+        ko_idx = np.asarray(ko_idx)
+        n_t = df.shape[0]
+        if np.any(df <= 0.0):  # df divides below; a non-positive curve point is invalid
+            raise ValidationError("discount factors must be positive for KO receivable")
+        out = np.zeros((ko_idx.shape[0], n_t), dtype=float)
+        for obs, payoff, settle in zip(
+                spec.ko_monitoring_idx, spec.ko_payoffs, spec.ko_settle_idx):
+            if not (0 <= obs < n_t) or not (0 <= settle < n_t):
+                raise ValidationError(
+                    f"KO receivable obs/settle index out of range (obs={obs}, "
+                    f"settle={settle}, n_t={n_t})")
+            if settle <= obs:
+                continue
+            sel = ko_idx == obs
+            if not sel.any():
+                continue
+            for j in range(obs, settle):
+                out[sel, j] = payoff * df[settle] / df[j]
+        return out
 
     def _trade_value_array(self, trade, paths, times):
         """Pathwise UNDISCOUNTED reporting-currency value, shape (num_paths, n_t)."""
