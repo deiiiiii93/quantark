@@ -53,7 +53,18 @@ changes to those engines — the impedance mismatch is absorbed in one place.
 - [x] Gate 1 (review clean, 1 iter)
 - [x] Gate 2 (review 3 iters; 1 known limitation below)
 - [x] Gate 3 (no engine changes — stress + dynamic are already duck-typed)
-- [ ] Gate 4  - [ ] Gate 5  - [ ] Gate 6  - [ ] Gate 7
+- [x] Gate 4 (backtest: swap-aware position init; step loop already duck-typed)
+- [ ] Gate 5  - [ ] Gate 6  - [ ] Gate 7
+
+### Gate 4 note
+`BacktestEngine._initialize` now registers `EquitySwapPosition`s via
+`add_swap_position` (they have no separate engine); the step/greeks/value loop
+was already duck-typed. A swap is revalued against each step's spot (delta-one
+PnL). Caveat: the engine marks a spot delta-hedge at market value without
+booking the offsetting financing cash, so absolute PnL of a *hedged* swap run is
+not meaningful — a pre-existing engine accounting characteristic, unrelated to
+the TRS. Delta hedging of the swap itself works (hedges trigger and trade the
+underlying).
 
 ### Gate 3 note
 The `EquityStressEngine`, `StressApplicator`, and `DynamicScenarioEngine` are

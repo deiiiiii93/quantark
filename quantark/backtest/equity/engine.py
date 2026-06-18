@@ -14,6 +14,7 @@ from .multi_hedge_executor import MultiInstrumentHedgeExecutor
 from quantark.backtest.logger import BacktestLogger
 from quantark.backtest.strategy.multi_greek_strategy import MultiGreekHedgeStrategy
 from quantark.portfolio import Portfolio
+from quantark.portfolio.equity.swap_position import EquitySwapPosition
 from quantark.priceenv import PricingEnvironment
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.asset.equity.lifecycle import PortfolioLifecycleManager
@@ -161,16 +162,28 @@ class BacktestEngine:
             creation_date=self.config.start_date,
         )
 
-        # Add initial positions
+        # Add initial positions. TRS swap positions price through their cashflow
+        # valuator (no separate engine), so register them via add_swap_position;
+        # payoff-on-spot positions carry an engine and use add_position.
         for position in self.config.initial_positions:
-            self.portfolio.add_position(
-                product=position.product,
-                quantity=position.quantity,
-                entry_price=position.entry_price,
-                underlying=position.underlying,
-                engine=position.engine,
-                entry_timestamp=position.entry_timestamp,
-            )
+            if isinstance(position, EquitySwapPosition):
+                self.portfolio.add_swap_position(
+                    product=position.product,
+                    quantity=position.quantity,
+                    underlying=position.underlying,
+                    entry_price=position.entry_price,
+                    funding_rate_ref=position.funding_rate_ref,
+                    entry_timestamp=position.entry_timestamp,
+                )
+            else:
+                self.portfolio.add_position(
+                    product=position.product,
+                    quantity=position.quantity,
+                    entry_price=position.entry_price,
+                    underlying=position.underlying,
+                    engine=position.engine,
+                    entry_timestamp=position.entry_timestamp,
+                )
 
         self.logger.logger.info(
             f"Initialized portfolio with {len(self.config.initial_positions)} positions"
