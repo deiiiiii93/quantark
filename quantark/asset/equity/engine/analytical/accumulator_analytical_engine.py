@@ -282,7 +282,10 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         if extra <= 0.0:
             return 0.0
 
-        obs_type, obs_dates = self._leg_monitoring(product, times)
+        # The terminal extra-shares leg follows the same knock-out treatment as a
+        # gain leg maturing at T: expiry-only for SINGLE_DAY (no cumulative
+        # knockout), cumulative discrete monitoring for TERMINATION.
+        obs_type, obs_dates = self._call_leg_monitoring(product, times, times[-1])
         put_leg = BarrierOption(
             strike=product.strike,
             option_type=OptionType.PUT,

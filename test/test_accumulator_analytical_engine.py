@@ -177,6 +177,42 @@ def test_single_day_legs_are_independent_per_day():
     assert price == pytest.approx(expected, rel=1e-9)
 
 
+def test_single_day_extra_shares_not_cumulatively_knocked_out():
+    env = _pricing_env()
+    obs = [0.25, 0.5, 0.75, 1.0]
+    strike, barrier, extra = 95.0, 108.0, 0.5
+    common = dict(
+        strike=strike,
+        knock_out_barrier=barrier,
+        option_type=OptionType.CALL,
+        maturity=1.0,
+        daily_share_accumulation=1.0,
+        gearing=2.0,
+        knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        observation_dates=obs,
+    )
+    engine = AccumulatorAnalyticalEngine()
+    base = engine.price(AccumulatorOption(**common), env)
+    with_extra = engine.price(
+        AccumulatorOption(**common, extra_shares_at_expiry=extra), env
+    )
+
+    # For SINGLE_DAY the extra-shares leg is checked only at expiry (no cumulative
+    # knockout): an expiry-monitored up-and-out put, scaled by extra shares.
+    barrier_engine = BarrierAnalyticalEngine()
+    extra_put = BarrierOption(
+        strike=strike,
+        option_type=OptionType.PUT,
+        barrier=barrier,
+        barrier_type=BarrierType.UP_OUT,
+        maturity=1.0,
+        observation_type=ObservationType.EXPIRY,
+        contract_multiplier=extra,
+    )
+    expected_delta = -barrier_engine.price(extra_put, env)
+    assert (with_extra - base) == pytest.approx(expected_delta, rel=1e-9)
+
+
 def test_single_day_price_ignores_rebate_rate():
     env = _pricing_env()
     obs = [0.25, 0.5, 0.75, 1.0]
