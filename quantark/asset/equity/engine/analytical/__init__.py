@@ -20,6 +20,7 @@ from .range_accrual_analytical_engine import (
     RangeAccrualAnalyticalEngine,
     RangeAccrualAnalyticalResult,
 )
+from .accumulator_analytical_engine import AccumulatorAnalyticalEngine
 
 __all__ = [
     "BlackScholesEngine",
@@ -34,4 +35,5 @@ __all__ = [
     "AsianOptionAnalyticalEngine",
     "RangeAccrualAnalyticalEngine",
     "RangeAccrualAnalyticalResult",
+    "AccumulatorAnalyticalEngine",
 ]
