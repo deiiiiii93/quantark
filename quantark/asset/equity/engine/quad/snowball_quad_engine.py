@@ -79,6 +79,14 @@ class SnowballQuadEngine(BaseEngine):
                 f"params must be QuadParams instance, got {type(params).__name__}"
             )
         super().__init__(params)
+        # Opt-in capture of the per-observation backward-induction value surfaces
+        # (the v_in / v_out continuation grids on the inception-anchored spot grid).
+        # Off by default so normal pricing pays no memory cost; the CVA exposure
+        # layer enables it to read a per-node x per-state value surface straight off
+        # the backward sweep, with no re-pricing. Maps observation_time ->
+        # (spot_grid, v_in, v_out), plus key 0.0 for the valuation-date surfaces.
+        self.record_backward_grids = False
+        self._backward_grids: dict = {}
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -91,6 +99,14 @@ class SnowballQuadEngine(BaseEngine):
             raise PricingError("PricingEnvironment is required for SnowballQuadEngine.")
 
         self._validate_product(product)
+
+        # Reset the opt-in backward-grid capture up front, BEFORE any early return
+        # (zero maturity / immediate KO). Otherwise a terminated bumped re-price would
+        # leave the previous trade's surfaces in _backward_grids for the CVA exposure
+        # layer to read as if live — a silent corruption of bumped sensitivities.
+        record_grids = getattr(self, "record_backward_grids", False)
+        if record_grids:
+            self._backward_grids = {}
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -156,6 +172,14 @@ class SnowballQuadEngine(BaseEngine):
         )
         if not times:
             raise PricingError("Observation time grid is empty for SnowballQuadEngine.")
+
+        # When the CVA exposure layer is recording surfaces, also diffuse through (and
+        # record at) delayed KO-settlement times so a still-alive path can be valued at
+        # the settlement node. These are pure recording nodes (no KO/KI event matches
+        # them), so the recursion records the bare continuation surface there. Gated on
+        # record_grids: normal pricing keeps its exact observation-only time grid.
+        if record_grids:
+            times = self._insert_settlement_times(times, ko_records, maturity)
 
         align_log = self._select_alignment_log(
             spot, product, ki_barrier_override=ki_barrier_continuous
@@ -271,6 +295,15 @@ class SnowballQuadEngine(BaseEngine):
                         ki_weight = ki_weight * (1.0 - ko_weight)
                     v_out = (1.0 - ki_weight) * v_out + ki_weight * v_in
 
+            # Post-event continuation surfaces AT obs_time (before diffusing back to
+            # the previous step): v_out = value of a not-yet-knocked-in contract,
+            # v_in = value once knock-in has occurred, both as a function of spot on
+            # spot_grid. These are exactly the per-(t, state) value slices the CVA
+            # exposure layer needs; the diffusion below rolls them to the prior step.
+            if record_grids:
+                self._backward_grids[float(obs_time)] = (
+                    spot_grid.copy(), v_in.copy(), v_out.copy())
+
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
@@ -319,6 +352,12 @@ class SnowballQuadEngine(BaseEngine):
                     beta,
                     tau_step,
                 )
+
+        # After the full backward sweep, v_in/v_out are the valuation-date (t=0)
+        # surfaces; record them so the exposure grid has a t0 slice for both states.
+        if record_grids:
+            self._backward_grids[0.0] = (
+                spot_grid.copy(), v_in.copy(), v_out.copy())
 
         value_surface = v_in if knocked_in_at_valuation else v_out
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
@@ -1011,6 +1050,33 @@ class SnowballQuadEngine(BaseEngine):
         if is_zero(delay, tol=Tolerance.ZERO):
             return 1.0
         return safe_exp(-rate * delay)
+
+    def _insert_settlement_times(
+        self, times: Sequence[float], ko_records: Sequence, maturity: float
+    ) -> list[float]:
+        """Merge delayed KO-settlement times (within (obs, maturity]) into ``times``.
+
+        Used only when recording backward grids for CVA exposure: a KO that settles
+        after its observation creates a pending receivable whose default window ends at
+        settlement, so the exposure grid needs a node there, and a still-alive path
+        needs a continuation surface at that node. Settlements beyond maturity are not
+        added here (no diffusion exists past the terminal node); the exposure builder
+        rejects those rather than approximating.
+        """
+        merged = list(times)
+        for rec in ko_records:
+            st = rec.settlement_time
+            if st is None:
+                continue
+            st = float(st)
+            if st <= float(rec.observation_time) + Tolerance.PRECISION:
+                continue  # immediate settlement: already an observation node
+            if is_greater_than(st, maturity, abs_tol=Tolerance.PRECISION):
+                continue  # post-maturity tail: handled (rejected) by the exposure layer
+            st = min(st, float(maturity))
+            if not any(is_close(st, t, abs_tol=Tolerance.PRECISION) for t in merged):
+                merged.append(st)
+        return sorted(merged)
 
     def _merge_times(
         self, ko_times: Sequence[float], ki_times: Sequence[float], maturity: float
