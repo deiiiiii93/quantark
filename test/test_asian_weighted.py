@@ -101,6 +101,27 @@ def test_get_average_arithmetic_uniform_unchanged():
     assert opt.get_average([100.0, 200.0]) == pytest.approx(150.0)
 
 
+def test_get_average_rejects_nonpositive_weights():
+    opt = AsianOption(strike=100.0, maturity=1.0, averaging_type=AveragingType.ARITHMETIC)
+    with pytest.raises(ValidationError, match="weight"):
+        opt.get_average([100.0, 200.0], weights=[-1.0, 2.0])
+    with pytest.raises(ValidationError, match="weight"):
+        opt.get_average([100.0, 200.0], weights=[0.0, 1.0])
+
+
+def test_resolve_rejects_nonpositive_component_weights():
+    # Build valid, then mutate to bypass construction-time validation, exercising
+    # _normalize_weights' own defensive check (direct resolve_observations callers).
+    recs = [
+        AsianObservationRecord(observation_time=0.5, weight=1.0),
+        AsianObservationRecord(observation_time=1.0, weight=2.0),
+    ]
+    opt = AsianOption(strike=100.0, maturity=1.0, observation_records=recs)
+    recs[0].weight = -1.0
+    with pytest.raises(ValidationError, match="weight"):
+        opt.resolve_observations(_env())
+
+
 def test_get_average_geometric_weighted():
     opt = AsianOption(strike=100.0, maturity=1.0, averaging_type=AveragingType.GEOMETRIC)
     # exp( (1*ln100 + 3*ln200) / 4 )

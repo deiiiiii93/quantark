@@ -341,6 +341,11 @@ class AsianOption(BaseEquityOption):
             )
         if not any(specified):
             return [1.0 / n] * n
+        for w in raw_weights:
+            if not np.isfinite(w) or w <= 0:  # type: ignore[arg-type]
+                raise ValidationError(
+                    f"Asian averaging weights must be positive and finite, got {w}"
+                )
         total = float(sum(w for w in raw_weights))  # type: ignore[arg-type]
         if total <= 0:
             raise ValidationError("Sum of Asian averaging weights must be positive.")
@@ -472,6 +477,10 @@ class AsianOption(BaseEquityOption):
                     "weights length must match prices length for averaging"
                 )
             weights_arr = np.asarray(weights, dtype=float)
+            if not np.all(np.isfinite(weights_arr)) or np.any(weights_arr <= 0):
+                raise ValidationError(
+                    "averaging weights must be positive and finite"
+                )
             total = float(weights_arr.sum())
             if total <= 0:
                 raise ValidationError("Sum of averaging weights must be positive")
