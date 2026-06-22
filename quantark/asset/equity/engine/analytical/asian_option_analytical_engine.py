@@ -250,10 +250,36 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         else:
             return self.DEFAULT_METHOD
 
+    # Analytical methods that admit a verified weighted-moment generalization.
+    _WEIGHTED_METHODS = (
+        AsianAnalyticalMethod.TURNBULL_WAKEMAN,
+        AsianAnalyticalMethod.GEOMETRIC_DISCRETE,
+    )
+
     def _check_method_compatibility(
         self, product: AsianOption, method: AsianAnalyticalMethod, params: dict
     ) -> None:
         """Check if method is compatible with product."""
+        # Non-uniform averaging weights: only a subset of methods can price them
+        # correctly. Reject the rest (and floating-strike / continuous) rather
+        # than silently ignoring the weights.
+        if product.has_custom_weights():
+            if product.is_continuous():
+                raise ValidationError(
+                    "Non-uniform averaging weights require discrete observations."
+                )
+            if product.is_floating_strike():
+                raise ValidationError(
+                    "Non-uniform averaging weights are not supported for "
+                    "floating-strike Asian options analytically; use the MC engine."
+                )
+            if method not in self._WEIGHTED_METHODS:
+                raise ValidationError(
+                    f"Method {method.name} cannot price non-uniform averaging "
+                    "weights. Use TURNBULL_WAKEMAN (arithmetic) / GEOMETRIC_DISCRETE "
+                    "(geometric), or the MC engine."
+                )
+
         # KEMNA_VORST only works for geometric averaging
         if method in (
             AsianAnalyticalMethod.KEMNA_VORST,
@@ -384,6 +410,18 @@ class AsianOptionAnalyticalEngine(BaseEngine):
                 for idx, v in enumerate(params["vol_times"])
                 if idx != max_index
             ]
+            # Drop the terminal fixing's weight and renormalize the rest to sum
+            # to 1 (custom-weighted floating strike is rejected upstream, so this
+            # only ever rescales uniform weights).
+            kept_weights = [
+                w
+                for idx, w in enumerate(params["future_weights"])
+                if idx != max_index
+            ]
+            weight_sum = sum(kept_weights)
+            params_transformed["future_weights"] = (
+                [w / weight_sum for w in kept_weights] if weight_sum > 0 else kept_weights
+            )
             params_transformed["n"] = n - 1
 
         # Transform parameters
@@ -468,14 +506,17 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         r = params["r"]
         b = params["b"]
         m = params["m"]
-        n_total = params["n"]
         past_prices = params["past_prices"]
+        past_weights = params["past_weights"]
 
-        time_vol_pairs = sorted(
-            zip(params["future_times"], params["vol_times"]), key=lambda tv: tv[0]
+        # Sort future fixings ascending, carrying each fixing's vol and weight.
+        triples = sorted(
+            zip(params["future_times"], params["vol_times"], params["future_weights"]),
+            key=lambda tvw: tvw[0],
         )
-        future_times = [t for t, _ in time_vol_pairs]
-        future_vols = [v for _, v in time_vol_pairs]
+        future_times = [t for t, _, _ in triples]
+        future_vols = [v for _, v, _ in triples]
+        future_weights = [w for _, _, w in triples]
 
         n_future = len(future_times)
         if n_future <= 0:
@@ -483,38 +524,32 @@ class AsianOptionAnalyticalEngine(BaseEngine):
             payoff = max(avg - K, 0.0) if is_call else max(K - avg, 0.0)
             return payoff * self._safe_exp(-r * T)
 
-        sum_sigma_t = 0.0
-        sum_sigma_t_weighted = 0.0
-        for idx, (ti, sigma_i) in enumerate(zip(future_times, future_vols), start=1):
-            sigma2_t = sigma_i**2 * ti
-            sum_sigma_t += sigma2_t
-            if idx < n_future:
-                sum_sigma_t_weighted += (n_future - idx) * sigma2_t
-
-        sigma_g2 = (sum_sigma_t + 2.0 * sum_sigma_t_weighted) / (n_future**2 * T)
-        if sigma_g2 < 1e-20:
-            sigma_g2 = 1e-20
-
-        b_g = 0.5 * sigma_g2 + (
-            sum(
-                (b - 0.5 * sigma_i**2) * ti
-                for sigma_i, ti in zip(future_vols, future_times)
-            )
-            / (n_future * T)
+        # Weighted log-average  ln A = sum_i w_i ln S_ti, weights global (sum to 1).
+        # E[ln A] = sum_past w_p ln(S_p) + sum_future w_f [ln S + (b - 0.5 sigma_f^2) t_f]
+        log_S = self._safe_log(S)
+        m_total = sum(
+            wp * self._safe_log(p) for wp, p in zip(past_weights, past_prices)
+        )
+        m_total += sum(
+            wf * (log_S + (b - 0.5 * sigma_i**2) * ti)
+            for wf, sigma_i, ti in zip(future_weights, future_vols, future_times)
         )
 
-        v_future = sigma_g2 * T
-        m_future = self._safe_log(S) + (b_g - 0.5 * sigma_g2) * T
+        # Var[ln A] = sum_i sum_j w_i w_j Cov(ln S_ti, ln S_tj), future only.
+        # With term-structure vols and ascending times, Cov(i,j) ~= sigma_i^2 t_i
+        # for i <= j, giving  sum_i sigma_i^2 t_i ( w_i^2 + 2 w_i * sum_{j>i} w_j ).
+        suffix_w = np.zeros(n_future + 1)  # suffix_w[i] = sum_{j>=i} w_j
+        for i in range(n_future - 1, -1, -1):
+            suffix_w[i] = suffix_w[i + 1] + future_weights[i]
 
-        if m > 0:
-            log_past = np.mean([self._safe_log(p) for p in past_prices])
-            weight_future = n_future / n_total
-            weight_past = m / n_total
-            m_total = weight_past * log_past + weight_future * m_future
-            v_total = (weight_future**2) * v_future
-        else:
-            m_total = m_future
-            v_total = v_future
+        v_total = 0.0
+        for i in range(n_future):
+            sigma2_t = future_vols[i] ** 2 * future_times[i]
+            wi = future_weights[i]
+            v_total += sigma2_t * (wi * wi + 2.0 * wi * suffix_w[i + 1])
+
+        if v_total < 1e-20:
+            v_total = 1e-20
 
         return self._price_lognormal(m_total, v_total, K, r, T, is_call)
 
@@ -572,7 +607,10 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         else:
             # Discrete averaging
             future_times = params["future_times"]
-            M1, M2 = self._compute_M1_M2_discrete(S, b, sigma, future_times, params["past_prices"])
+            M1, M2 = self._compute_M1_M2_discrete(
+                S, b, sigma, future_times, params["future_weights"],
+                params["past_prices"], params["past_weights"],
+            )
             T2 = T # Use T as maturity for discrete case adjustment
 
         # 2. Adjust for in-period results
@@ -630,46 +668,60 @@ class AsianOptionAnalyticalEngine(BaseEngine):
             return self._bsm_price(S, K, T, r, b_A, sigma_A, is_call)
 
     def _compute_M1_M2_discrete(
-        self, S: float, b: float, sigma: float, future_times: List[float], past_prices: List[float]
+        self,
+        S: float,
+        b: float,
+        sigma: float,
+        future_times: List[float],
+        future_weights: List[float],
+        past_prices: List[float],
+        past_weights: List[float],
     ) -> Tuple[float, float]:
-        """Compute first and second moments for discrete arithmetic average."""
-        n_future = len(future_times)
-        m = len(past_prices)
-        n = n_future + m
-        
-        # M1 = E[A] / S = (1/n) * [sum(past/S) + sum(E[S_ti]/S)]
-        sum_past_ratio = sum(past_prices) / S if S > 0 else 0.0
-        sum_future_E = sum(self._safe_exp(b * t) for t in future_times)
-        M1 = (sum_past_ratio + sum_future_E) / n
-        
-        # M2 = E[A^2] / S^2 = (1/n^2) * [E((sum_past + sum_future)^2)/S^2]
-        # E[(P + F)^2] = P^2 + 2P*E[F] + E[F^2]
-        P_ratio = sum_past_ratio
-        
-        # E[F] / S = sum_future_E
-        # E[F^2] / S^2 = sum_i E[S_ti^2]/S^2 + 2 * sum_{i<j} E[S_ti * S_tj]/S^2
-        # E[S_ti * S_tj] = S^2 * exp(b*ti + b*tj + sigma^2 * min(ti, tj))
-        
-        # Compute E[F^2]/S^2 in O(n)
-        # sum_{i,j} exp(b*ti + b*tj + sigma^2 * min(ti, tj))
-        # = sum_i exp((2b+sigma^2)ti) + 2 * sum_{i<j} exp((b+sigma^2)ti + b*tj)
-        # = sum_i [ exp((2b+sigma^2)ti) + 2 * exp((b+sigma^2)ti) * sum_{j>i} exp(b*tj) ]
-        
-        times = sorted(future_times)
-        term_E_tj = [self._safe_exp(b * t) for t in times]
-        suffix_sums = np.zeros(n_future + 1)
+        """First and second moments of the weighted discrete arithmetic average.
+
+        Average A = sum_i w_i S_ti with weights normalized so that
+        sum(past_weights) + sum(future_weights) == 1. Uniform weights (w_i = 1/n)
+        reproduce the equal-weight moments exactly.
+
+        M1 = E[A]/S = sum_past w_p (S_p/S) + sum_future w_f e^{b t_f}
+        M2 = E[A^2]/S^2 = P_w^2 + 2 P_w F_w + FF_w, where
+            P_w = sum_past w_p (S_p/S),  F_w = sum_future w_f e^{b t_f},
+            FF_w = sum_i sum_j w_i w_j e^{b t_i + b t_j + sigma^2 min(t_i,t_j)}.
+        """
+        # Deterministic past contribution (weighted), as a ratio to S
+        P_w = (
+            sum(wp * (p / S) for wp, p in zip(past_weights, past_prices))
+            if S > 0
+            else 0.0
+        )
+        # Stochastic future first moment (weighted)
+        F_w = sum(
+            wf * self._safe_exp(b * t) for wf, t in zip(future_weights, future_times)
+        )
+        M1 = P_w + F_w
+
+        # FF_w: weighted future-future double sum in O(n) via a weighted suffix sum.
+        # Sort fixings ascending so min(t_i, t_j) = t_i for i <= j.
+        pairs = sorted(zip(future_times, future_weights), key=lambda tw: tw[0])
+        times = [t for t, _ in pairs]
+        wts = [w for _, w in pairs]
+        n_future = len(times)
+
+        # suffix[i] = sum_{j >= i} w_j e^{b t_j}
+        suffix = np.zeros(n_future + 1)
         for i in range(n_future - 1, -1, -1):
-            suffix_sums[i] = suffix_sums[i+1] + term_E_tj[i]
-            
-        sum_future_sq = 0.0
+            suffix[i] = suffix[i + 1] + wts[i] * self._safe_exp(b * times[i])
+
+        FF_w = 0.0
         for i in range(n_future):
             ti = times[i]
-            term_i = self._safe_exp((2 * b + sigma**2) * ti)
-            cross_i = 2 * self._safe_exp((b + sigma**2) * ti) * suffix_sums[i+1]
-            sum_future_sq += term_i + cross_i
-            
-        M2 = (P_ratio**2 + 2 * P_ratio * sum_future_E + sum_future_sq) / (n**2)
-        
+            wi = wts[i]
+            diag = wi * wi * self._safe_exp((2 * b + sigma**2) * ti)
+            cross = 2 * wi * self._safe_exp((b + sigma**2) * ti) * suffix[i + 1]
+            FF_w += diag + cross
+
+        M2 = P_w**2 + 2 * P_w * F_w + FF_w
+
         return M1, M2
 
     def _compute_M2_turnbull_wakeman(
@@ -760,7 +812,10 @@ class AsianOptionAnalyticalEngine(BaseEngine):
             # Discrete Levy: Same moment matching logic as TW but using Levy's BSM parameterization
             # Levy matches E[A] and E[A^2] to lognormal.
             future_times = params["future_times"]
-            M1, M2 = self._compute_M1_M2_discrete(S, b, sigma, future_times, params["past_prices"])
+            M1, M2 = self._compute_M1_M2_discrete(
+                S, b, sigma, future_times, params["future_weights"],
+                params["past_prices"], params["past_weights"],
+            )
             
             E_A = M1 * S
             E_A2 = M2 * S**2

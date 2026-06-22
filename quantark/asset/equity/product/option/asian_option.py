@@ -578,6 +578,12 @@ class AsianOption(BaseEquityOption):
         """Check if this uses geometric averaging."""
         return self.averaging_type == AveragingType.GEOMETRIC
 
+    def has_custom_weights(self) -> bool:
+        """True if any observation carries an explicit (non-uniform) weight."""
+        if self.observation_records is None:
+            return False
+        return any(rec.weight is not None for rec in self.observation_records)
+
     def is_continuous(self) -> bool:
         """Check if this uses continuous averaging."""
         return self.num_observations is None and self.observation_times is None and self.observation_dates is None and self.observation_records is None
