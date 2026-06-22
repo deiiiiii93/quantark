@@ -233,7 +233,7 @@ class AsianOptionMCEngine(BaseEngine):
         product: AsianOption,
         pricing_env: PricingEnvironment,
         T: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
         """
         Build time grid aligned with future observation times.
 
@@ -251,15 +251,19 @@ class AsianOptionMCEngine(BaseEngine):
             - dt_array: Time increments between times
             - obs_indices: Indices into all_times for future observations
             - past_prices: Array of already-observed prices
+            - weights: Normalized averaging weights aligned with [past, future] order
             - total_observations: Total number of observations for averaging
         """
         # Use resolve_observations to get past and future observations
-        past_prices_list, _past_weights, future_times_list, _future_weights, total_observations = (
+        past_prices_list, past_weights, future_times_list, future_weights, total_observations = (
             product.resolve_observations(pricing_env)
         )
 
         past_prices = np.array(past_prices_list)
         future_times = np.array(future_times_list)
+        # Weights are aligned with the average's column order: past first, then
+        # future (matching how _compute_averages concatenates the price columns).
+        weights = np.array(list(past_weights) + list(future_weights), dtype=float)
 
         # If no future observations, we only need to compute payoff from past prices
         if len(future_times) == 0:
@@ -269,6 +273,7 @@ class AsianOptionMCEngine(BaseEngine):
                 np.array([T]),
                 np.array([], dtype=int),
                 past_prices,
+                weights,
                 total_observations,
             )
 
@@ -283,7 +288,7 @@ class AsianOptionMCEngine(BaseEngine):
         # Find indices for future observation times
         obs_indices = np.searchsorted(all_times, future_times)
 
-        return all_times, dt_array, obs_indices, past_prices, total_observations
+        return all_times, dt_array, obs_indices, past_prices, weights, total_observations
 
     def _create_path_generator(
         self,
@@ -356,19 +361,22 @@ class AsianOptionMCEngine(BaseEngine):
         paths: np.ndarray,
         obs_indices: np.ndarray,
         past_prices: np.ndarray,
+        weights: np.ndarray,
         total_observations: int,
         averaging_type: AveragingType,
     ) -> np.ndarray:
         """
-        Compute the average price over all observations for each path.
+        Compute the (weighted) average price over all observations per path.
 
         Combines past (already observed) prices with simulated future prices
-        to compute the full average.
+        to compute the full average. ``weights`` are normalized averaging weights
+        aligned with the [past, future] column order and summing to 1.
 
         Args:
             paths: Simulated paths, shape (num_paths, num_times + 1)
             obs_indices: Indices into paths for future observations
             past_prices: Array of already-observed prices, shape (num_past,)
+            weights: Normalized weights, shape (num_past + num_future,)
             total_observations: Total number of observations for averaging
             averaging_type: ARITHMETIC or GEOMETRIC
 
@@ -381,12 +389,10 @@ class AsianOptionMCEngine(BaseEngine):
 
         # Handle case with no future observations
         if num_future == 0:
-            # All observations are past - return constant average
-            if averaging_type == AveragingType.ARITHMETIC:
-                avg = float(np.mean(past_prices))
-            else:  # GEOMETRIC
-                log_prices = np.log(past_prices)
-                avg = float(np.exp(np.mean(log_prices)))
+            # All observations are past - return constant (weighted) average
+            avg = self._weighted_average_1d(
+                np.asarray(past_prices, dtype=float), weights, averaging_type
+            )
             return np.full(num_paths, avg)
 
         # Extract simulated prices at future observation times (offset by 1 for t=0)
@@ -404,13 +410,23 @@ class AsianOptionMCEngine(BaseEngine):
         else:
             all_prices = future_prices
 
-        # Compute average
+        # Compute weighted average (weights aligned with all_prices columns)
         if averaging_type == AveragingType.ARITHMETIC:
-            return np.mean(all_prices, axis=1)
+            return all_prices @ weights
         else:  # GEOMETRIC
-            # Use log-sum-exp for numerical stability
+            # Weighted log-mean for numerical stability
             log_prices = np.log(all_prices)
-            return np.exp(np.mean(log_prices, axis=1))
+            return np.exp(log_prices @ weights)
+
+    @staticmethod
+    def _weighted_average_1d(
+        prices: np.ndarray, weights: np.ndarray, averaging_type: AveragingType
+    ) -> float:
+        """Weighted scalar average of a 1-D price vector (weights sum to 1)."""
+        if averaging_type == AveragingType.ARITHMETIC:
+            return float(np.dot(weights, prices))
+        log_prices = np.log(prices)
+        return float(np.exp(np.dot(weights, log_prices)))
 
     def _compute_payoffs(
         self,
@@ -418,6 +434,7 @@ class AsianOptionMCEngine(BaseEngine):
         paths: np.ndarray,
         obs_indices: np.ndarray,
         past_prices: np.ndarray,
+        weights: np.ndarray,
         total_observations: int,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -428,6 +445,7 @@ class AsianOptionMCEngine(BaseEngine):
             paths: Simulated paths, shape (num_paths, num_times + 1)
             obs_indices: Indices into paths for future observations
             past_prices: Array of already-observed prices
+            weights: Normalized averaging weights aligned with [past, future]
             total_observations: Total number of observations for averaging
 
         Returns:
@@ -437,7 +455,7 @@ class AsianOptionMCEngine(BaseEngine):
         """
         # Compute averages (combining past and future prices)
         averages = self._compute_averages(
-            paths, obs_indices, past_prices, total_observations, product.averaging_type
+            paths, obs_indices, past_prices, weights, total_observations, product.averaging_type
         )
 
         # Get terminal spot prices
@@ -477,7 +495,7 @@ class AsianOptionMCEngine(BaseEngine):
         Price using normal MC or QMC (non-randomized).
         """
         # Build observation grid (separates past and future observations)
-        all_times, dt_array, obs_indices, past_prices, total_observations = (
+        all_times, dt_array, obs_indices, past_prices, weights, total_observations = (
             self._build_observation_grid(product, pricing_env, T)
         )
 
@@ -486,12 +504,10 @@ class AsianOptionMCEngine(BaseEngine):
 
         # Handle special case: all observations are in the past
         if num_future == 0:
-            # Compute average from past prices only
-            if product.averaging_type == AveragingType.ARITHMETIC:
-                avg = float(np.mean(past_prices))
-            else:  # GEOMETRIC
-                log_prices = np.log(past_prices)
-                avg = float(np.exp(np.mean(log_prices)))
+            # Compute (weighted) average from past prices only
+            avg = self._weighted_average_1d(
+                np.asarray(past_prices, dtype=float), weights, product.averaging_type
+            )
 
             # Compute payoff
             payoff = product.get_payoff(S, average=avg)
@@ -521,7 +537,7 @@ class AsianOptionMCEngine(BaseEngine):
 
         # Compute payoffs (combines past and future prices)
         payoffs, averages = self._compute_payoffs(
-            product, paths, obs_indices, past_prices, total_observations
+            product, paths, obs_indices, past_prices, weights, total_observations
         )
 
         # Discount payoffs
@@ -558,7 +574,7 @@ class AsianOptionMCEngine(BaseEngine):
         Price using Randomized QMC with adaptive batching.
         """
         # Build observation grid (separates past and future observations)
-        all_times, dt_array, obs_indices, past_prices, total_observations = (
+        all_times, dt_array, obs_indices, past_prices, weights, total_observations = (
             self._build_observation_grid(product, pricing_env, T)
         )
 
@@ -567,12 +583,10 @@ class AsianOptionMCEngine(BaseEngine):
 
         # Handle special case: all observations are in the past
         if num_future == 0:
-            # Same as MC case - no simulation needed
-            if product.averaging_type == AveragingType.ARITHMETIC:
-                avg = float(np.mean(past_prices))
-            else:  # GEOMETRIC
-                log_prices = np.log(past_prices)
-                avg = float(np.exp(np.mean(log_prices)))
+            # Same as MC case - no simulation needed (weighted average)
+            avg = self._weighted_average_1d(
+                np.asarray(past_prices, dtype=float), weights, product.averaging_type
+            )
 
             payoff = product.get_payoff(S, average=avg)
             discount_factor = math.exp(-r * T)
@@ -625,7 +639,7 @@ class AsianOptionMCEngine(BaseEngine):
         def pricer_fn(paths, aux):
             """Pricer function for RQMC driver."""
             payoffs, _ = self._compute_payoffs(
-                product, paths, obs_indices, past_prices, total_observations
+                product, paths, obs_indices, past_prices, weights, total_observations
             )
             return discount_factor * payoffs
 
@@ -640,7 +654,7 @@ class AsianOptionMCEngine(BaseEngine):
         # Run one more batch to get average statistics
         paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
         _, averages = self._compute_payoffs(
-            product, paths, obs_indices, past_prices, total_observations
+            product, paths, obs_indices, past_prices, weights, total_observations
         )
 
         return AsianMCResult(
