@@ -524,6 +524,9 @@ class AsianOptionAnalyticalEngine(BaseEngine):
 
         n_future = len(future_times)
         if n_future <= 0:
+            # S_A is the (weighted) past geometric average from get_past_average,
+            # so non-uniform weights are already honored here. The fully-realized
+            # (m == n) case is normally handled upstream in _price_fixed_strike.
             avg = params["S_A"] if m > 0 else S
             payoff = max(avg - K, 0.0) if is_call else max(K - avg, 0.0)
             return payoff * self._safe_exp(-r * T)
