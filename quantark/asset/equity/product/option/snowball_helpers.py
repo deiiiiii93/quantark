@@ -42,11 +42,18 @@ from .snowball_config import BarrierConfig, PayoffConfig, AccrualConfig, AirbagC
 # Utility Functions
 # =============================================================================
 
+# Conventional number of trading (business) days per year. Used to translate a
+# "daily" observation frequency into an evenly-spaced observation count. Callers
+# that carry a calendar-specific count (e.g. a PricingEnvironment's
+# bus_days_in_year) may override it per call.
+DEFAULT_TRADING_DAYS_PER_YEAR = 252
+
 
 def generate_ko_observation_dates(
     maturity: float,
     frequency: str = "monthly",
     skip_first: int = 0,
+    trading_days_per_year: Optional[int] = None,
 ) -> List[float]:
     """
     Generate evenly spaced observation dates as year fractions.
@@ -71,11 +78,16 @@ def generate_ko_observation_dates(
     if maturity <= 0:
         raise ValidationError(f"maturity must be positive, got {maturity}")
 
+    daily_periods = (
+        trading_days_per_year
+        if trading_days_per_year is not None
+        else DEFAULT_TRADING_DAYS_PER_YEAR
+    )
     frequency_map = {
         "monthly": 12,
         "quarterly": 4,
         "weekly": 52,
-        "daily": 252,
+        "daily": daily_periods,
     }
 
     if frequency not in frequency_map:
