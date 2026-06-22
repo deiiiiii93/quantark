@@ -135,3 +135,72 @@ def test_nonuniform_weights_rejected_for_floating_strike():
     tw = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.TURNBULL_WAKEMAN)
     with pytest.raises(ValidationError, match="weight"):
         tw.price(opt, env)
+
+
+# --- review-driven edge cases ------------------------------------------------
+
+def test_inprogress_floating_transform_renormalizes_all_weights():
+    """In-progress (m>0) floating-strike: dropping the terminal fixing must
+    renormalize past AND future weights so they still sum to 1 (P2). The
+    floating symmetry itself is an approximation for in-progress averages, so
+    we assert the weight invariant directly rather than MC agreement."""
+    env = _env(spot=100.0, rate=0.05, vol=0.20)
+    recs = [
+        AsianObservationRecord(observation_time=-0.5, observed_price=98.0),
+        AsianObservationRecord(observation_time=-0.25, observed_price=101.0),
+        AsianObservationRecord(observation_time=0.5),
+        AsianObservationRecord(observation_time=1.0),  # terminal fixing == T
+    ]
+    opt = AsianOption(
+        strike=0.0, option_type=OptionType.CALL,
+        asian_strike_type=AsianStrikeType.FLOATING,
+        averaging_type=AveragingType.ARITHMETIC, maturity=1.0,
+        observation_records=recs,
+    )
+    tw = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.TURNBULL_WAKEMAN)
+
+    captured = {}
+    original = tw._price_fixed_strike_internal
+
+    def spy(params, method, is_call):
+        captured["past"] = list(params["past_weights"])
+        captured["future"] = list(params["future_weights"])
+        return original(params, method, is_call)
+
+    tw._price_fixed_strike_internal = spy
+    tw.price(opt, env)
+
+    total = sum(captured["past"]) + sum(captured["future"])
+    assert total == pytest.approx(1.0)
+    # one future fixing dropped: 3 remaining fixings, each 1/3 for a uniform schedule
+    assert captured["past"] == pytest.approx([1 / 3, 1 / 3])
+    assert captured["future"] == pytest.approx([1 / 3])
+
+
+def test_all_past_geometric_weighted_uses_weights():
+    """All-past geometric must honor non-uniform weights (P2)."""
+    env = _env()
+    recs = [
+        AsianObservationRecord(observation_time=-0.5, observed_price=100.0, weight=1.0),
+        AsianObservationRecord(observation_time=-0.25, observed_price=400.0, weight=3.0),
+    ]
+    opt = AsianOption(
+        strike=200.0, option_type=OptionType.CALL,
+        averaging_type=AveragingType.GEOMETRIC, maturity=1.0,
+        observation_records=recs,
+    )
+    geo = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.GEOMETRIC_DISCRETE)
+    # weighted geo avg = (100^1 * 400^3)^(1/4) ~= 282.84 ; equal-weight would be 200 (payoff 0)
+    expected_avg = (100.0 ** 1 * 400.0 ** 3) ** 0.25
+    import math
+    expected = max(expected_avg - 200.0, 0.0) * math.exp(-0.05)
+    assert geo.price(opt, env) == pytest.approx(expected, rel=1e-6)
+
+
+def test_explicit_uniform_weights_not_rejected_by_levy():
+    """Explicit but uniform weights are mathematically unweighted -> not rejected (P3)."""
+    env = _env()
+    opt = _weighted_option([2.0, 2.0, 2.0, 2.0])  # all equal -> uniform
+    levy = AsianOptionAnalyticalEngine(method=AsianAnalyticalMethod.LEVY)
+    # should price, not raise
+    assert levy.price(opt, env) > 0.0

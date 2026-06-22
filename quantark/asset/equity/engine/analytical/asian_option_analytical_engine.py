@@ -263,7 +263,7 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         # Non-uniform averaging weights: only a subset of methods can price them
         # correctly. Reject the rest (and floating-strike / continuous) rather
         # than silently ignoring the weights.
-        if product.has_custom_weights():
+        if product.has_nonuniform_weights():
             if product.is_continuous():
                 raise ValidationError(
                     "Non-uniform averaging weights require discrete observations."
@@ -410,18 +410,22 @@ class AsianOptionAnalyticalEngine(BaseEngine):
                 for idx, v in enumerate(params["vol_times"])
                 if idx != max_index
             ]
-            # Drop the terminal fixing's weight and renormalize the rest to sum
-            # to 1 (custom-weighted floating strike is rejected upstream, so this
-            # only ever rescales uniform weights).
-            kept_weights = [
-                w
+            # Drop the terminal fixing's weight and renormalize ALL remaining
+            # fixings (past + kept future) so they still sum to 1. Custom-weighted
+            # floating strike is rejected upstream, so this only rescales uniform
+            # weights, but past weights must be scaled too (not just future).
+            dropped_weight = params["future_weights"][max_index]
+            remaining = 1.0 - dropped_weight
+            if remaining <= 0:
+                return 0.0
+            params_transformed["future_weights"] = [
+                w / remaining
                 for idx, w in enumerate(params["future_weights"])
                 if idx != max_index
             ]
-            weight_sum = sum(kept_weights)
-            params_transformed["future_weights"] = (
-                [w / weight_sum for w in kept_weights] if weight_sum > 0 else kept_weights
-            )
+            params_transformed["past_weights"] = [
+                w / remaining for w in params["past_weights"]
+            ]
             params_transformed["n"] = n - 1
 
         # Transform parameters

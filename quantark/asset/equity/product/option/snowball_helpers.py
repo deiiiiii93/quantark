@@ -78,6 +78,10 @@ def generate_ko_observation_dates(
     if maturity <= 0:
         raise ValidationError(f"maturity must be positive, got {maturity}")
 
+    if trading_days_per_year is not None and trading_days_per_year <= 0:
+        raise ValidationError(
+            f"trading_days_per_year must be positive, got {trading_days_per_year}"
+        )
     daily_periods = (
         trading_days_per_year
         if trading_days_per_year is not None

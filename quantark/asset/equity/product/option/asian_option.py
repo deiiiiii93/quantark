@@ -17,7 +17,7 @@ from quantark.util.enum import (
     AsianStrikeType,
 )
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import is_zero, safe_log, safe_exp
+from quantark.util.numerical import is_zero, is_close, safe_log, safe_exp
 
 from .base_equity_option import BaseEquityOption
 
@@ -579,10 +579,28 @@ class AsianOption(BaseEquityOption):
         return self.averaging_type == AveragingType.GEOMETRIC
 
     def has_custom_weights(self) -> bool:
-        """True if any observation carries an explicit (non-uniform) weight."""
+        """True if any observation carries an explicit weight."""
         if self.observation_records is None:
             return False
         return any(rec.weight is not None for rec in self.observation_records)
+
+    def has_nonuniform_weights(self) -> bool:
+        """True if explicit weights are present AND not all equal.
+
+        Explicit-but-equal weights (e.g. all 2.0) are mathematically identical to
+        the unweighted schedule, so they should not trigger weighted-only handling.
+        """
+        if self.observation_records is None:
+            return False
+        weights = [rec.weight for rec in self.observation_records]
+        if all(w is None for w in weights):
+            return False
+        if any(w is None for w in weights):
+            # Mixed specified/unspecified is itself non-uniform (and rejected at
+            # normalization time); treat as non-uniform here.
+            return True
+        first = weights[0]
+        return any(not is_close(w, first) for w in weights)
 
     def is_continuous(self) -> bool:
         """Check if this uses continuous averaging."""
