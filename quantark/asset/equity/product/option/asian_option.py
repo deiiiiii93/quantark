@@ -42,11 +42,16 @@ class AsianObservationRecord:
         observation_time: Observation time as year fraction from initial date
         observation_date: Observation date (alternative to observation_time)
         observed_price: Actual observed price (for past observations only)
+        weight: Relative averaging weight for this fixing. ``None`` means
+            unweighted; weights are normalized across all observations so they
+            sum to 1 (see ``AsianOption.resolve_observations``). Weights must be
+            supplied for every record or for none.
     """
 
     observation_time: Optional[float] = None
     observation_date: Optional[datetime] = None
     observed_price: Optional[float] = None
+    weight: Optional[float] = None
 
     def resolve_time(self, pricing_env: "PricingEnvironment") -> float:
         """
@@ -110,6 +115,8 @@ class AsianObservationRecord:
             raise ValidationError(
                 f"observed_price must be positive, got {self.observed_price}"
             )
+        if self.weight is not None and self.weight <= 0:
+            raise ValidationError(f"weight must be positive, got {self.weight}")
 
 
 @dataclass
@@ -286,7 +293,7 @@ class AsianOption(BaseEquityOption):
     def resolve_observations(
         self,
         pricing_env: "PricingEnvironment",
-    ) -> Tuple[List[float], List[float], int]:
+    ) -> Tuple[List[float], List[float], List[float], List[float], int]:
         """
         Resolve observation records into past and future observations.
 
@@ -297,13 +304,18 @@ class AsianOption(BaseEquityOption):
         - Times <= 0 are considered past (already observed)
         - Times > 0 are considered future (to be simulated)
 
+        Averaging weights are normalized across ALL observations (past + future)
+        so that they sum to 1. Unweighted schedules yield uniform 1/n weights.
+
         Args:
             pricing_env: Pricing environment with valuation date
 
         Returns:
             Tuple of:
             - past_prices: List of already-observed prices
+            - past_weights: Normalized weights aligned with past_prices
             - future_times: List of future observation times (relative to valuation date)
+            - future_weights: Normalized weights aligned with future_times
             - total_observations: Total number of observations for averaging
         """
         if self.observation_records is not None:
@@ -311,13 +323,39 @@ class AsianOption(BaseEquityOption):
         else:
             return self._resolve_from_legacy(pricing_env)
 
+    @staticmethod
+    def _normalize_weights(raw_weights: List[Optional[float]]) -> List[float]:
+        """Normalize a list of raw weights to sum to 1.
+
+        Weights must be supplied for every observation or for none. ``None`` for
+        all entries yields uniform 1/n weights; any mix raises ValidationError.
+        """
+        n = len(raw_weights)
+        if n == 0:
+            return []
+        specified = [w is not None for w in raw_weights]
+        if any(specified) and not all(specified):
+            raise ValidationError(
+                "Asian averaging weights must be supplied for every observation "
+                "or for none."
+            )
+        if not any(specified):
+            return [1.0 / n] * n
+        total = float(sum(w for w in raw_weights))  # type: ignore[arg-type]
+        if total <= 0:
+            raise ValidationError("Sum of Asian averaging weights must be positive.")
+        return [float(w) / total for w in raw_weights]  # type: ignore[arg-type]
+
     def _resolve_from_records(
         self,
         pricing_env: "PricingEnvironment",
-    ) -> Tuple[List[float], List[float], int]:
+    ) -> Tuple[List[float], List[float], List[float], List[float], int]:
         """Resolve observations from observation_records."""
         past_prices: List[float] = []
         future_times: List[float] = []
+        # Track each observation's slot so normalized weights stay aligned.
+        is_past: List[bool] = []
+        raw_weights: List[Optional[float]] = []
 
         for rec in self.observation_records:
             t = rec.resolve_time(pricing_env)
@@ -329,6 +367,7 @@ class AsianOption(BaseEquityOption):
                         f"Past observation (t={t}) must have observed_price set"
                     )
                 past_prices.append(rec.observed_price)
+                is_past.append(True)
             else:
                 # Future observation
                 if rec.observed_price is not None:
@@ -336,32 +375,41 @@ class AsianOption(BaseEquityOption):
                         f"Future observation (t={t}) should not have observed_price set"
                     )
                 future_times.append(t)
+                is_past.append(False)
+            raw_weights.append(rec.weight)
+
+        norm = self._normalize_weights(raw_weights)
+        past_weights = [w for w, past in zip(norm, is_past) if past]
+        future_weights = [w for w, past in zip(norm, is_past) if not past]
 
         total_observations = len(past_prices) + len(future_times)
-        return past_prices, future_times, total_observations
+        return past_prices, past_weights, future_times, future_weights, total_observations
 
     def _resolve_from_legacy(
         self,
         pricing_env: "PricingEnvironment",
-    ) -> Tuple[List[float], List[float], int]:
+    ) -> Tuple[List[float], List[float], List[float], List[float], int]:
         """Resolve observations from legacy observation_times/observation_dates."""
         T = self.get_maturity(pricing_env)
         obs_times = self.get_observation_times(T)
 
         # All observations are future (no historical prices in legacy mode)
         past_prices: List[float] = []
-        
+        past_weights: List[float] = []
+
         if self.num_observations is None:
             # Continuous mode
-            future_times = []
-            total_observations = 0 # Signifies continuous
+            future_times: List[float] = []
+            future_weights: List[float] = []
+            total_observations = 0  # Signifies continuous
         else:
             # Legacy mode has no historical prices, so times at valuation (t=0)
             # are treated as known-at-start observations (deterministic under spot).
             future_times = [t for t in obs_times if t >= 0]
             total_observations = len(obs_times)
+            future_weights = self._normalize_weights([None] * len(future_times))
 
-        return past_prices, future_times, total_observations
+        return past_prices, past_weights, future_times, future_weights, total_observations
 
     def has_past_observations(self, pricing_env: "PricingEnvironment") -> bool:
         """
@@ -373,7 +421,7 @@ class AsianOption(BaseEquityOption):
         Returns:
             True if there are past observations, False otherwise
         """
-        past_prices, _, _ = self.resolve_observations(pricing_env)
+        past_prices, _, _, _, _ = self.resolve_observations(pricing_env)
         return len(past_prices) > 0
 
     def get_past_average(self, pricing_env: "PricingEnvironment") -> Optional[float]:
@@ -386,20 +434,24 @@ class AsianOption(BaseEquityOption):
         Returns:
             Average of past observations, or None if no past observations
         """
-        past_prices, _, _ = self.resolve_observations(pricing_env)
+        past_prices, past_weights, _, _, _ = self.resolve_observations(pricing_env)
         if len(past_prices) == 0:
             return None
-        return self.get_average(past_prices)
+        return self.get_average(past_prices, weights=past_weights)
 
     def get_average(
         self,
         prices: Union[List[float], np.ndarray],
+        weights: Optional[Union[List[float], np.ndarray]] = None,
     ) -> float:
         """
-        Compute the average of observed prices.
+        Compute the (optionally weighted) average of observed prices.
 
         Args:
             prices: List or array of observed prices
+            weights: Optional per-price weights. ``None`` gives an equal-weight
+                average. Weights are renormalized to sum to 1, so any positive
+                scaling (e.g. a sub-list of globally-normalized weights) works.
 
         Returns:
             Average price (arithmetic or geometric based on averaging_type)
@@ -410,16 +462,29 @@ class AsianOption(BaseEquityOption):
         if len(prices) == 0:
             raise ValidationError("prices cannot be empty")
 
-        prices_arr = np.asarray(prices)
+        prices_arr = np.asarray(prices, dtype=float)
+
+        if weights is None:
+            weights_arr = np.full(len(prices_arr), 1.0 / len(prices_arr))
+        else:
+            if len(weights) != len(prices_arr):
+                raise ValidationError(
+                    "weights length must match prices length for averaging"
+                )
+            weights_arr = np.asarray(weights, dtype=float)
+            total = float(weights_arr.sum())
+            if total <= 0:
+                raise ValidationError("Sum of averaging weights must be positive")
+            weights_arr = weights_arr / total
 
         if self.averaging_type == AveragingType.ARITHMETIC:
-            return float(np.mean(prices_arr))
+            return float(np.dot(weights_arr, prices_arr))
         else:  # GEOMETRIC
             if np.any(prices_arr <= 0):
                 raise ValidationError("All prices must be positive for geometric averaging")
-            # Use log-sum-exp for numerical stability
+            # Weighted log-mean for numerical stability
             log_prices = np.log(prices_arr)
-            return float(safe_exp(np.mean(log_prices)))
+            return float(safe_exp(np.dot(weights_arr, log_prices)))
 
     def get_payoff(
         self,

@@ -192,7 +192,9 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         sigma = pricing_env.get_vol(K, T)
 
         # Observation schedule
-        past_prices, future_times, n_total = product.resolve_observations(pricing_env)
+        past_prices, past_weights, future_times, future_weights, n_total = (
+            product.resolve_observations(pricing_env)
+        )
         n = n_total
         m = len(past_prices)
         S_A = product.get_past_average(pricing_env) if m > 0 else 0.0
@@ -211,7 +213,9 @@ class AsianOptionAnalyticalEngine(BaseEngine):
             "S_A": S_A,
             "t1": t1,
             "future_times": future_times,
+            "future_weights": future_weights,
             "past_prices": past_prices,
+            "past_weights": past_weights,
             "vol_times": [pricing_env.get_vol(K, t) for t in future_times],
             "is_continuous": product.is_continuous(),
         }

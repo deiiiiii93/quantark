@@ -254,7 +254,7 @@ class AsianOptionMCEngine(BaseEngine):
             - total_observations: Total number of observations for averaging
         """
         # Use resolve_observations to get past and future observations
-        past_prices_list, future_times_list, total_observations = (
+        past_prices_list, _past_weights, future_times_list, _future_weights, total_observations = (
             product.resolve_observations(pricing_env)
         )
 
