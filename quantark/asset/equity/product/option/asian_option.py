@@ -487,8 +487,13 @@ class AsianOption(BaseEquityOption):
                     "averaging weights must be positive and finite"
                 )
             total = float(weights_arr.sum())
-            if total <= 0:
-                raise ValidationError("Sum of averaging weights must be positive")
+            if not np.isfinite(total) or total <= 0:
+                # Mirror _normalize_weights: a finite-but-huge weight set can
+                # overflow to inf, and inf division yields all-zero weights that
+                # silently misprice the average instead of rejecting the input.
+                raise ValidationError(
+                    "Sum of averaging weights must be positive and finite"
+                )
             weights_arr = weights_arr / total
 
         if self.averaging_type == AveragingType.ARITHMETIC:
