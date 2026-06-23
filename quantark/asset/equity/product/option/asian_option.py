@@ -115,8 +115,10 @@ class AsianObservationRecord:
             raise ValidationError(
                 f"observed_price must be positive, got {self.observed_price}"
             )
-        if self.weight is not None and self.weight <= 0:
-            raise ValidationError(f"weight must be positive, got {self.weight}")
+        if self.weight is not None and (not np.isfinite(self.weight) or self.weight <= 0):
+            raise ValidationError(
+                f"weight must be positive and finite, got {self.weight}"
+            )
 
 
 @dataclass
@@ -415,7 +417,17 @@ class AsianOption(BaseEquityOption):
         else:
             # Legacy mode has no historical prices, so times at valuation (t=0)
             # are treated as known-at-start observations (deterministic under spot).
-            future_times = [t for t in obs_times if t >= 0]
+            # Strictly-past fixings (t < 0) cannot be valued here because legacy
+            # mode carries no observed prices; silently dropping them and
+            # renormalizing the survivors to 100% would misprice an in-progress
+            # schedule, so require observation_records (with observed_price) instead.
+            if any(t < 0 for t in obs_times):
+                raise ValidationError(
+                    "Legacy Asian schedules cannot represent strictly-past "
+                    "observations (t < 0); supply observation_records with "
+                    "observed_price set for past fixings instead."
+                )
+            future_times = list(obs_times)
             total_observations = len(obs_times)
             future_weights = self._normalize_weights([None] * len(future_times))
 
