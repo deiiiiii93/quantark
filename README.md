@@ -9,44 +9,62 @@ A modular, professional-grade Python library for pricing and risk management of 
 
 ## Overview
 
-QuantArk is designed with a clean, modular architecture that separates concerns across different components:
+QuantArk spans five asset classes (equity, bond, rate, FX, credit) and a full
+risk-and-capital stack, all built on a clean, modular architecture that
+separates concerns across composable layers:
 
-- **Products**: Define instrument specifications (options, swaps, etc.)
-- **Processes**: Stochastic models (Black-Scholes-Merton, Heston, Local Vol, etc.)
-- **Engines**: Pricing algorithms (Analytical, Monte Carlo, PDE, Quadrature)
-- **Parameters**: Market data (spot prices, volatility surfaces, rate curves, dividends)
+- **Products**: Define instrument specifications (options, swaps, bonds, CDS, etc.)
+- **Processes**: Stochastic models (Black-Scholes-Merton, Heston, Local Vol, SLV, Garman-Kohlhagen, hazard-rate)
+- **Engines**: Pricing algorithms (Analytical, Monte Carlo, PDE, Quadrature, Tree)
+- **Parameters**: Market data (spot prices, volatility surfaces incl. SABR / Vanna-Volga, rate curves, dividends)
 - **PriceEnv**: Unified pricing environment bundling all market data
 - **RiskMeasures**: Greeks calculation (both analytical and numerical)
+- **Risk & Capital**: VaR, stress testing, dynamic scenarios, hedging backtests, and regulatory capital (ISDA SIMM, SA-CCR, SA-CVA)
 
 ## Features
 
 ### Current Implementation
 
-- **European Vanilla Options**: Full support for calls and puts
-- **American Options**: Analytical and numerical methods (Barone-Adesi-Whaley, Longstaff-Schwartz)
-- **Black-Scholes-Merton Model**: With continuous dividend yield
-- **Analytical Pricing**: Closed-form Black-Scholes formula
-- **Monte Carlo Engine**: Path-dependent pricing with variance reduction techniques
-- **PDE Engine**: Finite difference methods for American options
-- **Portfolio Value-at-Risk (VaR)**: Three calculation methods
-  - Historical VaR (full revaluation under historical scenarios)
-  - Parametric VaR (variance-covariance with Greeks/DV01)
-  - Monte Carlo VaR (simulation-based with stress testing)
-- **Bond Pricing**: Fixed rate bonds, FRNs, and bond options
-- **Interest Rate Swaps**: Pricing and risk metrics (DV01)
-- **FX Derivatives**: Garman-Kohlhagen vanilla, digital, and quanto options;
-  spot / forward / swap delta-one products with two-curve discounting
-- **FX Portfolio & Risk**: `FXPortfolio` plus full integration with the
-  portfolio risk stack — FX stress testing, Value-at-Risk (parametric /
-  historical / Monte Carlo with two-rate factors), multi-day dynamic scenarios,
-  delta-neutral backtest hedging, and ISDA SIMM v2.6 initial margin
-  (one `FXPosition` feeds all five; see `example/fx_portfolio_risk_demo.py`)
-- **Greeks Calculation**:
-  - Analytical Greeks using closed-form formulas
-  - Numerical Greeks using finite difference method (FDM)
-  - Delta, Gamma, Vega, Theta, Rho, DV01
-- **Robust Error Handling**: Professional exception hierarchy
-- **Numerical Stability**: Careful boundary checking and validation
+#### Equity derivatives
+- **Vanilla**: European and American options (analytical BS93/BS02/BAW, MC LSM, PDE)
+- **Asian, Digital, Barrier, Double-Barrier, One-Touch, Double-One-Touch** options
+- **Autocallables**: Snowball, Phoenix, KO-Reset Snowball (MC, PDE, Quad engines)
+- **Structured**: Range Accrual, Accumulator, Single/Double Sharkfin
+- **Total Return Swaps**: single-asset, multi-asset, and dual-currency, with realized-cashflow accounting
+- **Delta-One**: spot instruments and futures
+
+#### Stochastic models & engines
+- **Processes**: Black-Scholes-Merton (continuous dividend yield), Heston, Local Vol (Dupire), Stochastic Local Vol (SLV)
+- **Engines**: Analytical (closed-form), Monte Carlo (QMC — Sobol, Brownian bridge, randomized QMC, antithetic/control-variate variance reduction), PDE (finite-difference, banded solvers), Quadrature, Tree
+- **Shared MC layer** (`quantark/montecarlo/`): reusable QMC path generation across equity and FX
+
+#### Fixed income
+- **Bonds**: fixed-rate coupon bonds, FRNs, convertible bonds, bond forwards, bond futures, bond options
+- **Interest rate**: swaps (IRS), FRAs, caps/floors, swaptions — with DV01 / key-rate risk
+
+#### FX derivatives
+- **Garman-Kohlhagen** vanilla, digital, and quanto (vanilla / digital) options with two-curve discounting
+- **Path-dependent / exotic**: barrier, one-touch, sharkfin, range accrual (domestic / quanto / foreign), target-redemption forwards & notes (TARF / TARN)
+- **Smile models**: SABR (Hagan) and Vanna-Volga, plus an FX-Heston analytical engine
+- **Delta-one**: spot / forward / swap products
+
+#### Credit derivatives
+- **CDS** and **basket CDS** priced off a hazard-rate curve (model-agnostic engine), with hazard01 / CS01 sensitivities
+
+#### Risk, scenario & regulatory capital
+- **Portfolio VaR**: Historical (full revaluation), Parametric (variance-covariance with Greeks/DV01), and Monte Carlo — with risk-factor attribution and a backtesting framework
+- **Stress testing**: scenario-based shocks across all asset classes
+- **Dynamic scenarios**: multi-day path simulation
+- **Hedging backtests**: delta / DV01 / convexity-neutral strategies (equity / FI / FX)
+- **ISDA SIMM v2.6**: initial margin with CRIF, calibration, and dashboard
+- **SA-CCR**: Basel counterparty EAD (RC + PFE)
+- **SA-CVA**: Basel (MAR50) SBA CVA capital
+- **Portfolios**: equity, fixed income, FX, and credit position tracking — one position object feeds the entire risk stack
+
+#### Cross-cutting
+- **Greeks**: analytical (closed-form) and numerical (finite-difference) — Delta, Gamma, Vega, Theta, Rho, DV01
+- **Robust error handling**: professional exception hierarchy
+- **Numerical stability**: shared `quantark.util.numerical` toolkit (protected math, tolerance-aware comparisons), careful boundary checking and validation
 
 ### Key Design Principles
 
@@ -234,68 +252,42 @@ python example/fx_backtest_demo.py         # FX delta-neutral hedging backtest
 
 ## Project Structure
 
+All library code lives under the `quantark/` package (canonical `quantark.*` imports).
+
 ```
-QuantArk/
+quantark/
 ├── asset/              # Asset classes
 │   ├── equity/
-│   │   ├── engine/     # Pricing engines
-│   │   │   ├── analytical/
-│   │   │   ├── mc/
-│   │   │   ├── pde/
-│   │   │   └── quad/
-│   │   ├── param/      # Engine parameters
-│   │   ├── process/    # Stochastic processes
-│   │   │   ├── bsm/
-│   │   │   ├── heston/
-│   │   │   ├── localvol/
-│   │   │   └── slv/
-│   │   ├── product/    # Derivative products
-│   │   │   └── option/
-│   │   └── riskmeasures/  # Greeks calculation
-│   ├── bond/          # Fixed income instruments
-│   │   ├── engine/    # Bond pricing engines
-│   │   ├── product/   # Bond products
-│   │   └── riskmeasures/  # Bond risk measures
-│   ├── rate/          # Interest rate derivatives
-│   │   ├── engine/    # IR pricing engines
-│   │   ├── product/   # IR products
-│   │   └── riskmeasures/  # IR risk measures
-│   └── fx/            # FX derivatives
-│       ├── engine/    # Garman-Kohlhagen, digital, quanto, delta-one
-│       ├── process/   # Garman-Kohlhagen process
-│       ├── product/   # Options (vanilla/digital/quanto) and delta-one
-│       ├── report/    # Formatted pricing reports
-│       └── riskmeasures/  # FX Greeks calculator
-├── param/              # Market data parameters
-│   ├── div/           # Dividend yields
-│   ├── quote/         # Spot quotes
-│   ├── rrf/           # Risk-free rates
-│   └── vol/           # Volatility surfaces
-├── priceenv/          # Pricing environment
-├── var/               # Value-at-Risk (VaR) calculations
-│   ├── engines/       # VaR calculation engines
-│   │   ├── historical.py  # Historical VaR
-│   │   ├── parametric.py  # Parametric VaR
-│   │   └── monte_carlo.py # Monte Carlo VaR
-│   ├── risk_factors/  # Risk factor models
-│   │   ├── base.py
-│   │   ├── equity_factors.py
-│   │   └── fi_factors.py
-│   ├── backtest/      # VaR backtesting framework
-│   ├── base.py        # VaR base classes
-│   └── config.py      # VaR configuration
-├── portfolio/         # Portfolio management
-│   ├── equity/        # Equity portfolios
-│   ├── fi/            # Fixed income portfolios
-│   └── fx/            # FX portfolios (FXPortfolio / FXPosition)
-├── backtest/          # Hedging strategy backtesting (equity / fi / fx)
-├── dynamicscenario/   # Multi-day scenario simulation (equity / fi / fx)
-├── stresstest/        # Stress testing framework (equity / fi / fx)
-├── util/              # Utilities
-│   ├── enum/          # Enumerations
-│   └── exceptions.py  # Exception hierarchy
-├── example/           # Example scripts
-└── test/              # Unit tests
+│   │   ├── engine/     # analytical/, mc/, pde/, quad/  (+ base, event_stats)
+│   │   ├── process/    # bsm/  (Heston / LocalVol / SLV live in volmodels/)
+│   │   ├── product/    # option/ (vanilla, exotics, autocallables), deltaone/, swap/ (TRS)
+│   │   ├── lifecycle/  # shared autocallable lifecycle core
+│   │   ├── param/      # engine parameters & profiles
+│   │   ├── analysis/, report/, riskmeasures/
+│   ├── bond/          # coupon bonds, FRNs, convertibles, forwards, futures, options
+│   │   └── engine/    # analytical/, discount/, pde/, tree/, convertible/
+│   ├── rate/          # IRS, FRA, cap/floor, swaption
+│   ├── fx/            # Garman-Kohlhagen + exotics (barrier, sharkfin, range accrual, TARF/TARN)
+│   │   └── engine/    # analytical/ (incl. Vanna-Volga, FX-Heston), mc/, pde/
+│   └── credit/        # CDS, basket CDS (hazard-curve engine)
+├── volmodels/          # Heston, Local Vol (Dupire), SLV kernels + Black-Scholes / curves
+├── montecarlo/         # Shared QMC layer (Sobol, Brownian bridge, RQMC, variance reduction)
+├── param/              # Market data: quote/, rrf/, div/, vol/ (incl. sabr/, vannavolga/)
+├── priceenv/           # Pricing environments (equity & FX)
+├── portfolio/          # Position tracking: equity/, fi/, fx/, credit/
+├── var/                # Value-at-Risk (historical / parametric / monte_carlo) + backtest/
+├── stresstest/         # Scenario-based stress testing (all asset classes)
+├── dynamicscenario/    # Multi-day scenario simulation
+├── backtest/           # Hedging-strategy backtesting (delta / DV01 / convexity-neutral)
+├── simm/               # ISDA SIMM v2.6 initial margin (engines, crif, calibration, dashboard)
+├── saccr/              # Basel SA-CCR counterparty EAD (RC + PFE)
+├── sacva/              # Basel SA-CVA (MAR50) CVA capital
+├── cashleg/            # Deterministic cash-flow legs for structured products
+├── rfq/                # Request-for-quote service & registry
+└── util/               # enum/, numerical/, calendar, market-data adapters, exceptions
+
+example/                # 90+ runnable example scripts
+test/                   # Unit-test suite
 ```
 
 ## Exception Hierarchy
@@ -320,29 +312,25 @@ The Black-Scholes engine includes extensive checks for numerical stability:
 
 ## Roadmap
 
-### Short-term
+### Delivered
 - [x] American options (analytical and numerical methods)
-- [ ] Asian options
-- [ ] Barrier options
-- [x] Monte Carlo engine implementation
-- [x] PDE engine implementation
-- [x] Portfolio VaR calculations
-- [x] Fixed income instruments (bonds, swaps)
+- [x] Asian, barrier, digital, one-touch, and double-barrier options
+- [x] Autocallables (Snowball, Phoenix, KO-Reset) and structured products (range accrual, accumulator, sharkfin)
+- [x] Monte Carlo, PDE, Quadrature, and Tree engines
+- [x] Heston, Local Volatility (Dupire), and Stochastic Local Vol models
+- [x] FX derivatives (vanilla, exotic, TARF/TARN) with SABR & Vanna-Volga smiles
+- [x] Credit derivatives (single-name and basket CDS)
+- [x] Fixed income instruments (bonds, swaps, FRAs, caps/floors, swaptions)
+- [x] Portfolio VaR, stress testing, dynamic scenarios, and hedging backtests
+- [x] Regulatory capital: ISDA SIMM v2.6, SA-CCR, SA-CVA
 
-### Medium-term
-- [ ] Heston stochastic volatility model
-- [ ] Local volatility model
-- [ ] Credit derivatives
-- [ ] Calibration framework
-- [ ] XVA calculations
-- [ ] Multi-asset derivatives
-- [ ] Hybrid models
-
-### Long-term
+### In progress / planned
+- [ ] Multi-asset and hybrid derivatives
+- [ ] Unified calibration framework
+- [ ] Full XVA suite (FVA, MVA, KVA)
 - [ ] Performance optimization (Cython, GPU)
-- [ ] Real-time risk metrics
+- [ ] Real-time risk metrics & market data integration
 - [ ] Portfolio optimization
-- [ ] Market data integration
 - [ ] Cloud deployment support
 
 ## Contributing
@@ -368,6 +356,14 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Acknowledgments
 
-- Black-Scholes-Merton model from Fischer Black, Myron Scholes, and Robert Merton
+QuantArk builds on decades of published quantitative-finance research. In particular:
+
+- **Black-Scholes-Merton** option-pricing model — Fischer Black, Myron Scholes, and Robert Merton
+- **American options** — Barone-Adesi & Whaley quadratic approximation; Bjerksund & Stensland (1993/2002); Longstaff & Schwartz least-squares Monte Carlo
+- **Stochastic & local volatility** — Steven Heston (1993); Bruno Dupire local-volatility construction; stochastic-local-vol (SLV) calibration
+- **FX volatility smiles** — Patrick Hagan et al. (SABR); the Vanna-Volga market approach
+- **Credit** — standard ISDA hazard-rate / reduced-form CDS pricing conventions
+- **Regulatory capital** — ISDA SIMM v2.6, and the Basel Committee's SA-CCR and SA-CVA (MAR50) standards
+- **Numerical methods** — Sobol sequences, Brownian-bridge and randomized-QMC variance reduction, and finite-difference PDE schemes from standard computational-finance texts
 - Greeks formulas from standard derivatives textbooks
 - Design patterns inspired by QuantLib and similar professional libraries
