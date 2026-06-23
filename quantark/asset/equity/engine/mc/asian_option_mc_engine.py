@@ -423,6 +423,14 @@ class AsianOptionMCEngine(BaseEngine):
         prices: np.ndarray, weights: np.ndarray, averaging_type: AveragingType
     ) -> float:
         """Weighted scalar average of a 1-D price vector (weights sum to 1)."""
+        if len(prices) == 0 or len(weights) == 0:
+            # An empty schedule has no average to take: np.dot([], []) would
+            # silently return 0.0 (and geometric exp(0)==1.0), fabricating a
+            # payoff against a non-existent average. Reject it explicitly.
+            raise ValidationError(
+                "Cannot compute a weighted average over an empty observation "
+                "schedule (no past prices and no future fixings)."
+            )
         if averaging_type == AveragingType.ARITHMETIC:
             return float(np.dot(weights, prices))
         log_prices = np.log(prices)

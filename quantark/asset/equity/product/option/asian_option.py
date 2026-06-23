@@ -347,8 +347,13 @@ class AsianOption(BaseEquityOption):
                     f"Asian averaging weights must be positive and finite, got {w}"
                 )
         total = float(sum(w for w in raw_weights))  # type: ignore[arg-type]
-        if total <= 0:
-            raise ValidationError("Sum of Asian averaging weights must be positive.")
+        if not np.isfinite(total) or total <= 0:
+            # A finite-but-huge set of weights (e.g. [1e308, 1e308]) overflows to
+            # inf; dividing by inf yields all-zero weights that silently break the
+            # sum-to-one invariant and misprice the option.
+            raise ValidationError(
+                "Sum of Asian averaging weights must be positive and finite."
+            )
         return [float(w) / total for w in raw_weights]  # type: ignore[arg-type]
 
     def _resolve_from_records(
