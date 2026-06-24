@@ -64,6 +64,7 @@ class SABRVolSurface(VolatilitySurface):
 
     slices: Dict[float, Dict[str, float]]
     forward: ForwardRule = None
+    check_arbitrage: bool = False
     _sorted_t: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -95,6 +96,24 @@ class SABRVolSurface(VolatilitySurface):
 
         self.slices = normalized
         self._sorted_t = np.array(sorted(normalized.keys()), dtype=float)
+
+        if self.check_arbitrage:
+            from .diagnostics import check_arbitrage as _check
+            ts = list(normalized.keys())
+            ref = float(self._sorted_t[len(self._sorted_t) // 2])
+            atm = _resolve_forward(self.forward, 1.0, ref) if self.forward else 1.0
+            atm = atm if atm > 0 else 1.0
+            grid = np.linspace(0.5 * atm, 1.5 * atm, 41)
+            report = _check(self, strikes=grid, maturities=ts, spot=atm)
+            if not (report.butterfly_ok and report.calendar_ok):
+                raise ValidationError(
+                    "SABRVolSurface failed arbitrage check: " + "; ".join(report.messages)
+                )
+
+    def arbitrage_report(self, strikes, maturities, spot: float):
+        """Run no-arbitrage diagnostics on this surface (see sabr.diagnostics)."""
+        from .diagnostics import check_arbitrage
+        return check_arbitrage(self, strikes=strikes, maturities=maturities, spot=spot)
 
     @classmethod
     def from_params(
