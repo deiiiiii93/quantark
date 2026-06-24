@@ -77,6 +77,9 @@ class VannaVolgaVolSurface(VolatilitySurface):
         preserved; only the FXEnv anchor changes. Immutable: the original
         surface is left untouched. This is how the risk chain re-anchors the
         smile under spot/rate bumps (sticky-delta).
+
+        Convention: GreekConvention.STICKY_DELTA — the smile is re-anchored to
+        the new market snapshot (vol at fixed delta/moneyness is held).
         """
         return VannaVolgaVolSurface(
             env=FXEnv(spot=spot, rd=rd, rf=rf, tau=tau),
@@ -90,6 +93,9 @@ class VannaVolgaVolSurface(VolatilitySurface):
 
         The market anchor is preserved; only the three quotes change. This is
         the full-quote vega path used by the chain's vol-bump helpers.
+
+        Convention: full-quote vega bump (parallel/quote-wise), orthogonal to
+        the spot re-anchoring done by rebound().
         """
         return VannaVolgaVolSurface(
             env=self.env,
