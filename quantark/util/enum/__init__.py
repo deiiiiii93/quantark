@@ -33,6 +33,7 @@ from .engine_enums import (
     ConvertibleBondTrinomialVolScheme,
     HestonAnalyticalMethod,
     HestonMCScheme,
+    SABRMCScheme,
     ADIScheme,
     LeverageCalibrationMethod,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "ConvertibleBondTrinomialVolScheme",
     "HestonAnalyticalMethod",
     "HestonMCScheme",
+    "SABRMCScheme",
     "ADIScheme",
     "LeverageCalibrationMethod",
     # Delta-one enums
