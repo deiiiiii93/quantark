@@ -17,7 +17,7 @@ is treated as fixed); this is faithful to the per-slice calibration produced by
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Mapping, Optional, Union
+from typing import Callable, ClassVar, Dict, Mapping, Optional, Union
 
 import numpy as np
 
@@ -59,6 +59,8 @@ class SABRVolSurface(VolatilitySurface):
             constant forward; a callable is ``spot -> forward`` or
             ``(spot, ttm) -> forward``.
     """
+
+    is_smile: ClassVar[bool] = True
 
     slices: Dict[float, Dict[str, float]]
     forward: ForwardRule = None

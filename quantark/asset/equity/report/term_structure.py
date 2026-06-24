@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import ClassVar, List
 
 from quantark.param.div import DividendYield
 from quantark.param.vol import VolatilitySurface
@@ -112,6 +112,8 @@ class ShiftedDividendYield(DividendYield):
 
 @dataclass(frozen=True)
 class SkewSmileVolSurface(VolatilitySurface):
+    is_smile: ClassVar[bool] = True
+
     base: VolatilitySurface
     skew: float = 0.0
     smile: float = 0.0

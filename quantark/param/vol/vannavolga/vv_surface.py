@@ -15,7 +15,7 @@ market object evaluated at its stored ``FXEnv``. The free variable is the strike
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import ClassVar, Tuple
 
 import numpy as np
 
@@ -48,6 +48,8 @@ class VannaVolgaVolSurface(VolatilitySurface):
         conv: Delta convention used to locate 25d strikes.
         premium_included_atm: Whether the ATM strike is premium-included.
     """
+
+    is_smile: ClassVar[bool] = True
 
     env: FXEnv
     quotes: SmileQuotes

@@ -4,6 +4,7 @@ Volatility surface representations.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import ClassVar
 
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_divide, safe_sqrt, validate_positive
@@ -26,7 +27,7 @@ class BlackImpliedVolSurface(ABC):
             Constant or ATM-only term-structure surfaces leave this False.
     """
 
-    is_smile: bool = False
+    is_smile: ClassVar[bool] = False
 
     @abstractmethod
     def get_vol(self, strike: float, time_to_maturity: float, spot: float) -> float:
@@ -143,6 +144,8 @@ class GridVolSurface(BlackImpliedVolSurface):
         iv_grid: implied vols, shape (nT, nK), axis 0 = maturity, axis 1 = strike.
         strike_interpolation: only "linear" supported in v1.
     """
+
+    is_smile: ClassVar[bool] = True  # market smile data (strike-varying)
 
     strikes: list[float]
     maturities: list[float]
