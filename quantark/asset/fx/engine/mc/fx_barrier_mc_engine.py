@@ -54,7 +54,12 @@ class FxBarrierMCResult:
 
 
 class FxBarrierMCEngine(BaseFxEngine):
-    """Constant-vol GK Monte Carlo for FxBarrierOption (continuous + discrete)."""
+    """Constant-vol GK Monte Carlo for FxBarrierOption (continuous + discrete).
+
+    NOTE: numerical GK engine — a smile surface is collapsed to a single
+    forward-ATM constant vol. Not smile-aware; for a smile-consistent barrier use
+    the analytic VannaVolgaBarrierEngine or an LV / SLV / Heston MC engine.
+    """
 
     engine_type = EngineType.MONTE_CARLO
     MIN_VOL = 1e-8
@@ -103,6 +108,13 @@ class FxBarrierMCEngine(BaseFxEngine):
         sigma = float(fx_env.get_vol(fx_env.get_forward(T), T))
         if sigma <= 0:
             raise ValidationError(f"vol must be positive, got {sigma}")
+
+        # Constant-vol GK simulation: a smile surface is collapsed to one vol.
+        from quantark.param.vol.collapse_guard import guard_constant_vol
+        guard_constant_vol(
+            fx_env.vol_surface, type(self).__name__,
+            strict=getattr(self.params, "strict_smile", False),
+        )
 
         sim = self._barrier_sim(opt, fx_env, T, sigma)
         vanilla = self._vanilla_payoff(opt, sim.terminal)

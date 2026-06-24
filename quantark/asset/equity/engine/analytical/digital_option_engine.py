@@ -7,10 +7,15 @@ from typing import Optional
 from scipy import stats
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
-from quantark.asset.equity.product.option import CashOrNothingDigitalOption
+from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+from quantark.asset.equity.product.option import (
+    CashOrNothingDigitalOption,
+    EuropeanVanillaOption,
+)
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import OptionType
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError, NumericalError, PricingError
 
@@ -34,6 +39,10 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
     MIN_MATURITY = 1e-10
     MAX_MATURITY = 30.0
 
+    # Strike bump for the call-spread replication of the digital (-dC/dK).
+    _H_REL = 1e-4
+    _H_FLOOR = 1e-6
+
     def __init__(self, params: Optional[EngineParams] = None):
         """
         Initialize digital option analytical engine.
@@ -42,6 +51,7 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
             params: Engine configuration parameters
         """
         super().__init__(params)
+        self._vanilla_engine = BlackScholesEngine()
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -83,6 +93,12 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
         if T < self.MIN_MATURITY:
             return product.get_payoff(S)
 
+        # Under a smile surface the level-only N(d2) digital misses the skew
+        # term (-vega * d-sigma/d-K). Price by static replication off the
+        # smile-consistent vanilla call spread instead.
+        if getattr(pricing_env.vol_surface, "is_smile", False):
+            return self._replicated_digital(product, pricing_env) * product.contract_multiplier
+
         # Calculate d1 and d2 with numerical stability checks
         try:
             d1, d2 = self._calculate_d1_d2(S, K, T, r, q, sigma)
@@ -103,6 +119,42 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
             raise NumericalError(f"Negative price computed: {price}")
 
         return price * product.contract_multiplier
+
+    def _replicated_digital(
+        self, option: CashOrNothingDigitalOption, pricing_env: PricingEnvironment
+    ) -> float:
+        """Smile-consistent cash digital via the centred call spread (-dC/dK).
+
+        cash_call(K) = -dC/dK ≈ (C(K-h) - C(K+h)) / (2h), each leg priced
+        through the smile (BlackScholesEngine reads get_vol(K±h, T)). The put
+        digital follows from parity: cash_call + cash_put = exp(-rT).
+        """
+        K = option.strike
+        T = option.get_maturity(pricing_env)
+        r = pricing_env.get_rate(T)
+        h = max(self._H_FLOOR, self._H_REL * K)
+        if K - h <= 0.0:
+            raise PricingError(f"Replication strike bump h={h} too large for strike {K}")
+
+        c_up = self._vanilla_call_price(pricing_env, K + h, T)
+        c_dn = self._vanilla_call_price(pricing_env, K - h, T)
+        cash_call = (c_dn - c_up) / (2.0 * h)  # = -dC/dK, per unit payout
+
+        df = math.exp(-r * T)
+        base = cash_call if option.is_call() else (df - cash_call)
+        price = option.payout * base
+        if price < 0:
+            raise NumericalError(f"Negative replicated digital price: {price}")
+        return price
+
+    def _vanilla_call_price(
+        self, pricing_env: PricingEnvironment, strike: float, maturity: float
+    ) -> float:
+        """Unit-payout European call price at `strike` priced through the smile."""
+        leg = EuropeanVanillaOption(
+            strike=strike, option_type=OptionType.CALL, maturity=maturity
+        )
+        return self._vanilla_engine.price(leg, pricing_env)
 
     def _validate_inputs(
         self, S: float, K: float, T: float, r: float, q: float, sigma: float, payout: float

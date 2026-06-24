@@ -15,7 +15,7 @@ market object evaluated at its stored ``FXEnv``. The free variable is the strike
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import ClassVar, Tuple
 
 import numpy as np
 
@@ -49,6 +49,8 @@ class VannaVolgaVolSurface(VolatilitySurface):
         premium_included_atm: Whether the ATM strike is premium-included.
     """
 
+    is_smile: ClassVar[bool] = True
+
     env: FXEnv
     quotes: SmileQuotes
     conv: DeltaConvention = DeltaConvention.SPOT
@@ -75,6 +77,9 @@ class VannaVolgaVolSurface(VolatilitySurface):
         preserved; only the FXEnv anchor changes. Immutable: the original
         surface is left untouched. This is how the risk chain re-anchors the
         smile under spot/rate bumps (sticky-delta).
+
+        Convention: GreekConvention.STICKY_DELTA — the smile is re-anchored to
+        the new market snapshot (vol at fixed delta/moneyness is held).
         """
         return VannaVolgaVolSurface(
             env=FXEnv(spot=spot, rd=rd, rf=rf, tau=tau),
@@ -88,6 +93,9 @@ class VannaVolgaVolSurface(VolatilitySurface):
 
         The market anchor is preserved; only the three quotes change. This is
         the full-quote vega path used by the chain's vol-bump helpers.
+
+        Convention: full-quote vega bump (parallel/quote-wise), orthogonal to
+        the spot re-anchoring done by rebound().
         """
         return VannaVolgaVolSurface(
             env=self.env,

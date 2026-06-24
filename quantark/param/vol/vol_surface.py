@@ -4,19 +4,30 @@ Volatility surface representations.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import ClassVar
 
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_divide, safe_sqrt, validate_positive
 import numpy as np
 
 
-class VolatilitySurface(ABC):
+class BlackImpliedVolSurface(ABC):
     """
-    Abstract base class for volatility surfaces.
+    Abstract base class for Black/GK *implied* volatility surfaces.
 
-    Volatility surfaces provide implied volatility as a function of
-    strike and time to maturity.
+    This is a EUROPEAN MARGINAL pricing object: get_vol(K, T, spot) returns the
+    single Black-Scholes/Garman-Kohlhagen implied volatility for one strike and
+    maturity. It is NOT a stochastic process and carries no path / forward-smile
+    dynamics. Engines that diffuse a process (MC/PDE) must not treat a smile
+    surface's strike vol as if it defined dynamics — see
+    quantark.param.vol.collapse_guard.
+
+    Attributes:
+        is_smile: True when get_vol varies with strike (a skew/smile is present).
+            Constant or ATM-only term-structure surfaces leave this False.
     """
+
+    is_smile: ClassVar[bool] = False
 
     @abstractmethod
     def get_vol(self, strike: float, time_to_maturity: float, spot: float) -> float:
@@ -35,7 +46,7 @@ class VolatilitySurface(ABC):
 
 
 @dataclass
-class FlatVolSurface(VolatilitySurface):
+class FlatVolSurface(BlackImpliedVolSurface):
     """
     Flat (constant) volatility surface.
 
@@ -77,7 +88,7 @@ class FlatVolSurface(VolatilitySurface):
 
 
 @dataclass
-class TermStructureVolSurface(VolatilitySurface):
+class TermStructureVolSurface(BlackImpliedVolSurface):
     """
     Term-structure volatility surface (ATM by maturity).
 
@@ -119,7 +130,7 @@ class TermStructureVolSurface(VolatilitySurface):
 
 
 @dataclass
-class GridVolSurface(VolatilitySurface):
+class GridVolSurface(BlackImpliedVolSurface):
     """Market implied-volatility surface on a strike x maturity grid.
 
     Interpolation: linear in total variance w(T)=sigma^2*T across maturities; linear in
@@ -133,6 +144,8 @@ class GridVolSurface(VolatilitySurface):
         iv_grid: implied vols, shape (nT, nK), axis 0 = maturity, axis 1 = strike.
         strike_interpolation: only "linear" supported in v1.
     """
+
+    is_smile: ClassVar[bool] = True  # market smile data (strike-varying)
 
     strikes: list[float]
     maturities: list[float]
@@ -184,3 +197,9 @@ class GridVolSurface(VolatilitySurface):
 
     def __repr__(self):
         return f"GridVolSurface(nK={len(self.strikes)}, nT={len(self.maturities)})"
+
+
+# Backward-compatible alias. The abstraction was renamed to make explicit that
+# it is a Black/GK *implied-vol marginal* surface, not a stochastic process.
+# Deprecated: import BlackImpliedVolSurface instead.
+VolatilitySurface = BlackImpliedVolSurface

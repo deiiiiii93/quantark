@@ -33,6 +33,10 @@ class EuropeanMCEngine(BaseEngine):
     - QUASI: Quasi-Monte Carlo with Sobol sequences
     - RANDOMIZED_QUASI: Randomized QMC with adaptive batching
 
+    NOTE: numerical Black engine — a smile surface is collapsed to a single
+    strike-selected constant vol (sigma = get_vol(K, T)). Not smile-aware; for
+    smile-consistent dynamics use LV / SLV / Heston / SABR Monte-Carlo.
+
     Usage:
         # Preferred: Two-level enum pattern
         engine = EuropeanMCEngine(
@@ -144,6 +148,12 @@ class EuropeanMCEngine(BaseEngine):
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
+
+        from quantark.param.vol.collapse_guard import guard_constant_vol
+        guard_constant_vol(
+            pricing_env.vol_surface, type(self).__name__,
+            strict=getattr(self.params, "strict_smile", False),
+        )
 
         self._validate_inputs(S, K, T, r, q, sigma)
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, List
+from typing import Callable, ClassVar, List
 
 import numpy as np
 
@@ -49,6 +49,8 @@ class TermStructureVannaVolgaVolSurface(VolatilitySurface):
             (no negative forward variance). Set False to bypass for slightly
             arbitrageable market data.
     """
+
+    is_smile: ClassVar[bool] = True
 
     # Log-moneyness grid (in std units) on which calendar arbitrage is checked.
     _CAL_ARB_GRID_STD = (-3.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 3.0)

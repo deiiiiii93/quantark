@@ -205,6 +205,16 @@ class HestonMCScheme(Enum):
         return self.name.title()
 
 
+class SABRMCScheme(Enum):
+    """SABR MC time-discretization scheme (orthogonal to MonteCarloMethod RNG)."""
+
+    LOG_EULER = auto()   # log-Euler on the shifted forward, exact GBM on alpha
+    QUADEXP = auto()     # Andersen-style conditional lognormal (exact for beta=1)
+
+    def __str__(self):
+        return self.name.title()
+
+
 class ADIScheme(Enum):
     """Operator-splitting scheme for 2D ADI PDE solvers (Heston and SLV)."""
 
