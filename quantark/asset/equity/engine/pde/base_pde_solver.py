@@ -55,6 +55,10 @@ class BasePDESolver(BaseEngine):
         dV/dt + (r-q-0.5*sigma^2)*dV/dx + 0.5*sigma^2*d2V/dx^2 - r*V = 0
 
     The PDE is solved backward in time from maturity to valuation date.
+
+    NOTE: numerical Black engine — a smile surface is collapsed to a single
+    strike-selected constant vol (sigma = get_vol(K, T)). Not smile-aware; for
+    smile-consistent dynamics use LV / SLV / Heston Monte-Carlo or PDE.
     """
 
     engine_type = EngineType.PDE
@@ -321,6 +325,14 @@ class BasePDESolver(BaseEngine):
         r = pricing_env.get_rate(tau)
         q = pricing_env.get_div_yield(tau)
         sigma = pricing_env.get_vol(strike, tau)
+
+        # This PDE solver diffuses with a single strike-selected constant vol;
+        # a smile surface is collapsed (skew ignored). Make that explicit.
+        from quantark.param.vol.collapse_guard import guard_constant_vol
+        guard_constant_vol(
+            pricing_env.vol_surface, type(self).__name__,
+            strict=getattr(self.params, "strict_smile", False),
+        )
 
         # 1. Discretization
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
