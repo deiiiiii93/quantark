@@ -513,12 +513,17 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         # Undiscounted coupon-hit indicator (1.0 at the observation); the
         # probability is recovered by dividing by exp(-r*obs) at extraction,
         # matching the Phoenix MC reference (coupon_probability = mean(coupon_hit)).
+        # Coupons are paid while ALIVE regardless of KI state, so set BOTH surfaces:
+        # disable_ko_after_ki only suppresses future KO, never coupons.
+        # LIMITATION: under CONTINUOUS KI the coupon rows ride the same Brownian-
+        # bridge diffusion as the value surfaces, which leaves a ~5-7% coupon-
+        # probability approximation vs MC (KO/survival remain tight). Prefer the MC
+        # engine for tight continuous-KI coupon valuation.
         v_out[coup_row, pay_mask] = 1.0
-        if not disable_ko_after_ki:
-            v_in[coup_row, pay_mask] = 1.0
+        v_in[coup_row, pay_mask] = 1.0
 
     def _extract_extra_quad_stats(
-        self, initial_surface, math_utils, n_ko, ko_records, rate, product
+        self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity
     ) -> dict:
         coupon_probability = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
@@ -541,10 +546,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 for i in range(n_ko)
             ]
             expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-            maturity = float(ko_records[-1].observation_time)
             ecc = np.zeros(n_ko, dtype=float)
             for i in range(n_ko):
-                settle = maturity if expiry else ko_times[i]
+                settle = float(maturity) if expiry else ko_times[i]
                 ecc[i] = float(
                     math.exp(-rate * settle) * coupon_amounts[i] * coupon_probability[i]
                 )

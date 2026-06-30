@@ -55,12 +55,18 @@ def make_snowball(ko_dates=(0.5, 1.0), ko_barrier=103.0, ko_rate=0.15,
 
 def make_phoenix(ko_dates=(0.5, 1.0), ko_barrier=105.0,
                  coupon_barrier=(80.0, 80.0), memory=False,
-                 coupon_pay=CouponPayType.INSTANT, maturity=1.0):
+                 coupon_pay=CouponPayType.INSTANT, maturity=1.0,
+                 ki_barrier=None, disable_ko_after_ki=False):
     barrier = BarrierConfig(
         ko_barrier=ko_barrier, ko_rate=0.0,
         ko_observation_type=ObservationType.DISCRETE,
         ko_observation_dates=list(ko_dates),
-        ki_barrier=None,
+        ki_barrier=ki_barrier,
+        ki_observation_type=(
+            ObservationType.CONTINUOUS if ki_barrier else ObservationType.DISCRETE
+        ),
+        ki_continuous=ki_barrier is not None,
+        disable_ko_after_ki=disable_ko_after_ki,
     )
     coupon = CouponBarrierConfig(
         coupon_barrier=list(coupon_barrier), coupon_rate=0.02,

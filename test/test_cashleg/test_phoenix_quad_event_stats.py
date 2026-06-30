@@ -54,3 +54,34 @@ def test_phoenix_quad_coupon_at_simultaneous_ko_matches_mc():
     s_q = _quad().calculate_event_stats(ph, env)
     s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
     np.testing.assert_allclose(s_q.coupon_probability, s_mc.coupon_probability, atol=7e-3)
+
+
+def test_phoenix_quad_coupon_prob_with_ki_and_disable_ko_after_ki():
+    # Knocked-in-but-alive paths still earn coupons: disable_ko_after_ki suppresses
+    # future KO, never coupons. Coarse lock against the catastrophic regression
+    # (gating the coupon row on disable_ko_after_ki dropped post-KI coupon mass to
+    # ~0). NOTE: continuous-KI QUAD coupon stats carry a Brownian-bridge
+    # approximation (~5-7% vs MC) even though KO/survival match tightly; for tight
+    # continuous-KI coupon valuation prefer the MC engine.
+    env = make_env()
+    ph = make_phoenix(ki_barrier=95.0, disable_ko_after_ki=True)
+    s_q = _quad().calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    np.testing.assert_allclose(s_q.coupon_probability, s_mc.coupon_probability, atol=8e-2)
+
+
+def test_phoenix_quad_expiry_coupon_cashflow_uses_real_maturity():
+    # Last KO observation (0.75) strictly before maturity (1.0); EXPIRY coupons must
+    # discount to maturity, not the last KO date. (Regression for the maturity proxy.)
+    from quantark.util.enum import CouponPayType
+
+    env = make_env(rate=0.10)
+    ph = make_phoenix(ko_dates=(0.5, 0.75), maturity=1.0,
+                      coupon_pay=CouponPayType.EXPIRY)
+    s_q = _quad().calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    np.testing.assert_allclose(
+        s_q.expected_discounted_coupon_cashflow,
+        s_mc.expected_discounted_coupon_cashflow,
+        atol=3e-3,
+    )
