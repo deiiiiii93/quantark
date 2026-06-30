@@ -53,6 +53,63 @@ class PhoenixPDESolver(SnowballPDESolver):
 
         return PhoenixEventStats(**fields)
 
+    def _n_extra_event_cols(self, n_ko: int) -> int:
+        # One coupon-trigger indicator column per observation.
+        return n_ko
+
+    def _set_extra_event_indicators(
+        self, v0, v1, s_vec, n_ko, ko_idx, rec, product, pricing_env, t_vec, t_idx
+    ) -> None:
+        # Set the coupon-trigger column on the coupon-pay mask AFTER the KO jump,
+        # so a coupon at a simultaneous KO is still counted (matches the Phoenix MC
+        # reference: coupon_hit gated on "alive entering obs i", incl. first_ko_idx==i).
+        if ko_idx is None or ko_idx >= self._coupon_barriers.shape[0]:
+            return
+        coupon_barrier = float(self._coupon_barriers[ko_idx])
+        pay_mask = self._get_barrier_mask(
+            s_vec, coupon_barrier, product.is_reverse, is_up_barrier=True
+        )
+        df_delay = self._cashflow_value_at_time(
+            pricing_env=pricing_env,
+            cashflow=1.0,
+            current_time=float(t_vec[t_idx]),
+            settlement_time=rec.settlement_time,
+        )
+        coup_col = n_ko + ko_idx
+        v0[pay_mask, coup_col] = df_delay
+        v1[pay_mask, coup_col] = df_delay
+
+    def _extract_extra_event_stats(
+        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env
+    ) -> dict:
+        ed_coup = np.array(
+            [
+                float(np.interp(spot_log, x_vec, initial_grid[:, n_ko + i]))
+                for i in range(n_ko)
+            ],
+            dtype=float,
+        )
+        coupon_probability = np.zeros(n_ko, dtype=float)
+        expected_discounted_coupon_cashflow = np.zeros(n_ko, dtype=float)
+        for i, rec in enumerate(ko_records):
+            obs_time = float(rec.observation_time)
+            settle = float(
+                rec.settlement_time if rec.settlement_time is not None else obs_time
+            )
+            df0 = pricing_env.get_discount_factor(settle)
+            if df0 > 0.0:
+                coupon_probability[i] = float(ed_coup[i] / df0)
+            amt = (
+                float(self._coupon_amounts[i])
+                if i < self._coupon_amounts.shape[0]
+                else 0.0
+            )
+            expected_discounted_coupon_cashflow[i] = float(ed_coup[i] * amt)
+        return {
+            "coupon_probability": coupon_probability,
+            "expected_discounted_coupon_cashflow": expected_discounted_coupon_cashflow,
+        }
+
     # price() and calculate_greeks() are inherited from SnowballPDESolver
     # The _check_product_type() method uses _supported_product_type to validate
 

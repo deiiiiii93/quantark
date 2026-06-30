@@ -338,6 +338,24 @@ class SnowballPDESolver(BasePDESolver):
         """Construct the event-stats dataclass (overridable by subclasses)."""
         return AutocallableEventStats(**fields)
 
+    # --- Extra indicator-surface hooks (overridden by Phoenix for coupons) ---
+
+    def _n_extra_event_cols(self, n_ko: int) -> int:
+        """Extra stacked indicator columns beyond ``[KO_0..KO_{n-1}]``."""
+        return 0
+
+    def _set_extra_event_indicators(
+        self, v0, v1, s_vec, n_ko, ko_idx, rec, product, pricing_env, t_vec, t_idx
+    ) -> None:
+        """Set extra indicator columns at an observation (no-op for Snowball)."""
+        return None
+
+    def _extract_extra_event_stats(
+        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env
+    ) -> dict:
+        """Extra event-stats fields from the extra columns (none for Snowball)."""
+        return {}
+
     def _compute_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Optional[AutocallableEventStats]:
@@ -409,9 +427,10 @@ class SnowballPDESolver(BasePDESolver):
                 )
             ko_index_by_tidx[t_idx] = k
 
-        # Surface columns: [KO_0, ..., KO_{n_ko-1}, KI_indicator]
-        ki_col = n_ko
-        n_cols = n_ko + 1
+        # Surface columns: [KO_0..KO_{n-1}, <extra coupon cols>, KI_indicator]
+        n_extra = self._n_extra_event_cols(n_ko)
+        ki_col = n_ko + n_extra
+        n_cols = n_ko + n_extra + 1
 
         # Terminal conditions at maturity (t = T):
         # - KO indicators are zero at maturity (KO only at discrete observations via jumps)
@@ -438,6 +457,10 @@ class SnowballPDESolver(BasePDESolver):
             )
             v0_next[mask_ko, terminal_ko_idx] = df_delay
             v1_next[mask_ko, terminal_ko_idx] = df_delay
+            self._set_extra_event_indicators(
+                v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
+                product, pricing_env, t_vec, terminal_tidx,
+            )
 
         is_terminal_ki = product.has_ki_barrier and (
             self._ki_continuous or terminal_tidx in self._ki_observation_indices
@@ -546,6 +569,10 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 v0_cur[mask_ko, ko_idx] = df_delay
                 v1_cur[mask_ko, ko_idx] = df_delay
+                self._set_extra_event_indicators(
+                    v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
+                    product, pricing_env, t_vec, j,
+                )
 
             # Apply KI jump (continuous or discrete at observation indices).
             if product.has_ki_barrier:
@@ -608,6 +635,10 @@ class SnowballPDESolver(BasePDESolver):
         pv = float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
+        extra_fields = self._extract_extra_event_stats(
+            initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env
+        )
+
         return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
@@ -620,6 +651,7 @@ class SnowballPDESolver(BasePDESolver):
             ki_times=ki_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
+            **extra_fields,
         )
 
     def calculate_greeks(

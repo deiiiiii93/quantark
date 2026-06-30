@@ -34,3 +34,22 @@ def test_phoenix_pde_module_has_no_mc_import():
     import quantark.asset.equity.engine.pde.phoenix_pde_solver as mod
 
     assert "MCEngine" not in pathlib.Path(mod.__file__).read_text()
+
+
+def test_phoenix_pde_coupon_prob_match_mc():
+    env = make_env()
+    ph = make_phoenix()
+    s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    assert s_pde.coupon_probability.shape == s_mc.coupon_probability.shape
+    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupon_probability, atol=5e-3)
+
+
+def test_phoenix_pde_coupon_at_simultaneous_ko_matches_mc():
+    # KO barrier below coupon barrier => KO region is within coupon-pay region:
+    # every KO observation is also a coupon trigger. Locks "coupon counts at KO".
+    env = make_env()
+    ph = make_phoenix(ko_barrier=90.0, coupon_barrier=(80.0, 80.0))
+    s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupon_probability, atol=6e-3)
