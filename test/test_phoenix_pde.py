@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.pde_engine import PDEEngine
-from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+from quantark.asset.equity.param import PDEParams, QuadParams
 from quantark.asset.equity.product.option.observation_schedule import (
     ObservationRecord,
     ObservationSchedule,
@@ -313,3 +314,87 @@ def test_phoenix_pde_variable_discrete_ki_barrier_uses_time_varying_levels():
 
     # Lower KI participation should reduce downside and increase price.
     assert price_low > price_high + 1e-3
+
+
+def _terminal_ko_phoenix(coupon_barrier, coupon_rate: float) -> PhoenixOption:
+    """
+    Phoenix whose ONLY KO observation lands exactly at maturity.
+
+    Isolating the KO event at maturity concentrates the entire KO effect into
+    the terminal step, so a solver that drops terminal KO mispriced this product
+    by several percent (vs Quad/MC) instead of a diluted fraction of a percent.
+    """
+    barrier_config = BarrierConfig(
+        ko_barrier=105.0,
+        ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[1.0],
+        ki_barrier=None,
+    )
+    coupon_config = CouponBarrierConfig(
+        coupon_barrier=coupon_barrier,
+        coupon_rate=coupon_rate,
+        coupon_pay_type=CouponPayType.INSTANT,
+        day_count_convention=DayCountConvention.ACT_365,
+        memory_coupon=False,
+    )
+    payoff_config = PayoffConfig(rebate_rate=0.0, include_principal=True)
+    return PhoenixOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_config,
+        coupon_config=coupon_config,
+        payoff_config=payoff_config,
+        contract_multiplier=1.0,
+        maturity=1.0,
+    )
+
+
+def test_phoenix_pde_terminal_ko_no_coupon_matches_quad():
+    """
+    Regression: PhoenixPDESolver must apply a KO observation scheduled at maturity.
+
+    The inherited grid builder stores maturity KO in `_ko_terminal_record`
+    (not `_ko_observation_indices`), so a terminal-KO-skipping `_solve` ignored
+    it entirely. Quad (and MC) handle terminal KO correctly, so PDE must agree.
+    With the bug this case prices ~6% below Quad; with the fix it is within grid
+    discretization error.
+    """
+    env = create_pricing_env(vol=0.25)
+    phoenix = _terminal_ko_phoenix(coupon_barrier=1.0e9, coupon_rate=0.0)
+
+    pde = PhoenixPDESolver(params=PDEParams(grid_size=300, time_steps=150))
+    quad = PhoenixQuadEngine(params=QuadParams(grid_points=601))
+
+    pde_price = pde.price(phoenix, env)
+    quad_price = quad.price(phoenix, env)
+
+    rel_diff = abs(pde_price - quad_price) / abs(quad_price)
+    assert rel_diff < 0.02, (
+        f"Terminal KO (no coupon): PDE {pde_price:.4f} vs Quad {quad_price:.4f}, "
+        f"rel diff {rel_diff:.2%}"
+    )
+
+
+def test_phoenix_pde_terminal_ko_with_coupon_matches_quad():
+    """
+    Regression: terminal KO must also carry the same-date coupon.
+
+    Same structure as the no-coupon case but with an active coupon barrier, so
+    the terminal KO payoff includes the maturity coupon. This guards the
+    coupon-at-KO path of `_apply_ko_jump_vector` at the terminal step.
+    """
+    env = create_pricing_env(vol=0.25)
+    phoenix = _terminal_ko_phoenix(coupon_barrier=85.0, coupon_rate=0.02)
+
+    pde = PhoenixPDESolver(params=PDEParams(grid_size=300, time_steps=150))
+    quad = PhoenixQuadEngine(params=QuadParams(grid_points=601))
+
+    pde_price = pde.price(phoenix, env)
+    quad_price = quad.price(phoenix, env)
+
+    rel_diff = abs(pde_price - quad_price) / abs(quad_price)
+    assert rel_diff < 0.02, (
+        f"Terminal KO (with coupon): PDE {pde_price:.4f} vs Quad {quad_price:.4f}, "
+        f"rel diff {rel_diff:.2%}"
+    )

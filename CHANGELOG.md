@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.2.1] - 2026-06-30
+
+### Fixed
+- `PhoenixPDESolver`: apply a KO observation scheduled exactly at maturity.
+  The inherited grid builder stores the maturity KO in `_ko_terminal_record`
+  (intentionally kept out of `_ko_observation_indices`), but the Phoenix
+  `_solve` override looked the terminal KO up in `_ko_observation_indices`
+  and therefore dropped it — mispricing products with a terminal KO date by
+  several percent versus the quadrature and Monte Carlo engines. Terminal KO
+  is now applied after the terminal coupon/KI jumps (matching
+  `SnowballPDESolver._solve`), routed through `_apply_ko_jump_vector` so the
+  same-date coupon-at-KO payoff is preserved.
+
 ## [0.1.2] - 2026-06-13
 
 ### Added

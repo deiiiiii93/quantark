@@ -201,8 +201,14 @@ class PhoenixPDESolver(SnowballPDESolver):
                 for k in range(len(grid_v0_list)):
                     self._apply_ki_jump(grid_v0_list[k], grid_v1_list[k], s_vec, terminal_tidx, product)
 
-        ko_record = self._ko_observation_indices.get(terminal_tidx)
-        if ko_record is not None:
+        # Maturity KO is stored in `_ko_terminal_record` by the inherited
+        # `_build_grids` (it is intentionally kept out of
+        # `_ko_observation_indices`). Apply it here, after the terminal
+        # coupon/KI jumps, mirroring SnowballPDESolver._solve(). Using
+        # `_apply_ko_jump_vector` preserves the same-date coupon-at-KO semantics,
+        # since the terminal coupon index is registered in
+        # `_coupon_observation_indices`.
+        if self._has_terminal_ko and self._ko_terminal_record is not None:
             self._apply_ko_jump_vector(
                 grid_v0_list,
                 grid_v1_list,
@@ -211,7 +217,7 @@ class PhoenixPDESolver(SnowballPDESolver):
                 current_time=tau,
                 product=product,
                 pricing_env=pricing_env,
-                ko_record=ko_record,
+                ko_record=self._ko_terminal_record,
             )
 
         # Build operator matrices
