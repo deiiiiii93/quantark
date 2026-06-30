@@ -323,20 +323,31 @@ class SnowballPDESolver(BasePDESolver):
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Optional[AutocallableEventStats]:
-        """
-        Provide per-observation KO probabilities and expected discounted cashflows.
+        """Provide per-observation KO probabilities and expected discounted cashflows."""
+        if not isinstance(product, self._event_stats_product_type()):
+            return None
+        if pricing_env is None:
+            return None
+        return self._compute_event_stats(product, pricing_env)
 
+    def _event_stats_product_type(self) -> type:
+        """Product type accepted by ``calculate_event_stats`` (overridable)."""
+        return SnowballOption
+
+    def _make_event_stats(self, **fields) -> AutocallableEventStats:
+        """Construct the event-stats dataclass (overridable by subclasses)."""
+        return AutocallableEventStats(**fields)
+
+    def _compute_event_stats(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Optional[AutocallableEventStats]:
+        """
         Native PDE implementation:
         - Propagates stacked indicator surfaces through the same backward PDE stepping.
         - Applies KO/KI jumps to all indicator surfaces at observation times.
         - Returns KO per-observation probabilities (by dividing discounted indicators by
           discount factors) and expected discounted KO cashflows.
         """
-        if not isinstance(product, SnowballOption):
-            return None
-        if pricing_env is None:
-            return None
-
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
         if tau <= 0 or is_zero(tau):
@@ -597,7 +608,7 @@ class SnowballPDESolver(BasePDESolver):
         pv = float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
-        return AutocallableEventStats(
+        return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
             ko_probability=ko_probability,
