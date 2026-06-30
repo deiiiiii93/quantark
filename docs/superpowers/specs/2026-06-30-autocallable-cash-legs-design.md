@@ -26,15 +26,15 @@ the **one real parent autocallable trade** and delete its synthetic
 These facts make the feature small and surgical — no risk-engine changes are
 required.
 
-1. **Native event timing is engine-specific — NOT uniform (verified).** Only a
-   subset of engines emit *native* per-observation event stats; the rest return
-   a trivial maturity-only distribution or silently fall back to MC. Verified
-   against the code:
+1. **Native event timing is engine-specific — and Phoenix PDE/QUAD must be
+   fixed as part of this work (verified).** Today only a subset of engines emit
+   *native* per-observation event stats; the rest return a trivial maturity-only
+   distribution or silently fall back to MC. Verified against the code:
 
    | Product | MC | PDE | QUAD |
    |---------|----|-----|------|
-   | Snowball | native | native | native |
-   | Phoenix | native | **returns `None` → trivial** | **delegates to MC (`MCParams()` defaults)** |
+   | Snowball | native ✅ | native ✅ | native ✅ |
+   | Phoenix | native ✅ | **returns `None` → trivial** → fix in §3b | **delegates to MC (`MCParams()`)** → fix in §3b |
 
    - `PhoenixOption` is `class PhoenixOption(BaseEquityOption)` — **not** a
      `SnowballOption`.
@@ -46,14 +46,21 @@ required.
    - `PhoenixQuadEngine.calculate_event_stats` (`phoenix_quad_engine.py:486`)
      constructs `PhoenixMCEngine(params=MCParams())` and delegates. ⇒ Phoenix
      QUAD event legs are driven by a **fresh MC run with default params**,
-     inconsistent with the QUAD parent PV and Greeks.
+     inconsistent with the QUAD parent PV/Greeks — and an "MC inside QUAD"
+     anti-pattern.
+   - **Feasibility (verified):** both Phoenix engines already price coupons
+     **natively without MC** — `PhoenixPDESolver._solve` carries memory-coupon
+     vector states with coupon jumps; `PhoenixQuadEngine.price()` applies coupon
+     jumps on the spot grid. The MC dependency exists *only* in
+     `calculate_event_stats`. Native event stats can therefore mirror the
+     Snowball stacked-indicator-surface template plus coupon surfaces (§3b),
+     with no MC.
 
-   **Design consequence (see §3a, §6a):** `AutocallableCashLeg` supports
-   **Snowball on MC/PDE/QUAD** and **Phoenix on MC** natively; it must **fail
-   loud** when the parent's `EventDistribution` lacks the KO (or COUPON)
-   probabilities a nontrivial leg requires, rather than silently pricing against
-   a trivial distribution. Native Phoenix PDE/QUAD event stats are a separate
-   engine workstream (§9).
+   **Design consequence:** this work delivers native event stats for **Snowball
+   and Phoenix on MC/PDE/QUAD** (§3b). The `AutocallableCashLeg` still **fails
+   loud** (§3a) when a parent's `EventDistribution` lacks the KO/COUPON stream a
+   nontrivial leg needs — a defensive guard for genuinely unsupported engines
+   (e.g. non-autocallable products), not an expected path for Snowball/Phoenix.
 
 2. **`price_with_events` already bridges engine → leg.**
    `BaseEngine.price_with_events()`
@@ -112,30 +119,53 @@ trade) and attaches legs to it, deleting per-leg synthetic `SnowballOption`s.
 ## 3a. Engine support & fail-loud contract
 
 Supported parent/engine combinations for a nontrivial `AutocallableCashLeg`
-(`KO_MATURITY` or `COUPON` basis):
+(`KO_MATURITY` or `COUPON` basis), **after the §3b engine work**:
 
 | Parent | MC | PDE | QUAD |
 |--------|----|-----|------|
 | Snowball | ✅ | ✅ | ✅ |
-| Phoenix  | ✅ | ❌ (engine emits trivial) | ⚠️ MC-derived stats (documented; not method-consistent) |
+| Phoenix  | ✅ | ✅ (native, §3b) | ✅ (native, §3b) |
 
-- **Fail-loud guard (mandatory).** `value()` requires the probability stream its
-  `accrual_basis` needs:
+- **Fail-loud guard (mandatory, defensive).** `value()` requires the probability
+  stream its `accrual_basis` needs:
   - `KO_MATURITY` → `EventType.KO` present in `event_dist.probabilities` as an
     array whose length equals `len(accrual_factors)`.
   - `COUPON` → `EventType.COUPON` present, same length rule.
-  If the required stream is absent (e.g. a trivial distribution from Phoenix
-  PDE, or any non-autocallable engine), raise `ValidationError` naming the
-  engine/product — never price against a trivial distribution. This implements
-  the "no stupid fallbacks / exact semantics" rule.
-- **Phoenix QUAD caveat.** Because `PhoenixQuadEngine` delegates event stats to
-  MC with default `MCParams()`, a Phoenix-QUAD leg's PV/Greeks are MC-derived
-  (carry MC noise and are not consistent with the QUAD parent). The leg will
-  *function*, but the spec treats this as ⚠️ documented, not first-class
-  support; production use should prefer Phoenix MC until native QUAD event stats
-  exist (§9).
-- Native Phoenix PDE/QUAD event stats are **out of scope** here (§9); when added,
-  the support matrix upgrades with no leg-side changes.
+  If the required stream is absent (a trivial distribution — e.g. a non-
+  autocallable engine, or a zero-maturity edge), raise `ValidationError` naming
+  the engine/product — never price against a trivial distribution. This
+  implements the "no stupid fallbacks / exact semantics" rule. After §3b this is
+  *not* an expected path for any Snowball/Phoenix × MC/PDE/QUAD combination.
+
+## 3b. Native Phoenix PDE/QUAD event stats (in scope)
+
+The leg architecture demands method-consistent, MC-free event stats for every
+Snowball/Phoenix × MC/PDE/QUAD combination. Snowball already has all three;
+Phoenix PDE/QUAD do not. This work adds them, mirroring the existing Snowball
+indicator-surface implementations (`SnowballPDESolver.calculate_event_stats`,
+`SnowballQuadEngine.calculate_event_stats`) and the native Phoenix coupon-jump
+pricing already in `PhoenixPDESolver._solve` / `PhoenixQuadEngine.price()`.
+
+- **`PhoenixPDESolver.calculate_event_stats`** — override the inherited Snowball
+  method (which guards on `isinstance(product, SnowballOption)` and returns
+  `None`). Propagate the same stacked KO/KI indicator surfaces the Snowball PDE
+  uses, plus **coupon indicator surfaces** at each coupon observation, to emit a
+  `PhoenixEventStats` with `ko_times`, `ko_probability`, `survival_probability`,
+  `coupon_probability`, and `expected_discounted_coupon_cashflow`. No MC
+  (respects the "No MC inside PDE" rule).
+- **`PhoenixQuadEngine.calculate_event_stats`** — replace the
+  `PhoenixMCEngine(MCParams())` delegation with a native quadrature recursion
+  that propagates KO/KI indicator grids plus coupon indicator grids on the spot
+  grid, emitting `PhoenixEventStats`. This removes the existing "MC inside QUAD"
+  path and makes QUAD legs method-consistent.
+- **Validation:** native Phoenix PDE and QUAD event stats must agree with
+  Phoenix MC event stats (`ko_probability`, `survival_probability`,
+  `coupon_probability`, terminal buckets) within MC standard error on a shared
+  set of Phoenix products — the same cross-engine bar the Snowball event stats
+  already meet.
+- **`from_autocallable_stats`** already maps `PhoenixEventStats.coupon_probability`
+  into `EventType.COUPON`, so no `EventDistribution` changes are needed once the
+  engines emit native `PhoenixEventStats`.
 
 ## 4. The `AutocallableCashLeg` dataclass
 
@@ -262,13 +292,13 @@ For a nontrivial leg (`accrual_factors` non-empty), `value()` enforces **all** o
   year-fraction identity check is the strongest available and is required.)
 - No padding, no truncation, no silent realignment.
 
-### ZL496 margin sanity check
+### Margin leg sanity check (golden case)
 
-`GJZQ-ZL496-20260514-OPTION-01`, notional `N = 20,004,513.86`,
-`rate = 365/735`, `terminal_accrual_factor a_T = 735/365` ⇒
-`a_T · rate = 1`, so the return leg repays exactly the notional at termination ⇒
-`R = N · E[DF]` ⇒ `PV = N · (1 − E[DF]) = 207,475.74`. Matches the target model
-PV (`207,475.74`; Tongyu `207,730.75`).
+Golden case: notional `N = 20,004,513.86`, `rate = 365/735`,
+`terminal_accrual_factor a_T = 735/365` ⇒ `a_T · rate = 1`, so the return leg
+repays exactly the notional at termination ⇒ `R = N · E[DF]` ⇒
+`PV = N · (1 − E[DF]) = 207,475.74`. Matches the target model PV
+(`207,475.74`; vendor `207,730.75`).
 
 ## 6. Greeks & integration
 
@@ -278,12 +308,10 @@ No risk-engine changes. `get_trade_value()` already sums leg PVs;
 margin / rebate / interest legs acquire real delta/gamma. Method and as-of
 KO-filtering inherit from the parent.
 
-**Caveat — Phoenix QUAD Greeks are MC-derived (finding #1).** When the parent is
-a Phoenix priced with QUAD, each bump re-solves event stats via the delegated
-`PhoenixMCEngine(MCParams())`, so the legs' delta/gamma carry MC noise and are
-not consistent with the QUAD parent. For stable Phoenix leg Greeks, use the MC
-engine end-to-end (or wait for native Phoenix QUAD event stats, §9). Snowball
-PDE/QUAD/MC and Phoenix MC produce deterministic, method-consistent leg Greeks.
+Once the §3b native Phoenix PDE/QUAD event stats land, **all** Snowball/Phoenix ×
+MC/PDE/QUAD combinations produce method-consistent leg Greeks: PDE/QUAD give
+deterministic delta/gamma, MC/QMC give MC-standard-error delta/gamma. There is no
+longer an MC-derived QUAD path.
 
 Registration: export `AutocallableCashLeg` + enums from
 `quantark/cashleg/__init__.py`; register in `cashleg` serialization registry if
@@ -296,8 +324,8 @@ one is present for round-trip (follow existing `LegRegistry` pattern).
    against an **independent re-implementation** of the §5 sum (not the
    production code path).
 2. **Invariants & adversarial cases** — fail-loud guards: missing `EventType.KO`/
-   `EventType.COUPON` stream (trivial distribution from Phoenix PDE / non-
-   autocallable engine) → `ValidationError`; length mismatch across
+   `EventType.COUPON` stream (trivial distribution from a non-autocallable engine
+   or zero-maturity edge) → `ValidationError`; length mismatch across
    `observation_schedule` / `accrual_factors` / `settlement_schedule` / prob
    array; **shifted-but-equal-length** `observation_schedule` vs
    `event_dist.event_times` → `ValidationError` (the finding-#4 case); explicit
@@ -306,30 +334,33 @@ one is present for round-trip (follow existing `LegRegistry` pattern).
    discounts the terminal branch at `terminal_settlement_time` (regression for
    the dropped `event_times[-1]` assumption); `NOTIONAL_MINUS_PAYOFF` with a
    strictly-positive `notional_settlement_time` → `ValidationError` (finding #5);
-   sign/direction; `terminal_events` bucketing; `COUPON` basis against a Phoenix
-   MC `EventDistribution`.
-3. **Greeks** — attach legs to an `EquityPosition` and confirm
+   sign/direction; `terminal_events` bucketing; `COUPON` basis on Phoenix.
+3. **Native Phoenix PDE/QUAD event stats (§3b)** — `PhoenixPDESolver` and
+   `PhoenixQuadEngine` `calculate_event_stats` agree with Phoenix MC on
+   `ko_probability`, `survival_probability`, `coupon_probability`, and terminal
+   buckets within MC standard error; assert no MC engine is constructed inside
+   the PDE/QUAD paths (guards "No MC inside PDE/QUAD").
+4. **Greeks** — attach legs to an `EquityPosition` and confirm
    `get_trade_greeks()` produces non-zero, finite delta/gamma for the margin
-   leg, and that a deterministic leg's contribution stays zero. Cover Snowball
-   on PDE, QUAD, and MC (method-consistent); assert the Phoenix-PDE leg path
-   raises rather than returning trivial Greeks.
-4. **Regression (requirement #6)** — `DeterministicLeg` and fixed-maturity
+   leg, and that a deterministic leg's contribution stays zero. Cover **Snowball
+   and Phoenix** on PDE, QUAD, and MC (method-consistent); assert the fail-loud
+   guard raises for a non-autocallable / trivial distribution.
+5. **Regression (requirement #6)** — `DeterministicLeg` and fixed-maturity
    products remain unchanged: explicit test that fixed-maturity products keep
    deterministic cashflow style.
-5. **ZL496 numeric acceptance is REQUIRED, not optional (finding #6).** A
+6. **Golden-case numeric acceptance is REQUIRED, not optional (finding #6).** A
    **sanitized golden fixture** is committed to `test/test_cashleg/fixtures/`
    (parent autocallable params + per-future-observation accrual & settlement
    factors + curve) and a CI test asserts the native legs' PV **and** delta/gamma
    against the workaround targets across every supported engine method (Snowball
-   PDE/QUAD/MC; Phoenix MC). If the literal ZL496 confirm cannot be committed,
-   the fixture is a sanitized equivalent whose **own** golden numbers are
-   produced by the legacy synthetic-`SnowballOption` workaround and frozen into
-   the repo — so CI always proves native-vs-workaround parity, never an
-   optionally-skipped check. Target numbers (literal ZL496):
+   and Phoenix on PDE/QUAD/MC). The fixture's golden numbers are produced by the
+   legacy synthetic-`SnowballOption` workaround and frozen into the repo, so CI
+   always proves native-vs-workaround parity — never an optionally-skipped check.
+   Target numbers (golden case, vendor cross-check in parentheses):
    - `pv_margin`:   model PV `207,475.74`, delta `−1,183,832.92`, gamma `98,566.13`
    - `pv_interest`: model PV `−3,417.10`,  delta `17,000.95`,     gamma `−1,393.67`
    - `pv_rebate`:   model PV `−409,798.69`, delta `−24,505.34`,    gamma `2,040.32`
-   - total trade delta target (product + legs): `−13,990,506.81` (Tongyu `−14,019,368.71`)
+   - total trade delta target (product + legs): `−13,990,506.81` (vendor `−14,019,368.71`)
 
    **Open input dependency:** providing the sanitized fixture data (or
    authorizing a synthetic stand-in generated from the workaround) is a
@@ -341,22 +372,15 @@ one is present for round-trip (follow existing `LegRegistry` pattern).
 |---|-----------|--------------|
 | 1 | Native autocallable cash-leg API | `AutocallableCashLeg` (§4) |
 | 2 | Adapter removes synthetic `SnowballOption` workaround | Consume-parent architecture (§3) |
-| 3 | PV/Greeks match workaround within tight tolerance | §5 math + §7 **required** golden fixture |
-| 4 | Works for Snowball and Phoenix | Snowball MC/PDE/QUAD; Phoenix MC (`KO_MATURITY` + `COUPON`); Phoenix PDE/QUAD gated on engine support (§3a, §9) |
-| 5 | Supports PDE/QUAD/MC where parent supports them | Snowball: all three (native). Phoenix: MC native; PDE → fail-loud, QUAD → ⚠️ MC-derived (§3a) |
-| 6 | Unit tests cover all 5 leg types + deterministic legs unchanged | §7 items 1, 4 |
-
-**Note on #4/#5:** the verified engine reality (§2, §3a) means "works for Phoenix
-on all methods" is **not** achievable without first adding native Phoenix
-PDE/QUAD event stats. This spec delivers Phoenix on MC and fails loud elsewhere;
-full Phoenix method coverage is the §9 follow-on.
+| 3 | PV/Greeks match workaround within tight tolerance | §5 math + §7 item 6 **required** golden fixture |
+| 4 | Works for Snowball and Phoenix | Snowball + Phoenix, `KO_MATURITY` + `COUPON` (§4, §5); Phoenix PDE/QUAD event stats added in §3b |
+| 5 | Supports PDE/QUAD/MC where parent supports them | Snowball native (existing) + Phoenix native on all three after §3b |
+| 6 | Unit tests cover all 5 leg types + deterministic legs unchanged | §7 items 1, 5 |
 
 ## 9. Out of scope
 
-- New pricing engines or changes to autocallable engines — **including native
-  `PhoenixEventStats` for `PhoenixPDESolver` and `PhoenixQuadEngine`.** That is
-  the tracked follow-on that upgrades the §3a matrix; until it lands, Phoenix PDE
-  fails loud and Phoenix QUAD is ⚠️ MC-derived.
+- New pricing engines, or autocallable-engine changes **beyond** the native
+  Phoenix PDE/QUAD `calculate_event_stats` added in §3b.
 - Changes to `GreeksCalculator` / `EquityPosition` risk path.
 - Extending `AutocallableEventStats` / `EventDistribution` to carry settlement
   times / maturity time / observation dates — the consumer-only design takes
@@ -364,4 +388,4 @@ full Phoenix method coverage is the §9 follow-on.
   possible future robustness improvement but not required here.
 - Basket / multi-asset autocallable legs.
 - KO-reset / Phoenix memory-coupon leg variants beyond the `COUPON` basis above
-  (deferred unless ZL496 validation requires them).
+  (deferred unless the golden-case validation requires them).
