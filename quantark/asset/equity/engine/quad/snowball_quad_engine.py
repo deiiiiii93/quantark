@@ -412,7 +412,7 @@ class SnowballQuadEngine(BaseEngine):
         return None
 
     def _extract_extra_quad_stats(
-        self, initial_surface, math_utils, n_ko, ko_records, rate
+        self, initial_surface, math_utils, n_ko, ko_records, rate, product
     ) -> dict:
         """Extra event-stats fields from the extra rows (none for Snowball)."""
         return {}
@@ -752,8 +752,13 @@ class SnowballQuadEngine(BaseEngine):
                 ki_probability = float(pv_ki_no_ko / df_T)
 
         extra_fields = self._extract_extra_quad_stats(
-            initial_surface, math_utils, n_ko, ko_records, rate
+            initial_surface, math_utils, n_ko, ko_records, rate, product
         )
+        # Remove extra cashflow streams (Phoenix coupons) from the maturity field
+        # so pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
+        coupon_cf = extra_fields.get("expected_discounted_coupon_cashflow")
+        if coupon_cf is not None:
+            expected_discounted_maturity_cf -= float(np.sum(coupon_cf))
 
         return self._make_event_stats(
             pv=pv,

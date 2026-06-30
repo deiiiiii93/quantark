@@ -33,6 +33,23 @@ def test_phoenix_price_with_events_emits_coupon_stream(kind):
 
 
 @pytest.mark.parametrize("kind", ["mc", "pde", "quad"])
+def test_phoenix_cashflow_decomposition_reconciles(kind):
+    # pv == sum(ko_cf) + sum(coupon_cf) + maturity_cf: coupon PV is classified in
+    # its own field, not folded into the maturity cashflow (native PDE/QUAD parity
+    # with MC).
+    env = make_env()
+    ph = make_phoenix()
+    s = make_engine(kind, "phoenix").calculate_event_stats(ph, env)
+    recon = (
+        float(np.sum(s.expected_discounted_ko_cashflow))
+        + float(np.sum(s.expected_discounted_coupon_cashflow))
+        + float(s.expected_discounted_maturity_cashflow)
+    )
+    assert s.expected_discounted_coupon_cashflow.size == s.ko_times.size
+    assert abs(s.pv - recon) <= 1e-6 * max(1.0, abs(s.pv))
+
+
+@pytest.mark.parametrize("kind", ["mc", "pde", "quad"])
 def test_coupon_basis_leg_prices_in_position(kind):
     env = make_env()
     ph = make_phoenix()

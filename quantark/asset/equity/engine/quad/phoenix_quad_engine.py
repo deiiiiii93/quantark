@@ -518,16 +518,29 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             v_in[coup_row, pay_mask] = 1.0
 
     def _extract_extra_quad_stats(
-        self, initial_surface, math_utils, n_ko, ko_records, rate
+        self, initial_surface, math_utils, n_ko, ko_records, rate, product
     ) -> dict:
+        ko_times = [float(rec.observation_time) for rec in ko_records]
+        period_yf = product.get_coupon_period_year_fractions(ko_times)
+        coupon_amounts = [
+            float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
+            for i in range(n_ko)
+        ]
         coupon_probability = np.zeros(n_ko, dtype=float)
+        expected_discounted_coupon_cashflow = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
             obs_time = float(rec.observation_time)
+            # Coupon row was set to 1.0 (undiscounted indicator) at the observation,
+            # so ed_coup = E[DF(0->obs) * 1{coupon, alive}].
             ed_coup = float(math_utils.interpolate(initial_surface[n_ko + i], x=0.0))
             df_obs = math.exp(-rate * obs_time)
             if df_obs > 0.0:
                 coupon_probability[i] = float(ed_coup / df_obs)
-        return {"coupon_probability": coupon_probability}
+            expected_discounted_coupon_cashflow[i] = float(ed_coup * coupon_amounts[i])
+        return {
+            "coupon_probability": coupon_probability,
+            "expected_discounted_coupon_cashflow": expected_discounted_coupon_cashflow,
+        }
 
     def __repr__(self):
         return "PhoenixQuadEngine()"

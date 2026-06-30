@@ -638,6 +638,12 @@ class SnowballPDESolver(BasePDESolver):
         extra_fields = self._extract_extra_event_stats(
             initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env
         )
+        # The maturity cashflow is pv minus KO cashflows; for products with extra
+        # cashflow streams (Phoenix coupons) also remove those so the decomposition
+        # pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
+        coupon_cf = extra_fields.get("expected_discounted_coupon_cashflow")
+        if coupon_cf is not None:
+            expected_discounted_maturity_cf -= float(np.sum(coupon_cf))
 
         return self._make_event_stats(
             pv=pv,
