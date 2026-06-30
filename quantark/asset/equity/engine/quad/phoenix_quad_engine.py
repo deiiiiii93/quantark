@@ -14,7 +14,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from quantark.asset.equity.param import MCParams, QuadParams
+from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.priceenv import PricingEnvironment
@@ -483,16 +483,13 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
         return math_utils.interpolate(value_surface, x=0.0)
 
-    def calculate_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ):
-        if not isinstance(product, PhoenixOption):
-            return None
+    def _event_stats_product_type(self) -> type:
+        return PhoenixOption
 
-        from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+    def _make_event_stats(self, **fields):
+        from quantark.asset.equity.engine.event_stats import PhoenixEventStats
 
-        mc_engine = PhoenixMCEngine(params=MCParams())
-        return mc_engine.calculate_event_stats(product, pricing_env)
+        return PhoenixEventStats(**fields)
 
     def __repr__(self):
         return "PhoenixQuadEngine()"

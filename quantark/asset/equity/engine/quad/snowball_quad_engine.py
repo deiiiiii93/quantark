@@ -385,6 +385,19 @@ class SnowballQuadEngine(BaseEngine):
         """Construct the event-stats dataclass (overridable by subclasses)."""
         return AutocallableEventStats(**fields)
 
+    def _event_stats_alignment_log(
+        self, spot: float, product, ki_barrier_override: Optional[float] = None
+    ) -> Optional[float]:
+        """Grid-alignment log used by event stats.
+
+        Calls the Snowball implementation explicitly so a subclass that overrides
+        the price-path ``_select_alignment_log`` (e.g. PhoenixQuadEngine, with a
+        different signature) does not intercept the event-stats recursion.
+        """
+        return SnowballQuadEngine._select_alignment_log(
+            self, spot, product, ki_barrier_override=ki_barrier_override
+        )
+
     def _compute_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Optional[AutocallableEventStats]:
@@ -457,7 +470,7 @@ class SnowballQuadEngine(BaseEngine):
         )
         dt = self._build_dt(times)
 
-        align_log = self._select_alignment_log(
+        align_log = self._event_stats_alignment_log(
             spot, product, ki_barrier_override=ki_barrier_continuous
         )
         fft_padding_factor = self._resolve_fft_padding_factor()
