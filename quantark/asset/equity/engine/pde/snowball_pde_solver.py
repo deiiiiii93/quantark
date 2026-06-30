@@ -351,7 +351,7 @@ class SnowballPDESolver(BasePDESolver):
         return None
 
     def _extract_extra_event_stats(
-        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env
+        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
     ) -> dict:
         """Extra event-stats fields from the extra columns (none for Snowball)."""
         return {}
@@ -636,7 +636,7 @@ class SnowballPDESolver(BasePDESolver):
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
         extra_fields = self._extract_extra_event_stats(
-            initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env
+            initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
         )
         # The maturity cashflow is pv minus KO cashflows; for products with extra
         # cashflow streams (Phoenix coupons) also remove those so the decomposition

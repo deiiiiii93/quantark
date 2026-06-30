@@ -115,7 +115,12 @@ class AutocallableCashLeg(CashLeg):
                 "observation_schedule and settlement_schedule times must be >= 0"
             )
 
-        if not self.terminal_events or not self.terminal_events.issubset(_TERMINAL_BUCKETS):
+        try:
+            terminal = frozenset(self.terminal_events)
+        except TypeError:
+            raise ValidationError("terminal_events must be an iterable of EventType")
+        object.__setattr__(self, "terminal_events", terminal)
+        if not terminal or not terminal.issubset(_TERMINAL_BUCKETS):
             raise ValidationError(
                 "terminal_events must be a non-empty subset of "
                 "{MATURITY_NO_KO, MATURITY_WITH_KI}"

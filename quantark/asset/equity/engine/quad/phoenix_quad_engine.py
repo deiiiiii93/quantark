@@ -520,14 +520,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
     def _extract_extra_quad_stats(
         self, initial_surface, math_utils, n_ko, ko_records, rate, product
     ) -> dict:
-        ko_times = [float(rec.observation_time) for rec in ko_records]
-        period_yf = product.get_coupon_period_year_fractions(ko_times)
-        coupon_amounts = [
-            float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
-            for i in range(n_ko)
-        ]
         coupon_probability = np.zeros(n_ko, dtype=float)
-        expected_discounted_coupon_cashflow = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
             obs_time = float(rec.observation_time)
             # Coupon row was set to 1.0 (undiscounted indicator) at the observation,
@@ -536,11 +529,27 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             df_obs = math.exp(-rate * obs_time)
             if df_obs > 0.0:
                 coupon_probability[i] = float(ed_coup / df_obs)
-            expected_discounted_coupon_cashflow[i] = float(ed_coup * coupon_amounts[i])
-        return {
-            "coupon_probability": coupon_probability,
-            "expected_discounted_coupon_cashflow": expected_discounted_coupon_cashflow,
-        }
+        result = {"coupon_probability": coupon_probability}
+        # Expected discounted coupon cashflow only for non-memory coupons (the paid
+        # amount is path-dependent under memory). With a deterministic amount and
+        # settlement, E[DF*amount*1{coupon}] = DF(0->settle)*amount*P(coupon).
+        if not product.has_memory_coupon:
+            ko_times = [float(rec.observation_time) for rec in ko_records]
+            period_yf = product.get_coupon_period_year_fractions(ko_times)
+            coupon_amounts = [
+                float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
+                for i in range(n_ko)
+            ]
+            expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+            maturity = float(ko_records[-1].observation_time)
+            ecc = np.zeros(n_ko, dtype=float)
+            for i in range(n_ko):
+                settle = maturity if expiry else ko_times[i]
+                ecc[i] = float(
+                    math.exp(-rate * settle) * coupon_amounts[i] * coupon_probability[i]
+                )
+            result["expected_discounted_coupon_cashflow"] = ecc
+        return result
 
     def __repr__(self):
         return "PhoenixQuadEngine()"

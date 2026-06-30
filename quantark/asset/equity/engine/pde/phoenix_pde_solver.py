@@ -80,7 +80,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         v1[pay_mask, coup_col] = df_delay
 
     def _extract_extra_event_stats(
-        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env
+        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
     ) -> dict:
         ed_coup = np.array(
             [
@@ -90,7 +90,6 @@ class PhoenixPDESolver(SnowballPDESolver):
             dtype=float,
         )
         coupon_probability = np.zeros(n_ko, dtype=float)
-        expected_discounted_coupon_cashflow = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
             obs_time = float(rec.observation_time)
             settle = float(
@@ -99,16 +98,42 @@ class PhoenixPDESolver(SnowballPDESolver):
             df0 = pricing_env.get_discount_factor(settle)
             if df0 > 0.0:
                 coupon_probability[i] = float(ed_coup[i] / df0)
+        result = {"coupon_probability": coupon_probability}
+        ecc = self._coupon_cashflow_from_probability(
+            coupon_probability, n_ko, ko_records, pricing_env, product
+        )
+        if ecc is not None:
+            result["expected_discounted_coupon_cashflow"] = ecc
+        return result
+
+    def _coupon_cashflow_from_probability(
+        self, coupon_probability, n_ko, ko_records, pricing_env, product
+    ):
+        """Expected discounted coupon cashflow for non-memory coupons, else None.
+
+        With a deterministic per-period coupon amount and a deterministic
+        settlement time, E[DF(0->settle) * amount * 1{coupon}] factors exactly as
+        DF(0->settle) * amount * P(coupon). For memory coupons the paid amount is
+        path-dependent and cannot be recovered from the trigger indicator, so we
+        omit the field (probability stays correct) rather than report a wrong value.
+        """
+        if product.has_memory_coupon:
+            return None
+        expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+        maturity = float(product.get_maturity(pricing_env))
+        ecc = np.zeros(n_ko, dtype=float)
+        for i, rec in enumerate(ko_records):
+            obs_time = float(rec.observation_time)
+            settle = maturity if expiry else obs_time
             amt = (
                 float(self._coupon_amounts[i])
                 if i < self._coupon_amounts.shape[0]
                 else 0.0
             )
-            expected_discounted_coupon_cashflow[i] = float(ed_coup[i] * amt)
-        return {
-            "coupon_probability": coupon_probability,
-            "expected_discounted_coupon_cashflow": expected_discounted_coupon_cashflow,
-        }
+            ecc[i] = float(
+                pricing_env.get_discount_factor(settle) * amt * coupon_probability[i]
+            )
+        return ecc
 
     # price() and calculate_greeks() are inherited from SnowballPDESolver
     # The _check_product_type() method uses _supported_product_type to validate

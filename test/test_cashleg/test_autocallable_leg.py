@@ -63,6 +63,18 @@ def test_terminal_events_must_be_maturity_buckets():
         _leg(terminal_events=frozenset({EventType.KO}))
 
 
+def test_terminal_events_accepts_iterable_and_normalizes():
+    # A plain list of valid EventTypes must be normalized to a frozenset, not
+    # crash with AttributeError on .issubset.
+    leg = _leg(terminal_events=[EventType.MATURITY_NO_KO])
+    assert leg.terminal_events == frozenset({EventType.MATURITY_NO_KO})
+
+
+def test_terminal_events_invalid_iterable_rejected():
+    with pytest.raises(ValidationError):
+        _leg(terminal_events=[EventType.KO])
+
+
 def test_nan_accrual_factor_rejected():
     with pytest.raises(ValidationError):
         _leg(accrual_factors=(0.5, float("nan")))
