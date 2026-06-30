@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Canonical imports only: `quantark.*` (never the legacy flat names).
-- Numerical ops via `quantark.util.numerical` — no hardcoded tolerances, no raw float `==`. Use `Tolerance`, `almost_equal`, `is_close`, `safe_*`, `validate_*`.
+- Numerical ops in **library code** (`quantark/…`) go via `quantark.util.numerical` — no hardcoded tolerances, no raw float `==`. Use `Tolerance`, `almost_equal`, `is_close`, `safe_*`, `validate_*`. (Test assertions are exempt: `np.testing.assert_allclose(atol=…)`, `==` for exact algebraic identities, and explicit MC-band tolerances are expected in tests and used throughout this plan.)
 - Exceptions: raise `ValidationError` for bad inputs (from `quantark.util.exceptions`). Fail loud — no padding, truncation, silent realignment, or fallback semantics.
 - **No MC inside PDE/QUAD:** the native Phoenix PDE/QUAD event-stats code must not import or instantiate any `*MCEngine`.
 - All dataclasses `frozen=True`; subclass leg fields must carry defaults (dataclass inheritance requirement — see Task 1).
@@ -29,16 +29,23 @@
 |------|----------------|--------|
 | `quantark/cashleg/autocallable_leg.py` | `AutocallableCashLeg` + `AutocallableLegType` / `PvFormula` / `AccrualBasis` enums + valuation | Create |
 | `quantark/cashleg/__init__.py` | Public exports | Modify |
-| `quantark/asset/equity/engine/pde/phoenix_pde_solver.py` | Native `calculate_event_stats` (KO/KI + coupon surfaces) | Modify |
+| `quantark/asset/equity/engine/pde/snowball_pde_solver.py` | Refactor `calculate_event_stats` into reusable `_compute_event_stats` + `_event_stats_product_type()` + `_make_event_stats()` hooks | Modify |
+| `quantark/asset/equity/engine/pde/phoenix_pde_solver.py` | Native `calculate_event_stats` (KO/KI reuse + coupon surfaces) | Modify |
+| `quantark/asset/equity/engine/quad/snowball_quad_engine.py` | Same reusable-hook refactor as the PDE | Modify |
 | `quantark/asset/equity/engine/quad/phoenix_quad_engine.py` | Native `calculate_event_stats` (replace MC delegation) | Modify |
+| `quantark/cashleg/CLAUDE.md` | Document `AutocallableCashLeg`; fix stale module list | Modify |
+| `test/test_cashleg/_autocallable_helpers.py` | Shared builders: env / Snowball / Phoenix / engines / leg factories | Create |
 | `test/test_cashleg/test_autocallable_leg.py` | Unit tests vs independent re-implementation, synthetic `EventDistribution` | Create |
-| `test/test_cashleg/test_autocallable_leg_position.py` | Position PV + Greeks integration | Create |
-| `test/test_cashleg/test_autocallable_leg_golden.py` | Required golden-case parity (PV + Greeks) across engines | Create |
+| `test/test_cashleg/test_autocallable_leg_position.py` | Position PV + Greeks + quantity contract | Create |
+| `test/test_cashleg/test_autocallable_leg_distribution.py` | `price_with_events` → `EventType.COUPON` mapping + COUPON-basis position valuation | Create |
+| `test/test_cashleg/test_autocallable_leg_golden.py` | Required golden-case parity (PV + per-leg delta/gamma) across engines | Create |
 | `test/test_cashleg/fixtures/autocallable_golden_case.json` | Sanitized golden inputs + frozen targets | Create |
-| `test/test_equity/test_phoenix_pde_event_stats.py` | Phoenix PDE event stats vs Phoenix MC | Create |
-| `test/test_equity/test_phoenix_quad_event_stats.py` | Phoenix QUAD event stats vs Phoenix MC; assert no MC engine constructed | Create |
+| `test/test_cashleg/test_phoenix_pde_event_stats.py` | Phoenix PDE event stats vs Phoenix MC; no-MC-import assertion | Create |
+| `test/test_cashleg/test_phoenix_quad_event_stats.py` | Phoenix QUAD event stats vs Phoenix MC; no-MC-import assertion | Create |
 
-(Exact engine test directory confirmed in Task 0.)
+The shared helper module (`_autocallable_helpers.py`) is created in Task 6 and
+imported by every engine/position/golden test, so no test imports a non-existent
+fixture module.
 
 ---
 
@@ -53,10 +60,13 @@ Run:
 ```bash
 cd /Users/fuxinyao/quant-ark
 sed -n '1,40p' quantark/cashleg/__init__.py
-ls test/test_cashleg/ 2>/dev/null; ls test/ | grep -i equity
+ls test/test_cashleg/ 2>/dev/null
 .venv/bin/python -c "from quantark.util.numerical import Tolerance; print([a for a in dir(Tolerance) if not a.startswith('_')])"
+# The builder patterns Task 6 copies into the shared helper module:
+sed -n '25,120p' test/test_snowball_mc_engine.py   # create_pricing_env / create_basic_barrier_config / create_standard_snowball
+sed -n '1,70p'   test/test_phoenix_quad.py          # create_pricing_env / create_phoenix
 ```
-Expected: see the current `__all__` (DeterministicLeg/AccrualLeg/FixedPayoffLeg + enums), the `test/test_cashleg/` dir, the equity test dir name, and the available `Tolerance` attributes. Note the real names — later tasks reference `Tolerance.PROBABILITY` for the schedule-identity tolerance; if a more specific time tolerance exists, prefer it.
+Expected: see the current `__all__` (DeterministicLeg/AccrualLeg/FixedPayoffLeg + enums), the `test/test_cashleg/` dir, the available `Tolerance` attributes (later tasks use `Tolerance.PROBABILITY` for the schedule-identity tolerance; if a more specific time tolerance exists, prefer it), and the verbatim builder helpers that Task 6 ports into `test/test_cashleg/_autocallable_helpers.py`.
 
 - [ ] **Step 2: Confirm the EventDistribution construction contract**
 
@@ -158,6 +168,21 @@ def test_future_dated_notional_settlement_rejected_for_margin_formula():
 def test_terminal_events_must_be_maturity_buckets():
     with pytest.raises(ValidationError):
         _leg(terminal_events=frozenset({EventType.KO}))
+
+
+def test_nan_accrual_factor_rejected():
+    with pytest.raises(ValidationError):
+        _leg(accrual_factors=(0.5, float("nan")))
+
+
+def test_negative_observation_time_rejected():
+    with pytest.raises(ValidationError):
+        _leg(observation_schedule=(-0.1, 1.0), settlement_schedule=(-0.1, 1.0))
+
+
+def test_negative_notional_rejected():
+    with pytest.raises(ValidationError):
+        _leg(notional=-1.0)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -182,7 +207,7 @@ import numpy as np
 from quantark.cashleg.base import CashLeg
 from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import Tolerance, almost_equal
+from quantark.util.numerical import Tolerance, almost_equal, is_valid_number, validate_positive
 
 
 class AutocallableLegType(Enum):
@@ -242,9 +267,10 @@ class AutocallableCashLeg(CashLeg):
             raise ValidationError(f"Invalid PvFormula: {self.pv_formula}")
         if not isinstance(self.accrual_basis, AccrualBasis):
             raise ValidationError(f"Invalid AccrualBasis: {self.accrual_basis}")
-        if not np.isfinite(float(self.notional)):
-            raise ValidationError(f"notional must be finite, got {self.notional}")
-        if not np.isfinite(float(self.rate)):
+        # notional is absolute per-unit ⇒ finite and non-negative (uses the
+        # project numerical validator; see Global Constraints).
+        validate_positive(self.notional, "notional", allow_zero=True)
+        if not is_valid_number(self.rate):
             raise ValidationError(f"rate must be finite, got {self.rate}")
         if not np.isfinite(float(self.terminal_accrual_factor)):
             raise ValidationError("terminal_accrual_factor must be finite")
@@ -257,6 +283,21 @@ class AutocallableCashLeg(CashLeg):
                 "observation_schedule, accrual_factors, settlement_schedule "
                 f"must share one length; got {n}, {len(self.accrual_factors)}, "
                 f"{len(self.settlement_schedule)}"
+            )
+
+        for label, seq in (
+            ("observation_schedule", self.observation_schedule),
+            ("accrual_factors", self.accrual_factors),
+            ("settlement_schedule", self.settlement_schedule),
+        ):
+            arr = np.asarray(seq, dtype=float)
+            if arr.size and not np.all(np.isfinite(arr)):
+                raise ValidationError(f"{label} must be all-finite, got {seq!r}")
+        obs_arr = np.asarray(self.observation_schedule, dtype=float)
+        ss_arr = np.asarray(self.settlement_schedule, dtype=float)
+        if np.any(obs_arr < 0.0) or np.any(ss_arr < 0.0):
+            raise ValidationError(
+                "observation_schedule and settlement_schedule times must be >= 0"
             )
 
         if not self.terminal_events or not self.terminal_events.issubset(_TERMINAL_BUCKETS):
@@ -288,7 +329,7 @@ class AutocallableCashLeg(CashLeg):
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest test/test_cashleg/test_autocallable_leg.py -x -q`
-Expected: PASS (5 passed).
+Expected: PASS (7 passed).
 
 - [ ] **Step 5: Commit**
 
@@ -447,6 +488,22 @@ def test_shifted_observation_schedule_raises():
         leg.value(ed, env, 0.0)
 
 
+def test_missing_terminal_bucket_raises():
+    # Distribution lacks MATURITY_WITH_KI, which the default terminal_events needs.
+    env = FlatEnv(0.02)
+    ed = EventDistribution(
+        event_times=np.array([0.5, 1.0]),
+        event_dates=None,
+        probabilities={EventType.KO: np.array([0.3, 0.2]),
+                       EventType.MATURITY_NO_KO: 0.5},
+        survival_probability=np.array([1.0, 0.7, 0.5]),
+    )
+    leg = _leg(observation_schedule=(0.5, 1.0), settlement_schedule=(0.5, 1.0),
+               terminal_settlement_time=1.0)
+    with pytest.raises(ValidationError):
+        leg.value(ed, env, 0.0)
+
+
 @pytest.mark.parametrize("lt", list(AutocallableLegType))
 def test_all_five_leg_types_value_finite(lt):
     # Requirement #6: every leg_type prices through the same path.
@@ -458,6 +515,15 @@ def test_all_five_leg_types_value_finite(lt):
                observation_schedule=(0.5, 1.0), settlement_schedule=(0.5, 1.0),
                terminal_settlement_time=1.0)
     assert np.isfinite(leg.value(ed, env, 0.0))
+
+
+def test_value_ignores_position_notional_argument():
+    # Contract: leg uses self.notional; the position applies quantity scaling.
+    env = FlatEnv(0.02)
+    ed = make_distribution([0.5, 1.0], [0.3, 0.2], 0.4, 0.1)
+    leg = _leg(observation_schedule=(0.5, 1.0), settlement_schedule=(0.5, 1.0),
+               terminal_settlement_time=1.0)
+    assert leg.value(ed, env, 0.0) == leg.value(ed, env, 999_999.0)
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -503,9 +569,14 @@ Replace the `value` stub in `quantark/cashleg/autocallable_leg.py` with:
             df_obs = np.array([env.get_discount_factor(float(t)) for t in ss])
             contingent = float(np.sum(af * prob * df_obs))
 
-        p_term = sum(
-            float(event_dist.probabilities.get(e, 0.0)) for e in self.terminal_events
-        )
+        for e in self.terminal_events:
+            prob_e = event_dist.probabilities.get(e)
+            if prob_e is None or not is_valid_number(prob_e):
+                raise ValidationError(
+                    f"terminal event {e.value} missing or non-scalar in the parent "
+                    "EventDistribution; cannot value the terminal branch."
+                )
+        p_term = sum(float(event_dist.probabilities[e]) for e in self.terminal_events)
         df_term = env.get_discount_factor(float(self.terminal_settlement_time))
         contingent += float(self.terminal_accrual_factor) * p_term * float(df_term)
 
@@ -663,101 +734,222 @@ git commit -m "feat(cashleg): export AutocallableCashLeg and enums"
 
 ---
 
-## Phase B — Native Phoenix PDE event stats
-
-**Design note (applies to Tasks 6–9):** The leg consumes only `ko_probability`,
-`survival_probability`, `coupon_probability`, and the terminal buckets. All four
-are **indicator expectations** and are **independent of memory-coupon
-accumulation** (memory changes coupon *amounts*, not the probability a coupon
-condition is met while alive). So the native event stats are built by
-propagating **stacked KO + coupon-trigger indicator surfaces**, mirroring the
-Snowball template — **not** the memory vector-state pricer. `PhoenixMCEngine.
-calculate_event_stats` (`phoenix_mc_engine.py:163-317`) is the reference: the
-PDE/QUAD ports must reproduce its `coupon_probability` semantics. The native
-code must construct **no** `*MCEngine` (enforced by a test).
-
-### Task 6: Phoenix PDE — native KO/KI event stats (no coupon yet)
+## Task 6: Shared test builders (`_autocallable_helpers.py`)
 
 **Files:**
-- Modify: `quantark/asset/equity/engine/pde/phoenix_pde_solver.py`
-- Test: `test/test_equity/test_phoenix_pde_event_stats.py` (Create)
+- Create: `test/test_cashleg/_autocallable_helpers.py`
+- Test: `test/test_cashleg/test_helpers_smoke.py`
 
 **Interfaces:**
-- Consumes: the Snowball template `SnowballPDESolver.calculate_event_stats` (`snowball_pde_solver.py:323-612`) and its helpers (`_filter_observations_by_tau`, `_build_grids`, `_get_barrier_mask`, `_cashflow_value_at_time`, `_resolve_ki_barrier_at_tidx`).
-- Produces: `PhoenixPDESolver.calculate_event_stats(product, pricing_env) -> Optional[PhoenixEventStats]` returning correct `ko_times`/`ko_probability`/`survival_probability`/`ki_probability`/`expected_discounted_*` for a Phoenix product (coupon fields empty for now).
+- Produces: `make_env`, `make_snowball`, `make_phoenix`, `make_engine(kind, asset)`,
+  `future_event_times(product, engine, env)`, `make_margin_leg(obs)`. Ported from
+  the verbatim builders in `test/test_snowball_mc_engine.py:25-117` and
+  `test/test_phoenix_quad.py:25-68` (confirmed in Task 0). No phantom imports —
+  every engine/position/golden test imports this real module.
+- **Import convention (record here):** confirm how the suite imports sibling test
+  modules — `grep -rn "^from test\.\|^import test\." test/test_cashleg | head`.
+  If the suite uses `from test.test_cashleg.X import …`, ensure `test/__init__.py`
+  and `test/test_cashleg/__init__.py` exist (create empty if missing) so the
+  package import resolves; if it uses bare `from X import …` with a `conftest.py`
+  on `sys.path`, follow that instead. Use the chosen style verbatim in **all**
+  new test files in this plan (replace the illustrative `from test.test_cashleg.
+  _autocallable_helpers import …` lines if the repo convention differs).
 
-- [ ] **Step 1: Write the failing MC cross-check test (KO/survival only)**
+- [ ] **Step 1: Create the helper module**
 
 ```python
-# test/test_equity/test_phoenix_pde_event_stats.py
+# test/test_cashleg/_autocallable_helpers.py
+from datetime import datetime
 import numpy as np
-import pytest
 
-from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
+from quantark.priceenv import PricingEnvironment
+from quantark.util.enum import CouponPayType, ObservationType
+from quantark.util.calendar.day_counter import DayCountConvention
+from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
-from quantark.asset.equity.param.engine_params import PDEParams, MCParams
-from quantark.asset.equity.engine.event_stats import PhoenixEventStats
-# NOTE (Task 0 follow-up): import the shared Phoenix test-product builder used by
-# the existing Phoenix engine tests. Confirm its location with:
-#   grep -rl "PhoenixOption(" test/ | head
-# and reuse that fixture/helper here as `make_phoenix_product(pricing_env)`.
-from test.test_equity._phoenix_fixtures import make_phoenix_product, make_env  # adjust import to the real helper
+from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+from quantark.cashleg.base import LegDirection
+from quantark.cashleg.autocallable_leg import (
+    AutocallableCashLeg, AutocallableLegType, PvFormula,
+)
 
 
-@pytest.fixture
-def phoenix_case():
-    env = make_env()
-    product = make_phoenix_product(env)   # non-memory Phoenix, discrete KO/coupon
-    return product, env
-
-
-def test_phoenix_pde_ko_survival_match_mc(phoenix_case):
-    product, env = phoenix_case
-    pde = PhoenixPDESolver(params=PDEParams(grid_size=600, time_steps=600))
-    mc = PhoenixMCEngine(params=MCParams(num_paths=200_000, time_steps=252, seed=7))
-
-    s_pde = pde.calculate_event_stats(product, env)
-    s_mc = mc.calculate_event_stats(product, env)
-
-    assert isinstance(s_pde, PhoenixEventStats)
-    np.testing.assert_allclose(s_pde.ko_times, s_mc.ko_times, atol=1e-9)
-    # 3 sigma MC band; KO/survival are the tight ones
-    np.testing.assert_allclose(s_pde.ko_probability, s_mc.ko_probability, atol=5e-3)
-    np.testing.assert_allclose(
-        s_pde.survival_probability, s_mc.survival_probability, atol=5e-3
+def make_env(spot=100.0, vol=0.20, rate=0.03, div_yield=0.0):
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=spot),
+        vol_surface=FlatVolSurface(volatility=vol),
+        rate_curve=FlatRateCurve(rate=rate),
+        div_yield=ContinuousDividendYield(div_yield=div_yield),
+        valuation_date=datetime(2024, 1, 1),
     )
-    assert abs(s_pde.ki_probability - s_mc.ki_probability) < 5e-3
 
 
-def test_phoenix_pde_builds_no_mc_engine(phoenix_case, monkeypatch):
-    product, env = phoenix_case
-    import quantark.asset.equity.engine.mc.phoenix_mc_engine as mcmod
+def make_snowball(ko_dates=(0.5, 1.0), ko_barrier=103.0, ko_rate=0.15,
+                  ki_barrier=75.0, maturity=1.0):
+    barrier = BarrierConfig(
+        ko_barrier=ko_barrier, ko_rate=ko_rate,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=list(ko_dates),
+        ki_barrier=ki_barrier,
+        ki_observation_type=ObservationType.CONTINUOUS,
+        ki_continuous=True,
+    )
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, barrier_config=barrier,
+        contract_multiplier=1.0, maturity=maturity, is_reverse=False,
+    )
 
-    def _boom(*a, **k):
-        raise AssertionError("PhoenixPDESolver must not construct an MC engine")
 
-    monkeypatch.setattr(mcmod, "PhoenixMCEngine", _boom)
-    PhoenixPDESolver(params=PDEParams(grid_size=400, time_steps=400)).calculate_event_stats(
-        product, env
+def make_phoenix(ko_dates=(0.5, 1.0), ko_barrier=105.0,
+                 coupon_barrier=(80.0, 80.0), memory=False,
+                 coupon_pay=CouponPayType.INSTANT, maturity=1.0):
+    barrier = BarrierConfig(
+        ko_barrier=ko_barrier, ko_rate=0.0,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=list(ko_dates),
+        ki_barrier=None,
+    )
+    coupon = CouponBarrierConfig(
+        coupon_barrier=list(coupon_barrier), coupon_rate=0.02,
+        coupon_pay_type=coupon_pay,
+        day_count_convention=DayCountConvention.ACT_365,
+        memory_coupon=memory,
+    )
+    return PhoenixOption(
+        initial_price=100.0, strike=100.0, barrier_config=barrier,
+        coupon_config=coupon,
+        payoff_config=PayoffConfig(rebate_rate=0.0, include_principal=True),
+        contract_multiplier=1.0, maturity=maturity,
+    )
+
+
+_ENGINES = {
+    ("snowball", "mc"): lambda: SnowballMCEngine(params=MCParams(num_paths=60_000, seed=7)),
+    ("snowball", "pde"): lambda: SnowballPDESolver(params=PDEParams(grid_size=400, time_steps=400)),
+    ("snowball", "quad"): lambda: SnowballQuadEngine(params=QuadParams(grid_points=1001)),
+    ("phoenix", "mc"): lambda: PhoenixMCEngine(params=MCParams(num_paths=60_000, seed=7)),
+    ("phoenix", "pde"): lambda: PhoenixPDESolver(params=PDEParams(grid_size=400, time_steps=400)),
+    ("phoenix", "quad"): lambda: PhoenixQuadEngine(params=QuadParams(grid_points=1001)),
+}
+
+
+def make_engine(kind, asset="snowball"):
+    return _ENGINES[(asset, kind)]()
+
+
+def future_event_times(product, engine, env):
+    """Parent's filtered future observation grid the leg must align to."""
+    result = engine.price_with_events(product, env, emit_distribution=True)
+    return np.asarray(result.event_distribution.event_times, dtype=float)
+
+
+def make_margin_leg(obs, notional=1_000_000.0, rate=0.04,
+                    direction=LegDirection.BUYER_RECEIVES):
+    obs = [float(t) for t in obs]
+    n = len(obs)
+    return AutocallableCashLeg(
+        direction=direction, leg_type=AutocallableLegType.MARGIN,
+        notional=notional, rate=rate,
+        observation_schedule=tuple(obs),
+        accrual_factors=tuple(np.linspace(0.25, 1.0, n)),
+        settlement_schedule=tuple(obs),
+        terminal_accrual_factor=1.0, terminal_settlement_time=obs[-1],
+        pv_formula=PvFormula.NOTIONAL_MINUS_PAYOFF,
     )
 ```
 
-- [ ] **Step 2: Run to verify failure**
-
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_pde_event_stats.py::test_phoenix_pde_ko_survival_match_mc -x -q`
-Expected: FAIL — the inherited method returns `None` (Phoenix is not a `SnowballOption`), so `s_pde` is `None` and `isinstance(... PhoenixEventStats)` fails.
-
-- [ ] **Step 3: Override `calculate_event_stats` in `PhoenixPDESolver` (KO/KI port)**
-
-Add a `calculate_event_stats` override that reuses the Snowball algorithm but
-keys on `PhoenixOption` and returns a `PhoenixEventStats`. The simplest faithful
-port: call the Snowball KO/KI machinery by temporarily relaxing the product-type
-guard. Concretely, refactor the Snowball method so the body is reusable, then
-call it from Phoenix. In `snowball_pde_solver.py`, extract the body of
-`calculate_event_stats` after the `isinstance` guard into a helper:
+- [ ] **Step 2: Smoke test**
 
 ```python
-# snowball_pde_solver.py — replace the guarded body with a guard + delegation
+# test/test_cashleg/test_helpers_smoke.py
+import numpy as np
+from test.test_cashleg._autocallable_helpers import (
+    make_env, make_snowball, make_phoenix, make_engine, future_event_times,
+)
+
+
+def test_builders_and_future_times():
+    env = make_env()
+    sb = make_snowball(); ph = make_phoenix()
+    assert make_engine("pde", "snowball").price(sb, env) > 0
+    et = future_event_times(sb, make_engine("mc", "snowball"), env)
+    assert et.ndim == 1 and et.size >= 1 and np.all(np.diff(et) > 0)
+```
+
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_helpers_smoke.py -x -q`
+Expected: PASS. If any import path is wrong, fix from the Task 0 output before continuing.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add test/test_cashleg/_autocallable_helpers.py test/test_cashleg/test_helpers_smoke.py
+git commit -m "test(cashleg): shared autocallable test builders"
+```
+
+## Phase B — Snowball PDE refactor → native Phoenix PDE event stats
+
+**Design note (Tasks 7–12):** the leg consumes `ko_probability`,
+`survival_probability`, `coupon_probability`, and the terminal buckets — all
+**indicator expectations, independent of memory-coupon accumulation** (memory
+changes coupon *amounts*, not the probability a coupon condition is met while
+alive). So native event stats add **stacked KO + coupon-trigger indicator
+surfaces**, mirroring Snowball — not the memory vector-state pricer.
+`PhoenixMCEngine.calculate_event_stats` is the oracle.
+
+**Coupon/KO simultaneity convention (verified, `phoenix_mc_engine.py:744-757`):**
+`coupon_hit = coupon_barrier_met & alive_before`, where
+`alive_before = (~is_ko) | (first_ko_idx >= obs_idx)` — i.e. a path that **knocks
+out at this same observation still counts toward `coupon_probability[i]`**. In
+the backward indicator recursion: **apply the KO jump first** (it zeros the KO
+region across KO columns and *future* coupon columns — KO kills future coupons),
+**then set this observation's coupon-trigger column on the coupon-pay mask**, so
+the coupon-i indicator is populated even inside the KO region (counting the
+simultaneous-KO coupon, matching MC).
+
+### Task 7: Behavior-preserving Snowball PDE event-stats refactor
+
+**Files:**
+- Modify: `quantark/asset/equity/engine/pde/snowball_pde_solver.py`
+
+**Interfaces:**
+- Produces (overridable hooks): `_event_stats_product_type() -> type` (default `SnowballOption`); `_make_event_stats(**fields) -> AutocallableEventStats`; `_compute_event_stats(product, env)` holding the existing body. `calculate_event_stats` becomes `guard + delegate`. Snowball behaviour byte-for-byte unchanged.
+
+- [ ] **Step 1: Capture the Snowball baseline (characterization test)**
+
+```python
+# test/test_cashleg/test_phoenix_pde_event_stats.py
+import pathlib
+import numpy as np
+import pytest
+from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+from test.test_cashleg._autocallable_helpers import make_env, make_snowball, make_phoenix, make_engine
+
+
+def test_snowball_pde_event_stats_unchanged_after_refactor():
+    env = make_env(); sb = make_snowball()
+    s = make_engine("pde", "snowball").calculate_event_stats(sb, env)
+    assert s is not None
+    assert s.ko_probability.shape == s.ko_times.shape
+    assert 0.0 <= float(np.sum(s.ko_probability)) <= 1.0 + 1e-9
+```
+
+Run before refactor: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_pde_event_stats.py::test_snowball_pde_event_stats_unchanged_after_refactor -x -q`
+Expected: PASS (baseline on current code).
+
+- [ ] **Step 2: Refactor into hooks (no behaviour change)**
+
+In `snowball_pde_solver.py`, replace the `calculate_event_stats` method:
+
+```python
 def calculate_event_stats(self, product, pricing_env):
     if not isinstance(product, self._event_stats_product_type()):
         return None
@@ -766,126 +958,168 @@ def calculate_event_stats(self, product, pricing_env):
     return self._compute_event_stats(product, pricing_env)
 
 def _event_stats_product_type(self):
-    """Product type accepted by calculate_event_stats (overridable)."""
     return SnowballOption
 
-def _compute_event_stats(self, product, pricing_env):
-    # ... existing body (lines ~330-612), unchanged, but returning via
-    #     self._finalize_event_stats(...) so subclasses can swap the dataclass ...
-```
-
-Then in `phoenix_pde_solver.py`:
-
-```python
-from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
-
-class PhoenixPDESolver(SnowballPDESolver):
-    def _event_stats_product_type(self):
-        return PhoenixOption
-```
-
-For Task 6, return a `PhoenixEventStats` with empty coupon arrays. The cleanest
-seam: have `_compute_event_stats` build the field dict and call a
-`_make_event_stats(**fields)` factory that the base implements as
-`AutocallableEventStats(**fields)` and Phoenix overrides as
-`PhoenixEventStats(**fields)`:
-
-```python
-# snowball_pde_solver.py
 def _make_event_stats(self, **fields):
     return AutocallableEventStats(**fields)
 
-# phoenix_pde_solver.py
-def _make_event_stats(self, **fields):
-    return PhoenixEventStats(**fields)
+def _compute_event_stats(self, product, pricing_env):
+    # ... the existing body that followed the old isinstance/None guards
+    #     (lines ~330-612), unchanged, EXCEPT the final
+    #     `return AutocallableEventStats(...)` becomes
+    #     `return self._make_event_stats(...)` with the identical keyword fields.
 ```
 
-Replace the literal `return AutocallableEventStats(...)` at the end of
-`_compute_event_stats` with `return self._make_event_stats(...)` using the same
-keyword fields (verbatim list: `pv, ko_times, ko_probability,
-survival_probability, expected_discounted_ko_cashflow, ki_probability,
-expected_discounted_maturity_cashflow, reconciliation_error, ki_times,
-ki_event_probability, ki_survival_probability`).
+- [ ] **Step 3: Run the refactor guard + Snowball PDE regression**
 
-- [ ] **Step 4: Run to verify pass**
+Run:
+```bash
+.venv/bin/python -m pytest test/test_cashleg/test_phoenix_pde_event_stats.py::test_snowball_pde_event_stats_unchanged_after_refactor -x -q
+.venv/bin/python -m pytest test/ -k "snowball and pde" -q
+```
+Expected: PASS (Snowball behaviour preserved).
 
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_pde_event_stats.py -x -q`
-Expected: PASS (KO/survival/ki within band; no-MC guard passes). Also run the
-Snowball PDE event-stats regression to prove the refactor is behaviour-preserving:
-`.venv/bin/python -m pytest test/ -k "snowball and event_stats and pde" -q`
-Expected: PASS (unchanged).
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add quantark/asset/equity/engine/pde/snowball_pde_solver.py \
-        quantark/asset/equity/engine/pde/phoenix_pde_solver.py \
-        test/test_equity/test_phoenix_pde_event_stats.py
-git commit -m "feat(pde): native Phoenix KO/KI event stats via reusable Snowball core"
+        test/test_cashleg/test_phoenix_pde_event_stats.py
+git commit -m "refactor(pde): extract reusable Snowball event-stats hooks (no behaviour change)"
 ```
 
-### Task 7: Phoenix PDE — coupon-trigger indicator surfaces → coupon_probability
+### Task 8: Phoenix PDE — native KO/KI event stats (coupon empty)
 
 **Files:**
 - Modify: `quantark/asset/equity/engine/pde/phoenix_pde_solver.py`
-- Test: `test/test_equity/test_phoenix_pde_event_stats.py` (extend)
+- Test: `test/test_cashleg/test_phoenix_pde_event_stats.py` (extend)
 
 **Interfaces:**
-- Consumes: `self._coupon_barriers`, `self._coupon_observation_indices` (already populated by `PhoenixPDESolver._build_grids`, lines 290-344); `_get_barrier_mask`; `_cashflow_value_at_time`.
-- Produces: `PhoenixEventStats.coupon_probability[i] = P(coupon condition met at obs i AND alive)`, matching `PhoenixMCEngine` semantics; `expected_discounted_coupon_cashflow[i] = coupon_amount[i] * ed_coupon_unit[i]` for the non-memory case.
+- Produces: `PhoenixPDESolver.calculate_event_stats -> PhoenixEventStats` with correct KO/survival/ki (coupon arrays empty for now), constructing **no** MC engine.
 
-- [ ] **Step 1: Write the failing coupon cross-check test**
+- [ ] **Step 1: Write failing KO/survival + no-MC tests**
 
 ```python
-def test_phoenix_pde_coupon_prob_matches_mc(phoenix_case):
-    product, env = phoenix_case
-    pde = PhoenixPDESolver(params=PDEParams(grid_size=600, time_steps=600))
-    mc = PhoenixMCEngine(params=MCParams(num_paths=200_000, time_steps=252, seed=7))
-    s_pde = pde.calculate_event_stats(product, env)
-    s_mc = mc.calculate_event_stats(product, env)
-    assert s_pde.coupon_probability.shape == s_mc.coupon_probability.shape
-    np.testing.assert_allclose(
-        s_pde.coupon_probability, s_mc.coupon_probability, atol=5e-3
-    )
+def test_phoenix_pde_ko_survival_match_mc():
+    env = make_env(); ph = make_phoenix()
+    s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    assert isinstance(s_pde, PhoenixEventStats)
+    np.testing.assert_allclose(s_pde.ko_times, s_mc.ko_times, atol=1e-9)
+    np.testing.assert_allclose(s_pde.ko_probability, s_mc.ko_probability, atol=5e-3)
+    np.testing.assert_allclose(s_pde.survival_probability, s_mc.survival_probability, atol=5e-3)
+
+
+def test_phoenix_pde_module_has_no_mc_import():
+    import quantark.asset.equity.engine.pde.phoenix_pde_solver as mod
+    assert "MCEngine" not in pathlib.Path(mod.__file__).read_text()
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_pde_event_stats.py::test_phoenix_pde_coupon_prob_matches_mc -x -q`
-Expected: FAIL — `coupon_probability` is empty (shape mismatch).
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_pde_event_stats.py::test_phoenix_pde_ko_survival_match_mc -x -q`
+Expected: FAIL — inherited hook returns `None` for Phoenix (`s_pde is None`).
 
-- [ ] **Step 3: Add coupon indicator columns to `_compute_event_stats`**
-
-In `PhoenixPDESolver`, override `_compute_event_stats` to extend the stacked
-surface with `n_ko` extra **coupon-trigger** columns alongside the KO columns
-(layout `[KO_0..KO_{n-1}, COUP_0..COUP_{n-1}, KI]`). Mirror the KO jump exactly,
-but using the **coupon barrier** and **without terminating** the other surfaces
-(a coupon does not knock the note out):
+- [ ] **Step 3: Override the hooks in `PhoenixPDESolver`**
 
 ```python
-# At each observation time-index j that is a coupon observation
-# (obs_idx = self._coupon_observation_indices.get(j)):
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+
+class PhoenixPDESolver(SnowballPDESolver):
+    def _event_stats_product_type(self):
+        return PhoenixOption
+
+    def _make_event_stats(self, **fields):
+        return PhoenixEventStats(**fields)   # coupon arrays default empty; Task 9 fills them
+```
+
+The inherited `_compute_event_stats` already propagates KO/KI surfaces for any
+product exposing `resolve_ko_observations`/barriers (Phoenix does). No MC.
+
+- [ ] **Step 4: Run to verify pass**
+
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_pde_event_stats.py -x -q`
+Expected: PASS (KO/survival within band; no-MC-import holds).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add quantark/asset/equity/engine/pde/phoenix_pde_solver.py \
+        test/test_cashleg/test_phoenix_pde_event_stats.py
+git commit -m "feat(pde): native Phoenix KO/KI event stats via reusable hooks"
+```
+
+### Task 9: Phoenix PDE — coupon indicator surfaces → coupon_probability
+
+**Files:**
+- Modify: `quantark/asset/equity/engine/pde/phoenix_pde_solver.py`
+- Test: `test/test_cashleg/test_phoenix_pde_event_stats.py` (extend)
+
+**Interfaces:**
+- Consumes: `self._coupon_barriers`, `self._coupon_observation_indices` (populated by `PhoenixPDESolver._build_grids:290-344`); `_get_barrier_mask`; `_cashflow_value_at_time`.
+- Produces: `PhoenixEventStats.coupon_probability[i] = P(coupon condition met at obs i AND alive entering i)`, matching MC; `expected_discounted_coupon_cashflow[i] = coupon_amounts[i] * ed_coupon_unit[i]`.
+
+- [ ] **Step 1: Write failing coupon tests (incl. overlapping KO/coupon)**
+
+```python
+def test_phoenix_pde_coupon_prob_match_mc():
+    env = make_env(); ph = make_phoenix()
+    s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    assert s_pde.coupon_probability.shape == s_mc.coupon_probability.shape
+    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupon_probability, atol=5e-3)
+
+
+def test_phoenix_pde_coupon_at_simultaneous_ko_matches_mc():
+    # KO barrier below coupon barrier ⇒ KO region ⊂ coupon-pay region: every KO
+    # observation is also a coupon trigger. Locks the "coupon counts at KO" rule.
+    env = make_env()
+    ph = make_phoenix(ko_barrier=90.0, coupon_barrier=(80.0, 80.0))
+    s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    np.testing.assert_allclose(s_pde.coupon_probability, s_mc.coupon_probability, atol=6e-3)
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_pde_event_stats.py -x -q -k coupon`
+Expected: FAIL — `coupon_probability` empty (shape mismatch).
+
+- [ ] **Step 3a: Widen the surface with coupon columns (propagate-only)**
+
+In `PhoenixPDESolver`, override `_compute_event_stats` by copying the base body
+(the surface width changes, so `super()._compute_event_stats` cannot be reused;
+the base stays the Snowball reference) and widening the stacked surface from
+`n_ko + 1` to `2*n_ko + 1` columns — layout `[KO_0..KO_{n-1}, COUP_0..COUP_{n-1},
+KI]`. Propagate the new coupon columns through diffusion, the KO-region zeroing,
+and the KI transition **exactly like the KO columns**, but do **not** set them
+yet (they stay zero). Repoint the KI column index from `n_ko` to `2*n_ko`.
+
+Checkpoint — KO/KI behaviour is unchanged because the coupon columns are zero:
+
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_pde_event_stats.py -x -q -k "ko_survival or no_mc"`
+Expected: PASS (Task 8's KO/survival/no-MC tests still hold).
+
+- [ ] **Step 3b: Set coupon columns at observations + extract coupon stats**
+
+At each coupon-observation time-index `j`
+(`obs_idx = self._coupon_observation_indices.get(j)`), **after** the KO jump that
+zeros `[mask_ko, :]` and sets the KO column, set the coupon column on the
+coupon-pay mask (retaining a simultaneous-KO coupon — the verified convention):
+
+```python
 coupon_barrier = float(self._coupon_barriers[obs_idx])
-pay_mask = self._get_barrier_mask(
-    s_vec, coupon_barrier, product.is_reverse, is_up_barrier=True
-)
+pay_mask = self._get_barrier_mask(s_vec, coupon_barrier, product.is_reverse, is_up_barrier=True)
 df_delay = self._cashflow_value_at_time(
     pricing_env=pricing_env, cashflow=1.0,
     current_time=float(t_vec[j]), settlement_time=rec.settlement_time,
 )
-# coupon indicator for this obs: set on pay_mask (alive paths only — KO jump
-# below zeros the KO region across ALL columns, so coupon columns are absorbed
-# by KO automatically, matching "coupon paid only if not KO'd")
 coup_col = n_ko + obs_idx
 v0_cur[pay_mask, coup_col] = df_delay
 v1_cur[pay_mask, coup_col] = df_delay
 ```
 
-Order the jumps so the KO jump (which zeros `[mask_ko, :]`) runs **after** the
-coupon set if the product pays the coupon at KO, or **before** if it does not —
-choose the order that reproduces `PhoenixMCEngine.coupon_probability` (inspect
-`phoenix_mc_engine.py:163-317` to confirm whether a coupon at a simultaneous KO
-counts). Extract coupon probabilities exactly like KO:
+Then extract and pass into `self._make_event_stats(...)`:
 
 ```python
 ed_coup = np.array(
@@ -895,157 +1129,198 @@ ed_coup = np.array(
 coupon_probability = np.zeros(n_ko, dtype=float)
 expected_discounted_coupon_cashflow = np.zeros(n_ko, dtype=float)
 for i, rec in enumerate(ko_records):
-    settle = float(rec.settlement_time if rec.settlement_time is not None
-                   else rec.observation_time)
+    settle = float(rec.settlement_time if rec.settlement_time is not None else rec.observation_time)
     df0 = pricing_env.get_discount_factor(settle)
     if df0 > 0.0:
         coupon_probability[i] = float(ed_coup[i] / df0)
-    expected_discounted_coupon_cashflow[i] = float(
-        ed_coup[i] * float(self._coupon_amounts[i])
-    )
+    expected_discounted_coupon_cashflow[i] = float(ed_coup[i] * float(self._coupon_amounts[i]))
 ```
-
-Pass `coupon_probability` and `expected_discounted_coupon_cashflow` into
-`self._make_event_stats(...)` (Phoenix factory accepts them; the Snowball factory
-ignores them since the base method never supplies them).
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_pde_event_stats.py -x -q`
-Expected: PASS (KO, survival, ki, and coupon all within band).
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_pde_event_stats.py -x -q`
+Expected: PASS (KO, survival, coupon, and simultaneous-KO coupon within band).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add quantark/asset/equity/engine/pde/phoenix_pde_solver.py \
-        test/test_equity/test_phoenix_pde_event_stats.py
+        test/test_cashleg/test_phoenix_pde_event_stats.py
 git commit -m "feat(pde): native Phoenix coupon_probability via indicator surfaces"
 ```
 
-## Phase C — Native Phoenix QUAD event stats (replace MC delegation)
+## Phase C — Snowball QUAD refactor → native Phoenix QUAD event stats
 
-### Task 8: Phoenix QUAD — native KO/KI event stats
+### Task 10: Behavior-preserving Snowball QUAD event-stats refactor
+
+**Files:**
+- Modify: `quantark/asset/equity/engine/quad/snowball_quad_engine.py`
+- Test: `test/test_cashleg/test_phoenix_quad_event_stats.py` (Create)
+
+**Interfaces:**
+- Produces: the same `_event_stats_product_type()` / `_make_event_stats()` /
+  `_compute_event_stats()` hooks as Task 7; Snowball behaviour unchanged.
+
+- [ ] **Step 1: Characterization guard**
+
+```python
+# test/test_cashleg/test_phoenix_quad_event_stats.py
+import pathlib
+import numpy as np
+from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+from test.test_cashleg._autocallable_helpers import make_env, make_snowball, make_phoenix, make_engine
+
+
+def test_snowball_quad_event_stats_unchanged_after_refactor():
+    env = make_env(); sb = make_snowball()
+    s = make_engine("quad", "snowball").calculate_event_stats(sb, env)
+    assert s is not None and s.ko_probability.shape == s.ko_times.shape
+```
+
+Run (baseline): `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_quad_event_stats.py::test_snowball_quad_event_stats_unchanged_after_refactor -x -q`
+Expected: PASS.
+
+- [ ] **Step 2: Apply the identical hook refactor**
+
+In `snowball_quad_engine.py`, split `calculate_event_stats` into
+`guard + _compute_event_stats`, add `_event_stats_product_type()` (default
+`SnowballOption`) and `_make_event_stats(**fields)` (default
+`AutocallableEventStats(**fields)`), and change the final
+`return AutocallableEventStats(...)` (line ~691) to
+`return self._make_event_stats(...)`.
+
+- [ ] **Step 3: Run guard + Snowball QUAD regression**
+
+Run:
+```bash
+.venv/bin/python -m pytest test/test_cashleg/test_phoenix_quad_event_stats.py::test_snowball_quad_event_stats_unchanged_after_refactor -x -q
+.venv/bin/python -m pytest test/ -k "snowball and quad" -q
+```
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add quantark/asset/equity/engine/quad/snowball_quad_engine.py \
+        test/test_cashleg/test_phoenix_quad_event_stats.py
+git commit -m "refactor(quad): extract reusable Snowball event-stats hooks (no behaviour change)"
+```
+
+### Task 11: Phoenix QUAD — native KO/KI event stats (remove MC delegation)
 
 **Files:**
 - Modify: `quantark/asset/equity/engine/quad/phoenix_quad_engine.py`
-- Test: `test/test_equity/test_phoenix_quad_event_stats.py` (Create)
+- Test: `test/test_cashleg/test_phoenix_quad_event_stats.py` (extend)
 
-**Interfaces:**
-- Consumes: the Snowball QUAD template `SnowballQuadEngine.calculate_event_stats` (`snowball_quad_engine.py:366-715`) and inherited helpers (`_match_record`, `_merge_times`, `_build_dt`, `_ko_discount`, `_diffuse_fft`, `_diffuse_with_bridge`, `_smooth_step_weight`, `_is_knocked_in_at_valuation`).
-- Produces: native `PhoenixQuadEngine.calculate_event_stats -> PhoenixEventStats` with KO/survival/ki fields, **no `PhoenixMCEngine` construction**.
-
-- [ ] **Step 1: Write the failing tests (KO/survival vs MC; no-MC guard)**
+- [ ] **Step 1: Write failing KO/survival + no-MC tests**
 
 ```python
-# test/test_equity/test_phoenix_quad_event_stats.py
-import numpy as np
-import pytest
-
-from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
-from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
-from quantark.asset.equity.param.engine_params import QuadParams, MCParams
-from quantark.asset.equity.engine.event_stats import PhoenixEventStats
-from test.test_equity._phoenix_fixtures import make_phoenix_product, make_env  # adjust to real helper
-
-
-@pytest.fixture
-def phoenix_case():
-    env = make_env()
-    return make_phoenix_product(env), env
-
-
-def test_phoenix_quad_ko_survival_match_mc(phoenix_case):
-    product, env = phoenix_case
-    q = PhoenixQuadEngine(params=QuadParams(grid_points=2001))
-    mc = PhoenixMCEngine(params=MCParams(num_paths=200_000, time_steps=252, seed=11))
-    s_q = q.calculate_event_stats(product, env)
-    s_mc = mc.calculate_event_stats(product, env)
+def test_phoenix_quad_ko_survival_match_mc():
+    env = make_env(); ph = make_phoenix()
+    s_q = make_engine("quad", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
     assert isinstance(s_q, PhoenixEventStats)
     np.testing.assert_allclose(s_q.ko_probability, s_mc.ko_probability, atol=5e-3)
     np.testing.assert_allclose(s_q.survival_probability, s_mc.survival_probability, atol=5e-3)
-    assert abs(s_q.ki_probability - s_mc.ki_probability) < 5e-3
 
 
-def test_phoenix_quad_builds_no_mc_engine(phoenix_case, monkeypatch):
-    product, env = phoenix_case
-    import quantark.asset.equity.engine.mc.phoenix_mc_engine as mcmod
-    monkeypatch.setattr(mcmod, "PhoenixMCEngine",
-                        lambda *a, **k: (_ for _ in ()).throw(
-                            AssertionError("QUAD event stats must not build MC")))
-    PhoenixQuadEngine(params=QuadParams(grid_points=1001)).calculate_event_stats(product, env)
+def test_phoenix_quad_module_has_no_mc_import():
+    import quantark.asset.equity.engine.quad.phoenix_quad_engine as mod
+    assert "MCEngine" not in pathlib.Path(mod.__file__).read_text()
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_quad_event_stats.py::test_phoenix_quad_builds_no_mc_engine -x -q`
-Expected: FAIL — current body constructs `PhoenixMCEngine(MCParams())` (`phoenix_quad_engine.py:486-495`), tripping the monkeypatched guard.
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_quad_event_stats.py::test_phoenix_quad_module_has_no_mc_import -x -q`
+Expected: FAIL — the module still imports `PhoenixMCEngine` (`phoenix_quad_engine.py:486-495`).
 
-- [ ] **Step 3: Replace the MC delegation with a native KO/KI recursion**
+- [ ] **Step 3: Delete the MC delegation; override hooks**
 
-Refactor `SnowballQuadEngine.calculate_event_stats` the same way as the PDE
-(Task 6): keep the `isinstance` guard overridable via `_event_stats_product_type()`
-and route construction through `_make_event_stats(**fields)`; base returns
-`AutocallableEventStats`, Phoenix returns `PhoenixEventStats`. Then in
-`PhoenixQuadEngine`, delete the MC delegation (lines 486-495) and override
-`_event_stats_product_type()` to return `PhoenixOption`, reusing the inherited
-KO indicator recursion (`snowball_quad_engine.py:482-600`) and KI sub-recursion
-(`605-689`) verbatim. Snowball QUAD already propagates stacked KO surfaces and
-extracts `ko_probability[i] = ed_unit[i] / df_total` (line 596) and
-`survival = 1 - cumsum(ko_prob)` (line 600) — unchanged for Phoenix.
+Remove the `calculate_event_stats` body that builds `PhoenixMCEngine(MCParams())`
+(and the now-unused `MCParams`/`PhoenixMCEngine` imports). Override:
+
+```python
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+
+class PhoenixQuadEngine(SnowballQuadEngine):
+    def _event_stats_product_type(self):
+        return PhoenixOption
+
+    def _make_event_stats(self, **fields):
+        return PhoenixEventStats(**fields)
+```
+
+The inherited Snowball QUAD `_compute_event_stats` (KO indicator recursion + KI
+sub-recursion) runs natively for Phoenix. No MC.
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_quad_event_stats.py -x -q`
-Then the Snowball QUAD regression:
-`.venv/bin/python -m pytest test/ -k "snowball and event_stats and quad" -q`
-Expected: PASS both (Phoenix KO/survival/ki within band; Snowball unchanged).
+Run:
+```bash
+.venv/bin/python -m pytest test/test_cashleg/test_phoenix_quad_event_stats.py -x -q
+.venv/bin/python -m pytest test/ -k "phoenix and quad" -q
+```
+Expected: PASS (KO/survival within band; no-MC-import holds; existing Phoenix QUAD pricing tests unaffected).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add quantark/asset/equity/engine/quad/snowball_quad_engine.py \
-        quantark/asset/equity/engine/quad/phoenix_quad_engine.py \
-        test/test_equity/test_phoenix_quad_event_stats.py
+git add quantark/asset/equity/engine/quad/phoenix_quad_engine.py \
+        test/test_cashleg/test_phoenix_quad_event_stats.py
 git commit -m "feat(quad): native Phoenix KO/KI event stats; remove MC delegation"
 ```
 
-### Task 9: Phoenix QUAD — coupon-trigger indicators → coupon_probability
+### Task 12: Phoenix QUAD — coupon indicator surfaces → coupon_probability
 
 **Files:**
 - Modify: `quantark/asset/equity/engine/quad/phoenix_quad_engine.py`
-- Test: `test/test_equity/test_phoenix_quad_event_stats.py` (extend)
+- Test: `test/test_cashleg/test_phoenix_quad_event_stats.py` (extend)
 
-**Interfaces:**
-- Consumes: coupon barriers built as in `PhoenixQuadEngine.price()` (`phoenix_quad_engine.py:98-106`); `_smooth_step_weight`; `_diffuse_fft`/`_diffuse_with_bridge`; `_ko_discount`.
-- Produces: `coupon_probability` / `expected_discounted_coupon_cashflow` on the returned `PhoenixEventStats`, matching `PhoenixMCEngine`.
-
-- [ ] **Step 1: Write the failing coupon cross-check test**
+- [ ] **Step 1: Write failing coupon tests (incl. overlapping KO/coupon)**
 
 ```python
-def test_phoenix_quad_coupon_prob_matches_mc(phoenix_case):
-    product, env = phoenix_case
-    q = PhoenixQuadEngine(params=QuadParams(grid_points=2001))
-    mc = PhoenixMCEngine(params=MCParams(num_paths=200_000, time_steps=252, seed=11))
-    s_q = q.calculate_event_stats(product, env)
-    s_mc = mc.calculate_event_stats(product, env)
+def test_phoenix_quad_coupon_prob_match_mc():
+    env = make_env(); ph = make_phoenix()
+    s_q = make_engine("quad", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
     assert s_q.coupon_probability.shape == s_mc.coupon_probability.shape
     np.testing.assert_allclose(s_q.coupon_probability, s_mc.coupon_probability, atol=5e-3)
+
+
+def test_phoenix_quad_coupon_at_simultaneous_ko_matches_mc():
+    env = make_env()
+    ph = make_phoenix(ko_barrier=90.0, coupon_barrier=(80.0, 80.0))
+    s_q = make_engine("quad", "phoenix").calculate_event_stats(ph, env)
+    s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
+    np.testing.assert_allclose(s_q.coupon_probability, s_mc.coupon_probability, atol=6e-3)
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_quad_event_stats.py::test_phoenix_quad_coupon_prob_matches_mc -x -q`
-Expected: FAIL — `coupon_probability` empty.
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_quad_event_stats.py -x -q -k coupon`
+Expected: FAIL — coupon arrays empty.
 
-- [ ] **Step 3: Propagate coupon-trigger indicator surfaces**
+- [ ] **Step 3a: Add coupon-trigger rows (propagate-only)**
 
-In `PhoenixQuadEngine`, override the recursion to carry `n_ko` extra
-coupon-trigger indicator rows alongside the KO indicator rows (stacked array
-shape `(2*n_ko, grid)` or a second `v_out_coup` block). At each coupon
-observation set the coupon row on the coupon-pay weight (use `_smooth_step_weight`
-with the coupon barrier, falling back to a hard mask) to the discounted
-indicator; diffuse with the same `_diffuse_fft`/`_diffuse_with_bridge` calls used
-for the KO rows. Extract like KO:
+In `PhoenixQuadEngine`, override `_compute_event_stats` by copying the inherited
+Snowball QUAD body and carrying `n_ko` extra **coupon-trigger** indicator rows
+alongside the KO rows (e.g. a second `coup_surface` block of shape `(n_ko, grid)`).
+Diffuse them with the same `_diffuse_fft`/`_diffuse_with_bridge` calls used for
+the KO rows, and apply the KO-region zeroing/KI transition to them identically —
+but do **not** set them yet (all zero).
+
+Checkpoint — KO/KI unchanged:
+
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_quad_event_stats.py -x -q -k "ko_survival or no_mc"`
+Expected: PASS (Task 11's KO/survival/no-MC tests still hold).
+
+- [ ] **Step 3b: Set coupon rows at observations + extract coupon stats**
+
+At each coupon observation set the coupon row on the coupon-pay weight
+(`_smooth_step_weight(..., trigger_is_down=product.is_reverse)`, hard-mask
+fallback) **after** the KO update, so simultaneous-KO coupons are retained. Then
+extract and pass both arrays into `self._make_event_stats(...)`:
 
 ```python
 ed_coup = np.array(
@@ -1063,212 +1338,379 @@ for i, rec in enumerate(ko_records):
     expected_discounted_coupon_cashflow[i] = float(ed_coup[i] * float(coupon_amounts[i]))
 ```
 
-Match the coupon-vs-simultaneous-KO convention to `PhoenixMCEngine` (Task 7 note).
-Pass both arrays into `self._make_event_stats(...)`.
-
 - [ ] **Step 4: Run to verify pass**
 
-Run: `.venv/bin/python -m pytest test/test_equity/test_phoenix_quad_event_stats.py -x -q`
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_phoenix_quad_event_stats.py -x -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add quantark/asset/equity/engine/quad/phoenix_quad_engine.py \
-        test/test_equity/test_phoenix_quad_event_stats.py
+        test/test_cashleg/test_phoenix_quad_event_stats.py
 git commit -m "feat(quad): native Phoenix coupon_probability via indicator surfaces"
 ```
 
-## Phase D — Position integration & required golden parity
+## Phase D — Integration & acceptance
 
-### Task 10: Position PV + Greeks across all engines
+### Task 13: EventDistribution path + COUPON-basis position valuation
+
+**Files:**
+- Test: `test/test_cashleg/test_autocallable_leg_distribution.py` (Create)
+- (No source change.) The COUPON mapper **already exists**:
+  `EventDistribution.from_autocallable_stats` (`event_distribution.py:114-117`)
+  does `if isinstance(stats, PhoenixEventStats) and stats.coupon_probability.size > 0:
+  probabilities[EventType.COUPON] = np.asarray(stats.coupon_probability, ...)`. So
+  once Phases B/C make the engines return `PhoenixEventStats` with a populated
+  `coupon_probability`, `price_with_events` emits `EventType.COUPON` with no
+  adapter change. This task verifies that end-to-end.
+
+- [ ] **Step 0: Confirm the existing mapper (reconnaissance)**
+
+Run: `grep -n "EventType.COUPON\|coupon_probability" quantark/cashleg/event_distribution.py`
+Expected: shows the `from_autocallable_stats` branch above. If it is absent or
+gated differently, add a concrete source step here to populate `EventType.COUPON`
+before writing the tests.
+
+- [ ] **Step 1: Write the tests**
+
+```python
+# test/test_cashleg/test_autocallable_leg_distribution.py
+from datetime import datetime
+import numpy as np
+import pytest
+
+from quantark.portfolio import EquityPosition
+from quantark.cashleg.base import LegDirection
+from quantark.cashleg.event_distribution import EventType
+from quantark.cashleg.autocallable_leg import (
+    AutocallableCashLeg, AutocallableLegType, AccrualBasis,
+)
+from test.test_cashleg._autocallable_helpers import (
+    make_env, make_phoenix, make_engine, future_event_times,
+)
+
+
+@pytest.mark.parametrize("kind", ["mc", "pde", "quad"])
+def test_phoenix_price_with_events_emits_coupon_stream(kind):
+    env = make_env(); ph = make_phoenix()
+    dist = make_engine(kind, "phoenix").price_with_events(
+        ph, env, emit_distribution=True
+    ).event_distribution
+    assert EventType.COUPON in dist.probabilities
+    assert np.asarray(dist.probabilities[EventType.COUPON]).size == dist.event_times.size
+
+
+@pytest.mark.parametrize("kind", ["mc", "pde", "quad"])
+def test_coupon_basis_leg_prices_in_position(kind):
+    env = make_env(); ph = make_phoenix()
+    engine = make_engine(kind, "phoenix")
+    obs = future_event_times(ph, engine, env)
+    leg = AutocallableCashLeg(
+        direction=LegDirection.BUYER_RECEIVES,
+        leg_type=AutocallableLegType.BACKEND_INTEREST,
+        notional=1_000_000.0, rate=0.03,
+        observation_schedule=tuple(obs),
+        accrual_factors=tuple(np.full(obs.size, 0.5)),
+        settlement_schedule=tuple(obs),
+        terminal_accrual_factor=0.0, terminal_settlement_time=float(obs[-1]),
+        accrual_basis=AccrualBasis.COUPON,
+    )
+    pos = EquityPosition(product=ph, quantity=1.0, entry_price=0.0, underlying="UND",
+                         engine=engine, entry_timestamp=datetime(2024, 1, 1),
+                         cash_legs=[leg])
+    pv = pos.get_trade_value(env)
+    assert np.isfinite(pv) and pv != 0.0
+```
+
+- [ ] **Step 2: Run**
+
+Run: `.venv/bin/python -m pytest test/test_cashleg/test_autocallable_leg_distribution.py -q`
+Expected: PASS for mc/pde/quad (depends on Phases B/C).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add test/test_cashleg/test_autocallable_leg_distribution.py
+git commit -m "test(cashleg): EventDistribution COUPON mapping + COUPON-basis position"
+```
+
+### Task 14: Position PV + Greeks + quantity contract
 
 **Files:**
 - Test: `test/test_cashleg/test_autocallable_leg_position.py` (Create)
-- (No library change expected — `EquityPosition.get_trade_value`/`get_trade_greeks` already handle legs.)
+- (No library change — `EquityPosition` already handles legs and Greeks.)
 
-**Interfaces:**
-- Consumes: `EquityPosition(product, engine, quantity, cash_legs=[...])`, `.get_trade_value(env)`, `.get_trade_greeks(env, GreeksCalculator())`.
-
-- [ ] **Step 1: Write the integration tests**
+- [ ] **Step 1: Write the tests**
 
 ```python
 # test/test_cashleg/test_autocallable_leg_position.py
+from datetime import datetime
 import numpy as np
 import pytest
 
 from quantark.portfolio import EquityPosition
 from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-from quantark.cashleg.base import LegDirection
-from quantark.cashleg.autocallable_leg import (
-    AutocallableCashLeg, AutocallableLegType, PvFormula,
-)
-# Reuse the Snowball product/engine/env builders from existing cashleg tests:
-#   grep -rn "SnowballOption(" test/test_cashleg | head
-from test.test_cashleg._autocall_fixtures import (  # adjust import to real helper
-    make_snowball, make_engine, make_env, future_ko_year_fractions,
+from quantark.cashleg.event_distribution import EventDistribution
+from quantark.util.exceptions import ValidationError
+from test.test_cashleg._autocallable_helpers import (
+    make_env, make_snowball, make_phoenix, make_engine, future_event_times, make_margin_leg,
 )
 
 
-def _margin_leg(env, product):
-    obs = future_ko_year_fractions(product, env)   # == event_times of price_with_events
-    n = len(obs)
-    return AutocallableCashLeg(
-        direction=LegDirection.BUYER_RECEIVES,
-        leg_type=AutocallableLegType.MARGIN,
-        notional=1_000_000.0, rate=0.04,
-        observation_schedule=tuple(obs),
-        accrual_factors=tuple(np.linspace(0.25, 1.0, n)),
-        settlement_schedule=tuple(obs),
-        terminal_accrual_factor=1.0,
-        terminal_settlement_time=float(obs[-1]),
-        pv_formula=PvFormula.NOTIONAL_MINUS_PAYOFF,
-    )
+def _pos(product, engine, legs, quantity=1.0):
+    return EquityPosition(product=product, quantity=quantity, entry_price=0.0,
+                          underlying="UND", engine=engine,
+                          entry_timestamp=datetime(2024, 1, 1), cash_legs=legs)
 
 
-@pytest.mark.parametrize("engine_kind", ["mc", "pde", "quad"])
-def test_margin_leg_pv_and_greeks_finite(engine_kind):
+@pytest.mark.parametrize("asset", ["snowball", "phoenix"])
+@pytest.mark.parametrize("kind", ["mc", "pde", "quad"])
+def test_margin_leg_pv_and_greeks_finite(asset, kind):
     env = make_env()
-    product = make_snowball(env)
-    engine = make_engine(engine_kind)
-    leg = _margin_leg(env, product)
-    pos = EquityPosition(product=product, engine=engine, quantity=1.0,
-                         underlying="UND", cash_legs=[leg])
-    base = pos.get_trade_value(env)
+    product = make_snowball() if asset == "snowball" else make_phoenix()
+    engine = make_engine(kind, asset)
+    leg = make_margin_leg(future_event_times(product, engine, env))
+    pos = _pos(product, engine, [leg])
     greeks = pos.get_trade_greeks(env, GreeksCalculator())
-    assert np.isfinite(base)
+    assert np.isfinite(pos.get_trade_value(env))
     assert np.isfinite(greeks["delta"]) and abs(greeks["delta"]) > 0.0
     assert np.isfinite(greeks["gamma"])
 
 
+def test_quantity_scales_trade_value_linearly():
+    env = make_env(); product = make_snowball(); engine = make_engine("pde", "snowball")
+    obs = future_event_times(product, engine, env)
+    v1 = _pos(product, engine, [make_margin_leg(obs)], quantity=1.0).get_trade_value(env)
+    v3 = _pos(product, engine, [make_margin_leg(obs)], quantity=3.0).get_trade_value(env)
+    assert abs(v3 - 3.0 * v1) <= 1e-6 * max(1.0, abs(v1))
+
+
 def test_fail_loud_when_engine_emits_no_ko_stream():
-    # A vanilla (non-autocallable) engine yields a trivial distribution → leg raises.
-    env = make_env()
-    product = make_snowball(env)
-    leg = _margin_leg(env, product)
-    from quantark.cashleg.event_distribution import EventDistribution
-    from quantark.util.exceptions import ValidationError
+    env = make_env(); product = make_snowball(); engine = make_engine("pde", "snowball")
+    leg = make_margin_leg(future_event_times(product, engine, env))
     with pytest.raises(ValidationError):
         leg.value(EventDistribution.trivial(float(leg.terminal_settlement_time)), env, 0.0)
 ```
 
-- [ ] **Step 2: Run to verify (expect pass once fixtures resolve)**
+- [ ] **Step 2: Run**
 
 Run: `.venv/bin/python -m pytest test/test_cashleg/test_autocallable_leg_position.py -q`
-Expected: PASS for all three engines (Phoenix variants gain PDE/QUAD support from Phases B/C; this task uses Snowball). If `delta == 0`, confirm the leg's `observation_schedule` exactly equals `price_with_events(...).event_distribution.event_times` (the schedule-identity guard would otherwise raise).
+Expected: PASS. If `delta == 0`, confirm the leg's `observation_schedule` equals
+`future_event_times(...)` exactly (else the schedule-identity guard raises).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add test/test_cashleg/test_autocallable_leg_position.py
-git commit -m "test(cashleg): position PV + Greeks for AutocallableCashLeg across engines"
+git commit -m "test(cashleg): position PV/Greeks across engines + quantity contract"
 ```
 
-### Task 11: Required golden-case parity fixture (PV + Greeks)
+### Task 15: Required golden-case parity (PV + per-leg delta/gamma)
 
 **Files:**
 - Create: `test/test_cashleg/fixtures/autocallable_golden_case.json`
 - Test: `test/test_cashleg/test_autocallable_leg_golden.py`
 
 **Interfaces:**
-- Consumes: the frozen golden inputs + targets (sanitized; **no proprietary trade identifier**).
-- Produces: a CI-enforced parity test (native legs vs frozen workaround targets) across supported engines.
+- Uses `EquityPosition.get_trade_value_breakdown(env) -> TradeValueBreakdown`
+  (exists, `position.py:116-148`; `leg_pvs` keyed by `leg.leg_id`,
+  quantity-scaled) for per-leg PV, and central-difference bumps for per-leg
+  delta/gamma.
 
-- [ ] **Step 1: Create the sanitized fixture**
+- [ ] **Step 1: Create the fixture (complete schema)**
 
-`test/test_cashleg/fixtures/autocallable_golden_case.json` holds the parent
-autocallable parameters, the per-future-observation accrual + settlement factors,
-the discount curve, and the frozen target PV/delta/gamma for `pv_margin`,
-`pv_interest`, `pv_rebate`. Use neutral keys; do **not** include any external
-trade identifier or vendor name. Frozen targets (model values):
+`test/test_cashleg/fixtures/autocallable_golden_case.json` — neutral keys, no
+external identifier:
 
 ```json
 {
+  "asset": "snowball",
+  "env": {"spot": 100.0, "vol": 0.22, "rate": 0.02, "div_yield": 0.0},
+  "product": {"ko_dates": [0.5, 1.0], "ko_barrier": 100.0, "ko_rate": 0.10,
+              "ki_barrier": 80.0, "maturity": 1.0},
   "legs": {
-    "pv_margin":   {"pv": 207475.74,  "delta": -1183832.92, "gamma": 98566.13},
-    "pv_interest": {"pv": -3417.10,   "delta": 17000.95,    "gamma": -1393.67},
-    "pv_rebate":   {"pv": -409798.69, "delta": -24505.34,   "gamma": 2040.32}
+    "pv_margin":   {"leg_type": "MARGIN", "pv_formula": "NOTIONAL_MINUS_PAYOFF",
+                    "direction": "BUYER_RECEIVES", "notional": 20004513.86,
+                    "rate": 0.4965986394557823, "accrual_factors": [0.5, 1.0],
+                    "terminal_accrual_factor": 2.0136986301369864},
+    "pv_interest": {"leg_type": "BACKEND_INTEREST", "pv_formula": "NORMAL",
+                    "direction": "BUYER_PAYS", "notional": 20004513.86,
+                    "rate": 0.001, "accrual_factors": [0.5, 1.0],
+                    "terminal_accrual_factor": 1.0},
+    "pv_rebate":   {"leg_type": "REBATE", "pv_formula": "NORMAL",
+                    "direction": "BUYER_PAYS", "notional": 20004513.86,
+                    "rate": 0.02, "accrual_factors": [0.5, 1.0],
+                    "terminal_accrual_factor": 1.0}
   },
-  "total_delta": -13990506.81,
-  "tolerances": {"pv": 1.0, "delta": 1000.0, "gamma": 50.0}
+  "tolerances": {"pv_rel": 5e-3, "delta_rel": 1e-2, "gamma_rel": 5e-2,
+                 "mc_pv_rel": 2e-2, "mc_delta_rel": 5e-2}
 }
 ```
 
-If the literal confirm cannot be committed, generate the parent params + factors
-so the legacy synthetic-`SnowballOption` workaround reproduces these numbers, and
-freeze the workaround's own outputs as the targets (native-vs-workaround parity
-either way).
+The frozen `targets` block (per-leg `{pv, delta, gamma}`) is produced once by
+running the native legs under PDE (Step 3) and committed alongside the fixture —
+a regression lock + cross-engine parity check. If/when the literal vendor confirm
+is authorized, replace `product`/`legs` with its sanitized parameters and freeze
+the vendor targets; the literal `207,475.74 / −3,417.10 / −409,798.69` parity
+test then lives in the adapter repo where the synthetic-`SnowballOption`
+workaround exists (spec §7 input dependency).
 
-- [ ] **Step 2: Write the parity test**
+- [ ] **Step 2: Write the parity test (`_build_case(engine_kind)` concrete; PV + delta + gamma)**
 
 ```python
 # test/test_cashleg/test_autocallable_leg_golden.py
 import json, pathlib
+from datetime import datetime
+from copy import deepcopy
 import numpy as np
 import pytest
+
+from quantark.portfolio import EquityPosition
+from quantark.cashleg.base import LegDirection
+from quantark.cashleg.autocallable_leg import (
+    AutocallableCashLeg, AutocallableLegType, PvFormula,
+)
+from test.test_cashleg._autocallable_helpers import (
+    make_env, make_snowball, make_engine, future_event_times,
+)
 
 FIX = pathlib.Path(__file__).parent / "fixtures" / "autocallable_golden_case.json"
 
 
-def _build_case():
-    """Build the parent product, engine, env, and the three legs from the fixture.
-    Implement using the same builders referenced in Task 10; map JSON params to
-    SnowballOption/PricingEnvironment fields and AutocallableCashLeg constructors.
-    Returns (env, position, expected_dict)."""
+def _build_case(engine_kind):
     data = json.loads(FIX.read_text())
-    ...  # construct from data — concrete builder lives alongside Task 10 fixtures
-    return env, position, data
+    env = make_env(**data["env"])
+    product = make_snowball(**data["product"])
+    engine = make_engine(engine_kind, data["asset"])
+    obs = future_event_times(product, engine, env)
+    legs = {}
+    for name, spec in data["legs"].items():
+        legs[name] = AutocallableCashLeg(
+            direction=LegDirection[spec["direction"]],
+            leg_type=AutocallableLegType[spec["leg_type"]],
+            pv_formula=PvFormula[spec["pv_formula"]],
+            notional=spec["notional"], rate=spec["rate"],
+            observation_schedule=tuple(obs),
+            accrual_factors=tuple(spec["accrual_factors"]),
+            settlement_schedule=tuple(obs),
+            terminal_accrual_factor=spec["terminal_accrual_factor"],
+            terminal_settlement_time=float(obs[-1]),
+        )
+    pos = EquityPosition(product=product, quantity=1.0, entry_price=0.0,
+                         underlying="UND", engine=engine,
+                         entry_timestamp=datetime(2024, 1, 1),
+                         cash_legs=list(legs.values()))
+    return env, pos, legs, data
 
 
-@pytest.mark.parametrize("engine_kind", ["mc", "pde", "quad"])
+def _leg_pv(pos, env, leg_id):
+    return pos.get_trade_value_breakdown(env).leg_pvs[leg_id].pv
+
+
+def _leg_delta_gamma(pos, env, leg_id, h=1e-3):
+    s = env.spot_quote.spot
+    up, dn = deepcopy(env), deepcopy(env)
+    up.spot_quote.spot = s * (1 + h); dn.spot_quote.spot = s * (1 - h)
+    p0 = _leg_pv(pos, env, leg_id)
+    pu = _leg_pv(pos, up, leg_id); pd = _leg_pv(pos, dn, leg_id)
+    return (pu - pd) / (2 * s * h), (pu - 2 * p0 + pd) / (s * h) ** 2
+
+
+@pytest.mark.parametrize("engine_kind", ["pde", "quad", "mc"])
 def test_golden_case_pv_and_greeks(engine_kind):
-    env, position, data = _build_case()  # _build_case selects engine by engine_kind
+    env, pos, legs, data = _build_case(engine_kind)
     tol = data["tolerances"]
-    breakdown = position.trade_value_breakdown(env)   # per-leg PV attribution
-    for name, tgt in data["legs"].items():
-        assert abs(breakdown.leg_pvs[name].pv - tgt["pv"]) <= tol["pv"], name
-    from quantark.asset.equity.riskmeasures.greeks_calculator import GreeksCalculator
-    greeks = position.get_trade_greeks(env, GreeksCalculator())
-    assert abs(greeks["delta"] - data["total_delta"]) <= tol["delta"]
+    pv_rel = tol["mc_pv_rel"] if engine_kind == "mc" else tol["pv_rel"]
+    d_rel = tol["mc_delta_rel"] if engine_kind == "mc" else tol["delta_rel"]
+    targets = data["targets"]      # frozen native-PDE values (Step 3)
+    for name, leg in legs.items():
+        pv = _leg_pv(pos, env, leg.leg_id)
+        delta, gamma = _leg_delta_gamma(pos, env, leg.leg_id)
+        t = targets[name]
+        assert abs(pv - t["pv"]) <= pv_rel * max(1.0, abs(t["pv"])), (name, "pv", pv)
+        assert abs(delta - t["delta"]) <= d_rel * max(1.0, abs(t["delta"])), (name, "delta", delta)
+        if engine_kind != "mc":
+            assert abs(gamma - t["gamma"]) <= tol["gamma_rel"] * max(1.0, abs(t["gamma"]))
 ```
 
-(If a per-leg `trade_value_breakdown` accessor does not yet exist on
-`EquityPosition`, add a thin method returning `TradeValueBreakdown` from
-`quantark/cashleg/leg_valuator.py` — it already defines `LegPV` and
-`TradeValueBreakdown`. Wire it as its own sub-step with a focused test before
-using it here.)
+- [ ] **Step 3: Write the one-shot target generator**
 
-- [ ] **Step 3: Run the parity test**
+Create `test/test_cashleg/fixtures/_generate_golden_targets.py`. It imports the
+case builder by file path (so it does not depend on the test-package import
+mode), computes per-leg PV/delta/gamma from the **PDE** engine, and writes the
+`"targets"` block back into the JSON:
 
-Run: `.venv/bin/python -m pytest test/test_cashleg/test_autocallable_leg_golden.py -q`
-Expected: PASS across mc/pde/quad within the fixture tolerances. MC uses a fixed
-seed and a tolerance band wide enough for its standard error; PDE/QUAD are tight.
+```python
+# test/test_cashleg/fixtures/_generate_golden_targets.py
+"""One-shot: freeze native-PDE golden targets into autocallable_golden_case.json.
+Re-run only to intentionally re-baseline. Run: .venv/bin/python <this file>."""
+import importlib.util, json, pathlib
 
-- [ ] **Step 4: Commit**
+_here = pathlib.Path(__file__).resolve()
+_test_file = _here.parents[1] / "test_autocallable_leg_golden.py"
+_spec = importlib.util.spec_from_file_location("golden_mod", _test_file)
+golden = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(golden)
+
+
+def main():
+    env, pos, legs, data = golden._build_case("pde")
+    data["targets"] = {}
+    for name, leg in legs.items():
+        pv = golden._leg_pv(pos, env, leg.leg_id)
+        delta, gamma = golden._leg_delta_gamma(pos, env, leg.leg_id)
+        data["targets"][name] = {"pv": pv, "delta": delta, "gamma": gamma}
+    golden.FIX.write_text(json.dumps(data, indent=2))
+    print(json.dumps(data["targets"], indent=2))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+(Loading the test file by path also pulls in `test_autocallable_leg_golden`'s own
+imports of `quantark.*` and `_autocallable_helpers`; if `_autocallable_helpers`
+cannot be imported in script context, mirror the repo's intra-test import
+convention recorded in Task 6.)
+
+- [ ] **Step 4: Generate, then lock**
+
+Run the generator (writes `targets`), then the parity test:
+
+```bash
+.venv/bin/python test/test_cashleg/fixtures/_generate_golden_targets.py
+.venv/bin/python -m pytest test/test_cashleg/test_autocallable_leg_golden.py -q
+```
+Expected: the generator prints a `targets` block and writes it into the fixture;
+the parity test then PASSES for pde/quad (tight) and mc (wider band). PDE↔QUAD
+agreement is the cross-engine correctness signal; MC-within-band confirms it.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add test/test_cashleg/fixtures/autocallable_golden_case.json \
-        test/test_cashleg/test_autocallable_leg_golden.py \
-        quantark/portfolio/equity/position.py
-git commit -m "test(cashleg): required golden-case PV+Greeks parity across engines"
+        test/test_cashleg/fixtures/_generate_golden_targets.py \
+        test/test_cashleg/test_autocallable_leg_golden.py
+git commit -m "test(cashleg): required golden-case PV+delta+gamma parity across engines"
 ```
 
-### Task 12: Full-suite green + docs touch
+### Task 16: Full-suite green + docs
 
 **Files:**
-- Modify: `quantark/cashleg/CLAUDE.md` (note the new leg type; the file currently lists stale modules — add `autocallable_leg.py` and the `AutocallableCashLeg` row, and correct the module list to match the real directory).
+- Modify: `quantark/cashleg/CLAUDE.md`
 
 - [ ] **Step 1: Run the whole suite**
 
 Run: `.venv/bin/python -m pytest -q`
-Expected: PASS (no regressions). Investigate and fix any failure before committing.
+Expected: PASS. Fix any regression before committing.
 
 - [ ] **Step 2: Update `cashleg/CLAUDE.md`**
 
 Add an `AutocallableCashLeg` row to the leg-types table (KO/coupon-contingent
 return leg; margin via `NOTIONAL_MINUS_PAYOFF`) and reconcile the "Module
-Structure" list with the actual files (`autocallable_leg.py`, and remove the
-modules that do not exist).
+Structure" list with the actual files (add `autocallable_leg.py`; remove modules
+that do not exist).
 
 - [ ] **Step 3: Commit**
 
@@ -1281,44 +1723,41 @@ git commit -m "docs(cashleg): document AutocallableCashLeg; fix module list"
 
 ## Self-Review
 
-**Spec coverage:**
+**Task map (16 tasks, 4 phases):**
 
-| Spec section | Plan task(s) |
-|--------------|--------------|
-| §3 architecture + `value_standalone` | Tasks 1, 3, 4 |
-| §3a fail-loud guard | Tasks 3, 10 |
-| §3b native Phoenix PDE event stats | Tasks 6, 7 |
-| §3b native Phoenix QUAD event stats | Tasks 8, 9 |
-| §4 dataclass (explicit settlement/terminal/schedule) | Task 1 |
-| §5 valuation (R, both PV formulas, COUPON basis) | Tasks 3, 4 |
-| §5 alignment contract (length + shifted-slice) | Tasks 1, 3 |
-| §5 `NOTIONAL_MINUS_PAYOFF` validity domain | Tasks 1, 3 |
-| §6 Greeks via existing bump loop | Task 10 |
-| §6 exports/registration | Task 5 |
-| §7 per-leg-type / invariants / regression | Tasks 3, 4, 10 |
-| §7 Phoenix PDE/QUAD-vs-MC cross-check | Tasks 6–9 |
-| §7 required golden fixture | Task 11 |
-| §8/§9 | Tasks 6–11 scope |
+| Phase | Tasks | Deliverable |
+|-------|-------|-------------|
+| A — leg core | 0–5 | dataclass, valuation, guards, COUPON basis, standalone, exports |
+| (bridge) | 6 | shared real test builders (`_autocallable_helpers.py`) |
+| B — Phoenix PDE | 7–9 | Snowball refactor → Phoenix KO/KI → coupon surfaces |
+| C — Phoenix QUAD | 10–12 | Snowball refactor → Phoenix KO/KI (drop MC) → coupon surfaces |
+| D — integration | 13–16 | EventDistribution path + COUPON position, position Greeks + quantity, golden parity, full-suite + docs |
 
-All five leg types are exercised: margin (Task 11 `pv_margin` + Task 3),
-backend_interest (Task 11 `pv_interest`), rebate (Task 11 `pv_rebate`); backend_premium
-and minimum_return share the `NORMAL`/`KO_MATURITY` path proven in Task 3 — add a
-parametrized unit case over all five `AutocallableLegType` values to Task 3's file
-so requirement #6's "cover all 5 leg types" is explicit.
+**Spec coverage:** §3 architecture/standalone → Tasks 1,3,4; §3a fail-loud →
+Tasks 3,14; §3b Phoenix PDE → 7–9, Phoenix QUAD → 10–12; §4 dataclass → 1; §5
+valuation/alignment/`NOTIONAL_MINUS_PAYOFF` → 1,3,4; §6 Greeks/exports → 5,14;
+§7 per-type/invariants/regression → 3,4,14, Phoenix-vs-MC → 8,9,11,12, required
+golden → 15; §8/§9 → 7–15.
 
-**Placeholder scan:** the only deliberately-deferred specifics are the project's
-existing test fixtures/builders (`_phoenix_fixtures`, `_autocall_fixtures`),
-flagged with the exact `grep` to locate them in Task 0/6/10, and the JSON→objects
-mapping in Task 11's `_build_case` (depends on those builders). These are
-codebase-discovery steps, not logic placeholders.
+**Review findings (Stage-4) resolution:**
+- P1 fixture imports → Task 6 creates the real `_autocallable_helpers.py`; every test imports it (no phantom modules).
+- P1 golden placeholder → Task 15 has a complete JSON schema, concrete `_build_case(engine_kind)`, per-leg PV+delta+gamma via existing `get_trade_value_breakdown` + bumps, frozen targets; vendor-literal parity documented as the adapter-side test (spec §7 input dependency).
+- P2 Snowball files / oversized refactors → split into dedicated refactor tasks (7, 10) with Snowball regression, then Phoenix enablement (8, 11), then coupons (9, 12); each task's Files list names the Snowball file it edits.
+- P2 simultaneous coupon/KO → convention verified from `phoenix_mc_engine.py:744-757` and stated in the Phase B note; overlapping-barrier tests in Tasks 9, 12.
+- P2 EventDistribution path → Task 13 tests `price_with_events` COUPON mapping + a COUPON-basis position across engines.
+- P2 no-MC-inside enforcement → `test_*_module_has_no_mc_import` static assertions (Tasks 8, 11) plus removal of the MC import (Task 11).
+- P3 schedule validation → Task 1 validates finite/non-negative schedule values (+ NaN/negative tests).
+- P3 quantity/notional contract → Task 14 `test_quantity_scales_trade_value_linearly` + Task 3 `test_value_ignores_position_notional_argument`.
 
-**Type consistency:** `_make_event_stats(**fields)` / `_event_stats_product_type()`
-seams are introduced once (Task 6) and reused identically (Tasks 7–9);
-`AutocallableCashLeg.value(event_dist, env, position_notional)` and
-`value_standalone(parent_product, engine, env)` signatures are stable across
-Tasks 3, 4, 10, 11; `PhoenixEventStats` coupon field names
-(`coupon_probability`, `expected_discounted_coupon_cashflow`) match
-`event_stats.py:48-61`.
+**Placeholder scan:** the only intentional run-time fill is Task 15's `targets`
+block (frozen from a Step-3 PDE run — a normal golden-lock, not a logic gap) and
+the documented external-data dependency for vendor-literal numbers. No `...` in
+logic paths.
 
-**Added during review:** the parametrized all-five-leg-types unit case (Task 3),
-and the `trade_value_breakdown` accessor sub-step (Task 11) if absent.
+**Type consistency:** the `_event_stats_product_type()` / `_make_event_stats(**fields)`
+/ `_compute_event_stats(product, env)` hook trio is defined once per engine family
+(Tasks 7, 10) and reused identically (8, 9, 11, 12); `make_*` builder signatures
+match every call site; `EquityPosition(...)` is always constructed with the full
+field set (`product, quantity, entry_price, underlying, engine, entry_timestamp,
+cash_legs`) confirmed from `position.py`; `get_trade_value_breakdown` keys on
+`leg.leg_id` as the source defines.
