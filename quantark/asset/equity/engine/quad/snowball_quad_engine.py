@@ -398,6 +398,25 @@ class SnowballQuadEngine(BaseEngine):
             self, spot, product, ki_barrier_override=ki_barrier_override
         )
 
+    # --- Extra indicator-row hooks (overridden by Phoenix for coupons) ---
+
+    def _n_extra_quad_rows(self, n_ko: int) -> int:
+        """Extra stacked indicator rows beyond the ``n_ko`` KO rows."""
+        return 0
+
+    def _set_extra_quad_indicators(
+        self, v_in, v_out, spot_grid, n_ko, ko_index, ko_record, obs_time,
+        rate, product, disable_ko_after_ki,
+    ) -> None:
+        """Set extra indicator rows at a KO observation (no-op for Snowball)."""
+        return None
+
+    def _extract_extra_quad_stats(
+        self, initial_surface, math_utils, n_ko, ko_records, rate
+    ) -> dict:
+        """Extra event-stats fields from the extra rows (none for Snowball)."""
+        return {}
+
     def _compute_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Optional[AutocallableEventStats]:
@@ -503,9 +522,12 @@ class SnowballQuadEngine(BaseEngine):
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
 
         # --- KO indicator recursion (stacked over KO observations) ---
+        # Rows [0..n_ko-1] are KO indicators; subclasses may append extra rows
+        # (e.g. Phoenix coupon-trigger rows) that ride the same diffusion/jumps.
         n_ko = len(ko_records)
-        v_in = np.zeros((n_ko, grid.size), dtype=float)
-        v_out = np.zeros((n_ko, grid.size), dtype=float)
+        n_rows = n_ko + self._n_extra_quad_rows(n_ko)
+        v_in = np.zeros((n_rows, grid.size), dtype=float)
+        v_out = np.zeros((n_rows, grid.size), dtype=float)
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
@@ -534,6 +556,12 @@ class SnowballQuadEngine(BaseEngine):
                 if not disable_ko_after_ki:
                     v_in[:, ko_mask] = 0.0
                     v_in[int(ko_index), ko_mask] = float(discount_delay)
+                # Extra rows (coupon) are set AFTER the KO zeroing so a coupon at a
+                # simultaneous KO is retained; future-coupon rows stay zeroed by KO.
+                self._set_extra_quad_indicators(
+                    v_in, v_out, spot_grid, n_ko, int(ko_index), ko_record,
+                    obs_time, rate, product, disable_ko_after_ki,
+                )
 
             if ki_continuous:
                 # KI transition handled via Brownian bridge in diffusion step.
@@ -723,6 +751,10 @@ class SnowballQuadEngine(BaseEngine):
             if df_T > 0:
                 ki_probability = float(pv_ki_no_ko / df_T)
 
+        extra_fields = self._extract_extra_quad_stats(
+            initial_surface, math_utils, n_ko, ko_records, rate
+        )
+
         return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
@@ -735,6 +767,7 @@ class SnowballQuadEngine(BaseEngine):
             ki_times=ki_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
+            **extra_fields,
         )
 
     def _validate_product(self, product: SnowballOption) -> None:

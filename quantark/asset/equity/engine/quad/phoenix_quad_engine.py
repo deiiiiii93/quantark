@@ -491,6 +491,44 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         return PhoenixEventStats(**fields)
 
+    def _n_extra_quad_rows(self, n_ko: int) -> int:
+        # One coupon-trigger indicator row per observation.
+        return n_ko
+
+    def _coupon_barrier_for_obs(self, product, obs_index: int) -> float:
+        cb = product.coupon_config.coupon_barrier
+        if isinstance(cb, list):
+            return float(cb[obs_index])
+        return float(cb)
+
+    def _set_extra_quad_indicators(
+        self, v_in, v_out, spot_grid, n_ko, ko_index, ko_record, obs_time,
+        rate, product, disable_ko_after_ki,
+    ) -> None:
+        barrier = self._coupon_barrier_for_obs(product, ko_index)
+        pay_mask = (
+            spot_grid <= barrier if product.is_reverse else spot_grid >= barrier
+        )
+        coup_row = n_ko + ko_index
+        # Undiscounted coupon-hit indicator (1.0 at the observation); the
+        # probability is recovered by dividing by exp(-r*obs) at extraction,
+        # matching the Phoenix MC reference (coupon_probability = mean(coupon_hit)).
+        v_out[coup_row, pay_mask] = 1.0
+        if not disable_ko_after_ki:
+            v_in[coup_row, pay_mask] = 1.0
+
+    def _extract_extra_quad_stats(
+        self, initial_surface, math_utils, n_ko, ko_records, rate
+    ) -> dict:
+        coupon_probability = np.zeros(n_ko, dtype=float)
+        for i, rec in enumerate(ko_records):
+            obs_time = float(rec.observation_time)
+            ed_coup = float(math_utils.interpolate(initial_surface[n_ko + i], x=0.0))
+            df_obs = math.exp(-rate * obs_time)
+            if df_obs > 0.0:
+                coupon_probability[i] = float(ed_coup / df_obs)
+        return {"coupon_probability": coupon_probability}
+
     def __repr__(self):
         return "PhoenixQuadEngine()"
 
