@@ -366,18 +366,28 @@ class SnowballQuadEngine(BaseEngine):
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Optional[AutocallableEventStats]:
-        """
-        Provide per-observation KO probabilities and expected discounted cashflows.
+        """Provide per-observation KO probabilities and expected discounted cashflows.
 
-        This implementation runs a single quadrature recursion for all KO observations
-        by propagating stacked indicator surfaces. It is typically much faster than MC
-        for risk-neutral event stats.
+        Runs a single quadrature recursion over stacked indicator surfaces; usually
+        much faster than MC for risk-neutral event stats.
         """
-        if not isinstance(product, SnowballOption):
+        if not isinstance(product, self._event_stats_product_type()):
             return None
         if pricing_env is None:
             raise PricingError("PricingEnvironment is required for SnowballQuadEngine.")
+        return self._compute_event_stats(product, pricing_env)
 
+    def _event_stats_product_type(self) -> type:
+        """Product type accepted by ``calculate_event_stats`` (overridable)."""
+        return SnowballOption
+
+    def _make_event_stats(self, **fields) -> AutocallableEventStats:
+        """Construct the event-stats dataclass (overridable by subclasses)."""
+        return AutocallableEventStats(**fields)
+
+    def _compute_event_stats(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Optional[AutocallableEventStats]:
         self._validate_product(product)
 
         spot = pricing_env.spot
@@ -700,7 +710,7 @@ class SnowballQuadEngine(BaseEngine):
             if df_T > 0:
                 ki_probability = float(pv_ki_no_ko / df_T)
 
-        return AutocallableEventStats(
+        return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
             ko_probability=ko_prob,
@@ -1218,7 +1228,7 @@ class SnowballQuadEngine(BaseEngine):
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
 
-        return AutocallableEventStats(
+        return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
             ko_probability=ko_probability,
