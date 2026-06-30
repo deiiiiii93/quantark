@@ -43,6 +43,16 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._coupon_amounts: np.ndarray = np.array([])
         self._coupon_cumulative: np.ndarray = np.array([])
 
+    # --- Native event stats (no MC): reuse the Snowball KO/KI machinery ---
+
+    def _event_stats_product_type(self) -> type:
+        return PhoenixOption
+
+    def _make_event_stats(self, **fields):
+        from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+
+        return PhoenixEventStats(**fields)
+
     # price() and calculate_greeks() are inherited from SnowballPDESolver
     # The _check_product_type() method uses _supported_product_type to validate
 
