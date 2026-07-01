@@ -325,14 +325,85 @@ class SnowballPDESolver(BasePDESolver):
         return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
 
     def calculate_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        npv: Optional[float] = None,
+        streams: Optional[frozenset] = None,
     ) -> Optional[AutocallableEventStats]:
-        """Provide per-observation KO probabilities and expected discounted cashflows."""
+        """Provide per-observation KO probabilities and expected discounted cashflows.
+
+        ``npv`` / ``streams`` support the single-pass ``price_with_events`` path
+        (skip the internal value solve; prune unrequested indicator columns).
+        """
         if not isinstance(product, self._event_stats_product_type()):
             return None
         if pricing_env is None:
             return None
-        return self._compute_event_stats(product, pricing_env)
+        return self._compute_event_stats(product, pricing_env, npv=npv, streams=streams)
+
+    def price_with_events(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        emit_distribution: bool = True,
+        streams: Optional[frozenset] = None,
+    ) -> "PricingResult":
+        """Single-pass NPV + event distribution [§11.2, §11.3].
+
+        Replicates ``price()``'s expired / immediate-KO short-circuits before any
+        combined solve, then runs the value sweep once and reuses its NPV for the
+        event-distribution residual (no internal re-price), pruning indicator
+        columns to ``streams``.
+        """
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+
+        self._check_product_type(product)
+        if pricing_env is None:
+            raise ValidationError(
+                f"PricingEnvironment is required for {self._solver_name}"
+            )
+        self._validate_product(product)
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        # [§11.3] short-circuits: return the exact price() value with a degenerate
+        # (maturity-only) distribution, without running the indicator sweep.
+        if tau <= 0 or is_zero(tau):
+            npv = float(self._calculate_terminal_value(product, spot, pricing_env))
+            return PricingResult(
+                npv=npv,
+                event_distribution=EventDistribution.trivial(max(float(tau), 0.0)),
+            )
+        if self._is_knocked_out_at_valuation(product, spot, pricing_env):
+            npv = float(self._get_immediate_ko_payoff(product, pricing_env))
+            return PricingResult(
+                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
+            )
+        if not emit_distribution:
+            npv = float(self.price(product, pricing_env))
+            return PricingResult(
+                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
+            )
+
+        # Single value sweep -> npv, reused by the event-distribution residual.
+        result = self._solve(product, pricing_env)
+        npv = float(
+            self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+        )
+        stats = self.calculate_event_stats(
+            product, pricing_env, npv=npv, streams=streams
+        )
+        if stats is None:
+            return PricingResult(
+                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
+            )
+        return PricingResult(
+            npv=npv,
+            event_distribution=EventDistribution.from_autocallable_stats(stats),
+        )
 
     def _event_stats_product_type(self) -> type:
         """Product type accepted by ``calculate_event_stats`` (overridable)."""

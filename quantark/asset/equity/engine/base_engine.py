@@ -69,6 +69,7 @@ class BaseEngine(ABC):
         product: BaseEquityProduct,
         pricing_env: PricingEnvironment,
         emit_distribution: bool = True,
+        streams: "Optional[frozenset]" = None,
     ) -> "PricingResult":
         """
         Return product NPV and an event distribution for cash-leg valuation.
@@ -77,6 +78,10 @@ class BaseEngine(ABC):
         generalized EventDistribution. Engines without event stats fall back to
         a maturity-only distribution, which is sufficient for deterministic and
         full-schedule cash legs.
+
+        ``streams`` (the EventType set the caller needs, [§11.1]) is honored by
+        engines that support column pruning (the PDE autocallable solvers);
+        other engines ignore it and return the full distribution.
         """
         from quantark.cashleg.event_distribution import EventDistribution, PricingResult
 

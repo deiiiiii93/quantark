@@ -57,8 +57,17 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     # price() is inherited from SnowballPDESolver using _check_product_type()
 
     def calculate_event_stats(
-        self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment
+        self,
+        product: KnockOutResetSnowballOption,
+        pricing_env: PricingEnvironment,
+        *,
+        npv: Optional[float] = None,
+        streams: Optional[frozenset] = None,
     ) -> Optional[object]:
+        # streams is ignored: the KO-reset stats are QUAD-delegated (full
+        # distribution), not a prunable PDE indicator sweep. npv, when supplied
+        # by the single-pass price_with_events, is the PDE value used for the
+        # reconciliation residual (avoids a redundant self.price() solve).
         if not isinstance(product, KnockOutResetSnowballOption):
             return None
         if pricing_env is None:
@@ -75,7 +84,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         if quad_stats is None:
             return None
 
-        pde_pv = float(self.price(product, pricing_env))
+        pde_pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
         pv_delta = pde_pv - float(quad_stats.pv)
         return replace(
             quad_stats,
