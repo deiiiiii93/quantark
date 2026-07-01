@@ -8,6 +8,7 @@ to the V1 surface (ABSOLUTE post-KO mode only).
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import replace
 from time import perf_counter
 from typing import Dict, List, Optional, Tuple
 
@@ -15,6 +16,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
@@ -57,7 +59,31 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     def calculate_event_stats(
         self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment
     ) -> Optional[object]:
-        return None
+        if not isinstance(product, KnockOutResetSnowballOption):
+            return None
+        if pricing_env is None:
+            return None
+
+        from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
+            KOResetSnowballQuadEngine,
+        )
+
+        grid_points = max(501, int(getattr(self.params, "grid_size", 0) or 0))
+        quad_stats = KOResetSnowballQuadEngine(
+            QuadParams(grid_points=grid_points)
+        ).calculate_event_stats(product, pricing_env)
+        if quad_stats is None:
+            return None
+
+        pde_pv = float(self.price(product, pricing_env))
+        pv_delta = pde_pv - float(quad_stats.pv)
+        return replace(
+            quad_stats,
+            pv=pde_pv,
+            expected_discounted_maturity_cashflow=(
+                float(quad_stats.expected_discounted_maturity_cashflow) + pv_delta
+            ),
+        )
 
     def _validate_product(self, product: KnockOutResetSnowballOption) -> None:
         super()._validate_product(product)

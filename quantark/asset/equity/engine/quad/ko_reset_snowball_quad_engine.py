@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
+from quantark.asset.equity.engine.event_stats import KOResetEventStats
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.param import QuadParams
@@ -317,8 +318,341 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> Optional[object]:
-        return None
+    ) -> Optional[KOResetEventStats]:
+        if not isinstance(product, KnockOutResetSnowballOption):
+            return None
+        if pricing_env is None:
+            raise PricingError("PricingEnvironment is required for KOResetSnowballQuadEngine.")
+        return self._compute_event_stats(product, pricing_env)
+
+    def _compute_event_stats(
+        self,
+        product: KnockOutResetSnowballOption,
+        pricing_env: PricingEnvironment,
+    ) -> Optional[KOResetEventStats]:
+        self._validate_product(product)
+
+        spot = pricing_env.spot
+        maturity = product.get_maturity(pricing_env)
+        validate_positive(spot, "spot")
+        validate_positive(maturity, "maturity", allow_zero=True)
+        if is_zero(maturity, tol=Tolerance.ZERO):
+            return None
+
+        rate = pricing_env.get_rate(maturity)
+        div = pricing_env.get_div_yield(maturity)
+        vol = pricing_env.get_vol(product.strike, maturity)
+        validate_positive(vol, "volatility")
+        validate_non_negative(div, "dividend_yield")
+        if vol > 5.0:
+            raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
+
+        pre_ko_records = self._resolve_ko_records(
+            product, pricing_env, product.barrier_config
+        )
+        pre_ko_records = [
+            rec
+            for rec in pre_ko_records
+            if rec.observation_time <= maturity
+            or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
+        ]
+        if not pre_ko_records:
+            return None
+
+        post_ko_records = self._resolve_ko_records(
+            product, pricing_env, product.post_barrier_config
+        )
+        post_ko_records = [
+            rec
+            for rec in post_ko_records
+            if rec.observation_time <= maturity
+            or is_close(rec.observation_time, maturity, abs_tol=Tolerance.PRECISION)
+        ]
+        if not post_ko_records:
+            return None
+
+        ki_continuous = product.has_ki_barrier and (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        ki_records: Sequence = []
+        if product.has_ki_barrier and not ki_continuous:
+            ki_records = product.resolve_ki_observations(pricing_env)
+            if not ki_records:
+                raise PricingError("KI observation schedule is empty for KOResetSnowballQuadEngine.")
+
+        times = self._merge_times(
+            [rec.observation_time for rec in pre_ko_records]
+            + [rec.observation_time for rec in post_ko_records],
+            [rec.observation_time for rec in ki_records],
+            maturity,
+        )
+        if not times:
+            return None
+
+        align_log = self._select_alignment_log(spot, product)
+        fft_padding_factor = self._resolve_fft_padding_factor()
+        fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
+        math_utils = QuadratureMath(
+            grid_x=self.params.grid_points,
+            spot=spot,
+            maturity=maturity,
+            vol_max=vol,
+            num_std_devs=self.params.num_std_devs,
+            align_log=align_log,
+            fft_padding_factor=fft_padding_factor,
+            fft_filter_alpha=fft_filter_alpha,
+            fft_filter_power=fft_filter_power,
+        )
+        grid = math_utils.grid
+        spot_grid = spot * np.exp(grid)
+        dt = self._build_dt(times)
+        tau = 0.5 * vol * vol * dt
+        if np.any(tau[1:] <= 0.0):
+            raise ValidationError("time step too small for quadrature solver.")
+
+        alpha = (rate - div - 0.5 * vol * vol) / (vol * vol)
+        beta = (rate - div - 0.5 * vol * vol) ** 2 / (vol**4) + 2.0 * rate / (
+            vol * vol
+        )
+
+        n_pre = len(pre_ko_records)
+        n_post = len(post_ko_records)
+        post_offset = n_pre
+        ki_col = n_pre + n_post
+        ki_ever_col = ki_col + 1
+        n_rows = ki_ever_col + 1
+
+        v_in = np.zeros((n_rows, grid.size), dtype=float)
+        v_out = np.zeros((n_rows, grid.size), dtype=float)
+        v_in[ki_col] = 1.0
+        v_in[ki_ever_col] = 1.0
+
+        log_ki_barrier = None
+        if product.has_ki_barrier and ki_continuous:
+            if product.barrier_config.ki_barrier is None:
+                raise PricingError("KI barrier configuration is missing.")
+            if isinstance(product.barrier_config.ki_barrier, list):
+                raise PricingError("Continuous KI requires scalar ki_barrier.")
+            log_ki_barrier = safe_log(product.barrier_config.ki_barrier / spot)
+
+        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
+            product,
+            spot,
+            pricing_env,
+            ki_continuous=ki_continuous,
+            ki_records=ki_records,
+        )
+        full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
+        omega_grid = math_utils.z_grid
+        disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
+        smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
+
+        for step_index in range(len(times), 0, -1):
+            obs_time = times[step_index - 1]
+
+            pre_ko_record = self._match_record(obs_time, pre_ko_records)
+            if pre_ko_record is not None:
+                pre_idx = pre_ko_records.index(pre_ko_record)
+                ko_weight = self._smooth_step_weight(
+                    grid,
+                    pre_ko_record.barrier,
+                    spot,
+                    smoothing_width,
+                    trigger_is_down=product.is_reverse,
+                )
+                if ko_weight is None:
+                    ko_mask = (
+                        spot_grid <= pre_ko_record.barrier
+                        if product.is_reverse
+                        else spot_grid >= pre_ko_record.barrier
+                    )
+                    ko_weight = ko_mask.astype(float)
+
+                ever_before = v_out[ki_ever_col].copy()
+                v_out *= 1.0 - ko_weight
+                v_out[pre_idx] += ko_weight * float(
+                    self._ko_discount(rate, obs_time, pre_ko_record.settlement_time)
+                )
+                v_out[ki_ever_col] = ever_before
+
+            post_ko_record = self._match_record(obs_time, post_ko_records)
+            if post_ko_record is not None and not disable_ko_after_ki:
+                post_idx = post_ko_records.index(post_ko_record)
+                ko_weight = self._smooth_step_weight(
+                    grid,
+                    post_ko_record.barrier,
+                    spot,
+                    smoothing_width,
+                    trigger_is_down=product.is_reverse,
+                )
+                if ko_weight is None:
+                    ko_mask = (
+                        spot_grid <= post_ko_record.barrier
+                        if product.is_reverse
+                        else spot_grid >= post_ko_record.barrier
+                    )
+                    ko_weight = ko_mask.astype(float)
+
+                ever_before = v_in[ki_ever_col].copy()
+                v_in *= 1.0 - ko_weight
+                v_in[post_offset + post_idx] += ko_weight * float(
+                    self._ko_discount(rate, obs_time, post_ko_record.settlement_time)
+                )
+                v_in[ki_ever_col] = ever_before
+
+            if ki_continuous and log_ki_barrier is not None:
+                ki_mask = (
+                    spot_grid >= product.barrier_config.ki_barrier
+                    if product.is_reverse
+                    else spot_grid <= product.barrier_config.ki_barrier
+                )
+                v_out[:, ki_mask] = v_in[:, ki_mask]
+            elif ki_records:
+                ki_record = self._match_record(obs_time, ki_records)
+                if ki_record is not None:
+                    ki_mask = (
+                        spot_grid >= ki_record.barrier
+                        if product.is_reverse
+                        else spot_grid <= ki_record.barrier
+                    )
+                    v_out[:, ki_mask] = v_in[:, ki_mask]
+
+            tau_step = float(tau[step_index])
+            prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
+            omega_array = np.exp(
+                -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
+            )
+
+            v_in = self._diffuse_fft(
+                v_in,
+                math_utils,
+                omega_array,
+                prefactor,
+                full_p_lr,
+                full_p_ur,
+                full_p0,
+                alpha,
+                beta,
+                tau_step,
+            )
+
+            if ki_continuous and log_ki_barrier is not None:
+                v_out = self._diffuse_with_bridge(
+                    v_out,
+                    v_in,
+                    math_utils,
+                    omega_array,
+                    prefactor,
+                    full_p_lr,
+                    full_p_ur,
+                    full_p0,
+                    log_ki_barrier,
+                    alpha,
+                    beta,
+                    vol,
+                    dt[step_index],
+                    tau_step,
+                    product.is_reverse,
+                )
+            else:
+                v_out = self._diffuse_fft(
+                    v_out,
+                    math_utils,
+                    omega_array,
+                    prefactor,
+                    full_p_lr,
+                    full_p_ur,
+                    full_p0,
+                    alpha,
+                    beta,
+                    tau_step,
+                )
+
+        initial_surface = v_in if knocked_in_at_valuation else v_out
+        pre_unit = np.array(
+            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_pre)],
+            dtype=float,
+        )
+        post_unit = np.array(
+            [
+                math_utils.interpolate(initial_surface[post_offset + i], x=0.0)
+                for i in range(n_post)
+            ],
+            dtype=float,
+        )
+
+        pre_times = np.array([rec.observation_time for rec in pre_ko_records], dtype=float)
+        post_times = np.array([rec.observation_time for rec in post_ko_records], dtype=float)
+        pre_probability = np.zeros(n_pre, dtype=float)
+        post_probability = np.zeros(n_post, dtype=float)
+        expected_discounted_pre_ko_cashflow = np.zeros(n_pre, dtype=float)
+        expected_discounted_post_ko_cashflow = 0.0
+
+        for i, rec in enumerate(pre_ko_records):
+            df_total = math.exp(-rate * float(rec.observation_time)) * float(
+                self._ko_discount(rate, float(rec.observation_time), rec.settlement_time)
+            )
+            if df_total > 0:
+                pre_probability[i] = float(pre_unit[i] / df_total)
+            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
+            expected_discounted_pre_ko_cashflow[i] = float(pre_unit[i] * payoff)
+
+        for i, rec in enumerate(post_ko_records):
+            df_total = math.exp(-rate * float(rec.observation_time)) * float(
+                self._ko_discount(rate, float(rec.observation_time), rec.settlement_time)
+            )
+            if df_total > 0:
+                post_probability[i] = float(post_unit[i] / df_total)
+            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
+            expected_discounted_post_ko_cashflow += float(post_unit[i] * payoff)
+
+        df_maturity = math.exp(-rate * maturity)
+        ki_survive = 0.0
+        ki_ever = 0.0
+        if df_maturity > 0.0:
+            ki_survive = float(
+                math_utils.interpolate(initial_surface[ki_col], x=0.0) / df_maturity
+            )
+            ki_ever = float(
+                math_utils.interpolate(initial_surface[ki_ever_col], x=0.0)
+                / df_maturity
+            )
+
+        survival_probability = np.ones(n_pre, dtype=float)
+        cumulative_pre_ko = 0.0
+        for i in range(n_pre):
+            cumulative_pre_ko += pre_probability[i]
+            survival_probability[i] = max(0.0, 1.0 - cumulative_pre_ko)
+
+        pv = float(self.price(product, pricing_env))
+        expected_discounted_maturity_cashflow = float(
+            pv
+            - float(np.sum(expected_discounted_pre_ko_cashflow))
+            - expected_discounted_post_ko_cashflow
+        )
+
+        return KOResetEventStats(
+            pv=pv,
+            ko_times=pre_times,
+            ko_probability=pre_probability,
+            survival_probability=survival_probability,
+            expected_discounted_ko_cashflow=expected_discounted_pre_ko_cashflow,
+            ki_probability=ki_ever,
+            expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
+            reconciliation_error=0.0,
+            ki_ever_probability=ki_ever,
+            ki_survive_knocked_in_probability=ki_survive,
+            pre_ko_times=pre_times,
+            pre_ko_probability=pre_probability,
+            post_ko_times=post_times,
+            post_ko_probability=post_probability,
+            pre_ko_probability_total=float(np.sum(pre_probability)),
+            post_ko_probability_total=float(np.sum(post_probability)),
+            expected_discounted_post_ko_cashflow=float(
+                expected_discounted_post_ko_cashflow
+            ),
+        )
 
     def _validate_product(self, product: KnockOutResetSnowballOption) -> None:
         if product.barrier_config.ko_observation_type != ObservationType.DISCRETE:

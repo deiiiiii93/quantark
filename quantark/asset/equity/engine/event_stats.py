@@ -9,6 +9,7 @@ autocallable products (Snowball-first).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 
@@ -24,12 +25,26 @@ class AutocallableEventStats:
         ko_probability: Probability of KO occurring at each observation time.
         survival_probability: Probability of surviving (not KO'd) up to each observation.
         expected_discounted_ko_cashflow: Expected discounted KO redemption cashflow at each observation.
-        ki_probability: Probability that KI occurred at least once before maturity (if applicable).
+        ki_probability: LEGACY KI probability whose *definition differs by engine* — kept
+            for backward compatibility. QUAD/PDE report P(KI ever AND never KO)
+            (the KI indicator is absorbed to 0 on any KO), while MC reports
+            P(KI ever). Prefer the two unambiguous, cross-engine-consistent fields
+            below; ``ki_probability`` is retained only so existing callers do not
+            break.
         expected_discounted_maturity_cashflow: Expected discounted maturity cashflow (conditional on no KO).
         reconciliation_error: pv minus sum(expected discounted cashflows) if computed, else 0.0.
         ki_times: KI observation/monitoring times where event probabilities are available.
         ki_event_probability: Probability of first KI occurring at each KI time.
         ki_survival_probability: Probability of surviving without KI up to each KI time.
+        ki_ever_probability: P(the KI barrier is breached at any point in the
+            path's life, regardless of any subsequent KO/autocall). A *monitoring*
+            statistic. ``None`` if the engine does not compute it.
+        ki_survive_knocked_in_probability: P(KI breached AND the path reaches
+            maturity without ever knocking out) = P(the note settles in the
+            knocked-in state). This is the *economically relevant* quantity for
+            downside exposure / loss distribution (a path that knocks in and then
+            recovers to autocall redeems at par, so it carries no KI loss). Equals
+            ``ki_ever_probability`` minus P(KI AND KO). ``None`` if not computed.
     """
 
     pv: float
@@ -43,6 +58,8 @@ class AutocallableEventStats:
     ki_times: np.ndarray = field(default_factory=lambda: np.array([]))
     ki_event_probability: np.ndarray = field(default_factory=lambda: np.array([]))
     ki_survival_probability: np.ndarray = field(default_factory=lambda: np.array([]))
+    ki_ever_probability: Optional[float] = None
+    ki_survive_knocked_in_probability: Optional[float] = None
 
 
 @dataclass(frozen=True)

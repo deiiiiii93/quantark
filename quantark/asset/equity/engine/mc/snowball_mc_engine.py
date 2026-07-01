@@ -422,22 +422,31 @@ class SnowballMCEngine(BaseEngine):
         )
         reconciliation_error = pv - pv_cashflows
 
+        # Unambiguous, cross-engine-consistent KI definitions (investigation
+        # 2026-07-01): ki_ever = P(KI ever, KO-independent); ki_survive =
+        # P(KI ever AND never KO) = settles knocked-in. Legacy ki_probability keeps
+        # MC's historical "KI ever" meaning.
+        if product.has_ki_barrier or already_knocked_in:
+            ki_ever_probability = float(np.mean(ki_triggered))
+            ki_survive_knocked_in_probability = float(np.mean(ki_triggered & ~is_ko))
+        else:
+            ki_ever_probability = 0.0
+            ki_survive_knocked_in_probability = 0.0
+
         return AutocallableEventStats(
             pv=pv,
             ko_times=ko_times,
             ko_probability=ko_probability,
             survival_probability=survival_probability,
             expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
-            ki_probability=(
-                float(np.mean(ki_triggered))
-                if product.has_ki_barrier or already_knocked_in
-                else 0.0
-            ),
+            ki_probability=ki_ever_probability,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
             reconciliation_error=float(reconciliation_error),
             ki_times=ki_event_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
+            ki_ever_probability=ki_ever_probability,
+            ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
         )
 
     def _calculate_event_stats_ko_reset(
@@ -551,6 +560,10 @@ class SnowballMCEngine(BaseEngine):
             ki_probability=float(np.mean(ki_triggered)),
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
             reconciliation_error=float(reconciliation_error),
+            # ki_ever = P(KI ever, KO-independent); ki_survive = P(KI ever AND
+            # never KO'd, pre- or post-reset). Legacy ki_probability stays "KI ever".
+            ki_ever_probability=float(np.mean(ki_triggered)),
+            ki_survive_knocked_in_probability=float(np.mean(ki_triggered & ~is_ko)),
             pre_ko_times=pre_times,
             pre_ko_probability=pre_prob,
             post_ko_times=post_times,

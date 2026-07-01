@@ -298,20 +298,35 @@ class PhoenixMCEngine(BaseEngine):
                     0.0, 1.0 - np.cumsum(ki_event_probability)
                 )
 
+        # Unambiguous, cross-engine-consistent KI definitions (investigation
+        # 2026-07-01). `ki_ever` counts any path that touches the KI barrier;
+        # `ki_survive` restricts to paths that also reach maturity without KO
+        # (i.e. the note settles knocked-in). The legacy `ki_probability` keeps
+        # MC's historical "KI ever" meaning.
+        if product.has_ki_barrier:
+            ki_triggered = np.asarray(stats["ki_triggered"], dtype=bool)
+            ki_ever_probability = float(np.mean(ki_triggered))
+            ki_survive_knocked_in_probability = float(
+                np.mean(ki_triggered & ~is_ko)
+            )
+        else:
+            ki_ever_probability = 0.0
+            ki_survive_knocked_in_probability = 0.0
+
         return PhoenixEventStats(
             pv=pv,
             ko_times=np.array(ko_times, dtype=float),
             ko_probability=ko_probability,
             survival_probability=survival_probability,
             expected_discounted_ko_cashflow=expected_discounted_ko_cashflow,
-            ki_probability=float(np.mean(stats["ki_triggered"]))
-            if product.has_ki_barrier
-            else 0.0,
+            ki_probability=ki_ever_probability,
             expected_discounted_maturity_cashflow=expected_discounted_maturity_cashflow,
             reconciliation_error=float(reconciliation_error),
             ki_times=ki_event_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
+            ki_ever_probability=ki_ever_probability,
+            ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
             coupon_probability=coupon_probabilities,
             expected_discounted_coupon_cashflow=coupon_cashflows,
         )

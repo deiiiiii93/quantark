@@ -97,7 +97,16 @@ class EventDistribution:
 
         ko_total = float(np.sum(ko_probability))
         maturity_probability = max(0.0, 1.0 - ko_total)
-        maturity_with_ki = min(maturity_probability, max(0.0, float(stats.ki_probability)))
+        # MATURITY_WITH_KI is the mass that reaches maturity in the knocked-in
+        # state, so it must use P(KI ever AND never KO), NOT P(KI ever): a path
+        # that knocks in and later autocalls redeems at par and carries no KI
+        # loss. Prefer the unambiguous `ki_survive_knocked_in_probability`; fall
+        # back to the legacy `ki_probability` for engines that do not populate it
+        # (QUAD/PDE already report the "settles knocked-in" value there).
+        ki_settle = stats.ki_survive_knocked_in_probability
+        if ki_settle is None:
+            ki_settle = stats.ki_probability
+        maturity_with_ki = min(maturity_probability, max(0.0, float(ki_settle)))
         maturity_no_ko = max(0.0, maturity_probability - maturity_with_ki)
 
         probabilities: Dict[EventType, Union[np.ndarray, float]] = {

@@ -427,17 +427,25 @@ class SnowballPDESolver(BasePDESolver):
                 )
             ko_index_by_tidx[t_idx] = k
 
-        # Surface columns: [KO_0..KO_{n-1}, <extra coupon cols>, KI_indicator]
+        # Surface columns: [KO_0..KO_{n-1}, <extra coupon cols>, KI_indicator,
+        # KI_ever_indicator]. The KI_indicator carries the "settles knocked-in"
+        # semantics (absorbed to 0 on any KO). The KI_ever_indicator tracks
+        # P(the underlying breaches the KI barrier at any point in [0, T]),
+        # independent of KO/autocall — it is a pure first-passage statistic and is
+        # therefore EXEMPT from the KO absorption below (matching the QUAD and MC
+        # ki_ever definition).
         n_extra = self._n_extra_event_cols(n_ko)
         ki_col = n_ko + n_extra
-        n_cols = n_ko + n_extra + 1
+        ki_ever_col = n_ko + n_extra + 1
+        n_cols = n_ko + n_extra + 2
 
         # Terminal conditions at maturity (t = T):
         # - KO indicators are zero at maturity (KO only at discrete observations via jumps)
-        # - KI indicator is 1 on the KI surface and 0 on the no-KI surface
+        # - Both KI indicators are 1 on the KI surface and 0 on the no-KI surface
         v0_next = np.zeros((num_x, n_cols), dtype=float)
         v1_next = np.zeros((num_x, n_cols), dtype=float)
         v1_next[:, ki_col] = 1.0
+        v1_next[:, ki_ever_col] = 1.0
 
         # Apply terminal KO/KI events at maturity if observation schedules include t=T.
         terminal_tidx = num_t - 1
@@ -447,6 +455,9 @@ class SnowballPDESolver(BasePDESolver):
             barrier = float(rec.barrier) if rec.barrier is not None else 0.0
             mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
+            # KI-ever is exempt from KO absorption (pure first-passage statistic).
+            ever0 = v0_next[mask_ko, ki_ever_col].copy()
+            ever1 = v1_next[mask_ko, ki_ever_col].copy()
             v0_next[mask_ko, :] = 0.0
             v1_next[mask_ko, :] = 0.0
             df_delay = self._cashflow_value_at_time(
@@ -457,6 +468,8 @@ class SnowballPDESolver(BasePDESolver):
             )
             v0_next[mask_ko, terminal_ko_idx] = df_delay
             v1_next[mask_ko, terminal_ko_idx] = df_delay
+            v0_next[mask_ko, ki_ever_col] = ever0
+            v1_next[mask_ko, ki_ever_col] = ever1
             self._set_extra_event_indicators(
                 v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
                 product, pricing_env, t_vec, terminal_tidx,
@@ -559,6 +572,9 @@ class SnowballPDESolver(BasePDESolver):
                 mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
                 # Zero all event surfaces in KO region, then set the KO_i indicator.
+                # KI-ever is exempt (pure first-passage statistic, no KO absorption).
+                ever0 = v0_cur[mask_ko, ki_ever_col].copy()
+                ever1 = v1_cur[mask_ko, ki_ever_col].copy()
                 v0_cur[mask_ko, :] = 0.0
                 v1_cur[mask_ko, :] = 0.0
                 df_delay = self._cashflow_value_at_time(
@@ -569,6 +585,8 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 v0_cur[mask_ko, ko_idx] = df_delay
                 v1_cur[mask_ko, ko_idx] = df_delay
+                v0_cur[mask_ko, ki_ever_col] = ever0
+                v1_cur[mask_ko, ki_ever_col] = ever1
                 self._set_extra_event_indicators(
                     v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
                     product, pricing_env, t_vec, j,
@@ -624,13 +642,16 @@ class SnowballPDESolver(BasePDESolver):
         ki_survival_probability = np.array([], dtype=float)
         if already_knocked_in:
             ki_probability = 1.0
+            ki_ever_probability = 1.0
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
         else:
-            ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
             df_T = pricing_env.get_discount_factor(float(tau))
+            ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
             ki_probability = float(ed_ki / df_T) if df_T > 0.0 else 0.0
+            ed_ki_ever = float(np.interp(spot_log, x_vec, initial_grid[:, ki_ever_col]))
+            ki_ever_probability = float(ed_ki_ever / df_T) if df_T > 0.0 else 0.0
 
         pv = float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
@@ -657,6 +678,13 @@ class SnowballPDESolver(BasePDESolver):
             ki_times=ki_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
+            # Two unambiguous, cross-engine-consistent KI fields. The legacy
+            # `ki_probability` keeps the PDE's historical "settles knocked-in"
+            # meaning (KI indicator absorbed to 0 on any KO), which equals
+            # `ki_survive_knocked_in_probability`. `ki_ever_probability` comes from
+            # the dedicated KI-ever column that carries no KO absorption.
+            ki_ever_probability=ki_ever_probability,
+            ki_survive_knocked_in_probability=ki_probability,
             **extra_fields,
         )
 

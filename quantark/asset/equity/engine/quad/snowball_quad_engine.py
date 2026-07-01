@@ -683,25 +683,44 @@ class SnowballQuadEngine(BaseEngine):
         pv = float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
-        # KI probability (no-KO): propagate terminal indicator on KI surface with KO absorbing to 0.
-        # NOTE (spec 2026-07-01, §3 Out of scope): this pass measures P(KI without a
-        # prior KO), which differs by DEFINITION from the MC engine's ki_probability
-        # = P(KI ever, KO or not) — a tens-of-percent gap (e.g. 0.25 vs 0.78 for an
-        # ATM KI barrier), not a discretization error. Its KO/KI masks are therefore
-        # left hard: barrier smoothing (an O(h) effect) cannot move a definitional
-        # gap, so smoothing here would add complexity that changes no reported value.
+        # KI probability. Two definitions are computed side by side on parallel
+        # indicator surfaces (investigation 2026-07-01):
+        #   * "no-KO"  (v_*_ki)   -> P(KI ever AND never KO) = the note settles
+        #     knocked-in. KO absorbs the indicator to 0 on BOTH surfaces, so a
+        #     path that knocks in and later autocalls is NOT counted. This is the
+        #     economically relevant "downside exposure" quantity.
+        #   * "ever"   (v_*_ever) -> P(the underlying breaches the KI barrier at
+        #     any point in [0, T], independent of the note's KO/autocall). The
+        #     ever surfaces carry NO KO absorption at all — it is a pure
+        #     first-passage statistic of the underlying process, matching MC's
+        #     `mean(ki_triggered)` (which is likewise computed over the full path,
+        #     independent of KO).
+        # The legacy scalar `ki_probability` keeps QUAD's historical "no-KO"
+        # meaning; the two unambiguous fields are reported alongside it and match
+        # the MC engine to MC noise. This is a DEFINITIONAL split, not a
+        # discretization effect (an independent fine-grid MC reproduces both
+        # numbers by pure path counting), so the no-KO KO/KI masks stay hard here.
         ki_probability = 0.0
+        ki_ever_probability = 0.0
+        ki_survive_knocked_in_probability = 0.0
         ki_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
         if knocked_in_at_valuation:
             ki_probability = 1.0
+            ki_ever_probability = 1.0
+            # Latched KI: every surviving path settles knocked-in. Reporting 1.0
+            # keeps the downstream min(maturity_prob, ki_survive) attribution
+            # identical to the legacy ki_probability=1.0 convention.
+            ki_survive_knocked_in_probability = 1.0
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
         elif product.has_ki_barrier:
             v_in_ki = np.ones(grid.size, dtype=float)
             v_out_ki = np.zeros(grid.size, dtype=float)
+            v_in_ever = np.ones(grid.size, dtype=float)
+            v_out_ever = np.zeros(grid.size, dtype=float)
             for step_index in range(len(times), 0, -1):
                 obs_time = times[step_index - 1]
                 ko_record = self._match_record(obs_time, ko_records)
@@ -715,6 +734,10 @@ class SnowballQuadEngine(BaseEngine):
                     v_out_ki[ko_mask] = 0.0
                     if not disable_ko_after_ki:
                         v_in_ki[ko_mask] = 0.0
+                    # The "ever" surfaces (v_*_ever) carry NO KO absorption: KI-ever
+                    # is a pure first-passage statistic of the underlying, counted
+                    # whether or not the note autocalls (matching MC's ki_triggered,
+                    # which is likewise computed over the full path).
 
                 if not ki_continuous and ki_records:
                     ki_record = self._match_record(obs_time, ki_records)
@@ -724,6 +747,10 @@ class SnowballQuadEngine(BaseEngine):
                             if product.is_reverse
                             else spot_grid <= ki_record.barrier
                         )
+                        # "ever" transitions on the raw KI touch (a KI counts
+                        # regardless of a simultaneous KO), so use ki_mask before
+                        # it is narrowed by ~ko_mask below.
+                        v_out_ever[ki_mask] = v_in_ever[ki_mask]
                         if ko_mask is not None and not disable_ko_after_ki:
                             ki_mask = ki_mask & ~ko_mask
                         v_out_ki[ki_mask] = v_in_ki[ki_mask]
@@ -737,6 +764,18 @@ class SnowballQuadEngine(BaseEngine):
                 )
                 v_in_ki = self._diffuse_fft(
                     v_in_ki,
+                    math_utils,
+                    omega_array,
+                    prefactor,
+                    full_p_lr,
+                    full_p_ur,
+                    full_p0,
+                    alpha,
+                    beta,
+                    tau_step,
+                )
+                v_in_ever = self._diffuse_fft(
+                    v_in_ever,
                     math_utils,
                     omega_array,
                     prefactor,
@@ -766,6 +805,23 @@ class SnowballQuadEngine(BaseEngine):
                         tau_step,
                         product.is_reverse,
                     )
+                    v_out_ever = self._diffuse_with_bridge(
+                        v_out_ever,
+                        v_in_ever,
+                        math_utils,
+                        omega_array,
+                        prefactor,
+                        full_p_lr,
+                        full_p_ur,
+                        full_p0,
+                        log_ki_barrier,
+                        alpha,
+                        beta,
+                        vol,
+                        dt[step_index],
+                        tau_step,
+                        product.is_reverse,
+                    )
                 else:
                     v_out_ki = self._diffuse_fft(
                         v_out_ki,
@@ -779,11 +835,26 @@ class SnowballQuadEngine(BaseEngine):
                         beta,
                         tau_step,
                     )
+                    v_out_ever = self._diffuse_fft(
+                        v_out_ever,
+                        math_utils,
+                        omega_array,
+                        prefactor,
+                        full_p_lr,
+                        full_p_ur,
+                        full_p0,
+                        alpha,
+                        beta,
+                        tau_step,
+                    )
 
             df_T = math.exp(-rate * maturity)
             pv_ki_no_ko = float(math_utils.interpolate(v_out_ki, x=0.0))
+            pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
             if df_T > 0:
                 ki_probability = float(pv_ki_no_ko / df_T)
+                ki_survive_knocked_in_probability = ki_probability
+                ki_ever_probability = float(pv_ki_ever / df_T)
 
         extra_fields = self._extract_extra_quad_stats(
             initial_surface, math_utils, n_ko, ko_records, rate, product, maturity
@@ -806,6 +877,8 @@ class SnowballQuadEngine(BaseEngine):
             ki_times=ki_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
+            ki_ever_probability=ki_ever_probability,
+            ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
             **extra_fields,
         )
 
