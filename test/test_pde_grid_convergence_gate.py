@@ -106,6 +106,9 @@ def test_daily_ki_first_order_greeks_converged(autocallable_case):
     g8 = _greeks(product, env, 8)
     for k in FIRST_ORDER:
         assert _rel(g4[k], g8[k]) <= 2e-3, f"first-order greek {k} not converged"
-    # 2nd-order bump greeks are grid-noisy near barriers (pre-existing).
-    assert math.isfinite(g4["gamma"]) and g4["gamma"] > 0
+    # With the §11.4 frozen-grid bump context (create_bump_context now freezes
+    # the critical points, not just the bounds), gamma is grid-stable and
+    # converges too — it was ~2.4% grid-movement noise before the freeze.
+    assert math.isfinite(g4["gamma"])
+    assert _rel(g4["gamma"], g8["gamma"]) <= 1e-3, "gamma not converged"
     assert math.isfinite(g4["theta"])

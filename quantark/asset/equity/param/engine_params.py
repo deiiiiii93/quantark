@@ -447,6 +447,10 @@ class PDEParams(EngineParams):
     log_dx_target: float = 0.003
     max_grid_size: int = 2000
     include_spot_in_critical_points: bool = True
+    # When set (by create_bump_context), the spatial grid concentrates on exactly
+    # these frozen critical points instead of recomputing them per bump — so a
+    # spot bump does not snap the grid to a moved spot [§11.4].
+    frozen_critical_points: Optional[tuple] = None
     rannacher_at_events: bool = True
     event_theta: float = 1.0
     event_rannacher_steps: int = 1

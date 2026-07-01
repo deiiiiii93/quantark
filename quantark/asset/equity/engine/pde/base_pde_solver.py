@@ -174,10 +174,17 @@ class BasePDESolver(BaseEngine):
         s_min, s_max = self._resolve_spatial_bounds(
             product, spot, sigma, tau, r, q, barriers
         )
+        # Freeze the critical points at the base spot too [§11.4]: otherwise
+        # include_spot_in_critical_points re-snaps the grid to a bumped spot,
+        # so a spot bump mixes true delta/gamma with grid-movement noise.
+        frozen_critical = tuple(
+            self._resolve_critical_points(product, pricing_env, spot, barriers)
+        )
 
         fixed_params = deepcopy(self.params)
         fixed_params.s_min = float(s_min)
         fixed_params.s_max = float(s_max)
+        fixed_params.frozen_critical_points = frozen_critical
         return type(self)(params=fixed_params)
 
     def _freeze_cache_value(self, value):
@@ -271,6 +278,7 @@ class BasePDESolver(BaseEngine):
             params.theta,
             params.use_rannacher,
             params.rannacher_steps,
+            params.frozen_critical_points,
         )
 
     def _grid_cache_key(
@@ -638,6 +646,14 @@ class BasePDESolver(BaseEngine):
     ) -> List[float]:
         """Merge raw critical points with dynamic points (spot/barriers)."""
         params: PDEParams = self.params
+
+        # Frozen (bump-context) critical points are used verbatim so the grid is
+        # invariant to spot/vol/rate/div bumps [§11.4].
+        if params.frozen_critical_points is not None:
+            return sorted(
+                {float(p) for p in params.frozen_critical_points if p is not None and p > 0}
+            )
+
         points = list(raw_points)
 
         if params.auto_grid:
