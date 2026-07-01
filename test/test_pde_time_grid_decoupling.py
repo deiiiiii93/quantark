@@ -50,3 +50,46 @@ def test_time_grid_market_independent(snowball_daily_ki, snowball_pde_solver_fac
     t0, _ = solver._resolve_time_grid(snowball_daily_ki, 1.0, barriers)
     t1, _ = solver._resolve_time_grid(snowball_daily_ki, 1.0, barriers)
     assert np.array_equal(t0, t1)
+
+
+# ---------------------------------------------------------------------------
+# Task 1.4 — KI-regime-aware _ki_monitor_times + autocallable _time_grid_spec
+# ---------------------------------------------------------------------------
+def test_ki_monitor_daily_discrete(snowball_daily_ki, snowball_solver):
+    times = snowball_solver._ki_monitor_times(snowball_daily_ki, tau=1.0)
+    assert len(times) > 100  # ~daily interior dates
+
+
+def test_ki_monitor_european_is_empty(snowball_euro_ki, snowball_solver):
+    assert snowball_solver._ki_monitor_times(snowball_euro_ki, tau=1.0) == []
+
+
+def test_ki_monitor_continuous_is_empty(snowball_cont_ki, snowball_solver):
+    assert snowball_solver._ki_monitor_times(snowball_cont_ki, tau=1.0) == []
+
+
+def test_ki_monitor_no_ki_is_empty(snowball_no_ki, snowball_solver):
+    assert snowball_solver._ki_monitor_times(snowball_no_ki, tau=1.0) == []
+
+
+def test_align_times_are_ko_only(snowball_daily_ki, snowball_solver):
+    align = snowball_solver._ko_coupon_align_times(snowball_daily_ki, tau=1.0)
+    assert len(align) < 40  # monthly-ish KO, not daily
+    assert all(0.0 < t < 1.0 for t in align)
+
+
+def test_time_grid_spec_splits_align_and_monitor(snowball_daily_ki, snowball_solver):
+    spec = snowball_solver._time_grid_spec(snowball_daily_ki, tau=1.0)
+    assert len(spec.align_times) < 40  # KO only
+    assert len(spec.monitor_times) > 100  # daily KI monitor
+    assert spec.steps_per_day == snowball_solver.params.event_steps_per_day
+
+
+def test_get_event_times_preserves_union(snowball_daily_ki, snowball_solver):
+    # Back-compat: _get_event_times still returns sorted(align ∪ monitor) for
+    # Rannacher/grid-cache consumers.
+    union = snowball_solver._get_event_times(snowball_daily_ki, tau=1.0)
+    align = set(snowball_solver._ko_coupon_align_times(snowball_daily_ki, 1.0))
+    monitor = set(snowball_solver._ki_monitor_times(snowball_daily_ki, 1.0))
+    assert set(union) == align | monitor
+    assert union == sorted(union)

@@ -21,7 +21,11 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from scipy.linalg import solve_banded
 
-from quantark.asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
+from quantark.asset.equity.engine.pde.base_pde_solver import (
+    BasePDESolver,
+    PDESolutionResult,
+    TimeGridSpec,
+)
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -1106,41 +1110,91 @@ class SnowballPDESolver(BasePDESolver):
 
         return barriers
 
+    def _ko_coupon_align_times(
+        self, product: BaseEquityProduct, tau: float
+    ) -> List[float]:
+        """KO (and Phoenix coupon, same dates) observation times.
+
+        These MUST be grid nodes exactly — they drive the value KO jumps and the
+        event-distribution resets, so a misalignment here is a correctness bug.
+        Reads the barrier config directly (no pricing env / instance state), so
+        it is safe to call during grid construction.
+        """
+        out = []
+        cfg = getattr(product, "barrier_config", None)
+        if cfg is not None:
+            sched = cfg.ko_observation_schedule
+            if sched is not None:
+                out += [
+                    rec.observation_time
+                    for rec in sched.records
+                    if rec.observation_time is not None
+                ]
+            elif cfg.ko_observation_dates is not None:
+                out += list(cfg.ko_observation_dates)
+        return sorted({float(t) for t in out if t is not None and 0.0 < float(t) < tau})
+
+    def _ki_monitor_times(
+        self, product: BaseEquityProduct, tau: float
+    ) -> List[float]:
+        """Interior KI monitoring dates — only for daily-discrete KI.
+
+        Empty for every other regime (spec §4 table): European (maturity-only
+        => no interior dates), continuous, no-KI, and already-knocked-in
+        (monitoring moot).  Reads config directly; ``ki_continuous`` here is
+        derived identically to the solver's ``self._ki_continuous``.
+        """
+        cfg = getattr(product, "barrier_config", None)
+        if cfg is None or not getattr(product, "has_ki_barrier", False):
+            return []
+        if getattr(product, "_otc_lifecycle_knocked_in", False):
+            return []
+        ki_continuous = (
+            cfg.ki_continuous
+            or cfg.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        if ki_continuous:
+            return []
+        out = []
+        sched = cfg.ki_observation_schedule
+        if sched is not None:
+            out += [
+                rec.observation_time
+                for rec in sched.records
+                if rec.observation_time is not None
+            ]
+        elif cfg.ki_observation_dates is not None:
+            out += list(cfg.ki_observation_dates)
+        # Interior only: European KI (obs at maturity only) => empty (correct).
+        return sorted({float(t) for t in out if t is not None and 0.0 < float(t) < tau})
+
+    def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
+        """Decoupled time-grid concerns for autocallables (spec §4 Component 1).
+
+        align = KO/coupon dates (must be nodes); monitor = daily-discrete KI
+        dates (resolution only); steps_per_day from params.
+        """
+        return TimeGridSpec(
+            align_times=self._ko_coupon_align_times(product, tau),
+            monitor_times=self._ki_monitor_times(product, tau),
+            steps_per_day=float(self.params.event_steps_per_day),
+        )
+
     def _get_event_times(
         self, product: BaseEquityProduct, tau: float
     ) -> Optional[List[float]]:
-        """Collect all observation times for time grid alignment."""
-        event_times = []
+        """Back-compat union used by Rannacher damping and the grid cache key.
 
-        if hasattr(product, "barrier_config"):
-            # KO observation times
-            ko_schedule = product.barrier_config.ko_observation_schedule
-            if ko_schedule is not None:
-                for rec in ko_schedule.records:
-                    if rec.observation_time is not None:
-                        t = rec.observation_time
-                        if 0 < t < tau:
-                            event_times.append(t)
-            elif product.barrier_config.ko_observation_dates is not None:
-                for t in product.barrier_config.ko_observation_dates:
-                    if 0 < t < tau:
-                        event_times.append(t)
-
-            # KI observation times (if discrete)
-            if not self._ki_continuous:
-                ki_schedule = product.barrier_config.ki_observation_schedule
-                if ki_schedule is not None:
-                    for rec in ki_schedule.records:
-                        if rec.observation_time is not None:
-                            t = rec.observation_time
-                            if 0 < t < tau:
-                                event_times.append(t)
-                elif product.barrier_config.ki_observation_dates is not None:
-                    for t in product.barrier_config.ki_observation_dates:
-                        if 0 < t < tau:
-                            event_times.append(t)
-
-        return sorted(set(event_times)) if event_times else None
+        Returns ``sorted(align ∪ monitor)`` so damping still fires at KO **and**
+        discrete-KI dates independent of any downstream stream selection
+        [§11.2].  Correctness-critical alignment lives in
+        ``_ko_coupon_align_times``; ``_ki_monitor_times`` adds resolution.
+        """
+        union = sorted(
+            set(self._ko_coupon_align_times(product, tau))
+            | set(self._ki_monitor_times(product, tau))
+        )
+        return union or None
 
     def _set_terminal_condition_v0(
         self,
