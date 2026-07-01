@@ -409,6 +409,55 @@ class TestSnowballPDEConvergence:
             assert abs(price - mean_price) / mean_price < 0.10
 
 
+class TestSnowballPDEKOScheduleCaching:
+    """Tests for KO schedule caching in repeated PDE paths."""
+
+    def test_boundary_fallback_reuses_cached_ko_records(self, monkeypatch):
+        """Boundary fallback should not resolve KO schedules once per time step."""
+
+        def make_product():
+            barrier_config = create_basic_barrier_config(
+                ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+                ki_barrier=None,
+            )
+            return create_standard_snowball(
+                contract_multiplier=1.0,
+                barrier_config=barrier_config,
+            )
+
+        env = create_pricing_env()
+        params = PDEParams(grid_size=90, time_steps=48, auto_grid=False)
+        SnowballPDESolver.clear_grid_cache()
+
+        product = make_product()
+        resolve_calls = 0
+        original_resolve = product.resolve_ko_observations
+
+        def counted_resolve(pricing_env):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            return original_resolve(pricing_env)
+
+        monkeypatch.setattr(product, "resolve_ko_observations", counted_resolve)
+
+        cached_solver = SnowballPDESolver(params)
+        cached_price = cached_solver.price(product, env)
+
+        uncached_solver = SnowballPDESolver(
+            PDEParams(
+                grid_size=params.grid_size,
+                time_steps=params.time_steps,
+                auto_grid=params.auto_grid,
+                cache_enabled=False,
+            )
+        )
+        uncached_price = uncached_solver.price(make_product(), env)
+
+        assert np.isfinite(cached_price)
+        assert cached_price == uncached_price
+        assert resolve_calls <= 3
+
+
 class TestSnowballPDEVsMC:
     """Tests comparing PDE solver with Monte Carlo engine."""
 

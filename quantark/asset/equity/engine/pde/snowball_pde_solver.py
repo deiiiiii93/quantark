@@ -1669,7 +1669,7 @@ class SnowballPDESolver(BasePDESolver):
             )
 
         # Boundary fallback: use next scheduled KO record (ignore past observations).
-        ko_records = product.resolve_ko_observations(pricing_env)
+        ko_records = self._get_cached_ko_records(pricing_env, product)
         future_records = [
             rec for rec in ko_records if self._record_is_non_negative_time(rec)
         ]
