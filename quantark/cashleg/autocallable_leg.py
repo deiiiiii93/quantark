@@ -140,6 +140,19 @@ class AutocallableCashLeg(CashLeg):
     def requires_event_distribution(self) -> bool:
         return True
 
+    def required_event_types(self) -> frozenset:
+        """KO (terminal buckets always need KO mass) ∪ the basis stream ∪ the
+        terminal buckets this leg reads [§11.1].
+
+        A COUPON-basis leg adds COUPON; a leg whose ``terminal_events`` includes
+        MATURITY_WITH_KI forces the engine's KI split.
+        """
+
+        req = {EventType.KO}
+        req.add(_BASIS_EVENT[self.accrual_basis])
+        req |= set(self.terminal_events)
+        return frozenset(req)
+
     def value(
         self, event_dist: EventDistribution, env, position_notional: float
     ) -> float:

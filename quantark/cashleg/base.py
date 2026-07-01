@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from quantark.cashleg.event_distribution import EventDistribution
+    from quantark.cashleg.event_distribution import EventDistribution, EventType
     from quantark.priceenv import PricingEnvironment
 
 
@@ -41,6 +41,16 @@ class CashLeg(ABC):
         """Whether this leg needs non-trivial event timing to value accurately."""
 
         return True
+
+    def required_event_types(self) -> "frozenset[EventType]":
+        """Event-distribution streams this leg reads at valuation time [§11.1].
+
+        The engine takes the union across all attached legs to decide which
+        indicator columns to propagate, pruning the expensive KI split when no
+        leg needs it. Default: no streams (a deterministic leg reads none).
+        """
+
+        return frozenset()
 
     def sign(self) -> int:
         """Return +1 for buyer receives, -1 for buyer pays."""

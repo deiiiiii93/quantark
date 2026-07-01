@@ -37,3 +37,8 @@ class DeterministicLeg(CashLeg):
         """A deterministic leg can be valued without event timing."""
 
         return False
+
+    def required_event_types(self) -> frozenset:
+        """A deterministic cash flow reads no event streams [§11.1]."""
+
+        return frozenset()
