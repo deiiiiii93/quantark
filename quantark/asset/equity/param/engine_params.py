@@ -434,6 +434,13 @@ class PDEParams(EngineParams):
     grade_exponent: float = 2.0
 
     # Auto-grid tuning parameters
+    # event_steps_per_day: resolution (fill steps per business day) for the
+    # decoupled event-aligned grid (TimeGrid.build_mandatory). Validated by
+    # test_pde_grid_convergence_gate: at spd=4 the autocallable price is
+    # grid-converged for discrete-KI rows (<=1e-4 vs spd=8) and matches the
+    # pre-change production grid within 1.2e-5 (oracle b). Not lowered below 4
+    # because continuously-monitored KI needs the resolution (slow O(1/N)
+    # barrier convergence).
     event_steps_per_day: int = 4
     event_min_steps_per_interval: int = 10
     max_time_steps: int = 5000

@@ -187,3 +187,43 @@ def snowball_pde_solver_factory():
         return SnowballPDESolver(params=PDEParams(**param_overrides))
 
     return _factory
+
+
+# ---------------------------------------------------------------------------
+# Convergence-gate cases (Task 1.6): (product, env) per KI-regime row
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def autocallable_case():
+    """Return a builder mapping a row name to (product, pricing_env).
+
+    Rows exercise the three KI regimes that stress the time grid differently:
+    daily-discrete KI (dense monitor nodes), European KI (KO-aligned only), and
+    a monthly-KO continuous-KI note (sparse align, resolution-fill dependent).
+    All share the standard env (spot 100, vol 0.20, r 0.03, q 0.01).
+    """
+
+    def _build(row: str):
+        env = _make_env(spot=100.0, vol=0.20, rate=0.03, div_yield=0.01)
+        if row == "daily_ki":
+            product = _make_snowball(
+                ki_observation_type=ObservationType.DISCRETE,
+                ki_observation_dates=_daily_dates(252),
+                ki_continuous=False,
+            )
+        elif row == "euro_ki":
+            product = _make_snowball(
+                ki_observation_type=ObservationType.DISCRETE,
+                ki_observation_dates=[1.0],
+                ki_continuous=False,
+            )
+        elif row == "monthly_ko":
+            product = _make_snowball(
+                ki_observation_type=ObservationType.CONTINUOUS,
+                ki_observation_dates=None,
+                ki_continuous=True,
+            )
+        else:
+            raise ValueError(f"unknown autocallable row: {row}")
+        return product, env
+
+    return _build
