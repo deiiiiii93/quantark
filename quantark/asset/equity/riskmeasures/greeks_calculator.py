@@ -4,7 +4,7 @@ Greeks calculation for equity derivatives.
 
 import math
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Sequence, Tuple
 
 from scipy import stats
@@ -14,7 +14,7 @@ from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.priceenv import PricingEnvironment
-from quantark.util.calendar import calculate_year_fraction
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import CommonGreek, EquityGreek
 from quantark.util.enum.engine_enums import EngineType, GreeksCalculationMode
 from quantark.util.exceptions import ValidationError
@@ -748,31 +748,50 @@ class GreeksCalculator:
         engine: BaseEngine,
         base_price: Optional[float] = None,
         time_bump_days: Optional[int] = None,
+        time_bump_mode: Optional[str] = None,
     ) -> float:
-        """Numerical theta via time bump with observation schedule handling."""
+        """
+        Numerical theta via time bump with observation schedule handling.
+
+        Theta date advancement is controlled by BumpConfig.time_bump_mode:
+        "calendar_days" preserves legacy calendar-date bumps, "business_days"
+        advances by valid pricing-calendar business days, and "auto" uses
+        business days for BUSINESS_DAYS pricing environments with a calendar.
+        """
         engine = self._resolve_bump_engine(product, pricing_env, engine)
         time_bump_days = (
             time_bump_days
             if time_bump_days is not None
             else self._bump_config.time_bump_days
         )
+        time_bump_mode = (
+            time_bump_mode
+            if time_bump_mode is not None
+            else getattr(self._bump_config, "time_bump_mode", "auto")
+        )
         base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         product_theta = deepcopy(product)
         env_theta = deepcopy(pricing_env)
         current_maturity = product.get_maturity(pricing_env)
 
-        bumped_date = pricing_env.valuation_date + timedelta(days=time_bump_days)
-        time_bump = calculate_year_fraction(
-            pricing_env.valuation_date,
-            bumped_date,
-            pricing_env.day_count_convention,
-            pricing_env.bus_days_in_year,
-            calendar=getattr(pricing_env, "calendar", None),
+        bumped_date, time_bump, resolved_mode = self._advance_theta_bump(
+            pricing_env, time_bump_days, time_bump_mode
         )
 
+        if time_bump <= 0.0:
+            if current_maturity <= 0.0:
+                return 0.0
+            if resolved_mode == "business_days":
+                raise ValidationError(
+                    "Business-day theta bump did not advance time: "
+                    f"valuation_date={pricing_env.valuation_date}, "
+                    f"bumped_date={bumped_date}, time_bump_days={time_bump_days}"
+                )
+            return 0.0
         if current_maturity <= time_bump:
             return 0.0
 
+        env_theta.valuation_date = bumped_date
         dropped_all_observations = product_theta.time_shift(
             time_bump, bumped_date, env_theta
         )
@@ -782,6 +801,57 @@ class GreeksCalculator:
 
         price_theta = engine.price(product_theta, env_theta)
         return price_theta - base_price
+
+    def _advance_theta_bump(
+        self,
+        pricing_env: PricingEnvironment,
+        time_bump_days: int,
+        time_bump_mode: str,
+    ) -> Tuple[datetime, float, str]:
+        """Advance the theta valuation date and return date, year fraction, mode."""
+        mode = self._resolve_theta_bump_mode(pricing_env, time_bump_mode)
+        if mode == "calendar_days":
+            bumped_date = pricing_env.valuation_date + timedelta(days=time_bump_days)
+        else:
+            calendar = getattr(pricing_env, "calendar", None)
+            if calendar is None or not hasattr(calendar, "add_business_days"):
+                raise ValidationError(
+                    "time_bump_mode='business_days' requires pricing_env.calendar "
+                    "with add_business_days()"
+                )
+            bumped_date = calendar.add_business_days(
+                pricing_env.valuation_date, time_bump_days
+            )
+
+        time_bump = calculate_year_fraction(
+            pricing_env.valuation_date,
+            bumped_date,
+            pricing_env.day_count_convention,
+            pricing_env.bus_days_in_year,
+            calendar=getattr(pricing_env, "calendar", None),
+        )
+        return bumped_date, time_bump, mode
+
+    @staticmethod
+    def _resolve_theta_bump_mode(
+        pricing_env: PricingEnvironment, time_bump_mode: str
+    ) -> str:
+        """Resolve auto theta mode against the pricing environment."""
+        mode = time_bump_mode.lower()
+        if mode not in {"auto", "calendar_days", "business_days"}:
+            raise ValidationError(
+                "time_bump_mode must be one of 'auto', 'calendar_days', "
+                f"or 'business_days', got {time_bump_mode!r}"
+            )
+        if mode != "auto":
+            return mode
+
+        if (
+            pricing_env.day_count_convention == DayCountConvention.BUSINESS_DAYS
+            and getattr(pricing_env, "calendar", None) is not None
+        ):
+            return "business_days"
+        return "calendar_days"
 
     def calculate_numerical_rho(
         self,
