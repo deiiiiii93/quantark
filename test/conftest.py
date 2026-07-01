@@ -12,10 +12,15 @@ from typing import List, Optional
 import pytest
 
 from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
+    KOResetSnowballPDESolver,
+)
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.product.option import create_ko_reset_snowball
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.util.enum import PostKOScheduleMode
 from quantark.param import (
     ContinuousDividendYield,
     FlatRateCurve,
@@ -154,6 +159,24 @@ def snowball_no_ki() -> SnowballOption:
 @pytest.fixture
 def snowball_solver() -> SnowballPDESolver:
     return SnowballPDESolver()
+
+
+@pytest.fixture
+def ko_reset_product():
+    """KO-reset snowball with pre (0,1] KO and post (1,2] KO in ABSOLUTE mode."""
+    return create_ko_reset_snowball(
+        initial_price=100.0,
+        strike=100.0,
+        maturity_pre=1.0,
+        maturity_post=2.0,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        ki_continuous=False,
+    )
+
+
+@pytest.fixture
+def ko_reset_solver() -> KOResetSnowballPDESolver:
+    return KOResetSnowballPDESolver(PDEParams(grid_size=80, time_steps=40))
 
 
 @pytest.fixture

@@ -232,22 +232,33 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
 
         return result
 
-    def _get_event_times(
+    def _post_ki_ko_times(
         self, product: KnockOutResetSnowballOption, tau: float
-    ) -> Optional[List[float]]:
-        event_times = super()._get_event_times(product, tau) or []
+    ) -> List[float]:
+        """Post-KI (reset) KO observation times, interior to (0, tau).
+
+        In the two-surface KO-reset PDE the post-KI KO schedule fires on the V1
+        (knocked-in) surface; those dates must be grid nodes exactly [§11.7].
+        """
+        out = []
         post_schedule = product.post_barrier_config.ko_observation_schedule
         if post_schedule is not None:
-            for rec in post_schedule.records:
-                if rec.observation_time is not None:
-                    t = rec.observation_time
-                    if 0 < t < tau:
-                        event_times.append(t)
+            out += [
+                rec.observation_time
+                for rec in post_schedule.records
+                if rec.observation_time is not None
+            ]
         elif product.post_barrier_config.ko_observation_dates is not None:
-            for t in product.post_barrier_config.ko_observation_dates:
-                if 0 < t < tau:
-                    event_times.append(t)
-        return sorted(set(event_times)) if event_times else None
+            out += list(product.post_barrier_config.ko_observation_dates)
+        return sorted({float(t) for t in out if t is not None and 0.0 < float(t) < tau})
+
+    def _ko_coupon_align_times(
+        self, product: KnockOutResetSnowballOption, tau: float
+    ) -> List[float]:
+        """Pre-KI KO ∪ post-KI (reset) KO — both must align exactly [§11.7]."""
+        pre = super()._ko_coupon_align_times(product, tau)
+        post = self._post_ki_ko_times(product, tau)
+        return sorted(set(pre) | set(post))
 
     def get_critical_points(
         self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment

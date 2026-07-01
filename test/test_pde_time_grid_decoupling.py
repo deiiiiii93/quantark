@@ -93,3 +93,46 @@ def test_get_event_times_preserves_union(snowball_daily_ki, snowball_solver):
     monitor = set(snowball_solver._ki_monitor_times(snowball_daily_ki, 1.0))
     assert set(union) == align | monitor
     assert union == sorted(union)
+
+
+# ---------------------------------------------------------------------------
+# Task 1.5 — KO-reset pre+post-KI KO alignment [§11.7]
+# ---------------------------------------------------------------------------
+def test_ko_reset_aligns_pre_and_post_ki_ko(ko_reset_product, ko_reset_solver):
+    tau = 2.0  # total maturity (maturity_post)
+    align = ko_reset_solver._ko_coupon_align_times(ko_reset_product, tau=tau)
+    post_ki_ko_times = ko_reset_solver._post_ki_ko_times(ko_reset_product, tau=tau)
+    assert len(post_ki_ko_times) > 0  # guard against a vacuous test
+    for t in post_ki_ko_times:
+        assert any(abs(t - a) < 1e-9 for a in align), f"post-KI KO {t} not aligned"
+
+
+def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
+    """[Self-review #6b] KO-reset event-stats delegate to QUAD with a residual
+    adjustment against the PDE price. Phase 1 changed the PDE grid, so confirm:
+
+    * the decoupled grid still yields a grid-converged PDE price (agrees with
+      the pre-change baseline of ~98.028 measured on `main`), and
+    * ``calculate_event_stats`` still reconciles its reported ``pv`` to the PDE
+      price exactly (so the residual/distribution stay consistent).
+    """
+    from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
+        KOResetSnowballPDESolver,
+    )
+    from quantark.asset.equity.param import PDEParams
+
+    coarse = KOResetSnowballPDESolver(PDEParams(grid_size=120, time_steps=60))
+    fine = KOResetSnowballPDESolver(
+        PDEParams(grid_size=240, time_steps=120, event_steps_per_day=8)
+    )
+    pv_coarse = float(coarse.price(ko_reset_product, pricing_env))
+    pv_fine = float(fine.price(ko_reset_product, pricing_env))
+
+    # Grid-converged on the decoupled grid.
+    assert abs(pv_coarse - pv_fine) / abs(pv_fine) < 1e-3
+    # Agrees with the pre-change baseline captured on main (98.0279).
+    assert abs(pv_fine - 98.028) < 0.05
+
+    # Reconciliation intact: reported pv == PDE price.
+    stats = coarse.calculate_event_stats(ko_reset_product, pricing_env)
+    assert abs(float(stats.pv) - pv_coarse) < 1e-6
