@@ -39,7 +39,14 @@ def base_env():
     return create_pricing_env()
 
 
-@pytest.fixture(scope="module")
+# Function scope (not module): the PDE solver accumulates grid / critical-point /
+# observation caches on the instance. Sharing one solver across the module's many
+# different products made results depend on test ordering, which is nondeterministic
+# under `pytest -n auto --dist worksteal` and caused a platform-specific CI-only
+# failure in test_stepdown_phoenix_consistency. A fresh engine per test is
+# deterministic and cannot change any correct value (an empty-cache first price
+# equals a shared engine's first price).
+@pytest.fixture
 def engines():
     return {
         "quad": PhoenixQuadEngine(params=QuadParams(grid_points=401)),
