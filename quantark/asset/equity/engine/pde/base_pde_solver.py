@@ -697,22 +697,61 @@ class BasePDESolver(BaseEngine):
     def _resolve_time_grid(
         self, product, tau, barriers
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Determine time grid type and number of steps."""
+        """Build the time grid from the decoupled ``_time_grid_spec`` seam.
+
+        When the product has mandatory event nodes (KO/coupon alignment plus any
+        KI-monitor times), the grid is built by ``TimeGrid.build_mandatory``:
+        every event time lands on a node exactly, and resolution between nodes is
+        set solely by ``steps_per_day`` (no per-interval floor).  This path is
+        market-independent — it depends only on ``tau``, the schedule,
+        ``steps_per_day`` and params — so spot/vol/rate/div bumps reprice on an
+        identical grid [§4.5], and it always feeds the day-based resolution
+        params, fixing the historical ``auto_grid=False`` param drop (root cause
+        2) that inflated daily-KI grids ~10x.
+
+        When there are no discrete event nodes (continuous barriers, American,
+        European), the base resolution heuristics are preserved unchanged.
+        """
         params: PDEParams = self.params
+        spec = self._time_grid_spec(product, tau)
+        mandatory = sorted(
+            {
+                t
+                for t in (list(spec.align_times) + list(spec.monitor_times))
+                if 0.0 < t < tau
+            }
+        )
+
+        # Event alignment engages when the config wants an event-aligned grid:
+        # auto_grid (auto-selects alignment when events exist, as before) or an
+        # explicit event grid type. An explicit auto_grid=False + uniform/graded
+        # request is honored literally (plain grid), matching prior behavior.
+        want_event_aligned = params.auto_grid or params.time_grid_type in (
+            "event_aligned",
+            "event_clustered",
+        )
+        if mandatory and want_event_aligned:
+            return TimeGrid.build_mandatory(
+                tau,
+                mandatory,
+                steps_per_day=spec.steps_per_day,
+                day_count=int(params.bus_days_in_year),
+                max_steps_total=params.max_time_steps,
+            )
+
+        # No event alignment requested: preserve the base resolution heuristics.
         obs_type = getattr(product, "observation_type", None)
         has_barriers = len(barriers) > 0
-        event_times = self._get_event_times(product, tau)
 
         if not params.auto_grid:
             return TimeGrid.build(
                 tau,
                 params.time_steps,
                 method=params.time_grid_type,
-                event_times=event_times,
+                event_times=None,
                 grade_exponent=params.grade_exponent,
             )
 
-        # Logic for suggested time steps
         days = max(1, int(round(tau * float(params.bus_days_in_year))))
         suggested = days
         if has_barriers:
@@ -724,24 +763,13 @@ class BasePDESolver(BaseEngine):
             suggested = int(round(1.5 * float(days)))
 
         steps = min(max(params.time_steps, suggested), params.max_time_steps)
-
-        # Decide method
-        method = "uniform"
-        if event_times and (has_barriers or obs_type == ObservationType.DISCRETE):
-            method = "event_aligned"
-        elif params.time_grid_type != "uniform":
-            method = params.time_grid_type
-
+        method = params.time_grid_type if params.time_grid_type != "uniform" else "uniform"
         return TimeGrid.build(
             tau,
             steps,
             method=method,
-            event_times=event_times,
+            event_times=None,
             grade_exponent=params.grade_exponent,
-            steps_per_day=params.event_steps_per_day,
-            day_count=params.bus_days_in_year,
-            min_steps_per_interval=params.event_min_steps_per_interval,
-            max_steps_total=params.max_time_steps,
         )
 
     def _calculate_coefficients(
