@@ -52,6 +52,12 @@ class BumpConfig:
         vol_bump: Absolute bump size for vega (default: 1 vol point = 0.01).
                   Applied as: sigma +/- vol_bump
         time_bump_days: Absolute bump in days for theta (default: 1 day).
+        time_bump_mode: Date advance mode for theta:
+                        "calendar_days" advances by calendar dates;
+                        "business_days" advances by valid business days;
+                        "auto" uses business days when the pricing environment
+                        uses BUSINESS_DAYS and has a calendar, otherwise
+                        calendar days.
         rate_bump: Absolute bump size for rho (default: 1bp = 0.0001).
                    Applied as: r +/- rate_bump
         div_bump: Absolute bump size for dividend_rho (default: 1bp = 0.0001).
@@ -76,6 +82,7 @@ class BumpConfig:
 
     # Time bump (absolute in days) - for theta
     time_bump_days: int = 1
+    time_bump_mode: str = "auto"
 
     # Rate bump (absolute) - for rho
     rate_bump: float = 0.0001
@@ -109,6 +116,12 @@ class BumpConfig:
         if self.time_bump_days > 30:  # More than a month seems wrong
             raise ValidationError(
                 f"time_bump_days seems too large: {self.time_bump_days} (max 30 days)"
+            )
+        self.time_bump_mode = self.time_bump_mode.lower()
+        if self.time_bump_mode not in {"auto", "calendar_days", "business_days"}:
+            raise ValidationError(
+                "time_bump_mode must be one of 'auto', 'calendar_days', "
+                f"or 'business_days', got {self.time_bump_mode!r}"
             )
 
         # Rate bump: must be positive

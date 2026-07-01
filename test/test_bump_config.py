@@ -16,6 +16,7 @@ class TestBumpConfig:
         assert config.spot_bump == 0.01
         assert config.vol_bump == 0.01
         assert config.time_bump_days == 1
+        assert config.time_bump_mode == "auto"
         assert config.rate_bump == 0.0001
         assert config.div_bump == 0.0001
 
@@ -71,6 +72,16 @@ class TestBumpConfig:
         """Test that too large time_bump_days raises ValidationError."""
         with pytest.raises(ValidationError, match="time_bump_days seems too large"):
             BumpConfig(time_bump_days=60)  # 2 months
+
+    def test_validation_invalid_time_bump_mode(self):
+        """Test that invalid time_bump_mode raises ValidationError."""
+        with pytest.raises(ValidationError, match="time_bump_mode must be one of"):
+            BumpConfig(time_bump_mode="trading_days")
+
+    def test_time_bump_mode_normalized(self):
+        """Test that time_bump_mode is normalized to lowercase."""
+        config = BumpConfig(time_bump_mode="BUSINESS_DAYS")
+        assert config.time_bump_mode == "business_days"
 
     def test_validation_negative_rate_bump(self):
         """Test that negative rate_bump raises ValidationError."""
