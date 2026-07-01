@@ -361,7 +361,12 @@ class SnowballPDESolver(BasePDESolver):
         return {}
 
     def _compute_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        npv: Optional[float] = None,
+        streams: Optional[frozenset] = None,
     ) -> Optional[AutocallableEventStats]:
         """
         Native PDE implementation:
@@ -369,6 +374,17 @@ class SnowballPDESolver(BasePDESolver):
         - Applies KO/KI jumps to all indicator surfaces at observation times.
         - Returns KO per-observation probabilities (by dividing discounted indicators by
           discount factors) and expected discounted KO cashflows.
+
+        ``npv``: the product value; when provided, the internal ``self.price()``
+        solve is skipped and this value is used for the maturity residual
+        (single-pass path — the caller already ran the value sweep).
+
+        ``streams``: the ``EventType`` set the caller needs [§11.1]. ``None`` ⇒
+        the full distribution (KO + coupon + KI, unchanged behaviour). Pruning
+        the KI indicator columns and/or the Phoenix coupon columns when they are
+        not requested leaves ``ko_probability`` / ``survival`` / ``pv`` bit-
+        identical — the KI *regime jump* still runs, only the auxiliary
+        indicator columns are dropped.
         """
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
@@ -438,18 +454,39 @@ class SnowballPDESolver(BasePDESolver):
         # independent of KO/autocall — it is a pure first-passage statistic and is
         # therefore EXEMPT from the KO absorption below (matching the QUAD and MC
         # ki_ever definition).
-        n_extra = self._n_extra_event_cols(n_ko)
-        ki_col = n_ko + n_extra
-        ki_ever_col = n_ko + n_extra + 1
-        n_cols = n_ko + n_extra + 2
+        # Stream selection [§11.1]: prune auxiliary indicator columns the caller
+        # does not need. KO columns are always present; the KI regime jump always
+        # runs (it drives the KO columns), only the KI *indicator* columns and
+        # the Phoenix coupon columns are optional.
+        if streams is None:
+            want_ki = True
+            want_coupon = True
+        else:
+            from quantark.cashleg.event_distribution import EventType
+
+            want_ki = bool(
+                streams & {EventType.KI, EventType.MATURITY_WITH_KI}
+            )
+            want_coupon = EventType.COUPON in streams
+
+        n_extra = self._n_extra_event_cols(n_ko) if want_coupon else 0
+        if want_ki:
+            ki_col = n_ko + n_extra
+            ki_ever_col = n_ko + n_extra + 1
+            n_cols = n_ko + n_extra + 2
+        else:
+            ki_col = -1
+            ki_ever_col = -1
+            n_cols = n_ko + n_extra
 
         # Terminal conditions at maturity (t = T):
         # - KO indicators are zero at maturity (KO only at discrete observations via jumps)
         # - Both KI indicators are 1 on the KI surface and 0 on the no-KI surface
         v0_next = np.zeros((num_x, n_cols), dtype=float)
         v1_next = np.zeros((num_x, n_cols), dtype=float)
-        v1_next[:, ki_col] = 1.0
-        v1_next[:, ki_ever_col] = 1.0
+        if want_ki:
+            v1_next[:, ki_col] = 1.0
+            v1_next[:, ki_ever_col] = 1.0
 
         # Apply terminal KO/KI events at maturity if observation schedules include t=T.
         terminal_tidx = num_t - 1
@@ -460,8 +497,9 @@ class SnowballPDESolver(BasePDESolver):
             mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
             # KI-ever is exempt from KO absorption (pure first-passage statistic).
-            ever0 = v0_next[mask_ko, ki_ever_col].copy()
-            ever1 = v1_next[mask_ko, ki_ever_col].copy()
+            if want_ki:
+                ever0 = v0_next[mask_ko, ki_ever_col].copy()
+                ever1 = v1_next[mask_ko, ki_ever_col].copy()
             v0_next[mask_ko, :] = 0.0
             v1_next[mask_ko, :] = 0.0
             df_delay = self._cashflow_value_at_time(
@@ -472,12 +510,14 @@ class SnowballPDESolver(BasePDESolver):
             )
             v0_next[mask_ko, terminal_ko_idx] = df_delay
             v1_next[mask_ko, terminal_ko_idx] = df_delay
-            v0_next[mask_ko, ki_ever_col] = ever0
-            v1_next[mask_ko, ki_ever_col] = ever1
-            self._set_extra_event_indicators(
-                v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
-                product, pricing_env, t_vec, terminal_tidx,
-            )
+            if want_ki:
+                v0_next[mask_ko, ki_ever_col] = ever0
+                v1_next[mask_ko, ki_ever_col] = ever1
+            if want_coupon:
+                self._set_extra_event_indicators(
+                    v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
+                    product, pricing_env, t_vec, terminal_tidx,
+                )
 
         is_terminal_ki = product.has_ki_barrier and (
             self._ki_continuous or terminal_tidx in self._ki_observation_indices
@@ -577,8 +617,9 @@ class SnowballPDESolver(BasePDESolver):
 
                 # Zero all event surfaces in KO region, then set the KO_i indicator.
                 # KI-ever is exempt (pure first-passage statistic, no KO absorption).
-                ever0 = v0_cur[mask_ko, ki_ever_col].copy()
-                ever1 = v1_cur[mask_ko, ki_ever_col].copy()
+                if want_ki:
+                    ever0 = v0_cur[mask_ko, ki_ever_col].copy()
+                    ever1 = v1_cur[mask_ko, ki_ever_col].copy()
                 v0_cur[mask_ko, :] = 0.0
                 v1_cur[mask_ko, :] = 0.0
                 df_delay = self._cashflow_value_at_time(
@@ -589,12 +630,14 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 v0_cur[mask_ko, ko_idx] = df_delay
                 v1_cur[mask_ko, ko_idx] = df_delay
-                v0_cur[mask_ko, ki_ever_col] = ever0
-                v1_cur[mask_ko, ki_ever_col] = ever1
-                self._set_extra_event_indicators(
-                    v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
-                    product, pricing_env, t_vec, j,
-                )
+                if want_ki:
+                    v0_cur[mask_ko, ki_ever_col] = ever0
+                    v1_cur[mask_ko, ki_ever_col] = ever1
+                if want_coupon:
+                    self._set_extra_event_indicators(
+                        v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
+                        product, pricing_env, t_vec, j,
+                    )
 
             # Apply KI jump (continuous or discrete at observation indices).
             if product.has_ki_barrier:
@@ -650,19 +693,28 @@ class SnowballPDESolver(BasePDESolver):
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
-        else:
+        elif want_ki:
             df_T = pricing_env.get_discount_factor(float(tau))
             ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
             ki_probability = float(ed_ki / df_T) if df_T > 0.0 else 0.0
             ed_ki_ever = float(np.interp(spot_log, x_vec, initial_grid[:, ki_ever_col]))
             ki_ever_probability = float(ed_ki_ever / df_T) if df_T > 0.0 else 0.0
+        else:
+            # KI columns were pruned (no leg reads KI): report 0, KO/pv are intact.
+            ki_probability = 0.0
+            ki_ever_probability = 0.0
 
-        pv = float(self.price(product, pricing_env))
+        # Single-pass: use the value-sweep npv when the caller supplied one,
+        # else fall back to an internal price() solve (standalone event-stats).
+        pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
-        extra_fields = self._extract_extra_event_stats(
-            initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
-        )
+        if want_coupon:
+            extra_fields = self._extract_extra_event_stats(
+                initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
+            )
+        else:
+            extra_fields = {}
         # The maturity cashflow is pv minus KO cashflows; for products with extra
         # cashflow streams (Phoenix coupons) also remove those so the decomposition
         # pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
