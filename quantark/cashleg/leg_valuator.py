@@ -38,3 +38,17 @@ class TradeValueBreakdown:
         """Total trade PV."""
 
         return self.product_npv + sum(leg_pv.pv for leg_pv in self.leg_pvs.values())
+
+
+@dataclass(frozen=True)
+class TradeGreeks:
+    """Product-only and full-trade (product + cash legs) greeks.
+
+    ``product`` holds ``quantity * d(npv)/dx``; ``total`` holds
+    ``quantity * d(npv)/dx + d(Σ leg_pv)/dx`` — the legs carry their own
+    direction and are NOT scaled by the note quantity sign [§11.8].
+    """
+
+    product: Dict[str, float]
+    total: Dict[str, float]
+    leg_pvs: Dict[str, LegPV]

@@ -13,7 +13,12 @@ from quantark.cashleg.deterministic_leg import DeterministicLeg
 from quantark.cashleg.event_distribution import EventDistribution, EventType, PricingResult
 from quantark.cashleg.fixed_payoff_leg import FixedPayoffLeg, PaymentTrigger
 from quantark.cashleg.leg_schedule import LegSchedule
-from quantark.cashleg.leg_valuator import LegPV, TradeValueBreakdown, value_leg
+from quantark.cashleg.leg_valuator import (
+    LegPV,
+    TradeGreeks,
+    TradeValueBreakdown,
+    value_leg,
+)
 
 __all__ = [
     "AccrualBasis",
@@ -36,6 +41,7 @@ __all__ = [
     "PaymentTrigger",
     "PricingResult",
     "SurvivalBasis",
+    "TradeGreeks",
     "TradeValueBreakdown",
     "value_leg",
 ]
