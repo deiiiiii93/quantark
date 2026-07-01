@@ -406,7 +406,7 @@ class SnowballQuadEngine(BaseEngine):
 
     def _set_extra_quad_indicators(
         self, v_in, v_out, spot_grid, n_ko, ko_index, ko_record, obs_time,
-        rate, product, disable_ko_after_ki,
+        rate, product, disable_ko_after_ki, math_utils, smoothing_width,
     ) -> None:
         """Set extra indicator rows at a KO observation (no-op for Snowball)."""
         return None
@@ -510,6 +510,7 @@ class SnowballQuadEngine(BaseEngine):
         )
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
+        smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
 
         tau = 0.5 * vol * vol * dt
         alpha = (rate - div - 0.5 * vol * vol) / (vol * vol)
@@ -533,6 +534,7 @@ class SnowballQuadEngine(BaseEngine):
             obs_time = times[step_index - 1]
 
             ko_mask = None
+            ko_w = None
             ko_index = None
             ko_record = None
             for idx, rec in enumerate(ko_records):
@@ -550,17 +552,27 @@ class SnowballQuadEngine(BaseEngine):
                 discount_delay = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time
                 )
+                # Resolution-aware KO weight (spec 2026-07-01): a convex partition
+                # of surviving mass. `_smooth_step_weight` returns None at width 0,
+                # in which case we fall back to the exact hard mask.
+                ko_w = self._smooth_step_weight(
+                    grid, ko_record.barrier, spot, smoothing_width,
+                    trigger_is_down=product.is_reverse,
+                )
+                if ko_w is None:
+                    ko_w = ko_mask.astype(float)
                 # KO always applies to not-yet-KI surface; KI surface only if enabled.
-                v_out[:, ko_mask] = 0.0
-                v_out[int(ko_index), ko_mask] = float(discount_delay)
+                v_out *= (1.0 - ko_w)
+                v_out[int(ko_index)] += ko_w * float(discount_delay)
                 if not disable_ko_after_ki:
-                    v_in[:, ko_mask] = 0.0
-                    v_in[int(ko_index), ko_mask] = float(discount_delay)
-                # Extra rows (coupon) are set AFTER the KO zeroing so a coupon at a
-                # simultaneous KO is retained; future-coupon rows stay zeroed by KO.
+                    v_in *= (1.0 - ko_w)
+                    v_in[int(ko_index)] += ko_w * float(discount_delay)
+                # Extra rows (coupon) are set AFTER the KO scaling so a coupon at a
+                # simultaneous KO is retained; future-coupon rows stay scaled by KO.
                 self._set_extra_quad_indicators(
                     v_in, v_out, spot_grid, n_ko, int(ko_index), ko_record,
                     obs_time, rate, product, disable_ko_after_ki,
+                    math_utils, smoothing_width,
                 )
 
             if ki_continuous:
@@ -569,14 +581,30 @@ class SnowballQuadEngine(BaseEngine):
             elif ki_records:
                 ki_record = self._match_record(obs_time, ki_records)
                 if ki_record is not None:
-                    ki_mask = (
-                        spot_grid >= ki_record.barrier
-                        if product.is_reverse
-                        else spot_grid <= ki_record.barrier
+                    # Smoothed discrete-KI transition, consistent with the smoothed
+                    # KO absorption above and with the price() path. Blending is
+                    # required (not just a copy): when disable_ko_after_ki=True, v_in
+                    # is NOT KO-scaled while v_out IS, so a hard `v_out[ki]=v_in[ki]`
+                    # copy would mix the soft KO partition with an un-scaled surface
+                    # and corrupt KO/maturity attribution near a KO/KI-adjacent
+                    # barrier. `ki_w_eff = ki_w*(1-ko_w)` when KO takes precedence
+                    # (not disable_ko_after_ki), else `ki_w` (KI unmasked by KO) —
+                    # the smoothed analog of the old `ki_mask & ~ko_mask`, reducing
+                    # EXACTLY to it at width 0.
+                    ki_w = self._smooth_step_weight(
+                        grid, ki_record.barrier, spot, smoothing_width,
+                        trigger_is_down=not product.is_reverse,
                     )
-                    if ko_mask is not None and not disable_ko_after_ki:
-                        ki_mask = ki_mask & ~ko_mask
-                    v_out[:, ki_mask] = v_in[:, ki_mask]
+                    if ki_w is None:
+                        ki_mask = (
+                            spot_grid >= ki_record.barrier
+                            if product.is_reverse
+                            else spot_grid <= ki_record.barrier
+                        )
+                        ki_w = ki_mask.astype(float)
+                    if ko_w is not None and not disable_ko_after_ki:
+                        ki_w = ki_w * (1.0 - ko_w)
+                    v_out = (1.0 - ki_w) * v_out + ki_w * v_in
 
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
@@ -656,6 +684,12 @@ class SnowballQuadEngine(BaseEngine):
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
         # KI probability (no-KO): propagate terminal indicator on KI surface with KO absorbing to 0.
+        # NOTE (spec 2026-07-01, §3 Out of scope): this pass measures P(KI without a
+        # prior KO), which differs by DEFINITION from the MC engine's ki_probability
+        # = P(KI ever, KO or not) — a tens-of-percent gap (e.g. 0.25 vs 0.78 for an
+        # ATM KI barrier), not a discretization error. Its KO/KI masks are therefore
+        # left hard: barrier smoothing (an O(h) effect) cannot move a definitional
+        # gap, so smoothing here would add complexity that changes no reported value.
         ki_probability = 0.0
         ki_times = np.array([], dtype=float)
         ki_event_probability = np.array([], dtype=float)

@@ -503,24 +503,40 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
     def _set_extra_quad_indicators(
         self, v_in, v_out, spot_grid, n_ko, ko_index, ko_record, obs_time,
-        rate, product, disable_ko_after_ki,
+        rate, product, disable_ko_after_ki, math_utils, smoothing_width,
     ) -> None:
         barrier = self._coupon_barrier_for_obs(product, ko_index)
-        pay_mask = (
-            spot_grid <= barrier if product.is_reverse else spot_grid >= barrier
-        )
         coup_row = n_ko + ko_index
-        # Undiscounted coupon-hit indicator (1.0 at the observation); the
-        # probability is recovered by dividing by exp(-r*obs) at extraction,
-        # matching the Phoenix MC reference (coupon_probability = mean(coupon_hit)).
-        # Coupons are paid while ALIVE regardless of KI state, so set BOTH surfaces:
-        # disable_ko_after_ki only suppresses future KO, never coupons.
-        # LIMITATION: under CONTINUOUS KI the coupon rows ride the same Brownian-
-        # bridge diffusion as the value surfaces, which leaves a ~5-7% coupon-
-        # probability approximation vs MC (KO/survival remain tight). Prefer the MC
-        # engine for tight continuous-KI coupon valuation.
-        v_out[coup_row, pay_mask] = 1.0
-        v_in[coup_row, pay_mask] = 1.0
+        # Resolution-aware coupon-hit weight (undiscounted indicator at the
+        # observation); the probability is recovered by dividing by exp(-r*obs) at
+        # extraction, matching the Phoenix MC reference
+        # (coupon_probability = mean(coupon_hit)).
+        #
+        # Each coupon row is a dedicated indicator for THIS observation and is
+        # OVERWRITTEN with the full pay weight *after* KO absorption has scaled the
+        # rows by (1 - ko_w). The overwrite is deliberate: a coupon on a
+        # simultaneous KO is still paid (MC's `alive_before` includes
+        # first_ko_idx >= obs_idx), so the coupon-on-KO weight is the full pay_w,
+        # not ko_w*pay_w. Coupons are paid while ALIVE regardless of KI state, so we
+        # set BOTH surfaces; disable_ko_after_ki only suppresses future KO.
+        #
+        # Accuracy note: the earlier "~5-7% Brownian-bridge approximation" here was
+        # a MISDIAGNOSIS. The gap came from the hard 0/1 barrier masks in the
+        # event-stats recursion (O(h) discretization at barriers near spot, esp.
+        # the first KO), not the KI bridge. The smoothed weights below — the same
+        # ones price() uses — close it (coupon probability to within ~0.6% of MC).
+        # See spec 2026-07-01.
+        pay_w = self._smooth_step_weight(
+            math_utils.grid, barrier, math_utils.spot, smoothing_width,
+            trigger_is_down=product.is_reverse,
+        )
+        if pay_w is None:
+            pay_mask = (
+                spot_grid <= barrier if product.is_reverse else spot_grid >= barrier
+            )
+            pay_w = pay_mask.astype(float)
+        v_out[coup_row] = pay_w
+        v_in[coup_row] = pay_w
 
     def _extract_extra_quad_stats(
         self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity
