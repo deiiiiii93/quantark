@@ -91,6 +91,19 @@ class EquityPosition:
         current_price = self.get_current_price(pricing_env)
         return current_price * self.quantity
 
+    def _required_streams(self) -> "frozenset":
+        """Union of EventDistribution streams the attached legs read [§11.1].
+
+        Passed to ``price_with_events`` so the engine prunes indicator columns
+        (e.g. KI) that no leg needs. ``None`` when there are no legs.
+        """
+        if not self.cash_legs:
+            return frozenset()
+        streams: frozenset = frozenset()
+        for leg in self.cash_legs:
+            streams = streams | leg.required_event_types()
+        return streams
+
     def get_trade_value(self, pricing_env: PricingEnvironment) -> float:
         """
         Calculate full trade value including product and attached cash legs.
@@ -104,7 +117,10 @@ class EquityPosition:
             leg.requires_event_distribution() for leg in self.cash_legs
         )
         result = self.engine.price_with_events(
-            self.product, pricing_env, emit_distribution=needs_distribution
+            self.product,
+            pricing_env,
+            emit_distribution=needs_distribution,
+            streams=self._required_streams(),
         )
         unit_notional = self._get_unit_notional(pricing_env)
         leg_pv_total = sum(
@@ -127,7 +143,10 @@ class EquityPosition:
             leg.requires_event_distribution() for leg in self.cash_legs
         )
         result = self.engine.price_with_events(
-            self.product, pricing_env, emit_distribution=needs_distribution
+            self.product,
+            pricing_env,
+            emit_distribution=needs_distribution,
+            streams=self._required_streams(),
         )
         unit_notional = self._get_unit_notional(pricing_env)
         leg_pvs = {}
