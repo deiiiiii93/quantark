@@ -213,6 +213,18 @@ class PDEEngine(BaseEngine):
         solver = self._get_solver(product)
         return solver.price(product, pricing_env)
 
+    def create_bump_context(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> "PDEEngine":
+        """
+        Return a facade engine whose dispatched solver uses fixed bump bounds.
+        """
+        solver = self._get_solver(product)
+        fixed_solver = solver.create_bump_context(product, pricing_env)
+        if fixed_solver is solver:
+            return self
+        return type(self)(params=fixed_solver.params, method=self.method)
+
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Dict[str, float]:

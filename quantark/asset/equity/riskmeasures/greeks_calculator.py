@@ -183,6 +183,19 @@ class GreeksCalculator:
             base_price if base_price is not None else engine.price(product, pricing_env)
         )
 
+    def _resolve_bump_engine(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+    ) -> BaseEngine:
+        """Return the engine context used for numerical bump repricing."""
+        create_context = getattr(engine, "create_bump_context", None)
+        if not callable(create_context):
+            return engine
+        bump_engine = create_context(product, pricing_env)
+        return bump_engine if bump_engine is not None else engine
+
     def _calculate_sensitivity(
         self,
         base_price: float,
@@ -428,6 +441,7 @@ class GreeksCalculator:
                 greeks_out.setdefault(extra, 0.0)
             return {key: greeks_out[key] for key in greeks_out if key in requested}
 
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
         greeks_out: Dict[str, float] = {}
         if "price" in requested and base_price is not None:
             greeks_out["price"] = base_price
@@ -436,7 +450,7 @@ class GreeksCalculator:
         gamma = None
         if {"delta", "gamma", "delta_q", "vanna"} & requested:
             base_price, delta, gamma = self._get_delta_gamma(
-                product, pricing_env, engine, base_price
+                product, pricing_env, bump_engine, base_price
             )
         if delta is not None and "delta" in requested:
             greeks_out["delta"] = delta
@@ -444,7 +458,9 @@ class GreeksCalculator:
             greeks_out["gamma"] = gamma
 
         if base_price is None:
-            base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
+            base_price = self._ensure_base_price(
+                product, pricing_env, bump_engine, base_price
+            )
         if "price" in requested and "price" not in greeks_out:
             greeks_out["price"] = base_price
 
@@ -453,7 +469,7 @@ class GreeksCalculator:
             greeks_out["vega"] = self.calculate_numerical_vega(
                 product,
                 pricing_env,
-                engine,
+                bump_engine,
                 base_price=base_price,
                 vol_bump=self._bump_config.vol_bump,
             )
@@ -461,7 +477,7 @@ class GreeksCalculator:
             greeks_out["volga"] = self.calculate_numerical_volga(
                 product,
                 pricing_env,
-                engine,
+                bump_engine,
                 base_price=base_price,
                 vol_bump=self._bump_config.vol_bump,
             )
@@ -469,7 +485,7 @@ class GreeksCalculator:
             greeks_out["vanna"] = self.calculate_numerical_vanna(
                 product,
                 pricing_env,
-                engine,
+                bump_engine,
                 base_price=base_price,
                 vol_bump=self._bump_config.vol_bump,
             )
@@ -477,7 +493,7 @@ class GreeksCalculator:
             greeks_out["delta_q"] = self.calculate_numerical_delta_q(
                 product,
                 pricing_env,
-                engine,
+                bump_engine,
                 base_price=base_price,
                 div_bump=self._bump_config.div_bump,
                 base_delta=delta,
@@ -486,7 +502,7 @@ class GreeksCalculator:
             greeks_out["theta"] = self.calculate_numerical_theta(
                 product,
                 pricing_env,
-                engine,
+                bump_engine,
                 base_price=base_price,
                 time_bump_days=self._bump_config.time_bump_days,
             )
@@ -494,7 +510,7 @@ class GreeksCalculator:
             greeks_out["rho"] = self.calculate_numerical_rho(
                 product,
                 pricing_env,
-                engine,
+                bump_engine,
                 base_price=base_price,
                 rate_bump=self._bump_config.rate_bump,
             )
@@ -502,7 +518,7 @@ class GreeksCalculator:
             greeks_out["dividend_rho"] = self.calculate_numerical_dividend_rho(
                 product,
                 pricing_env,
-                engine,
+                bump_engine,
                 base_price=base_price,
                 div_bump=self._bump_config.div_bump,
             )
@@ -513,7 +529,7 @@ class GreeksCalculator:
                 greeks_out["theta"] = self.calculate_numerical_theta(
                     product,
                     pricing_env,
-                    engine,
+                    bump_engine,
                     base_price=base_price,
                     time_bump_days=self._bump_config.time_bump_days,
                 )
@@ -521,7 +537,7 @@ class GreeksCalculator:
                 greeks_out["rho"] = self.calculate_numerical_rho(
                     product,
                     pricing_env,
-                    engine,
+                    bump_engine,
                     base_price=base_price,
                     rate_bump=self._bump_config.rate_bump,
                 )
@@ -529,7 +545,7 @@ class GreeksCalculator:
                 greeks_out["dividend_rho"] = self.calculate_numerical_dividend_rho(
                     product,
                     pricing_env,
-                    engine,
+                    bump_engine,
                     base_price=base_price,
                     div_bump=self._bump_config.div_bump,
                 )
@@ -615,6 +631,7 @@ class GreeksCalculator:
         vol_bump: Optional[float] = None,
     ) -> float:
         """Numerical vega from a vol bump."""
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
         vol_bump = vol_bump if vol_bump is not None else self._bump_config.vol_bump
         base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         T = product.get_maturity(pricing_env)
@@ -637,6 +654,7 @@ class GreeksCalculator:
         vol_bump: Optional[float] = None,
     ) -> float:
         """Numerical volga (second derivative wrt vol) using vol bumps."""
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
         vol_bump = vol_bump if vol_bump is not None else self._bump_config.vol_bump
         base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         T = product.get_maturity(pricing_env)
@@ -676,6 +694,7 @@ class GreeksCalculator:
         vol_bump: Optional[float] = None,
     ) -> float:
         """Numerical vanna (cross derivative wrt spot and vol)."""
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
         vol_bump = vol_bump if vol_bump is not None else self._bump_config.vol_bump
         base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         T = product.get_maturity(pricing_env)
@@ -731,6 +750,7 @@ class GreeksCalculator:
         time_bump_days: Optional[int] = None,
     ) -> float:
         """Numerical theta via time bump with observation schedule handling."""
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
         time_bump_days = (
             time_bump_days
             if time_bump_days is not None
@@ -772,6 +792,7 @@ class GreeksCalculator:
         rate_bump: Optional[float] = None,
     ) -> float:
         """Numerical rho from a rate bump (per 1% rate change)."""
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
         rate_bump = rate_bump if rate_bump is not None else self._bump_config.rate_bump
         base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         env_up_rate = deepcopy(pricing_env)
@@ -812,6 +833,7 @@ class GreeksCalculator:
             Negative for call options (higher div = lower call price).
             Positive for put options (higher div = higher put price).
         """
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
         div_bump = div_bump if div_bump is not None else self._bump_config.div_bump
         base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         T = product.get_maturity(pricing_env)
@@ -835,6 +857,7 @@ class GreeksCalculator:
         base_delta: Optional[float] = None,
     ) -> float:
         """Numerical dDelta/dq via dividend yield bumps."""
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
         div_bump = div_bump if div_bump is not None else self._bump_config.div_bump
         base_price = self._ensure_base_price(product, pricing_env, engine, base_price)
         T = product.get_maturity(pricing_env)

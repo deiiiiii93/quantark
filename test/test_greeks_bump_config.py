@@ -79,6 +79,12 @@ class TestEngineParamsBackwardCompatibility:
         assert calc._bump_config.spot_bump == 0.001
         assert calc._bump_config.vol_bump == 0.005
 
+    def test_non_grid_engine_bump_context_falls_back_to_same_engine(
+        self, call_option, pricing_env, bs_engine
+    ):
+        """Test that engines without numerical domains use the explicit fallback."""
+        assert bs_engine.create_bump_context(call_option, pricing_env) is bs_engine
+
 
 class TestNumericalGreeksWithBumpConfig:
     """Test numerical Greeks with custom bump configurations."""

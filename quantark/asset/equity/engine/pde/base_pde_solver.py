@@ -7,6 +7,7 @@ backward in time, with support for Rannacher smoothing.
 
 from abc import abstractmethod
 from collections import OrderedDict
+from copy import deepcopy
 import math
 import threading
 from typing import Dict, Optional, Tuple, List, NamedTuple, Sequence
@@ -130,6 +131,35 @@ class BasePDESolver(BaseEngine):
         if strategy is None:
             strategy = self._cache_strategy
         return strategy
+
+    def create_bump_context(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> "BasePDESolver":
+        """
+        Return a PDE solver clone with the base spatial domain frozen.
+
+        Auto spatial bounds depend on market drift/volatility. Freezing the
+        base valuation bounds keeps rate, dividend, volatility, and theta bumps
+        from mixing true market sensitivity with domain movement noise.
+        """
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+        if tau <= 0:
+            return self
+
+        strike = getattr(product, "strike", spot)
+        r = pricing_env.get_rate(tau)
+        q = pricing_env.get_div_yield(tau)
+        sigma = pricing_env.get_vol(strike, tau)
+        barriers = self._get_barriers(product)
+        s_min, s_max = self._resolve_spatial_bounds(
+            product, spot, sigma, tau, r, q, barriers
+        )
+
+        fixed_params = deepcopy(self.params)
+        fixed_params.s_min = float(s_min)
+        fixed_params.s_max = float(s_max)
+        return type(self)(params=fixed_params)
 
     def _freeze_cache_value(self, value):
         if value is None or isinstance(value, (str, int, float, bool)):

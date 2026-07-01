@@ -52,6 +52,18 @@ class BaseEngine(ABC):
         """
         pass
 
+    def create_bump_context(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> "BaseEngine":
+        """
+        Return an engine context for finite-difference bump repricing.
+
+        Engines with market-dependent numerical grids can override this hook to
+        freeze the base valuation grid/domain before bumped repricing. Engines
+        without such state explicitly fall back to the current repricing engine.
+        """
+        return self
+
     def price_with_events(
         self,
         product: BaseEquityProduct,
