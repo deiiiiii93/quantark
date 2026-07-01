@@ -8,6 +8,7 @@ backward in time, with support for Rannacher smoothing.
 from abc import abstractmethod
 from collections import OrderedDict
 from copy import deepcopy
+from dataclasses import dataclass, field
 import math
 import threading
 from typing import Dict, Optional, Tuple, List, NamedTuple, Sequence
@@ -26,6 +27,24 @@ from quantark.util.enum.engine_enums import EngineType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid
+
+
+@dataclass(frozen=True)
+class TimeGridSpec:
+    """The three orthogonal time-grid concerns (spec §4 Component 1).
+
+    * ``align_times``  — times that MUST be grid nodes exactly: KO/coupon
+      observation dates.  They drive both node alignment and the
+      event-distribution resets, so a misalignment here is a correctness bug.
+    * ``monitor_times`` — extra nodes that improve resolution of a monitored
+      feature (daily-discrete KI) but are not alignment-critical for the
+      value/cashflow.  Empty for European/continuous/no-KI regimes.
+    * ``steps_per_day`` — resolution: fill density between mandatory nodes.
+    """
+
+    align_times: list
+    monitor_times: list = field(default_factory=list)
+    steps_per_day: float = 1.0
 
 
 class PDESolutionResult(NamedTuple):
@@ -658,6 +677,22 @@ class BasePDESolver(BaseEngine):
                 size = min(max(size, suggested), params.max_grid_size)
 
         return size, adaptive
+
+    def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
+        """Decoupled time-grid concerns for this product (spec §4 Component 1).
+
+        Base default: align to the generic observation schedule; no KI-monitor
+        concept (that belongs to autocallable solvers, which override this);
+        resolution from params.  Returns interior times only (0 < t < tau).
+        """
+        align = [
+            t for t in (self._get_event_times(product, tau) or []) if 0.0 < t < tau
+        ]
+        return TimeGridSpec(
+            align_times=sorted(set(align)),
+            monitor_times=[],
+            steps_per_day=float(self.params.event_steps_per_day),
+        )
 
     def _resolve_time_grid(
         self, product, tau, barriers
