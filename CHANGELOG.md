@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.2.2] - 2026-07-01
+
+### Fixed
+- PDE numerical Greeks: freeze the base spatial domain for finite-difference
+  bump repricing so rho and dividend rho measure market sensitivity without
+  contamination from auto-grid/domain movement under bumped rate, dividend,
+  volatility, or time inputs.
+
 ## [0.2.1] - 2026-06-30
 
 ### Fixed
