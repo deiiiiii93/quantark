@@ -12,6 +12,7 @@ The surfaces interact at barrier observation times:
 For detailed design, see: asset/equity/engine/docs/snowball_pde_engine.md
 """
 
+import logging
 from collections import OrderedDict
 from time import perf_counter
 from typing import Dict, List, Optional, Set, Tuple
@@ -33,6 +34,7 @@ from quantark.asset.equity.product.option.observation_schedule import ResolvedOb
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
+from quantark.util.enum.engine_enums import KnockInMonitoringMode
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
@@ -40,7 +42,15 @@ from quantark.util.numerical import (
     is_greater_than_or_close,
     is_zero,
     safe_divide,
+    safe_exp,
+    safe_sqrt,
 )
+
+# BGK continuity-correction constant beta = -zeta(1/2)/sqrt(2*pi). Defined here
+# with the identical high-precision value used by SnowballQuadEngine so the PDE
+# and quad BGK shifted barriers coincide (kept as a local literal rather than a
+# cross-engine import to avoid a PDE->quad module dependency) [§11.6].
+_BGK_BETA = 0.5825971579390107
 
 
 class SnowballPDESolver(BasePDESolver):
@@ -97,6 +107,12 @@ class SnowballPDESolver(BasePDESolver):
         self._ki_continuous: bool = False
         self._ki_barrier: float = 0.0
         self._is_reverse: bool = False
+
+        # BGK opt-in continuous-KI state [§11.6]. Set per-solve by _configure_bgk:
+        # when active, KI is applied on every step against the shifted barrier and
+        # the interior daily-KI nodes are dropped from the time grid.
+        self._bgk_active: bool = False
+        self._bgk_ki_barrier: float = 0.0
 
         # Time tracking
         self._total_tau: float = 0.0
@@ -178,6 +194,9 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
+        # Resolve BGK state before grids so the time grid drops interior KI nodes.
+        self._configure_bgk(product, pricing_env, sigma, tau)
+
         if self._profile_enabled:
             self._reset_profile_stats()
 
@@ -216,7 +235,7 @@ class SnowballPDESolver(BasePDESolver):
 
         # Apply terminal KI if at maturity observation (European KI fix)
         if product.has_ki_barrier:
-            is_terminal_ki = self._ki_continuous
+            is_terminal_ki = self._ki_continuous or self._bgk_active
             if not is_terminal_ki:
                 if (num_t - 1) in self._ki_observation_indices:
                     is_terminal_ki = True
@@ -490,6 +509,9 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
+        # Resolve BGK state before grids so the time grid drops interior KI nodes.
+        self._configure_bgk(product, pricing_env, sigma, tau)
+
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
             product, pricing_env, spot, sigma, tau, r, q
         )
@@ -591,7 +613,9 @@ class SnowballPDESolver(BasePDESolver):
                 )
 
         is_terminal_ki = product.has_ki_barrier and (
-            self._ki_continuous or terminal_tidx in self._ki_observation_indices
+            self._ki_continuous
+            or self._bgk_active
+            or terminal_tidx in self._ki_observation_indices
         )
         if is_terminal_ki:
             ki_barrier = self._resolve_ki_barrier_at_tidx(terminal_tidx)
@@ -710,9 +734,13 @@ class SnowballPDESolver(BasePDESolver):
                         product, pricing_env, t_vec, j,
                     )
 
-            # Apply KI jump (continuous or discrete at observation indices).
+            # Apply KI jump (continuous / BGK every step, or discrete at obs indices).
             if product.has_ki_barrier:
-                should_apply_ki = self._ki_continuous or j in self._ki_observation_indices
+                should_apply_ki = (
+                    self._ki_continuous
+                    or self._bgk_active
+                    or j in self._ki_observation_indices
+                )
                 if should_apply_ki:
                     ki_barrier = self._resolve_ki_barrier_at_tidx(j)
                     mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
@@ -1145,11 +1173,76 @@ class SnowballPDESolver(BasePDESolver):
 
     def _resolve_ki_barrier_at_tidx(self, t_idx: int) -> float:
         """Resolve KI barrier for a specific PDE time index."""
+        if self._bgk_active:
+            return float(self._bgk_ki_barrier)
         if not self._ki_continuous:
             mapped = self._ki_barrier_by_tidx.get(t_idx)
             if mapped is not None:
                 return float(mapped)
         return float(self._ki_barrier)
+
+    def _bgk_shifted_ki_barrier(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, sigma: float
+    ) -> float:
+        """Broadie-Glasserman-Kou continuity-corrected KI barrier [§11.6].
+
+        Shift the discrete KI barrier AWAY from spot by ``exp(±beta*sigma*sqrt(dt))``
+        with ``dt = 1/bus_days_in_year``: a standard down-in barrier shifts DOWN
+        (``-``), a reverse up-in barrier shifts UP (``+``). ``sigma`` is the same
+        strike-selected constant vol used to build the operator, so the shift is
+        consistent with the diffusion the grid resolves.
+        """
+        ki_barrier = product.barrier_config.ki_barrier
+        if isinstance(ki_barrier, list):
+            ki_barrier = ki_barrier[0]
+        ki_barrier = float(ki_barrier)
+        dt = 1.0 / float(pricing_env.bus_days_in_year)
+        shift = _BGK_BETA * float(sigma) * safe_sqrt(dt)
+        return ki_barrier * safe_exp(shift if product.is_reverse else -shift)
+
+    def _bgk_requested(self) -> bool:
+        """True iff the opt-in BGK monitoring mode is selected on the params."""
+        return (
+            getattr(self.params, "ki_monitoring_mode", None)
+            is KnockInMonitoringMode.BGK_APPROXIMATION
+        )
+
+    def _bgk_applicable(self, product: BaseEquityProduct, tau: float) -> bool:
+        """BGK engages only for discretely-monitored KI (interior dates present).
+
+        European (maturity-only), continuous, no-KI, and already-knocked-in
+        products have no interior KI monitor times, so BGK is inert for them.
+        """
+        return bool(self._ki_monitor_times(product, tau))
+
+    def _configure_bgk(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        sigma: float,
+        tau: float,
+    ) -> None:
+        """Resolve per-solve BGK state; log an inert note when opted-in but N/A.
+
+        Must run before ``_build_grids`` so ``_time_grid_spec`` /
+        ``_get_event_times`` see ``self._bgk_active`` and drop the interior daily
+        KI nodes.
+        """
+        self._bgk_active = False
+        self._bgk_ki_barrier = 0.0
+        if not self._bgk_requested():
+            return
+        if not self._bgk_applicable(product, tau):
+            logging.warning(
+                "PDEParams.ki_monitoring_mode=BGK_APPROXIMATION is inert for this "
+                "product: the Broadie-Glasserman-Kou continuity correction engages "
+                "only for discretely-monitored knock-in (European / continuous / "
+                "no-KI / already-knocked-in are priced unchanged under the exact "
+                "path)."
+            )
+            return
+        self._bgk_active = True
+        self._bgk_ki_barrier = self._bgk_shifted_ki_barrier(product, pricing_env, sigma)
 
     def _aligned_time_index(
         self, t_vec: np.ndarray, obs_time: float, label: str
@@ -1208,6 +1301,15 @@ class SnowballPDESolver(BasePDESolver):
         # Add airbag barrier if present
         if product.airbag_config.airbag_barrier is not None:
             points.append(product.airbag_config.airbag_barrier)
+
+        # BGK opt-in mode: the shifted KI barrier must be a spatial node so the
+        # continuous KI mask lands on it exactly [§11.6]. Computed statelessly
+        # from the env vol so the frozen-bump critical points capture it too.
+        if self._bgk_requested():
+            tau = product.get_maturity(pricing_env)
+            if tau > 0 and self._bgk_applicable(product, tau):
+                sigma = pricing_env.get_vol(product.strike, tau)
+                points.append(self._bgk_shifted_ki_barrier(product, pricing_env, sigma))
 
         return sorted(set([p for p in points if p > 0]))
 
@@ -1295,11 +1397,14 @@ class SnowballPDESolver(BasePDESolver):
         """Decoupled time-grid concerns for autocallables (spec §4 Component 1).
 
         align = KO/coupon dates (must be nodes); monitor = daily-discrete KI
-        dates (resolution only); steps_per_day from params.
+        dates (resolution only); steps_per_day from params. Under active BGK the
+        KI is monitored continuously against a shifted barrier, so the interior
+        daily-KI nodes are dropped and the grid aligns to KO/coupon only [§11.6].
         """
+        monitor = [] if self._bgk_active else self._ki_monitor_times(product, tau)
         return TimeGridSpec(
             align_times=self._ko_coupon_align_times(product, tau),
-            monitor_times=self._ki_monitor_times(product, tau),
+            monitor_times=monitor,
             steps_per_day=float(self.params.event_steps_per_day),
         )
 
@@ -1313,9 +1418,9 @@ class SnowballPDESolver(BasePDESolver):
         [§11.2].  Correctness-critical alignment lives in
         ``_ko_coupon_align_times``; ``_ki_monitor_times`` adds resolution.
         """
+        monitor = [] if self._bgk_active else self._ki_monitor_times(product, tau)
         union = sorted(
-            set(self._ko_coupon_align_times(product, tau))
-            | set(self._ki_monitor_times(product, tau))
+            set(self._ko_coupon_align_times(product, tau)) | set(monitor)
         )
         return union or None
 
@@ -1791,7 +1896,9 @@ class SnowballPDESolver(BasePDESolver):
         # For discrete KI: apply only at observation times
         if product.has_ki_barrier:
             should_apply_ki = (
-                self._ki_continuous or t_idx in self._ki_observation_indices
+                self._ki_continuous
+                or self._bgk_active
+                or t_idx in self._ki_observation_indices
             )
             if should_apply_ki:
                 self._apply_ki_jump(grid_v0, grid_v1, s_vec, t_idx, product)

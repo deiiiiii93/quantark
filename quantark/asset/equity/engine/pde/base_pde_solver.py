@@ -279,6 +279,7 @@ class BasePDESolver(BaseEngine):
             params.use_rannacher,
             params.rannacher_steps,
             params.frozen_critical_points,
+            getattr(params, "ki_monitoring_mode", None),
         )
 
     def _grid_cache_key(
