@@ -306,7 +306,10 @@ class EquityPosition:
 
         T = product.get_maturity(pricing_env)
 
-        # Vega: one-sided vol bump (per vol point).
+        # Vega: one-sided vol bump. Convention MUST match
+        # GreeksCalculator.calculate_numerical_vega — the canonical greek used
+        # everywhere else reports the RAW P&L for a `vol_bump` move (NOT a
+        # dV/dsigma derivative); do not divide by the bump.
         if "vega" in requested:
             strike = getattr(product, "strike", pricing_env.spot)
             cur_vol = pricing_env.get_vol(strike, T)
@@ -314,22 +317,21 @@ class EquityPosition:
                 pricing_env, product, cur_vol, bc.vol_bump, direction=1.0
             )
             nv, lv = reprice(product, env_v, self.cash_legs)
-            record("vega", (nv - base_npv) / bc.vol_bump, (lv - base_legs) / bc.vol_bump)
+            record("vega", nv - base_npv, lv - base_legs)
 
-        # Rho: one-sided rate bump, scaled to per 1% change.
+        # Rho: one-sided rate bump, rescaled to per 1% change — exactly matching
+        # GreeksCalculator.calculate_numerical_rho (`(price_up - base) * 0.01/rate_bump`,
+        # a SINGLE rescale, not a derivative-then-rescale).
         if "rho" in requested:
             cur_rate = pricing_env.get_rate(T)
             env_r = deepcopy(pricing_env)
             env_r.rate_curve = FlatRateCurve(cur_rate + bc.rate_bump)
             nr, lr = reprice(product, env_r, self.cash_legs)
             scale = 0.01 / bc.rate_bump
-            record(
-                "rho",
-                (nr - base_npv) / bc.rate_bump * scale,
-                (lr - base_legs) / bc.rate_bump * scale,
-            )
+            record("rho", (nr - base_npv) * scale, (lr - base_legs) * scale)
 
-        # Dividend rho: one-sided div bump, scaled to per 1% change.
+        # Dividend rho: one-sided div bump, rescaled to per 1% change — matching
+        # GreeksCalculator.calculate_numerical_dividend_rho (single rescale).
         if "dividend_rho" in requested:
             cur_div = pricing_env.get_div_yield(T)
             env_d = gc._build_div_bumped_env(
@@ -337,11 +339,7 @@ class EquityPosition:
             )
             nd_, ld_ = reprice(product, env_d, self.cash_legs)
             scale = 0.01 / bc.div_bump
-            record(
-                "dividend_rho",
-                (nd_ - base_npv) / bc.div_bump * scale,
-                (ld_ - base_legs) / bc.div_bump * scale,
-            )
+            record("dividend_rho", (nd_ - base_npv) * scale, (ld_ - base_legs) * scale)
 
         # Theta: shift product AND legs by the same time bump.
         if "theta" in requested:

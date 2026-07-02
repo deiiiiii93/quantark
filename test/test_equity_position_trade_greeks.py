@@ -9,11 +9,14 @@ product and the legs together.
 
 from datetime import datetime
 
+import pytest
+
 from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.util.enum import GreeksCalculationMode
 from quantark.cashleg.autocallable_leg import (
     AccrualBasis,
     AutocallableCashLeg,
@@ -141,6 +144,41 @@ def test_quantity_contract_product_scales_legs_absolute():
     leg_delta_long = rl.total["delta"] - rl.product["delta"]
     leg_delta_short = rs.total["delta"] - rs.product["delta"]
     assert abs(leg_delta_long - leg_delta_short) < 1e-6 * max(abs(leg_delta_long), 1.0)
+
+
+def test_trade_risk_matches_calculate_numerical_greeks_convention():
+    """get_trade_risk (no legs) must report greeks in the SAME convention as
+    GreeksCalculator.calculate_numerical_greeks — the one used everywhere else.
+
+    Regression: vega was divided by vol_bump (100x too large) and rho/dividend_rho
+    were divided by rate_bump/div_bump twice (10000x too large) vs the canonical
+    one-sided "P&L per configured bump" (vega) and "per 1% change" (rho/div)
+    scaling. delta/gamma/theta already matched (raw differences). With no cash
+    legs, product == total, so both must equal the numerical greeks exactly.
+    """
+    env = _env()
+    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    gc = GreeksCalculator(greeks_mode=GreeksCalculationMode.BUMP)
+    greeks = ["delta", "gamma", "vega", "theta", "rho", "dividend_rho"]
+
+    pos = EquityPosition(
+        product=_snowball(),
+        quantity=1.0,
+        entry_price=100.0,
+        underlying="TEST",
+        engine=engine,
+        entry_timestamp=datetime(2024, 1, 1),
+        cash_legs=[],
+    )
+    risk = pos.get_trade_risk(env, gc, greeks)
+    ref = gc.calculate_numerical_greeks(_snowball(), env, engine, greeks=greeks)
+
+    for k in greeks:
+        assert risk.product[k] == pytest.approx(ref[k], rel=1e-6, abs=1e-6), (
+            f"{k}: trade_risk={risk.product[k]} vs numerical={ref[k]}"
+        )
+        # No legs → total equals product.
+        assert risk.total[k] == pytest.approx(risk.product[k], rel=1e-9, abs=1e-9)
 
 
 def test_total_price_matches_trade_value_breakdown():
