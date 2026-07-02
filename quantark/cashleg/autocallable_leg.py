@@ -8,7 +8,7 @@ settlement times. Greeks flow through the existing position bump loop.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Optional, Sequence
 
@@ -140,6 +140,19 @@ class AutocallableCashLeg(CashLeg):
     def requires_event_distribution(self) -> bool:
         return True
 
+    def required_event_types(self) -> frozenset:
+        """KO (terminal buckets always need KO mass) ∪ the basis stream ∪ the
+        terminal buckets this leg reads [§11.1].
+
+        A COUPON-basis leg adds COUPON; a leg whose ``terminal_events`` includes
+        MATURITY_WITH_KI forces the engine's KI split.
+        """
+
+        req = {EventType.KO}
+        req.add(_BASIS_EVENT[self.accrual_basis])
+        req |= set(self.terminal_events)
+        return frozenset(req)
+
     def value(
         self, event_dist: EventDistribution, env, position_notional: float
     ) -> float:
@@ -190,6 +203,46 @@ class AutocallableCashLeg(CashLeg):
         if self.pv_formula is PvFormula.NORMAL:
             return self.sign() * R
         return self.sign() * (float(self.notional) - R)
+
+    def time_shift(self, dt: float) -> "Optional[AutocallableCashLeg]":
+        """Advance the leg by ``dt`` years for a theta bump [§11.9].
+
+        Mirrors the parent product's observation-drop rule (a time observation
+        survives iff ``obs - dt > 0``): survivors shift by ``-dt`` (floored at
+        0), their accrual factors and settlement times move with them, and the
+        terminal settlement shifts likewise. Returns ``None`` when the leg had
+        observations and they all drop (fully expired within the bump); a
+        terminal-only leg (no observations) survives with a shifted terminal.
+        """
+        dt = float(dt)
+        if dt <= 0.0:
+            return self
+
+        obs = np.asarray(self.observation_schedule, dtype=float)
+        had_obs = obs.size > 0
+        keep = (obs - dt) > Tolerance.ZERO if had_obs else np.array([], dtype=bool)
+
+        new_obs = tuple(max(0.0, float(t - dt)) for t, k in zip(obs, keep) if k)
+        new_af = tuple(
+            float(a) for a, k in zip(self.accrual_factors, keep) if k
+        )
+        new_ss = tuple(
+            max(0.0, float(s - dt))
+            for s, k in zip(self.settlement_schedule, keep)
+            if k
+        )
+
+        if had_obs and not new_obs:
+            return None  # every observation dropped => leg expired
+
+        new_terminal_settlement = max(0.0, float(self.terminal_settlement_time - dt))
+        return replace(
+            self,
+            observation_schedule=new_obs,
+            accrual_factors=new_af,
+            settlement_schedule=new_ss,
+            terminal_settlement_time=new_terminal_settlement,
+        )
 
     def value_standalone(self, parent_product, engine, env) -> float:
         """Price this leg directly against a parent product + engine."""

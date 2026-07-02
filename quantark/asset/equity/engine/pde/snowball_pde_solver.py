@@ -12,6 +12,7 @@ The surfaces interact at barrier observation times:
 For detailed design, see: asset/equity/engine/docs/snowball_pde_engine.md
 """
 
+import logging
 from collections import OrderedDict
 from time import perf_counter
 from typing import Dict, List, Optional, Set, Tuple
@@ -21,7 +22,11 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from scipy.linalg import solve_banded
 
-from quantark.asset.equity.engine.pde.base_pde_solver import BasePDESolver, PDESolutionResult
+from quantark.asset.equity.engine.pde.base_pde_solver import (
+    BasePDESolver,
+    PDESolutionResult,
+    TimeGridSpec,
+)
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -29,6 +34,7 @@ from quantark.asset.equity.product.option.observation_schedule import ResolvedOb
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
+from quantark.util.enum.engine_enums import KnockInMonitoringMode
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
@@ -36,7 +42,15 @@ from quantark.util.numerical import (
     is_greater_than_or_close,
     is_zero,
     safe_divide,
+    safe_exp,
+    safe_sqrt,
 )
+
+# BGK continuity-correction constant beta = -zeta(1/2)/sqrt(2*pi). Defined here
+# with the identical high-precision value used by SnowballQuadEngine so the PDE
+# and quad BGK shifted barriers coincide (kept as a local literal rather than a
+# cross-engine import to avoid a PDE->quad module dependency) [§11.6].
+_BGK_BETA = 0.5825971579390107
 
 
 class SnowballPDESolver(BasePDESolver):
@@ -93,6 +107,12 @@ class SnowballPDESolver(BasePDESolver):
         self._ki_continuous: bool = False
         self._ki_barrier: float = 0.0
         self._is_reverse: bool = False
+
+        # BGK opt-in continuous-KI state [§11.6]. Set per-solve by _configure_bgk:
+        # when active, KI is applied on every step against the shifted barrier and
+        # the interior daily-KI nodes are dropped from the time grid.
+        self._bgk_active: bool = False
+        self._bgk_ki_barrier: float = 0.0
 
         # Time tracking
         self._total_tau: float = 0.0
@@ -174,6 +194,9 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
+        # Resolve BGK state before grids so the time grid drops interior KI nodes.
+        self._configure_bgk(product, pricing_env, sigma, tau)
+
         if self._profile_enabled:
             self._reset_profile_stats()
 
@@ -212,7 +235,7 @@ class SnowballPDESolver(BasePDESolver):
 
         # Apply terminal KI if at maturity observation (European KI fix)
         if product.has_ki_barrier:
-            is_terminal_ki = self._ki_continuous
+            is_terminal_ki = self._ki_continuous or self._bgk_active
             if not is_terminal_ki:
                 if (num_t - 1) in self._ki_observation_indices:
                     is_terminal_ki = True
@@ -321,14 +344,85 @@ class SnowballPDESolver(BasePDESolver):
         return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
 
     def calculate_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        npv: Optional[float] = None,
+        streams: Optional[frozenset] = None,
     ) -> Optional[AutocallableEventStats]:
-        """Provide per-observation KO probabilities and expected discounted cashflows."""
+        """Provide per-observation KO probabilities and expected discounted cashflows.
+
+        ``npv`` / ``streams`` support the single-pass ``price_with_events`` path
+        (skip the internal value solve; prune unrequested indicator columns).
+        """
         if not isinstance(product, self._event_stats_product_type()):
             return None
         if pricing_env is None:
             return None
-        return self._compute_event_stats(product, pricing_env)
+        return self._compute_event_stats(product, pricing_env, npv=npv, streams=streams)
+
+    def price_with_events(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        emit_distribution: bool = True,
+        streams: Optional[frozenset] = None,
+    ) -> "PricingResult":
+        """Single-pass NPV + event distribution [§11.2, §11.3].
+
+        Replicates ``price()``'s expired / immediate-KO short-circuits before any
+        combined solve, then runs the value sweep once and reuses its NPV for the
+        event-distribution residual (no internal re-price), pruning indicator
+        columns to ``streams``.
+        """
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+
+        self._check_product_type(product)
+        if pricing_env is None:
+            raise ValidationError(
+                f"PricingEnvironment is required for {self._solver_name}"
+            )
+        self._validate_product(product)
+
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+
+        # [§11.3] short-circuits: return the exact price() value with a degenerate
+        # (maturity-only) distribution, without running the indicator sweep.
+        if tau <= 0 or is_zero(tau):
+            npv = float(self._calculate_terminal_value(product, spot, pricing_env))
+            return PricingResult(
+                npv=npv,
+                event_distribution=EventDistribution.trivial(max(float(tau), 0.0)),
+            )
+        if self._is_knocked_out_at_valuation(product, spot, pricing_env):
+            npv = float(self._get_immediate_ko_payoff(product, pricing_env))
+            return PricingResult(
+                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
+            )
+        if not emit_distribution:
+            npv = float(self.price(product, pricing_env))
+            return PricingResult(
+                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
+            )
+
+        # Single value sweep -> npv, reused by the event-distribution residual.
+        result = self._solve(product, pricing_env)
+        npv = float(
+            self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+        )
+        stats = self.calculate_event_stats(
+            product, pricing_env, npv=npv, streams=streams
+        )
+        if stats is None:
+            return PricingResult(
+                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
+            )
+        return PricingResult(
+            npv=npv,
+            event_distribution=EventDistribution.from_autocallable_stats(stats),
+        )
 
     def _event_stats_product_type(self) -> type:
         """Product type accepted by ``calculate_event_stats`` (overridable)."""
@@ -357,7 +451,12 @@ class SnowballPDESolver(BasePDESolver):
         return {}
 
     def _compute_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        npv: Optional[float] = None,
+        streams: Optional[frozenset] = None,
     ) -> Optional[AutocallableEventStats]:
         """
         Native PDE implementation:
@@ -365,6 +464,17 @@ class SnowballPDESolver(BasePDESolver):
         - Applies KO/KI jumps to all indicator surfaces at observation times.
         - Returns KO per-observation probabilities (by dividing discounted indicators by
           discount factors) and expected discounted KO cashflows.
+
+        ``npv``: the product value; when provided, the internal ``self.price()``
+        solve is skipped and this value is used for the maturity residual
+        (single-pass path — the caller already ran the value sweep).
+
+        ``streams``: the ``EventType`` set the caller needs [§11.1]. ``None`` ⇒
+        the full distribution (KO + coupon + KI, unchanged behaviour). Pruning
+        the KI indicator columns and/or the Phoenix coupon columns when they are
+        not requested leaves ``ko_probability`` / ``survival`` / ``pv`` bit-
+        identical — the KI *regime jump* still runs, only the auxiliary
+        indicator columns are dropped.
         """
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
@@ -398,6 +508,9 @@ class SnowballPDESolver(BasePDESolver):
                 self._ki_barrier = ki_barrier[0]
             else:
                 self._ki_barrier = ki_barrier
+
+        # Resolve BGK state before grids so the time grid drops interior KI nodes.
+        self._configure_bgk(product, pricing_env, sigma, tau)
 
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
             product, pricing_env, spot, sigma, tau, r, q
@@ -434,18 +547,39 @@ class SnowballPDESolver(BasePDESolver):
         # independent of KO/autocall — it is a pure first-passage statistic and is
         # therefore EXEMPT from the KO absorption below (matching the QUAD and MC
         # ki_ever definition).
-        n_extra = self._n_extra_event_cols(n_ko)
-        ki_col = n_ko + n_extra
-        ki_ever_col = n_ko + n_extra + 1
-        n_cols = n_ko + n_extra + 2
+        # Stream selection [§11.1]: prune auxiliary indicator columns the caller
+        # does not need. KO columns are always present; the KI regime jump always
+        # runs (it drives the KO columns), only the KI *indicator* columns and
+        # the Phoenix coupon columns are optional.
+        if streams is None:
+            want_ki = True
+            want_coupon = True
+        else:
+            from quantark.cashleg.event_distribution import EventType
+
+            want_ki = bool(
+                streams & {EventType.KI, EventType.MATURITY_WITH_KI}
+            )
+            want_coupon = EventType.COUPON in streams
+
+        n_extra = self._n_extra_event_cols(n_ko) if want_coupon else 0
+        if want_ki:
+            ki_col = n_ko + n_extra
+            ki_ever_col = n_ko + n_extra + 1
+            n_cols = n_ko + n_extra + 2
+        else:
+            ki_col = -1
+            ki_ever_col = -1
+            n_cols = n_ko + n_extra
 
         # Terminal conditions at maturity (t = T):
         # - KO indicators are zero at maturity (KO only at discrete observations via jumps)
         # - Both KI indicators are 1 on the KI surface and 0 on the no-KI surface
         v0_next = np.zeros((num_x, n_cols), dtype=float)
         v1_next = np.zeros((num_x, n_cols), dtype=float)
-        v1_next[:, ki_col] = 1.0
-        v1_next[:, ki_ever_col] = 1.0
+        if want_ki:
+            v1_next[:, ki_col] = 1.0
+            v1_next[:, ki_ever_col] = 1.0
 
         # Apply terminal KO/KI events at maturity if observation schedules include t=T.
         terminal_tidx = num_t - 1
@@ -456,8 +590,9 @@ class SnowballPDESolver(BasePDESolver):
             mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
             # KI-ever is exempt from KO absorption (pure first-passage statistic).
-            ever0 = v0_next[mask_ko, ki_ever_col].copy()
-            ever1 = v1_next[mask_ko, ki_ever_col].copy()
+            if want_ki:
+                ever0 = v0_next[mask_ko, ki_ever_col].copy()
+                ever1 = v1_next[mask_ko, ki_ever_col].copy()
             v0_next[mask_ko, :] = 0.0
             v1_next[mask_ko, :] = 0.0
             df_delay = self._cashflow_value_at_time(
@@ -468,15 +603,19 @@ class SnowballPDESolver(BasePDESolver):
             )
             v0_next[mask_ko, terminal_ko_idx] = df_delay
             v1_next[mask_ko, terminal_ko_idx] = df_delay
-            v0_next[mask_ko, ki_ever_col] = ever0
-            v1_next[mask_ko, ki_ever_col] = ever1
-            self._set_extra_event_indicators(
-                v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
-                product, pricing_env, t_vec, terminal_tidx,
-            )
+            if want_ki:
+                v0_next[mask_ko, ki_ever_col] = ever0
+                v1_next[mask_ko, ki_ever_col] = ever1
+            if want_coupon:
+                self._set_extra_event_indicators(
+                    v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
+                    product, pricing_env, t_vec, terminal_tidx,
+                )
 
         is_terminal_ki = product.has_ki_barrier and (
-            self._ki_continuous or terminal_tidx in self._ki_observation_indices
+            self._ki_continuous
+            or self._bgk_active
+            or terminal_tidx in self._ki_observation_indices
         )
         if is_terminal_ki:
             ki_barrier = self._resolve_ki_barrier_at_tidx(terminal_tidx)
@@ -573,8 +712,9 @@ class SnowballPDESolver(BasePDESolver):
 
                 # Zero all event surfaces in KO region, then set the KO_i indicator.
                 # KI-ever is exempt (pure first-passage statistic, no KO absorption).
-                ever0 = v0_cur[mask_ko, ki_ever_col].copy()
-                ever1 = v1_cur[mask_ko, ki_ever_col].copy()
+                if want_ki:
+                    ever0 = v0_cur[mask_ko, ki_ever_col].copy()
+                    ever1 = v1_cur[mask_ko, ki_ever_col].copy()
                 v0_cur[mask_ko, :] = 0.0
                 v1_cur[mask_ko, :] = 0.0
                 df_delay = self._cashflow_value_at_time(
@@ -585,16 +725,22 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 v0_cur[mask_ko, ko_idx] = df_delay
                 v1_cur[mask_ko, ko_idx] = df_delay
-                v0_cur[mask_ko, ki_ever_col] = ever0
-                v1_cur[mask_ko, ki_ever_col] = ever1
-                self._set_extra_event_indicators(
-                    v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
-                    product, pricing_env, t_vec, j,
-                )
+                if want_ki:
+                    v0_cur[mask_ko, ki_ever_col] = ever0
+                    v1_cur[mask_ko, ki_ever_col] = ever1
+                if want_coupon:
+                    self._set_extra_event_indicators(
+                        v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
+                        product, pricing_env, t_vec, j,
+                    )
 
-            # Apply KI jump (continuous or discrete at observation indices).
+            # Apply KI jump (continuous / BGK every step, or discrete at obs indices).
             if product.has_ki_barrier:
-                should_apply_ki = self._ki_continuous or j in self._ki_observation_indices
+                should_apply_ki = (
+                    self._ki_continuous
+                    or self._bgk_active
+                    or j in self._ki_observation_indices
+                )
                 if should_apply_ki:
                     ki_barrier = self._resolve_ki_barrier_at_tidx(j)
                     mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
@@ -646,19 +792,28 @@ class SnowballPDESolver(BasePDESolver):
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
-        else:
+        elif want_ki:
             df_T = pricing_env.get_discount_factor(float(tau))
             ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
             ki_probability = float(ed_ki / df_T) if df_T > 0.0 else 0.0
             ed_ki_ever = float(np.interp(spot_log, x_vec, initial_grid[:, ki_ever_col]))
             ki_ever_probability = float(ed_ki_ever / df_T) if df_T > 0.0 else 0.0
+        else:
+            # KI columns were pruned (no leg reads KI): report 0, KO/pv are intact.
+            ki_probability = 0.0
+            ki_ever_probability = 0.0
 
-        pv = float(self.price(product, pricing_env))
+        # Single-pass: use the value-sweep npv when the caller supplied one,
+        # else fall back to an internal price() solve (standalone event-stats).
+        pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
         expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
 
-        extra_fields = self._extract_extra_event_stats(
-            initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
-        )
+        if want_coupon:
+            extra_fields = self._extract_extra_event_stats(
+                initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
+            )
+        else:
+            extra_fields = {}
         # The maturity cashflow is pv minus KO cashflows; for products with extra
         # cashflow streams (Phoenix coupons) also remove those so the decomposition
         # pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
@@ -1018,11 +1173,76 @@ class SnowballPDESolver(BasePDESolver):
 
     def _resolve_ki_barrier_at_tidx(self, t_idx: int) -> float:
         """Resolve KI barrier for a specific PDE time index."""
+        if self._bgk_active:
+            return float(self._bgk_ki_barrier)
         if not self._ki_continuous:
             mapped = self._ki_barrier_by_tidx.get(t_idx)
             if mapped is not None:
                 return float(mapped)
         return float(self._ki_barrier)
+
+    def _bgk_shifted_ki_barrier(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, sigma: float
+    ) -> float:
+        """Broadie-Glasserman-Kou continuity-corrected KI barrier [§11.6].
+
+        Shift the discrete KI barrier AWAY from spot by ``exp(±beta*sigma*sqrt(dt))``
+        with ``dt = 1/bus_days_in_year``: a standard down-in barrier shifts DOWN
+        (``-``), a reverse up-in barrier shifts UP (``+``). ``sigma`` is the same
+        strike-selected constant vol used to build the operator, so the shift is
+        consistent with the diffusion the grid resolves.
+        """
+        ki_barrier = product.barrier_config.ki_barrier
+        if isinstance(ki_barrier, list):
+            ki_barrier = ki_barrier[0]
+        ki_barrier = float(ki_barrier)
+        dt = 1.0 / float(pricing_env.bus_days_in_year)
+        shift = _BGK_BETA * float(sigma) * safe_sqrt(dt)
+        return ki_barrier * safe_exp(shift if product.is_reverse else -shift)
+
+    def _bgk_requested(self) -> bool:
+        """True iff the opt-in BGK monitoring mode is selected on the params."""
+        return (
+            getattr(self.params, "ki_monitoring_mode", None)
+            is KnockInMonitoringMode.BGK_APPROXIMATION
+        )
+
+    def _bgk_applicable(self, product: BaseEquityProduct, tau: float) -> bool:
+        """BGK engages only for discretely-monitored KI (interior dates present).
+
+        European (maturity-only), continuous, no-KI, and already-knocked-in
+        products have no interior KI monitor times, so BGK is inert for them.
+        """
+        return bool(self._ki_monitor_times(product, tau))
+
+    def _configure_bgk(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        sigma: float,
+        tau: float,
+    ) -> None:
+        """Resolve per-solve BGK state; log an inert note when opted-in but N/A.
+
+        Must run before ``_build_grids`` so ``_time_grid_spec`` /
+        ``_get_event_times`` see ``self._bgk_active`` and drop the interior daily
+        KI nodes.
+        """
+        self._bgk_active = False
+        self._bgk_ki_barrier = 0.0
+        if not self._bgk_requested():
+            return
+        if not self._bgk_applicable(product, tau):
+            logging.warning(
+                "PDEParams.ki_monitoring_mode=BGK_APPROXIMATION is inert for this "
+                "product: the Broadie-Glasserman-Kou continuity correction engages "
+                "only for discretely-monitored knock-in (European / continuous / "
+                "no-KI / already-knocked-in are priced unchanged under the exact "
+                "path)."
+            )
+            return
+        self._bgk_active = True
+        self._bgk_ki_barrier = self._bgk_shifted_ki_barrier(product, pricing_env, sigma)
 
     def _aligned_time_index(
         self, t_vec: np.ndarray, obs_time: float, label: str
@@ -1082,6 +1302,15 @@ class SnowballPDESolver(BasePDESolver):
         if product.airbag_config.airbag_barrier is not None:
             points.append(product.airbag_config.airbag_barrier)
 
+        # BGK opt-in mode: the shifted KI barrier must be a spatial node so the
+        # continuous KI mask lands on it exactly [§11.6]. Computed statelessly
+        # from the env vol so the frozen-bump critical points capture it too.
+        if self._bgk_requested():
+            tau = product.get_maturity(pricing_env)
+            if tau > 0 and self._bgk_applicable(product, tau):
+                sigma = pricing_env.get_vol(product.strike, tau)
+                points.append(self._bgk_shifted_ki_barrier(product, pricing_env, sigma))
+
         return sorted(set([p for p in points if p > 0]))
 
     def _get_barriers(self, product: BaseEquityProduct) -> List[float]:
@@ -1106,41 +1335,94 @@ class SnowballPDESolver(BasePDESolver):
 
         return barriers
 
+    def _ko_coupon_align_times(
+        self, product: BaseEquityProduct, tau: float
+    ) -> List[float]:
+        """KO (and Phoenix coupon, same dates) observation times.
+
+        These MUST be grid nodes exactly — they drive the value KO jumps and the
+        event-distribution resets, so a misalignment here is a correctness bug.
+        Reads the barrier config directly (no pricing env / instance state), so
+        it is safe to call during grid construction.
+        """
+        out = []
+        cfg = getattr(product, "barrier_config", None)
+        if cfg is not None:
+            sched = cfg.ko_observation_schedule
+            if sched is not None:
+                out += [
+                    rec.observation_time
+                    for rec in sched.records
+                    if rec.observation_time is not None
+                ]
+            elif cfg.ko_observation_dates is not None:
+                out += list(cfg.ko_observation_dates)
+        return sorted({float(t) for t in out if t is not None and 0.0 < float(t) < tau})
+
+    def _ki_monitor_times(
+        self, product: BaseEquityProduct, tau: float
+    ) -> List[float]:
+        """Interior KI monitoring dates — only for daily-discrete KI.
+
+        Empty for every other regime (spec §4 table): European (maturity-only
+        => no interior dates), continuous, no-KI, and already-knocked-in
+        (monitoring moot).  Reads config directly; ``ki_continuous`` here is
+        derived identically to the solver's ``self._ki_continuous``.
+        """
+        cfg = getattr(product, "barrier_config", None)
+        if cfg is None or not getattr(product, "has_ki_barrier", False):
+            return []
+        if getattr(product, "_otc_lifecycle_knocked_in", False):
+            return []
+        ki_continuous = (
+            cfg.ki_continuous
+            or cfg.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        if ki_continuous:
+            return []
+        out = []
+        sched = cfg.ki_observation_schedule
+        if sched is not None:
+            out += [
+                rec.observation_time
+                for rec in sched.records
+                if rec.observation_time is not None
+            ]
+        elif cfg.ki_observation_dates is not None:
+            out += list(cfg.ki_observation_dates)
+        # Interior only: European KI (obs at maturity only) => empty (correct).
+        return sorted({float(t) for t in out if t is not None and 0.0 < float(t) < tau})
+
+    def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
+        """Decoupled time-grid concerns for autocallables (spec §4 Component 1).
+
+        align = KO/coupon dates (must be nodes); monitor = daily-discrete KI
+        dates (resolution only); steps_per_day from params. Under active BGK the
+        KI is monitored continuously against a shifted barrier, so the interior
+        daily-KI nodes are dropped and the grid aligns to KO/coupon only [§11.6].
+        """
+        monitor = [] if self._bgk_active else self._ki_monitor_times(product, tau)
+        return TimeGridSpec(
+            align_times=self._ko_coupon_align_times(product, tau),
+            monitor_times=monitor,
+            steps_per_day=float(self.params.event_steps_per_day),
+        )
+
     def _get_event_times(
         self, product: BaseEquityProduct, tau: float
     ) -> Optional[List[float]]:
-        """Collect all observation times for time grid alignment."""
-        event_times = []
+        """Back-compat union used by Rannacher damping and the grid cache key.
 
-        if hasattr(product, "barrier_config"):
-            # KO observation times
-            ko_schedule = product.barrier_config.ko_observation_schedule
-            if ko_schedule is not None:
-                for rec in ko_schedule.records:
-                    if rec.observation_time is not None:
-                        t = rec.observation_time
-                        if 0 < t < tau:
-                            event_times.append(t)
-            elif product.barrier_config.ko_observation_dates is not None:
-                for t in product.barrier_config.ko_observation_dates:
-                    if 0 < t < tau:
-                        event_times.append(t)
-
-            # KI observation times (if discrete)
-            if not self._ki_continuous:
-                ki_schedule = product.barrier_config.ki_observation_schedule
-                if ki_schedule is not None:
-                    for rec in ki_schedule.records:
-                        if rec.observation_time is not None:
-                            t = rec.observation_time
-                            if 0 < t < tau:
-                                event_times.append(t)
-                elif product.barrier_config.ki_observation_dates is not None:
-                    for t in product.barrier_config.ki_observation_dates:
-                        if 0 < t < tau:
-                            event_times.append(t)
-
-        return sorted(set(event_times)) if event_times else None
+        Returns ``sorted(align ∪ monitor)`` so damping still fires at KO **and**
+        discrete-KI dates independent of any downstream stream selection
+        [§11.2].  Correctness-critical alignment lives in
+        ``_ko_coupon_align_times``; ``_ki_monitor_times`` adds resolution.
+        """
+        monitor = [] if self._bgk_active else self._ki_monitor_times(product, tau)
+        union = sorted(
+            set(self._ko_coupon_align_times(product, tau)) | set(monitor)
+        )
+        return union or None
 
     def _set_terminal_condition_v0(
         self,
@@ -1614,7 +1896,9 @@ class SnowballPDESolver(BasePDESolver):
         # For discrete KI: apply only at observation times
         if product.has_ki_barrier:
             should_apply_ki = (
-                self._ki_continuous or t_idx in self._ki_observation_indices
+                self._ki_continuous
+                or self._bgk_active
+                or t_idx in self._ki_observation_indices
             )
             if should_apply_ki:
                 self._apply_ki_jump(grid_v0, grid_v1, s_vec, t_idx, product)

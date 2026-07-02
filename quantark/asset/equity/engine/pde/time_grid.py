@@ -154,6 +154,82 @@ class TimeGrid:
         return t_vec, dt_vec
 
     @staticmethod
+    def build_mandatory(
+        tau: float,
+        mandatory_times,
+        *,
+        steps_per_day: float,
+        day_count: int,
+        max_steps_total: Optional[int] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Grid whose nodes include every mandatory time exactly, plus uniform
+        fill sized by ``steps_per_day``.
+
+        Decouples the three orthogonal time-grid concerns:
+          * alignment  — every entry of ``mandatory_times`` becomes a node exactly
+          * resolution — fill between nodes is ``max(1, round(interval_days *
+            steps_per_day))``; there is NO per-interval floor (that floor is what
+            inflated daily-KI grids ~10x under ``build_event_aligned``)
+          * cap policy — ``max_steps_total`` caps FILL only.  Mandatory nodes are
+            inviolable [§11.5]: if the mandatory count alone exceeds the cap, the
+            cap is exceeded (logged), never a node moved or dropped.
+
+        Args:
+            tau: Total time to maturity in years.
+            mandatory_times: Times (years) that must appear as grid nodes exactly;
+                duplicates and out-of-(0, tau) values are ignored.
+            steps_per_day: Resolution — fill steps per calendar/business day.
+            day_count: Days per year for converting year fractions to days.
+            max_steps_total: Optional upper bound on FILL steps (mandatory nodes
+                always survive).
+
+        Returns:
+            Tuple of (t_vec, dt_vec).
+        """
+        if tau <= 0:
+            raise ValueError(f"tau must be positive, got {tau}")
+        if steps_per_day <= 0:
+            raise ValueError(f"steps_per_day must be positive, got {steps_per_day}")
+        if day_count <= 0:
+            raise ValueError(f"day_count must be positive, got {day_count}")
+
+        # Unique, in-range interior mandatory nodes; boundaries always present.
+        mand = np.array([float(t) for t in mandatory_times], dtype=float)
+        mand = mand[(mand > 0.0) & (mand < tau)]
+        boundaries = np.unique(np.concatenate([[0.0], mand, [tau]]))
+
+        interval_lengths = np.diff(boundaries)
+        interval_days = np.maximum(1.0, interval_lengths * float(day_count))
+        fill = np.maximum(1, np.round(interval_days * float(steps_per_day)).astype(int))
+
+        n_mandatory_intervals = len(interval_lengths)  # each contributes >= 1 step
+        if max_steps_total is not None:
+            cap = int(max_steps_total)
+            if n_mandatory_intervals > cap:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "build_mandatory: %d mandatory intervals exceed "
+                    "max_steps_total=%d; keeping all mandatory nodes and "
+                    "exceeding the cap [§11.5]",
+                    n_mandatory_intervals,
+                    cap,
+                )
+                fill = np.ones_like(fill)  # minimal fill, but never drop a node
+            else:
+                # Scale fill down toward the cap, but never below 1 per interval.
+                total = int(fill.sum())
+                if total > cap:
+                    scaled = np.floor(fill.astype(float) * (cap / total)).astype(int)
+                    fill = np.maximum(1, scaled)
+
+        points = [np.array([0.0])]
+        for start, end, n in zip(boundaries[:-1], boundaries[1:], fill):
+            points.append(np.linspace(start, end, int(n) + 1)[1:])  # exclude start
+        t_vec = np.concatenate(points)
+        return t_vec, np.diff(t_vec)
+
+    @staticmethod
     def build_event_aligned(
         tau: float,
         event_times: List[float],

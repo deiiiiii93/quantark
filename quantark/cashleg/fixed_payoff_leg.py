@@ -52,6 +52,15 @@ class FixedPayoffLeg(CashLeg):
         if not isinstance(self.trigger, PaymentTrigger):
             raise ValidationError(f"Invalid PaymentTrigger: {self.trigger}")
 
+    def required_event_types(self) -> frozenset:
+        """The single trigger stream (or both maturity buckets for ANY) [§11.1]."""
+
+        if self.trigger is PaymentTrigger.AT_MATURITY_ANY:
+            return frozenset(
+                {EventType.MATURITY_NO_KO, EventType.MATURITY_WITH_KI}
+            )
+        return frozenset({_TRIGGER_TO_EVENT[self.trigger]})
+
     def value(
         self, event_dist: EventDistribution, env, position_notional: float
     ) -> float:

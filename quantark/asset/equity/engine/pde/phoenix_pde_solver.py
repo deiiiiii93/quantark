@@ -236,6 +236,9 @@ class PhoenixPDESolver(SnowballPDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
+        # Resolve BGK state before grids so the time grid drops interior KI nodes.
+        self._configure_bgk(product, pricing_env, sigma, tau)
+
         if self._profile_enabled:
             self._reset_profile_stats()
 
@@ -288,7 +291,11 @@ class PhoenixPDESolver(SnowballPDESolver):
             )
 
         if product.has_ki_barrier:
-            should_apply_ki = self._ki_continuous or terminal_tidx in self._ki_observation_indices
+            should_apply_ki = (
+                self._ki_continuous
+                or self._bgk_active
+                or terminal_tidx in self._ki_observation_indices
+            )
             if should_apply_ki:
                 for k in range(len(grid_v0_list)):
                     self._apply_ki_jump(grid_v0_list[k], grid_v1_list[k], s_vec, terminal_tidx, product)
@@ -583,7 +590,11 @@ class PhoenixPDESolver(SnowballPDESolver):
 
         # 2. KI Jump
         if product.has_ki_barrier:
-            should_apply_ki = self._ki_continuous or t_idx in self._ki_observation_indices
+            should_apply_ki = (
+                self._ki_continuous
+                or self._bgk_active
+                or t_idx in self._ki_observation_indices
+            )
             if should_apply_ki:
                 # Apply to all states
                 for k in range(len(grid_v0_list)):

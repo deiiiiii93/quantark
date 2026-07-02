@@ -9,7 +9,7 @@ import numpy as np
 
 from quantark.cashleg.base import CashLeg
 from quantark.cashleg.base_amount import BaseAmount
-from quantark.cashleg.event_distribution import EventDistribution
+from quantark.cashleg.event_distribution import EventDistribution, EventType
 from quantark.cashleg.leg_schedule import LegSchedule
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.exceptions import ValidationError
@@ -64,6 +64,13 @@ class AccrualLeg(CashLeg):
             raise ValidationError(f"Invalid KOBehavior: {self.ko_behavior}")
         if not isinstance(self.survival_basis, SurvivalBasis):
             raise ValidationError(f"Invalid SurvivalBasis: {self.survival_basis}")
+
+    def required_event_types(self) -> frozenset:
+        """KO drives the survival truncation; a full-schedule leg needs nothing."""
+
+        if self.ko_behavior is KOBehavior.TRUNCATE_AT_KO:
+            return frozenset({EventType.KO})
+        return frozenset()
 
     def value(
         self, event_dist: EventDistribution, env, position_notional: float

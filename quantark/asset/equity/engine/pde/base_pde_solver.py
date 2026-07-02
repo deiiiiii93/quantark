@@ -8,6 +8,7 @@ backward in time, with support for Rannacher smoothing.
 from abc import abstractmethod
 from collections import OrderedDict
 from copy import deepcopy
+from dataclasses import dataclass, field
 import math
 import threading
 from typing import Dict, Optional, Tuple, List, NamedTuple, Sequence
@@ -26,6 +27,24 @@ from quantark.util.enum.engine_enums import EngineType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid
+
+
+@dataclass(frozen=True)
+class TimeGridSpec:
+    """The three orthogonal time-grid concerns (spec §4 Component 1).
+
+    * ``align_times``  — times that MUST be grid nodes exactly: KO/coupon
+      observation dates.  They drive both node alignment and the
+      event-distribution resets, so a misalignment here is a correctness bug.
+    * ``monitor_times`` — extra nodes that improve resolution of a monitored
+      feature (daily-discrete KI) but are not alignment-critical for the
+      value/cashflow.  Empty for European/continuous/no-KI regimes.
+    * ``steps_per_day`` — resolution: fill density between mandatory nodes.
+    """
+
+    align_times: list
+    monitor_times: list = field(default_factory=list)
+    steps_per_day: float = 1.0
 
 
 class PDESolutionResult(NamedTuple):
@@ -155,10 +174,17 @@ class BasePDESolver(BaseEngine):
         s_min, s_max = self._resolve_spatial_bounds(
             product, spot, sigma, tau, r, q, barriers
         )
+        # Freeze the critical points at the base spot too [§11.4]: otherwise
+        # include_spot_in_critical_points re-snaps the grid to a bumped spot,
+        # so a spot bump mixes true delta/gamma with grid-movement noise.
+        frozen_critical = tuple(
+            self._resolve_critical_points(product, pricing_env, spot, barriers)
+        )
 
         fixed_params = deepcopy(self.params)
         fixed_params.s_min = float(s_min)
         fixed_params.s_max = float(s_max)
+        fixed_params.frozen_critical_points = frozen_critical
         return type(self)(params=fixed_params)
 
     def _freeze_cache_value(self, value):
@@ -252,6 +278,8 @@ class BasePDESolver(BaseEngine):
             params.theta,
             params.use_rannacher,
             params.rannacher_steps,
+            params.frozen_critical_points,
+            getattr(params, "ki_monitoring_mode", None),
         )
 
     def _grid_cache_key(
@@ -619,6 +647,14 @@ class BasePDESolver(BaseEngine):
     ) -> List[float]:
         """Merge raw critical points with dynamic points (spot/barriers)."""
         params: PDEParams = self.params
+
+        # Frozen (bump-context) critical points are used verbatim so the grid is
+        # invariant to spot/vol/rate/div bumps [§11.4].
+        if params.frozen_critical_points is not None:
+            return sorted(
+                {float(p) for p in params.frozen_critical_points if p is not None and p > 0}
+            )
+
         points = list(raw_points)
 
         if params.auto_grid:
@@ -659,25 +695,80 @@ class BasePDESolver(BaseEngine):
 
         return size, adaptive
 
+    def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
+        """Decoupled time-grid concerns for this product (spec §4 Component 1).
+
+        Base default: align to the generic observation schedule; no KI-monitor
+        concept (that belongs to autocallable solvers, which override this);
+        resolution from params.  Returns interior times only (0 < t < tau).
+        """
+        align = [
+            t for t in (self._get_event_times(product, tau) or []) if 0.0 < t < tau
+        ]
+        return TimeGridSpec(
+            align_times=sorted(set(align)),
+            monitor_times=[],
+            steps_per_day=float(self.params.event_steps_per_day),
+        )
+
     def _resolve_time_grid(
         self, product, tau, barriers
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Determine time grid type and number of steps."""
+        """Build the time grid from the decoupled ``_time_grid_spec`` seam.
+
+        When the product has mandatory event nodes (KO/coupon alignment plus any
+        KI-monitor times), the grid is built by ``TimeGrid.build_mandatory``:
+        every event time lands on a node exactly, and resolution between nodes is
+        set solely by ``steps_per_day`` (no per-interval floor).  This path is
+        market-independent — it depends only on ``tau``, the schedule,
+        ``steps_per_day`` and params — so spot/vol/rate/div bumps reprice on an
+        identical grid [§4.5], and it always feeds the day-based resolution
+        params, fixing the historical ``auto_grid=False`` param drop (root cause
+        2) that inflated daily-KI grids ~10x.
+
+        When there are no discrete event nodes (continuous barriers, American,
+        European), the base resolution heuristics are preserved unchanged.
+        """
         params: PDEParams = self.params
+        spec = self._time_grid_spec(product, tau)
+        mandatory = sorted(
+            {
+                t
+                for t in (list(spec.align_times) + list(spec.monitor_times))
+                if 0.0 < t < tau
+            }
+        )
+
+        # Event alignment engages when the config wants an event-aligned grid:
+        # auto_grid (auto-selects alignment when events exist, as before) or an
+        # explicit event grid type. An explicit auto_grid=False + uniform/graded
+        # request is honored literally (plain grid), matching prior behavior.
+        want_event_aligned = params.auto_grid or params.time_grid_type in (
+            "event_aligned",
+            "event_clustered",
+        )
+        if mandatory and want_event_aligned:
+            return TimeGrid.build_mandatory(
+                tau,
+                mandatory,
+                steps_per_day=spec.steps_per_day,
+                day_count=int(params.bus_days_in_year),
+                max_steps_total=params.max_time_steps,
+            )
+
+        # No event alignment requested: preserve the base resolution heuristics.
         obs_type = getattr(product, "observation_type", None)
         has_barriers = len(barriers) > 0
-        event_times = self._get_event_times(product, tau)
 
         if not params.auto_grid:
             return TimeGrid.build(
                 tau,
                 params.time_steps,
                 method=params.time_grid_type,
-                event_times=event_times,
+                event_times=None,
                 grade_exponent=params.grade_exponent,
             )
 
-        # Logic for suggested time steps
         days = max(1, int(round(tau * float(params.bus_days_in_year))))
         suggested = days
         if has_barriers:
@@ -689,24 +780,13 @@ class BasePDESolver(BaseEngine):
             suggested = int(round(1.5 * float(days)))
 
         steps = min(max(params.time_steps, suggested), params.max_time_steps)
-
-        # Decide method
-        method = "uniform"
-        if event_times and (has_barriers or obs_type == ObservationType.DISCRETE):
-            method = "event_aligned"
-        elif params.time_grid_type != "uniform":
-            method = params.time_grid_type
-
+        method = params.time_grid_type if params.time_grid_type != "uniform" else "uniform"
         return TimeGrid.build(
             tau,
             steps,
             method=method,
-            event_times=event_times,
+            event_times=None,
             grade_exponent=params.grade_exponent,
-            steps_per_day=params.event_steps_per_day,
-            day_count=params.bus_days_in_year,
-            min_steps_per_interval=params.event_min_steps_per_interval,
-            max_steps_total=params.max_time_steps,
         )
 
     def _calculate_coefficients(

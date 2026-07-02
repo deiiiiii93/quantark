@@ -434,12 +434,34 @@ class PDEParams(EngineParams):
     grade_exponent: float = 2.0
 
     # Auto-grid tuning parameters
+    # event_steps_per_day: resolution (fill steps per business day) for the
+    # decoupled event-aligned grid (TimeGrid.build_mandatory). Validated by
+    # test_pde_grid_convergence_gate: at spd=4 the autocallable price is
+    # grid-converged for discrete-KI rows (<=1e-4 vs spd=8) and matches the
+    # pre-change production grid within 1.2e-5 (oracle b). Not lowered below 4
+    # because continuously-monitored KI needs the resolution (slow O(1/N)
+    # barrier convergence).
     event_steps_per_day: int = 4
     event_min_steps_per_interval: int = 10
     max_time_steps: int = 5000
     log_dx_target: float = 0.003
     max_grid_size: int = 2000
     include_spot_in_critical_points: bool = True
+    # When set (by create_bump_context), the spatial grid concentrates on exactly
+    # these frozen critical points instead of recomputing them per bump — so a
+    # spot bump does not snap the grid to a moved spot [§11.4].
+    frozen_critical_points: Optional[tuple] = None
+    # Treatment of discretely-monitored knock-in schedules [§11.6]. EXACT_DISCRETE
+    # (default) applies the KI regime jump on every observation date exactly, with
+    # an event-aligned grid. BGK_APPROXIMATION is an opt-in performance/robustness
+    # mode that replaces a dense daily KI schedule with continuous monitoring at a
+    # Broadie-Glasserman-Kou (1997) shifted barrier; it engages only for discretely
+    # monitored KI (European / continuous / no-KI / already-knocked-in are inert
+    # with a logged note). Same enum, beta, and shift as SnowballQuadEngine so PDE
+    # and quad BGK prices are directly comparable.
+    ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
+        KnockInMonitoringMode.EXACT_DISCRETE
+    )
     rannacher_at_events: bool = True
     event_theta: float = 1.0
     event_rannacher_steps: int = 1
@@ -540,6 +562,23 @@ class PDEParams(EngineParams):
         if self.boundary_mode not in ("default", "asymptotic"):
             raise ValidationError(
                 f"boundary_mode must be one of default, asymptotic, got {self.boundary_mode}"
+            )
+        # Coerce ki_monitoring_mode to the enum (same contract as QuadParams).
+        if isinstance(self.ki_monitoring_mode, str):
+            try:
+                self.ki_monitoring_mode = KnockInMonitoringMode(
+                    self.ki_monitoring_mode.lower()
+                )
+            except ValueError:
+                raise ValidationError(
+                    "ki_monitoring_mode must be one of "
+                    f"{[mode.value for mode in KnockInMonitoringMode]}, "
+                    f"got {self.ki_monitoring_mode!r}"
+                )
+        elif not isinstance(self.ki_monitoring_mode, KnockInMonitoringMode):
+            raise ValidationError(
+                "ki_monitoring_mode must be a KnockInMonitoringMode or its "
+                f"string value, got {type(self.ki_monitoring_mode).__name__}"
             )
 
     @classmethod

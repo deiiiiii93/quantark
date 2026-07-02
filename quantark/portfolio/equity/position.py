@@ -9,7 +9,13 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.riskmeasures import GreeksCalculator
-from quantark.cashleg import CashLeg, LegPV, TradeValueBreakdown, value_leg
+from quantark.cashleg import (
+    CashLeg,
+    LegPV,
+    TradeGreeks,
+    TradeValueBreakdown,
+    value_leg,
+)
 from quantark.util.exceptions import ValidationError
 
 
@@ -91,6 +97,19 @@ class EquityPosition:
         current_price = self.get_current_price(pricing_env)
         return current_price * self.quantity
 
+    def _required_streams(self) -> "frozenset":
+        """Union of EventDistribution streams the attached legs read [§11.1].
+
+        Passed to ``price_with_events`` so the engine prunes indicator columns
+        (e.g. KI) that no leg needs. ``None`` when there are no legs.
+        """
+        if not self.cash_legs:
+            return frozenset()
+        streams: frozenset = frozenset()
+        for leg in self.cash_legs:
+            streams = streams | leg.required_event_types()
+        return streams
+
     def get_trade_value(self, pricing_env: PricingEnvironment) -> float:
         """
         Calculate full trade value including product and attached cash legs.
@@ -104,7 +123,10 @@ class EquityPosition:
             leg.requires_event_distribution() for leg in self.cash_legs
         )
         result = self.engine.price_with_events(
-            self.product, pricing_env, emit_distribution=needs_distribution
+            self.product,
+            pricing_env,
+            emit_distribution=needs_distribution,
+            streams=self._required_streams(),
         )
         unit_notional = self._get_unit_notional(pricing_env)
         leg_pv_total = sum(
@@ -127,7 +149,10 @@ class EquityPosition:
             leg.requires_event_distribution() for leg in self.cash_legs
         )
         result = self.engine.price_with_events(
-            self.product, pricing_env, emit_distribution=needs_distribution
+            self.product,
+            pricing_env,
+            emit_distribution=needs_distribution,
+            streams=self._required_streams(),
         )
         unit_notional = self._get_unit_notional(pricing_env)
         leg_pvs = {}
@@ -194,6 +219,175 @@ class EquityPosition:
             "vega": vega,
             "rho": rho,
         }
+
+    def get_trade_risk(
+        self,
+        pricing_env: PricingEnvironment,
+        greeks_calculator: GreeksCalculator,
+        greeks: Optional[List[str]] = None,
+    ) -> TradeGreeks:
+        """Product + full-trade greeks from ONE frozen-grid bump loop [§11.4, §11.8].
+
+        The frozen bump context is resolved once; every bump reprices the product
+        AND its cash legs from a single ``price_with_events`` call (npv + event
+        distribution), so product and total greeks come from the same solves
+        instead of two independent bump loops. Delta and gamma share the two spot
+        bumps. Theta shifts the product and the legs consistently.
+
+        Contract [§11.8]: ``product`` greeks = ``quantity * d(npv)``; ``total``
+        greeks = ``quantity * d(npv) + d(Σ leg_pv)`` — legs carry their own
+        direction and are not scaled by the note quantity sign.
+        """
+        from copy import deepcopy
+
+        from quantark.param.rrf import FlatRateCurve
+
+        gc = greeks_calculator
+        bc = gc._bump_config
+        product = self.product
+        q = float(self.quantity)
+        streams = self._required_streams()
+        requested = set(
+            greeks
+            if greeks is not None
+            else ["delta", "gamma", "vega", "theta", "rho", "dividend_rho"]
+        )
+
+        bump_engine = gc._resolve_bump_engine(product, pricing_env, self.engine)
+
+        def reprice(prod, env, legs):
+            """Return (npv, Σ leg_pv) from one solve on the frozen bump engine."""
+            result = bump_engine.price_with_events(prod, env, streams=streams)
+            unit = self._get_unit_notional(env)
+            leg_sum = sum(
+                value_leg(leg, result.event_distribution, env, unit) for leg in legs
+            )
+            return result.npv, leg_sum
+
+        # Base solve: npv, per-leg PVs (absolute), and Σ leg_pv.
+        base_result = bump_engine.price_with_events(
+            product, pricing_env, streams=streams
+        )
+        unit0 = self._get_unit_notional(pricing_env)
+        base_npv = float(base_result.npv)
+        leg_pvs: Dict[str, LegPV] = {}
+        base_legs = 0.0
+        for leg in self.cash_legs:
+            pv = float(
+                value_leg(leg, base_result.event_distribution, pricing_env, unit0)
+            )
+            base_legs += pv
+            leg_pvs[leg.leg_id] = LegPV(name=leg.name, direction=leg.direction, pv=pv)
+
+        product_g: Dict[str, float] = {"price": q * base_npv}
+        total_g: Dict[str, float] = {"price": q * base_npv + base_legs}
+
+        def record(name, d_npv, d_legs):
+            product_g[name] = q * d_npv
+            total_g[name] = q * d_npv + d_legs
+
+        # Delta / gamma: two shared spot bumps.
+        if {"delta", "gamma"} & requested:
+            h = pricing_env.spot * bc.spot_bump
+            env_up = deepcopy(pricing_env)
+            env_up.spot_quote.spot *= 1.0 + bc.spot_bump
+            env_dn = deepcopy(pricing_env)
+            env_dn.spot_quote.spot *= 1.0 - bc.spot_bump
+            nu, lu = reprice(product, env_up, self.cash_legs)
+            nd, ld = reprice(product, env_dn, self.cash_legs)
+            if "delta" in requested:
+                record("delta", (nu - nd) / (2.0 * h), (lu - ld) / (2.0 * h))
+            if "gamma" in requested:
+                record(
+                    "gamma",
+                    (nu - 2.0 * base_npv + nd) / h**2,
+                    (lu - 2.0 * base_legs + ld) / h**2,
+                )
+
+        T = product.get_maturity(pricing_env)
+
+        # Vega: one-sided vol bump. Convention MUST match
+        # GreeksCalculator.calculate_numerical_vega — the canonical greek used
+        # everywhere else reports the RAW P&L for a `vol_bump` move (NOT a
+        # dV/dsigma derivative); do not divide by the bump.
+        if "vega" in requested:
+            strike = getattr(product, "strike", pricing_env.spot)
+            cur_vol = pricing_env.get_vol(strike, T)
+            env_v = gc._build_vol_bumped_env(
+                pricing_env, product, cur_vol, bc.vol_bump, direction=1.0
+            )
+            nv, lv = reprice(product, env_v, self.cash_legs)
+            record("vega", nv - base_npv, lv - base_legs)
+
+        # Rho: one-sided rate bump, rescaled to per 1% change — exactly matching
+        # GreeksCalculator.calculate_numerical_rho (`(price_up - base) * 0.01/rate_bump`,
+        # a SINGLE rescale, not a derivative-then-rescale).
+        if "rho" in requested:
+            cur_rate = pricing_env.get_rate(T)
+            env_r = deepcopy(pricing_env)
+            env_r.rate_curve = FlatRateCurve(cur_rate + bc.rate_bump)
+            nr, lr = reprice(product, env_r, self.cash_legs)
+            scale = 0.01 / bc.rate_bump
+            record("rho", (nr - base_npv) * scale, (lr - base_legs) * scale)
+
+        # Dividend rho: one-sided div bump, rescaled to per 1% change — matching
+        # GreeksCalculator.calculate_numerical_dividend_rho (single rescale).
+        if "dividend_rho" in requested:
+            cur_div = pricing_env.get_div_yield(T)
+            env_d = gc._build_div_bumped_env(
+                pricing_env, product, cur_div, bc.div_bump, direction=1.0
+            )
+            nd_, ld_ = reprice(product, env_d, self.cash_legs)
+            scale = 0.01 / bc.div_bump
+            record("dividend_rho", (nd_ - base_npv) * scale, (ld_ - base_legs) * scale)
+
+        # Theta: shift product AND legs by the same time bump.
+        if "theta" in requested:
+            product_g["theta"], total_g["theta"] = self._trade_theta(
+                gc, bump_engine, pricing_env, streams, base_npv, base_legs, q
+            )
+
+        return TradeGreeks(product=product_g, total=total_g, leg_pvs=leg_pvs)
+
+    def _trade_theta(
+        self, gc, bump_engine, pricing_env, streams, base_npv, base_legs, q
+    ) -> tuple:
+        """Theta for product + total via a time shift of product and legs."""
+        from copy import deepcopy
+
+        bc = gc._bump_config
+        product = self.product
+        bumped_date, time_bump, _mode = gc._advance_theta_bump(
+            pricing_env, bc.time_bump_days, getattr(bc, "time_bump_mode", "auto")
+        )
+        current_maturity = product.get_maturity(pricing_env)
+        if time_bump <= 0.0 or current_maturity <= time_bump:
+            return 0.0, 0.0
+
+        prod_theta = deepcopy(product)
+        env_theta = deepcopy(pricing_env)
+        env_theta.valuation_date = bumped_date
+        dropped_all = prod_theta.time_shift(time_bump, bumped_date, env_theta)
+        if dropped_all:
+            return 0.0, 0.0
+
+        shifted_legs = []
+        for leg in self.cash_legs:
+            shift = getattr(leg, "time_shift", None)
+            shifted = shift(time_bump) if callable(shift) else leg
+            if shifted is not None:
+                shifted_legs.append(shifted)
+
+        result = bump_engine.price_with_events(prod_theta, env_theta, streams=streams)
+        unit = self._get_unit_notional(env_theta)
+        npv_t = float(result.npv)
+        legs_t = sum(
+            value_leg(leg, result.event_distribution, env_theta, unit)
+            for leg in shifted_legs
+        )
+        product_theta = q * (npv_t - base_npv)
+        total_theta = q * (npv_t - base_npv) + (legs_t - base_legs)
+        return product_theta, total_theta
 
     def get_actual_notional(
         self, pricing_env: Optional[PricingEnvironment] = None
