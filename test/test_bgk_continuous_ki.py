@@ -18,6 +18,10 @@ import pytest
 
 from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.engine.pde import PhoenixPDESolver
+from quantark.asset.equity.product.option.observation_schedule import ObservationSchedule
+from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.param import (
@@ -266,3 +270,68 @@ def test_ko_probabilities_identical_between_modes():
         atol=5e-3,
         rtol=0.0,
     )
+
+
+# --------------------------------------------------------------------------
+# Phase 4 exit — Phoenix near-strike degradation is FLAGGED [gate 6.2]
+# --------------------------------------------------------------------------
+
+
+def _daily_ki_phoenix(ki_barrier, coupon_barrier):
+    """Phoenix with dense daily discrete KI, monthly KO + coupon."""
+    ki_schedule = ObservationSchedule.from_legacy(
+        observation_dates=_daily_ki_dates(),
+        default_barrier=ki_barrier,
+        default_payoff=0.0,
+    )
+    barrier_cfg = BarrierConfig(
+        ko_barrier=103.0,
+        ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[i / 12 for i in range(1, 13)],
+        ki_barrier=ki_barrier,
+        ki_observation_type=ObservationType.DISCRETE,
+        ki_observation_schedule=ki_schedule,
+        ki_continuous=False,
+    )
+    coupon_cfg = CouponBarrierConfig(
+        coupon_barrier=coupon_barrier,
+        coupon_rate=0.01,
+        memory_coupon=False,
+    )
+    return PhoenixOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=barrier_cfg,
+        coupon_config=coupon_cfg,
+        contract_multiplier=10_000.0,
+        maturity=1.0,
+    )
+
+
+def test_phoenix_bgk_far_ki_in_accurate_band():
+    """Phoenix inherits the BGK machinery; far-below-spot KI is the accurate regime.
+
+    FLAG (gate 6.2): the *price* impact of BGK is NOT monotone in barrier
+    proximity. Near-strike KI is nearly certain, so the product is insensitive to
+    the KI-probability error BGK introduces (small price error there); the worst
+    *price* error is at intermediate KI where P(KI) ~ 50% and sensitivity peaks.
+    Hence Phoenix BGK must be validated PER-PRODUCT, not assumed accurate because
+    the barrier is far or inaccurate because it is near. This test locks in the
+    far-KI accurate band and that BGK engages (drops the interior KI nodes).
+    """
+    env = _env(vol=0.25)
+    far = _daily_ki_phoenix(ki_barrier=75.0, coupon_barrier=85.0)
+
+    far_exact = PhoenixPDESolver(PDEParams(grid_size=200)).price(far, env)
+    bgk_engine = PhoenixPDESolver(
+        PDEParams(grid_size=200, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+    )
+    far_bgk = bgk_engine.price(far, env)
+    far_rel = abs(far_bgk - far_exact) / max(abs(far_exact), 1.0)
+    assert far_rel <= 0.015, f"far-KI Phoenix BGK rel={far_rel}"
+
+    # BGK genuinely engaged: interior daily KI nodes dropped, grid aligns to the
+    # 12 monthly KO/coupon dates plus steps_per_day fill (far fewer mandatory
+    # nodes than the 252 daily-KI exact grid would force).
+    assert bgk_engine._bgk_active is True
