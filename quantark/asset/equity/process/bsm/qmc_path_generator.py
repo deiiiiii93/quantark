@@ -105,8 +105,6 @@ class GBMPathGenerator:
     def __post_init__(self) -> None:
         if self.initial_value <= 0.0:
             raise ValueError("initial_value must be positive")
-        if self.vol < 0.0:
-            raise ValueError("vol must be non-negative")
         if self.num_paths <= 0:
             raise ValueError("num_paths must be positive")
 
@@ -121,25 +119,48 @@ class GBMPathGenerator:
             self.random_stream = PseudoRandomNormalGenerator()
             self.is_qmc = False
 
-        # Precompute drift based on model type
-        self._set_drift()
-
-        # Build time grid
+        # Build time grid first: per-step coefficient arrays need time_steps
         self.times, self.dt_vector = _build_time_grid(
             maturity=self.maturity,
             time_steps=self.time_steps,
             dt_array=self.dt_array,
         )
 
+        # Normalize vol to a per-step vector (scalar inputs stay flat)
+        self._vol_vec = self._as_step_vector(self.vol, "vol")
+        if np.any(self._vol_vec < 0.0):
+            raise ValueError("vol must be non-negative")
+
+        # Precompute drift based on model type
+        self._set_drift()
+
+    def _as_step_vector(self, value, name: str) -> np.ndarray:
+        """Normalize a scalar-or-per-step input to shape (time_steps,).
+
+        Entry k applies over [times[k-1], times[k]] (the k-th step).
+        """
+        arr = np.asarray(value, dtype=float)
+        if arr.ndim == 0:
+            return np.full(self.time_steps, float(arr))
+        if arr.shape != (self.time_steps,):
+            raise ValueError(
+                f"{name} must be scalar or shape ({self.time_steps},), got {arr.shape}"
+            )
+        return arr.copy()
+
     def _set_drift(self) -> None:
+        rrf_vec = self._as_step_vector(self.rrf, "rrf")
+        div_vec = self._as_step_vector(self.div, "div")
         if self.model == "black":
-            self.drift = self.rrf
+            self._drift_vec = rrf_vec
         elif self.model == "bsm":
-            self.drift = self.rrf - self.div
+            self._drift_vec = rrf_vec - div_vec
         elif self.model == "gbm":
-            self.drift = 0.0
+            self._drift_vec = np.zeros(self.time_steps)
         else:
             raise ValueError(f"Invalid model '{self.model}'")
+        # Backward-compat scalar view (step-0 drift) for external readers
+        self.drift = float(self._drift_vec[0])
 
     def _generate_base_normals(self, batch_id: Optional[int]) -> np.ndarray:
         """
@@ -232,10 +253,12 @@ class GBMPathGenerator:
         paths = np.zeros((self.num_paths, self.time_steps + 1), dtype=float)
         paths[:, 0] = self.initial_value
 
-        drift_term = (self.drift - 0.5 * self.vol * self.vol) * self.dt_vector
+        drift_term = (
+            self._drift_vec - 0.5 * self._vol_vec * self._vol_vec
+        ) * self.dt_vector
         drift_term = drift_term.reshape(1, -1)
 
-        diffusion_term = self.vol * dW
+        diffusion_term = self._vol_vec.reshape(1, -1) * dW
         exp_term = np.exp(drift_term + diffusion_term)
 
         paths[:, 1:] = self.initial_value * np.cumprod(exp_term, axis=1)
@@ -290,11 +313,14 @@ class GBMPathGenerator:
         z = self.random_stream.normal(self.num_paths, dim, batch_id=batch_id)
         z_1d = z[:, 0]
 
-        T = self.maturity
-        drift_term = (self.drift - 0.5 * self.vol * self.vol) * T
-        diffusion_term = self.vol * np.sqrt(T) * z_1d
+        total_drift = float(
+            np.sum((self._drift_vec - 0.5 * self._vol_vec**2) * self.dt_vector)
+        )
+        total_var = float(np.sum(self._vol_vec**2 * self.dt_vector))
 
-        return self.initial_value * np.exp(drift_term + diffusion_term)
+        return self.initial_value * np.exp(
+            total_drift + np.sqrt(total_var) * z_1d
+        )
 
 
 @dataclass
