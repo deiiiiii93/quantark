@@ -39,7 +39,8 @@ class TermCoefficients:
         Engines share these objects; aliased or mutated arrays would
         silently desynchronize coefficients from the grid.
         """
-        n = np.asarray(self.t_grid).size
+        grid = _validate_grid(self.t_grid)  # 1D, >=2 nodes, finite, increasing
+        n = grid.size
         expected = {
             "t_grid": (n,),
             "fwd_rates": (n - 1,),
@@ -54,8 +55,17 @@ class TermCoefficients:
                 raise ValidationError(
                     f"{name} must have shape {shape}, got {arr.shape}"
                 )
+            if not np.all(np.isfinite(arr)):
+                raise ValidationError(f"{name} must be finite")
             arr.flags.writeable = False
             object.__setattr__(self, name, arr)
+        if np.any(self.node_dfs <= 0.0) or np.any(self.step_dfs <= 0.0):
+            raise ValidationError("discount factors must be strictly positive")
+        implied_step_dfs = self.node_dfs[1:] / self.node_dfs[:-1]
+        if not np.allclose(self.step_dfs, implied_step_dfs, rtol=0.0, atol=1e-12):
+            raise ValidationError(
+                "step_dfs must equal node_dfs[1:] / node_dfs[:-1]"
+            )
 
     @classmethod
     def from_env(

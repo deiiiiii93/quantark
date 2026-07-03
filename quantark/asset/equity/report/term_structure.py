@@ -12,6 +12,19 @@ from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_log, validate_positive
 
 
+def _check_carry_bound(q: float) -> float:
+    """Enforce the signed-carry policy bound |q| <= 1.0 on bumped outputs.
+
+    Matches the TermStructureDividendYield node bound so a valid base plus a
+    valid bump cannot produce a yield outside the library-wide sanity range.
+    """
+    if not math.isfinite(q) or abs(q) > 1.0:
+        raise ValidationError(
+            f"bumped dividend yield magnitude must be <= 1.0, got {q}"
+        )
+    return q
+
+
 @dataclass(frozen=True)
 class TenorBucket:
     label: str
@@ -101,7 +114,7 @@ class BucketedDividendYield(DividendYield):
     def get_yield(self, time_to_maturity: float) -> float:
         base_yield = float(self.base.get_yield(time_to_maturity))
         if self.bucket_start < time_to_maturity <= self.bucket_end:
-            return base_yield + float(self.bump)
+            return _check_carry_bound(base_yield + float(self.bump))
         return base_yield
 
 
@@ -118,7 +131,7 @@ class ShiftedDividendYield(DividendYield):
 
     def get_yield(self, time_to_maturity: float) -> float:
         base_yield = float(self.base.get_yield(time_to_maturity))
-        return base_yield + float(self.shift)
+        return _check_carry_bound(base_yield + float(self.shift))
 
 
 @dataclass(frozen=True)

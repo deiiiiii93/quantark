@@ -79,5 +79,44 @@ def test_mismatched_shapes_rejected():
             fwd_carry=np.array([0.01, 0.01]),
             step_vols=np.array([0.2, 0.2]),
             node_dfs=np.array([1.0, 0.97, 0.94]),
-            step_dfs=np.array([0.97, 0.97]),
+            step_dfs=np.array([0.97, 0.97 / 1.0]),
         )
+
+
+def _valid_kwargs():
+    node_dfs = np.array([1.0, 0.97, 0.94])
+    return dict(
+        t_grid=np.array([0.0, 1.0, 2.0]),
+        fwd_rates=np.array([0.03, 0.03]),
+        fwd_carry=np.array([0.01, 0.01]),
+        step_vols=np.array([0.2, 0.2]),
+        node_dfs=node_dfs,
+        step_dfs=node_dfs[1:] / node_dfs[:-1],
+    )
+
+
+def test_public_constructor_enforces_grid_and_df_invariants():
+    from quantark.util.exceptions import ValidationError
+
+    kw = _valid_kwargs()
+    TermCoefficients(**kw)  # valid baseline constructs
+
+    bad = _valid_kwargs()
+    bad["t_grid"] = np.array([0.0, 2.0, 1.0])  # not increasing
+    with pytest.raises(ValidationError):
+        TermCoefficients(**bad)
+
+    bad = _valid_kwargs()
+    bad["fwd_carry"] = np.array([0.01, np.nan])  # non-finite
+    with pytest.raises(ValidationError):
+        TermCoefficients(**bad)
+
+    bad = _valid_kwargs()
+    bad["node_dfs"] = np.array([1.0, -0.97, 0.94])  # non-positive DF
+    with pytest.raises(ValidationError):
+        TermCoefficients(**bad)
+
+    bad = _valid_kwargs()
+    bad["step_dfs"] = np.array([0.5, 0.5])  # inconsistent with node_dfs
+    with pytest.raises(ValidationError):
+        TermCoefficients(**bad)

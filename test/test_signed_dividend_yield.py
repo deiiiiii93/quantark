@@ -78,6 +78,23 @@ def test_bucketed_yield_goes_negative_without_clamp():
     assert bucketed.get_yield(0.5) == pytest.approx(-0.01)
 
 
+def test_wrapper_output_respects_carry_policy_bound():
+    """Valid base + valid shift must not exceed the |q| <= 1.0 policy."""
+    base = TermStructureDividendYield(times=[0.1, 0.5], yields=[0.9, 0.9])
+    shifted = ShiftedDividendYield(base=base, shift=0.5)
+    with pytest.raises(ValidationError):
+        shifted.get_yield(0.25)  # 0.9 + 0.5 = 1.4 > 1.0
+    ok = BucketedDividendYield(
+        base=base, bucket_start=0.0, bucket_end=1.0, bump=-0.5
+    )
+    assert ok.get_yield(0.25) == pytest.approx(0.4)  # within policy
+    bucketed_bad = BucketedDividendYield(
+        base=base, bucket_start=0.0, bucket_end=1.0, bump=0.2
+    )
+    with pytest.raises(ValidationError):
+        bucketed_bad.get_yield(0.25)  # 0.9 + 0.2 = 1.1 > 1.0
+
+
 def test_wrappers_reject_non_finite_or_oversized_bumps():
     with pytest.raises(ValidationError):
         ShiftedDividendYield(base=ContinuousDividendYield(0.0), shift=math.nan)
