@@ -10,6 +10,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.engine.mc.term_inputs import McTermInputs, build_mc_term_inputs
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
 from quantark.util.exceptions import ValidationError, PricingError
@@ -153,13 +154,19 @@ class DigitalOptionMCEngine(BaseEngine):
         if T < 1e-10:
             return product.get_payoff(S)
 
+        term = build_mc_term_inputs(
+            pricing_env, ref_strike=K, maturity=T,
+            time_steps=self.params.time_steps,
+        )
+        df = pricing_env.get_discount_factor(T)
+
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             price, std_error = self._price_rqmc(
-                product, S, K, payout, T, r, q, sigma
+                product, S, K, payout, T, r, q, sigma, term=term, df=df
             )
         else:
             price, std_error = self._price_mc_or_qmc(
-                product, S, K, payout, T, r, q, sigma
+                product, S, K, payout, T, r, q, sigma, term=term, df=df
             )
 
         self._last_std_error = std_error
@@ -169,7 +176,7 @@ class DigitalOptionMCEngine(BaseEngine):
 
         # Digital options: price must be in [0, payout * exp(-r*T)]
         # The upper bound is the discounted payout (certainty case)
-        max_price = payout * math.exp(-r * T)
+        max_price = payout * df
         if price > max_price + 1e-6:
             raise PricingError(
                 f"Price ({price:.6f}) exceeds discounted payout ({max_price:.6f})"
@@ -201,6 +208,7 @@ class DigitalOptionMCEngine(BaseEngine):
         sigma: float,
         T: float,
         num_paths: Optional[int] = None,
+        term: Optional[McTermInputs] = None,
     ) -> GBMPathGenerator:
         """
         Create a GBMPathGenerator configured for the current method.
@@ -237,9 +245,9 @@ class DigitalOptionMCEngine(BaseEngine):
 
         generator = GBMPathGenerator(
             initial_value=S,
-            vol=sigma,
-            rrf=r,
-            div=q,
+            vol=term.vol if term is not None else sigma,
+            rrf=term.rrf if term is not None else r,
+            div=term.div if term is not None else q,
             maturity=T,
             time_steps=params.time_steps,
             num_paths=effective_num_paths,
@@ -290,6 +298,9 @@ class DigitalOptionMCEngine(BaseEngine):
         r: float,
         q: float,
         sigma: float,
+        *,
+        term: Optional[McTermInputs] = None,
+        df: Optional[float] = None,
     ) -> Tuple[float, float]:
         """
         Price using normal MC or QMC (non-randomized).
@@ -307,7 +318,7 @@ class DigitalOptionMCEngine(BaseEngine):
         Returns:
             Tuple of (price, standard_error)
         """
-        generator = self._create_path_generator(S, r, q, sigma, T)
+        generator = self._create_path_generator(S, r, q, sigma, T, term=term)
 
         paths, aux = generator.generate_paths(return_aux=True)
 
@@ -315,7 +326,7 @@ class DigitalOptionMCEngine(BaseEngine):
 
         payoffs = self._calculate_payoffs(product, terminal_prices)
 
-        discount_factor = math.exp(-r * T)
+        discount_factor = df if df is not None else math.exp(-r * T)
         discounted_payoffs = discount_factor * payoffs
 
         mean_payoff = float(discounted_payoffs.mean())
@@ -335,6 +346,9 @@ class DigitalOptionMCEngine(BaseEngine):
         r: float,
         q: float,
         sigma: float,
+        *,
+        term: Optional[McTermInputs] = None,
+        df: Optional[float] = None,
     ) -> Tuple[float, float]:
         """
         Price using Randomized QMC with adaptive batching.
@@ -352,7 +366,7 @@ class DigitalOptionMCEngine(BaseEngine):
         Returns:
             Tuple of (price, standard_error)
         """
-        discount_factor = math.exp(-r * T)
+        discount_factor = df if df is not None else math.exp(-r * T)
 
         def pricer_fn(paths, aux):
             """Pricer function for RQMC driver."""
@@ -380,7 +394,7 @@ class DigitalOptionMCEngine(BaseEngine):
             per_batch_paths = params.num_paths
 
         generator = self._create_path_generator(
-            S, r, q, sigma, T, num_paths=per_batch_paths
+            S, r, q, sigma, T, num_paths=per_batch_paths, term=term
         )
 
         result = run_rqmc(

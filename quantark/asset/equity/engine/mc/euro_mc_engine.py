@@ -10,6 +10,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.engine.mc.term_inputs import McTermInputs, build_mc_term_inputs
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
 from quantark.util.exceptions import ValidationError, PricingError
@@ -160,13 +161,19 @@ class EuropeanMCEngine(BaseEngine):
         if T < 1e-10:
             return product.get_payoff(S)
 
+        term = build_mc_term_inputs(
+            pricing_env, ref_strike=K, maturity=T,
+            time_steps=self.params.time_steps,
+        )
+        df = pricing_env.get_discount_factor(T)
+
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             price, std_error = self._price_rqmc(
-                product, S, K, T, r, q, sigma
+                product, S, K, T, r, q, sigma, term=term, df=df
             )
         else:
             price, std_error = self._price_mc_or_qmc(
-                product, S, K, T, r, q, sigma
+                product, S, K, T, r, q, sigma, term=term, df=df
             )
 
         contract_multiplier = product.contract_multiplier
@@ -177,7 +184,7 @@ class EuropeanMCEngine(BaseEngine):
         if price < 0:
             raise PricingError(f"Negative price computed: {price}")
 
-        lower_bound = self._european_lower_bound(product, S, K, T, r, q)
+        lower_bound = self._european_lower_bound(product, S, K, T, q, df)
         if price < lower_bound - 1e-6:
             raise PricingError(
                 f"Price ({price:.6f}) below discounted European lower bound "
@@ -192,12 +199,12 @@ class EuropeanMCEngine(BaseEngine):
         S: float,
         K: float,
         T: float,
-        r: float,
         q: float,
+        df: float,
     ) -> float:
         """Calculate the discounted no-arbitrage lower bound for a European option."""
         spot_pv = S * safe_exp(-q * T)
-        strike_pv = K * safe_exp(-r * T)
+        strike_pv = K * df
         if product.is_call():
             lower_bound = max(spot_pv - strike_pv, 0.0)
         else:
@@ -225,6 +232,7 @@ class EuropeanMCEngine(BaseEngine):
         sigma: float,
         T: float,
         num_paths: Optional[int] = None,
+        term: Optional[McTermInputs] = None,
     ) -> GBMPathGenerator:
         """
         Create a GBMPathGenerator configured for the current method.
@@ -261,9 +269,9 @@ class EuropeanMCEngine(BaseEngine):
 
         generator = GBMPathGenerator(
             initial_value=S,
-            vol=sigma,
-            rrf=r,
-            div=q,
+            vol=term.vol if term is not None else sigma,
+            rrf=term.rrf if term is not None else r,
+            div=term.div if term is not None else q,
             maturity=T,
             time_steps=params.time_steps,
             num_paths=effective_num_paths,
@@ -307,6 +315,9 @@ class EuropeanMCEngine(BaseEngine):
         r: float,
         q: float,
         sigma: float,
+        *,
+        term: Optional[McTermInputs] = None,
+        df: Optional[float] = None,
     ) -> Tuple[float, float]:
         """
         Price using normal MC or QMC (non-randomized).
@@ -319,11 +330,13 @@ class EuropeanMCEngine(BaseEngine):
             r: Risk-free rate
             q: Dividend yield
             sigma: Volatility
+            term: Per-step forward coefficients (term-structure aware path)
+            df: Curve discount factor to maturity
 
         Returns:
             Tuple of (price, standard_error)
         """
-        generator = self._create_path_generator(S, r, q, sigma, T)
+        generator = self._create_path_generator(S, r, q, sigma, T, term=term)
 
         paths, aux = generator.generate_paths(return_aux=True)
 
@@ -331,7 +344,7 @@ class EuropeanMCEngine(BaseEngine):
 
         payoffs = self._calculate_payoffs(product, terminal_prices)
 
-        discount_factor = math.exp(-r * T)
+        discount_factor = df if df is not None else math.exp(-r * T)
         discounted_payoffs = discount_factor * payoffs
 
         mean_payoff = float(discounted_payoffs.mean())
@@ -350,6 +363,9 @@ class EuropeanMCEngine(BaseEngine):
         r: float,
         q: float,
         sigma: float,
+        *,
+        term: Optional[McTermInputs] = None,
+        df: Optional[float] = None,
     ) -> Tuple[float, float]:
         """
         Price using Randomized QMC with adaptive batching.
@@ -362,11 +378,13 @@ class EuropeanMCEngine(BaseEngine):
             r: Risk-free rate
             q: Dividend yield
             sigma: Volatility
+            term: Per-step forward coefficients (term-structure aware path)
+            df: Curve discount factor to maturity
 
         Returns:
             Tuple of (price, standard_error)
         """
-        discount_factor = math.exp(-r * T)
+        discount_factor = df if df is not None else math.exp(-r * T)
 
         def pricer_fn(paths, aux):
             """Pricer function for RQMC driver."""
@@ -394,7 +412,7 @@ class EuropeanMCEngine(BaseEngine):
             per_batch_paths = params.num_paths
 
         generator = self._create_path_generator(
-            S, r, q, sigma, T, num_paths=per_batch_paths
+            S, r, q, sigma, T, num_paths=per_batch_paths, term=term
         )
 
         result = run_rqmc(
