@@ -428,6 +428,19 @@ def test_snowball_pde_flat_identity_golden():
 
 - [ ] **Step 3: Implement.** In the pricing sweep (:248 site) and event sweep (:627 site): build `sc` via the Task 1/Task 2 call-site pattern right after `l, c, u = self._calculate_coefficients(...)`; inside each `for j ...` loop select `l, c, u = sc.lcu_sets[int(sc.set_index[j])]` and call `self._get_banded_system(l, c, u, dt, theta, coeff_key=int(sc.set_index[j]))`. `_get_banded_system` gains the `coeff_key` parameter included in both cache lookups (`key = (coeff_key, round(dt, 12), round(theta, 12))`). The boundary-row updates in the loop that use `l[1]` / `u[-2]` etc. must use the step's set.
 
+  **Sparse fallback (codex plan-review finding):** the snowball family has a
+  supported `use_banded_solver=False` branch (`_time_stepping_two_surface`
+  style) that consumes a single sparse `A` + scalar `l, u` through
+  `_get_matrices(I_int, A, dt, theta)`. Wire it the same way as Task 2's
+  Path A: per-step set selection, per-set sparse `A` via the solver-held
+  `_term_A_cache`, `coeff_key` into `_get_matrices`, step-local boundary
+  contributions. Add a test variant that prices the snowball discrimination
+  case with `PDEParams(use_banded_solver=False)` (resolve the exact param
+  name from `PDEParams`) and asserts the same `px_term != px_collapsed`
+  outcome AND that banded and sparse paths agree on the term env within the
+  solver's own cross-path tolerance (copy from any existing banded-vs-sparse
+  test if one exists, else `rel=1e-6`).
+
 - [ ] **Step 4: Run** new tests + `test/test_snowball_option.py` + event-distribution suites (`test/test_ki_probability_definitions.py test/test_quad_event_stats_smoothing.py test/test_cashleg/`) + full suite. Expected: all PASS — the event sweep and pricing sweep share the same per-step schedule, so their reconciliation tests are the real gate here.
 
 - [ ] **Step 5: Commit**
@@ -447,7 +460,7 @@ git commit -m "feat(pde): snowball banded sweeps consume per-step term coefficie
 
 **Interfaces:** same call-site pattern as Task 3 (both inherit `_get_banded_system` from `SnowballPDESolver`, already `coeff_key`-aware after Task 3).
 
-- [ ] **Step 1: Write failing discrimination tests** — phoenix (product construction copied from `test_mc_term_structure_engines.test_phoenix_mc_sees_term_structure`) and KO-reset (product via `create_ko_reset_snowball` from `quantark.asset.equity.product.option`, construction copied from `test/conftest.py` fixtures). Same `_collapsed_flat_env` pattern, `rel=1e-5`.
+- [ ] **Step 1: Write failing discrimination tests** — phoenix (product construction copied from `test_mc_term_structure_engines.test_phoenix_mc_sees_term_structure`) and KO-reset (product via `create_ko_reset_snowball` from `quantark.asset.equity.product.option`, construction copied from `test/conftest.py` fixtures). Same `_collapsed_flat_env` pattern, `rel=1e-5`. Phoenix has the same banded/sparse split as snowball — cover its `use_banded_solver=False` branch exactly as in Task 3.
 
 - [ ] **Step 2: Run — expect equal-price failures.**
 
@@ -493,20 +506,37 @@ git commit -m "feat(pde): curve discounting + term extraction across remaining B
 
 ---
 
-### Task 6: Heston / Heston-SLV PDE forward carry
+### Task 6: Heston / Heston-SLV PDE — cumulative-equivalence convention
+
+**Scope corrected by codex plan review:** the Heston PDE kernel prices a
+EUROPEAN terminal-value problem, which depends on the carry/rate curves only
+through the terminal forward and discount factor. Its existing cumulative
+`get_rate(T)` / `get_div_yield(T)` inputs are therefore **already
+term-structure exact** — the same convention as the analytical engines. A
+term-vs-collapsed discrimination test would assert a false invariant. No
+kernel change.
 
 **Files:**
-- Modify: `quantark/asset/equity/engine/pde/heston_pde_solver.py:59,83` (scalar `carry=get_div_yield(T)` → forward carry per step, matching the Heston MC engine's `forward_carry_on_grid` usage), `heston_slv_pde_solver.py` equivalents
+- Modify: `quantark/asset/equity/engine/pde/heston_pde_solver.py` (docstring note only, at the :59/:83 extraction sites), `docs/superpowers/specs/2026-07-03-engine-term-structure-upgrade-design.md` (inventory row: heston/heston_slv PDE disposition becomes "documented cumulative convention — no change", matching the analytical-engines row)
 - Test: extend `test/test_pde_term_structure_solvers.py`
 
-- [ ] **Step 1: Read** how the Heston PDE consumes `carry` (single scalar into the operator vs per-step): route it through `forward_carry_on_grid(env.get_div_yield, t_grid)` + `forward_rates_on_grid` exactly as `quantark/asset/equity/engine/mc/heston_mc_engine.py` does — mirror that engine's pattern so MC and PDE Heston agree.
-- [ ] **Step 2: Failing test** — Heston PDE term-vs-collapsed carry discrimination (European product, Heston params copied from the existing `test/test_heston_pde*.py`), plus cross-check against Heston MC on the same term env within the existing MC/PDE tolerance used in that test file.
-- [ ] **Step 3: Implement; run heston test files + full suite; PASS.**
+- [ ] **Step 1: Equivalence test** — Heston PDE on a term env equals Heston PDE on the collapsed cumulative env within solver tolerance (`rel=1e-8` — identical kernel inputs by construction), pinning the convention:
+
+```python
+def test_heston_pde_cumulative_convention_is_term_exact_for_europeans():
+    # Heston params + product copied from the existing test/test_heston_pde*.py
+    env_term = make_term_env("kinked")  # attach the Heston vol/model per that file
+    ...
+    assert px_term == pytest.approx(px_collapsed, rel=1e-8)
+```
+
+- [ ] **Step 2: Docstring notes** at the two extraction sites + spec inventory row update.
+- [ ] **Step 3: Run heston test files + full suite; PASS.**
 - [ ] **Step 4: Commit**
 
 ```bash
-git add quantark/asset/equity/engine/pde/heston_pde_solver.py quantark/asset/equity/engine/pde/heston_slv_pde_solver.py test/test_pde_term_structure_solvers.py
-git commit -m "feat(pde): heston/heston-slv PDE consume forward carry/rate grids"
+git add quantark/asset/equity/engine/pde/heston_pde_solver.py docs/superpowers/specs/2026-07-03-engine-term-structure-upgrade-design.md test/test_pde_term_structure_solvers.py
+git commit -m "docs(pde): heston PDE cumulative-inputs convention is term-exact for europeans"
 ```
 
 ---
