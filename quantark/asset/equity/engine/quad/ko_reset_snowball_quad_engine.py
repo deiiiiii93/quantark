@@ -15,6 +15,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.event_stats import KOResetEventStats
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -149,14 +150,20 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         dt = self._build_dt(times)
-        tau = 0.5 * vol * vol * dt
+        rate_vec, div_vec, vol_vec = self._term_step_params(
+            pricing_env, product.strike, times, rate, div, vol
+        )
+        df_local = make_df_fn(pricing_env)
+        tau = 0.5 * vol_vec * vol_vec * dt
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
-        alpha = (rate - div - 0.5 * vol * vol) / (vol * vol)
-        beta = (rate - div - 0.5 * vol * vol) ** 2 / (vol**4) + 2.0 * rate / (
-            vol * vol
+        alpha_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) / (
+            vol_vec * vol_vec
         )
+        beta_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) ** 2 / (
+            vol_vec**4
+        ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
         v_in = np.array(
             [
@@ -196,8 +203,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
             if pre_ko_record is not None:
                 discount = self._ko_discount(
-                    rate, obs_time, pre_ko_record.settlement_time
-                )
+                    rate, obs_time, pre_ko_record.settlement_time, df_fn=df_local)
                 ko_value = pre_ko_record.payoff * discount
                 ko_weight = self._smooth_step_weight(
                     grid,
@@ -220,8 +226,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             post_ko_record = self._match_record(obs_time, post_ko_records)
             if post_ko_record is not None and not disable_ko_after_ki:
                 discount = self._ko_discount(
-                    rate, obs_time, post_ko_record.settlement_time
-                )
+                    rate, obs_time, post_ko_record.settlement_time, df_fn=df_local)
                 ko_value = post_ko_record.payoff * discount
                 ko_weight = self._smooth_step_weight(
                     grid,
@@ -272,6 +277,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     spot_grid.copy(), v_in.copy(), v_out.copy())
 
             tau_step = float(tau[step_index])
+            alpha = float(alpha_vec[step_index])
+            beta = float(beta_vec[step_index])
+            vol_step = float(vol_vec[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
@@ -303,7 +311,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     log_ki_barrier,
                     alpha,
                     beta,
-                    vol,
+                    vol_step,
                     dt[step_index],
                     tau_step,
                     product.is_reverse,
@@ -421,14 +429,20 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         dt = self._build_dt(times)
-        tau = 0.5 * vol * vol * dt
+        rate_vec, div_vec, vol_vec = self._term_step_params(
+            pricing_env, product.strike, times, rate, div, vol
+        )
+        df_local = make_df_fn(pricing_env)
+        tau = 0.5 * vol_vec * vol_vec * dt
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
-        alpha = (rate - div - 0.5 * vol * vol) / (vol * vol)
-        beta = (rate - div - 0.5 * vol * vol) ** 2 / (vol**4) + 2.0 * rate / (
-            vol * vol
+        alpha_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) / (
+            vol_vec * vol_vec
         )
+        beta_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) ** 2 / (
+            vol_vec**4
+        ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
         n_pre = len(pre_ko_records)
         n_post = len(post_ko_records)
@@ -488,7 +502,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 ever_before = v_out[ki_ever_col].copy()
                 v_out *= 1.0 - ko_weight
                 v_out[pre_idx] += ko_weight * float(
-                    self._ko_discount(rate, obs_time, pre_ko_record.settlement_time)
+                    self._ko_discount(rate, obs_time, pre_ko_record.settlement_time, df_fn=df_local)
                 )
                 v_out[ki_ever_col] = ever_before
 
@@ -513,7 +527,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 ever_before = v_in[ki_ever_col].copy()
                 v_in *= 1.0 - ko_weight
                 v_in[post_offset + post_idx] += ko_weight * float(
-                    self._ko_discount(rate, obs_time, post_ko_record.settlement_time)
+                    self._ko_discount(rate, obs_time, post_ko_record.settlement_time, df_fn=df_local)
                 )
                 v_in[ki_ever_col] = ever_before
 
@@ -545,6 +559,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     )
 
             tau_step = float(tau[step_index])
+            alpha = float(alpha_vec[step_index])
+            beta = float(beta_vec[step_index])
+            vol_step = float(vol_vec[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
@@ -576,7 +593,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     log_ki_barrier,
                     alpha,
                     beta,
-                    vol,
+                    vol_step,
                     dt[step_index],
                     tau_step,
                     product.is_reverse,
@@ -616,7 +633,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         expected_discounted_post_ko_cashflow = 0.0
 
         for i, rec in enumerate(pre_ko_records):
-            df_total = math.exp(-rate * float(rec.observation_time)) * float(
+            df_total = float(df_local(float(rec.observation_time))) * float(
                 self._ko_discount(rate, float(rec.observation_time), rec.settlement_time)
             )
             if df_total > 0:
@@ -625,7 +642,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             expected_discounted_pre_ko_cashflow[i] = float(pre_unit[i] * payoff)
 
         for i, rec in enumerate(post_ko_records):
-            df_total = math.exp(-rate * float(rec.observation_time)) * float(
+            df_total = float(df_local(float(rec.observation_time))) * float(
                 self._ko_discount(rate, float(rec.observation_time), rec.settlement_time)
             )
             if df_total > 0:
@@ -633,7 +650,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             payoff = float(rec.payoff) if rec.payoff is not None else 0.0
             expected_discounted_post_ko_cashflow += float(post_unit[i] * payoff)
 
-        df_maturity = math.exp(-rate * maturity)
+        df_maturity = float(df_local(maturity))
         ki_survive = 0.0
         ki_ever = 0.0
         if df_maturity > 0.0:

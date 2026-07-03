@@ -14,6 +14,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
@@ -112,16 +113,22 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             ki_records=ki_records,
             product=product,
         )
+        rate_vec, div_vec, vol_vec = self._term_step_params(
+            pricing_env, product.strike, times, rate, div, vol
+        )
+        vol_max_val = float(np.max(vol_vec))
+        df_local = make_df_fn(pricing_env)
+
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
-            maturity, vol, [rec.observation_time for rec in ki_records]
+            maturity, vol_max_val, [rec.observation_time for rec in ki_records]
         )
         math_utils = QuadratureMath(
             grid_x=grid_points,
             spot=spot,
             maturity=maturity,
-            vol_max=vol,
+            vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
             fft_padding_factor=fft_padding_factor,
@@ -131,14 +138,16 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         dt = self._build_dt(times)
-        tau = 0.5 * vol * vol * dt
+        tau = 0.5 * vol_vec * vol_vec * dt
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
-        alpha = (rate - div - 0.5 * vol * vol) / (vol * vol)
-        beta = (rate - div - 0.5 * vol * vol) ** 2 / (vol**4) + 2.0 * rate / (
-            vol * vol
+        alpha_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) / (
+            vol_vec * vol_vec
         )
+        beta_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) ** 2 / (
+            vol_vec**4
+        ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
         v_in = np.array(
             [
@@ -296,13 +305,12 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     ko_weight = ko_mask.astype(float)
 
                 ko_discount = self._ko_discount(
-                    rate, obs_time, ko_record.settlement_time
-                )
+                    rate, obs_time, ko_record.settlement_time, df_fn=df_local)
                 base_ko_payoff = float(ko_record.payoff or 0.0)
                 
                 coupon_discount = 1.0
                 if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
-                    coupon_discount = self._ko_discount(rate, obs_time, maturity)
+                    coupon_discount = self._ko_discount(rate, obs_time, maturity, df_fn=df_local)
 
                 new_v_in_list = []
                 new_v_out_list = []
@@ -418,6 +426,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
             # Diffusion Step
             tau_step = float(tau[step_index])
+            alpha = float(alpha_vec[step_index])
+            beta = float(beta_vec[step_index])
+            vol_step = float(vol_vec[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
 
@@ -449,7 +460,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         log_ki_barrier,
                         alpha,
                         beta,
-                        vol,
+                        vol_step,
                         dt[step_index],
                         tau_step,
                         product.is_reverse,
@@ -542,7 +553,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         v_in[coup_row] = pay_w
 
     def _extract_extra_quad_stats(
-        self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity
+        self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity,
+        df_fn=None,
     ) -> dict:
         coupon_probability = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
@@ -550,7 +562,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             # Coupon row was set to 1.0 (undiscounted indicator) at the observation,
             # so ed_coup = E[DF(0->obs) * 1{coupon, alive}].
             ed_coup = float(math_utils.interpolate(initial_surface[n_ko + i], x=0.0))
-            df_obs = math.exp(-rate * obs_time)
+            df_obs = (
+                float(df_fn(obs_time)) if df_fn is not None
+                else math.exp(-rate * obs_time)
+            )
             if df_obs > 0.0:
                 coupon_probability[i] = float(ed_coup / df_obs)
         result = {"coupon_probability": coupon_probability}
@@ -568,8 +583,12 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             ecc = np.zeros(n_ko, dtype=float)
             for i in range(n_ko):
                 settle = float(maturity) if expiry else ko_times[i]
+                df_settle = (
+                    float(df_fn(settle)) if df_fn is not None
+                    else math.exp(-rate * settle)
+                )
                 ecc[i] = float(
-                    math.exp(-rate * settle) * coupon_amounts[i] * coupon_probability[i]
+                    df_settle * coupon_amounts[i] * coupon_probability[i]
                 )
             result["expected_discounted_coupon_cashflow"] = ecc
         return result

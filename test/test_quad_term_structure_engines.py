@@ -173,3 +173,100 @@ def test_snowball_quad_flat_identity_golden():
     GOLDEN_QUAD_PRE = 102.9747856874856
     px = SnowballQuadEngine().price(_standard_snowball(), make_term_env("flat"))
     assert px == GOLDEN_QUAD_PRE
+
+
+def _standard_phoenix():
+    """Discrete monthly-KI Phoenix (matches the PDE test builder)."""
+    from quantark.asset.equity.product.option import create_standard_phoenix
+    from quantark.asset.equity.product.option.observation_schedule import (
+        ObservationRecord,
+        ObservationSchedule,
+    )
+    from quantark.util.enum import ObservationType
+
+    sched = ObservationSchedule(
+        records=[
+            ObservationRecord(observation_time=i / 12, barrier=75.0)
+            for i in range(1, 13)
+        ]
+    )
+    return create_standard_phoenix(
+        initial_price=100.0, strike=100.0, maturity=1.0,
+        ko_barrier=103.0, ki_barrier=75.0, coupon_barrier=85.0,
+        coupon_rate=0.02, num_observations=12, memory_coupon=False,
+        ki_continuous=False, ki_observation_type=ObservationType.DISCRETE,
+        ki_observation_schedule=sched,
+    )
+
+
+def test_phoenix_quad_sees_term_structure():
+    from quantark.asset.equity.engine.quad import PhoenixQuadEngine
+
+    env_term = make_term_env("kinked")
+    px_term = PhoenixQuadEngine().price(_standard_phoenix(), env_term)
+    px_collapsed = PhoenixQuadEngine().price(
+        _standard_phoenix(), _collapsed_flat_env(env_term, 1.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_phoenix_quad_coupon_stats_see_term_structure():
+    """Coupon stream stats (probabilities + discounted cashflows) must be
+    computed with curve DFs (codex plan-review required test)."""
+    from quantark.asset.equity.engine.quad import PhoenixQuadEngine
+    from quantark.asset.equity.param import QuadParams
+
+    env_term = make_term_env("kinked")
+    env_coll = _collapsed_flat_env(env_term, 1.0)
+    engine = PhoenixQuadEngine(params=QuadParams(grid_points=801))
+    stats_term = engine.calculate_event_stats(_standard_phoenix(), env_term)
+    stats_coll = engine.calculate_event_stats(_standard_phoenix(), env_coll)
+    ecc_term = np.asarray(stats_term.expected_discounted_coupon_cashflow)
+    ecc_coll = np.asarray(stats_coll.expected_discounted_coupon_cashflow)
+    assert float(np.sum(ecc_term)) != pytest.approx(
+        float(np.sum(ecc_coll)), rel=1e-6
+    )
+
+
+def test_ko_reset_quad_sees_term_structure():
+    from quantark.asset.equity.engine.quad import KOResetSnowballQuadEngine
+    from quantark.asset.equity.product.option import create_ko_reset_snowball
+    from quantark.util.enum import PostKOScheduleMode
+
+    product = create_ko_reset_snowball(
+        initial_price=100.0,
+        strike=100.0,
+        maturity_pre=1.0,
+        maturity_post=2.0,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        ki_continuous=False,
+    )
+    env_term = make_term_env("kinked")
+    px_term = KOResetSnowballQuadEngine().price(product, env_term)
+    px_collapsed = KOResetSnowballQuadEngine().price(
+        product, _collapsed_flat_env(env_term, 2.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_ko_reset_quad_event_stats_see_term_structure():
+    from quantark.asset.equity.engine.quad import KOResetSnowballQuadEngine
+    from quantark.asset.equity.product.option import create_ko_reset_snowball
+    from quantark.util.enum import PostKOScheduleMode
+
+    product = create_ko_reset_snowball(
+        initial_price=100.0,
+        strike=100.0,
+        maturity_pre=1.0,
+        maturity_post=2.0,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        ki_continuous=False,
+    )
+    env_term = make_term_env("kinked")
+    env_coll = _collapsed_flat_env(env_term, 2.0)
+    engine = KOResetSnowballQuadEngine()
+    st_term = engine.calculate_event_stats(product, env_term)
+    st_coll = engine.calculate_event_stats(product, env_coll)
+    cf_term = float(np.sum(np.asarray(st_term.expected_discounted_ko_cashflow)))
+    cf_coll = float(np.sum(np.asarray(st_coll.expected_discounted_ko_cashflow)))
+    assert cf_term != pytest.approx(cf_coll, rel=1e-6)
