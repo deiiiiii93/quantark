@@ -70,7 +70,13 @@ class SABRMCEngine:
             payoff = np.maximum(fT - K, 0.0)
         else:
             payoff = np.maximum(K - fT, 0.0)
-        price = math.exp(-r * T) * float(payoff.mean()) * product.contract_multiplier
+        # Curve-exact DF; the forward S*exp((r(T)-q(T))*T) above is already
+        # cumulative-to-T and therefore term-structure exact for Europeans.
+        price = (
+            pricing_env.get_discount_factor(T)
+            * float(payoff.mean())
+            * product.contract_multiplier
+        )
         if price < 0:
             raise PricingError(f"Negative price computed: {price}")
         return price

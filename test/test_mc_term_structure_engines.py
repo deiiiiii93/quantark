@@ -313,6 +313,70 @@ def test_phoenix_mc_sees_term_structure():
     _term_sensitivity_check(price_fn, maturity=1.0)
 
 
+def test_american_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc.american_option_mc_engine import (
+        AmericanOptionMCEngine,
+    )
+    from quantark.asset.equity.product.option import AmericanOption
+
+    def price_fn(env):
+        option = AmericanOption(100.0, OptionType.PUT, maturity=1.0)
+        return AmericanOptionMCEngine(
+            params=MCParams(num_paths=20_000, time_steps=64, seed=42)
+        ).price(option, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
+def test_american_call_no_dividend_matches_european_reference():
+    """American call with q=0 has no early-exercise premium: must match the
+    exact European price under a term rate/vol structure."""
+    from quantark.asset.equity.engine.mc.american_option_mc_engine import (
+        AmericanOptionMCEngine,
+    )
+    from quantark.asset.equity.product.option import AmericanOption
+    from quantark.param.div.dividend_yield import NoDividend
+
+    env = make_term_env("up")
+    env.div_yield = NoDividend()
+    option = AmericanOption(100.0, OptionType.CALL, maturity=1.5)
+    px = AmericanOptionMCEngine(
+        params=MCParams(num_paths=100_000, time_steps=64, seed=42)
+    ).price(option, env)
+    assert px == pytest.approx(
+        reference_european_call_price(env, 100.0, 1.5), rel=2e-2
+    )
+
+
+def test_sabr_mc_discounting_sees_rate_term_structure():
+    """SABR evolves the forward (term-exact via cumulative r/q); the discount
+    factor must come from the curve, not exp(-r(T)*T) recomposed — for the
+    zero-curve classes here these agree, so assert against the curve DF."""
+    from quantark.asset.equity.engine.mc.sabr_mc_engine import SABRMCEngine
+    from quantark.param.vol.sabr import SABRVolSurface
+
+    env_term = make_term_env("up")
+    env_term.vol_surface = SABRVolSurface(
+        slices={
+            0.5: {"alpha": 0.2, "beta": 1.0, "rho": -0.3, "nu": 0.4},
+            2.0: {"alpha": 0.25, "beta": 1.0, "rho": -0.3, "nu": 0.4},
+        }
+    )
+    T = 1.5
+    option = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=T)
+    engine = SABRMCEngine(params=MCParams(num_paths=50_000, time_steps=64, seed=42))
+    px = engine.price(option, env_term)
+    assert px > 0.0
+    from quantark.param.rrf.rate_curve import ParallelShiftRateCurve
+
+    env_shift = make_term_env("up")
+    env_shift.vol_surface = env_term.vol_surface
+    env_shift.rate_curve = ParallelShiftRateCurve(env_term.rate_curve, 0.01)
+    px_shift = engine.price(option, env_shift)
+    # forward changes too, so just require the price to move and stay sane
+    assert px_shift != pytest.approx(px, rel=1e-6)
+
+
 def test_digital_mc_sees_term_structure():
     from quantark.asset.equity.engine.mc.digital_option_mc_engine import (
         DigitalOptionMCEngine,

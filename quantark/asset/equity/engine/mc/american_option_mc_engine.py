@@ -11,6 +11,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.product.option import AmericanOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
 from quantark.util.exceptions import ValidationError, PricingError
@@ -189,6 +190,10 @@ class AmericanOptionMCEngine(BaseEngine):
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
 
+        # Term-structure context for this pricing call (see term_inputs.py)
+        self._term_ctx = (pricing_env, K)
+        self._last_step_dfs = None
+
         self._validate_inputs(S, K, T, r, q, sigma)
 
         if is_zero(T):
@@ -251,11 +256,24 @@ class AmericanOptionMCEngine(BaseEngine):
         if params.use_antithetic and not is_qmc:
             vr_config = VarianceReductionConfig(antithetic=True)
 
+        term_ctx = getattr(self, "_term_ctx", None)
+        if term_ctx is not None:
+            env_ctx, ref_strike = term_ctx
+            term = build_mc_term_inputs(
+                env_ctx, ref_strike=ref_strike, maturity=T,
+                time_steps=params.time_steps,
+            )
+            vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
+            # Per-step curve DFs for the LSM backward induction
+            self._last_step_dfs = term.node_dfs[1:] / term.node_dfs[:-1]
+        else:
+            vol_in, rrf_in, div_in = sigma, r, q
+
         return GBMPathGenerator(
             initial_value=S,
-            vol=sigma,
-            rrf=r,
-            div=q,
+            vol=vol_in,
+            rrf=rrf_in,
+            div=div_in,
             maturity=T,
             time_steps=params.time_steps,
             num_paths=effective_num_paths,
@@ -280,7 +298,10 @@ class AmericanOptionMCEngine(BaseEngine):
         generator = self._create_path_generator(S, r, q, sigma, T)
         paths, _ = generator.generate_paths(return_aux=False)
 
-        discount_factors = safe_exp(-r * generator.dt_vector)
+        step_dfs = getattr(self, "_last_step_dfs", None)
+        discount_factors = (
+            step_dfs if step_dfs is not None else safe_exp(-r * generator.dt_vector)
+        )
 
         payoffs, exercise_steps = self._lsm_discounted_payoffs(
             product=product,
@@ -347,7 +368,10 @@ class AmericanOptionMCEngine(BaseEngine):
         generator = self._create_path_generator(
             S, r, q, sigma, T, num_paths=per_batch_paths
         )
-        discount_factors = safe_exp(-r * generator.dt_vector)
+        step_dfs = getattr(self, "_last_step_dfs", None)
+        discount_factors = (
+            step_dfs if step_dfs is not None else safe_exp(-r * generator.dt_vector)
+        )
 
         def pricer_fn(paths, aux):
             return self._lsm_discounted_payoffs(
