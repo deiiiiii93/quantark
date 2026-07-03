@@ -34,6 +34,7 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import (
@@ -213,6 +214,10 @@ class SnowballMCEngine(BaseEngine):
         sigma = pricing_env.get_vol(product.strike, T)
 
         self._validate_inputs(S, T, r, q, sigma, product)
+        # Term-structure context for this pricing call (see term_inputs.py)
+        self._term_ctx = (pricing_env, product.strike)
+        self._df = make_df_fn(pricing_env)
+
 
         # Handle near-expiry case
         if T < 1e-10:
@@ -889,11 +894,22 @@ class SnowballMCEngine(BaseEngine):
         # No antithetic variates for barrier options (breaks correlation structure)
         vr_config = None
 
+        term_ctx = getattr(self, "_term_ctx", None)
+        if term_ctx is not None:
+            env_ctx, ref_strike = term_ctx
+            term = build_mc_term_inputs(
+                env_ctx, ref_strike=ref_strike, maturity=T,
+                time_steps=len(dt_array), dt_array=dt_array,
+            )
+            vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
+        else:
+            vol_in, rrf_in, div_in = sigma, r, q
+
         generator = GBMPathGenerator(
             initial_value=S,
-            vol=sigma,
-            rrf=r,
-            div=q,
+            vol=vol_in,
+            rrf=rrf_in,
+            div=div_in,
             maturity=T,
             time_steps=len(dt_array),
             num_paths=effective_num_paths,
@@ -1664,7 +1680,7 @@ class SnowballMCEngine(BaseEngine):
         )
 
         # Discount payoffs
-        discount_factors = np.exp(-r * settlement_times)
+        discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors
 
         # Compute price and standard error
@@ -1710,7 +1726,7 @@ class SnowballMCEngine(BaseEngine):
             rng_seed=int(self.params.seed) + 1337,
         )
 
-        discount_factors = np.exp(-r * settlement_times)
+        discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors
 
         price = float(discounted_payoffs.mean())
@@ -1769,7 +1785,7 @@ class SnowballMCEngine(BaseEngine):
         )
 
         # Discount payoffs
-        discount_factors = np.exp(-r * settlement_times)
+        discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors
 
         discounted_payoffs = np.asarray(discounted_payoffs, dtype=float)
@@ -1820,7 +1836,7 @@ class SnowballMCEngine(BaseEngine):
             rng_seed=int(self.params.seed) + 1337 + int(batch_id) * 1000,
         )
 
-        discount_factors = np.exp(-r * settlement_times)
+        discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors
 
         discounted_payoffs = np.asarray(discounted_payoffs, dtype=float)
@@ -2091,7 +2107,7 @@ class SnowballMCEngine(BaseEngine):
                 sigma,
                 rng_seed=int(self.params.seed) + 1337 + batch_id * 1000,
             )
-            discount_factors = np.exp(-r * settlement_times)
+            discount_factors = self._df(settlement_times)
             return payoffs * discount_factors
 
         params = self.params
@@ -2181,7 +2197,7 @@ class SnowballMCEngine(BaseEngine):
                 sigma,
                 rng_seed=int(self.params.seed) + 1337 + batch_id * 1000,
             )
-            discount_factors = np.exp(-r * settlement_times)
+            discount_factors = self._df(settlement_times)
             return payoffs * discount_factors
 
         params = self.params

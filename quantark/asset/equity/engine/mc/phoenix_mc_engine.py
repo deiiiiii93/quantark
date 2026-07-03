@@ -28,6 +28,7 @@ from quantark.asset.equity.process.bsm.qmc_sobol import (
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
@@ -142,6 +143,10 @@ class PhoenixMCEngine(BaseEngine):
         sigma = pricing_env.get_vol(product.strike, T)
 
         self._validate_inputs(S, T, r, q, sigma, product)
+        # Term-structure context for this pricing call (see term_inputs.py)
+        self._term_ctx = (pricing_env, product.strike)
+        self._df = make_df_fn(pricing_env)
+
 
         if T < 1e-10:
             return product.get_payoff(S, pricing_env=pricing_env)
@@ -216,7 +221,7 @@ class PhoenixMCEngine(BaseEngine):
             collect_coupon_stats=True,
         )
 
-        discount_factors = np.exp(-r * settlement_times)
+        discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors + instant_coupon_discounted
         pv = float(discounted_payoffs.mean())
 
@@ -227,7 +232,7 @@ class PhoenixMCEngine(BaseEngine):
             p_i = float(np.mean(hit_i))
             ko_probability[i] = p_i
             if p_i > 0.0:
-                df = math.exp(-r * float(ko_settlement_times[i]))
+                df = self._df(float(ko_settlement_times[i]))
                 expected_discounted_ko_cashflow[i] = p_i * float(ko_payoffs[i]) * df
 
         survival_probability = np.ones(len(ko_times), dtype=float)
@@ -236,7 +241,7 @@ class PhoenixMCEngine(BaseEngine):
             cumulative_ko += ko_probability[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
 
-        maturity_df = math.exp(-r * float(T))
+        maturity_df = self._df(float(T))
         maturity_payoff_all = np.zeros(len(paths), dtype=float)
         is_ko = stats["is_ko"]
         is_v0 = stats["is_v0"]
@@ -430,11 +435,22 @@ class PhoenixMCEngine(BaseEngine):
         else:
             raise ValidationError(f"Unknown Monte Carlo method: {self.method}")
 
+        term_ctx = getattr(self, "_term_ctx", None)
+        if term_ctx is not None:
+            env_ctx, ref_strike = term_ctx
+            term = build_mc_term_inputs(
+                env_ctx, ref_strike=ref_strike, maturity=T,
+                time_steps=len(dt_array), dt_array=dt_array,
+            )
+            vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
+        else:
+            vol_in, rrf_in, div_in = sigma, r, q
+
         generator = GBMPathGenerator(
             initial_value=S,
-            vol=sigma,
-            rrf=r,
-            div=q,
+            vol=vol_in,
+            rrf=rrf_in,
+            div=div_in,
             maturity=T,
             time_steps=len(dt_array),
             num_paths=effective_num_paths,
@@ -771,12 +787,12 @@ class PhoenixMCEngine(BaseEngine):
             if collect_coupon_stats:
                 coupon_probabilities[obs_idx] = float(np.mean(coupon_hit))
                 if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
-                    df_obs = math.exp(-r * float(ko_times[obs_idx]))
+                    df_obs = self._df(float(ko_times[obs_idx]))
                     coupon_cashflows[obs_idx] = float(
                         np.mean(coupon_to_pay * coupon_hit) * df_obs
                     )
                 else:
-                    df_T = math.exp(-r * float(T))
+                    df_T = self._df(float(T))
                     coupon_cashflows[obs_idx] = float(
                         np.mean(coupon_to_pay * coupon_hit) * df_T
                     )
@@ -784,7 +800,7 @@ class PhoenixMCEngine(BaseEngine):
             non_ko_coupon = coupon_hit & ~ko_at_obs
             if non_ko_coupon.any():
                 if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
-                    df_obs = math.exp(-r * float(ko_times[obs_idx]))
+                    df_obs = self._df(float(ko_times[obs_idx]))
                     instant_coupon_discounted[non_ko_coupon] += (
                         coupon_to_pay[non_ko_coupon] * df_obs
                     )
@@ -920,7 +936,7 @@ class PhoenixMCEngine(BaseEngine):
             collect_coupon_stats=True,
         )
 
-        discount_factors = np.exp(-r * settlement_times)
+        discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors + instant_coupon_discounted
 
         price = float(discounted_payoffs.mean())
@@ -984,7 +1000,7 @@ class PhoenixMCEngine(BaseEngine):
             rng_seed=int(self.params.seed) + 1337 + int(batch_id) * 1000,
         )
 
-        discount_factors = np.exp(-r * settlement_times)
+        discount_factors = self._df(settlement_times)
         discounted_payoffs = payoffs * discount_factors + instant_coupon_discounted
 
         discounted_payoffs = np.asarray(discounted_payoffs, dtype=float)
@@ -1149,7 +1165,7 @@ class PhoenixMCEngine(BaseEngine):
                 sigma,
                 rng_seed=int(self.params.seed) + 1337 + batch_id * 1000,
             )
-            discount_factors = np.exp(-r * settlement_times)
+            discount_factors = self._df(settlement_times)
             return payoffs * discount_factors + instant_coupon_discounted
 
         params = self.params

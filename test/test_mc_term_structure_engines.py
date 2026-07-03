@@ -223,6 +223,96 @@ def test_accumulator_mc_sees_term_structure():
     _term_sensitivity_check(price_fn, maturity=1.0)
 
 
+def _standard_snowball():
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+    from quantark.util.enum import ObservationType
+
+    return SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=BarrierConfig(
+            ko_barrier=1.03,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=0.75,
+            ki_observation_type=ObservationType.CONTINUOUS,
+        ),
+        payoff_config=None,
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+
+
+def test_snowball_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+
+    def price_fn(env):
+        return SnowballMCEngine(
+            params=MCParams(num_paths=50_000, time_steps=252, seed=42)
+        ).price(_standard_snowball(), env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
+def test_snowball_mc_flat_identity_vs_pre_upgrade_golden():
+    """Flat-input identity: fixed-seed flat-env price must equal the value
+    captured on this worktree BEFORE the snowball engine was wired for term
+    structures (constant coefficient arrays reproduce scalars bit-exactly)."""
+    from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+
+    GOLDEN_PRE_UPGRADE = 102.97478568748559
+    env = make_term_env("flat")
+    px = SnowballMCEngine(
+        params=MCParams(num_paths=50_000, time_steps=252, seed=42)
+    ).price(_standard_snowball(), env)
+    assert px == pytest.approx(GOLDEN_PRE_UPGRADE, rel=1e-12)
+
+
+def test_phoenix_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+    from quantark.asset.equity.product.option.phoenix_config import (
+        CouponBarrierConfig,
+    )
+    from quantark.util.calendar import DayCountConvention
+    from quantark.util.enum import CouponPayType, ObservationType
+
+    def price_fn(env):
+        product = PhoenixOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=103.0,
+                ko_rate=0.15,
+                ko_observation_type=ObservationType.DISCRETE,
+                ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+                ki_barrier=75.0,
+                ki_observation_type=ObservationType.CONTINUOUS,
+            ),
+            coupon_config=CouponBarrierConfig(
+                coupon_barrier=85.0,
+                coupon_rate=0.01,
+                memory_coupon=True,
+                day_count_convention=DayCountConvention.ACT_365,
+                coupon_pay_type=CouponPayType.INSTANT,
+            ),
+            payoff_config=None,
+            accrual_config=None,
+            contract_multiplier=1.0,
+            maturity=1.0,
+            is_reverse=False,
+        )
+        return PhoenixMCEngine(
+            params=MCParams(num_paths=50_000, time_steps=252, seed=42)
+        ).price(product, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
 def test_digital_mc_sees_term_structure():
     from quantark.asset.equity.engine.mc.digital_option_mc_engine import (
         DigitalOptionMCEngine,
