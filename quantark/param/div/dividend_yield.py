@@ -3,6 +3,8 @@ Dividend yield representations.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import math
+
 import numpy as np
 from quantark.util.exceptions import ValidationError
 
@@ -42,11 +44,13 @@ class ContinuousDividendYield(DividendYield):
     div_yield: float
     
     def __post_init__(self):
-        """Validate dividend yield."""
-        if self.div_yield < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {self.div_yield}")
-        if self.div_yield > 0.20:  # 20% div yield - sanity check
-            raise ValidationError(f"Dividend yield seems unreasonably high: {self.div_yield}")
+        """Validate dividend yield (signed carry allowed, symmetric bound)."""
+        if not math.isfinite(self.div_yield):
+            raise ValidationError(f"Dividend yield must be finite, got {self.div_yield}")
+        if abs(self.div_yield) > 0.20:  # symmetric sanity bound
+            raise ValidationError(
+                f"Dividend yield magnitude seems unreasonably high: {self.div_yield}"
+            )
     
     def get_yield(self, time_to_maturity: float) -> float:
         """
@@ -84,8 +88,10 @@ class TermStructureDividendYield(DividendYield):
             raise ValidationError("times must be positive.")
         if any(self.times[i] >= self.times[i + 1] for i in range(len(self.times) - 1)):
             raise ValidationError("times must be strictly increasing.")
-        if any(y < 0 for y in self.yields):
-            raise ValidationError("dividend yields must be non-negative.")
+        if any(not math.isfinite(y) for y in self.yields):
+            raise ValidationError("dividend yields must be finite.")
+        if any(abs(y) > 1.0 for y in self.yields):
+            raise ValidationError("dividend yield magnitude must be <= 1.0.")
 
     def get_yield(self, time_to_maturity: float) -> float:
         t = float(time_to_maturity)
