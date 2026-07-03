@@ -23,6 +23,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, NumericalError
 from quantark.util.numerical import is_close, safe_divide
 from quantark.util.enum.option_enums import ExerciseType, ObservationType
+from quantark.util.enum import ObservationAggregation
 from quantark.util.enum.engine_enums import EngineType
 
 from .time_grid import TimeGrid
@@ -102,6 +103,89 @@ class BasePDESolver(BaseEngine):
         self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
             OrderedDict()
         )
+        # Discrete-monitoring state shared by the barrier-family solvers
+        # (populated by _setup_observation_indices).
+        self._observation_indices: set = set()
+        self._schedule_records: Dict[int, List] = {}
+        self._schedule_aggregation: "ObservationAggregation" = (
+            ObservationAggregation.STOP_FIRST_HIT
+        )
+        self._terminal_schedule_records: List = []
+        self._has_terminal_observation: bool = False
+        self._total_tau: float = 0.0
+
+    def _setup_observation_indices(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        tau: float,
+        t_vec: np.ndarray,
+        resolve_kwargs: Optional[Dict] = None,
+    ) -> None:
+        """
+        Resolve a product's discrete observation schedule onto the time grid.
+
+        Routing convention (shared by all barrier-family solvers):
+        - an observation at t=0 maps to time index 0,
+        - an observation at t=tau is recorded as a TERMINAL observation
+          (``_has_terminal_observation`` / ``_terminal_schedule_records``) and
+          must be applied in ``set_terminal_condition`` — NOT silently dropped
+          and NOT double-applied as an interior step,
+        - interior observations snap to the nearest time-grid node.
+
+        Args:
+            product: Product carrying observation_schedule / observation_dates
+            pricing_env: Pricing environment (for schedule resolution)
+            tau: Total time to maturity
+            t_vec: Time grid nodes
+            resolve_kwargs: Product-specific defaults forwarded to
+                ``ObservationSchedule.resolve`` (e.g. default_barrier /
+                default_upper / default_lower / default_payoff)
+        """
+        self._total_tau = tau
+        self._observation_indices.clear()
+        self._schedule_records.clear()
+        self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
+        self._terminal_schedule_records = []
+        self._has_terminal_observation = False
+
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            resolved_records = schedule.resolve(
+                pricing_env=pricing_env, **(resolve_kwargs or {})
+            )
+            self._schedule_aggregation = schedule.aggregation_mode
+            if self._schedule_aggregation in (
+                ObservationAggregation.BEST,
+                ObservationAggregation.WORST,
+            ):
+                raise PricingError(
+                    f"PDE solver does not support aggregation mode "
+                    f"{self._schedule_aggregation.value}"
+                )
+            for rec in resolved_records:
+                if is_close(rec.observation_time, 0.0):
+                    self._observation_indices.add(0)
+                    self._schedule_records.setdefault(0, []).append(rec)
+                elif is_close(rec.observation_time, tau):
+                    self._terminal_schedule_records.append(rec)
+                    self._has_terminal_observation = True
+                elif 0.0 < rec.observation_time < tau:
+                    idx = int(np.argmin(np.abs(t_vec - rec.observation_time)))
+                    self._observation_indices.add(idx)
+                    self._schedule_records.setdefault(idx, []).append(rec)
+        elif (
+            getattr(product, "observation_type", None) == ObservationType.DISCRETE
+            and getattr(product, "observation_dates", None) is not None
+        ):
+            for obs_time in product.observation_dates:
+                if is_close(obs_time, 0.0):
+                    self._observation_indices.add(0)
+                elif is_close(obs_time, tau):
+                    self._has_terminal_observation = True
+                elif 0.0 < obs_time < tau:
+                    idx = int(np.argmin(np.abs(t_vec - obs_time)))
+                    self._observation_indices.add(idx)
 
     @classmethod
     def clear_grid_cache(cls) -> None:

@@ -243,7 +243,11 @@ class TestDiscreteDoubleBarrierPDE:
         double_price = DoubleBarrierPDESolver(params).price(double, env)
         single_price = BarrierPDESolver(params).price(single, env)
 
-        assert double_price == pytest.approx(single_price, rel=0.02, abs=0.05)
+        # The two solvers use different spatial domains, so they carry ~2%
+        # relative discretization gap at this resolution (shrinking to ~1% at
+        # grid=1600/steps=800). The defect this test guards against produced a
+        # 5x collapse (0.48 vs 2.54), so rel=0.03 discriminates cleanly.
+        assert double_price == pytest.approx(single_price, rel=0.03)
 
     def test_double_ko_rebate_discounting_matches_single_barrier_on_steep_curve(self):
         # Audit #6: rebate value at interior steps must use the forward

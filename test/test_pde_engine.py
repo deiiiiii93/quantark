@@ -831,9 +831,6 @@ class TestDoubleBarrierPDESolver:
 class TestOneTouchPDESolver:
     """Tests for one-touch option PDE solver."""
 
-    @pytest.mark.skip(
-        reason="One-touch solver needs refinement for proper boundary handling"
-    )
     def test_one_touch_positive_price(self, pricing_env, pde_params):
         """Test that one-touch has positive price when barrier is reachable."""
         barrier = 110.0  # Closer barrier is more likely to be hit
@@ -914,9 +911,6 @@ class TestOneTouchPDESolver:
 class TestDoubleOneTouchPDESolver:
     """Tests for double one-touch option PDE solver."""
 
-    @pytest.mark.skip(
-        reason="Double one-touch solver needs refinement for proper boundary handling"
-    )
     def test_double_one_touch_positive_price(self, pricing_env, pde_params):
         """Test that double one-touch has positive price."""
         upper_barrier = 110.0

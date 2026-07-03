@@ -40,20 +40,8 @@ class OneTouchPDESolver(BasePDESolver):
         with the barrier being an absorbing boundary with value = rebate.
     """
 
-    def __init__(self, params: Optional[PDEParams] = None):
-        """
-        Initialize one-touch option PDE solver.
-
-        Args:
-            params: PDE engine configuration parameters
-        """
-        super().__init__(params)
-        self._observation_indices: Set[int] = set()
-        self._schedule_records: Dict[int, List] = {}
-        self._schedule_aggregation: ObservationAggregation = (
-            ObservationAggregation.STOP_FIRST_HIT
-        )
-        self._total_tau: float = 0.0
+    # Discrete-monitoring state is initialized by BasePDESolver and populated
+    # by the shared _setup_observation_indices.
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -162,26 +150,42 @@ class OneTouchPDESolver(BasePDESolver):
         barrier = product.barrier
         rebate = product.rebate
 
+        # Base terminal value assuming no touch happens exactly at maturity.
         if product.is_one_touch:
-            # One-touch: at maturity, if we haven't touched, we get 0
-            # But at barrier, we get rebate (this is set in boundary conditions)
             grid[:, -1] = 0.0
-
-            # Set barrier boundary to rebate value
-            if product.is_up_barrier:
-                grid[s_vec >= barrier, -1] = rebate
-            else:
-                grid[s_vec <= barrier, -1] = rebate
         else:
-            # No-touch: pays rebate at expiry if never touched
-            # Terminal is rebate everywhere except at barrier
             grid[:, -1] = rebate
 
-            # Zero at barrier (already touched)
-            if product.is_up_barrier:
-                grid[s_vec >= barrier, -1] = 0.0
+        # Apply the touch check at maturity only for continuous monitoring or
+        # when the discrete schedule actually observes at t=T; otherwise this
+        # would insert a phantom terminal observation.
+        apply_terminal_touch = (
+            product.observation_type != ObservationType.DISCRETE
+            or self._has_terminal_observation
+        )
+        if not apply_terminal_touch:
+            return
+
+        terminal_records = (
+            self._terminal_schedule_records
+            if (
+                product.observation_type == ObservationType.DISCRETE
+                and self._terminal_schedule_records
+            )
+            else [None]
+        )
+        for rec in terminal_records:
+            rec_barrier = (
+                rec.barrier if rec is not None and rec.barrier is not None else barrier
+            )
+            payoff = rec.payoff if rec is not None else rebate
+            touched = (
+                s_vec >= rec_barrier if product.is_up_barrier else s_vec <= rec_barrier
+            )
+            if product.is_one_touch:
+                grid[touched, -1] = payoff
             else:
-                grid[s_vec <= barrier, -1] = 0.0
+                grid[touched, -1] = 0.0
 
     def set_boundary_conditions(
         self,
@@ -376,40 +380,17 @@ class OneTouchPDESolver(BasePDESolver):
             grade_exponent=params.grade_exponent,
         )
 
-        # Setup observation indices for discrete monitoring
-        self._total_tau = tau
-        self._observation_indices.clear()
-        self._schedule_records.clear()
-        self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
-        schedule = getattr(product, "observation_schedule", None)
-        if schedule is not None:
-            resolved_records = schedule.resolve(
-                pricing_env=pricing_env,
-                default_barrier=product.barrier,
-                default_payoff=product.rebate,
-                require_single=True,
-            )
-            self._schedule_aggregation = schedule.aggregation_mode
-            if self._schedule_aggregation in (
-                ObservationAggregation.BEST,
-                ObservationAggregation.WORST,
-            ):
-                raise PricingError(
-                    f"PDE solver does not support aggregation mode {self._schedule_aggregation.value}"
-                )
-            for rec in resolved_records:
-                if 0 < rec.observation_time < tau:
-                    idx = np.argmin(np.abs(t_vec - rec.observation_time))
-                    self._observation_indices.add(idx)
-                    self._schedule_records.setdefault(idx, []).append(rec)
-        elif (
-            product.observation_type == ObservationType.DISCRETE
-            and product.observation_dates is not None
-        ):
-            for obs_time in product.observation_dates:
-                if 0 < obs_time < tau:
-                    idx = np.argmin(np.abs(t_vec - obs_time))
-                    self._observation_indices.add(idx)
+        self._setup_observation_indices(
+            product,
+            pricing_env,
+            tau,
+            t_vec,
+            resolve_kwargs={
+                "default_barrier": product.barrier,
+                "default_payoff": product.rebate,
+                "require_single": True,
+            },
+        )
 
         return x_vec, s_vec, dx_vec, t_vec, dt_vec
 
