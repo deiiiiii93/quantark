@@ -49,6 +49,20 @@ class TimeGridSpec:
     steps_per_day: float = 1.0
 
 
+class StepCoefficients(NamedTuple):
+    """Per-step (l, c, u) operator coefficient sets, deduped by unique triple.
+
+    ``lcu_sets[set_index[j]]`` is the operator for backward step ``j`` (the
+    interval [t_vec[j], t_vec[j+1]]). Flat market inputs produce exactly one
+    set, preserving single-operator factorization reuse; term inputs pay the
+    designed per-step rebuild (spec Component 4).
+    """
+
+    lcu_sets: list
+    set_index: np.ndarray
+    n_unique: int
+
+
 class PDESolutionResult(NamedTuple):
     """
     Result from PDE solving containing solution and grid data.
@@ -910,6 +924,67 @@ class BasePDESolver(BaseEngine):
             method=method,
             event_times=None,
             grade_exponent=params.grade_exponent,
+        )
+
+    def _build_step_coefficients(
+        self,
+        pricing_env: PricingEnvironment,
+        ref_strike: float,
+        t_vec: np.ndarray,
+        dx_vec: np.ndarray,
+        num_x: int,
+    ) -> StepCoefficients:
+        """Sample forward (r, q, sigma) per time step and build operator sets."""
+        from quantark.priceenv.term_sampling import TermCoefficients
+
+        tc = TermCoefficients.from_env(
+            pricing_env, np.asarray(t_vec, dtype=float), ref_strike=float(ref_strike)
+        )
+        lcu_sets: list = []
+        keys: dict = {}
+        n_steps = len(t_vec) - 1
+        set_index = np.zeros(n_steps, dtype=int)
+        for j in range(n_steps):
+            # 12 decimals (same precision as the dt cache keys) absorbs
+            # DF round-trip ulp noise so flat curves dedupe to ONE set
+            key = (
+                round(float(tc.fwd_rates[j]), 12),
+                round(float(tc.fwd_carry[j]), 12),
+                round(float(tc.step_vols[j]), 12),
+            )
+            idx = keys.get(key)
+            if idx is None:
+                idx = len(lcu_sets)
+                keys[key] = idx
+                lcu_sets.append(
+                    self._calculate_coefficients(key[0], key[1], key[2], dx_vec, num_x)
+                )
+            set_index[j] = idx
+        return StepCoefficients(
+            lcu_sets=lcu_sets, set_index=set_index, n_unique=len(lcu_sets)
+        )
+
+    def _flat_exact_step_coefficients(
+        self,
+        sc: StepCoefficients,
+        r: float,
+        q: float,
+        sigma: float,
+        dx_vec: np.ndarray,
+        num_x: int,
+    ) -> StepCoefficients:
+        """Rebuild a single unique set from the exact cumulative scalars.
+
+        One unique set means the curves are constant on the grid, so the
+        cumulative scalars equal the forwards mathematically; substituting is
+        exact (not an approximation) and makes flat envs bit-identical to the
+        pre-term code path.
+        """
+        if sc.n_unique != 1:
+            return sc
+        lcu = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
+        return StepCoefficients(
+            lcu_sets=[lcu], set_index=sc.set_index, n_unique=1
         )
 
     def _calculate_coefficients(
