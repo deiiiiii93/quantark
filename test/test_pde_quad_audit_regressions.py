@@ -392,6 +392,99 @@ class TestEventStatsThetaConsistency:
 
 
 # ============================================================================
+# Audit #12 — the adaptive grid-resolution safeguard (min_diffusion_stddev_cells)
+# must protect Phoenix and KO-reset QUAD engines, not only Snowball. Pre-fix,
+# an under-resolved daily-KI diffusion step silently produced garbage (e.g. a
+# KO-reset price of 832 vs the converged 83.1 at default settings).
+# ============================================================================
+
+
+class TestQuadGridResolutionSafeguard:
+    def test_ko_reset_daily_ki_price_is_resolved_at_default_settings(self):
+        from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
+            KOResetSnowballQuadEngine,
+        )
+        from quantark.asset.equity.product.option import create_ko_reset_snowball
+        from quantark.util.enum import PostKOScheduleMode
+
+        env = create_pricing_env(spot=81.0, div=0.0)  # near the 80 KI barrier
+        product = create_ko_reset_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity_pre=1.0,
+            maturity_post=2.0,
+            post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+            ki_continuous=False,  # discrete daily KI
+        )
+        # grid_points=401 under-resolves the 1-day diffusion step; the default
+        # min_diffusion_stddev_cells safeguard must auto-refine the grid.
+        # Converged reference (grid 2001/4001 on both pre- and post-fix code):
+        # ~83.10-83.13. The pre-fix engine silently returned ~832.
+        price = KOResetSnowballQuadEngine(params=QuadParams(grid_points=401)).price(
+            product, env
+        )
+        assert price == pytest.approx(83.11, rel=0.02)
+
+    def test_phoenix_grid_safeguard_raises_when_cap_exceeded(self):
+        from quantark.asset.equity.engine.quad.phoenix_quad_engine import (
+            PhoenixQuadEngine,
+        )
+        from quantark.util.exceptions import NumericalError
+
+        env = create_pricing_env(div=0.0)
+        ko_dates = [i / 12 for i in range(1, 13)]
+        daily_ki_dates = [i / 244 for i in range(1, 245)]
+        ki_schedule = ObservationSchedule(
+            records=[
+                ObservationRecord(observation_time=t, barrier=75.0)
+                for t in daily_ki_dates
+            ]
+        )
+        barrier_config = BarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.0,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=ko_dates,
+            ki_barrier=75.0,
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_schedule=ki_schedule,
+            ki_continuous=False,
+        )
+        coupon_config = CouponBarrierConfig(
+            coupon_barrier=85.0,
+            coupon_rate=0.01,
+            coupon_pay_type=CouponPayType.INSTANT,
+            day_count_convention=DayCountConvention.ACT_365,
+            memory_coupon=False,
+        )
+        payoff_config = PayoffConfig(
+            rebate_rate=0.0,
+            include_principal=False,
+            participation_rate=1.0,
+            protection_type=ProtectionType.NONE,
+        )
+        phoenix = PhoenixOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            coupon_config=coupon_config,
+            payoff_config=payoff_config,
+            contract_multiplier=1.0,
+            maturity=1.0,
+        )
+        engine = PhoenixQuadEngine(
+            params=QuadParams(
+                grid_points=101,
+                min_diffusion_stddev_cells=25.0,
+                max_adaptive_grid_points=201,
+            )
+        )
+        # Snowball already raises here; Phoenix silently priced garbage pre-fix.
+        with pytest.raises(NumericalError):
+            engine.price(phoenix, env)
+
+
+# ============================================================================
 # Audit #8 — Phoenix memory coupon at KO: accrued (missed) coupons are paid
 # only if the current observation's coupon condition is met (MC semantics).
 # Constructed so the divergence is structural: coupon_barrier > ko_barrier

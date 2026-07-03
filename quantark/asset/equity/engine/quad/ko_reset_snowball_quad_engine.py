@@ -133,8 +133,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         align_log = self._select_alignment_log(spot, product)
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
+        grid_points = self._resolve_grid_points(
+            maturity, vol, [rec.observation_time for rec in ki_records]
+        )
         math_utils = QuadratureMath(
-            grid_x=self.params.grid_points,
+            grid_x=grid_points,
             spot=spot,
             maturity=maturity,
             vol_max=vol,
@@ -190,6 +193,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
+            pre_ko_weight = None
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
             if pre_ko_record is not None:
                 discount = self._ko_discount(
@@ -211,6 +215,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     )
                     ko_weight = ko_mask.astype(float)
 
+                pre_ko_weight = ko_weight
                 v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
 
             post_ko_record = self._match_record(obs_time, post_ko_records)
@@ -246,12 +251,26 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             elif ki_records:
                 ki_record = self._match_record(obs_time, ki_records)
                 if ki_record is not None:
-                    ki_mask = (
-                        spot_grid >= ki_record.barrier
-                        if product.is_reverse
-                        else spot_grid <= ki_record.barrier
+                    # Resolution-aware smoothed KI transition (same O(h)
+                    # bias fix as SnowballQuadEngine), narrowed by the
+                    # pre-KO weight on simultaneous observations.
+                    ki_weight = self._smooth_step_weight(
+                        grid,
+                        ki_record.barrier,
+                        spot,
+                        smoothing_width,
+                        trigger_is_down=not product.is_reverse,
                     )
-                    v_out[ki_mask] = v_in[ki_mask]
+                    if ki_weight is None:
+                        ki_mask = (
+                            spot_grid >= ki_record.barrier
+                            if product.is_reverse
+                            else spot_grid <= ki_record.barrier
+                        )
+                        ki_weight = ki_mask.astype(float)
+                    if pre_ko_weight is not None:
+                        ki_weight = ki_weight * (1.0 - pre_ko_weight)
+                    v_out = (1.0 - ki_weight) * v_out + ki_weight * v_in
 
             # Post-event continuation surfaces at obs_time (v_out = pre-KI/not-yet-KI,
             # v_in = post-KI/knocked-in), before diffusing back to the previous step.
@@ -393,8 +412,11 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         align_log = self._select_alignment_log(spot, product)
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
+        grid_points = self._resolve_grid_points(
+            maturity, vol, [rec.observation_time for rec in ki_records]
+        )
         math_utils = QuadratureMath(
-            grid_x=self.params.grid_points,
+            grid_x=grid_points,
             spot=spot,
             maturity=maturity,
             vol_max=vol,
@@ -451,6 +473,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
+            pre_ko_weight = None
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
             if pre_ko_record is not None:
                 pre_idx = pre_ko_records.index(pre_ko_record)
@@ -469,6 +492,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     )
                     ko_weight = ko_mask.astype(float)
 
+                pre_ko_weight = ko_weight
                 ever_before = v_out[ki_ever_col].copy()
                 v_out *= 1.0 - ko_weight
                 v_out[pre_idx] += ko_weight * float(
@@ -511,12 +535,28 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             elif ki_records:
                 ki_record = self._match_record(obs_time, ki_records)
                 if ki_record is not None:
-                    ki_mask = (
-                        spot_grid >= ki_record.barrier
-                        if product.is_reverse
-                        else spot_grid <= ki_record.barrier
+                    # Smoothed discrete-KI transition, consistent with the
+                    # smoothed KO absorption above and with the price() path;
+                    # narrowed by the pre-KO weight so KO keeps precedence at
+                    # a simultaneous observation (reduces to the hard mask at
+                    # width 0, where KO and KI regions are disjoint).
+                    ki_w = self._smooth_step_weight(
+                        grid,
+                        ki_record.barrier,
+                        spot,
+                        smoothing_width,
+                        trigger_is_down=not product.is_reverse,
                     )
-                    v_out[:, ki_mask] = v_in[:, ki_mask]
+                    if ki_w is None:
+                        ki_mask = (
+                            spot_grid >= ki_record.barrier
+                            if product.is_reverse
+                            else spot_grid <= ki_record.barrier
+                        )
+                        ki_w = ki_mask.astype(float)
+                    if pre_ko_weight is not None:
+                        ki_w = ki_w * (1.0 - pre_ko_weight)
+                    v_out = (1.0 - ki_w) * v_out + ki_w * v_in
 
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
