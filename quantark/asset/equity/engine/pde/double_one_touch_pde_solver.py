@@ -49,6 +49,7 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         self._schedule_aggregation: ObservationAggregation = (
             ObservationAggregation.STOP_FIRST_HIT
         )
+        self._total_tau: float = 0.0
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -203,8 +204,10 @@ class DoubleOneTouchPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         rebate = product.rebate
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
-        df = np.exp(-r * tau) if tau > 0 else 1.0
+        # Forward discount factor from the current step to maturity,
+        # term-structure consistent (DF(t,T), not DF(0,tau)).
+        current_time = self._current_time(self._total_tau, tau)
+        df = self._df_between_times(pricing_env, current_time, self._total_tau)
 
         if product.is_double_one_touch:
             if product.payment_at_hit:
@@ -254,8 +257,8 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         upper = product.upper_barrier
         lower = product.lower_barrier
         rebate = product.rebate
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
-        df = np.exp(-r * tau) if tau > 0 else 1.0
+        current_time = self._current_time(self._total_tau, tau)
+        df = self._df_between_times(pricing_env, current_time, self._total_tau)
 
         if schedule_records:
             for rec in schedule_records:
@@ -368,6 +371,7 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         )
 
         # Setup observation indices for discrete monitoring
+        self._total_tau = tau
         self._observation_indices.clear()
         self._schedule_records.clear()
         self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT

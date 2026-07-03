@@ -41,7 +41,6 @@ from quantark.util.numerical import (
     is_close,
     is_greater_than_or_close,
     is_zero,
-    safe_divide,
     safe_exp,
     safe_sqrt,
 )
@@ -2001,16 +2000,8 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=next_rec.settlement_time,
         )
 
-    @staticmethod
-    def _df_between_times(
-        pricing_env: PricingEnvironment, start_time: float, end_time: float
-    ) -> float:
-        """Calculate discount factor between two times."""
-        if end_time <= start_time:
-            return 1.0
-        df_end = pricing_env.get_discount_factor(end_time)
-        df_start = pricing_env.get_discount_factor(start_time)
-        return float(safe_divide(df_end, df_start, fallback=1.0))
+    # _df_between_times / _cashflow_value_at_time are inherited from
+    # BasePDESolver.
 
     @staticmethod
     def _get_asymptotic_discount_factors(
@@ -2036,19 +2027,6 @@ class SnowballPDESolver(BasePDESolver):
         df = np.exp(-r * tau_to_maturity)
         df_div = np.exp(-q * tau_to_maturity)
         return float(df), float(df_div)
-
-    def _cashflow_value_at_time(
-        self,
-        pricing_env: PricingEnvironment,
-        cashflow: float,
-        current_time: float,
-        settlement_time: Optional[float],
-    ) -> float:
-        """Discount a cashflow from settlement time to current time."""
-        if settlement_time is None or settlement_time <= current_time:
-            return float(cashflow)
-        df = self._df_between_times(pricing_env, current_time, settlement_time)
-        return float(cashflow) * df
 
     # Override abstract methods from base class (not used for two-surface)
     def set_terminal_condition(

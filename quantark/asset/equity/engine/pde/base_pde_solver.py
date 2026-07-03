@@ -21,7 +21,7 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, NumericalError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, safe_divide
 from quantark.util.enum.option_enums import ExerciseType, ObservationType
 from quantark.util.enum.engine_enums import EngineType
 
@@ -1032,6 +1032,40 @@ class BasePDESolver(BaseEngine):
         gamma = (d2v_dx2 - dv_dx) / (spot**2)
 
         return delta, gamma
+
+    @staticmethod
+    def _current_time(total_tau: float, tau_remaining: float) -> float:
+        """Elapsed time (from valuation) at a backward-induction step."""
+        return max(total_tau - tau_remaining, 0.0)
+
+    @staticmethod
+    def _df_between_times(
+        pricing_env: PricingEnvironment, start_time: float, end_time: float
+    ) -> float:
+        """
+        Forward discount factor DF(start_time, end_time), both measured from
+        the valuation date. Term-structure consistent: DF(0,T)/DF(0,t), NOT
+        exp(-r(tau)*tau) with tau = remaining time (they coincide only under
+        a flat curve).
+        """
+        if end_time <= start_time:
+            return 1.0
+        df_end = pricing_env.get_discount_factor(end_time)
+        df_start = pricing_env.get_discount_factor(start_time)
+        return float(safe_divide(df_end, df_start, fallback=1.0))
+
+    def _cashflow_value_at_time(
+        self,
+        pricing_env: PricingEnvironment,
+        cashflow: float,
+        current_time: float,
+        settlement_time: Optional[float],
+    ) -> float:
+        """Discount a cashflow from its settlement time back to current_time."""
+        if settlement_time is None or settlement_time <= current_time:
+            return float(cashflow)
+        df = self._df_between_times(pricing_env, current_time, settlement_time)
+        return float(cashflow) * df
 
     def _calculate_intrinsic(self, product: BaseEquityProduct, spot: float) -> float:
         """

@@ -16,7 +16,7 @@ from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
-from quantark.util.numerical import is_close, safe_divide
+from quantark.util.numerical import is_close
 
 from .base_pde_solver import BasePDESolver
 
@@ -58,31 +58,8 @@ class BarrierPDESolver(BasePDESolver):
         self._terminal_schedule_records: List[ResolvedObservationRecord] = []
         self._has_terminal_observation: bool = False
 
-    @staticmethod
-    def _current_time(total_tau: float, tau_remaining: float) -> float:
-        return max(total_tau - tau_remaining, 0.0)
-
-    @staticmethod
-    def _df_between_times(
-        pricing_env: PricingEnvironment, start_time: float, end_time: float
-    ) -> float:
-        if end_time <= start_time:
-            return 1.0
-        df_end = pricing_env.get_discount_factor(end_time)
-        df_start = pricing_env.get_discount_factor(start_time)
-        return float(safe_divide(df_end, df_start, fallback=0.0))
-
-    def _cashflow_value_at_time(
-        self,
-        pricing_env: PricingEnvironment,
-        cashflow: float,
-        current_time: float,
-        settlement_time: Optional[float],
-    ) -> float:
-        if settlement_time is None or settlement_time <= current_time:
-            return float(cashflow)
-        df = self._df_between_times(pricing_env, current_time, settlement_time)
-        return float(cashflow) * df
+    # _current_time / _df_between_times / _cashflow_value_at_time are
+    # inherited from BasePDESolver.
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

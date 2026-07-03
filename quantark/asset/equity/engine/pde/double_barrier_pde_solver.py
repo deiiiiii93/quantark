@@ -46,6 +46,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
         self._schedule_aggregation: ObservationAggregation = (
             ObservationAggregation.STOP_FIRST_HIT
         )
+        self._total_tau: float = 0.0
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -300,10 +301,12 @@ class DoubleBarrierPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         rebate = product.rebate
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
-
-        # Discounted rebate
-        discounted_rebate = rebate * np.exp(-r * tau)
+        # Rebate paid at maturity, discounted with the forward factor
+        # DF(t, T) (term-structure consistent, not DF(0, tau)).
+        current_time = self._current_time(self._total_tau, tau)
+        discounted_rebate = rebate * self._df_between_times(
+            pricing_env, current_time, self._total_tau
+        )
 
         # Both boundaries are at the barriers, so both get rebate
         grid[0, t_idx] = discounted_rebate  # Lower barrier
@@ -339,7 +342,12 @@ class DoubleBarrierPDESolver(BasePDESolver):
                 return
 
         schedule_records = self._schedule_records.get(t_idx)
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
+        total_tau = (
+            self._total_tau
+            if self._total_tau > 0
+            else product.get_maturity(pricing_env)
+        )
+        current_time = self._current_time(total_tau, tau)
 
         if schedule_records:
             for rec in schedule_records:
@@ -353,8 +361,16 @@ class DoubleBarrierPDESolver(BasePDESolver):
                     if rec.lower_barrier is not None
                     else product.lower_barrier
                 )
-                payoff = rec.payoff
-                discounted_payoff = payoff * np.exp(-r * tau)
+                discounted_payoff = self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=rec.payoff,
+                    current_time=current_time,
+                    settlement_time=(
+                        rec.settlement_time
+                        if rec.settlement_time is not None
+                        else total_tau
+                    ),
+                )
                 outside_corridor = (s_vec >= upper) | (s_vec <= lower)
                 if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
                     grid[outside_corridor, t_idx] += discounted_payoff
@@ -367,7 +383,9 @@ class DoubleBarrierPDESolver(BasePDESolver):
         lower = product.lower_barrier
         rebate = product.rebate
 
-        discounted_rebate = rebate * np.exp(-r * tau)
+        discounted_rebate = rebate * self._df_between_times(
+            pricing_env, current_time, total_tau
+        )
 
         # Apply knockout at both barriers
         outside_corridor = (s_vec >= upper) | (s_vec <= lower)
@@ -441,6 +459,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
         )
 
         # Setup observation indices for discrete monitoring
+        self._total_tau = tau
         self._observation_indices.clear()
         self._schedule_records.clear()
         self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
