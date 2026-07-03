@@ -474,8 +474,6 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         if abs(r) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {r}")
 
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
 
     def __repr__(self):
         return "DoubleBarrierOptionAnalyticalEngine()"

@@ -227,8 +227,6 @@ class RangeAccrualMCEngine(BaseEngine):
             raise ValidationError(f"Time to maturity must be non-negative, got {T}")
         if sigma <= 0:
             raise ValidationError(f"Volatility must be positive, got {sigma}")
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
 
         if product.range_config is None:
             raise ValidationError("range_config is required for Range Accrual option")

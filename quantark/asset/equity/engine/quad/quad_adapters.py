@@ -375,8 +375,6 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             raise ValidationError(f"Volatility must be positive, got {vol}")
         if barrier <= 0:
             raise ValidationError(f"Barrier must be positive, got {barrier}")
-        if div < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {div}")
         if abs(rate) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
         if vol > engine.MAX_VOL:

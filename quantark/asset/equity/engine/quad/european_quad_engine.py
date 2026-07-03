@@ -189,8 +189,6 @@ class EuropeanQuadEngine(BaseEngine):
             raise ValidationError(
                 f"Volatility too high for numerical stability: {sigma}"
             )
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
         if abs(r) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {r}")
         if T > 100:

@@ -176,8 +176,6 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
             raise ValidationError(
                 f"Volatility {sigma} outside supported range [{self.MIN_VOL}, {self.MAX_VOL}]"
             )
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
         if abs(r) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {r}")
         if T > self.MAX_MATURITY:

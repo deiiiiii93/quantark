@@ -354,8 +354,6 @@ class AccumulatorAnalyticalEngine(BaseEngine):
             raise ValidationError(
                 f"Maturity too long for analytical accumulator pricing: {maturity}"
             )
-        if div < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {div}")
         if abs(rate) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
 

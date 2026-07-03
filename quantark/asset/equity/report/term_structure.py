@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import ClassVar, List
 
@@ -92,11 +93,15 @@ class BucketedDividendYield(DividendYield):
             raise ValidationError("bucket_start must be non-negative")
         if self.bucket_end <= self.bucket_start:
             raise ValidationError("bucket_end must be > bucket_start")
+        if not math.isfinite(float(self.bump)) or abs(float(self.bump)) > 1.0:
+            raise ValidationError(
+                f"bump must be finite with magnitude <= 1.0, got {self.bump}"
+            )
 
     def get_yield(self, time_to_maturity: float) -> float:
         base_yield = float(self.base.get_yield(time_to_maturity))
         if self.bucket_start < time_to_maturity <= self.bucket_end:
-            return max(0.0, base_yield + float(self.bump))
+            return base_yield + float(self.bump)
         return base_yield
 
 
@@ -105,9 +110,15 @@ class ShiftedDividendYield(DividendYield):
     base: DividendYield
     shift: float
 
+    def __post_init__(self) -> None:
+        if not math.isfinite(float(self.shift)) or abs(float(self.shift)) > 1.0:
+            raise ValidationError(
+                f"shift must be finite with magnitude <= 1.0, got {self.shift}"
+            )
+
     def get_yield(self, time_to_maturity: float) -> float:
         base_yield = float(self.base.get_yield(time_to_maturity))
-        return max(0.0, base_yield + float(self.shift))
+        return base_yield + float(self.shift)
 
 
 @dataclass(frozen=True)

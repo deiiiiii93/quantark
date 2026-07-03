@@ -37,8 +37,8 @@ class MarketDataPoint:
             raise ValidationError(f"Spot price must be positive, got {self.spot}")
         if self.volatility <= 0:
             raise ValidationError(f"Volatility must be positive, got {self.volatility}")
-        if self.div_yield < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {self.div_yield}")
+        if abs(self.div_yield) > 0.20:
+            raise ValidationError(f"Dividend yield magnitude seems unreasonably high: {self.div_yield}")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

@@ -43,9 +43,9 @@ class BSMProcess:
             raise ValidationError(
                 f"Volatility seems unreasonably high: {self.volatility}"
             )
-        if self.dividend_yield < 0:
+        if abs(self.dividend_yield) > 0.20:
             raise ValidationError(
-                f"Dividend yield must be non-negative, got {self.dividend_yield}"
+                f"Dividend yield magnitude seems unreasonably high: {self.dividend_yield}"
             )
         # Allow negative rates
         if self.risk_free_rate < -0.10 or self.risk_free_rate > 0.50:

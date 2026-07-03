@@ -272,8 +272,6 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
             raise ValidationError(f"Spot price must be positive, got {S}")
         if T < 0:
             raise ValidationError(f"Time to maturity must be non-negative, got {T}")
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
         if abs(r) > 1.0:
             raise ValidationError(
                 f"Risk-free rate outside reasonable bounds: {r}"

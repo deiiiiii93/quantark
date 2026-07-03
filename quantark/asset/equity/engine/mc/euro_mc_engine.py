@@ -216,8 +216,6 @@ class EuropeanMCEngine(BaseEngine):
             raise ValidationError(f"Time to maturity must be non-negative, got {T}")
         if sigma <= 0:
             raise ValidationError(f"Volatility must be positive, got {sigma}")
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
 
     def _create_path_generator(
         self,

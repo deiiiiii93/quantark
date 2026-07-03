@@ -154,8 +154,6 @@ class BlackScholesEngine(BaseEngine):
             raise ValidationError(
                 f"Volatility too high for numerical stability: {sigma}"
             )
-        if q < 0:
-            raise ValidationError(f"Dividend yield must be non-negative, got {q}")
 
         # Check for extreme parameter combinations
         if abs(r) > 1.0:

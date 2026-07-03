@@ -942,19 +942,6 @@ class GreeksCalculator:
                 bump=self._bump_config.spot_bump,
             )
 
-        if current_div - div_bump < 0:
-            env_up = self._build_div_bumped_env(
-                pricing_env, product, current_div, div_bump, direction=1.0
-            )
-            delta_up = self.calculate_numerical_delta(
-                product,
-                env_up,
-                engine,
-                base_price=base_price,
-                bump=self._bump_config.spot_bump,
-            )
-            return (delta_up - base_delta) / div_bump
-
         env_up = self._build_div_bumped_env(
             pricing_env, product, current_div, div_bump, direction=1.0
         )
@@ -1180,20 +1167,12 @@ class GreeksCalculator:
         from quantark.param.div import ContinuousDividendYield, TermStructureDividendYield
 
         new_div = current_div + direction * div_bump
-        if new_div < 0:
-            raise ValidationError(
-                f"Stressed dividend yield cannot be negative, got {new_div}"
-            )
 
         env = deepcopy(pricing_env)
         if isinstance(pricing_env.div_yield, TermStructureDividendYield):
             new_yields = [
                 float(y) + direction * div_bump for y in pricing_env.div_yield.yields
             ]
-            if any(y < 0 for y in new_yields):
-                raise ValidationError(
-                    "Stressed term-structure dividend yield cannot be negative."
-                )
             env.div_yield = TermStructureDividendYield(
                 times=list(pricing_env.div_yield.times), yields=new_yields
             )
