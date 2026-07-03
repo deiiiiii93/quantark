@@ -270,3 +270,34 @@ def test_ko_reset_quad_event_stats_see_term_structure():
     cf_term = float(np.sum(np.asarray(st_term.expected_discounted_ko_cashflow)))
     cf_coll = float(np.sum(np.asarray(st_coll.expected_discounted_ko_cashflow)))
     assert cf_term != pytest.approx(cf_coll, rel=1e-6)
+
+
+def test_phoenix_mc_pde_quad_agree_on_term_structure():
+    """Spec test layer 4 (flagship): all three engine families price the same
+    term-structured autocallable within cross-family tolerances. Product is
+    the discrete-KI phoenix used by the existing three-engine agreement
+    tests (test_ki_probability_definitions.py)."""
+    from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+    from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+    from quantark.asset.equity.engine.quad import PhoenixQuadEngine
+    from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
+
+    env = make_term_env("kinked")
+    product = _standard_phoenix()
+
+    px_quad = PhoenixQuadEngine(params=QuadParams(grid_points=801)).price(
+        product, env
+    )
+    px_pde = PhoenixPDESolver(
+        params=PDEParams(grid_size=500, time_steps=500, auto_grid=True)
+    ).price(product, env)
+    px_mc = PhoenixMCEngine(
+        params=MCParams(num_paths=300_000, time_steps=252, use_qmc=True, seed=7)
+    ).price(product, env)
+
+    # deterministic engines: tight (observed term gap ~0.12%)
+    assert px_pde == pytest.approx(px_quad, rel=5e-3)
+    # MC: the net value (~ -2.5) nets large offsetting legs, so the QMC
+    # sampling error is material in RELATIVE terms; bound it absolutely
+    # at the observed few-cents scale.
+    assert px_mc == pytest.approx(px_quad, rel=5e-3, abs=0.05)
