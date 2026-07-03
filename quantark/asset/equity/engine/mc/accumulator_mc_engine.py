@@ -31,6 +31,7 @@ from quantark.asset.equity.process.bsm.qmc_variance_reduction import (
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import AccumulatorOption
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import AccumulatorKnockOutType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
@@ -107,6 +108,10 @@ class AccumulatorMCEngine(BaseEngine):
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(strike, maturity)
+        # Term-structure context for this pricing call (see term_inputs.py)
+        self._term_ctx = (pricing_env, strike)
+        self._df = make_df_fn(pricing_env)
+
 
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product)
 
@@ -309,11 +314,22 @@ class AccumulatorMCEngine(BaseEngine):
         if self.params.use_antithetic and not is_qmc:
             vr_config = VarianceReductionConfig(antithetic=True)
 
+        term_ctx = getattr(self, "_term_ctx", None)
+        if term_ctx is not None:
+            env_ctx, ref_strike = term_ctx
+            term = build_mc_term_inputs(
+                env_ctx, ref_strike=ref_strike, maturity=maturity,
+                time_steps=len(dt_array), dt_array=dt_array,
+            )
+            vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
+        else:
+            vol_in, rrf_in, div_in = vol, rate, div
+
         return GBMPathGenerator(
             initial_value=spot,
-            vol=vol,
-            rrf=rate,
-            div=div,
+            vol=vol_in,
+            rrf=rrf_in,
+            div=div_in,
             maturity=maturity,
             time_steps=len(dt_array),
             num_paths=num_paths,
@@ -364,7 +380,6 @@ class AccumulatorMCEngine(BaseEngine):
         validate_positive(strike, "strike")
         validate_non_negative(maturity, "maturity")
         validate_positive(vol, "volatility")
-        validate_non_negative(div, "dividend_yield")
         validate_positive(product.knock_out_barrier, "knock_out_barrier")
         validate_non_negative(product.gearing, "gearing")
         validate_non_negative(

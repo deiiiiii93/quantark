@@ -305,8 +305,11 @@ def compute_step_crossing_probabilities(
         raise ValueError("times must be a 1D array of shape (n_steps,)")
     if barrier_level <= 0.0:
         raise ValueError("barrier_level must be positive")
-    if sigma <= 0.0:
+    sigma_vec = np.asarray(sigma, dtype=float)
+    if np.any(sigma_vec <= 0.0):
         raise ValueError("sigma must be positive")
+    if sigma_vec.ndim not in (0, 1):
+        raise ValueError("sigma must be a scalar or 1D per-step array")
     if paths.shape[1] != times.shape[0] + 1:
         raise ValueError(
             "paths second dimension must be n_steps + 1 where n_steps = len(times)"
@@ -326,7 +329,15 @@ def compute_step_crossing_probabilities(
 
     # Broadcast dt to match shape of path slices
     dt_matrix = dt.reshape(1, -1)
-    h2 = (sigma * sigma) * dt_matrix
+    if sigma_vec.ndim == 1:
+        if sigma_vec.shape[0] != n_steps:
+            raise ValueError(
+                f"per-step sigma must have length {n_steps}, got {sigma_vec.shape[0]}"
+            )
+        sig2 = (sigma_vec * sigma_vec).reshape(1, -1)
+    else:
+        sig2 = float(sigma_vec) * float(sigma_vec)
+    h2 = sig2 * dt_matrix
 
     # Initialize probabilities per step
     prob = np.zeros_like(S0, dtype=float)

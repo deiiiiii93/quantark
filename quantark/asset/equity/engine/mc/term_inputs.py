@@ -55,6 +55,24 @@ def build_mc_term_inputs(
     )
 
 
+def make_df_fn(pricing_env):
+    """Vectorized curve discount factors: scalar t -> float, array t -> array.
+
+    Drop-in replacement for ``safe_exp(-r * times)`` sites in MC payoff code;
+    identical values for flat curves, curve-exact for term structures.
+    """
+
+    def f(t):
+        arr = np.asarray(t, dtype=float)
+        if arr.ndim == 0:
+            return float(pricing_env.get_discount_factor(float(arr)))
+        return np.array(
+            [pricing_env.get_discount_factor(float(x)) for x in arr.ravel()]
+        ).reshape(arr.shape)
+
+    return f
+
+
 def df_at(inputs: McTermInputs, t: float) -> float:
     """Discount factor at a grid node time; rejects off-grid times."""
     idx = int(np.argmin(np.abs(inputs.times - float(t))))

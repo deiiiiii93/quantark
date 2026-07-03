@@ -21,6 +21,7 @@ from quantark.asset.equity.process.bsm.qmc_sobol import (
 from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import SingleSharkfinOption
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationAggregation, ObservationType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
@@ -86,6 +87,10 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         rate = pricing_env.get_rate(maturity)
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(strike, maturity)
+        # Term-structure context for this pricing call (see term_inputs.py)
+        self._term_ctx = (pricing_env, strike)
+        self._df = make_df_fn(pricing_env)
+
 
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product)
 
@@ -170,7 +175,6 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         validate_positive(strike, "strike")
         validate_non_negative(maturity, "maturity")
         validate_positive(vol, "volatility")
-        validate_non_negative(div, "dividend_yield")
         validate_positive(product.barrier, "barrier")
         validate_non_negative(product.participation_rate, "participation_rate")
         validate_non_negative(product.knock_out_rebate, "knock_out_rebate")
@@ -186,7 +190,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
             return product.knock_out_rebate * product.contract_multiplier
         return (
             product.knock_out_rebate
-            * safe_exp(-rate * maturity)
+            * self._df(maturity)
             * product.contract_multiplier
         )
 
@@ -220,11 +224,22 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if self.params.use_antithetic and not is_qmc:
             vr_config = VarianceReductionConfig(antithetic=True)
 
+        term_ctx = getattr(self, "_term_ctx", None)
+        if term_ctx is not None:
+            env_ctx, ref_strike = term_ctx
+            term = build_mc_term_inputs(
+                env_ctx, ref_strike=ref_strike, maturity=maturity,
+                time_steps=len(dt_array), dt_array=dt_array,
+            )
+            vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
+        else:
+            vol_in, rrf_in, div_in = vol, rate, div
+
         return GBMPathGenerator(
             initial_value=spot,
-            vol=vol,
-            rrf=rate,
-            div=div,
+            vol=vol_in,
+            rrf=rrf_in,
+            div=div_in,
             maturity=maturity,
             time_steps=len(dt_array),
             num_paths=num_paths_eff,
@@ -356,9 +371,9 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
 
         hit_payoff = payoffs[first_idx]
         if product.pay_at_hit:
-            hit_discount = safe_exp(-rate * settlement_times[first_idx])
+            hit_discount = self._df(settlement_times[first_idx])
         else:
-            hit_discount = safe_exp(-rate * maturity)
+            hit_discount = self._df(maturity)
         discounted_hit = hit_payoff * hit_discount
         discounted_hit[~hit_any] = 0.0
 
@@ -378,7 +393,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
     ) -> np.ndarray:
         terminal_prices = paths[:, -1]
         no_hit_payoff = self._no_hit_payoff(product, terminal_prices)
-        df_t = safe_exp(-rate * maturity)
+        df_t = self._df(maturity)
 
         if self.use_brownian_bridge:
             step_hit_prob = compute_step_crossing_probabilities(
@@ -397,7 +412,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
                     axis=1,
                 )
                 first_hit_prob = survival_before * step_hit_prob
-                discount = safe_exp(-rate * times).reshape(1, -1)
+                discount = self._df(times).reshape(1, -1)
                 hit_leg = product.knock_out_rebate * np.sum(
                     first_hit_prob * discount, axis=1
                 )
@@ -416,7 +431,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if product.pay_at_hit:
             first_idx = np.argmax(hit_matrix, axis=1)
             hit_time = times[first_idx]
-            hit_payoff = product.knock_out_rebate * safe_exp(-rate * hit_time)
+            hit_payoff = product.knock_out_rebate * self._df(hit_time)
             hit_payoff[~hit_any] = 0.0
         else:
             hit_payoff = product.knock_out_rebate * df_t

@@ -51,7 +51,7 @@ def test_mc_rejects_price_below_discounted_european_lower_bound():
         method=MonteCarloMethod.PSEUDO,
     )
     lower_bound = _discounted_european_lower_bound(call, 120.0, 0.01, 0.0, 1.0)
-    engine._price_mc_or_qmc = lambda *args: (lower_bound - 1e-5, 0.0)
+    engine._price_mc_or_qmc = lambda *args, **kwargs: (lower_bound - 1e-5, 0.0)
 
     with pytest.raises(PricingError, match="discounted European lower bound"):
         engine.price(call, pricing_env)
@@ -71,7 +71,7 @@ def test_mc_still_rejects_negative_prices():
         params=MCParams(num_paths=16, time_steps=1, seed=42),
         method=MonteCarloMethod.PSEUDO,
     )
-    engine._price_mc_or_qmc = lambda *args: (-1.0, 0.0)
+    engine._price_mc_or_qmc = lambda *args, **kwargs: (-1.0, 0.0)
 
     with pytest.raises(PricingError, match="Negative price computed"):
         engine.price(call, pricing_env)

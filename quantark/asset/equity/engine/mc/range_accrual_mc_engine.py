@@ -31,6 +31,7 @@ from quantark.asset.equity.process.bsm.qmc_sobol import (
 from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.range_accrual_option import RangeAccrualOption
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
 from quantark.util.exceptions import PricingError, ValidationError
@@ -182,6 +183,10 @@ class RangeAccrualMCEngine(BaseEngine):
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(product.initial_price, T)
+        # Term-structure context for this pricing call (see term_inputs.py)
+        self._term_ctx = (pricing_env, product.initial_price)
+        self._df = make_df_fn(pricing_env)
+
 
         self._validate_inputs(S, T, r, q, sigma, product)
 
@@ -350,11 +355,22 @@ class RangeAccrualMCEngine(BaseEngine):
         if params.use_antithetic and not is_qmc:
             vr_config = VarianceReductionConfig(antithetic=True)
 
+        term_ctx = getattr(self, "_term_ctx", None)
+        if term_ctx is not None:
+            env_ctx, ref_strike = term_ctx
+            term = build_mc_term_inputs(
+                env_ctx, ref_strike=ref_strike, maturity=T,
+                time_steps=len(dt_array), dt_array=dt_array,
+            )
+            vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
+        else:
+            vol_in, rrf_in, div_in = sigma, r, q
+
         generator = GBMPathGenerator(
             initial_value=S,
-            vol=sigma,
-            rrf=r,
-            div=q,
+            vol=vol_in,
+            rrf=rrf_in,
+            div=div_in,
             maturity=T,
             time_steps=len(dt_array),
             num_paths=effective_num_paths,
@@ -520,7 +536,7 @@ class RangeAccrualMCEngine(BaseEngine):
             )
 
             # Discount payoff
-            discount_factor = math.exp(-r * T)
+            discount_factor = self._df(T)
             price = discount_factor * payoff
 
             return RangeAccrualMCResult(
@@ -556,7 +572,7 @@ class RangeAccrualMCEngine(BaseEngine):
         )
 
         # Discount payoffs
-        discount_factor = math.exp(-r * T)
+        discount_factor = self._df(T)
         discounted_payoffs = discount_factor * payoffs
 
         # Compute price and standard error
@@ -617,7 +633,7 @@ class RangeAccrualMCEngine(BaseEngine):
                 * year_fraction
             )
 
-            discount_factor = math.exp(-r * T)
+            discount_factor = self._df(T)
             price = discount_factor * payoff
 
             return RangeAccrualMCResult(
@@ -664,7 +680,7 @@ class RangeAccrualMCEngine(BaseEngine):
             num_paths=per_batch_paths,
         )
 
-        discount_factor = math.exp(-r * T)
+        discount_factor = self._df(T)
 
         def pricer_fn(paths, aux):
             """Pricer function for RQMC driver."""

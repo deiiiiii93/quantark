@@ -77,7 +77,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(product.strike, maturity)
         validate_positive(vol, "volatility")
-        validate_non_negative(div, "dividend_yield")
         if vol > 5.0:
             raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
 
@@ -356,7 +355,6 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         div = pricing_env.get_div_yield(maturity)
         vol = pricing_env.get_vol(product.strike, maturity)
         validate_positive(vol, "volatility")
-        validate_non_negative(div, "dividend_yield")
         if vol > 5.0:
             raise ValidationError(f"Volatility too high for quadrature stability: {vol}")
 

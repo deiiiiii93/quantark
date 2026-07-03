@@ -11,6 +11,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.product.option import BarrierOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
@@ -147,6 +148,11 @@ class BarrierOptionMCEngine(BaseEngine):
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
 
+        # Term-structure context for this pricing call (see term_inputs.py)
+        self._term_ctx = (pricing_env, K)
+        self._df = make_df_fn(pricing_env)
+        self._term_vol = None
+
         self._validate_inputs(S, K, T, r, q, sigma, product)
 
         if is_zero(T):
@@ -197,7 +203,6 @@ class BarrierOptionMCEngine(BaseEngine):
         validate_positive(K, "strike")
         validate_non_negative(T, "maturity")
         validate_positive(sigma, "volatility")
-        validate_non_negative(q, "dividend_yield")
         validate_positive(product.barrier, "barrier")
         validate_non_negative(product.rebate, "rebate")
         validate_positive(product.participation_rate, "participation_rate")
@@ -207,7 +212,7 @@ class BarrierOptionMCEngine(BaseEngine):
     ) -> float:
         if product.pay_at_hit:
             return product.rebate
-        return product.rebate * safe_exp(-r * T)
+        return product.rebate * self._df(T)
 
     def _price_vanilla_mc(
         self, product: BarrierOption, pricing_env: PricingEnvironment
@@ -264,11 +269,23 @@ class BarrierOptionMCEngine(BaseEngine):
         if params.use_antithetic and not is_qmc:
             vr_config = VarianceReductionConfig(antithetic=True)
 
+        term_ctx = getattr(self, "_term_ctx", None)
+        if term_ctx is not None:
+            env_ctx, ref_strike = term_ctx
+            term = build_mc_term_inputs(
+                env_ctx, ref_strike=ref_strike, maturity=T,
+                time_steps=len(dt_array), dt_array=dt_array,
+            )
+            vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
+            self._term_vol = term.vol
+        else:
+            vol_in, rrf_in, div_in = sigma, r, q
+
         generator = GBMPathGenerator(
             initial_value=S,
-            vol=sigma,
-            rrf=r,
-            div=q,
+            vol=vol_in,
+            rrf=rrf_in,
+            div=div_in,
             maturity=T,
             time_steps=len(dt_array),
             num_paths=effective_num_paths,
@@ -364,7 +381,7 @@ class BarrierOptionMCEngine(BaseEngine):
             value = product.rebate if hit else payoff
         else:
             value = payoff if hit else product.rebate
-        return value * safe_exp(-r * T)
+        return value * self._df(T)
 
     def _expiry_payoffs(
         self, product: BarrierOption, terminal_prices: np.ndarray
@@ -382,7 +399,9 @@ class BarrierOptionMCEngine(BaseEngine):
         sigma: float,
         times: np.ndarray,
     ) -> np.ndarray:
-        return compute_step_crossing_probabilities(paths, barrier, sigma, times)
+        vol_in = getattr(self, "_term_vol", None)
+        vol_in = sigma if vol_in is None else vol_in
+        return compute_step_crossing_probabilities(paths, barrier, vol_in, times)
 
     def _expected_rebate_at_hit(
         self,
@@ -396,7 +415,7 @@ class BarrierOptionMCEngine(BaseEngine):
             [np.ones((step_hit_prob.shape[0], 1)), survival_before[:, :-1]], axis=1
         )
         first_hit_prob = survival_before * step_hit_prob
-        discount = safe_exp(-r * times).reshape(1, -1)
+        discount = self._df(times).reshape(1, -1)
         return rebate * np.sum(first_hit_prob * discount, axis=1)
 
     def _aggregate_discrete_hit_payoffs(
@@ -417,25 +436,25 @@ class BarrierOptionMCEngine(BaseEngine):
             first_idx = np.argmax(hit_matrix, axis=1)
             payoff = payoffs[first_idx]
             if pay_at_hit:
-                discount = safe_exp(-r * settlement_times[first_idx])
+                discount = self._df(settlement_times[first_idx])
             else:
-                discount = safe_exp(-r * T)
+                discount = self._df(T)
             discounted = payoff * discount
             discounted[~hit_any] = 0.0
             return discounted, hit_any
 
         if aggregation == ObservationAggregation.ACCUMULATE:
             if pay_at_hit:
-                discount = safe_exp(-r * settlement_times)
+                discount = self._df(settlement_times)
                 discounted = np.sum(hit_matrix * (payoffs * discount), axis=1)
             else:
                 total = np.sum(hit_matrix * payoffs, axis=1)
-                discounted = total * safe_exp(-r * T)
+                discounted = total * self._df(T)
             return discounted, hit_any
 
         if aggregation in (ObservationAggregation.BEST, ObservationAggregation.WORST):
             if pay_at_hit:
-                discount = safe_exp(-r * settlement_times)
+                discount = self._df(settlement_times)
                 value_matrix = hit_matrix * (payoffs * discount)
                 if aggregation == ObservationAggregation.BEST:
                     discounted = value_matrix.max(axis=1)
@@ -446,11 +465,11 @@ class BarrierOptionMCEngine(BaseEngine):
                 value_matrix = hit_matrix * payoffs
                 if aggregation == ObservationAggregation.BEST:
                     best = value_matrix.max(axis=1)
-                    discounted = best * safe_exp(-r * T)
+                    discounted = best * self._df(T)
                 else:
                     value_matrix = np.where(hit_matrix, value_matrix, np.inf)
                     worst = value_matrix.min(axis=1)
-                    discounted = worst * safe_exp(-r * T)
+                    discounted = worst * self._df(T)
             discounted[~hit_any] = 0.0
             return discounted, hit_any
 
@@ -467,7 +486,7 @@ class BarrierOptionMCEngine(BaseEngine):
     ) -> np.ndarray:
         terminal_prices = paths[:, -1]
         vanilla_payoffs = self._calculate_vanilla_payoff(product, terminal_prices)
-        df_T = safe_exp(-r * T)
+        df_T = self._df(T)
 
         if self.use_brownian_bridge:
             step_hit_prob = self._compute_bridge_step_hit_probabilities(
@@ -502,7 +521,7 @@ class BarrierOptionMCEngine(BaseEngine):
             if product.pay_at_hit:
                 first_idx = np.argmax(hit_matrix, axis=1)
                 hit_time = times[first_idx]
-                rebate_payoff = product.rebate * safe_exp(-r * hit_time)
+                rebate_payoff = product.rebate * self._df(hit_time)
                 rebate_payoff[~hit_any] = 0.0
                 return np.where(hit_any, rebate_payoff, vanilla_payoffs * df_T)
             return np.where(hit_any, product.rebate, vanilla_payoffs) * df_T
@@ -523,7 +542,7 @@ class BarrierOptionMCEngine(BaseEngine):
     ) -> np.ndarray:
         terminal_prices = paths[:, -1]
         vanilla_payoffs = self._calculate_vanilla_payoff(product, terminal_prices)
-        df_T = safe_exp(-r * T)
+        df_T = self._df(T)
 
         obs_prices = paths[:, obs_indices + 1]
         hit_matrix = obs_prices >= barriers if product.is_up_barrier else obs_prices <= barriers
@@ -608,7 +627,7 @@ class BarrierOptionMCEngine(BaseEngine):
             def pricer_fn(paths, aux):
                 terminal_prices = paths[:, -1]
                 payoffs = self._expiry_payoffs(product, terminal_prices)
-                return payoffs * safe_exp(-r * T)
+                return payoffs * self._df(T)
 
         elif product.observation_type == ObservationType.DISCRETE:
             (
@@ -693,7 +712,7 @@ class BarrierOptionMCEngine(BaseEngine):
         terminal_prices = paths[:, -1]
 
         payoffs = self._expiry_payoffs(product, terminal_prices)
-        discounted = payoffs * safe_exp(-r * T)
+        discounted = payoffs * self._df(T)
 
         mean_payoff = float(discounted.mean())
         std_payoff = float(discounted.std(ddof=1))

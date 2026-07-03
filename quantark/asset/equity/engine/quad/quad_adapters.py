@@ -657,7 +657,6 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         validate_positive(vol, "volatility")
         validate_positive(maturity, "maturity", allow_zero=True)
         validate_non_negative(rebate, "rebate")
-        validate_non_negative(div, "dividend_yield")
 
         if abs(rate) > 1.0:
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
@@ -970,7 +969,6 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         validate_positive(maturity, "maturity", allow_zero=True)
         validate_positive(lower, "lower_barrier")
         validate_positive(upper, "upper_barrier")
-        validate_non_negative(div, "dividend_yield")
 
         if lower >= upper:
             raise ValidationError(
@@ -1226,7 +1224,6 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         validate_positive(vol, "volatility")
         validate_positive(maturity, "maturity", allow_zero=True)
         validate_non_negative(rebate, "rebate")
-        validate_non_negative(div, "dividend_yield")
 
         if lower >= upper:
             raise ValidationError(

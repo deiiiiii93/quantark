@@ -77,6 +77,152 @@ def test_euro_mc_forward_reproduction_via_parity(shape):
     assert c - p == pytest.approx(df * (fwd - K), rel=2e-2, abs=0.15)
 
 
+def test_asian_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc.asian_option_mc_engine import (
+        AsianOptionMCEngine,
+    )
+    from quantark.asset.equity.product.option import AsianOption
+    from quantark.util.enum import AsianStrikeType, AveragingType
+
+    def price_fn(env):
+        option = AsianOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            asian_strike_type=AsianStrikeType.FIXED,
+            averaging_type=AveragingType.ARITHMETIC,
+            maturity=1.0,
+        )
+        return AsianOptionMCEngine(
+            params=MCParams(num_paths=20_000, time_steps=64, seed=42)
+        ).price(option, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
+def test_barrier_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc.barrier_option_mc_engine import (
+        BarrierOptionMCEngine,
+    )
+    from quantark.asset.equity.product.option import BarrierOption
+    from quantark.util.enum import BarrierType, ObservationType
+
+    def price_fn(env):
+        option = BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=120.0,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=1.0,
+            rebate=0.0,
+            observation_type=ObservationType.CONTINUOUS,
+        )
+        return BarrierOptionMCEngine(
+            params=MCParams(num_paths=20_000, time_steps=64, seed=42)
+        ).price(option, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
+def test_range_accrual_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc.range_accrual_mc_engine import (
+        RangeAccrualMCEngine,
+    )
+    from quantark.asset.equity.product.option import (
+        RangeAccrualConfig,
+        RangeAccrualOption,
+    )
+
+    def price_fn(env):
+        option = RangeAccrualOption(
+            initial_price=100.0,
+            range_config=RangeAccrualConfig(
+                upper_barrier=110.0,
+                lower_barrier=90.0,
+                accrual_rate=0.05,
+                is_rate_annualized=True,
+            ),
+            observation_times=[0.25, 0.5, 0.75, 1.0],
+            maturity=1.0,
+            contract_multiplier=10000.0,
+        )
+        return RangeAccrualMCEngine(
+            params=MCParams(num_paths=20_000, time_steps=64, seed=42)
+        ).price(option, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
+def test_single_sharkfin_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc import SingleSharkfinOptionMCEngine
+    from quantark.asset.equity.product.option import SingleSharkfinOption
+    from quantark.util.enum import ObservationType
+
+    def price_fn(env):
+        option = SingleSharkfinOption(
+            strike=95.0,
+            option_type=OptionType.CALL,
+            barrier=120.0,
+            maturity=1.0,
+            participation_rate=0.7,
+            knock_out_rebate=2.0,
+            no_hit_rebate=0.5,
+            observation_type=ObservationType.CONTINUOUS,
+        )
+        return SingleSharkfinOptionMCEngine(
+            params=MCParams(num_paths=20_000, time_steps=64, seed=42)
+        ).price(option, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
+def test_double_sharkfin_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc import DoubleSharkfinOptionMCEngine
+    from quantark.asset.equity.product.option import DoubleSharkfinOption
+    from quantark.util.enum import ObservationType
+
+    def price_fn(env):
+        option = DoubleSharkfinOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            lower_barrier=70.0,
+            upper_barrier=130.0,
+            maturity=1.0,
+            participation_rate=0.8,
+            knock_out_rebate=2.0,
+            no_hit_rebate=0.5,
+            observation_type=ObservationType.CONTINUOUS,
+        )
+        return DoubleSharkfinOptionMCEngine(
+            params=MCParams(num_paths=20_000, time_steps=64, seed=42)
+        ).price(option, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
+def test_accumulator_mc_sees_term_structure():
+    from quantark.asset.equity.engine.mc import AccumulatorMCEngine
+    from quantark.asset.equity.product.option import AccumulatorOption
+    from quantark.util.enum import AccumulatorKnockOutType
+
+    obs = [round(i / 12.0, 6) for i in range(1, 13)]
+
+    def price_fn(env):
+        option = AccumulatorOption(
+            strike=96.0,
+            knock_out_barrier=108.0,
+            option_type=OptionType.CALL,
+            maturity=1.0,
+            daily_share_accumulation=1.0,
+            observation_dates=obs,
+            knock_out_type=AccumulatorKnockOutType.SINGLE_DAY,
+        )
+        return AccumulatorMCEngine(
+            params=MCParams(num_paths=20_000, seed=42)
+        ).price(option, env)
+
+    _term_sensitivity_check(price_fn, maturity=1.0)
+
+
 def test_digital_mc_sees_term_structure():
     from quantark.asset.equity.engine.mc.digital_option_mc_engine import (
         DigitalOptionMCEngine,

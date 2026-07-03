@@ -218,7 +218,6 @@ class AmericanOptionMCEngine(BaseEngine):
         validate_positive(K, "strike")
         validate_non_negative(T, "time_to_maturity")
         validate_positive(sigma, "volatility")
-        validate_non_negative(q, "dividend_yield")
         if not is_finite(r):
             raise ValidationError(f"risk_free_rate must be finite, got {r}")
 
