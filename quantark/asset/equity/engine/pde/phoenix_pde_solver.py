@@ -502,7 +502,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             theta = params.theta
             
             steps_from_end = num_t - 1 - j
-            if params.use_rannacher and steps_from_end < params.rannacher_steps:
+            if params.use_rannacher and steps_from_end <= params.rannacher_steps:
                 theta = 1.0
             elif j in smooth_js:
                 theta = event_theta

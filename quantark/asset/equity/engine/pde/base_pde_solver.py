@@ -881,7 +881,7 @@ class BasePDESolver(BaseEngine):
             theta = (
                 1.0
                 if params.use_rannacher
-                and (steps_from_end < params.rannacher_steps or j in smooth_js)
+                and (steps_from_end <= params.rannacher_steps or j in smooth_js)
                 else params.theta
             )
 

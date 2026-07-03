@@ -295,13 +295,18 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         b_plus = np.zeros_like(k_plus, dtype=float)
 
         if product.rebate > 0.0:
+            # For knock-in products the core prices the complementary knock-out
+            # structure and the actual rebate is paid at expiry (if never
+            # knocked in), so pay_at_hit must not leak into the parity
+            # decomposition. Mirrors BarrierAnalyticalEngine's convention.
+            pay_at_hit = product.pay_at_hit if product.is_knock_out else False
             rebate_values = self._discount_rebates(
                 payoffs,
                 obs_times,
                 settlement_times,
                 context.maturity,
                 context.rate,
-                product.pay_at_hit,
+                pay_at_hit,
             )
             if product.is_up_barrier:
                 b_plus = rebate_values
@@ -596,13 +601,16 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         b_plus = np.zeros_like(k_plus, dtype=float)
 
         if product.rebate > 0.0:
+            # No-touch rebates are paid at expiry by definition; only a genuine
+            # one-touch can pay at hit. Mirrors OneTouchAnalyticalEngine.
+            pay_at_hit = product.payment_at_hit if product.is_one_touch else False
             rebate_values = self._discount_rebates(
                 payoffs,
                 obs_times,
                 settlement_times,
                 context.maturity,
                 context.rate,
-                product.payment_at_hit,
+                pay_at_hit,
             )
             if product.is_up_barrier:
                 b_plus = rebate_values
@@ -1116,13 +1124,20 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         b_plus = np.zeros_like(k_plus, dtype=float)
 
         if np.any(payoffs > 0.0):
+            # Double-no-touch rebates are paid at expiry by definition; only a
+            # double-one-touch can pay at hit.
+            pay_at_hit = (
+                product.payment_at_hit
+                if product.touch_type == TouchType.DOUBLE_ONE_TOUCH
+                else False
+            )
             rebate_values = self._discount_rebates(
                 payoffs,
                 obs_times,
                 settlement_times,
                 context.maturity,
                 context.rate,
-                product.payment_at_hit,
+                pay_at_hit,
             )
             b_minus = rebate_values
             b_plus = rebate_values

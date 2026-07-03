@@ -651,7 +651,7 @@ class SnowballPDESolver(BasePDESolver):
             theta = (
                 1.0
                 if params.use_rannacher
-                and (steps_from_end < params.rannacher_steps or j in smooth_js)
+                and (steps_from_end <= params.rannacher_steps or j in smooth_js)
                 else params.theta
             )
 
@@ -1557,7 +1557,7 @@ class SnowballPDESolver(BasePDESolver):
 
             # Determine theta (Rannacher smoothing uses backward Euler)
             theta = params.theta
-            if params.use_rannacher and steps_from_end < params.rannacher_steps:
+            if params.use_rannacher and steps_from_end <= params.rannacher_steps:
                 theta = 1.0
             elif j in smooth_js:
                 theta = event_theta
