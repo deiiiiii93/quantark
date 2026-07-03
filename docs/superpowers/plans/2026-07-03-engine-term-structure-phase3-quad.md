@@ -163,6 +163,28 @@ context = QuadPricingContext(spot=..., maturity=..., rate=tp.rate, div=tp.div, v
 
 NOTE: if `build_pricing_context` runs before the observation schedule is resolved (check call order in `DiscreteQuadEngine.price` :60-66 — context is built FIRST, schedule resolved after), sample on the schedule inside `build_inputs`/`resolve_schedule` instead, or restructure so the context is enriched after `resolve_schedule`; keep scalars in the context for maturity-level uses and pass the arrays to the core construction site in `discrete_quad_engine.py:72-79` via a new context field `term_params: Optional[QuadTermParams]`. Choose the minimal-diff variant that keeps `QuadratureCore(rate=..., div=..., vol=...)` receiving arrays.
 
+**Explicit discount interface (codex plan-review finding):** adapter
+discounting runs inside `build_inputs`/`finalize_price` which do NOT receive
+`pricing_env` — an interval-rate array in the context CANNOT express forward
+DFs from observation to settlement/maturity. Extend `QuadPricingContext` with
+BOTH:
+
+```python
+    term_params: Optional[QuadTermParams] = None
+    df_fn: Optional[Callable] = None   # make_df_fn(pricing_env), curve-exact
+```
+
+set in `build_pricing_context`. Every adapter discount site switches to
+forward curve DFs via `context.df_fn`:
+- `_discount_rebates`-style `np.exp(-rate * delay)` → `df_fn(settle) / df_fn(obs)`
+  (elementwise for arrays of observation/settlement times);
+- DoubleOneTouch finalize `math.exp(-context.rate * context.maturity)` →
+  `df_fn(context.maturity)`.
+Tests must cover: delayed rebate (pay-at-settlement), expiry-paid rebate, and
+double-no-touch finalize under the kinked term curve, each asserting the
+term price differs from the collapsed-scalar price when the discounting leg
+is the only term-sensitive piece.
+
 - [ ] **Step 1: Failing tests** — barrier + one-touch QUAD discrimination (products/configs copied from `test/test_one_touch_quad_engine.py:35-64` and the barrier adapter's existing test file; `_collapsed_flat_env` helper copied from `test/test_pde_term_structure_solvers.py:21-33`):
 
 ```python
@@ -274,13 +296,23 @@ def test_european_quad_matches_term_benchmark(shape):
 
 ---
 
-### Task 5: Phoenix + KO-reset QUAD
+### Task 5: Phoenix + KO-reset QUAD — overridden recursions wired per-method
+
+**Codex plan-review correction:** Phoenix and KO-reset do NOT merely inherit
+the snowball machinery — they **override their full recursions**, building
+scalar `tau/alpha/beta` from maturity-level inputs and using flat-rate
+discounts in their own price AND event-stats paths (verified anchors:
+`phoenix_quad_engine.py:66-68, :133-140, :298-305, :553-572`;
+`ko_reset_snowball_quad_engine.py:76-78, :151-158, :198-224, :423-430,
+:490-516, :618-636`). Task 4's wiring must be mirrored per overridden method,
+not assumed inherited.
 
 **Files:**
-- Modify: `quantark/asset/equity/engine/quad/phoenix_quad_engine.py` (:66-68), `quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py` (:76-78, :342-344) — same wiring as Task 4 at their extraction sites (shared machinery inherited from `SnowballQuadEngine` is already per-step after Task 4).
-- Test: extend `test/test_quad_term_structure_engines.py` — phoenix discrimination (product = `_standard_phoenix()` discrete-KI builder copied from `test/test_pde_term_structure_solvers.py:138-159`), KO-reset discrimination (product from `test/conftest.py:165-174`).
+- Modify: `quantark/asset/equity/engine/quad/phoenix_quad_engine.py` — for BOTH the price path and the event-stats path: build `QuadTermParams` after the final observation grid is constructed; per-step `rate/div/vol` into its `tau/alpha/beta` builds (:133-140, :298-305); coupon/KO cashflow discounts (:553-572) → curve/forward DFs; `QuadratureMath` sizing with `float(np.max(vol_vec))`.
+- Modify: `quantark/asset/equity/engine/quad/ko_reset_snowball_quad_engine.py` — same per-method treatment at :151-158, :198-224 (price recursion), :423-430, :490-516 (event stats), :618-636 (discount/extraction); pre- and post-KO segments each sample the term params on THEIR OWN observation grids.
+- Test: extend `test/test_quad_term_structure_engines.py` — phoenix discrimination (product = `_standard_phoenix()` discrete-KI builder copied from `test/test_pde_term_structure_solvers.py:138-159`) **plus a phoenix coupon event-stats term test** (coupon stream under kinked vs collapsed differs); KO-reset discrimination (product from `test/conftest.py:165-174`) **plus KO-reset event-stats term test**.
 
-- [ ] **Steps: failing tests → wire → run (phoenix/ko-reset quad suites + full suite) → commit** `feat(quad): phoenix + KO-reset quad consume per-step term parameters`
+- [ ] **Steps: failing tests → wire per overridden method → run (phoenix/ko-reset quad suites + KI/event suites + full suite) → commit** `feat(quad): phoenix + KO-reset quad recursions consume per-step term parameters`
 
 ---
 
