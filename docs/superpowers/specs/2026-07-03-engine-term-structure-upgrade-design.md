@@ -142,6 +142,11 @@ Rules:
 - `fwd_carry` from `forward_carry_on_grid(env.get_div_yield, t_grid)`.
 - `step_vols` from total-variance differencing at `ref_strike`
   (the engine's existing vol reference strike — usually product strike).
+  **Fail-fast:** if total variance decreases between nodes by more than a
+  floating-noise tolerance (1e-12), raise `NumericalError` — a non-monotone
+  vol term structure must never silently become zero-vol intervals. This is
+  deliberately stricter than `PricingEnvironment.get_step_volatility`
+  (which clamps and is left unchanged for its existing callers).
 - Flat inputs must produce arrays where every entry equals today's scalar —
   covered by a dedicated unit test.
 - Engines consume `TermCoefficients`; **no engine re-derives forward
@@ -202,11 +207,19 @@ S_{k+1} = S_k · exp(drift_k + σ_k·√dt_k·Z_k)
 
 Changes concentrate in the shared infrastructure, not the nine solvers:
 
-- `BackwardOperator` accepts per-segment `(r_k, q_k, σ_k)` instead of one
-  constant triple. Its coefficient/factorization **cache keys on the segment
-  values**: implied curves are piecewise with few nodes, so forward
-  parameters are piecewise-constant and factorization reuse survives within
-  segments. Coefficients rebuild only at segment boundaries, not every step.
+- `BackwardOperator` accepts per-step `(r_k, q_k, σ_k)` instead of one
+  constant triple, with the coefficient/factorization cache keyed on those
+  values. Two regimes follow:
+  - **Flat inputs:** every step's triple is identical, so existing cache and
+    factorization reuse is fully preserved — this is how the flat-input
+    performance identity holds.
+  - **Term inputs:** forward parameters generally differ on every step
+    (linear zero-yield interpolation makes forward carry `q(t) + t·q'(t)`
+    vary *within* pillar intervals — they are NOT piecewise-constant), so
+    per-step coefficient rebuilds are the designed behavior, not a cache
+    miss to be optimized away. The rebuild is O(num_x) per step, the same
+    order as the tridiagonal solve itself; budget: term-structured pricing
+    within **20%** of flat-input time on the same grid.
 - `BasePDESolver._solve` implementations replace the single
   `(r, q, sigma)` extraction with `TermCoefficients.from_env(env, t_vec,
   ref_strike)` and pass the per-step values through to the operator.
@@ -218,10 +231,12 @@ Changes concentrate in the shared infrastructure, not the nine solvers:
 - Rannacher restarts, event application (KO/KI/coupon), BGK mode, and the
   event-distribution machinery are orthogonal to coefficient values and are
   untouched.
-- **Performance gate:** flat-input pricing time within measurement noise of
-  the current baseline on the standard snowball benchmark, protecting the
-  event-distribution redesign gains. The tridiagonal solve is already O(n)
-  per step; per-segment rebuilds add a bounded constant factor.
+- **Performance gate (two benchmarks):** (a) flat-input pricing time within
+  measurement noise of the current baseline on the standard snowball
+  benchmark, protecting the event-distribution redesign gains; (b) a
+  term-structured snowball benchmark using `LinearRateCurve` and
+  `TermStructureDividendYield` with **fewer pillars than time steps**
+  (the realistic worst case for cache reuse) within the 20% budget above.
 
 If threading per-step coefficients through `BackwardOperator` turns out to
 require touching individual solvers' time loops beyond the coefficient
