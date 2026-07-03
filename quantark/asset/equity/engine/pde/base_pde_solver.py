@@ -50,25 +50,32 @@ class TimeGridSpec:
     steps_per_day: float = 1.0
 
 
-# Per-environment memoization for curve lookups and step coefficients.
-# PricingEnvironment is an eq=True dataclass (unhashable), so these stores
-# key on id() with a weakref eviction callback plus an identity re-check —
-# entries die with the env, id reuse cannot alias (the stored weakref must
-# still point at the SAME object), and repeated pricing against one env
-# (portfolios, price + event stats, benchmark medians) hits warm caches
-# across solver instances.
+# Per-market-object memoization for curve lookups and step coefficients.
+# Keyed on the CURVE OBJECTS (rate curve / dividend yield), not the mutable
+# PricingEnvironment: the established market-data update pattern is attribute
+# REPLACEMENT (env.rate_curve = new_curve), which yields a new object and
+# therefore a fresh memo — a bumped or refreshed environment can never reuse
+# stale values (codex code-review finding). Curve/dataclass objects are
+# unhashable (eq=True), so stores key on id() with a weakref eviction
+# callback plus an identity re-check; id reuse cannot alias because the
+# stored weakref must still point at the SAME object. Each memo is size-
+# bounded so long-lived processes cannot grow without bound.
 _ENV_DF_MEMO: dict = {}
 _ENV_STEP_COEFF_MEMO: dict = {}
+_DF_MEMO_MAX_ENTRIES = 200_000
+_STEP_COEFF_MEMO_MAX_ENTRIES = 64
 
 
-def _per_env_memo(pricing_env, store: dict) -> Optional[dict]:
-    """Return the per-env memo dict, or None if the env is not weakref-able."""
-    key = id(pricing_env)
+def _per_object_memo(market_obj, store: dict) -> Optional[dict]:
+    """Return the memo dict for a market object, or None if not weakref-able."""
+    if market_obj is None:
+        return None
+    key = id(market_obj)
     entry = store.get(key)
-    if entry is not None and entry[0]() is pricing_env:
+    if entry is not None and entry[0]() is market_obj:
         return entry[1]
     try:
-        ref = weakref.ref(pricing_env, lambda _r, _k=key: store.pop(_k, None))
+        ref = weakref.ref(market_obj, lambda _r, _k=key: store.pop(_k, None))
     except TypeError:
         return None
     memo: dict = {}
@@ -974,7 +981,7 @@ class BasePDESolver(BaseEngine):
         """Sample forward (r, q, sigma) per time step and build operator sets."""
         from quantark.priceenv.term_sampling import TermCoefficients
 
-        memo = _per_env_memo(pricing_env, _ENV_STEP_COEFF_MEMO)
+        memo = _per_object_memo(pricing_env.rate_curve, _ENV_STEP_COEFF_MEMO)
         if memo is not None:
             mkey = (
                 float(ref_strike),
@@ -983,8 +990,13 @@ class BasePDESolver(BaseEngine):
                 int(num_x),
             )
             cached = memo.get(mkey)
-            if cached is not None:
-                return cached
+            # identity re-check: replacing div_yield / vol_surface on the env
+            # must invalidate (the memo key is only the rate curve)
+            if cached is not None and (
+                cached[0] is pricing_env.div_yield
+                and cached[1] is pricing_env.vol_surface
+            ):
+                return cached[2]
 
         tc = TermCoefficients.from_env(
             pricing_env, np.asarray(t_vec, dtype=float), ref_strike=float(ref_strike)
@@ -1031,7 +1043,9 @@ class BasePDESolver(BaseEngine):
             n_unique=n_unique,
         )
         if memo is not None:
-            memo[mkey] = result
+            if len(memo) >= _STEP_COEFF_MEMO_MAX_ENTRIES:
+                memo.pop(next(iter(memo)))  # FIFO eviction
+            memo[mkey] = (pricing_env.div_yield, pricing_env.vol_surface, result)
         return result
 
     def _flat_exact_step_coefficients(
@@ -1343,7 +1357,7 @@ class BasePDESolver(BaseEngine):
         """
         if end_time <= start_time:
             return 1.0
-        memo = _per_env_memo(pricing_env, _ENV_DF_MEMO)
+        memo = _per_object_memo(pricing_env.rate_curve, _ENV_DF_MEMO)
         if memo is None:
             memo = {}
         key = (round(float(start_time), 12), round(float(end_time), 12))
@@ -1352,6 +1366,8 @@ class BasePDESolver(BaseEngine):
             df_end = pricing_env.get_discount_factor(end_time)
             df_start = pricing_env.get_discount_factor(start_time)
             v = float(safe_divide(df_end, df_start, fallback=1.0))
+            if len(memo) >= _DF_MEMO_MAX_ENTRIES:
+                memo.clear()
             memo[key] = v
         return v
 
@@ -1366,7 +1382,7 @@ class BasePDESolver(BaseEngine):
         """
         if end_time <= start_time:
             return 1.0
-        memo = _per_env_memo(pricing_env, _ENV_DF_MEMO)
+        memo = _per_object_memo(pricing_env.div_yield, _ENV_DF_MEMO)
         if memo is None:
             memo = {}
         key = ("q", round(float(start_time), 12), round(float(end_time), 12))
@@ -1379,6 +1395,8 @@ class BasePDESolver(BaseEngine):
                 else 0.0
             )
             v = float(np.exp(-(w_end - w_start)))
+            if len(memo) >= _DF_MEMO_MAX_ENTRIES:
+                memo.clear()
             memo[key] = v
         return v
 

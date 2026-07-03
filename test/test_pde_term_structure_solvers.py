@@ -288,3 +288,77 @@ def test_term_pde_not_pathologically_slower_than_flat():
     flat = best_time(make_term_env("flat"))
     term = best_time(make_term_env("kinked"))
     assert term <= 2.0 * flat + 0.05  # catches pathology, not noise
+
+
+def test_df_memo_invalidates_when_market_data_replaced():
+    """Codex code-review regression: replacing curves on a long-lived env
+    must never reuse memoized DFs/coefficients from the old market data."""
+    from quantark.asset.equity.engine.pde.european_pde_solver import (
+        EuropeanPDESolver,
+    )
+
+    solver = EuropeanPDESolver()
+    env = make_term_env("flat")
+
+    df_before = solver._df_between_times(env, 0.5, 1.0)
+    carry_before = solver._carry_df_between_times(env, 0.5, 1.0)
+
+    env.rate_curve = FlatRateCurve(0.10)          # attribute replacement
+    env.div_yield = ContinuousDividendYield(0.05)
+
+    df_after = solver._df_between_times(env, 0.5, 1.0)
+    carry_after = solver._carry_df_between_times(env, 0.5, 1.0)
+    assert df_after == pytest.approx(np.exp(-0.10 * 0.5), rel=1e-12)
+    assert carry_after == pytest.approx(np.exp(-0.05 * 0.5), rel=1e-12)
+    assert df_after != pytest.approx(df_before, rel=1e-6)
+    assert carry_after != pytest.approx(carry_before, rel=1e-6)
+
+
+def test_step_coefficients_invalidate_when_div_or_vol_replaced():
+    from quantark.asset.equity.engine.pde.european_pde_solver import (
+        EuropeanPDESolver,
+    )
+    from quantark.param.div.dividend_yield import TermStructureDividendYield
+
+    solver = EuropeanPDESolver()
+    env = make_term_env("kinked")
+    t_vec = np.linspace(0.0, 1.0, 6)
+    dx_vec = np.full(10, 0.02)
+
+    sc1 = solver._build_step_coefficients(env, 100.0, t_vec, dx_vec, 11)
+    sc_cached = solver._build_step_coefficients(env, 100.0, t_vec, dx_vec, 11)
+    assert sc_cached is sc1  # warm hit while market objects unchanged
+
+    env.div_yield = TermStructureDividendYield(
+        times=[0.5, 1.0], yields=[0.05, 0.08]
+    )
+    sc2 = solver._build_step_coefficients(env, 100.0, t_vec, dx_vec, 11)
+    assert sc2 is not sc1
+    l1, c1, u1 = sc1.lcu_sets[int(sc1.set_index[0])]
+    l2, c2, u2 = sc2.lcu_sets[int(sc2.set_index[0])]
+    assert not np.array_equal(l1, l2)  # coefficients reflect the new carry
+
+
+def test_pde_price_reacts_to_in_place_env_curve_replacement():
+    """End-to-end: same env object, curves replaced between prices."""
+    from quantark.asset.equity.engine.pde.barrier_pde_solver import BarrierPDESolver
+    from quantark.asset.equity.product.option import BarrierOption
+    from quantark.util.enum import BarrierType, ObservationType
+
+    option = BarrierOption(
+        strike=100.0, option_type=OptionType.CALL, barrier=120.0,
+        barrier_type=BarrierType.UP_OUT, maturity=1.0, rebate=2.0,
+        observation_type=ObservationType.CONTINUOUS,
+    )
+    env = make_term_env("kinked")
+    solver = BarrierPDESolver()
+    px1 = solver.price(option, env)
+
+    env.rate_curve = FlatRateCurve(0.08)
+    px2 = solver.price(option, env)
+    assert px2 != pytest.approx(px1, rel=1e-6)
+
+    fresh = make_term_env("kinked")
+    fresh.rate_curve = FlatRateCurve(0.08)
+    px_fresh = BarrierPDESolver().price(option, fresh)
+    assert px2 == pytest.approx(px_fresh, rel=1e-12)
