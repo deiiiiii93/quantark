@@ -211,6 +211,32 @@ def test_ko_reset_pde_sees_term_structure():
     assert px_term != pytest.approx(px_collapsed, rel=1e-5)
 
 
+def test_one_touch_pde_sees_term_structure():
+    """Pay-at-hit rebate discounts at hit times — curve-exactness matters."""
+    from quantark.asset.equity.engine.pde.one_touch_pde_solver import (
+        OneTouchPDESolver,
+    )
+    from quantark.asset.equity.product.option import OneTouchOption
+    from quantark.util.enum import BarrierDirection, ObservationType, TouchType
+
+    def price_fn(env):
+        option = OneTouchOption(
+            barrier=110.0,
+            barrier_direction=BarrierDirection.UP,
+            maturity=1.0,
+            rebate=5.0,
+            payment_at_hit=True,
+            touch_type=TouchType.ONE_TOUCH,
+            observation_type=ObservationType.CONTINUOUS,
+        )
+        return OneTouchPDESolver().price(option, env)
+
+    env_term = make_term_env("kinked")
+    px_term = price_fn(env_term)
+    px_collapsed = price_fn(_collapsed_flat_env(env_term, 1.0))
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
 def test_american_pde_sees_term_structure():
     from quantark.asset.equity.engine.pde.american_pde_solver import (
         AmericanPDESolver,

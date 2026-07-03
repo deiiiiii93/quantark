@@ -1282,6 +1282,26 @@ class BasePDESolver(BaseEngine):
         df_start = pricing_env.get_discount_factor(start_time)
         return float(safe_divide(df_end, df_start, fallback=1.0))
 
+    @staticmethod
+    def _carry_df_between_times(
+        pricing_env: PricingEnvironment, start_time: float, end_time: float
+    ) -> float:
+        """Forward dividend/carry discount factor exp(-(q(T)T - q(t)t)).
+
+        Term-structure consistent analog of _df_between_times for the carry
+        leg of asymptotic boundary conditions; equals exp(-q*(T-t)) only
+        under a flat carry curve.
+        """
+        if end_time <= start_time:
+            return 1.0
+        w_end = float(pricing_env.get_div_yield(end_time)) * float(end_time)
+        w_start = (
+            float(pricing_env.get_div_yield(start_time)) * float(start_time)
+            if start_time > 0.0
+            else 0.0
+        )
+        return float(np.exp(-(w_end - w_start)))
+
     def _cashflow_value_at_time(
         self,
         pricing_env: PricingEnvironment,

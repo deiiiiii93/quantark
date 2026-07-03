@@ -2053,9 +2053,8 @@ class SnowballPDESolver(BasePDESolver):
     # _df_between_times / _cashflow_value_at_time are inherited from
     # BasePDESolver.
 
-    @staticmethod
     def _get_asymptotic_discount_factors(
-        pricing_env: PricingEnvironment, tau_to_maturity: float
+        self, pricing_env: PricingEnvironment, tau_to_maturity: float
     ) -> Tuple[float, float]:
         """
         Get risk-free and dividend discount factors for asymptotic boundary conditions.
@@ -2072,10 +2071,10 @@ class SnowballPDESolver(BasePDESolver):
         """
         if tau_to_maturity <= 0:
             return 1.0, 1.0
-        r = pricing_env.get_rate(tau_to_maturity)
-        q = pricing_env.get_div_yield(tau_to_maturity)
-        df = np.exp(-r * tau_to_maturity)
-        df_div = np.exp(-q * tau_to_maturity)
+        total_tau = self._total_tau if self._total_tau > 0 else tau_to_maturity
+        current_time = max(total_tau - tau_to_maturity, 0.0)
+        df = self._df_between_times(pricing_env, current_time, total_tau)
+        df_div = self._carry_df_between_times(pricing_env, current_time, total_tau)
         return float(df), float(df_div)
 
     # Override abstract methods from base class (not used for two-surface)

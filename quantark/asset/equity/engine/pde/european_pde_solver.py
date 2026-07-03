@@ -129,11 +129,11 @@ class EuropeanPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         K = product.strike
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
-        q = pricing_env.get_div_yield(tau) if tau > 0 else 0.0
-        
-        df = np.exp(-r * tau) if tau > 0 else 1.0
-        df_div = np.exp(-q * tau) if tau > 0 else 1.0
+        total_tau = product.get_maturity(pricing_env)
+        current_time = max(total_tau - tau, 0.0)
+
+        df = self._df_between_times(pricing_env, current_time, total_tau)
+        df_div = self._carry_df_between_times(pricing_env, current_time, total_tau)
         
         if product.is_call():
             # Lower boundary: call worth 0 when S = 0
