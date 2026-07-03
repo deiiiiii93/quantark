@@ -13,6 +13,7 @@ import scipy.sparse as sp
 from scipy.linalg import solve_banded
 from time import perf_counter
 
+from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -483,29 +484,17 @@ class PhoenixPDESolver(SnowballPDESolver):
         if use_banded and n_int > 2:
             rhs = np.empty(n_int, dtype=float)
 
-        smooth_js = set()
-        event_theta = params.event_theta
-        event_steps = params.event_rannacher_steps
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            event_times = self._get_event_times(product, tau)
-            if event_times and event_steps > 0:
-                for et in event_times:
-                    idx = int(np.argmin(np.abs(t_vec - et)))
-                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                        for k in range(event_steps):
-                            smooth_idx = idx - 1 - k
-                            if smooth_idx >= 0:
-                                smooth_js.add(smooth_idx)
+        # Canonical damping schedule (terminal Rannacher + event smoothing).
+        theta_schedule = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
-            theta = params.theta
-            
-            steps_from_end = num_t - 1 - j
-            if params.use_rannacher and steps_from_end <= params.rannacher_steps:
-                theta = 1.0
-            elif j in smooth_js:
-                theta = event_theta
+            theta = float(theta_schedule[j])
 
             banded, lower1, main1, upper1 = (None, None, None, None)
             M1, M2_lu = (None, None)

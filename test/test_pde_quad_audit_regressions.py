@@ -337,6 +337,61 @@ class TestDiscreteOneTouchPDE:
 
 
 # ============================================================================
+# Audit #13 — the event-distribution sweep must run the SAME damping schedule
+# as the pricing sweep. Pre-fix it ignored event_theta/event_rannacher_steps
+# (using rannacher_steps/theta=1.0 instead), so changing those knobs left the
+# KO probability bit-identical — proving the stats were computed on a
+# different discretization than the npv they decompose.
+# ============================================================================
+
+
+class TestEventStatsThetaConsistency:
+    def test_event_theta_knobs_reach_event_distribution_sweep(self):
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.product.option.snowball_config import (
+            BarrierConfig as SnowballBarrierConfig,
+        )
+        from quantark.asset.equity.product.option import SnowballOption
+
+        env = create_pricing_env(div=0.0)
+        barrier_config = SnowballBarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.12,
+            ko_observation_dates=[i / 12 for i in range(1, 13)],
+            ki_barrier=75.0,
+            ki_continuous=True,
+        )
+        snowball = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            contract_multiplier=1.0,
+            maturity=1.0,
+        )
+
+        def ko_prob(event_theta: float, event_steps: int) -> np.ndarray:
+            solver = SnowballPDESolver(
+                PDEParams(
+                    grid_size=200,
+                    time_steps=100,
+                    event_theta=event_theta,
+                    event_rannacher_steps=event_steps,
+                )
+            )
+            return np.asarray(
+                solver.calculate_event_stats(snowball, env).ko_probability
+            )
+
+        prob_default = ko_prob(event_theta=1.0, event_steps=1)
+        prob_damped = ko_prob(event_theta=0.5, event_steps=3)
+
+        # The knobs change the discretization, so the (grid-converging)
+        # probabilities must respond — bit-identical values mean the event
+        # sweep ignored them.
+        assert not np.array_equal(prob_default, prob_damped)
+
+
+# ============================================================================
 # Audit #8 — Phoenix memory coupon at KO: accrued (missed) coupons are paid
 # only if the current observation's coupon condition is met (MC semantics).
 # Constructed so the divergence is structural: coupon_barrier > ko_barrier

@@ -27,6 +27,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     PDESolutionResult,
     TimeGridSpec,
 )
+from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -628,31 +629,22 @@ class SnowballPDESolver(BasePDESolver):
         if not use_banded:
             raise ValidationError("Event stats PDE currently requires banded solver path.")
 
-        # Rannacher smoothing indices (reuse the same rule as the pricing solver).
-        smooth_js: set[int] = set()
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            event_times = self._get_event_times(product, tau)
-            if event_times:
-                for et in event_times:
-                    idx = int(np.argmin(np.abs(t_vec - et)))
-                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                        for k in range(params.rannacher_steps):
-                            smooth_idx = idx - 1 - k
-                            if smooth_idx >= 0:
-                                smooth_js.add(smooth_idx)
+        # Canonical damping schedule shared with the pricing sweep — the
+        # event-distribution pass MUST run the identical discretization for
+        # the KO-probability / NPV decomposition to reconcile.
+        theta_by_step = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         n_int = num_x - 2
         rhs = np.empty((n_int, 2 * n_cols), dtype=float)
 
         for j in range(num_t - 2, -1, -1):
             dt = float(dt_vec[j])
-            steps_from_end = num_t - 1 - j
-            theta = (
-                1.0
-                if params.use_rannacher
-                and (steps_from_end <= params.rannacher_steps or j in smooth_js)
-                else params.theta
-            )
+            theta = float(theta_by_step[j])
 
             banded, lower1, main1, upper1 = self._get_banded_system(l, c, u, dt, theta)
 
@@ -1525,20 +1517,13 @@ class SnowballPDESolver(BasePDESolver):
         self._matrix_cache.clear()
         self._banded_cache.clear()
 
-        # Rannacher smoothing indices
-        smooth_js = set()
-        event_theta = params.event_theta
-        event_steps = params.event_rannacher_steps
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            event_times = self._get_event_times(product, tau)
-            if event_times and event_steps > 0:
-                for et in event_times:
-                    idx = int(np.argmin(np.abs(t_vec - et)))
-                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                        for k in range(event_steps):
-                            smooth_idx = idx - 1 - k
-                            if smooth_idx >= 0:
-                                smooth_js.add(smooth_idx)
+        # Canonical damping schedule (terminal Rannacher + event smoothing).
+        theta_schedule = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         rhs = None
         rhs_v0 = None
@@ -1550,16 +1535,9 @@ class SnowballPDESolver(BasePDESolver):
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
-            steps_from_end = num_t - 1 - j
             current_time = t_vec[j]
             tau_remaining = tau - current_time
-
-            # Determine theta (Rannacher smoothing uses backward Euler)
-            theta = params.theta
-            if params.use_rannacher and steps_from_end <= params.rannacher_steps:
-                theta = 1.0
-            elif j in smooth_js:
-                theta = event_theta
+            theta = float(theta_schedule[j])
 
             # Set boundary conditions for both surfaces
             if profile:

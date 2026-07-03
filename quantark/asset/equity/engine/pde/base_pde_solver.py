@@ -28,6 +28,7 @@ from quantark.util.enum.engine_enums import EngineType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid
+from .backward_operator import BackwardOperator
 
 
 @dataclass(frozen=True)
@@ -943,31 +944,18 @@ class BasePDESolver(BaseEngine):
         I_int = sp.eye(num_x - 2, format="csc")
         self._matrix_cache.clear()
 
-        # Rannacher smoothing at events
-        smooth_js = set()
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            for et in self._get_event_times(product, tau) or []:
-                idx = int(np.argmin(np.abs(t_vec - et)))
-                if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                    smooth_js.update(
-                        [
-                            idx - 1 - k
-                            for k in range(params.rannacher_steps)
-                            if idx - 1 - k >= 0
-                        ]
-                    )
+        # Canonical damping schedule (terminal Rannacher + event smoothing),
+        # shared with all other sweeps via BackwardOperator.theta_by_step.
+        theta_by_step = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
-            steps_from_end = num_t - 1 - j
-
-            # Smoothing uses theta=1.0 (Backward Euler)
-            theta = (
-                1.0
-                if params.use_rannacher
-                and (steps_from_end <= params.rannacher_steps or j in smooth_js)
-                else params.theta
-            )
+            theta = float(theta_by_step[j])
 
             M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
             self.set_boundary_conditions(
