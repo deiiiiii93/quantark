@@ -337,11 +337,18 @@ def build_mc_term_inputs(
     time_steps: int,
     dt_array: Optional[np.ndarray] = None,
 ) -> McTermInputs:
-    """Sample forward r/q/vol and node DFs on the generator's exact grid."""
+    """Sample forward r/q/vol and node DFs on the generator's exact grid.
+
+    NOTE: _build_time_grid returns step-terminal times only, shape
+    (time_steps,), NOT including t=0 (it is np.cumsum(dt)). TermCoefficients
+    needs the full node grid, so prepend 0.0 — interval arrays then have
+    length time_steps and node_dfs length time_steps + 1.
+    """
     times, _ = _build_time_grid(
         maturity=maturity, time_steps=time_steps, dt_array=dt_array
     )
-    tc = TermCoefficients.from_env(pricing_env, times, ref_strike=ref_strike)
+    grid = np.concatenate(([0.0], np.asarray(times, dtype=float)))
+    tc = TermCoefficients.from_env(pricing_env, grid, ref_strike=ref_strike)
     return McTermInputs(
         times=tc.t_grid,
         rrf=tc.fwd_rates,
@@ -501,7 +508,7 @@ git commit -m "feat(mc): euro + digital engines consume term-structured r/q/vol"
 Append to `test/test_mc_term_structure_engines.py` — one term-vs-flat discrimination test per engine. The pattern (asian shown; repeat for each engine with its product constructor resolved from that engine's existing test file, e.g. `test/test_asian_option.py`):
 
 ```python
-def _term_sensitivity_check(price_fn):
+def _term_sensitivity_check(price_fn, maturity):
     """An upgraded engine must price 'up' and 'down' term shapes differently
     even though both have the same cumulative-to-maturity endpoint values at
     the product maturity ONLY when shapes differ at intermediates; use shapes
@@ -517,7 +524,9 @@ def _term_sensitivity_check(price_fn):
         ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote,
     )
     from quantark.priceenv import PricingEnvironment
-    T = 2.0
+    T = float(maturity)  # MUST be the product's actual pricing maturity —
+    # a mismatched T lets an un-wired engine "pass" via scalar endpoint
+    # differences (codex plan-review finding)
     env_flat = PricingEnvironment(
         rate_curve=FlatRateCurve(env_term.get_rate(T)),
         valuation_date=datetime(2026, 7, 3),
@@ -543,7 +552,7 @@ def test_asian_mc_sees_term_structure():
         option = AsianOption(strike=100.0, maturity=2.0, option_type=OptionType.CALL)  # resolve exact ctor
         return AsianOptionMCEngine().price(option, env)
 
-    _term_sensitivity_check(price_fn)
+    _term_sensitivity_check(price_fn, maturity=2.0)  # maturity == product's
 ```
 
 (One such test per engine: asian, barrier, range accrual, single sharkfin, double sharkfin, accumulator. For each, copy the product construction from its existing test file — `test/test_barrier_option.py`, `test/test_range_accrual.py`, `test/test_sharkfin*.py`, `test/test_accumulator*.py` — with maturity stretched to 2.0 where the product allows, else use its test default maturity and accept the shapes still differ at that horizon.)
