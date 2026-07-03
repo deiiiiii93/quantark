@@ -84,3 +84,21 @@ class TermCoefficients:
             node_dfs=node_dfs,
             step_dfs=node_dfs[1:] / node_dfs[:-1],
         )
+
+
+def make_df_fn(pricing_env):
+    """Vectorized curve discount factors: scalar t -> float, array t -> array.
+
+    Drop-in replacement for ``exp(-r * times)`` discounting sites; identical
+    values for flat curves, curve-exact for term structures.
+    """
+
+    def f(t):
+        arr = np.asarray(t, dtype=float)
+        if arr.ndim == 0:
+            return float(pricing_env.get_discount_factor(float(arr)))
+        return np.array(
+            [pricing_env.get_discount_factor(float(x)) for x in arr.ravel()]
+        ).reshape(arr.shape)
+
+    return f
