@@ -541,6 +541,15 @@ class BasePDESolver(BaseEngine):
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, len(x_vec))
         A = self._build_operator_matrix(l, c, u, len(x_vec))
 
+        # Term-structure step coefficients: one set for flat inputs (exact
+        # scalar substitution -> zero behavior change), one per unique
+        # forward triple otherwise (designed per-step rebuild).
+        sc = self._build_step_coefficients(
+            pricing_env, strike, t_vec, dx_vec, len(x_vec)
+        )
+        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, len(x_vec))
+        step_coeffs = None if sc.n_unique == 1 else sc
+
         # 3. Solve
         self._time_stepping(
             grid,
@@ -557,6 +566,7 @@ class BasePDESolver(BaseEngine):
             q,
             sigma,
             tau,
+            step_coeffs=step_coeffs,
         )
 
         return PDESolutionResult(
@@ -1050,12 +1060,14 @@ class BasePDESolver(BaseEngine):
         q: float,
         sigma: float,
         tau: float,
+        step_coeffs: Optional[StepCoefficients] = None,
     ) -> None:
         """Backward time stepping using the Crank-Nicolson scheme."""
         params: PDEParams = self.params
         num_t, num_x = len(t_vec), len(x_vec)
         I_int = sp.eye(num_x - 2, format="csc")
         self._matrix_cache.clear()
+        self._term_A_cache: dict = {}
 
         # Canonical damping schedule (terminal Rannacher + event smoothing),
         # shared with all other sweeps via BackwardOperator.theta_by_step.
@@ -1070,7 +1082,13 @@ class BasePDESolver(BaseEngine):
             dt = dt_vec[j]
             theta = float(theta_by_step[j])
 
-            M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
+            if step_coeffs is not None:
+                k = int(step_coeffs.set_index[j])
+                l, _c_j, u = step_coeffs.lcu_sets[k]
+                A = self._operator_matrix_for_set(step_coeffs, k, num_x)
+            else:
+                k = 0
+            M1, M2_lu = self._get_matrices(I_int, A, dt, theta, coeff_key=k)
             self.set_boundary_conditions(
                 grid, x_vec, s_vec, j, tau - t_vec[j], product, pricing_env
             )
@@ -1096,8 +1114,20 @@ class BasePDESolver(BaseEngine):
                 (1.0 - theta) * u[-2] * grid[-1, j + 1] + theta * u[-2] * grid[-1, j]
             )
 
+    def _operator_matrix_for_set(
+        self, step_coeffs: StepCoefficients, k: int, num_x: int
+    ) -> sp.csc_matrix:
+        """Lazy per-unique-set sparse operator (cleared per _time_stepping)."""
+        A = self._term_A_cache.get(k)
+        if A is None:
+            l, c, u = step_coeffs.lcu_sets[k]
+            A = self._build_operator_matrix(l, c, u, num_x)
+            self._term_A_cache[k] = A
+        return A
+
     def _get_matrices(
-        self, I: sp.csc_matrix, A: sp.csc_matrix, dt: float, theta: float
+        self, I: sp.csc_matrix, A: sp.csc_matrix, dt: float, theta: float,
+        coeff_key: int = 0,
     ) -> Tuple[sp.csc_matrix, spla.SuperLU]:
         """
         Get or compute matrices for time stepping.
@@ -1116,7 +1146,7 @@ class BasePDESolver(BaseEngine):
                 M2_lu = LU factorization of I - theta*dt*A (for LHS)
         """
         # Round dt to avoid floating point comparison issues
-        key = (round(dt, 12), round(theta, 6))
+        key = (coeff_key, round(dt, 12), round(theta, 6))
 
         if self._is_cache_enabled() and key in self._matrix_cache:
             return self._matrix_cache[key]
