@@ -377,6 +377,75 @@ def test_sabr_mc_discounting_sees_rate_term_structure():
     assert px_shift != pytest.approx(px, rel=1e-6)
 
 
+def test_forward_reproduction_from_synthetic_futures_marks():
+    """Spec test layer 3: q(T) implied from futures marks; the drift/carry
+    arrays the engines consume must reprice those marks at every node."""
+    from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
+    from quantark.param.div.dividend_yield import TermStructureDividendYield
+
+    S, r = 100.0, 0.03
+    node_times = [0.25, 0.5, 1.0, 2.0]
+    marks = [100.3, 100.9, 101.5, 103.2]  # synthetic futures marks
+    q_nodes = [r - np.log(f / S) / t for f, t in zip(marks, node_times)]
+    env = PricingEnvironment(
+        rate_curve=FlatRateCurve(r),
+        valuation_date=datetime(2026, 7, 3),
+        spot_quote=SpotQuote(S),
+        vol_surface=FlatVolSurface(0.20),
+        div_yield=TermStructureDividendYield(times=node_times, yields=q_nodes),
+    )
+    # grid with nodes exactly at the futures maturities
+    dt_array = np.diff([0.0] + node_times)
+    ti = build_mc_term_inputs(
+        env, ref_strike=S, maturity=2.0,
+        time_steps=len(dt_array), dt_array=dt_array,
+    )
+    dt = np.diff(ti.times)
+    for i, (t_i, f_i) in enumerate(zip(node_times, marks)):
+        model_fwd = S * np.exp(
+            np.sum((ti.rrf[: i + 1] - ti.div[: i + 1]) * dt[: i + 1])
+        )
+        assert model_fwd == pytest.approx(f_i, rel=1e-10), f"node {t_i}"
+
+
+def test_forward_reproduction_through_mc_paths():
+    """End-to-end: simulated path expectations reprice the futures marks."""
+    from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
+    from quantark.asset.equity.process.bsm.qmc_path_generator import (
+        GBMPathGenerator,
+    )
+    from quantark.asset.equity.process.bsm.qmc_sobol import (
+        PseudoRandomNormalGenerator,
+    )
+    from quantark.param.div.dividend_yield import TermStructureDividendYield
+
+    S, r = 100.0, 0.03
+    node_times = [0.25, 0.5, 1.0, 2.0]
+    marks = [100.3, 100.9, 101.5, 103.2]
+    q_nodes = [r - np.log(f / S) / t for f, t in zip(marks, node_times)]
+    env = PricingEnvironment(
+        rate_curve=FlatRateCurve(r),
+        valuation_date=datetime(2026, 7, 3),
+        spot_quote=SpotQuote(S),
+        vol_surface=FlatVolSurface(0.20),
+        div_yield=TermStructureDividendYield(times=node_times, yields=q_nodes),
+    )
+    dt_array = np.diff([0.0] + node_times)
+    ti = build_mc_term_inputs(
+        env, ref_strike=S, maturity=2.0,
+        time_steps=len(dt_array), dt_array=dt_array,
+    )
+    g = GBMPathGenerator(
+        initial_value=S, vol=ti.vol, rrf=ti.rrf, div=ti.div, maturity=2.0,
+        time_steps=len(dt_array), num_paths=400_000, dt_array=dt_array,
+        random_stream=PseudoRandomNormalGenerator(seed=42),
+    )
+    paths, _ = g.generate_paths()
+    for i, (t_i, f_i) in enumerate(zip(node_times, marks)):
+        mc_fwd = float(paths[:, i + 1].mean())
+        assert mc_fwd == pytest.approx(f_i, rel=3e-3), f"node {t_i}"
+
+
 def test_digital_mc_sees_term_structure():
     from quantark.asset.equity.engine.mc.digital_option_mc_engine import (
         DigitalOptionMCEngine,

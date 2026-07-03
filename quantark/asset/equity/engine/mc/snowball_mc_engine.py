@@ -275,6 +275,9 @@ class SnowballMCEngine(BaseEngine):
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(product.strike, T)
+        # Term-structure context for this entry point (see term_inputs.py)
+        self._term_ctx = (pricing_env, product.strike)
+        self._df = make_df_fn(pricing_env)
         self._validate_inputs(S, T, r, q, sigma, product)
 
         all_times, dt_array, ko_indices, ki_indices = self._build_time_grid(
@@ -464,6 +467,9 @@ class SnowballMCEngine(BaseEngine):
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(product.strike, T)
+        # Term-structure context for this entry point (see term_inputs.py)
+        self._term_ctx = (pricing_env, product.strike)
+        self._df = make_df_fn(pricing_env)
         self._validate_inputs(S, T, r, q, sigma, product)
 
         grid = self._build_time_grid_ko_reset(product, pricing_env, T)
