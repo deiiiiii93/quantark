@@ -37,8 +37,13 @@ Phases 0-3 all merged to main):
    including this spec's own demo marks: spot `5000`, `IC00 = 5008` at
    `T = 0.03` with `r = 3%` gives `q ≈ −2.3%`. `TermStructureDividendYield`
    now accepts signed yields (`|y| ≤ 1.0`), the dividend wrapper clamps are
-   removed, and the greeks calculator's dividend bump is central with no
-   `q ≥ 0` guard. The demo marks are therefore valid as written.
+   removed, and `_build_div_bumped_env` no longer guards `q ≥ 0`. The demo
+   marks are therefore valid as written. Bump-direction status quo, stated
+   precisely: `calculate_numerical_delta_q` is central, but the scalar
+   `calculate_numerical_dividend_rho` remains a **one-sided up-bump**
+   (`direction=+1`, scaled to per-1%). This spec's rhoq bucket methods
+   follow the same one-sided up-bump convention (see "Rhoq bucket bump")
+   so scalar and bucketed rhoq are comparable; neither is central.
 2. **Term-aware engines.** All equity MC, PDE, and QUAD engines consume
    forward rates, forward carry, and step vols sampled on their own time
    grids (identity on flat inputs; cross-family term agreement gate green).
@@ -273,7 +278,8 @@ For a complete index-option risk report, show both:
 
 Do not derive hedge hands from scalar spot delta when a futures-tenor bucket
 curve is available. Use scalar spot delta as a cross-check: under a simple,
-flat, one-contract world, futures-bucket delta should reconcile directionally
+flat, one-contract world (a conceptual limit case — the API itself requires
+at least two quotes), futures-bucket delta should reconcile directionally
 with spot delta after applying `dF/dS`. Under real multi-tenor carry curves,
 bucket deltas provide the hedge allocation.
 
@@ -460,6 +466,13 @@ Responsibilities:
 
 - validate non-empty underlying, positive spot, unique contracts, sorted
   maturities, and supported interpolation/mode values;
+- validate `len(quotes) >= 2`: the conversion target
+  `TermStructureDividendYield` requires at least two time nodes, so a
+  one-contract curve must fail fast at construction with a clear
+  `ValidationError`, not deep inside `to_dividend_yield_curve()`.
+  Single-tenor markets are out of scope for v1 (no duplicated-node or
+  flat-curve fallback — if support is needed later it must be an explicit
+  one-quote conversion mode, not an invented approximation);
 - convert futures marks into `TermStructureDividendYield`;
 - bump one contract mark and rebuild the implied carry curve;
 - compute `delta_per_hand(contract)`.
@@ -640,6 +653,11 @@ The node source is mode-specific:
   any base curve, already used by the snowball risk report) with bucket
   edges at the futures maturities `[0, T_0], (T_0, T_1], ...`. Do **not**
   invent a parallel node-bump mechanism for this mode.
+
+Bump direction: one-sided **up**-bump (`+div_bump`), matching the existing
+scalar `calculate_numerical_dividend_rho` convention so scalar and bucketed
+rhoq are directly comparable. Signed carry makes the up-bump always valid
+(no `q ≥ 0` constraint to respect).
 
 For each implied carry node (implied-carry mode):
 
@@ -861,7 +879,10 @@ Bump `IC01` by `+1.0`. Assert:
 - `IC01` implied `q` changes according to the formula;
 - `IC00`, `IC02`, `IC03` implied `q` **nodes** are unchanged;
 - under `linear_q`, interpolated `q(T)` between neighboring nodes may change;
-- validation rejects unknown contracts and non-positive bumped prices.
+- validation rejects unknown contracts and non-positive bumped prices;
+- constructing an `IndexFuturesCurve` with fewer than two quotes raises
+  `ValidationError` at construction (single-tenor markets are out of scope
+  in v1).
 
 ### 3. Vanilla option futures-delta bucket matches finite difference
 
