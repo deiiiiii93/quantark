@@ -248,6 +248,11 @@ class SnowballPDESolver(BasePDESolver):
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)
 
+        # Term-structure step coefficients (one set for flat inputs)
+        sc = self._build_step_coefficients(pricing_env, product.strike, t_vec, dx_vec, num_x)
+        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
+        step_coeffs = None if sc.n_unique == 1 else sc
+
         # Time stepping for both surfaces
         self._time_stepping_two_surface(
             self._grid_v0,
@@ -266,6 +271,7 @@ class SnowballPDESolver(BasePDESolver):
             q,
             sigma,
             tau,
+            step_coeffs=step_coeffs,
         )
 
         # Return appropriate surface based on knocked-in state
@@ -625,6 +631,11 @@ class SnowballPDESolver(BasePDESolver):
         # Operator coefficients and banded solver setup
         params: PDEParams = self.params
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
+        sc_ev = self._build_step_coefficients(
+            pricing_env, product.strike, t_vec, dx_vec, num_x
+        )
+        sc_ev = self._flat_exact_step_coefficients(sc_ev, r, q, sigma, dx_vec, num_x)
+        ev_step_coeffs = None if sc_ev.n_unique == 1 else sc_ev
         use_banded = params.use_banded_solver and (num_x - 2) > 2
         if not use_banded:
             raise ValidationError("Event stats PDE currently requires banded solver path.")
@@ -646,7 +657,14 @@ class SnowballPDESolver(BasePDESolver):
             dt = float(dt_vec[j])
             theta = float(theta_by_step[j])
 
-            banded, lower1, main1, upper1 = self._get_banded_system(l, c, u, dt, theta)
+            if ev_step_coeffs is not None:
+                ev_key = int(ev_step_coeffs.set_index[j])
+                l, c, u = ev_step_coeffs.lcu_sets[ev_key]
+            else:
+                ev_key = 0
+            banded, lower1, main1, upper1 = self._get_banded_system(
+                l, c, u, dt, theta, coeff_key=ev_key
+            )
 
             # Initialize "current" with next boundaries (approximation); interior will be solved.
             v0_cur = v0_next.copy()
@@ -1541,6 +1559,7 @@ class SnowballPDESolver(BasePDESolver):
         q: float,
         sigma: float,
         tau: float,
+        step_coeffs=None,
     ) -> None:
         """
         Backward time stepping for both V0 and V1 surfaces.
@@ -1560,6 +1579,7 @@ class SnowballPDESolver(BasePDESolver):
         I_int = sp.eye(n_int, format="csc")
         self._matrix_cache.clear()
         self._banded_cache.clear()
+        self._term_A_cache = {}
 
         # Canonical damping schedule (terminal Rannacher + event smoothing).
         theta_schedule = BackwardOperator.theta_by_step(
@@ -1582,6 +1602,11 @@ class SnowballPDESolver(BasePDESolver):
             current_time = t_vec[j]
             tau_remaining = tau - current_time
             theta = float(theta_schedule[j])
+            if step_coeffs is not None:
+                coeff_key = int(step_coeffs.set_index[j])
+                l, c, u = step_coeffs.lcu_sets[coeff_key]
+            else:
+                coeff_key = 0
 
             # Set boundary conditions for both surfaces
             if profile:
@@ -1599,7 +1624,7 @@ class SnowballPDESolver(BasePDESolver):
                 if profile:
                     t0 = perf_counter()
                 banded, lower1, main1, upper1 = self._get_banded_system(
-                    l, c, u, dt, theta
+                    l, c, u, dt, theta, coeff_key=coeff_key
                 )
                 if profile:
                     timings["matrix_build"] += perf_counter() - t0
@@ -1637,7 +1662,9 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 if profile:
                     t0 = perf_counter()
-                M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
+                if step_coeffs is not None:
+                    A = self._operator_matrix_for_set(step_coeffs, coeff_key, num_x)
+                M1, M2_lu = self._get_matrices(I_int, A, dt, theta, coeff_key=coeff_key)
                 if profile:
                     timings["matrix_build"] += perf_counter() - t0
 
@@ -1674,6 +1701,7 @@ class SnowballPDESolver(BasePDESolver):
         u: np.ndarray,
         dt: float,
         theta: float,
+        coeff_key: int = 0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if not self._is_cache_enabled():
             lower = -theta * dt * l[2:-1]
@@ -1690,7 +1718,7 @@ class SnowballPDESolver(BasePDESolver):
             upper1 = (1.0 - theta) * dt * u[1:-2]
             return banded, lower1, main1, upper1
 
-        key = (round(dt, 12), round(theta, 12))
+        key = (coeff_key, round(dt, 12), round(theta, 12))
         cached = self._banded_cache.get(key)
         if cached is not None:
             self._banded_cache.move_to_end(key)

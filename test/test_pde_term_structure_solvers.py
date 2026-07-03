@@ -72,6 +72,69 @@ def test_barrier_pde_sees_term_structure():
     assert px_term != pytest.approx(px_collapsed, rel=1e-5)
 
 
+def _standard_snowball():
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+    from quantark.util.enum import ObservationType
+
+    return SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=BarrierConfig(
+            ko_barrier=1.03,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=0.75,
+            ki_observation_type=ObservationType.CONTINUOUS,
+        ),
+        payoff_config=None,
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+
+
+def test_snowball_pde_sees_term_structure():
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+
+    env_term = make_term_env("kinked")
+    px_term = SnowballPDESolver().price(_standard_snowball(), env_term)
+    px_collapsed = SnowballPDESolver().price(
+        _standard_snowball(), _collapsed_flat_env(env_term, 1.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_snowball_pde_flat_identity_golden():
+    """Flat-input identity: price captured on this worktree BEFORE the
+    snowball sweeps were wired for term structures (bit-exact via
+    _flat_exact_step_coefficients)."""
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+
+    GOLDEN_PDE_PRE = 102.97478573304076
+    px = SnowballPDESolver().price(_standard_snowball(), make_term_env("flat"))
+    assert px == GOLDEN_PDE_PRE
+
+
+def test_snowball_pde_sparse_fallback_sees_term_structure():
+    """use_banded_solver=False path (codex plan-review finding): the sparse
+    branch must consume per-step coefficients too, and agree with banded."""
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+    from quantark.asset.equity.param import PDEParams
+
+    params = PDEParams(use_banded_solver=False)
+    env_term = make_term_env("kinked")
+    px_term = SnowballPDESolver(params=params).price(_standard_snowball(), env_term)
+    px_collapsed = SnowballPDESolver(params=params).price(
+        _standard_snowball(), _collapsed_flat_env(env_term, 1.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+    px_banded = SnowballPDESolver().price(_standard_snowball(), env_term)
+    assert px_term == pytest.approx(px_banded, rel=1e-6)
+
+
 def test_american_pde_sees_term_structure():
     from quantark.asset.equity.engine.pde.american_pde_solver import (
         AmericanPDESolver,
