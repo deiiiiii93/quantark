@@ -56,6 +56,10 @@ class HestonPDESolver(BaseEngine):
         unit = price_european_heston_pde(
             s0=float(env.spot), strike=float(product.strike),
             is_call=product.option_type == OptionType.CALL, T=T, params=self.model_params,
+            # Cumulative-to-T inputs are term-structure EXACT here: the
+            # European terminal-value problem depends on the curves only
+            # through the terminal forward and discount factor (same
+            # convention as the analytical engines; spec Component 4).
             r=float(env.get_rate(T)), carry=float(env.get_div_yield(T)),
             n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
             use_sparse=self.use_sparse, grid_spot=self._greeks_grid_spot,
@@ -80,6 +84,7 @@ class HestonPDESolver(BaseEngine):
         price, delta, gamma = price_delta_gamma_heston_pde(
             s0=float(pricing_env.spot), strike=float(product.strike),
             is_call=product.option_type == OptionType.CALL, T=T, params=self.model_params,
+            # Cumulative-to-T inputs: term-structure exact for Europeans.
             r=float(pricing_env.get_rate(T)), carry=float(pricing_env.get_div_yield(T)),
             n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme, use_sparse=self.use_sparse,
         )

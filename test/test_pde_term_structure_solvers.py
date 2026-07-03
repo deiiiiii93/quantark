@@ -251,3 +251,20 @@ def test_american_pde_sees_term_structure():
     px_term = price_fn(env_term)
     px_collapsed = price_fn(_collapsed_flat_env(env_term, 1.0))
     assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_heston_pde_cumulative_convention_is_term_exact_for_europeans():
+    """Heston PDE prices a European terminal-value problem: cumulative
+    r(T)/q(T) inputs are term-structure exact, so a term env and its
+    collapsed cumulative env must agree (spec: documented convention)."""
+    from quantark.asset.equity.engine.pde import HestonPDESolver
+    from quantark.volmodels.heston import HestonParams
+
+    P = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
+    option = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
+    env_term = make_term_env("kinked")
+    px_term = HestonPDESolver(P, n_x=120, n_v=50, n_t=60).price(option, env_term)
+    px_collapsed = HestonPDESolver(P, n_x=120, n_v=50, n_t=60).price(
+        option, _collapsed_flat_env(env_term, 1.0)
+    )
+    assert px_term == pytest.approx(px_collapsed, rel=1e-8)

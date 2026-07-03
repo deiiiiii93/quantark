@@ -88,7 +88,7 @@ architecture to all engines.
 | MC (model-based) | heston, heston_slv, local_vol | Already term-aware — no change |
 | MC (SABR) | sabr_mc | **Upgrade drift only**: term r/q in the drift; SABR vol dynamics unchanged (constant SABR params are the model) |
 | PDE (BSM) | european, american, barrier, double_barrier, one_touch, double_one_touch, snowball, phoenix, ko_reset_snowball | **Upgrade**: per-step coefficients via `BackwardOperator` |
-| PDE (model-based) | local_vol (already term-aware), heston, heston_slv | **Upgrade heston/heston_slv carry**: currently scalar `carry=get_div_yield(T)` (`heston_pde_solver.py:59`); switch to the same forward-carry grid the Heston MC engine already uses |
+| PDE (model-based) | local_vol (already term-aware), heston, heston_slv | heston/heston_slv PDE price EUROPEAN terminal-value problems, so their cumulative `get_rate(T)`/`get_div_yield(T)` inputs are already term-structure exact — **documented convention, no change** (same as the analytical-engines row; corrected by Phase 2 codex plan review) |
 | QUAD | european, snowball, phoenix, ko_reset_snowball, discrete_quad, quad_adapters | **Upgrade**: per-observation-interval forward `(r, q, σ)` |
 | Analytical | black_scholes, digital, barrier, one_touch, double_barrier, asian, sharkfin, range_accrual, accumulator, deltaone | Europeans already exact given cumulative-to-T inputs — no change. Constant-parameter approximations (BS93/BAW American, closed-form barrier) keep sampling cumulative-to-T values as a **documented convention** |
 | Tree | (none exist) | n/a |
