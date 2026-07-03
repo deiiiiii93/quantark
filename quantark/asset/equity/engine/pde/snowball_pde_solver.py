@@ -194,8 +194,8 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # Resolve BGK state before grids so the time grid drops interior KI nodes.
-        self._configure_bgk(product, pricing_env, sigma, tau)
+        # BGK state is resolved at the top of _build_grids so the time grid
+        # drops interior KI nodes (and subclasses cannot skip it).
 
         if self._profile_enabled:
             self._reset_profile_stats()
@@ -1113,6 +1113,12 @@ class SnowballPDESolver(BasePDESolver):
         - Align time grid with all observation times
         - Track observation indices for discrete barrier checks
         """
+        # Resolve BGK state FIRST: the event/KI-monitor time selection below
+        # (and in super()._build_grids) depends on self._bgk_active. Living
+        # here — not in _solve — guarantees subclasses that override _solve
+        # (e.g. KOResetSnowballPDESolver) cannot silently skip it.
+        self._configure_bgk(product, pricing_env, sigma, tau)
+
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
         x_vec, s_vec, dx_vec, t_vec, dt_vec = result
 

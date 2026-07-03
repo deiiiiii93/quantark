@@ -237,8 +237,8 @@ class PhoenixPDESolver(SnowballPDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # Resolve BGK state before grids so the time grid drops interior KI nodes.
-        self._configure_bgk(product, pricing_env, sigma, tau)
+        # BGK state is resolved at the top of _build_grids (see
+        # SnowballPDESolver._build_grids) so subclasses cannot skip it.
 
         if self._profile_enabled:
             self._reset_profile_stats()

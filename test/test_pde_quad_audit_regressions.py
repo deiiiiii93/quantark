@@ -485,6 +485,54 @@ class TestQuadGridResolutionSafeguard:
 
 
 # ============================================================================
+# Audit #9 — KOResetSnowballPDESolver's _solve override skipped _configure_bgk
+# entirely, so ki_monitoring_mode=BGK_APPROXIMATION was a silent no-op (no
+# warning, exact-discrete pricing returned instead).
+# ============================================================================
+
+
+class TestKOResetBGKMode:
+    def test_bgk_mode_changes_ko_reset_pde_price(self):
+        from quantark.asset.equity.engine.pde import KOResetSnowballPDESolver
+        from quantark.asset.equity.product.option import create_ko_reset_snowball
+        from quantark.util.enum import PostKOScheduleMode
+        from quantark.util.enum.engine_enums import KnockInMonitoringMode
+
+        env = create_pricing_env(spot=95.0, div=0.0)
+        product = create_ko_reset_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity_pre=1.0,
+            maturity_post=2.0,
+            post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+            ki_continuous=False,  # daily discrete KI: BGK applicable
+        )
+
+        exact_solver = KOResetSnowballPDESolver(
+            PDEParams(grid_size=200, time_steps=100)
+        )
+        exact_price = exact_solver.price(product, env)
+        assert exact_solver._bgk_active is False
+
+        bgk_solver = KOResetSnowballPDESolver(
+            PDEParams(
+                grid_size=200,
+                time_steps=100,
+                ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION,
+            )
+        )
+        bgk_price = bgk_solver.price(product, env)
+
+        # The defect was that KOResetSnowballPDESolver._solve never called
+        # _configure_bgk, leaving _bgk_active False and silently pricing the
+        # exact discrete-KI scheme. BGK must activate (daily discrete KI is
+        # applicable) and use the shifted continuous-KI barrier.
+        assert bgk_solver._bgk_active is True
+        assert bgk_solver._bgk_ki_barrier is not None
+        assert exact_price != bgk_price
+
+
+# ============================================================================
 # Audit #8 — Phoenix memory coupon at KO: accrued (missed) coupons are paid
 # only if the current observation's coupon condition is met (MC semantics).
 # Constructed so the divergence is structural: coupon_barrier > ko_barrier
