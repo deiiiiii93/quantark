@@ -15,6 +15,8 @@ from scipy.special import erfc
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
+from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
+from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -181,19 +183,25 @@ class SnowballQuadEngine(BaseEngine):
         if record_grids:
             times = self._insert_settlement_times(times, ko_records, maturity)
 
+        rate_vec, div_vec, vol_vec = self._term_step_params(
+            pricing_env, product.strike, times, rate, div, vol
+        )
+        vol_max_val = float(np.max(vol_vec))
+        df_local = make_df_fn(pricing_env)
+
         align_log = self._select_alignment_log(
             spot, product, ki_barrier_override=ki_barrier_continuous
         )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
-            maturity, vol, [rec.observation_time for rec in ki_records]
+            maturity, vol_max_val, [rec.observation_time for rec in ki_records]
         )
         math_utils = QuadratureMath(
             grid_x=grid_points,
             spot=spot,
             maturity=maturity,
-            vol_max=vol,
+            vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
             fft_padding_factor=fft_padding_factor,
@@ -203,14 +211,16 @@ class SnowballQuadEngine(BaseEngine):
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
         dt = self._build_dt(times)
-        tau = 0.5 * vol * vol * dt
+        tau = 0.5 * vol_vec * vol_vec * dt
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
 
-        alpha = (rate - div - 0.5 * vol * vol) / (vol * vol)
-        beta = (rate - div - 0.5 * vol * vol) ** 2 / (vol**4) + 2.0 * rate / (
-            vol * vol
+        alpha_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) / (
+            vol_vec * vol_vec
         )
+        beta_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) ** 2 / (
+            vol_vec**4
+        ) + 2.0 * rate_vec / (vol_vec * vol_vec)
 
         v_in = np.array(
             [
@@ -244,7 +254,7 @@ class SnowballQuadEngine(BaseEngine):
             ko_weight = None
             if ko_record is not None:
                 discount = self._ko_discount(
-                    rate, obs_time, ko_record.settlement_time
+                    rate, obs_time, ko_record.settlement_time, df_fn=df_local
                 )
                 ko_value = ko_record.payoff * discount
                 ko_weight = self._smooth_step_weight(
@@ -301,6 +311,9 @@ class SnowballQuadEngine(BaseEngine):
                     spot_grid.copy(), v_in.copy(), v_out.copy())
 
             tau_step = float(tau[step_index])
+            alpha = float(alpha_vec[step_index])
+            beta = float(beta_vec[step_index])
+            vol_step = float(vol_vec[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
 
@@ -330,7 +343,7 @@ class SnowballQuadEngine(BaseEngine):
                     log_ki_barrier,
                     alpha,
                     beta,
-                    vol,
+                    vol_step,
                     dt[step_index],
                     tau_step,
                     product.is_reverse,
@@ -485,19 +498,25 @@ class SnowballQuadEngine(BaseEngine):
         )
         dt = self._build_dt(times)
 
+        rate_vec, div_vec, vol_vec = self._term_step_params(
+            pricing_env, product.strike, times, rate, div, vol
+        )
+        vol_max_val = float(np.max(vol_vec))
+        df_local = make_df_fn(pricing_env)
+
         align_log = self._event_stats_alignment_log(
             spot, product, ki_barrier_override=ki_barrier_continuous
         )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
         grid_points = self._resolve_grid_points(
-            maturity, vol, [rec.observation_time for rec in ki_records]
+            maturity, vol_max_val, [rec.observation_time for rec in ki_records]
         )
         math_utils = QuadratureMath(
             grid_x=grid_points,
             spot=spot,
             maturity=maturity,
-            vol_max=vol,
+            vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
             fft_padding_factor=fft_padding_factor,
@@ -508,11 +527,13 @@ class SnowballQuadEngine(BaseEngine):
         spot_grid = spot * np.exp(grid)
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
 
-        tau = 0.5 * vol * vol * dt
-        alpha = (rate - div - 0.5 * vol * vol) / (vol * vol)
-        beta = (rate - div - 0.5 * vol * vol) ** 2 / (vol**4) + 2.0 * rate / (
-            vol * vol
+        tau = 0.5 * vol_vec * vol_vec * dt
+        alpha_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) / (
+            vol_vec * vol_vec
         )
+        beta_vec = (rate_vec - div_vec - 0.5 * vol_vec * vol_vec) ** 2 / (
+            vol_vec**4
+        ) + 2.0 * rate_vec / (vol_vec * vol_vec)
         full_p_lr, full_p_ur, full_p0 = 0, len(grid) - 1, (len(grid) - 1) % 2
         omega_grid = math_utils.z_grid
 
@@ -546,7 +567,7 @@ class SnowballQuadEngine(BaseEngine):
                     else spot_grid >= ko_record.barrier
                 )
                 discount_delay = self._ko_discount(
-                    rate, obs_time, ko_record.settlement_time
+                    rate, obs_time, ko_record.settlement_time, df_fn=df_local
                 )
                 # Resolution-aware KO weight (spec 2026-07-01): a convex partition
                 # of surviving mass. `_smooth_step_weight` returns None at width 0,
@@ -599,6 +620,9 @@ class SnowballQuadEngine(BaseEngine):
                     )
 
             tau_step = float(tau[step_index])
+            alpha = float(alpha_vec[step_index])
+            beta = float(beta_vec[step_index])
+            vol_step = float(vol_vec[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
@@ -631,7 +655,7 @@ class SnowballQuadEngine(BaseEngine):
                     log_ki_barrier,
                     alpha,
                     beta,
-                    vol,
+                    vol_step,
                     dt[step_index],
                     tau_step,
                     product.is_reverse,
@@ -662,8 +686,11 @@ class SnowballQuadEngine(BaseEngine):
 
         cumulative = 0.0
         for i, rec in enumerate(ko_records):
-            df_total = math.exp(-rate * float(rec.observation_time)) * float(
-                self._ko_discount(rate, float(rec.observation_time), rec.settlement_time)
+            df_total = float(df_local(float(rec.observation_time))) * float(
+                self._ko_discount(
+                    rate, float(rec.observation_time), rec.settlement_time,
+                    df_fn=df_local,
+                )
             )
             if df_total > 0:
                 ko_prob[i] = float(ed_unit[i] / df_total)
@@ -748,6 +775,9 @@ class SnowballQuadEngine(BaseEngine):
                         v_out_ki[ki_mask] = v_in_ki[ki_mask]
 
                 tau_step = float(tau[step_index])
+                alpha = float(alpha_vec[step_index])
+                beta = float(beta_vec[step_index])
+                vol_step = float(vol_vec[step_index])
                 prefactor = (
                     math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
                 )
@@ -840,7 +870,7 @@ class SnowballQuadEngine(BaseEngine):
                         tau_step,
                     )
 
-            df_T = math.exp(-rate * maturity)
+            df_T = float(df_local(maturity))
             pv_ki_no_ko = float(math_utils.interpolate(v_out_ki, x=0.0))
             pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
             if df_T > 0:
@@ -1203,12 +1233,15 @@ class SnowballQuadEngine(BaseEngine):
         rate: float,
         obs_time: float,
         settlement_time: Optional[float],
+        df_fn=None,
     ) -> float:
         if settlement_time is None:
             return 1.0
         delay = max(settlement_time - obs_time, 0.0)
         if is_zero(delay, tol=Tolerance.ZERO):
             return 1.0
+        if df_fn is not None:
+            return float(df_fn(obs_time + delay)) / float(df_fn(obs_time))
         return safe_exp(-rate * delay)
 
     def _insert_settlement_times(
@@ -1255,6 +1288,31 @@ class SnowballQuadEngine(BaseEngine):
         if not merged or not is_close(merged[-1], maturity, abs_tol=Tolerance.PRECISION):
             merged.append(maturity)
         return merged
+
+    def _term_step_params(
+        self, pricing_env, ref_strike, times, rate, div, vol
+    ):
+        """0-prefixed per-step forward (rate, div, vol) arrays for the
+        recursion; collapses back to constant arrays built from the exact
+        cumulative scalars when the curves are flat (bit-identical to the
+        pre-term code path)."""
+        tp = build_quad_term_params(pricing_env, ref_strike, times)
+        if (
+            np.all(np.abs(tp.rate - rate) <= 1e-12)
+            and np.all(np.abs(tp.div - div) <= 1e-12)
+            and np.all(np.abs(tp.vol - vol) <= 1e-12)
+        ):
+            n = len(times) + 1
+            return (
+                np.full(n, float(rate)),
+                np.full(n, float(div)),
+                np.full(n, float(vol)),
+            )
+
+        def z(a):
+            return np.concatenate(([a[0]], np.asarray(a, dtype=float)))
+
+        return z(tp.rate), z(tp.div), z(tp.vol)
 
     def _build_dt(self, times: Sequence[float]) -> np.ndarray:
         times_full = np.concatenate(([0.0], np.asarray(times, dtype=float)))

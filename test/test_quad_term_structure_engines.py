@@ -128,3 +128,48 @@ def test_european_quad_matches_term_benchmark(shape):
     assert px == pytest.approx(
         reference_european_call_price(env, 100.0, 1.5), rel=2e-3
     )
+
+
+def _standard_snowball():
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+    from quantark.util.enum import ObservationType
+
+    return SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=BarrierConfig(
+            ko_barrier=1.03,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=0.75,
+            ki_observation_type=ObservationType.CONTINUOUS,
+        ),
+        payoff_config=None,
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+
+
+def test_snowball_quad_sees_term_structure():
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+
+    env_term = make_term_env("kinked")
+    px_term = SnowballQuadEngine().price(_standard_snowball(), env_term)
+    px_collapsed = SnowballQuadEngine().price(
+        _standard_snowball(), _collapsed_flat_env(env_term, 1.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_snowball_quad_flat_identity_golden():
+    """Flat-input identity: price captured on this worktree BEFORE the
+    snowball QUAD recursion was wired for term structures (bit-exact via
+    the exact-scalar collapse in _term_step_params)."""
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+
+    GOLDEN_QUAD_PRE = 102.9747856874856
+    px = SnowballQuadEngine().price(_standard_snowball(), make_term_env("flat"))
+    assert px == GOLDEN_QUAD_PRE
