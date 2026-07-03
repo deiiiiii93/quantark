@@ -301,3 +301,67 @@ def test_phoenix_mc_pde_quad_agree_on_term_structure():
     # sampling error is material in RELATIVE terms; bound it absolutely
     # at the observed few-cents scale.
     assert px_mc == pytest.approx(px_quad, rel=5e-3, abs=0.05)
+
+
+def test_ko_discount_forward_df_on_term_curve():
+    """Codex code-review regression: delayed-settlement discounting must be
+    the forward curve DF df(settle)/df(obs), not exp(-rate * delay)."""
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+    from quantark.priceenv.term_sampling import make_df_fn
+
+    env = make_term_env("kinked")
+    engine = SnowballQuadEngine()
+    df = make_df_fn(env)
+    rate = env.get_rate(1.0)  # cumulative scalar the engine threads around
+    obs, settle = 0.5, 0.75
+
+    got = engine._ko_discount(rate, obs, settle, df_fn=df)
+    expected = env.get_discount_factor(settle) / env.get_discount_factor(obs)
+    assert got == pytest.approx(expected, rel=1e-14)
+    # and it must differ from the flat-rate delay discount on a kinked curve
+    assert got != pytest.approx(np.exp(-rate * (settle - obs)), rel=1e-8)
+
+
+def test_snowball_continuous_ki_bridge_uses_term_vol():
+    """Codex code-review regression: the continuous-KI Brownian-bridge legs
+    must run with per-step vol. The PRICE path is the meaningful check —
+    QUAD's continuous-KI event probabilities carry a pre-existing
+    definitional gap that is explicitly out of scope (see memory/spec), so
+    the event-stats path is exercised for execution + bounds only."""
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+    from quantark.util.enum import ObservationType
+
+    def _product():
+        return SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=1.03,
+                ko_rate=0.15,
+                ko_observation_type=ObservationType.DISCRETE,
+                ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+                ki_barrier=0.90,  # close enough to bite
+                ki_observation_type=ObservationType.CONTINUOUS,
+            ),
+            payoff_config=None,
+            contract_multiplier=1.0,
+            maturity=1.0,
+            is_reverse=False,
+        )
+
+    env_term = make_term_env("kinked")
+    env_coll = _collapsed_flat_env(env_term, 1.0)
+    quad = SnowballQuadEngine()
+
+    # price path: bridge diffusion with per-step vol must discriminate
+    px_term = quad.price(_product(), env_term)
+    px_coll = quad.price(_product(), env_coll)
+    assert px_term != pytest.approx(px_coll, rel=1e-5)
+
+    # event-stats path: the fixed KI-ever bridge calls execute with the
+    # per-step vol binding and produce bounded probabilities
+    st = quad.calculate_event_stats(_product(), env_term)
+    assert 0.0 <= float(st.ki_ever_probability) <= 1.0
+    assert 0.0 <= float(st.ki_probability) <= 1.0

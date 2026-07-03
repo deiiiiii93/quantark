@@ -634,7 +634,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         for i, rec in enumerate(pre_ko_records):
             df_total = float(df_local(float(rec.observation_time))) * float(
-                self._ko_discount(rate, float(rec.observation_time), rec.settlement_time)
+                self._ko_discount(
+                    rate, float(rec.observation_time), rec.settlement_time,
+                    df_fn=df_local,
+                )
             )
             if df_total > 0:
                 pre_probability[i] = float(pre_unit[i] / df_total)
@@ -643,7 +646,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         for i, rec in enumerate(post_ko_records):
             df_total = float(df_local(float(rec.observation_time))) * float(
-                self._ko_discount(rate, float(rec.observation_time), rec.settlement_time)
+                self._ko_discount(
+                    rate, float(rec.observation_time), rec.settlement_time,
+                    df_fn=df_local,
+                )
             )
             if df_total > 0:
                 post_probability[i] = float(post_unit[i] / df_total)
