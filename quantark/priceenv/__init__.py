@@ -11,6 +11,7 @@ from .credit_pricing_environment import (
     CreditPricingEnvironment,
     BasketCreditPricingEnvironment,
 )
+from .term_sampling import TermCoefficients
 
 __all__ = [
     'PricingEnvironment',
@@ -19,4 +20,5 @@ __all__ = [
     'QuantoConversionOrientation',
     'CreditPricingEnvironment',
     'BasketCreditPricingEnvironment',
+    'TermCoefficients',
 ]
