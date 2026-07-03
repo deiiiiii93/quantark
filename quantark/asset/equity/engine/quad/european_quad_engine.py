@@ -134,9 +134,15 @@ class EuropeanQuadEngine(BaseEngine):
 
         # Price using quadrature
         if self.method == QuadratureMethod.SIMPSON:
-            price = self._price_simpson(S, K, T, r, q, sigma, product.is_call())
+            price = self._price_simpson(
+                S, K, T, r, q, sigma, product.is_call(),
+                df=pricing_env.get_discount_factor(T),
+            )
         elif self.method == QuadratureMethod.GAUSS_LEGENDRE:
-            price = self._price_gauss_legendre(S, K, T, r, q, sigma, product.is_call())
+            price = self._price_gauss_legendre(
+                S, K, T, r, q, sigma, product.is_call(),
+                df=pricing_env.get_discount_factor(T),
+            )
         else:
             raise PricingError(f"Unsupported quadrature method: {self.method}")
 
@@ -146,7 +152,9 @@ class EuropeanQuadEngine(BaseEngine):
         if price < 0:
             raise NumericalError(f"Negative price computed: {price}")
 
-        lower_bound = self._european_lower_bound(product, S, K, T, r, q)
+        lower_bound = self._european_lower_bound(
+            product, S, K, T, q, pricing_env.get_discount_factor(T)
+        )
         if price < lower_bound - 1e-4:  # Small tolerance for numerical errors
             raise NumericalError(
                 f"Price ({price:.6f}) below discounted European lower bound "
@@ -161,12 +169,12 @@ class EuropeanQuadEngine(BaseEngine):
         S: float,
         K: float,
         T: float,
-        r: float,
         q: float,
+        df: float,
     ) -> float:
         """Calculate the discounted no-arbitrage lower bound for a European option."""
         spot_pv = S * safe_exp(-q * T)
-        strike_pv = K * safe_exp(-r * T)
+        strike_pv = K * df
         if product.is_call():
             lower_bound = max(spot_pv - strike_pv, 0.0)
         else:
@@ -205,6 +213,7 @@ class EuropeanQuadEngine(BaseEngine):
         q: float,
         sigma: float,
         is_call: bool,
+        df: float | None = None,
     ) -> float:
         """
         Price option using Simpson's rule integration.
@@ -258,7 +267,10 @@ class EuropeanQuadEngine(BaseEngine):
         integral = simpson(integrand, dx=dx)
 
         # Discount to present value
-        discount = math.exp(-r * T)
+        # Curve-exact DF; the terminal-density integral uses cumulative-to-T
+        # inputs, which are term-structure exact for Europeans (spec:
+        # documented convention, same as the analytical engines).
+        discount = df if df is not None else math.exp(-r * T)
         price = discount * integral
 
         return price
@@ -272,6 +284,7 @@ class EuropeanQuadEngine(BaseEngine):
         q: float,
         sigma: float,
         is_call: bool,
+        df: float | None = None,
     ) -> float:
         """
         Price option using Gauss-Legendre quadrature.
@@ -314,7 +327,10 @@ class EuropeanQuadEngine(BaseEngine):
         integral, _ = fixed_quad(integrand, x_min, x_max, n=n_quad)
 
         # Discount to present value
-        discount = math.exp(-r * T)
+        # Curve-exact DF; the terminal-density integral uses cumulative-to-T
+        # inputs, which are term-structure exact for Europeans (spec:
+        # documented convention, same as the analytical engines).
+        discount = df if df is not None else math.exp(-r * T)
         price = discount * integral
 
         return price

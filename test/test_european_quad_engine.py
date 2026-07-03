@@ -62,7 +62,7 @@ class TestEuropeanQuadEngineBasic:
         call = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
         engine = EuropeanQuadEngine()
         lower_bound = _discounted_european_lower_bound(call, 120.0, 0.01, 0.0, 1.0)
-        engine._price_simpson = lambda *args: lower_bound - 1e-3
+        engine._price_simpson = lambda *args, **kwargs: lower_bound - 1e-3
 
         with pytest.raises(NumericalError, match="discounted European lower bound"):
             engine.price(call, pricing_env)
@@ -72,7 +72,7 @@ class TestEuropeanQuadEngineBasic:
         pricing_env = create_pricing_env(spot=100.0, rate=0.01, div=0.0)
         call = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.0)
         engine = EuropeanQuadEngine()
-        engine._price_simpson = lambda *args: -1.0
+        engine._price_simpson = lambda *args, **kwargs: -1.0
 
         with pytest.raises(NumericalError, match="Negative price computed"):
             engine.price(call, pricing_env)

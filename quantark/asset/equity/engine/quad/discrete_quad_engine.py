@@ -12,6 +12,7 @@ import numpy as np
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
 from quantark.asset.equity.engine.quad.quad_adapters import QuadInputAdapter, resolve_quad_adapter
+from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
 from quantark.asset.equity.engine.quad.quad_core import QuadratureCore
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -65,17 +66,34 @@ class DiscreteQuadEngine(BaseEngine):
         resolved = adapter.resolve_schedule(product, pricing_env, context)
         inputs = adapter.build_inputs(product, resolved, context)
         observation_times = np.asarray(inputs.observation_times, dtype=float)
+
+        # Per-interval forward params on the RESOLVED observation grid.
+        # Flat curves collapse back to the context scalars (exact — the
+        # forward of a constant curve IS the constant), preserving the
+        # pre-term code path bit-for-bit.
+        rate_in, div_in, vol_in = context.rate, context.div, context.vol
+        if context.ref_strike is not None:
+            tp = build_quad_term_params(
+                pricing_env, context.ref_strike, observation_times
+            )
+            if not (
+                np.all(np.abs(tp.rate - context.rate) <= 1e-12)
+                and np.all(np.abs(tp.div - context.div) <= 1e-12)
+                and np.all(np.abs(tp.vol - context.vol) <= 1e-12)
+            ):
+                rate_in, div_in, vol_in = tp.rate, tp.div, tp.vol
+
         effective_grid_x = self._select_grid_points(
-            observation_times, context.maturity, context.vol
+            observation_times, context.maturity, vol_in
         )
 
         core = QuadratureCore(
             grid_x=effective_grid_x,
             spot=context.spot,
             observation_times=inputs.observation_times,
-            rate=context.rate,
-            div=context.div,
-            vol=context.vol,
+            rate=rate_in,
+            div=div_in,
+            vol=vol_in,
         )
         core_price = core.price(inputs)
         return adapter.finalize_price(product, pricing_env, context, core_price, self)
