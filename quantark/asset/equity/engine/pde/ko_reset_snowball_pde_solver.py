@@ -398,6 +398,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)
 
+        # Term-structure step coefficients (one set for flat inputs)
+        sc = self._build_step_coefficients(pricing_env, product.strike, t_vec, dx_vec, num_x)
+        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
+        step_coeffs = None if sc.n_unique == 1 else sc
+
         self._time_stepping_two_surface(
             self._grid_v0,
             self._grid_v1,
@@ -415,6 +420,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             q,
             sigma,
             tau,
+            step_coeffs=step_coeffs,
         )
 
         spot_log = np.log(spot)

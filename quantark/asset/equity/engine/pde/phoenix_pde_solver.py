@@ -324,6 +324,11 @@ class PhoenixPDESolver(SnowballPDESolver):
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)
 
+        # Term-structure step coefficients (one set for flat inputs)
+        sc = self._build_step_coefficients(pricing_env, product.strike, t_vec, dx_vec, num_x)
+        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
+        step_coeffs = None if sc.n_unique == 1 else sc
+
         # Time stepping with vector state
         self._time_stepping_vector_surface(
             grid_v0_list,
@@ -342,6 +347,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             q,
             sigma,
             tau,
+            step_coeffs=step_coeffs,
         )
 
         # Result is from state 0 (no accumulated memory at valuation)
@@ -467,6 +473,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         q: float,
         sigma: float,
         tau: float,
+        step_coeffs=None,
     ) -> None:
         """Backward time stepping for vector surfaces."""
         params = self.params
@@ -478,6 +485,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         # Reuse caches
         self._matrix_cache.clear()
         self._banded_cache.clear()
+        self._term_A_cache = {}
 
         # Temporary buffers for RHS/Sol
         rhs = None
@@ -496,13 +504,23 @@ class PhoenixPDESolver(SnowballPDESolver):
             dt = dt_vec[j]
             theta = float(theta_schedule[j])
 
+            if step_coeffs is not None:
+                coeff_key = int(step_coeffs.set_index[j])
+                l, c, u = step_coeffs.lcu_sets[coeff_key]
+            else:
+                coeff_key = 0
+
             banded, lower1, main1, upper1 = (None, None, None, None)
             M1, M2_lu = (None, None)
             
             if use_banded and n_int > 2:
-                banded, lower1, main1, upper1 = self._get_banded_system(l, c, u, dt, theta)
+                banded, lower1, main1, upper1 = self._get_banded_system(
+                    l, c, u, dt, theta, coeff_key=coeff_key
+                )
             else:
-                M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
+                if step_coeffs is not None:
+                    A = self._operator_matrix_for_set(step_coeffs, coeff_key, num_x)
+                M1, M2_lu = self._get_matrices(I_int, A, dt, theta, coeff_key=coeff_key)
 
             tau_remaining = tau - t_vec[j]
             

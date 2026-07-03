@@ -135,6 +135,82 @@ def test_snowball_pde_sparse_fallback_sees_term_structure():
     assert px_term == pytest.approx(px_banded, rel=1e-6)
 
 
+def _standard_phoenix():
+    """Discrete monthly-KI Phoenix (the PDE path supports discrete KI)."""
+    from quantark.asset.equity.product.option import create_standard_phoenix
+    from quantark.asset.equity.product.option.observation_schedule import (
+        ObservationRecord,
+        ObservationSchedule,
+    )
+    from quantark.util.enum import ObservationType
+
+    sched = ObservationSchedule(
+        records=[
+            ObservationRecord(observation_time=i / 12, barrier=75.0)
+            for i in range(1, 13)
+        ]
+    )
+    return create_standard_phoenix(
+        initial_price=100.0, strike=100.0, maturity=1.0,
+        ko_barrier=103.0, ki_barrier=75.0, coupon_barrier=85.0,
+        coupon_rate=0.02, num_observations=12, memory_coupon=False,
+        ki_continuous=False, ki_observation_type=ObservationType.DISCRETE,
+        ki_observation_schedule=sched,
+    )
+
+
+def test_phoenix_pde_sees_term_structure():
+    from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+
+    env_term = make_term_env("kinked")
+    px_term = PhoenixPDESolver().price(_standard_phoenix(), env_term)
+    px_collapsed = PhoenixPDESolver().price(
+        _standard_phoenix(), _collapsed_flat_env(env_term, 1.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_phoenix_pde_sparse_fallback_sees_term_structure():
+    from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+    from quantark.asset.equity.param import PDEParams
+
+    params = PDEParams(use_banded_solver=False)
+    env_term = make_term_env("kinked")
+    px_term = PhoenixPDESolver(params=params).price(_standard_phoenix(), env_term)
+    px_collapsed = PhoenixPDESolver(params=params).price(
+        _standard_phoenix(), _collapsed_flat_env(env_term, 1.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+    px_banded = PhoenixPDESolver().price(_standard_phoenix(), env_term)
+    assert px_term == pytest.approx(px_banded, rel=1e-6)
+
+
+def test_ko_reset_pde_sees_term_structure():
+    from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
+        KOResetSnowballPDESolver,
+    )
+    from quantark.asset.equity.param import PDEParams
+    from quantark.asset.equity.product.option import create_ko_reset_snowball
+    from quantark.util.enum import PostKOScheduleMode
+
+    product = create_ko_reset_snowball(
+        initial_price=100.0,
+        strike=100.0,
+        maturity_pre=1.0,
+        maturity_post=2.0,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        ki_continuous=False,
+    )
+    solver_params = PDEParams(grid_size=80, time_steps=40)
+    env_term = make_term_env("kinked")
+    px_term = KOResetSnowballPDESolver(solver_params).price(product, env_term)
+    px_collapsed = KOResetSnowballPDESolver(solver_params).price(
+        product, _collapsed_flat_env(env_term, 2.0)
+    )
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
 def test_american_pde_sees_term_structure():
     from quantark.asset.equity.engine.pde.american_pde_solver import (
         AmericanPDESolver,
