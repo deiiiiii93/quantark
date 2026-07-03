@@ -114,8 +114,11 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
+        grid_points = self._resolve_grid_points(
+            maturity, vol, [rec.observation_time for rec in ki_records]
+        )
         math_utils = QuadratureMath(
-            grid_x=self.params.grid_points,
+            grid_x=grid_points,
             spot=spot,
             maturity=maturity,
             vol_max=vol,
@@ -638,28 +641,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         return closest(ko_logs + coupon_logs + ki_logs)
 
-    def _resolve_align_priority(self) -> str:
-        priority = getattr(self.params, "align_priority", None)
-        if priority is None:
-            return "auto"
-        return str(priority).lower()
-
-    def _resolve_fft_padding_factor(self) -> int:
-        factor = getattr(self.params, "fft_padding_factor", None)
-        if factor is None or int(factor) <= 0:
-            return 2
-        return int(factor)
-
-    def _resolve_fft_filter(self) -> tuple[float, int]:
-        alpha = getattr(self.params, "fft_filter_alpha", None)
-        power = getattr(self.params, "fft_filter_power", None)
-
-        if alpha is None:
-            alpha = 12.0
-        if power is None:
-            power = 8
-
-        return float(alpha), int(power)
+    # _resolve_align_priority / _resolve_fft_padding_factor /
+    # _resolve_fft_filter / _smooth_step_weight / _smooth_step_weight_log are
+    # inherited from SnowballQuadEngine.
 
     def _resolve_event_smoothing_width(
         self, math_utils: QuadratureMath, product: PhoenixOption
@@ -683,41 +667,3 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             return 0.0
         return float(cells) * float(math_utils.h)
 
-    def _smooth_step_weight(
-        self,
-        grid: np.ndarray,
-        barrier: float,
-        spot: float,
-        width: float,
-        *,
-        trigger_is_down: bool,
-    ) -> Optional[np.ndarray]:
-        if width <= 0.0:
-            return None
-        if barrier is None or barrier <= 0.0 or spot <= 0.0:
-            return None
-        barrier_log = safe_log(barrier / spot)
-        return self._smooth_step_weight_log(
-            grid, barrier_log, width, trigger_is_down=trigger_is_down
-        )
-
-    def _smooth_step_weight_log(
-        self,
-        grid: np.ndarray,
-        barrier_log: float,
-        width: float,
-        *,
-        trigger_is_down: bool,
-    ) -> Optional[np.ndarray]:
-        if width <= 0.0:
-            return None
-        x = grid - float(barrier_log)
-        kernel = str(getattr(self.params, "event_smoothing_kernel", "cosine")).lower()
-        if kernel == "tanh":
-            base = 0.5 * (1.0 + np.tanh(x / width))
-        else:
-            t = np.clip((x + width) / (2.0 * width), 0.0, 1.0)
-            base = 0.5 - 0.5 * np.cos(np.pi * t)
-        if trigger_is_down:
-            return 1.0 - base
-        return base

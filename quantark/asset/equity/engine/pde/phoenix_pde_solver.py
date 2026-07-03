@@ -13,6 +13,7 @@ import scipy.sparse as sp
 from scipy.linalg import solve_banded
 from time import perf_counter
 
+from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -236,8 +237,8 @@ class PhoenixPDESolver(SnowballPDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # Resolve BGK state before grids so the time grid drops interior KI nodes.
-        self._configure_bgk(product, pricing_env, sigma, tau)
+        # BGK state is resolved at the top of _build_grids (see
+        # SnowballPDESolver._build_grids) so subclasses cannot skip it.
 
         if self._profile_enabled:
             self._reset_profile_stats()
@@ -483,29 +484,17 @@ class PhoenixPDESolver(SnowballPDESolver):
         if use_banded and n_int > 2:
             rhs = np.empty(n_int, dtype=float)
 
-        smooth_js = set()
-        event_theta = params.event_theta
-        event_steps = params.event_rannacher_steps
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            event_times = self._get_event_times(product, tau)
-            if event_times and event_steps > 0:
-                for et in event_times:
-                    idx = int(np.argmin(np.abs(t_vec - et)))
-                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                        for k in range(event_steps):
-                            smooth_idx = idx - 1 - k
-                            if smooth_idx >= 0:
-                                smooth_js.add(smooth_idx)
+        # Canonical damping schedule (terminal Rannacher + event smoothing).
+        theta_schedule = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
-            theta = params.theta
-            
-            steps_from_end = num_t - 1 - j
-            if params.use_rannacher and steps_from_end < params.rannacher_steps:
-                theta = 1.0
-            elif j in smooth_js:
-                theta = event_theta
+            theta = float(theta_schedule[j])
 
             banded, lower1, main1, upper1 = (None, None, None, None)
             M1, M2_lu = (None, None)
@@ -702,19 +691,22 @@ class PhoenixPDESolver(SnowballPDESolver):
             df = self._df_between_times(pricing_env, current_time, ko_record.settlement_time)
             
         for k in range(len(grid_v0_list)):
-            effective_k = k if k <= max_k else max_k 
+            effective_k = k if k <= max_k else max_k
             accumulated_pay = (
                 self._accumulated_coupon_amount(obs_idx, effective_k)
                 if (use_memory and obs_idx is not None)
                 else 0.0
             )
 
-            total_payoff = np.full_like(
-                s_vec, (base_payoff + accumulated_pay) * df, dtype=float
-            )
-            if coupon_amt > 0.0:
+            # Memory semantics (matching the Phoenix Monte-Carlo engine's
+            # convention): accrued coupons are released ONLY when the current
+            # observation's coupon condition is met — a KO below the coupon
+            # barrier forfeits them along with the current coupon.
+            total_payoff = np.full_like(s_vec, base_payoff * df, dtype=float)
+            coupon_at_ko = coupon_amt + accumulated_pay
+            if coupon_at_ko > 0.0:
                 total_payoff = np.where(
-                    pay_mask, total_payoff + coupon_amt * df, total_payoff
+                    pay_mask, total_payoff + coupon_at_ko * df, total_payoff
                 )
             
             if ko_mask.any():

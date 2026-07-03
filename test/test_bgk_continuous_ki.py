@@ -159,7 +159,9 @@ def test_bgk_shift_standard_down_ki_shifts_down():
         PDEParams(grid_size=100, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     sigma = env.get_vol(product.strike, product.get_maturity(env))
-    shifted = engine._bgk_shifted_ki_barrier(product, env, sigma)
+    shifted = engine._bgk_shifted_ki_barrier(
+        product, env, sigma, product.get_maturity(env)
+    )
     expected = 75.0 * math.exp(-BETA * sigma * math.sqrt(1.0 / BUS_DAYS))
     assert shifted < 75.0
     assert shifted == pytest.approx(expected, rel=1e-12)
@@ -172,7 +174,9 @@ def test_bgk_shift_reverse_up_ki_shifts_up():
         PDEParams(grid_size=100, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     sigma = env.get_vol(product.strike, product.get_maturity(env))
-    shifted = engine._bgk_shifted_ki_barrier(product, env, sigma)
+    shifted = engine._bgk_shifted_ki_barrier(
+        product, env, sigma, product.get_maturity(env)
+    )
     expected = 125.0 * math.exp(+BETA * sigma * math.sqrt(1.0 / BUS_DAYS))
     assert shifted > 125.0
     assert shifted == pytest.approx(expected, rel=1e-12)
@@ -190,7 +194,9 @@ def test_bgk_shifted_barrier_is_a_critical_point():
         PDEParams(grid_size=100, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     sigma = env.get_vol(product.strike, product.get_maturity(env))
-    shifted = engine._bgk_shifted_ki_barrier(product, env, sigma)
+    shifted = engine._bgk_shifted_ki_barrier(
+        product, env, sigma, product.get_maturity(env)
+    )
     points = engine.get_critical_points(product, env)
     assert any(abs(p - shifted) < 1e-9 for p in points)
 

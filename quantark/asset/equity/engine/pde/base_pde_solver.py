@@ -21,12 +21,14 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.exceptions import PricingError, NumericalError
-from quantark.util.numerical import is_close
+from quantark.util.numerical import is_close, safe_divide
 from quantark.util.enum.option_enums import ExerciseType, ObservationType
+from quantark.util.enum import ObservationAggregation
 from quantark.util.enum.engine_enums import EngineType
 
 from .time_grid import TimeGrid
 from .spatial_grid import SpatialGrid
+from .backward_operator import BackwardOperator
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,127 @@ class BasePDESolver(BaseEngine):
         self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
             OrderedDict()
         )
+        # Discrete-monitoring state shared by the barrier-family solvers
+        # (populated by _setup_observation_indices).
+        self._observation_indices: set = set()
+        self._schedule_records: Dict[int, List] = {}
+        self._schedule_aggregation: "ObservationAggregation" = (
+            ObservationAggregation.STOP_FIRST_HIT
+        )
+        self._terminal_schedule_records: List = []
+        self._has_terminal_observation: bool = False
+        self._total_tau: float = 0.0
+
+    def _setup_observation_indices(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        tau: float,
+        t_vec: np.ndarray,
+        resolve_kwargs: Optional[Dict] = None,
+    ) -> None:
+        """
+        Resolve a product's discrete observation schedule onto the time grid.
+
+        Routing convention (shared by all barrier-family solvers):
+        - an observation at t=0 maps to time index 0,
+        - an observation at t=tau is recorded as a TERMINAL observation
+          (``_has_terminal_observation`` / ``_terminal_schedule_records``) and
+          must be applied in ``set_terminal_condition`` — NOT silently dropped
+          and NOT double-applied as an interior step,
+        - interior observations snap to the nearest time-grid node.
+
+        Args:
+            product: Product carrying observation_schedule / observation_dates
+            pricing_env: Pricing environment (for schedule resolution)
+            tau: Total time to maturity
+            t_vec: Time grid nodes
+            resolve_kwargs: Product-specific defaults forwarded to
+                ``ObservationSchedule.resolve`` (e.g. default_barrier /
+                default_upper / default_lower / default_payoff)
+        """
+        self._total_tau = tau
+        self._observation_indices.clear()
+        self._schedule_records.clear()
+        self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
+        self._terminal_schedule_records = []
+        self._has_terminal_observation = False
+
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None:
+            resolved_records = schedule.resolve(
+                pricing_env=pricing_env, **(resolve_kwargs or {})
+            )
+            self._schedule_aggregation = schedule.aggregation_mode
+            if self._schedule_aggregation in (
+                ObservationAggregation.BEST,
+                ObservationAggregation.WORST,
+            ):
+                raise PricingError(
+                    f"PDE solver does not support aggregation mode "
+                    f"{self._schedule_aggregation.value}"
+                )
+            for rec in resolved_records:
+                if is_close(rec.observation_time, 0.0):
+                    self._observation_indices.add(0)
+                    self._schedule_records.setdefault(0, []).append(rec)
+                elif is_close(rec.observation_time, tau):
+                    self._terminal_schedule_records.append(rec)
+                    self._has_terminal_observation = True
+                elif 0.0 < rec.observation_time < tau:
+                    idx = int(np.argmin(np.abs(t_vec - rec.observation_time)))
+                    self._observation_indices.add(idx)
+                    self._schedule_records.setdefault(idx, []).append(rec)
+        elif (
+            getattr(product, "observation_type", None) == ObservationType.DISCRETE
+            and getattr(product, "observation_dates", None) is not None
+        ):
+            for obs_time in product.observation_dates:
+                if is_close(obs_time, 0.0):
+                    self._observation_indices.add(0)
+                elif is_close(obs_time, tau):
+                    self._has_terminal_observation = True
+                elif 0.0 < obs_time < tau:
+                    idx = int(np.argmin(np.abs(t_vec - obs_time)))
+                    self._observation_indices.add(idx)
+
+    def _resolved_terminal_payoffs(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        default_payoff: float,
+    ) -> List[Tuple]:
+        """
+        Terminal observation records paired with settlement-discounted payoffs.
+
+        Returns ``[(record_or_None, payoff), ...]``: the terminal schedule
+        records when the product is discretely monitored and the schedule
+        observes at t=T, else a single ``(None, default_payoff)`` entry (the
+        product-level default for continuous monitoring or date-list
+        schedules). Record payoffs with a settlement_time are discounted back
+        to maturity via the forward discount factor.
+        """
+        records = (
+            self._terminal_schedule_records
+            if (
+                getattr(product, "observation_type", None)
+                == ObservationType.DISCRETE
+                and self._terminal_schedule_records
+            )
+            else [None]
+        )
+        out = []
+        for rec in records:
+            payoff = rec.payoff if rec is not None else default_payoff
+            if rec is not None and rec.settlement_time is not None:
+                payoff = self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=payoff,
+                    current_time=self._total_tau,
+                    settlement_time=rec.settlement_time,
+                )
+            out.append((rec, payoff))
+        return out
 
     @classmethod
     def clear_grid_cache(cls) -> None:
@@ -796,7 +919,7 @@ class BasePDESolver(BaseEngine):
         mu = r - q - 0.5 * sigma * sigma
         D = 0.5 * sigma * sigma
 
-        if (np.max(dx_vec) - np.min(dx_vec)) < 1e-10:
+        if is_close(float(np.max(dx_vec)), float(np.min(dx_vec))):
             dx = dx_vec[0]
             l = np.full(num_x, D / (dx * dx) - mu / (2.0 * dx))
             c = np.full(num_x, -2.0 * D / (dx * dx) - r)
@@ -859,31 +982,18 @@ class BasePDESolver(BaseEngine):
         I_int = sp.eye(num_x - 2, format="csc")
         self._matrix_cache.clear()
 
-        # Rannacher smoothing at events
-        smooth_js = set()
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            for et in self._get_event_times(product, tau) or []:
-                idx = int(np.argmin(np.abs(t_vec - et)))
-                if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                    smooth_js.update(
-                        [
-                            idx - 1 - k
-                            for k in range(params.rannacher_steps)
-                            if idx - 1 - k >= 0
-                        ]
-                    )
+        # Canonical damping schedule (terminal Rannacher + event smoothing),
+        # shared with all other sweeps via BackwardOperator.theta_by_step.
+        theta_by_step = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
-            steps_from_end = num_t - 1 - j
-
-            # Smoothing uses theta=1.0 (Backward Euler)
-            theta = (
-                1.0
-                if params.use_rannacher
-                and (steps_from_end < params.rannacher_steps or j in smooth_js)
-                else params.theta
-            )
+            theta = float(theta_by_step[j])
 
             M1, M2_lu = self._get_matrices(I_int, A, dt, theta)
             self.set_boundary_conditions(
@@ -1014,24 +1124,71 @@ class BasePDESolver(BaseEngine):
         Returns:
             Tuple of (delta, gamma)
         """
-        # Find nearest grid points
-        idx = np.searchsorted(x_vec, x_target)
+        # Snap to the grid node nearest x_target (interior only)
+        idx = int(np.searchsorted(x_vec, x_target))
         idx = max(1, min(idx, len(x_vec) - 2))
+        if idx > 1 and abs(x_vec[idx - 1] - x_target) < abs(x_vec[idx] - x_target):
+            idx -= 1
 
-        # Local grid spacing
-        dx_left = x_vec[idx] - x_vec[idx - 1]
-        dx_right = x_vec[idx + 1] - x_vec[idx]
-        dx_avg = (dx_left + dx_right) / 2.0
+        # Non-uniform three-point stencil (exact for quadratics on ANY local
+        # spacing). The symmetric formulas are only valid when h_m == h_p; on
+        # the adaptive grid the asymmetry error is proportional to gamma.
+        h_m = x_vec[idx] - x_vec[idx - 1]
+        h_p = x_vec[idx + 1] - x_vec[idx]
+        h_sum = h_m + h_p
 
-        # Central differences for derivatives in log-space
-        dv_dx = (v_vec[idx + 1] - v_vec[idx - 1]) / (dx_left + dx_right)
-        d2v_dx2 = (v_vec[idx + 1] - 2 * v_vec[idx] + v_vec[idx - 1]) / (dx_avg**2)
+        v_m, v_0, v_p = v_vec[idx - 1], v_vec[idx], v_vec[idx + 1]
+        dv_dx = (
+            -h_p / (h_m * h_sum) * v_m
+            + (h_p - h_m) / (h_m * h_p) * v_0
+            + h_m / (h_p * h_sum) * v_p
+        )
+        d2v_dx2 = 2.0 * (
+            v_m / (h_m * h_sum) - v_0 / (h_m * h_p) + v_p / (h_p * h_sum)
+        )
 
-        # Convert to price-space derivatives
-        delta = dv_dx / spot
-        gamma = (d2v_dx2 - dv_dx) / (spot**2)
+        # Convert to price-space derivatives AT THE NODE where the stencil
+        # was evaluated (identical to `spot` when the spot is a grid node,
+        # which is the default; consistent when x_target falls between nodes).
+        s_node = float(np.exp(x_vec[idx]))
+        delta = dv_dx / s_node
+        gamma = (d2v_dx2 - dv_dx) / (s_node**2)
 
         return delta, gamma
+
+    @staticmethod
+    def _current_time(total_tau: float, tau_remaining: float) -> float:
+        """Elapsed time (from valuation) at a backward-induction step."""
+        return max(total_tau - tau_remaining, 0.0)
+
+    @staticmethod
+    def _df_between_times(
+        pricing_env: PricingEnvironment, start_time: float, end_time: float
+    ) -> float:
+        """
+        Forward discount factor DF(start_time, end_time), both measured from
+        the valuation date. Term-structure consistent: DF(0,T)/DF(0,t), NOT
+        exp(-r(tau)*tau) with tau = remaining time (they coincide only under
+        a flat curve).
+        """
+        if end_time <= start_time:
+            return 1.0
+        df_end = pricing_env.get_discount_factor(end_time)
+        df_start = pricing_env.get_discount_factor(start_time)
+        return float(safe_divide(df_end, df_start, fallback=1.0))
+
+    def _cashflow_value_at_time(
+        self,
+        pricing_env: PricingEnvironment,
+        cashflow: float,
+        current_time: float,
+        settlement_time: Optional[float],
+    ) -> float:
+        """Discount a cashflow from its settlement time back to current_time."""
+        if settlement_time is None or settlement_time <= current_time:
+            return float(cashflow)
+        df = self._df_between_times(pricing_env, current_time, settlement_time)
+        return float(cashflow) * df
 
     def _calculate_intrinsic(self, product: BaseEquityProduct, spot: float) -> float:
         """

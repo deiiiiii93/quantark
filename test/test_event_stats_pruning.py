@@ -88,10 +88,13 @@ def _phoenix():
     )
 
 
-# Golden values captured from the pre-2a code (commit before stream pruning).
-SNOWBALL_PV = 988334.2318758955
-SNOWBALL_KI = 0.1103589664
-SNOWBALL_KI_EVER = 0.1478791194
+# Golden values captured from the pre-2a code (commit before stream pruning),
+# regenerated 2026-07 after the Rannacher terminal-step off-by-one fix
+# (rannacher_steps=1 now applies one implicit-Euler step, shifting the
+# discretization by ~3e-6 relative).
+SNOWBALL_PV = 988337.2459390898
+SNOWBALL_KI = 0.11034618258849545
+SNOWBALL_KI_EVER = 0.1478552608852366
 
 
 def test_snowball_full_stream_matches_golden():

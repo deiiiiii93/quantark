@@ -5,18 +5,15 @@ Implements the finite difference method for knock-in and knock-out
 barrier options with continuous or discrete monitoring.
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List
 
 import numpy as np
 
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
-from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
-from quantark.util.numerical import is_close, safe_divide
 
 from .base_pde_solver import BasePDESolver
 
@@ -41,48 +38,12 @@ class BarrierPDESolver(BasePDESolver):
     the barrier at specified observation times.
     """
 
-    def __init__(self, params: Optional[PDEParams] = None):
-        """
-        Initialize barrier option PDE solver.
+    # Discrete-monitoring state (_observation_indices, _schedule_records,
+    # _terminal_schedule_records, ...) is initialized by BasePDESolver and
+    # populated by the shared _setup_observation_indices.
 
-        Args:
-            params: PDE engine configuration parameters
-        """
-        super().__init__(params)
-        self._observation_indices: Set[int] = set()
-        self._schedule_records: Dict[int, List[ResolvedObservationRecord]] = {}
-        self._schedule_aggregation: ObservationAggregation = (
-            ObservationAggregation.STOP_FIRST_HIT
-        )
-        self._total_tau: float = 0.0
-        self._terminal_schedule_records: List[ResolvedObservationRecord] = []
-        self._has_terminal_observation: bool = False
-
-    @staticmethod
-    def _current_time(total_tau: float, tau_remaining: float) -> float:
-        return max(total_tau - tau_remaining, 0.0)
-
-    @staticmethod
-    def _df_between_times(
-        pricing_env: PricingEnvironment, start_time: float, end_time: float
-    ) -> float:
-        if end_time <= start_time:
-            return 1.0
-        df_end = pricing_env.get_discount_factor(end_time)
-        df_start = pricing_env.get_discount_factor(start_time)
-        return float(safe_divide(df_end, df_start, fallback=0.0))
-
-    def _cashflow_value_at_time(
-        self,
-        pricing_env: PricingEnvironment,
-        cashflow: float,
-        current_time: float,
-        settlement_time: Optional[float],
-    ) -> float:
-        if settlement_time is None or settlement_time <= current_time:
-            return float(cashflow)
-        df = self._df_between_times(pricing_env, current_time, settlement_time)
-        return float(cashflow) * df
+    # _current_time / _df_between_times / _cashflow_value_at_time are
+    # inherited from BasePDESolver.
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -610,56 +571,17 @@ class BarrierPDESolver(BasePDESolver):
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
         x_vec, s_vec, dx_vec, t_vec, dt_vec = result
 
-        # Setup observation time indices for discrete monitoring
-        self._total_tau = tau
-        self._observation_indices.clear()
-        self._schedule_records.clear()
-        self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
-        self._terminal_schedule_records = []
-        self._has_terminal_observation = False
-
-        schedule = getattr(product, "observation_schedule", None)
-        if schedule is not None:
-            resolved_records = schedule.resolve(
-                pricing_env=pricing_env,
-                default_barrier=product.barrier,
-                default_payoff=product.rebate,
-                require_single=True,
-            )
-            self._schedule_aggregation = schedule.aggregation_mode
-            if self._schedule_aggregation in (
-                ObservationAggregation.BEST,
-                ObservationAggregation.WORST,
-            ):
-                raise PricingError(
-                    f"PDE solver does not support aggregation mode {self._schedule_aggregation.value}"
-                )
-            for rec in resolved_records:
-                if is_close(rec.observation_time, 0.0):
-                    idx = 0
-                    self._observation_indices.add(idx)
-                    self._schedule_records.setdefault(idx, []).append(rec)
-                elif is_close(rec.observation_time, tau):
-                    self._terminal_schedule_records.append(rec)
-                    self._has_terminal_observation = True
-                elif 0.0 < rec.observation_time < tau:
-                    idx = int(np.argmin(np.abs(t_vec - rec.observation_time)))
-                    self._observation_indices.add(idx)
-                    self._schedule_records.setdefault(idx, []).append(rec)
-        elif (
-            hasattr(product, "observation_type")
-            and product.observation_type == ObservationType.DISCRETE
-            and hasattr(product, "observation_dates")
-            and product.observation_dates is not None
-        ):
-            for obs_time in product.observation_dates:
-                if is_close(obs_time, 0.0):
-                    self._observation_indices.add(0)
-                elif is_close(obs_time, tau):
-                    self._has_terminal_observation = True
-                elif 0.0 < obs_time < tau:
-                    idx = int(np.argmin(np.abs(t_vec - obs_time)))
-                    self._observation_indices.add(idx)
+        self._setup_observation_indices(
+            product,
+            pricing_env,
+            tau,
+            t_vec,
+            resolve_kwargs={
+                "default_barrier": product.barrier,
+                "default_payoff": product.rebate,
+                "require_single": True,
+            },
+        )
 
         return result
 

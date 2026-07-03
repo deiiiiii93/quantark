@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
+
 from scipy.linalg import solve_banded
 
 from quantark.asset.equity.engine.pde.base_pde_solver import (
@@ -27,6 +27,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     PDESolutionResult,
     TimeGridSpec,
 )
+from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -41,7 +42,6 @@ from quantark.util.numerical import (
     is_close,
     is_greater_than_or_close,
     is_zero,
-    safe_divide,
     safe_exp,
     safe_sqrt,
 )
@@ -194,8 +194,8 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # Resolve BGK state before grids so the time grid drops interior KI nodes.
-        self._configure_bgk(product, pricing_env, sigma, tau)
+        # BGK state is resolved at the top of _build_grids so the time grid
+        # drops interior KI nodes (and subclasses cannot skip it).
 
         if self._profile_enabled:
             self._reset_profile_stats()
@@ -509,8 +509,8 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # Resolve BGK state before grids so the time grid drops interior KI nodes.
-        self._configure_bgk(product, pricing_env, sigma, tau)
+        # BGK state is resolved at the top of _build_grids (see
+        # SnowballPDESolver._build_grids) so no path can skip it.
 
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
             product, pricing_env, spot, sigma, tau, r, q
@@ -629,31 +629,22 @@ class SnowballPDESolver(BasePDESolver):
         if not use_banded:
             raise ValidationError("Event stats PDE currently requires banded solver path.")
 
-        # Rannacher smoothing indices (reuse the same rule as the pricing solver).
-        smooth_js: set[int] = set()
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            event_times = self._get_event_times(product, tau)
-            if event_times:
-                for et in event_times:
-                    idx = int(np.argmin(np.abs(t_vec - et)))
-                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                        for k in range(params.rannacher_steps):
-                            smooth_idx = idx - 1 - k
-                            if smooth_idx >= 0:
-                                smooth_js.add(smooth_idx)
+        # Canonical damping schedule shared with the pricing sweep — the
+        # event-distribution pass MUST run the identical discretization for
+        # the KO-probability / NPV decomposition to reconcile.
+        theta_by_step = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         n_int = num_x - 2
         rhs = np.empty((n_int, 2 * n_cols), dtype=float)
 
         for j in range(num_t - 2, -1, -1):
             dt = float(dt_vec[j])
-            steps_from_end = num_t - 1 - j
-            theta = (
-                1.0
-                if params.use_rannacher
-                and (steps_from_end < params.rannacher_steps or j in smooth_js)
-                else params.theta
-            )
+            theta = float(theta_by_step[j])
 
             banded, lower1, main1, upper1 = self._get_banded_system(l, c, u, dt, theta)
 
@@ -1122,6 +1113,12 @@ class SnowballPDESolver(BasePDESolver):
         - Align time grid with all observation times
         - Track observation indices for discrete barrier checks
         """
+        # Resolve BGK state FIRST: the event/KI-monitor time selection below
+        # (and in super()._build_grids) depends on self._bgk_active. Living
+        # here — not in _solve — guarantees subclasses that override _solve
+        # (e.g. KOResetSnowballPDESolver) cannot silently skip it.
+        self._configure_bgk(product, pricing_env, sigma, tau)
+
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
         x_vec, s_vec, dx_vec, t_vec, dt_vec = result
 
@@ -1148,8 +1145,11 @@ class SnowballPDESolver(BasePDESolver):
                 idx = self._aligned_time_index(t_vec, obs_time, "KO observation")
                 self._ko_observation_indices[idx] = rec
 
-        # Setup KI observation indices (if discrete)
-        if product.has_ki_barrier and not self._ki_continuous:
+        # Setup KI observation indices (if discrete). Under BGK the interior
+        # KI dates are intentionally dropped from the time grid (continuous
+        # monitoring at the shifted barrier replaces them), so alignment is
+        # neither possible nor needed.
+        if product.has_ki_barrier and not self._ki_continuous and not self._bgk_active:
             ki_profile = self._get_cached_ki_profile(pricing_env, product)
             ki_times = ki_profile["observation_times"]
             ki_barriers = ki_profile.get("barriers") or []
@@ -1182,21 +1182,49 @@ class SnowballPDESolver(BasePDESolver):
         return float(self._ki_barrier)
 
     def _bgk_shifted_ki_barrier(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, sigma: float
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        sigma: float,
+        tau: float,
     ) -> float:
         """Broadie-Glasserman-Kou continuity-corrected KI barrier [§11.6].
 
         Shift the discrete KI barrier AWAY from spot by ``exp(±beta*sigma*sqrt(dt))``
-        with ``dt = 1/bus_days_in_year``: a standard down-in barrier shifts DOWN
-        (``-``), a reverse up-in barrier shifts UP (``+``). ``sigma`` is the same
-        strike-selected constant vol used to build the operator, so the shift is
-        consistent with the diffusion the grid resolves.
+        with ``dt`` = the ACTUAL spacing between consecutive KI monitoring
+        dates (median interval; the BGK correction assumes equal spacing, so a
+        warning is logged for materially irregular schedules). A standard
+        down-in barrier shifts DOWN (``-``), a reverse up-in barrier shifts UP
+        (``+``). ``sigma`` is the same strike-selected constant vol used to
+        build the operator, so the shift is consistent with the diffusion the
+        grid resolves.
         """
         ki_barrier = product.barrier_config.ki_barrier
         if isinstance(ki_barrier, list):
             ki_barrier = ki_barrier[0]
         ki_barrier = float(ki_barrier)
-        dt = 1.0 / float(pricing_env.bus_days_in_year)
+
+        # _bgk_applicable guarantees at least TWO interior monitor times, so
+        # an inter-observation spacing exists. Use the spacing BETWEEN
+        # observations; the valuation-to-first-observation stub is not a
+        # monitoring interval (a late-starting monitoring window would
+        # otherwise pollute the median).
+        times = np.sort(np.asarray(self._ki_monitor_times(product, tau), dtype=float))
+        intervals = np.diff(times)
+        intervals = intervals[intervals > Tolerance.ZERO]
+        dt = float(np.median(intervals))
+        if intervals.size > 1 and float(np.max(intervals)) > 1.5 * float(
+            np.min(intervals)
+        ):
+            logging.warning(
+                "BGK continuity correction assumes equally-spaced KI monitoring; "
+                "this schedule's intervals range from %.6f to %.6f years. Using "
+                "the median interval %.6f for the barrier shift.",
+                float(np.min(intervals)),
+                float(np.max(intervals)),
+                dt,
+            )
+
         shift = _BGK_BETA * float(sigma) * safe_sqrt(dt)
         return ki_barrier * safe_exp(shift if product.is_reverse else -shift)
 
@@ -1208,12 +1236,15 @@ class SnowballPDESolver(BasePDESolver):
         )
 
     def _bgk_applicable(self, product: BaseEquityProduct, tau: float) -> bool:
-        """BGK engages only for discretely-monitored KI (interior dates present).
+        """BGK engages only for discretely-monitored KI with a genuine
+        monitoring FREQUENCY (at least two interior dates, so an
+        inter-observation spacing exists).
 
-        European (maturity-only), continuous, no-KI, and already-knocked-in
-        products have no interior KI monitor times, so BGK is inert for them.
+        European (maturity-only), continuous, no-KI, already-knocked-in, and
+        single-interior-date products are priced unchanged under the exact
+        path — a continuity correction has no meaningful dt for them.
         """
-        return bool(self._ki_monitor_times(product, tau))
+        return len(self._ki_monitor_times(product, tau)) >= 2
 
     def _configure_bgk(
         self,
@@ -1242,7 +1273,9 @@ class SnowballPDESolver(BasePDESolver):
             )
             return
         self._bgk_active = True
-        self._bgk_ki_barrier = self._bgk_shifted_ki_barrier(product, pricing_env, sigma)
+        self._bgk_ki_barrier = self._bgk_shifted_ki_barrier(
+            product, pricing_env, sigma, tau
+        )
 
     def _aligned_time_index(
         self, t_vec: np.ndarray, obs_time: float, label: str
@@ -1309,7 +1342,9 @@ class SnowballPDESolver(BasePDESolver):
             tau = product.get_maturity(pricing_env)
             if tau > 0 and self._bgk_applicable(product, tau):
                 sigma = pricing_env.get_vol(product.strike, tau)
-                points.append(self._bgk_shifted_ki_barrier(product, pricing_env, sigma))
+                points.append(
+                    self._bgk_shifted_ki_barrier(product, pricing_env, sigma, tau)
+                )
 
         return sorted(set([p for p in points if p > 0]))
 
@@ -1526,20 +1561,13 @@ class SnowballPDESolver(BasePDESolver):
         self._matrix_cache.clear()
         self._banded_cache.clear()
 
-        # Rannacher smoothing indices
-        smooth_js = set()
-        event_theta = params.event_theta
-        event_steps = params.event_rannacher_steps
-        if params.use_rannacher and params.auto_grid and params.rannacher_at_events:
-            event_times = self._get_event_times(product, tau)
-            if event_times and event_steps > 0:
-                for et in event_times:
-                    idx = int(np.argmin(np.abs(t_vec - et)))
-                    if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
-                        for k in range(event_steps):
-                            smooth_idx = idx - 1 - k
-                            if smooth_idx >= 0:
-                                smooth_js.add(smooth_idx)
+        # Canonical damping schedule (terminal Rannacher + event smoothing).
+        theta_schedule = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            params,
+            self._get_event_times(product, tau),
+        )
 
         rhs = None
         rhs_v0 = None
@@ -1551,16 +1579,9 @@ class SnowballPDESolver(BasePDESolver):
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
-            steps_from_end = num_t - 1 - j
             current_time = t_vec[j]
             tau_remaining = tau - current_time
-
-            # Determine theta (Rannacher smoothing uses backward Euler)
-            theta = params.theta
-            if params.use_rannacher and steps_from_end < params.rannacher_steps:
-                theta = 1.0
-            elif j in smooth_js:
-                theta = event_theta
+            theta = float(theta_schedule[j])
 
             # Set boundary conditions for both surfaces
             if profile:
@@ -2001,16 +2022,8 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=next_rec.settlement_time,
         )
 
-    @staticmethod
-    def _df_between_times(
-        pricing_env: PricingEnvironment, start_time: float, end_time: float
-    ) -> float:
-        """Calculate discount factor between two times."""
-        if end_time <= start_time:
-            return 1.0
-        df_end = pricing_env.get_discount_factor(end_time)
-        df_start = pricing_env.get_discount_factor(start_time)
-        return float(safe_divide(df_end, df_start, fallback=1.0))
+    # _df_between_times / _cashflow_value_at_time are inherited from
+    # BasePDESolver.
 
     @staticmethod
     def _get_asymptotic_discount_factors(
@@ -2036,19 +2049,6 @@ class SnowballPDESolver(BasePDESolver):
         df = np.exp(-r * tau_to_maturity)
         df_div = np.exp(-q * tau_to_maturity)
         return float(df), float(df_div)
-
-    def _cashflow_value_at_time(
-        self,
-        pricing_env: PricingEnvironment,
-        cashflow: float,
-        current_time: float,
-        settlement_time: Optional[float],
-    ) -> float:
-        """Discount a cashflow from settlement time to current time."""
-        if settlement_time is None or settlement_time <= current_time:
-            return float(cashflow)
-        df = self._df_between_times(pricing_env, current_time, settlement_time)
-        return float(cashflow) * df
 
     # Override abstract methods from base class (not used for two-surface)
     def set_terminal_condition(

@@ -129,8 +129,11 @@ class BackwardOperator:
                             smooth_js.add(sj)
 
         for j in range(n_steps):
+            # steps_from_end is 1 for the first backward step off the terminal
+            # payoff, so `<=` yields exactly `rannacher_steps` implicit-Euler
+            # steps at the terminal discontinuity.
             steps_from_end = num_t - 1 - j
-            if steps_from_end < params.rannacher_steps:
+            if steps_from_end <= params.rannacher_steps:
                 theta[j] = 1.0
             elif j in smooth_js:
                 theta[j] = float(params.event_theta)

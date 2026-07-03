@@ -5,7 +5,7 @@ Implements the finite difference method for double knock-in and
 knock-out barrier options (corridor options).
 """
 
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List
 import numpy as np
 
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -41,11 +41,8 @@ class DoubleBarrierPDESolver(BasePDESolver):
             params: PDE engine configuration parameters
         """
         super().__init__(params)
-        self._observation_indices: Set[int] = set()
-        self._schedule_records: Dict[int, List] = {}
-        self._schedule_aggregation: ObservationAggregation = (
-            ObservationAggregation.STOP_FIRST_HIT
-        )
+        # Discrete-monitoring state is initialized by BasePDESolver and
+        # populated by the shared _setup_observation_indices.
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -267,9 +264,38 @@ class DoubleBarrierPDESolver(BasePDESolver):
         else:
             payoff = np.maximum(K - s_vec, 0.0)
 
-        # Zero (or rebate) payoff outside corridor
-        outside_corridor = (s_vec >= upper) | (s_vec <= lower)
-        payoff[outside_corridor] = rebate
+        # Apply the corridor check at maturity only for continuous monitoring
+        # or when the discrete schedule actually observes at t=T; otherwise
+        # this would insert a phantom terminal observation.
+        apply_terminal_barrier = (
+            product.observation_type != ObservationType.DISCRETE
+            or self._has_terminal_observation
+        )
+
+        if apply_terminal_barrier:
+            for rec, cashflow_value in self._resolved_terminal_payoffs(
+                product, pricing_env, default_payoff=rebate
+            ):
+                rec_upper = (
+                    rec.upper_barrier
+                    if rec is not None and rec.upper_barrier is not None
+                    else upper
+                )
+                rec_lower = (
+                    rec.lower_barrier
+                    if rec is not None and rec.lower_barrier is not None
+                    else lower
+                )
+                outside = (s_vec >= rec_upper) | (s_vec <= rec_lower)
+                if (
+                    rec is not None
+                    and self._schedule_aggregation
+                    == ObservationAggregation.ACCUMULATE
+                ):
+                    payoff[outside] += cashflow_value
+                else:
+                    payoff[outside] = cashflow_value
+                    break
 
         grid[:, -1] = payoff
 
@@ -300,14 +326,23 @@ class DoubleBarrierPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         rebate = product.rebate
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
+        # Rebate paid at maturity, discounted with the forward factor
+        # DF(t, T) (term-structure consistent, not DF(0, tau)).
+        current_time = self._current_time(self._total_tau, tau)
+        discounted_rebate = rebate * self._df_between_times(
+            pricing_env, current_time, self._total_tau
+        )
 
-        # Discounted rebate
-        discounted_rebate = rebate * np.exp(-r * tau)
-
-        # Both boundaries are at the barriers, so both get rebate
-        grid[0, t_idx] = discounted_rebate  # Lower barrier
-        grid[-1, t_idx] = discounted_rebate  # Upper barrier
+        # Continuous monitoring: edges sit AT the barriers (absorbing).
+        # Discrete monitoring: edges sit >=5 sigma outside the corridor
+        # (see _build_grids), where knockout at the next observation is
+        # almost sure, so the discounted rebate is the correct far-field
+        # limit between observations. After the LAST observation the exact
+        # far-field would relax to the vanilla continuation; the resulting
+        # boundary mismatch reaches the interior only with probability
+        # ~P(|5 sigma| move), which the wide domain makes negligible.
+        grid[0, t_idx] = discounted_rebate
+        grid[-1, t_idx] = discounted_rebate
 
     def _apply_step_modifications(
         self,
@@ -339,7 +374,10 @@ class DoubleBarrierPDESolver(BasePDESolver):
                 return
 
         schedule_records = self._schedule_records.get(t_idx)
-        r = pricing_env.get_rate(tau) if tau > 0 else 0.0
+        # _setup_observation_indices (via _build_grids) always sets _total_tau
+        # before any time step runs.
+        total_tau = self._total_tau
+        current_time = self._current_time(total_tau, tau)
 
         if schedule_records:
             for rec in schedule_records:
@@ -353,8 +391,16 @@ class DoubleBarrierPDESolver(BasePDESolver):
                     if rec.lower_barrier is not None
                     else product.lower_barrier
                 )
-                payoff = rec.payoff
-                discounted_payoff = payoff * np.exp(-r * tau)
+                discounted_payoff = self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=rec.payoff,
+                    current_time=current_time,
+                    settlement_time=(
+                        rec.settlement_time
+                        if rec.settlement_time is not None
+                        else total_tau
+                    ),
+                )
                 outside_corridor = (s_vec >= upper) | (s_vec <= lower)
                 if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
                     grid[outside_corridor, t_idx] += discounted_payoff
@@ -367,7 +413,9 @@ class DoubleBarrierPDESolver(BasePDESolver):
         lower = product.lower_barrier
         rebate = product.rebate
 
-        discounted_rebate = rebate * np.exp(-r * tau)
+        discounted_rebate = rebate * self._df_between_times(
+            pricing_env, current_time, total_tau
+        )
 
         # Apply knockout at both barriers
         outside_corridor = (s_vec >= upper) | (s_vec <= lower)
@@ -403,21 +451,42 @@ class DoubleBarrierPDESolver(BasePDESolver):
         """
         params: PDEParams = self.params
 
-        # Use barriers as spatial boundaries (with small buffer)
         lower = product.lower_barrier
         upper = product.upper_barrier
 
-        # Small buffer to ensure barrier points are included
-        buffer = 0.001
-        s_min = lower * (1 - buffer)
-        s_max = upper * (1 + buffer)
+        from .spatial_grid import SpatialGrid
+
+        if product.observation_type == ObservationType.DISCRETE:
+            # Discrete monitoring: the spot may leave the corridor and return
+            # between observation dates, so the domain must extend beyond the
+            # barriers. Clamping the edges at the barriers would impose
+            # continuous-monitoring dynamics on every time step.
+            s_min, s_max = SpatialGrid.calculate_auto_bounds(
+                spot,
+                sigma,
+                tau,
+                r,
+                q,
+                barriers=self._get_barriers(product),
+                num_std=5.0,
+            )
+            s_min = min(s_min, lower * 0.99)
+            s_max = max(s_max, upper * 1.01)
+            if params.s_min > 0:
+                s_min = params.s_min
+            if params.s_max > 0:
+                s_max = params.s_max
+        else:
+            # Continuous monitoring: barriers are absorbing boundaries, so the
+            # domain edges sit at the barriers (small buffer to include them).
+            buffer = 0.001
+            s_min = lower * (1 - buffer)
+            s_max = upper * (1 + buffer)
 
         # Get critical points
         critical_points = self.get_critical_points(product, pricing_env)
 
         # Build spatial grid
-        from .spatial_grid import SpatialGrid
-
         x_vec, s_vec, dx_vec = SpatialGrid.build(
             s_min,
             s_max,
@@ -440,42 +509,18 @@ class DoubleBarrierPDESolver(BasePDESolver):
             grade_exponent=params.grade_exponent,
         )
 
-        # Setup observation indices for discrete monitoring
-        self._observation_indices.clear()
-        self._schedule_records.clear()
-        self._schedule_aggregation = ObservationAggregation.STOP_FIRST_HIT
-        schedule = getattr(product, "observation_schedule", None)
-        if schedule is not None:
-            resolved_records = schedule.resolve(
-                pricing_env=pricing_env,
-                default_upper=product.upper_barrier,
-                default_lower=product.lower_barrier,
-                default_payoff=product.rebate,
-                require_double=True,
-            )
-            self._schedule_aggregation = schedule.aggregation_mode
-            if self._schedule_aggregation in (
-                ObservationAggregation.BEST,
-                ObservationAggregation.WORST,
-            ):
-                raise PricingError(
-                    f"PDE solver does not support aggregation mode {self._schedule_aggregation.value}"
-                )
-            for rec in resolved_records:
-                if 0 < rec.observation_time < tau:
-                    idx = np.argmin(np.abs(t_vec - rec.observation_time))
-                    self._observation_indices.add(idx)
-                    self._schedule_records.setdefault(idx, []).append(rec)
-        elif (
-            hasattr(product, "observation_type")
-            and product.observation_type == ObservationType.DISCRETE
-            and hasattr(product, "observation_dates")
-            and product.observation_dates is not None
-        ):
-            for obs_time in product.observation_dates:
-                if 0 < obs_time < tau:
-                    idx = np.argmin(np.abs(t_vec - obs_time))
-                    self._observation_indices.add(idx)
+        self._setup_observation_indices(
+            product,
+            pricing_env,
+            tau,
+            t_vec,
+            resolve_kwargs={
+                "default_upper": product.upper_barrier,
+                "default_lower": product.lower_barrier,
+                "default_payoff": product.rebate,
+                "require_double": True,
+            },
+        )
 
         return x_vec, s_vec, dx_vec, t_vec, dt_vec
 

@@ -49,7 +49,10 @@ def test_theta_default_is_cn_away_from_events():
     params = PDEParams()  # theta=0.5, rannacher_steps=1, event_theta=1.0, ers=1
     theta = _theta(t_vec, params, discontinuity_times=None)
     assert len(theta) == len(t_vec) - 1
-    assert np.allclose(theta, 0.5)  # no events, rannacher_steps=1 => no terminal step
+    # rannacher_steps=1 => exactly one implicit-Euler step at the terminal
+    # payoff discontinuity; CN everywhere else.
+    assert theta[-1] == 1.0
+    assert np.allclose(theta[:-1], 0.5)
 
 
 def test_theta_event_step_uses_event_theta():
@@ -57,9 +60,11 @@ def test_theta_event_step_uses_event_theta():
     params = PDEParams()  # event_theta=1.0
     event = t_vec[6]  # aligned node
     theta = _theta(t_vec, params, discontinuity_times=[event])
-    # step j = idx-1 = 5 (the step immediately before the event node) is damped.
+    # step j = idx-1 = 5 (the step immediately before the event node) is damped;
+    # the terminal step is the default rannacher_steps=1 implicit-Euler step.
     assert theta[5] == params.event_theta == 1.0
-    others = np.delete(theta, 5)
+    assert theta[-1] == 1.0
+    others = np.delete(theta, [5, len(theta) - 1])
     assert np.allclose(others, 0.5)
 
 
@@ -67,9 +72,10 @@ def test_theta_terminal_rannacher_when_steps_gt_1():
     t_vec = np.linspace(0.0, 1.0, 11)
     params = PDEParams(rannacher_steps=2)
     theta = _theta(t_vec, params, discontinuity_times=None)
-    # steps_from_end < 2 => the last backward step (j = num_t-2) is backward-Euler.
+    # rannacher_steps=2 => the last TWO backward steps are backward-Euler.
     assert theta[-1] == 1.0
-    assert np.allclose(theta[:-1], 0.5)
+    assert theta[-2] == 1.0
+    assert np.allclose(theta[:-2], 0.5)
 
 
 def test_theta_is_stream_independent():

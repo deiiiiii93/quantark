@@ -386,7 +386,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             )
 
         if product.has_ki_barrier:
-            is_terminal_ki = self._ki_continuous
+            is_terminal_ki = self._ki_continuous or self._bgk_active
             if not is_terminal_ki:
                 if (num_t - 1) in self._ki_observation_indices:
                     is_terminal_ki = True
