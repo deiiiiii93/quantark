@@ -59,3 +59,47 @@ def forward_carry_on_grid(
     if not np.all(np.isfinite(out)):
         raise NumericalError("zero_yield produced non-finite forward carry")
     return out
+
+
+def discount_factors_on_grid(rate_curve, t_grid: np.ndarray) -> np.ndarray:
+    """Node discount factors DF(0, t_i) for each grid node (DF at t=0 is 1)."""
+    t = _validate_grid(t_grid)
+    out = np.array(
+        [1.0 if ti <= 0.0 else float(rate_curve.get_discount_factor(ti)) for ti in t]
+    )
+    if not np.all(np.isfinite(out)) or np.any(out <= 0.0):
+        raise NumericalError("rate_curve produced invalid discount factors")
+    return out
+
+
+def step_vols_on_grid(
+    get_vol: Callable[[float, float], float], ref_strike: float, t_grid: np.ndarray
+) -> np.ndarray:
+    """Per-interval vols from total-variance differencing at a reference strike.
+
+    w(t) = get_vol(ref_strike, t)^2 * t;  step vol = sqrt((w1 - w0) / dt).
+    Raises NumericalError if total variance decreases beyond tolerance
+    (calendar arbitrage in the input surface).
+    """
+    t = _validate_grid(t_grid)
+    w = np.empty(t.size, dtype=float)
+    for i, ti in enumerate(t):
+        if ti <= 0.0:
+            w[i] = 0.0
+        else:
+            v = float(get_vol(float(ref_strike), float(ti)))
+            if not np.isfinite(v) or v <= 0.0:
+                raise NumericalError(
+                    f"get_vol returned invalid vol {v} at t={ti} "
+                    "(must be finite and strictly positive)"
+                )
+            w[i] = v * v * ti
+    dw = np.diff(w)
+    if np.any(dw < -1e-12):
+        raise NumericalError(
+            "total variance is decreasing on the grid (calendar arbitrage)"
+        )
+    out = np.sqrt(np.maximum(dw, 0.0) / np.diff(t))
+    if not np.all(np.isfinite(out)):
+        raise NumericalError("get_vol produced non-finite step vols")
+    return out
