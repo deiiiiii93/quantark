@@ -188,6 +188,44 @@ class BasePDESolver(BaseEngine):
                     idx = int(np.argmin(np.abs(t_vec - obs_time)))
                     self._observation_indices.add(idx)
 
+    def _resolved_terminal_payoffs(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        default_payoff: float,
+    ) -> List[Tuple]:
+        """
+        Terminal observation records paired with settlement-discounted payoffs.
+
+        Returns ``[(record_or_None, payoff), ...]``: the terminal schedule
+        records when the product is discretely monitored and the schedule
+        observes at t=T, else a single ``(None, default_payoff)`` entry (the
+        product-level default for continuous monitoring or date-list
+        schedules). Record payoffs with a settlement_time are discounted back
+        to maturity via the forward discount factor.
+        """
+        records = (
+            self._terminal_schedule_records
+            if (
+                getattr(product, "observation_type", None)
+                == ObservationType.DISCRETE
+                and self._terminal_schedule_records
+            )
+            else [None]
+        )
+        out = []
+        for rec in records:
+            payoff = rec.payoff if rec is not None else default_payoff
+            if rec is not None and rec.settlement_time is not None:
+                payoff = self._cashflow_value_at_time(
+                    pricing_env=pricing_env,
+                    cashflow=payoff,
+                    current_time=self._total_tau,
+                    settlement_time=rec.settlement_time,
+                )
+            out.append((rec, payoff))
+        return out
+
     @classmethod
     def clear_grid_cache(cls) -> None:
         """Clear the shared grid cache for this solver class."""
@@ -1109,9 +1147,12 @@ class BasePDESolver(BaseEngine):
             v_m / (h_m * h_sum) - v_0 / (h_m * h_p) + v_p / (h_p * h_sum)
         )
 
-        # Convert to price-space derivatives
-        delta = dv_dx / spot
-        gamma = (d2v_dx2 - dv_dx) / (spot**2)
+        # Convert to price-space derivatives AT THE NODE where the stencil
+        # was evaluated (identical to `spot` when the spot is a grid node,
+        # which is the default; consistent when x_target falls between nodes).
+        s_node = float(np.exp(x_vec[idx]))
+        delta = dv_dx / s_node
+        gamma = (d2v_dx2 - dv_dx) / (s_node**2)
 
         return delta, gamma
 

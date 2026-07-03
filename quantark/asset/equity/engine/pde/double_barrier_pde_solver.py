@@ -5,7 +5,7 @@ Implements the finite difference method for double knock-in and
 knock-out barrier options (corridor options).
 """
 
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List
 import numpy as np
 
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -273,37 +273,29 @@ class DoubleBarrierPDESolver(BasePDESolver):
         )
 
         if apply_terminal_barrier:
-            if (
-                product.observation_type == ObservationType.DISCRETE
-                and self._terminal_schedule_records
+            for rec, cashflow_value in self._resolved_terminal_payoffs(
+                product, pricing_env, default_payoff=rebate
             ):
-                current_time = self._total_tau
-                for rec in self._terminal_schedule_records:
-                    rec_upper = (
-                        rec.upper_barrier
-                        if rec.upper_barrier is not None
-                        else upper
-                    )
-                    rec_lower = (
-                        rec.lower_barrier
-                        if rec.lower_barrier is not None
-                        else lower
-                    )
-                    cashflow_value = self._cashflow_value_at_time(
-                        pricing_env=pricing_env,
-                        cashflow=rec.payoff,
-                        current_time=current_time,
-                        settlement_time=rec.settlement_time,
-                    )
-                    outside = (s_vec >= rec_upper) | (s_vec <= rec_lower)
-                    if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
-                        payoff[outside] += cashflow_value
-                    else:
-                        payoff[outside] = cashflow_value
-                        break
-            else:
-                outside_corridor = (s_vec >= upper) | (s_vec <= lower)
-                payoff[outside_corridor] = rebate
+                rec_upper = (
+                    rec.upper_barrier
+                    if rec is not None and rec.upper_barrier is not None
+                    else upper
+                )
+                rec_lower = (
+                    rec.lower_barrier
+                    if rec is not None and rec.lower_barrier is not None
+                    else lower
+                )
+                outside = (s_vec >= rec_upper) | (s_vec <= rec_lower)
+                if (
+                    rec is not None
+                    and self._schedule_aggregation
+                    == ObservationAggregation.ACCUMULATE
+                ):
+                    payoff[outside] += cashflow_value
+                else:
+                    payoff[outside] = cashflow_value
+                    break
 
         grid[:, -1] = payoff
 
@@ -342,9 +334,13 @@ class DoubleBarrierPDESolver(BasePDESolver):
         )
 
         # Continuous monitoring: edges sit AT the barriers (absorbing).
-        # Discrete monitoring: edges sit far outside the corridor, where
-        # knockout at the next observation is almost sure, so the same
-        # discounted-rebate value is the correct far-field limit.
+        # Discrete monitoring: edges sit >=5 sigma outside the corridor
+        # (see _build_grids), where knockout at the next observation is
+        # almost sure, so the discounted rebate is the correct far-field
+        # limit between observations. After the LAST observation the exact
+        # far-field would relax to the vanilla continuation; the resulting
+        # boundary mismatch reaches the interior only with probability
+        # ~P(|5 sigma| move), which the wide domain makes negligible.
         grid[0, t_idx] = discounted_rebate
         grid[-1, t_idx] = discounted_rebate
 
@@ -378,11 +374,9 @@ class DoubleBarrierPDESolver(BasePDESolver):
                 return
 
         schedule_records = self._schedule_records.get(t_idx)
-        total_tau = (
-            self._total_tau
-            if self._total_tau > 0
-            else product.get_maturity(pricing_env)
-        )
+        # _setup_observation_indices (via _build_grids) always sets _total_tau
+        # before any time step runs.
+        total_tau = self._total_tau
         current_time = self._current_time(total_tau, tau)
 
         if schedule_records:

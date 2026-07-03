@@ -5,15 +5,16 @@ Implements the finite difference method for digital barrier options
 with two barriers (upper and lower).
 """
 
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List
 import numpy as np
 
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.double_one_touch_option import DoubleOneTouchOption
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import ObservationType, ObservationAggregation, TouchType
+from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
+from quantark.util.numerical import Tolerance
 
 from .base_pde_solver import BasePDESolver
 from .spatial_grid import SpatialGrid
@@ -171,15 +172,9 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         if not apply_terminal_touch:
             return
 
-        terminal_records = (
-            self._terminal_schedule_records
-            if (
-                product.observation_type == ObservationType.DISCRETE
-                and self._terminal_schedule_records
-            )
-            else [None]
-        )
-        for rec in terminal_records:
+        for rec, payoff in self._resolved_terminal_payoffs(
+            product, pricing_env, default_payoff=rebate
+        ):
             rec_upper = (
                 rec.upper_barrier
                 if rec is not None and rec.upper_barrier is not None
@@ -190,19 +185,23 @@ class DoubleOneTouchPDESolver(BasePDESolver):
                 if rec is not None and rec.lower_barrier is not None
                 else lower
             )
-            payoff = rec.payoff if rec is not None else rebate
 
             # Relative tolerance for floating-point comparisons at each barrier
-            tol = 1e-10
+            tol = Tolerance.ZERO
             at_or_above_upper = s_vec >= rec_upper - tol * rec_upper
             at_or_below_lower = s_vec <= rec_lower + tol * rec_lower
+            outside = at_or_above_upper | at_or_below_lower
 
             if product.is_double_one_touch:
-                grid[at_or_above_upper, -1] = payoff
-                grid[at_or_below_lower, -1] = payoff
+                # Mirror the interior-step aggregation semantics.
+                if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
+                    grid[outside, -1] += payoff
+                else:
+                    grid[outside, -1] = payoff
+                    break
             else:
-                grid[at_or_above_upper, -1] = 0.0
-                grid[at_or_below_lower, -1] = 0.0
+                # No-touch: any touch region pays zero (aggregation-neutral).
+                grid[outside, -1] = 0.0
 
     def set_boundary_conditions(
         self,
@@ -303,7 +302,18 @@ class DoubleOneTouchPDESolver(BasePDESolver):
                 )
                 payoff = rec.payoff
                 if product.is_double_one_touch:
-                    barrier_value = payoff if product.payment_at_hit else payoff * df
+                    if rec.settlement_time is not None:
+                        # Record-level settlement overrides pay-at-hit/expiry.
+                        barrier_value = self._cashflow_value_at_time(
+                            pricing_env=pricing_env,
+                            cashflow=payoff,
+                            current_time=current_time,
+                            settlement_time=rec.settlement_time,
+                        )
+                    else:
+                        barrier_value = (
+                            payoff if product.payment_at_hit else payoff * df
+                        )
                 else:
                     barrier_value = 0.0
                 at_or_above_upper = s_vec >= upper

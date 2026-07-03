@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
+
 from scipy.linalg import solve_banded
 
 from quantark.asset.equity.engine.pde.base_pde_solver import (
@@ -509,8 +509,8 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # Resolve BGK state before grids so the time grid drops interior KI nodes.
-        self._configure_bgk(product, pricing_env, sigma, tau)
+        # BGK state is resolved at the top of _build_grids (see
+        # SnowballPDESolver._build_grids) so no path can skip it.
 
         x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
             product, pricing_env, spot, sigma, tau, r, q
@@ -1204,9 +1204,13 @@ class SnowballPDESolver(BasePDESolver):
             ki_barrier = ki_barrier[0]
         ki_barrier = float(ki_barrier)
 
-        # _bgk_applicable guarantees interior monitor times exist.
+        # _bgk_applicable guarantees at least TWO interior monitor times, so
+        # an inter-observation spacing exists. Use the spacing BETWEEN
+        # observations; the valuation-to-first-observation stub is not a
+        # monitoring interval (a late-starting monitoring window would
+        # otherwise pollute the median).
         times = np.sort(np.asarray(self._ki_monitor_times(product, tau), dtype=float))
-        intervals = np.diff(np.concatenate(([0.0], times)))
+        intervals = np.diff(times)
         intervals = intervals[intervals > Tolerance.ZERO]
         dt = float(np.median(intervals))
         if intervals.size > 1 and float(np.max(intervals)) > 1.5 * float(
@@ -1232,12 +1236,15 @@ class SnowballPDESolver(BasePDESolver):
         )
 
     def _bgk_applicable(self, product: BaseEquityProduct, tau: float) -> bool:
-        """BGK engages only for discretely-monitored KI (interior dates present).
+        """BGK engages only for discretely-monitored KI with a genuine
+        monitoring FREQUENCY (at least two interior dates, so an
+        inter-observation spacing exists).
 
-        European (maturity-only), continuous, no-KI, and already-knocked-in
-        products have no interior KI monitor times, so BGK is inert for them.
+        European (maturity-only), continuous, no-KI, already-knocked-in, and
+        single-interior-date products are priced unchanged under the exact
+        path — a continuity correction has no meaningful dt for them.
         """
-        return bool(self._ki_monitor_times(product, tau))
+        return len(self._ki_monitor_times(product, tau)) >= 2
 
     def _configure_bgk(
         self,

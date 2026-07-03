@@ -254,23 +254,17 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     # Resolution-aware smoothed KI transition (same O(h)
                     # bias fix as SnowballQuadEngine), narrowed by the
                     # pre-KO weight on simultaneous observations.
-                    ki_weight = self._smooth_step_weight(
+                    v_out = self._blend_ki_transition(
+                        v_out,
+                        v_in,
                         grid,
+                        spot_grid,
                         ki_record.barrier,
                         spot,
                         smoothing_width,
-                        trigger_is_down=not product.is_reverse,
+                        product.is_reverse,
+                        ko_weight=pre_ko_weight,
                     )
-                    if ki_weight is None:
-                        ki_mask = (
-                            spot_grid >= ki_record.barrier
-                            if product.is_reverse
-                            else spot_grid <= ki_record.barrier
-                        )
-                        ki_weight = ki_mask.astype(float)
-                    if pre_ko_weight is not None:
-                        ki_weight = ki_weight * (1.0 - pre_ko_weight)
-                    v_out = (1.0 - ki_weight) * v_out + ki_weight * v_in
 
             # Post-event continuation surfaces at obs_time (v_out = pre-KI/not-yet-KI,
             # v_in = post-KI/knocked-in), before diffusing back to the previous step.
@@ -540,23 +534,17 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                     # narrowed by the pre-KO weight so KO keeps precedence at
                     # a simultaneous observation (reduces to the hard mask at
                     # width 0, where KO and KI regions are disjoint).
-                    ki_w = self._smooth_step_weight(
+                    v_out = self._blend_ki_transition(
+                        v_out,
+                        v_in,
                         grid,
+                        spot_grid,
                         ki_record.barrier,
                         spot,
                         smoothing_width,
-                        trigger_is_down=not product.is_reverse,
+                        product.is_reverse,
+                        ko_weight=pre_ko_weight,
                     )
-                    if ki_w is None:
-                        ki_mask = (
-                            spot_grid >= ki_record.barrier
-                            if product.is_reverse
-                            else spot_grid <= ki_record.barrier
-                        )
-                        ki_w = ki_mask.astype(float)
-                    if pre_ko_weight is not None:
-                        ki_w = ki_w * (1.0 - pre_ko_weight)
-                    v_out = (1.0 - ki_w) * v_out + ki_w * v_in
 
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0

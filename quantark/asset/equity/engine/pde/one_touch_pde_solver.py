@@ -5,14 +5,14 @@ Implements the finite difference method for digital barrier options
 that pay a fixed rebate on touching (or not touching) a barrier.
 """
 
-from typing import Dict, Optional, List, Set
+from typing import Dict, List
 import numpy as np
 
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.one_touch_option import OneTouchOption
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import ObservationType, ObservationAggregation, TouchType
+from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
@@ -166,25 +166,24 @@ class OneTouchPDESolver(BasePDESolver):
         if not apply_terminal_touch:
             return
 
-        terminal_records = (
-            self._terminal_schedule_records
-            if (
-                product.observation_type == ObservationType.DISCRETE
-                and self._terminal_schedule_records
-            )
-            else [None]
-        )
-        for rec in terminal_records:
+        for rec, payoff in self._resolved_terminal_payoffs(
+            product, pricing_env, default_payoff=rebate
+        ):
             rec_barrier = (
                 rec.barrier if rec is not None and rec.barrier is not None else barrier
             )
-            payoff = rec.payoff if rec is not None else rebate
             touched = (
                 s_vec >= rec_barrier if product.is_up_barrier else s_vec <= rec_barrier
             )
             if product.is_one_touch:
-                grid[touched, -1] = payoff
+                # Mirror the interior-step aggregation semantics.
+                if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
+                    grid[touched, -1] += payoff
+                else:
+                    grid[touched, -1] = payoff
+                    break
             else:
+                # No-touch: any touch region pays zero (aggregation-neutral).
                 grid[touched, -1] = 0.0
 
     def set_boundary_conditions(
@@ -287,7 +286,18 @@ class OneTouchPDESolver(BasePDESolver):
                 barrier = rec.barrier if rec.barrier is not None else product.barrier
                 payoff = rec.payoff
                 if product.is_one_touch:
-                    barrier_value = payoff if product.payment_at_hit else payoff * df
+                    if rec.settlement_time is not None:
+                        # Record-level settlement overrides pay-at-hit/expiry.
+                        barrier_value = self._cashflow_value_at_time(
+                            pricing_env=pricing_env,
+                            cashflow=payoff,
+                            current_time=current_time,
+                            settlement_time=rec.settlement_time,
+                        )
+                    else:
+                        barrier_value = (
+                            payoff if product.payment_at_hit else payoff * df
+                        )
                 else:
                     barrier_value = 0.0
                 if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:

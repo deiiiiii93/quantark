@@ -698,10 +698,10 @@ class PhoenixPDESolver(SnowballPDESolver):
                 else 0.0
             )
 
-            # Memory semantics (matching PhoenixMCEngine): accrued coupons are
-            # released ONLY when the current observation's coupon condition is
-            # met — a KO below the coupon barrier forfeits them along with the
-            # current coupon.
+            # Memory semantics (matching the Phoenix Monte-Carlo engine's
+            # convention): accrued coupons are released ONLY when the current
+            # observation's coupon condition is met — a KO below the coupon
+            # barrier forfeits them along with the current coupon.
             total_payoff = np.full_like(s_vec, base_payoff * df, dtype=float)
             coupon_at_ko = coupon_amt + accumulated_pay
             if coupon_at_ko > 0.0:

@@ -5,18 +5,15 @@ Implements the finite difference method for knock-in and knock-out
 barrier options with continuous or discrete monitoring.
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List
 
 import numpy as np
 
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
-from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
-from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
-from quantark.util.numerical import is_close
 
 from .base_pde_solver import BasePDESolver
 

@@ -277,23 +277,19 @@ class SnowballQuadEngine(BaseEngine):
             elif ki_records:
                 ki_record = self._match_record(obs_time, ki_records)
                 if ki_record is not None:
-                    ki_weight = self._smooth_step_weight(
+                    v_out = self._blend_ki_transition(
+                        v_out,
+                        v_in,
                         grid,
+                        spot_grid,
                         ki_record.barrier,
                         spot,
                         smoothing_width,
-                        trigger_is_down=not product.is_reverse,
+                        product.is_reverse,
+                        ko_weight=(
+                            ko_weight if not disable_ko_after_ki else None
+                        ),
                     )
-                    if ki_weight is None:
-                        ki_mask = (
-                            spot_grid >= ki_record.barrier
-                            if product.is_reverse
-                            else spot_grid <= ki_record.barrier
-                        )
-                        ki_weight = ki_mask.astype(float)
-                    if ko_weight is not None and not disable_ko_after_ki:
-                        ki_weight = ki_weight * (1.0 - ko_weight)
-                    v_out = (1.0 - ki_weight) * v_out + ki_weight * v_in
 
             # Post-event continuation surfaces AT obs_time (before diffusing back to
             # the previous step): v_out = value of a not-yet-knocked-in contract,
@@ -587,24 +583,20 @@ class SnowballQuadEngine(BaseEngine):
                     # is NOT KO-scaled while v_out IS, so a hard `v_out[ki]=v_in[ki]`
                     # copy would mix the soft KO partition with an un-scaled surface
                     # and corrupt KO/maturity attribution near a KO/KI-adjacent
-                    # barrier. `ki_w_eff = ki_w*(1-ko_w)` when KO takes precedence
-                    # (not disable_ko_after_ki), else `ki_w` (KI unmasked by KO) —
-                    # the smoothed analog of the old `ki_mask & ~ko_mask`, reducing
-                    # EXACTLY to it at width 0.
-                    ki_w = self._smooth_step_weight(
-                        grid, ki_record.barrier, spot, smoothing_width,
-                        trigger_is_down=not product.is_reverse,
+                    # barrier. KO precedence via ko_weight narrowing when
+                    # `not disable_ko_after_ki` — the smoothed analog of the old
+                    # `ki_mask & ~ko_mask`, reducing EXACTLY to it at width 0.
+                    v_out = self._blend_ki_transition(
+                        v_out,
+                        v_in,
+                        grid,
+                        spot_grid,
+                        ki_record.barrier,
+                        spot,
+                        smoothing_width,
+                        product.is_reverse,
+                        ko_weight=(ko_w if not disable_ko_after_ki else None),
                     )
-                    if ki_w is None:
-                        ki_mask = (
-                            spot_grid >= ki_record.barrier
-                            if product.is_reverse
-                            else spot_grid <= ki_record.barrier
-                        )
-                        ki_w = ki_mask.astype(float)
-                    if ko_w is not None and not disable_ko_after_ki:
-                        ki_w = ki_w * (1.0 - ko_w)
-                    v_out = (1.0 - ki_w) * v_out + ki_w * v_in
 
             tau_step = float(tau[step_index])
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
@@ -1509,6 +1501,38 @@ class SnowballQuadEngine(BaseEngine):
         if cells <= 0:
             return 0.0
         return float(cells) * float(math_utils.h)
+
+    def _blend_ki_transition(
+        self,
+        v_out: np.ndarray,
+        v_in: np.ndarray,
+        grid: np.ndarray,
+        spot_grid: np.ndarray,
+        ki_barrier: float,
+        spot: float,
+        width: float,
+        is_reverse: bool,
+        ko_weight: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """
+        Apply the smoothed discrete-KI transition to the not-yet-KI surface.
+
+        Computes the resolution-aware KI weight (hard mask when smoothing is
+        disabled), optionally narrows it by a simultaneous KO weight so KO
+        keeps precedence at the same observation, and returns the blended
+        ``(1-w)*v_out + w*v_in``. Works for both a single value vector and a
+        stacked (rows, grid) indicator array (the weight broadcasts over
+        rows). Reduces exactly to the old hard-mask copy at width 0.
+        """
+        ki_w = self._smooth_step_weight(
+            grid, ki_barrier, spot, width, trigger_is_down=not is_reverse
+        )
+        if ki_w is None:
+            ki_mask = spot_grid >= ki_barrier if is_reverse else spot_grid <= ki_barrier
+            ki_w = ki_mask.astype(float)
+        if ko_weight is not None:
+            ki_w = ki_w * (1.0 - ko_weight)
+        return (1.0 - ki_w) * v_out + ki_w * v_in
 
     def _smooth_step_weight(
         self,
