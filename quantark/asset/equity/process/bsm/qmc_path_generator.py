@@ -12,7 +12,7 @@ Created on Mon Nov 17 2025
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 
@@ -89,9 +89,11 @@ class GBMPathGenerator:
     """
 
     initial_value: float = 100.0
-    vol: float = 0.2
-    rrf: float = 0.0
-    div: float = 0.0
+    # vol / rrf / div accept a scalar or a per-step array of shape
+    # (time_steps,); entry k applies over [times[k-1], times[k]].
+    vol: Union[float, np.ndarray] = 0.2
+    rrf: Union[float, np.ndarray] = 0.0
+    div: Union[float, np.ndarray] = 0.0
     maturity: float = 1.0
     time_steps: int = 244
     num_paths: int = 10000

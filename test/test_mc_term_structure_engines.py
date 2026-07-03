@@ -377,6 +377,30 @@ def test_sabr_mc_discounting_sees_rate_term_structure():
     assert px_shift != pytest.approx(px, rel=1e-6)
 
 
+def test_reused_engine_instance_does_not_leak_term_context():
+    """Codex code-review regression: one engine instance priced against two
+    different environments must reproduce fresh-instance prices exactly —
+    the request-scoped term context may never leak across calls."""
+    from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+
+    env_term = make_term_env("kinked")
+    env_flat = make_term_env("flat")
+    product = _standard_snowball()
+    params = MCParams(num_paths=20_000, time_steps=64, seed=42)
+
+    reused = SnowballMCEngine(params=params)
+    px_term_reused = reused.price(product, env_term)
+    px_flat_reused = reused.price(product, env_flat)   # after term call
+    px_term_again = reused.price(product, env_term)    # after flat call
+
+    px_term_fresh = SnowballMCEngine(params=params).price(product, env_term)
+    px_flat_fresh = SnowballMCEngine(params=params).price(product, env_flat)
+
+    assert px_term_reused == px_term_fresh
+    assert px_flat_reused == px_flat_fresh
+    assert px_term_again == px_term_fresh
+
+
 def test_forward_reproduction_from_synthetic_futures_marks():
     """Spec test layer 3: q(T) implied from futures marks; the drift/carry
     arrays the engines consume must reprice those marks at every node."""

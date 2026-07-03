@@ -91,6 +91,15 @@ class RangeAccrualMCEngine(BaseEngine):
 
     engine_type = EngineType.MONTE_CARLO
 
+    # Request-scoped term-structure context (set at every public pricing
+    # entry point from ITS pricing_env; never carried across calls).
+    # Private helpers called outside a public entry fall back to their
+    # scalar arguments (None ctx) or fail loudly (None _df) rather than
+    # silently reusing a previous environment. Engine instances are not
+    # safe for concurrent pricing calls (pre-existing engine contract).
+    _term_ctx = None
+    _df = None
+
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
     def __init__(

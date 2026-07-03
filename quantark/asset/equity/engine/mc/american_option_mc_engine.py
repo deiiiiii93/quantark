@@ -190,19 +190,20 @@ class AmericanOptionMCEngine(BaseEngine):
         q = pricing_env.get_div_yield(T)
         sigma = pricing_env.get_vol(K, T)
 
-        # Term-structure context for this pricing call (see term_inputs.py)
-        self._term_ctx = (pricing_env, K)
-        self._last_step_dfs = None
-
         self._validate_inputs(S, K, T, r, q, sigma)
 
         if is_zero(T):
             return product.get_payoff(S)
 
+        term = build_mc_term_inputs(
+            pricing_env, ref_strike=K, maturity=T,
+            time_steps=self.params.time_steps,
+        )
+
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
-            result = self._price_rqmc(product, S, K, T, r, q, sigma)
+            result = self._price_rqmc(product, S, K, T, r, q, sigma, term=term)
         else:
-            result = self._price_mc_or_qmc(product, S, K, T, r, q, sigma)
+            result = self._price_mc_or_qmc(product, S, K, T, r, q, sigma, term=term)
 
         contract_multiplier = product.contract_multiplier
         result.price *= contract_multiplier
@@ -234,6 +235,7 @@ class AmericanOptionMCEngine(BaseEngine):
         sigma: float,
         T: float,
         num_paths: Optional[int] = None,
+        term=None,
     ) -> GBMPathGenerator:
         """Create a GBMPathGenerator configured for the current method."""
         params = self.params
@@ -256,16 +258,8 @@ class AmericanOptionMCEngine(BaseEngine):
         if params.use_antithetic and not is_qmc:
             vr_config = VarianceReductionConfig(antithetic=True)
 
-        term_ctx = getattr(self, "_term_ctx", None)
-        if term_ctx is not None:
-            env_ctx, ref_strike = term_ctx
-            term = build_mc_term_inputs(
-                env_ctx, ref_strike=ref_strike, maturity=T,
-                time_steps=params.time_steps,
-            )
+        if term is not None:
             vol_in, rrf_in, div_in = term.vol, term.rrf, term.div
-            # Per-step curve DFs for the LSM backward induction
-            self._last_step_dfs = term.node_dfs[1:] / term.node_dfs[:-1]
         else:
             vol_in, rrf_in, div_in = sigma, r, q
 
@@ -293,14 +287,17 @@ class AmericanOptionMCEngine(BaseEngine):
         r: float,
         q: float,
         sigma: float,
+        *,
+        term=None,
     ) -> AmericanMCResult:
         """Price using normal MC or QMC (non-randomized)."""
-        generator = self._create_path_generator(S, r, q, sigma, T)
+        generator = self._create_path_generator(S, r, q, sigma, T, term=term)
         paths, _ = generator.generate_paths(return_aux=False)
 
-        step_dfs = getattr(self, "_last_step_dfs", None)
         discount_factors = (
-            step_dfs if step_dfs is not None else safe_exp(-r * generator.dt_vector)
+            term.node_dfs[1:] / term.node_dfs[:-1]
+            if term is not None
+            else safe_exp(-r * generator.dt_vector)
         )
 
         payoffs, exercise_steps = self._lsm_discounted_payoffs(
@@ -345,6 +342,8 @@ class AmericanOptionMCEngine(BaseEngine):
         r: float,
         q: float,
         sigma: float,
+        *,
+        term=None,
     ) -> AmericanMCResult:
         """Price using Randomized QMC with adaptive batching."""
         params = self.params
@@ -366,11 +365,12 @@ class AmericanOptionMCEngine(BaseEngine):
             per_batch_paths = params.num_paths
 
         generator = self._create_path_generator(
-            S, r, q, sigma, T, num_paths=per_batch_paths
+            S, r, q, sigma, T, num_paths=per_batch_paths, term=term
         )
-        step_dfs = getattr(self, "_last_step_dfs", None)
         discount_factors = (
-            step_dfs if step_dfs is not None else safe_exp(-r * generator.dt_vector)
+            term.node_dfs[1:] / term.node_dfs[:-1]
+            if term is not None
+            else safe_exp(-r * generator.dt_vector)
         )
 
         def pricer_fn(paths, aux):
