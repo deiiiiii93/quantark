@@ -51,13 +51,30 @@ def forward_carry_on_grid(
     maps maturity (years) to continuously-compounded zero yield (e.g. env.get_div_yield).
     """
     t = _validate_grid(t_grid)
-    out = np.empty(t.size - 1, dtype=float)
-    for i in range(t.size - 1):
-        t0, t1 = t[i], t[i + 1]
-        w0 = 0.0 if t0 <= 0.0 else float(zero_yield(t0)) * t0
-        out[i] = (float(zero_yield(t1)) * t1 - w0) / (t1 - t0)
+    y = _sample_vectorized(zero_yield, t)
+    if y is None:
+        y = np.array([float(zero_yield(x)) if x > 0.0 else 0.0 for x in t])
+    w = np.where(t > 0.0, y * t, 0.0)
+    out = np.diff(w) / np.diff(t)
     if not np.all(np.isfinite(out)):
         raise NumericalError("zero_yield produced non-finite forward carry")
+    return out
+
+
+def _sample_vectorized(fn, t: np.ndarray):
+    """Try one vectorized callable evaluation; None if unsupported.
+
+    Exactness: curve classes that accept ndarrays implement the identical
+    interpolation for scalars and arrays, so this is a fast path, not an
+    approximation. Callables that reject arrays (or return scalars) fall
+    back to the per-point loop.
+    """
+    try:
+        out = np.asarray(fn(t), dtype=float)
+    except Exception:
+        return None
+    if out.shape != t.shape:
+        return None
     return out
 
 
@@ -82,18 +99,19 @@ def step_vols_on_grid(
     (calendar arbitrage in the input surface).
     """
     t = _validate_grid(t_grid)
-    w = np.empty(t.size, dtype=float)
-    for i, ti in enumerate(t):
-        if ti <= 0.0:
-            w[i] = 0.0
-        else:
-            v = float(get_vol(float(ref_strike), float(ti)))
-            if not np.isfinite(v) or v <= 0.0:
-                raise NumericalError(
-                    f"get_vol returned invalid vol {v} at t={ti} "
-                    "(must be finite and strictly positive)"
-                )
-            w[i] = v * v * ti
+    v_all = _sample_vectorized(lambda ts: get_vol(float(ref_strike), ts), t)
+    if v_all is None:
+        v_all = np.array(
+            [float(get_vol(float(ref_strike), float(ti))) if ti > 0.0 else 1.0 for ti in t]
+        )
+    pos = t > 0.0
+    if np.any(~np.isfinite(v_all[pos])) or np.any(v_all[pos] <= 0.0):
+        bad = v_all[pos][~(np.isfinite(v_all[pos]) & (v_all[pos] > 0.0))][0]
+        raise NumericalError(
+            f"get_vol returned invalid vol {bad} "
+            "(must be finite and strictly positive)"
+        )
+    w = np.where(pos, v_all * v_all * t, 0.0)
     dw = np.diff(w)
     if np.any(dw < -1e-12):
         raise NumericalError(

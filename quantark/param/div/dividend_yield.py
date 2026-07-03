@@ -93,13 +93,17 @@ class TermStructureDividendYield(DividendYield):
         if any(abs(y) > 1.0 for y in self.yields):
             raise ValidationError("dividend yield magnitude must be <= 1.0.")
 
-    def get_yield(self, time_to_maturity: float) -> float:
-        t = float(time_to_maturity)
-        if t <= self.times[0]:
-            return float(self.yields[0])
-        if t >= self.times[-1]:
-            return float(self.yields[-1])
-        return float(np.interp(t, self.times, self.yields))
+    def get_yield(self, time_to_maturity):
+        """Zero carry to maturity; accepts a scalar or an ndarray of times.
+
+        np.interp clips to the endpoint values, which IS the documented flat
+        extrapolation — array and scalar paths are exactly equivalent.
+        """
+        t = np.asarray(time_to_maturity, dtype=float)
+        out = np.interp(t, self.times, self.yields)
+        if t.ndim == 0:
+            return float(out)
+        return out
 
     def __repr__(self):
         return "TermStructureDividendYield(points=%d)" % len(self.times)

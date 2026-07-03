@@ -115,15 +115,24 @@ class TermStructureVolSurface(BlackImpliedVolSurface):
         for v in self.vols:
             validate_positive(float(v), name="volatility")
 
-    def get_vol(self, strike: float, time_to_maturity: float, spot: float) -> float:
-        t = float(time_to_maturity)
-        if t <= self.times[0]:
-            return float(self.vols[0])
-        if t >= self.times[-1]:
-            return float(self.vols[-1])
-        total_variances = [float(v) ** 2 * float(tt) for v, tt in zip(self.vols, self.times)]
-        interp_total_var = float(np.interp(t, self.times, total_variances))
-        return float(safe_sqrt(safe_divide(interp_total_var, t)))
+    def get_vol(self, strike: float, time_to_maturity, spot: float):
+        """Term vol via total-variance interpolation; scalar or ndarray times.
+
+        Endpoint behavior: at/below the first pillar and at/above the last,
+        the pillar VOL is returned flat (matching the scalar code path).
+        """
+        t = np.asarray(time_to_maturity, dtype=float)
+        times = np.asarray(self.times, dtype=float)
+        vols = np.asarray(self.vols, dtype=float)
+        total_variances = vols * vols * times
+        interp_tv = np.interp(t, times, total_variances)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out = np.sqrt(np.maximum(interp_tv, 0.0) / np.where(t > 0.0, t, 1.0))
+        out = np.where(t <= times[0], vols[0], out)
+        out = np.where(t >= times[-1], vols[-1], out)
+        if t.ndim == 0:
+            return float(out)
+        return out
 
     def __repr__(self):
         return "TermStructureVolSurface(points=%d)" % len(self.times)

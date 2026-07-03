@@ -73,9 +73,12 @@ class TermCoefficients:
     ) -> "TermCoefficients":
         t = _validate_grid(t_grid)
         node_dfs = discount_factors_on_grid(pricing_env.rate_curve, t)
+        # Forward rates from the node DFs directly — identical DF-based math
+        # to forward_rates_on_grid, without re-evaluating the curve per step.
+        fwd_rates = -np.log(node_dfs[1:] / node_dfs[:-1]) / np.diff(t)
         return cls(
             t_grid=t,
-            fwd_rates=forward_rates_on_grid(pricing_env.rate_curve, t),
+            fwd_rates=fwd_rates,
             fwd_carry=forward_carry_on_grid(pricing_env.get_div_yield, t),
             step_vols=step_vols_on_grid(pricing_env.get_vol, ref_strike, t),
             node_dfs=node_dfs,

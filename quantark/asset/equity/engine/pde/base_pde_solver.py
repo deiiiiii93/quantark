@@ -6,6 +6,7 @@ backward in time, with support for Rannacher smoothing.
 """
 
 from abc import abstractmethod
+import weakref
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -47,6 +48,32 @@ class TimeGridSpec:
     align_times: list
     monitor_times: list = field(default_factory=list)
     steps_per_day: float = 1.0
+
+
+# Per-environment memoization for curve lookups and step coefficients.
+# PricingEnvironment is an eq=True dataclass (unhashable), so these stores
+# key on id() with a weakref eviction callback plus an identity re-check —
+# entries die with the env, id reuse cannot alias (the stored weakref must
+# still point at the SAME object), and repeated pricing against one env
+# (portfolios, price + event stats, benchmark medians) hits warm caches
+# across solver instances.
+_ENV_DF_MEMO: dict = {}
+_ENV_STEP_COEFF_MEMO: dict = {}
+
+
+def _per_env_memo(pricing_env, store: dict) -> Optional[dict]:
+    """Return the per-env memo dict, or None if the env is not weakref-able."""
+    key = id(pricing_env)
+    entry = store.get(key)
+    if entry is not None and entry[0]() is pricing_env:
+        return entry[1]
+    try:
+        ref = weakref.ref(pricing_env, lambda _r, _k=key: store.pop(_k, None))
+    except TypeError:
+        return None
+    memo: dict = {}
+    store[key] = (ref, memo)
+    return memo
 
 
 class StepCoefficients(NamedTuple):
@@ -947,32 +974,65 @@ class BasePDESolver(BaseEngine):
         """Sample forward (r, q, sigma) per time step and build operator sets."""
         from quantark.priceenv.term_sampling import TermCoefficients
 
+        memo = _per_env_memo(pricing_env, _ENV_STEP_COEFF_MEMO)
+        if memo is not None:
+            mkey = (
+                float(ref_strike),
+                np.asarray(t_vec, dtype=float).tobytes(),
+                np.asarray(dx_vec, dtype=float).tobytes(),
+                int(num_x),
+            )
+            cached = memo.get(mkey)
+            if cached is not None:
+                return cached
+
         tc = TermCoefficients.from_env(
             pricing_env, np.asarray(t_vec, dtype=float), ref_strike=float(ref_strike)
         )
-        lcu_sets: list = []
-        keys: dict = {}
         n_steps = len(t_vec) - 1
-        set_index = np.zeros(n_steps, dtype=int)
-        for j in range(n_steps):
-            # 12 decimals (same precision as the dt cache keys) absorbs
-            # DF round-trip ulp noise so flat curves dedupe to ONE set
-            key = (
-                round(float(tc.fwd_rates[j]), 12),
-                round(float(tc.fwd_carry[j]), 12),
-                round(float(tc.step_vols[j]), 12),
+        # 12 decimals (same precision as the dt cache keys) absorbs DF
+        # round-trip ulp noise so flat curves dedupe to ONE set
+        triples = np.column_stack(
+            (
+                np.round(tc.fwd_rates, 12),
+                np.round(tc.fwd_carry, 12),
+                np.round(tc.step_vols, 12),
             )
-            idx = keys.get(key)
-            if idx is None:
-                idx = len(lcu_sets)
-                keys[key] = idx
-                lcu_sets.append(
-                    self._calculate_coefficients(key[0], key[1], key[2], dx_vec, num_x)
-                )
-            set_index[j] = idx
-        return StepCoefficients(
-            lcu_sets=lcu_sets, set_index=set_index, n_unique=len(lcu_sets)
         )
+        uniq, set_index = np.unique(triples, axis=0, return_inverse=True)
+        n_unique = uniq.shape[0]
+
+        # Vectorized _calculate_coefficients over all unique triples at once
+        r_u, q_u, sig_u = uniq[:, 0:1], uniq[:, 1:2], uniq[:, 2:3]  # (n_unique, 1)
+        mu = r_u - q_u - 0.5 * sig_u * sig_u
+        D = 0.5 * sig_u * sig_u
+        dx_vec = np.asarray(dx_vec, dtype=float)
+        l = np.zeros((n_unique, num_x))
+        c = np.zeros((n_unique, num_x))
+        u = np.zeros((n_unique, num_x))
+        if is_close(float(np.max(dx_vec)), float(np.min(dx_vec))):
+            dx = dx_vec[0]
+            l[:, :] = D / (dx * dx) - mu / (2.0 * dx)
+            c[:, :] = -2.0 * D / (dx * dx) - r_u
+            u[:, :] = D / (dx * dx) + mu / (2.0 * dx)
+        else:
+            h_m, h_p = dx_vec[:-1], dx_vec[1:]
+            h_sum, h_prod = h_m + h_p, h_m * h_p
+            l[:, 1:-1] = 2.0 * D / (h_m * h_sum) - mu * h_p / (h_m * h_sum)
+            c[:, 1:-1] = -2.0 * D / h_prod + mu * (h_p - h_m) / h_prod - r_u
+            u[:, 1:-1] = 2.0 * D / (h_p * h_sum) + mu * h_m / (h_p * h_sum)
+            l[:, 0], c[:, 0], u[:, 0] = l[:, 1], c[:, 1], u[:, 1]
+            l[:, -1], c[:, -1], u[:, -1] = l[:, -2], c[:, -2], u[:, -2]
+
+        lcu_sets = [(l[k], c[k], u[k]) for k in range(n_unique)]
+        result = StepCoefficients(
+            lcu_sets=lcu_sets,
+            set_index=np.asarray(set_index, dtype=int).reshape(n_steps),
+            n_unique=n_unique,
+        )
+        if memo is not None:
+            memo[mkey] = result
+        return result
 
     def _flat_exact_step_coefficients(
         self,
@@ -1266,25 +1326,37 @@ class BasePDESolver(BaseEngine):
         """Elapsed time (from valuation) at a backward-induction step."""
         return max(total_tau - tau_remaining, 0.0)
 
-    @staticmethod
     def _df_between_times(
-        pricing_env: PricingEnvironment, start_time: float, end_time: float
+        self, pricing_env: PricingEnvironment, start_time: float, end_time: float
     ) -> float:
         """
         Forward discount factor DF(start_time, end_time), both measured from
         the valuation date. Term-structure consistent: DF(0,T)/DF(0,t), NOT
         exp(-r(tau)*tau) with tau = remaining time (they coincide only under
         a flat curve).
+
+        Memoized per pricing environment (identity-checked, strong ref held):
+        the boundary-condition path evaluates the same (t, T) pairs many
+        times per step, and term-structure curves make each curve lookup a
+        np.interp call — the memo keeps the term/flat cost ratio inside the
+        spec's 20% budget.
         """
         if end_time <= start_time:
             return 1.0
-        df_end = pricing_env.get_discount_factor(end_time)
-        df_start = pricing_env.get_discount_factor(start_time)
-        return float(safe_divide(df_end, df_start, fallback=1.0))
+        memo = _per_env_memo(pricing_env, _ENV_DF_MEMO)
+        if memo is None:
+            memo = {}
+        key = (round(float(start_time), 12), round(float(end_time), 12))
+        v = memo.get(key)
+        if v is None:
+            df_end = pricing_env.get_discount_factor(end_time)
+            df_start = pricing_env.get_discount_factor(start_time)
+            v = float(safe_divide(df_end, df_start, fallback=1.0))
+            memo[key] = v
+        return v
 
-    @staticmethod
     def _carry_df_between_times(
-        pricing_env: PricingEnvironment, start_time: float, end_time: float
+        self, pricing_env: PricingEnvironment, start_time: float, end_time: float
     ) -> float:
         """Forward dividend/carry discount factor exp(-(q(T)T - q(t)t)).
 
@@ -1294,13 +1366,21 @@ class BasePDESolver(BaseEngine):
         """
         if end_time <= start_time:
             return 1.0
-        w_end = float(pricing_env.get_div_yield(end_time)) * float(end_time)
-        w_start = (
-            float(pricing_env.get_div_yield(start_time)) * float(start_time)
-            if start_time > 0.0
-            else 0.0
-        )
-        return float(np.exp(-(w_end - w_start)))
+        memo = _per_env_memo(pricing_env, _ENV_DF_MEMO)
+        if memo is None:
+            memo = {}
+        key = ("q", round(float(start_time), 12), round(float(end_time), 12))
+        v = memo.get(key)
+        if v is None:
+            w_end = float(pricing_env.get_div_yield(end_time)) * float(end_time)
+            w_start = (
+                float(pricing_env.get_div_yield(start_time)) * float(start_time)
+                if start_time > 0.0
+                else 0.0
+            )
+            v = float(np.exp(-(w_end - w_start)))
+            memo[key] = v
+        return v
 
     def _cashflow_value_at_time(
         self,

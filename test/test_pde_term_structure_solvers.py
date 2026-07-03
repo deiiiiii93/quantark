@@ -268,3 +268,23 @@ def test_heston_pde_cumulative_convention_is_term_exact_for_europeans():
         option, _collapsed_flat_env(env_term, 1.0)
     )
     assert px_term == pytest.approx(px_collapsed, rel=1e-8)
+
+
+def test_term_pde_not_pathologically_slower_than_flat():
+    """Loose CI smoke guard (2x) — the formal 20% budget is measured by
+    example/pde_term_structure_benchmark.py (see Phase 2 commit messages)."""
+    import time
+
+    from quantark.asset.equity.engine.pde import SnowballPDESolver
+
+    def best_time(env):
+        best = float("inf")
+        for _ in range(3):
+            start = time.perf_counter()
+            SnowballPDESolver().price(_standard_snowball(), env)
+            best = min(best, time.perf_counter() - start)
+        return best
+
+    flat = best_time(make_term_env("flat"))
+    term = best_time(make_term_env("kinked"))
+    assert term <= 2.0 * flat + 0.05  # catches pathology, not noise
