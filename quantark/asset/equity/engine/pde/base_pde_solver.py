@@ -881,7 +881,7 @@ class BasePDESolver(BaseEngine):
         mu = r - q - 0.5 * sigma * sigma
         D = 0.5 * sigma * sigma
 
-        if (np.max(dx_vec) - np.min(dx_vec)) < 1e-10:
+        if is_close(float(np.max(dx_vec)), float(np.min(dx_vec))):
             dx = dx_vec[0]
             l = np.full(num_x, D / (dx * dx) - mu / (2.0 * dx))
             c = np.full(num_x, -2.0 * D / (dx * dx) - r)
@@ -1086,18 +1086,28 @@ class BasePDESolver(BaseEngine):
         Returns:
             Tuple of (delta, gamma)
         """
-        # Find nearest grid points
-        idx = np.searchsorted(x_vec, x_target)
+        # Snap to the grid node nearest x_target (interior only)
+        idx = int(np.searchsorted(x_vec, x_target))
         idx = max(1, min(idx, len(x_vec) - 2))
+        if idx > 1 and abs(x_vec[idx - 1] - x_target) < abs(x_vec[idx] - x_target):
+            idx -= 1
 
-        # Local grid spacing
-        dx_left = x_vec[idx] - x_vec[idx - 1]
-        dx_right = x_vec[idx + 1] - x_vec[idx]
-        dx_avg = (dx_left + dx_right) / 2.0
+        # Non-uniform three-point stencil (exact for quadratics on ANY local
+        # spacing). The symmetric formulas are only valid when h_m == h_p; on
+        # the adaptive grid the asymmetry error is proportional to gamma.
+        h_m = x_vec[idx] - x_vec[idx - 1]
+        h_p = x_vec[idx + 1] - x_vec[idx]
+        h_sum = h_m + h_p
 
-        # Central differences for derivatives in log-space
-        dv_dx = (v_vec[idx + 1] - v_vec[idx - 1]) / (dx_left + dx_right)
-        d2v_dx2 = (v_vec[idx + 1] - 2 * v_vec[idx] + v_vec[idx - 1]) / (dx_avg**2)
+        v_m, v_0, v_p = v_vec[idx - 1], v_vec[idx], v_vec[idx + 1]
+        dv_dx = (
+            -h_p / (h_m * h_sum) * v_m
+            + (h_p - h_m) / (h_m * h_p) * v_0
+            + h_m / (h_p * h_sum) * v_p
+        )
+        d2v_dx2 = 2.0 * (
+            v_m / (h_m * h_sum) - v_0 / (h_m * h_p) + v_p / (h_p * h_sum)
+        )
 
         # Convert to price-space derivatives
         delta = dv_dx / spot

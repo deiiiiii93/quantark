@@ -485,6 +485,83 @@ class TestQuadGridResolutionSafeguard:
 
 
 # ============================================================================
+# Audit #10 — the BGK barrier shift must use the ACTUAL KI monitoring spacing,
+# not a hardcoded daily dt. A weekly schedule needs a sqrt(5)x larger shift.
+# ============================================================================
+
+
+class TestBGKMonitoringSpacing:
+    def test_bgk_shift_uses_actual_weekly_spacing(self):
+        import math
+
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.engine.pde.snowball_pde_solver import _BGK_BETA
+        from quantark.asset.equity.product.option import SnowballOption
+        from quantark.asset.equity.product.option.snowball_config import (
+            BarrierConfig as SnowballBarrierConfig,
+        )
+        from quantark.util.enum.engine_enums import KnockInMonitoringMode
+
+        env = create_pricing_env(div=0.0)
+        vol = 0.20
+        weekly_dt = 1.0 / 52.0
+        ki_dates = [i * weekly_dt for i in range(1, 52)]  # weekly, interior
+        barrier_config = SnowballBarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.12,
+            ko_observation_dates=[i / 12 for i in range(1, 13)],
+            ki_barrier=75.0,
+            ki_continuous=False,
+            ki_observation_dates=ki_dates,
+        )
+        snowball = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            contract_multiplier=1.0,
+            maturity=1.0,
+        )
+
+        solver = SnowballPDESolver(
+            PDEParams(
+                grid_size=200,
+                time_steps=100,
+                ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION,
+            )
+        )
+        solver.price(snowball, env)
+
+        assert solver._bgk_active is True
+        expected = 75.0 * math.exp(-_BGK_BETA * vol * math.sqrt(weekly_dt))
+        assert solver._bgk_ki_barrier == pytest.approx(expected, rel=1e-9)
+
+
+# ============================================================================
+# Audit #7 — _calculate_delta_gamma used uniform-grid central differences on
+# the (default) non-uniform adaptive grid. Pre-fix, gamma was wrong by
+# +2,500% to +12,500% whenever spot != strike (e.g. 2.1 vs the true 0.017).
+# ============================================================================
+
+
+class TestNonUniformGridGreeks:
+    @pytest.mark.parametrize("spot", [95.0, 100.0, 105.0, 110.0])
+    def test_default_grid_gamma_matches_black_scholes(self, spot):
+        from quantark.asset.equity.engine.analytical import BlackScholesEngine
+        from quantark.asset.equity.engine.pde import EuropeanPDESolver
+        from quantark.asset.equity.product.option import EuropeanVanillaOption
+
+        env = create_pricing_env(spot=spot)
+        option = EuropeanVanillaOption(
+            strike=100.0, option_type=OptionType.CALL, maturity=1.0
+        )
+        pde = EuropeanPDESolver(PDEParams()).calculate_greeks(option, env)
+        bs = BlackScholesEngine().calculate_greeks(option, env)
+
+        assert pde["delta"] == pytest.approx(bs["delta"], rel=0.02)
+        assert pde["gamma"] == pytest.approx(bs["gamma"], rel=0.05)
+
+
+# ============================================================================
 # Audit #9 — KOResetSnowballPDESolver's _solve override skipped _configure_bgk
 # entirely, so ki_monitoring_mode=BGK_APPROXIMATION was a silent no-op (no
 # warning, exact-discrete pricing returned instead).

@@ -691,19 +691,22 @@ class PhoenixPDESolver(SnowballPDESolver):
             df = self._df_between_times(pricing_env, current_time, ko_record.settlement_time)
             
         for k in range(len(grid_v0_list)):
-            effective_k = k if k <= max_k else max_k 
+            effective_k = k if k <= max_k else max_k
             accumulated_pay = (
                 self._accumulated_coupon_amount(obs_idx, effective_k)
                 if (use_memory and obs_idx is not None)
                 else 0.0
             )
 
-            total_payoff = np.full_like(
-                s_vec, (base_payoff + accumulated_pay) * df, dtype=float
-            )
-            if coupon_amt > 0.0:
+            # Memory semantics (matching PhoenixMCEngine): accrued coupons are
+            # released ONLY when the current observation's coupon condition is
+            # met — a KO below the coupon barrier forfeits them along with the
+            # current coupon.
+            total_payoff = np.full_like(s_vec, base_payoff * df, dtype=float)
+            coupon_at_ko = coupon_amt + accumulated_pay
+            if coupon_at_ko > 0.0:
                 total_payoff = np.where(
-                    pay_mask, total_payoff + coupon_amt * df, total_payoff
+                    pay_mask, total_payoff + coupon_at_ko * df, total_payoff
                 )
             
             if ko_mask.any():

@@ -1145,8 +1145,11 @@ class SnowballPDESolver(BasePDESolver):
                 idx = self._aligned_time_index(t_vec, obs_time, "KO observation")
                 self._ko_observation_indices[idx] = rec
 
-        # Setup KI observation indices (if discrete)
-        if product.has_ki_barrier and not self._ki_continuous:
+        # Setup KI observation indices (if discrete). Under BGK the interior
+        # KI dates are intentionally dropped from the time grid (continuous
+        # monitoring at the shifted barrier replaces them), so alignment is
+        # neither possible nor needed.
+        if product.has_ki_barrier and not self._ki_continuous and not self._bgk_active:
             ki_profile = self._get_cached_ki_profile(pricing_env, product)
             ki_times = ki_profile["observation_times"]
             ki_barriers = ki_profile.get("barriers") or []
@@ -1179,21 +1182,45 @@ class SnowballPDESolver(BasePDESolver):
         return float(self._ki_barrier)
 
     def _bgk_shifted_ki_barrier(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, sigma: float
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        sigma: float,
+        tau: float,
     ) -> float:
         """Broadie-Glasserman-Kou continuity-corrected KI barrier [§11.6].
 
         Shift the discrete KI barrier AWAY from spot by ``exp(±beta*sigma*sqrt(dt))``
-        with ``dt = 1/bus_days_in_year``: a standard down-in barrier shifts DOWN
-        (``-``), a reverse up-in barrier shifts UP (``+``). ``sigma`` is the same
-        strike-selected constant vol used to build the operator, so the shift is
-        consistent with the diffusion the grid resolves.
+        with ``dt`` = the ACTUAL spacing between consecutive KI monitoring
+        dates (median interval; the BGK correction assumes equal spacing, so a
+        warning is logged for materially irregular schedules). A standard
+        down-in barrier shifts DOWN (``-``), a reverse up-in barrier shifts UP
+        (``+``). ``sigma`` is the same strike-selected constant vol used to
+        build the operator, so the shift is consistent with the diffusion the
+        grid resolves.
         """
         ki_barrier = product.barrier_config.ki_barrier
         if isinstance(ki_barrier, list):
             ki_barrier = ki_barrier[0]
         ki_barrier = float(ki_barrier)
-        dt = 1.0 / float(pricing_env.bus_days_in_year)
+
+        # _bgk_applicable guarantees interior monitor times exist.
+        times = np.sort(np.asarray(self._ki_monitor_times(product, tau), dtype=float))
+        intervals = np.diff(np.concatenate(([0.0], times)))
+        intervals = intervals[intervals > Tolerance.ZERO]
+        dt = float(np.median(intervals))
+        if intervals.size > 1 and float(np.max(intervals)) > 1.5 * float(
+            np.min(intervals)
+        ):
+            logging.warning(
+                "BGK continuity correction assumes equally-spaced KI monitoring; "
+                "this schedule's intervals range from %.6f to %.6f years. Using "
+                "the median interval %.6f for the barrier shift.",
+                float(np.min(intervals)),
+                float(np.max(intervals)),
+                dt,
+            )
+
         shift = _BGK_BETA * float(sigma) * safe_sqrt(dt)
         return ki_barrier * safe_exp(shift if product.is_reverse else -shift)
 
@@ -1239,7 +1266,9 @@ class SnowballPDESolver(BasePDESolver):
             )
             return
         self._bgk_active = True
-        self._bgk_ki_barrier = self._bgk_shifted_ki_barrier(product, pricing_env, sigma)
+        self._bgk_ki_barrier = self._bgk_shifted_ki_barrier(
+            product, pricing_env, sigma, tau
+        )
 
     def _aligned_time_index(
         self, t_vec: np.ndarray, obs_time: float, label: str
@@ -1306,7 +1335,9 @@ class SnowballPDESolver(BasePDESolver):
             tau = product.get_maturity(pricing_env)
             if tau > 0 and self._bgk_applicable(product, tau):
                 sigma = pricing_env.get_vol(product.strike, tau)
-                points.append(self._bgk_shifted_ki_barrier(product, pricing_env, sigma))
+                points.append(
+                    self._bgk_shifted_ki_barrier(product, pricing_env, sigma, tau)
+                )
 
         return sorted(set([p for p in points if p > 0]))
 

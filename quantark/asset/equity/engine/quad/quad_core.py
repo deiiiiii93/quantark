@@ -350,8 +350,12 @@ class QuadratureCore:
         x_m = np.array([bound_lr_m, bound_ur_m, xee_lr_m, xee_ur_m])
 
         spot_array = self.spot * np.exp(x_m)
+        # tilde_V_{M-1} must be evaluated with the TERMINAL boundary levels
+        # K_M (Prop 3.3): the boundary points {B_{M-1}, xi_{M-1}} select WHERE
+        # to evaluate, but the value function itself is the step-M payoff —
+        # exactly as the grid-wide evaluation in _backward_recursion does.
         values = self._option_value_at_previous_m(
-            spot_array, self.ko[m_index], self.ki[m_index], factors,
+            spot_array, self.ko[self.grid_t], self.ki[self.grid_t], factors,
             factor_index=self.grid_t, step_index=self.grid_t
         )
 
