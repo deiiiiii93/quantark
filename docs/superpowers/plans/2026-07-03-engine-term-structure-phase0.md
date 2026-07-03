@@ -188,6 +188,12 @@ def test_step_vols_rejects_decreasing_total_variance():
 
     with pytest.raises(NumericalError):
         step_vols_on_grid(vol, 100.0, np.array([0.0, 0.5, 1.0]))
+
+
+@pytest.mark.parametrize("bad_vol", [-0.20, 0.0, float("nan")])
+def test_step_vols_rejects_invalid_sampled_vols(bad_vol):
+    with pytest.raises(NumericalError):
+        step_vols_on_grid(lambda k, t: bad_vol, 100.0, np.array([0.0, 0.5, 1.0]))
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -227,6 +233,11 @@ def step_vols_on_grid(
             w[i] = 0.0
         else:
             v = float(get_vol(float(ref_strike), float(ti)))
+            if not np.isfinite(v) or v <= 0.0:
+                raise NumericalError(
+                    f"get_vol returned invalid vol {v} at t={ti} "
+                    "(must be finite and strictly positive)"
+                )
             w[i] = v * v * ti
     dw = np.diff(w)
     if np.any(dw < -1e-12):
@@ -341,6 +352,31 @@ def test_shapes_are_consistent():
     assert tc.fwd_rates.shape == tc.fwd_carry.shape == tc.step_vols.shape == (2,)
     assert tc.node_dfs.shape == (3,)
     assert tc.step_dfs.shape == (2,)
+
+
+def test_arrays_are_defensive_copies_and_read_only():
+    grid = np.array([0.0, 1.0, 2.0])
+    tc = TermCoefficients.from_env(make_flat_env(), grid, ref_strike=100.0)
+    grid[1] = 99.0  # mutate caller's grid after construction
+    assert tc.t_grid[1] == pytest.approx(1.0)  # no aliasing
+    with pytest.raises(ValueError):
+        tc.fwd_rates[0] = 0.99  # read-only
+    with pytest.raises(ValueError):
+        tc.t_grid[0] = -1.0
+
+
+def test_mismatched_shapes_rejected():
+    from quantark.util.exceptions import ValidationError
+
+    with pytest.raises(ValidationError):
+        TermCoefficients(
+            t_grid=np.array([0.0, 1.0, 2.0]),
+            fwd_rates=np.array([0.03]),  # wrong length: expect 2
+            fwd_carry=np.array([0.01, 0.01]),
+            step_vols=np.array([0.2, 0.2]),
+            node_dfs=np.array([1.0, 0.97, 0.94]),
+            step_dfs=np.array([0.97, 0.97]),
+        )
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -368,6 +404,7 @@ from quantark.param.term_sampling import (
     forward_rates_on_grid,
     step_vols_on_grid,
 )
+from quantark.util.exceptions import ValidationError
 
 
 @dataclass(frozen=True)
@@ -386,6 +423,30 @@ class TermCoefficients:
     step_vols: np.ndarray
     node_dfs: np.ndarray
     step_dfs: np.ndarray
+
+    def __post_init__(self) -> None:
+        """Defensive-copy every array, freeze it, and validate shapes.
+
+        Phases 1-3 share these objects across engines; aliased or mutated
+        arrays would silently desynchronize coefficients from the grid.
+        """
+        n = np.asarray(self.t_grid).size
+        expected = {
+            "t_grid": (n,),
+            "fwd_rates": (n - 1,),
+            "fwd_carry": (n - 1,),
+            "step_vols": (n - 1,),
+            "node_dfs": (n,),
+            "step_dfs": (n - 1,),
+        }
+        for name, shape in expected.items():
+            arr = np.array(getattr(self, name), dtype=float, copy=True)
+            if arr.shape != shape:
+                raise ValidationError(
+                    f"{name} must have shape {shape}, got {arr.shape}"
+                )
+            arr.flags.writeable = False
+            object.__setattr__(self, name, arr)
 
     @classmethod
     def from_env(
@@ -586,6 +647,18 @@ def test_bucketed_yield_goes_negative_without_clamp():
     assert bucketed.get_yield(0.5) == pytest.approx(-0.01)
 
 
+def test_wrappers_reject_non_finite_or_oversized_bumps():
+    with pytest.raises(ValidationError):
+        ShiftedDividendYield(base=ContinuousDividendYield(0.0), shift=math.nan)
+    with pytest.raises(ValidationError):
+        ShiftedDividendYield(base=ContinuousDividendYield(0.0), shift=-1.5)
+    with pytest.raises(ValidationError):
+        BucketedDividendYield(
+            base=ContinuousDividendYield(0.0),
+            bucket_start=0.0, bucket_end=1.0, bump=2.0,
+        )
+
+
 def test_central_dividend_rho_at_q_zero_matches_analytical():
     """At q=0 the old clamp broke the down bump; central FD must now match BS."""
     env = _env_q0()
@@ -634,6 +707,27 @@ Expected: `test_shifted_yield_goes_negative_without_clamp` and `test_bucketed_yi
 In `quantark/asset/equity/report/term_structure.py`:
 - `BucketedDividendYield.get_yield`: replace `return max(0.0, base_yield + float(self.bump))` with `return base_yield + float(self.bump)`.
 - `ShiftedDividendYield.get_yield`: replace `return max(0.0, base_yield + float(self.shift))` with `return base_yield + float(self.shift)`.
+- The wrappers bypass the Task 4 constructors, so they enforce the signed-carry
+  policy themselves. Extend `BucketedDividendYield.__post_init__` with:
+
+```python
+        if not math.isfinite(float(self.bump)) or abs(float(self.bump)) > 1.0:
+            raise ValidationError(
+                f"bump must be finite with magnitude <= 1.0, got {self.bump}"
+            )
+```
+
+  and add a `__post_init__` to `ShiftedDividendYield` (it has none today):
+
+```python
+    def __post_init__(self) -> None:
+        if not math.isfinite(float(self.shift)) or abs(float(self.shift)) > 1.0:
+            raise ValidationError(
+                f"shift must be finite with magnitude <= 1.0, got {self.shift}"
+            )
+```
+
+  (add `import math` to the module imports; `ValidationError` is already imported).
 
 In `quantark/asset/equity/riskmeasures/greeks_calculator.py`:
 - `_build_div_bumped_env`: delete the `if new_div < 0: raise ValidationError(...)` block and the `if any(y < 0 for y in new_yields): raise ValidationError(...)` block. Keep everything else.
