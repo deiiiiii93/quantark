@@ -344,3 +344,39 @@ def test_aggregate_rhoq_buckets_multiple_contracts_keeps_order():
     out = aggregate_futures_rhoq_buckets({"a": [r1, r2], "b": [dict(r2, rhoq_bucket=-3.0)]})
     assert [r["contract"] for r in out] == ["IC00", "IC01"]
     assert out[1]["rhoq_bucket"] == pytest.approx(-5.0)
+
+
+# --- spec test 7: portfolio net rhoq offset by futures hedge ---
+
+def test_portfolio_net_rhoq_offset_by_futures_hedge():
+    env = _env()  # spot 5000, r 3%
+    curve = _ic_curve()
+    engine = BlackScholesEngine()
+    calc = GreeksCalculator()
+    # maturity 0.18 == IC02 node: risk concentrates on one bucket
+    option = EuropeanVanillaOption(5000.0, OptionType.CALL, maturity=0.18)
+
+    delta_rows = calc.calculate_futures_delta_buckets(option, env, engine, curve)
+    rhoq_rows = calc.calculate_futures_rhoq_buckets(
+        option, env, engine, curve, div_bump=0.0001
+    )
+    row_d = next(r for r in delta_rows if r["contract"] == "IC02")
+    row_q = next(r for r in rhoq_rows if r["contract"] == "IC02")
+    assert abs(row_q["rhoq_bucket"]) > 1e-6  # standalone option rhoq non-zero
+
+    # hedge futures: theoretical carry under the implied curve
+    hedge_env = deepcopy(env)
+    hedge_env.div_yield = curve.to_dividend_yield_curve(env.rate_curve)
+    fut = Futures(underlying="IC", multiplier=1.0, maturity=0.18)
+    fut_rhoq_per_hand = (
+        DeltaOneEngine().calculate_greeks(fut, hedge_env)["dividend_rho"] * 200.0
+    )
+    assert fut_rhoq_per_hand < 0.0  # long futures rhoq negative
+
+    hands = row_d["hedge_hands"]
+    # net bucket delta ~ 0 by construction of hedge_hands
+    net_delta = row_d["delta_bucket"] + hands * row_d["delta_per_hand"]
+    assert net_delta == pytest.approx(0.0, abs=1e-9)
+    # net rhoq reduced relative to standalone option rhoq
+    net_rhoq = row_q["rhoq_bucket"] + hands * fut_rhoq_per_hand
+    assert abs(net_rhoq) < abs(row_q["rhoq_bucket"])
