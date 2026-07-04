@@ -47,7 +47,12 @@ from .bond_enums import (
     BondDerivativeType,
     ResetConvention,
 )
-from .greeks_enums import CommonGreek, EquityGreek
+from .greeks_enums import (
+    CommonGreek,
+    EquityGreek,
+    EquityDividendInputMode,
+    FuturesCarryRiskMode,
+)
 from .greek_conventions import GreekConvention
 
 __all__ = [
@@ -99,5 +104,7 @@ __all__ = [
     # Greek enums
     "CommonGreek",
     "EquityGreek",
+    "EquityDividendInputMode",
+    "FuturesCarryRiskMode",
     "GreekConvention",
 ]
