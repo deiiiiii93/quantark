@@ -9,12 +9,21 @@ Two scenarios:
      monthly KO observations, futures tenors spanning the observation
      range — risk spreads across all tenors.
 
+Each scenario ends with a cross-engine check: the same buckets computed on
+the QUAD, PDE, and MC snowball engines. The MC legs are seeded (common
+random numbers) and use larger bumps (20 futures points, 1% carry) — the
+discontinuous KO/KI payoff makes small-bump finite differences noisy even
+with a fixed seed.
+
 Run: python example/equity_futures_delta_buckets_demo.py
 """
 from datetime import datetime
 
 from quantark.asset.equity.engine.analytical.deltaone_engine import DeltaOneEngine
+from quantark.asset.equity.engine.mc import SnowballMCEngine
+from quantark.asset.equity.engine.pde_engine import PDEEngine
 from quantark.asset.equity.engine.quad import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.market import IndexFuturesCurve, IndexFuturesQuote
 from quantark.asset.equity.product.deltaone.futures import Futures
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig
@@ -130,6 +139,42 @@ def run_scenario(title, spot, quotes, ko_observation_dates, maturity):
             f"\nnote: snowball maturity {maturity} > last futures node "
             f"{quotes[-1].maturity} — the {quotes[-1].contract} bucket includes "
             "flat-extrapolated tail carry (extrapolated_tail=True)."
+        )
+
+    # cross-engine check: the same buckets on all three engine families.
+    # MC rhoq uses a 50bp bump — the per-1% scaling (x 0.01/div_bump) would
+    # otherwise amplify barrier-flip FD noise on the discontinuous payoff,
+    # even with common random numbers.
+    print("\ncross-engine check (same product, same implied curve):")
+    contracts = "  ".join(f"{q.contract:>10s}" for q in curve.quotes)
+    print(f"  {'engine':6s} {'greek':5s} {contracts}")
+    families = [
+        ("QUAD", SnowballQuadEngine()),
+        ("PDE", PDEEngine()),
+        ("MC", SnowballMCEngine(MCParams(seed=42, num_paths=100_000))),
+    ]
+    for name, family_engine in families:
+        # MC needs stronger finite-difference signals than the deterministic
+        # engines: a 1-point bump on F~5000 is only a few bp of carry, which
+        # drowns in barrier-flip noise even with a fixed seed. 20 points is
+        # still just 0.4% of the mark.
+        bump = 20.0 if name == "MC" else 1.0
+        d = (
+            delta_rows
+            if name == "QUAD"
+            else calc.calculate_futures_delta_buckets(
+                snowball, env, family_engine, curve, price_bump=bump
+            )
+        )
+        q = calc.calculate_futures_rhoq_buckets(
+            snowball, env, family_engine, curve,
+            div_bump=0.01 if name == "MC" else 0.005,
+        )
+        print(
+            f"  {name:6s} delta " + "  ".join(f"{r['delta_bucket']:+10.6f}" for r in d)
+        )
+        print(
+            f"  {name:6s} rhoq  " + "  ".join(f"{r['rhoq_bucket']:+10.6f}" for r in q)
         )
 
 
