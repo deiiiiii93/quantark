@@ -186,6 +186,28 @@ def test_rhoq_buckets_theoretical_mode_uses_bucketed_dividend():
     assert sum(by_contract.values()) == pytest.approx(scalar, rel=1e-6)
 
 
+def test_rhoq_buckets_theoretical_tail_beyond_last_node_not_dropped():
+    # codex code-review regression: a product maturing beyond the last futures
+    # tenor must keep its tail dividend exposure in the last bucket, not lose it
+    env = _env(spot=100.0, q=0.01)
+    curve = _short_curve()  # nodes [0.1, 0.3, 0.6]
+    engine = BlackScholesEngine()
+    option = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.5)
+    calc = GreeksCalculator()
+
+    rows = calc.calculate_futures_rhoq_buckets(
+        option, env, engine, curve,
+        mode=FuturesCarryRiskMode.THEORETICAL_CARRY, div_bump=0.0001,
+    )
+    scalar = calc.calculate_numerical_dividend_rho(
+        option, env, engine, div_bump=0.0001
+    )
+    assert abs(scalar) > 1e-6
+    assert sum(r["rhoq_bucket"] for r in rows) == pytest.approx(scalar, rel=1e-6)
+    assert abs(rows[-1]["rhoq_bucket"]) > 1e-6  # tail lands in the last bucket
+    assert [r["extrapolated_tail"] for r in rows] == [False, False, True]
+
+
 def test_rhoq_buckets_market_price_mode_rejected():
     env = _env()
     curve = _ic_curve()

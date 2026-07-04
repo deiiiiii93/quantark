@@ -1082,6 +1082,14 @@ class GreeksCalculator:
             raise ValidationError("div_bump must be positive")
         engine = self._resolve_bump_engine(product, pricing_env, engine)
 
+        maturity = product.get_maturity(pricing_env)
+        last_index = len(futures_curve.quotes) - 1
+
+        def _tail_flag(i: int, quote) -> bool:
+            return (i == last_index and maturity > quote.maturity) or (
+                i == 0 and maturity < quote.maturity
+            )
+
         rows: List[Dict[str, object]] = []
         if resolved_mode is FuturesCarryRiskMode.IMPLIED_FUTURES_CARRY:
             base_div = futures_curve.to_dividend_yield_curve(pricing_env.rate_curve)
@@ -1093,7 +1101,9 @@ class GreeksCalculator:
                 bumped_env.div_yield = bump_term_yield_node(base_div, i, div_bump)
                 bumped_price = engine.price(product, bumped_env)
                 rows.append(
-                    self._rhoq_bucket_row(quote, div_bump, base_price, bumped_price)
+                    self._rhoq_bucket_row(
+                        quote, div_bump, base_price, bumped_price, _tail_flag(i, quote)
+                    )
                 )
         else:  # THEORETICAL_CARRY: pricing_env.div_yield is the carry source
             base_price = engine.price(product, pricing_env)
@@ -1101,6 +1111,12 @@ class GreeksCalculator:
             if base_div is None:
                 base_div = ContinuousDividendYield(0.0)
             edges = [0.0] + [q.maturity for q in futures_curve.quotes]
+            # a product maturing beyond the last futures tenor still carries
+            # dividend exposure on (T_last, T*]; attribute that tail to the
+            # last contract's bucket (roll-hedge convention, mirrored from the
+            # implied mode's flat extrapolation) instead of dropping it
+            if maturity > edges[-1]:
+                edges[-1] = maturity
             for i, quote in enumerate(futures_curve.quotes):
                 bumped_env = deepcopy(pricing_env)
                 bumped_env.div_yield = BucketedDividendYield(
@@ -1111,18 +1127,21 @@ class GreeksCalculator:
                 )
                 bumped_price = engine.price(product, bumped_env)
                 rows.append(
-                    self._rhoq_bucket_row(quote, div_bump, base_price, bumped_price)
+                    self._rhoq_bucket_row(
+                        quote, div_bump, base_price, bumped_price, _tail_flag(i, quote)
+                    )
                 )
         return rows
 
     @staticmethod
-    def _rhoq_bucket_row(quote, div_bump, base_price, bumped_price):
+    def _rhoq_bucket_row(quote, div_bump, base_price, bumped_price, extrapolated_tail):
         return {
             "contract": quote.contract,
             "maturity": quote.maturity,
             "future_price": quote.price,
             "div_bump": div_bump,
             "rhoq_bucket": (bumped_price - base_price) * (0.01 / div_bump),
+            "extrapolated_tail": extrapolated_tail,
         }
 
     def estimate_theta_components(

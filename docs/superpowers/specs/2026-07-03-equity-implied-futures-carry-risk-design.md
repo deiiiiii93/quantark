@@ -663,7 +663,19 @@ The node source is mode-specific:
   to bump. Reuse the existing `BucketedDividendYield` (an interval bump over
   any base curve, already used by the snowball risk report) with bucket
   edges at the futures maturities `[0, T_0], (T_0, T_1], ...`. Do **not**
-  invent a parallel node-bump mechanism for this mode.
+  invent a parallel node-bump mechanism for this mode. When the product
+  maturity exceeds the last futures tenor, the **final bucket must extend to
+  the product maturity** — otherwise the tail exposure `(T_last, T*]` is
+  never bumped, every bucket reads zero for a long-dated option, and the
+  bucket table silently understates residual rhoq. This mirrors the implied
+  mode, where flat extrapolation attributes the tail to the last node; the
+  extended row carries `extrapolated_tail: true`. Bucketed theoretical rhoq
+  must sum to scalar `dividend_rho` for any product maturity (pinned by
+  test).
+
+Rhoq bucket rows carry the same `extrapolated_tail` flag as delta bucket
+rows (last row when maturity exceeds the last node, first row when maturity
+precedes the first node).
 
 Bump direction: one-sided **up**-bump (`+div_bump`), matching the existing
 scalar `calculate_numerical_dividend_rho` convention so scalar and bucketed
