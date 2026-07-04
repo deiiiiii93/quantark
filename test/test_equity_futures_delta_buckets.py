@@ -131,3 +131,67 @@ def test_futures_delta_buckets_mode_rejection():
         calc.calculate_futures_delta_buckets(
             option, env, BlackScholesEngine(), curve, price_bump=0.0
         )
+
+
+# --- rhoq buckets: implied node bump / theoretical BucketedDividendYield ---
+
+def test_rhoq_buckets_implied_mode_matches_manual_node_bump():
+    from quantark.asset.equity.market import bump_term_yield_node
+
+    env = _env()
+    curve = _ic_curve()
+    engine = BlackScholesEngine()
+    option = EuropeanVanillaOption(5000.0, OptionType.CALL, maturity=0.10)
+    calc = GreeksCalculator()
+
+    rows = calc.calculate_futures_rhoq_buckets(
+        option, env, engine, curve, div_bump=0.0001
+    )
+    row = next(r for r in rows if r["contract"] == "IC01")
+
+    base_div = curve.to_dividend_yield_curve(env.rate_curve)
+    base_env = deepcopy(env)
+    base_env.div_yield = base_div
+    bumped_env = deepcopy(env)
+    bumped_env.div_yield = bump_term_yield_node(base_div, 1, 0.0001)
+    manual = (
+        engine.price(option, bumped_env) - engine.price(option, base_env)
+    ) * (0.01 / 0.0001)
+    assert row["rhoq_bucket"] == pytest.approx(manual, rel=1e-12)
+    assert row["rhoq_bucket"] < 0.0  # call: higher carry lowers forward
+
+
+def test_rhoq_buckets_theoretical_mode_uses_bucketed_dividend():
+    env = _env(q=0.01)
+    curve = _ic_curve()
+    engine = BlackScholesEngine()
+    option = EuropeanVanillaOption(5000.0, OptionType.CALL, maturity=0.10)
+    calc = GreeksCalculator()
+
+    rows = calc.calculate_futures_rhoq_buckets(
+        option, env, engine, curve,
+        mode=FuturesCarryRiskMode.THEORETICAL_CARRY, div_bump=0.0001,
+    )
+    # option matures at 0.10 = IC01 node: spot-yield q(0.10) sits in the
+    # (0.03, 0.10] bucket, so only IC01's interval bump moves the PV
+    by_contract = {r["contract"]: r["rhoq_bucket"] for r in rows}
+    assert by_contract["IC01"] != pytest.approx(0.0, abs=1e-9)
+    assert by_contract["IC00"] == pytest.approx(0.0, abs=1e-9)
+    assert by_contract["IC02"] == pytest.approx(0.0, abs=1e-9)
+    assert by_contract["IC03"] == pytest.approx(0.0, abs=1e-9)
+    # bucket rows decompose the scalar rhoq: sum == scalar dividend_rho
+    scalar = calc.calculate_numerical_dividend_rho(
+        option, env, engine, div_bump=0.0001
+    )
+    assert sum(by_contract.values()) == pytest.approx(scalar, rel=1e-6)
+
+
+def test_rhoq_buckets_market_price_mode_rejected():
+    env = _env()
+    curve = _ic_curve()
+    with pytest.raises(ValidationError):
+        GreeksCalculator().calculate_futures_rhoq_buckets(
+            EuropeanVanillaOption(5000.0, OptionType.CALL, maturity=0.10),
+            env, BlackScholesEngine(), curve,
+            mode=FuturesCarryRiskMode.MARKET_PRICE,
+        )

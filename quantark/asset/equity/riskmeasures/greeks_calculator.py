@@ -1038,6 +1038,93 @@ class GreeksCalculator:
             )
         return rows
 
+    def calculate_futures_rhoq_buckets(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        futures_curve,
+        *,
+        mode=None,
+        div_bump: Optional[float] = None,
+    ) -> List[Dict[str, object]]:
+        """
+        Bucketed rhoq diagnostics per futures tenor (carry coordinate).
+        The base PV is always computed internally (per-mode base environment);
+        no ``base_price`` parameter — see calculate_futures_delta_buckets.
+
+        One-sided **up** dividend bump, matching the scalar
+        ``calculate_numerical_dividend_rho`` convention; output scaled to
+        per-1% yield change via ``* (0.01 / div_bump)``.
+
+        IMPLIED_FUTURES_CARRY: bumps one implied q(T_i) node at a time on the
+        curve rebuilt from ``futures_curve``. THEORETICAL_CARRY: bumps
+        ``pricing_env.div_yield`` on the interval (T_{i-1}, T_i] via
+        ``BucketedDividendYield`` (the futures curve supplies metadata only).
+        MARKET_PRICE is rejected: a zero bucket table can look like a real
+        hedge result.
+        """
+        from quantark.asset.equity.market import bump_term_yield_node
+        from quantark.asset.equity.report.term_structure import (
+            BucketedDividendYield,
+        )
+        from quantark.param.div import ContinuousDividendYield
+        from quantark.util.enum import FuturesCarryRiskMode
+
+        resolved_mode = mode if mode is not None else futures_curve.mode
+        if resolved_mode is FuturesCarryRiskMode.MARKET_PRICE:
+            raise ValidationError(
+                "calculate_futures_rhoq_buckets does not support MARKET_PRICE "
+                "mode (model carry rhoq is zero by convention there)"
+            )
+        div_bump = div_bump if div_bump is not None else self._bump_config.div_bump
+        if div_bump <= 0.0:
+            raise ValidationError("div_bump must be positive")
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
+
+        rows: List[Dict[str, object]] = []
+        if resolved_mode is FuturesCarryRiskMode.IMPLIED_FUTURES_CARRY:
+            base_div = futures_curve.to_dividend_yield_curve(pricing_env.rate_curve)
+            base_env = deepcopy(pricing_env)
+            base_env.div_yield = base_div
+            base_price = engine.price(product, base_env)
+            for i, quote in enumerate(futures_curve.quotes):
+                bumped_env = deepcopy(pricing_env)
+                bumped_env.div_yield = bump_term_yield_node(base_div, i, div_bump)
+                bumped_price = engine.price(product, bumped_env)
+                rows.append(
+                    self._rhoq_bucket_row(quote, div_bump, base_price, bumped_price)
+                )
+        else:  # THEORETICAL_CARRY: pricing_env.div_yield is the carry source
+            base_price = engine.price(product, pricing_env)
+            base_div = pricing_env.div_yield
+            if base_div is None:
+                base_div = ContinuousDividendYield(0.0)
+            edges = [0.0] + [q.maturity for q in futures_curve.quotes]
+            for i, quote in enumerate(futures_curve.quotes):
+                bumped_env = deepcopy(pricing_env)
+                bumped_env.div_yield = BucketedDividendYield(
+                    base=base_div,
+                    bucket_start=edges[i],
+                    bucket_end=edges[i + 1],
+                    bump=div_bump,
+                )
+                bumped_price = engine.price(product, bumped_env)
+                rows.append(
+                    self._rhoq_bucket_row(quote, div_bump, base_price, bumped_price)
+                )
+        return rows
+
+    @staticmethod
+    def _rhoq_bucket_row(quote, div_bump, base_price, bumped_price):
+        return {
+            "contract": quote.contract,
+            "maturity": quote.maturity,
+            "future_price": quote.price,
+            "div_bump": div_bump,
+            "rhoq_bucket": (bumped_price - base_price) * (0.01 / div_bump),
+        }
+
     def estimate_theta_components(
         self,
         theta: float,
