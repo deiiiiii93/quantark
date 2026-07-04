@@ -5,7 +5,7 @@ Greeks calculation for equity derivatives.
 import math
 from copy import deepcopy
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from scipy import stats
 
@@ -963,6 +963,80 @@ class GreeksCalculator:
             bump=self._bump_config.spot_bump,
         )
         return (delta_up - delta_down) / (2.0 * div_bump)
+
+    def calculate_futures_delta_buckets(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        futures_curve,
+        *,
+        mode=None,
+        price_bump: float = 1.0,
+    ) -> List[Dict[str, object]]:
+        """
+        Futures-tenor bucket deltas: delta_bucket_i = dPV / dF_i.
+
+        Bumps one futures mark at a time, rebuilds the implied q(T) curve,
+        and reprices (one-sided up bump). The base and bumped legs reuse the
+        same engine/params unchanged, so MC engines with a fixed seed price
+        with common random numbers. The base PV is always computed internally
+        under the implied-carry environment (div_yield rebuilt from
+        ``futures_curve``); no ``base_price`` parameter is accepted because a
+        caller's PV under ``pricing_env.div_yield`` would silently shift every
+        bucket.
+
+        hedge_hands = -delta_bucket / delta_per_hand (fractional, unrounded).
+        Rows are flagged ``extrapolated_tail`` when the product maturity lies
+        outside the quoted node range (flat-extrapolated carry).
+        """
+        from quantark.asset.equity.market import hedge_hands as _hedge_hands
+        from quantark.util.enum import FuturesCarryRiskMode
+
+        resolved_mode = mode if mode is not None else futures_curve.mode
+        if resolved_mode is not FuturesCarryRiskMode.IMPLIED_FUTURES_CARRY:
+            raise ValidationError(
+                "calculate_futures_delta_buckets requires IMPLIED_FUTURES_CARRY "
+                f"mode, got {resolved_mode}"
+            )
+        if price_bump <= 0.0:
+            raise ValidationError("price_bump must be positive")
+
+        engine = self._resolve_bump_engine(product, pricing_env, engine)
+        base_env = deepcopy(pricing_env)
+        base_env.div_yield = futures_curve.to_dividend_yield_curve(
+            pricing_env.rate_curve
+        )
+        base_price = engine.price(product, base_env)
+
+        maturity = product.get_maturity(pricing_env)
+        last_index = len(futures_curve.quotes) - 1
+        rows: List[Dict[str, object]] = []
+        for i, quote in enumerate(futures_curve.quotes):
+            bumped_curve = futures_curve.bump_contract(quote.contract, price_bump)
+            bumped_env = deepcopy(pricing_env)
+            bumped_env.div_yield = bumped_curve.to_dividend_yield_curve(
+                pricing_env.rate_curve
+            )
+            bumped_price = engine.price(product, bumped_env)
+            delta_bucket = (bumped_price - base_price) / price_bump
+            per_hand = futures_curve.delta_per_hand(quote.contract)
+            extrapolated_tail = (
+                i == last_index and maturity > quote.maturity
+            ) or (i == 0 and maturity < quote.maturity)
+            rows.append(
+                {
+                    "contract": quote.contract,
+                    "maturity": quote.maturity,
+                    "future_price": quote.price,
+                    "price_bump": price_bump,
+                    "delta_bucket": delta_bucket,
+                    "delta_per_hand": per_hand,
+                    "hedge_hands": _hedge_hands(delta_bucket, per_hand),
+                    "extrapolated_tail": extrapolated_tail,
+                }
+            )
+        return rows
 
     def estimate_theta_components(
         self,
