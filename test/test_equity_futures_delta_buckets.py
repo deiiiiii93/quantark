@@ -299,3 +299,48 @@ def test_mc_delta_buckets_deterministic_and_near_analytic():
     )
     mc_mid, bs_mid = rows_a[1]["delta_bucket"], analytic[1]["delta_bucket"]
     assert mc_mid == pytest.approx(bs_mid, rel=0.05)
+
+
+# --- portfolio aggregation ---
+
+def test_aggregate_futures_delta_buckets():
+    from quantark.portfolio.equity import aggregate_futures_delta_buckets
+
+    row = {
+        "contract": "IC01", "maturity": 0.10, "future_price": 5020.0,
+        "price_bump": 1.0, "delta_bucket": 600.0, "delta_per_hand": 300.0,
+        "hedge_hands": -2.0, "extrapolated_tail": False,
+    }
+    other = dict(row, delta_bucket=300.0, hedge_hands=-1.0)
+    out = aggregate_futures_delta_buckets({"pos_a": [row], "pos_b": [other]})
+    assert len(out) == 1
+    agg = out[0]
+    assert agg["contract"] == "IC01"
+    assert agg["delta_bucket"] == pytest.approx(900.0)
+    assert agg["hedge_hands"] == pytest.approx(-3.0)
+    assert agg["delta_per_hand"] == 300.0
+    assert agg["maturity"] == 0.10
+
+
+def test_aggregate_rejects_incompatible_metadata():
+    from quantark.portfolio.equity import aggregate_futures_delta_buckets
+
+    row = {
+        "contract": "IC01", "maturity": 0.10, "future_price": 5020.0,
+        "delta_bucket": 600.0, "delta_per_hand": 300.0, "hedge_hands": -2.0,
+    }
+    clash = dict(row, future_price=5021.0)  # different curve mark
+    with pytest.raises(ValidationError):
+        aggregate_futures_delta_buckets({"a": [row], "b": [clash]})
+
+
+def test_aggregate_rhoq_buckets_multiple_contracts_keeps_order():
+    from quantark.portfolio.equity import aggregate_futures_rhoq_buckets
+
+    r1 = {"contract": "IC00", "maturity": 0.03, "future_price": 5008.0,
+          "div_bump": 1e-4, "rhoq_bucket": -1.0}
+    r2 = {"contract": "IC01", "maturity": 0.10, "future_price": 5020.0,
+          "div_bump": 1e-4, "rhoq_bucket": -2.0}
+    out = aggregate_futures_rhoq_buckets({"a": [r1, r2], "b": [dict(r2, rhoq_bucket=-3.0)]})
+    assert [r["contract"] for r in out] == ["IC00", "IC01"]
+    assert out[1]["rhoq_bucket"] == pytest.approx(-5.0)
