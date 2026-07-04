@@ -478,7 +478,10 @@ Responsibilities:
 - compute `delta_per_hand(contract)`.
 
 Field-level quote validation belongs in `IndexFuturesQuote.__post_init__`.
-Cross-quote invariants belong in `IndexFuturesCurve.__post_init__`.
+Cross-quote invariants belong in `IndexFuturesCurve.__post_init__`, which must
+also snapshot `quotes` into a tuple (`object.__setattr__`) **before**
+validating — a frozen market object must not be mutable through the caller's
+original list after validation.
 
 ### Conversion methods
 
@@ -539,10 +542,16 @@ def calculate_futures_delta_buckets(
     *,
     mode: FuturesCarryRiskMode | None = None,
     price_bump: float = 1.0,
-    base_price: float | None = None,
 ) -> list[dict[str, float | str]]:
     ...
 ```
+
+No `base_price` parameter: the method rebuilds the dividend curve from the
+futures marks internally, so the base PV must be computed under that implied
+environment. Accepting a caller-supplied PV (typically priced under
+`pricing_env.div_yield`) would silently shift every bucket by
+`(implied_base − supplied_base) / price_bump` and mis-size the hedge with no
+exception. The base PV is always recomputed internally.
 
 Each result row:
 
@@ -571,10 +580,12 @@ def calculate_futures_rhoq_buckets(
     *,
     mode: FuturesCarryRiskMode | None = None,
     div_bump: float | None = None,
-    base_price: float | None = None,
 ) -> list[dict[str, float | str]]:
     ...
 ```
+
+(Same rule: no `base_price` parameter — the base PV is computed internally
+under the mode's base environment.)
 
 This produces carry-coordinate diagnostics by bumping one implied `q_i` node at
 a time.

@@ -289,6 +289,19 @@ def test_delta_per_hand_is_multiplier():
     assert curve.delta_per_hand("IC00") == 200.0
 
 
+def test_curve_quotes_snapshot_immune_to_caller_mutation():
+    quotes = _quotes_from_q(100.0, 0.03, [0.25, 0.5], [0.01, 0.02])
+    curve = IndexFuturesCurve(underlying="IC", spot=100.0, quotes=quotes)
+    base = curve.to_dividend_yield_curve(FlatRateCurve(0.03)).yields
+    quotes.append(
+        IndexFuturesQuote("IC99", maturity=2.0, price=110.0, multiplier=200.0)
+    )
+    quotes[0] = IndexFuturesQuote("IC00", maturity=0.25, price=99.0, multiplier=200.0)
+    assert isinstance(curve.quotes, tuple)
+    assert len(curve.quotes) == 2
+    assert curve.to_dividend_yield_curve(FlatRateCurve(0.03)).yields == base
+
+
 def test_bump_term_yield_node():
     term = TermStructureDividendYield(times=[0.25, 0.5], yields=[0.01, 0.02])
     bumped = bump_term_yield_node(term, 1, 0.0001)
@@ -385,6 +398,9 @@ class IndexFuturesCurve:
     interpolation: str = "linear_q"
 
     def __post_init__(self) -> None:
+        # snapshot the quotes: a frozen curve must not be mutable through the
+        # caller's original list after validation
+        object.__setattr__(self, "quotes", tuple(self.quotes))
         if not self.underlying:
             raise ValidationError("underlying must be non-empty")
         if self.spot <= 0.0:
@@ -595,7 +611,7 @@ git commit -m "feat(deltaone): futures dividend_rho (theoretical carry; zero in 
 
 **Interfaces:**
 - Consumes: `IndexFuturesCurve.{to_dividend_yield_curve, bump_contract, delta_per_hand, quotes}`, `hedge_hands` (Task 2); existing calculator helpers `self._resolve_bump_engine(product, pricing_env, engine)`, `product.get_maturity(pricing_env)`; `deepcopy` (already imported in the module).
-- Produces: `calculate_futures_delta_buckets(product, pricing_env, engine, futures_curve, *, mode=None, price_bump=1.0, base_price=None) -> list[dict]` with row keys `contract, maturity, future_price, price_bump, delta_bucket, delta_per_hand, hedge_hands, extrapolated_tail`. Used by Tasks 6, 8, 9.
+- Produces: `calculate_futures_delta_buckets(product, pricing_env, engine, futures_curve, *, mode=None, price_bump=1.0) -> list[dict]` (no `base_price` — the implied-carry base PV is always computed internally) with row keys `contract, maturity, future_price, price_bump, delta_bucket, delta_per_hand, hedge_hands, extrapolated_tail`. Used by Tasks 6, 8, 9.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -707,7 +723,6 @@ method body:
         *,
         mode=None,
         price_bump: float = 1.0,
-        base_price: Optional[float] = None,
     ) -> List[Dict[str, object]]:
         """
         Futures-tenor bucket deltas: delta_bucket_i = dPV / dF_i.
@@ -715,9 +730,11 @@ method body:
         Bumps one futures mark at a time, rebuilds the implied q(T) curve,
         and reprices (one-sided up bump). The base and bumped legs reuse the
         same engine/params unchanged, so MC engines with a fixed seed price
-        with common random numbers. If ``base_price`` is supplied it must be
-        the PV under the implied-carry environment (div_yield rebuilt from
-        ``futures_curve``), not under ``pricing_env.div_yield``.
+        with common random numbers. The base PV is always computed internally
+        under the implied-carry environment (div_yield rebuilt from
+        ``futures_curve``); no ``base_price`` parameter is accepted because a
+        caller's PV under ``pricing_env.div_yield`` would silently shift every
+        bucket.
 
         hedge_hands = -delta_bucket / delta_per_hand (fractional, unrounded).
         Rows are flagged ``extrapolated_tail`` when the product maturity lies
@@ -740,8 +757,7 @@ method body:
         base_env.div_yield = futures_curve.to_dividend_yield_curve(
             pricing_env.rate_curve
         )
-        if base_price is None:
-            base_price = engine.price(product, base_env)
+        base_price = engine.price(product, base_env)
 
         maturity = product.get_maturity(pricing_env)
         last_index = len(futures_curve.quotes) - 1
@@ -799,7 +815,7 @@ git commit -m "feat(greeks): futures-tenor delta buckets from implied carry rebu
 
 **Interfaces:**
 - Consumes: `bump_term_yield_node` (Task 2); `BucketedDividendYield(base, bucket_start, bucket_end, bump)` from `quantark/asset/equity/report/term_structure.py` (bumps spot yield on `bucket_start < t <= bucket_end`); `self._bump_config.div_bump`.
-- Produces: `calculate_futures_rhoq_buckets(product, pricing_env, engine, futures_curve, *, mode=None, div_bump=None, base_price=None) -> list[dict]` with row keys `contract, maturity, future_price, div_bump, rhoq_bucket`. One-sided up bump scaled per 1% (`* (0.01/div_bump)`). Used by Tasks 8, 9.
+- Produces: `calculate_futures_rhoq_buckets(product, pricing_env, engine, futures_curve, *, mode=None, div_bump=None) -> list[dict]` (no `base_price`) with row keys `contract, maturity, future_price, div_bump, rhoq_bucket`. One-sided up bump scaled per 1% (`* (0.01/div_bump)`). Used by Tasks 8, 9.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -889,10 +905,11 @@ Insert after `calculate_futures_delta_buckets`:
         *,
         mode=None,
         div_bump: Optional[float] = None,
-        base_price: Optional[float] = None,
     ) -> List[Dict[str, object]]:
         """
         Bucketed rhoq diagnostics per futures tenor (carry coordinate).
+        The base PV is always computed internally (per-mode base environment);
+        no ``base_price`` parameter — see calculate_futures_delta_buckets.
 
         One-sided **up** dividend bump, matching the scalar
         ``calculate_numerical_dividend_rho`` convention; output scaled to
@@ -928,8 +945,7 @@ Insert after `calculate_futures_delta_buckets`:
             base_div = futures_curve.to_dividend_yield_curve(pricing_env.rate_curve)
             base_env = deepcopy(pricing_env)
             base_env.div_yield = base_div
-            if base_price is None:
-                base_price = engine.price(product, base_env)
+            base_price = engine.price(product, base_env)
             for i, quote in enumerate(futures_curve.quotes):
                 bumped_env = deepcopy(pricing_env)
                 bumped_env.div_yield = bump_term_yield_node(base_div, i, div_bump)
@@ -938,8 +954,7 @@ Insert after `calculate_futures_delta_buckets`:
                     self._rhoq_bucket_row(quote, div_bump, base_price, bumped_price)
                 )
         else:  # THEORETICAL_CARRY: pricing_env.div_yield is the carry source
-            if base_price is None:
-                base_price = engine.price(product, pricing_env)
+            base_price = engine.price(product, pricing_env)
             base_div = pricing_env.div_yield
             if base_div is None:
                 base_div = ContinuousDividendYield(0.0)
