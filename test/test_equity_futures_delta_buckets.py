@@ -195,3 +195,107 @@ def test_rhoq_buckets_market_price_mode_rejected():
             env, BlackScholesEngine(), curve,
             mode=FuturesCarryRiskMode.MARKET_PRICE,
         )
+
+
+# --- spec test 8: extrapolated tail concentrates in the last contract ---
+
+def _short_curve(spot=100.0, r=0.03):
+    times, qs = [0.1, 0.3, 0.6], [0.01, 0.015, 0.012]
+    return IndexFuturesCurve(
+        underlying="IC",
+        spot=spot,
+        quotes=[
+            IndexFuturesQuote(
+                f"IC{i:02d}", maturity=t, price=spot * math.exp((r - q) * t),
+                multiplier=200.0,
+            )
+            for i, (t, q) in enumerate(zip(times, qs))
+        ],
+    )
+
+
+def test_european_beyond_last_node_all_delta_in_last_bucket():
+    env = _env(spot=100.0)
+    curve = _short_curve()
+    option = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=1.5)
+    rows = GreeksCalculator().calculate_futures_delta_buckets(
+        option, env, BlackScholesEngine(), curve
+    )
+    assert rows[0]["delta_bucket"] == pytest.approx(0.0, abs=1e-12)
+    assert rows[1]["delta_bucket"] == pytest.approx(0.0, abs=1e-12)
+    assert abs(rows[2]["delta_bucket"]) > 1e-4
+    assert [r["extrapolated_tail"] for r in rows] == [False, False, True]
+
+
+def test_snowball_keeps_interior_node_sensitivity_beyond_last_node():
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+    from quantark.util.enum import ObservationType
+
+    # barriers are ABSOLUTE levels (103/75 on spot 100), not ratios — a
+    # ko_barrier below spot would mean an already-knocked-out product with a
+    # deterministic PV and zero carry sensitivity
+    snowball = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        barrier_config=BarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=75.0,
+            ki_observation_type=ObservationType.CONTINUOUS,
+        ),
+        payoff_config=None,
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    env = _env(spot=100.0)
+    curve = _short_curve()  # T_last = 0.6 < snowball maturity 1.0
+    rows = GreeksCalculator().calculate_futures_delta_buckets(
+        snowball, env, SnowballQuadEngine(), curve
+    )
+    # KO observations at 0.25/0.5 sit inside [0.1, 0.6]: interior nodes
+    # carry genuine sensitivity through the term-aware engine
+    interior = [r for r in rows if not r["extrapolated_tail"]]
+    assert any(abs(r["delta_bucket"]) > 1e-6 for r in interior)
+    assert rows[-1]["extrapolated_tail"] is True
+
+
+def test_first_bucket_flagged_when_maturity_before_first_node():
+    env = _env(spot=100.0)
+    curve = _short_curve()
+    option = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=0.05)
+    rows = GreeksCalculator().calculate_futures_delta_buckets(
+        option, env, BlackScholesEngine(), curve
+    )
+    assert rows[0]["extrapolated_tail"] is True
+    assert rows[1]["extrapolated_tail"] is False
+
+
+# --- MC common random numbers ---
+
+def test_mc_delta_buckets_deterministic_and_near_analytic():
+    from quantark.asset.equity.engine.mc import EuropeanMCEngine
+    from quantark.asset.equity.param import MCParams
+
+    env = _env(spot=100.0)
+    curve = _short_curve()
+    option = EuropeanVanillaOption(100.0, OptionType.CALL, maturity=0.3)
+    calc = GreeksCalculator()
+
+    mc_engine = EuropeanMCEngine(MCParams(seed=42, num_paths=100_000))
+    rows_a = calc.calculate_futures_delta_buckets(option, env, mc_engine, curve)
+    rows_b = calc.calculate_futures_delta_buckets(option, env, mc_engine, curve)
+    # fixed seed => common random numbers => bit-identical reruns
+    assert [r["delta_bucket"] for r in rows_a] == [
+        r["delta_bucket"] for r in rows_b
+    ]
+
+    analytic = calc.calculate_futures_delta_buckets(
+        option, env, BlackScholesEngine(), curve
+    )
+    mc_mid, bs_mid = rows_a[1]["delta_bucket"], analytic[1]["delta_bucket"]
+    assert mc_mid == pytest.approx(bs_mid, rel=0.05)
