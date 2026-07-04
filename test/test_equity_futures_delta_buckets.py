@@ -292,6 +292,82 @@ def test_snowball_keeps_interior_node_sensitivity_beyond_last_node():
     assert rows[-1]["extrapolated_tail"] is True
 
 
+def test_snowball_buckets_complete_across_quad_pde_mc():
+    """Cross-family proof: QUAD, PDE, and MC all finish the bucket calculation
+    on the same snowball + backwardation curve, and the families agree."""
+    from quantark.asset.equity.engine.mc import SnowballMCEngine
+    from quantark.asset.equity.engine.pde_engine import PDEEngine
+    from quantark.asset.equity.engine.quad import SnowballQuadEngine
+    from quantark.asset.equity.param import MCParams
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.asset.equity.product.option.snowball_option import SnowballOption
+    from quantark.util.enum import ObservationType
+
+    spot = 100.0
+    env = _env(spot=spot)
+    # backwardation marks => positive implied q; monthly KO observations so
+    # every tenor segment of the curve is genuinely read
+    curve = IndexFuturesCurve(
+        underlying="IC",
+        spot=spot,
+        quotes=[
+            IndexFuturesQuote("IC00", maturity=0.17, price=99.1, multiplier=200.0),
+            IndexFuturesQuote("IC01", maturity=0.42, price=98.0, multiplier=200.0),
+            IndexFuturesQuote("IC02", maturity=0.67, price=96.7, multiplier=200.0),
+        ],
+    )
+    assert all(y > 0 for y in curve.implied_yields(env.rate_curve))
+    snowball = SnowballOption(
+        initial_price=spot,
+        strike=spot,
+        barrier_config=BarrierConfig(
+            ko_barrier=1.03 * spot,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[round(i / 12.0, 6) for i in range(1, 13)],
+            ki_barrier=0.75 * spot,
+            ki_observation_type=ObservationType.CONTINUOUS,
+        ),
+        payoff_config=None,
+        contract_multiplier=1.0,
+        maturity=1.0,
+        is_reverse=False,
+    )
+    calc = GreeksCalculator()
+    engines = {
+        "quad": SnowballQuadEngine(),
+        "pde": PDEEngine(),
+        "mc": SnowballMCEngine(MCParams(seed=42, num_paths=100_000)),
+    }
+    delta, rhoq = {}, {}
+    for name, engine in engines.items():
+        delta[name] = calc.calculate_futures_delta_buckets(
+            snowball, env, engine, curve
+        )
+        # MC rhoq needs a bump large enough to dominate barrier-flip noise
+        # (discontinuous payoff FD, scaled by 0.01/div_bump)
+        rhoq[name] = calc.calculate_futures_rhoq_buckets(
+            snowball, env, engine, curve, div_bump=0.005
+        )
+        assert [r["contract"] for r in delta[name]] == ["IC00", "IC01", "IC02"]
+        assert all(math.isfinite(r["delta_bucket"]) for r in delta[name])
+        assert all(math.isfinite(r["rhoq_bucket"]) for r in rhoq[name])
+        # long-forward snowball on a backwardated curve: positive futures
+        # exposure, dominant (tail-extrapolated) last bucket
+        assert delta[name][-1]["delta_bucket"] > 0.1
+        assert delta[name][-1]["extrapolated_tail"] is True
+
+    for name in ("pde", "mc"):
+        for r_other, r_quad in zip(delta[name], delta["quad"]):
+            assert r_other["delta_bucket"] == pytest.approx(
+                r_quad["delta_bucket"], abs=0.06
+            )
+        for r_other, r_quad in zip(rhoq[name], rhoq["quad"]):
+            assert r_other["rhoq_bucket"] == pytest.approx(
+                r_quad["rhoq_bucket"], abs=0.1
+            )
+
+
 def test_first_bucket_flagged_when_maturity_before_first_node():
     env = _env(spot=100.0)
     curve = _short_curve()
