@@ -267,6 +267,7 @@ class DeltaOneEngine(BaseEngine):
             greeks["vega"] = 0.0
             greeks["theta"] = 0.0  # Market price is fixed
             greeks["rho"] = 0.0  # Market price independent of model rate
+            greeks["dividend_rho"] = 0.0  # market price independent of model carry
             return greeks
         
         # Theoretical Greeks
@@ -299,7 +300,11 @@ class DeltaOneEngine(BaseEngine):
         # Rho: derivative with respect to rate
         # dF/dr = S*T*exp((r-q)*T)
         greeks["rho"] = S * T * math.exp(carry_cost)
-        
+
+        # Dividend rho: dF/dq = -S*T*exp((r-q)*T); basis term is q-independent.
+        # Per 1% q change; negative for long futures (higher carry lowers F).
+        greeks["dividend_rho"] = -S * T * math.exp(carry_cost) * 0.01
+
         return greeks
     
     def get_forward_price(
