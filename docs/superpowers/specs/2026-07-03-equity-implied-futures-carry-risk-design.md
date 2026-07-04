@@ -111,7 +111,7 @@ Futures can be viewed in three different modes:
 
 | Mode | Futures price source | Futures rhoq |
 |------|----------------------|--------------|
-| `market_price` | observed futures mark only | 0 by model convention |
+| `market_price` | observed futures mark only | non-zero, at the mark's implied carry |
 | `theoretical_carry` | generated from `S`, `r`, `q(T)` | non-zero |
 | `implied_futures_carry` | observed marks imply `q(T)` for option pricing | non-zero as a portfolio risk coordinate |
 
@@ -129,7 +129,7 @@ Mapping to the current `DeltaOneEngine.use_market_price`:
 
 | New mode | Existing futures pricing behavior | Carry/rhoq behavior |
 |----------|-----------------------------------|---------------------|
-| `market_price` | `DeltaOneEngine(use_market_price=True)` | futures mark is exogenous; model `rhoq = 0` |
+| `market_price` | `DeltaOneEngine(use_market_price=True)` | futures mark is exogenous for **pricing**; `rhoq` is evaluated at the mark's implied carry: `q_impl = r − ln(F_mkt/S)/T`, `dividend_rho = −S·T·e^{(r−q_impl)T}·0.01 = −T·F_mkt·0.01` |
 | `theoretical_carry` | `DeltaOneEngine(use_market_price=False)` with user-supplied `div_yield` | futures generated from `S`, `r`, `q(T)`; model `rhoq` non-zero |
 | `implied_futures_carry` | `DeltaOneEngine(use_market_price=False)` with `div_yield` built from `IndexFuturesCurve` | live futures marks imply `q(T)`; futures/rhoq buckets are portfolio risk coordinates |
 
@@ -934,10 +934,22 @@ rhoq = -S * T * exp((r - q)T) * 0.01
 The engine or calculator should return this value, scaled by multiplier when
 computed at position/hand level.
 
-### 6. Market-price mode keeps model rhoq at zero
+### 6. Market-price mode rhoq at the mark's implied carry
 
-When futures are valued as observed marks only, `dividend_rho` remains zero.
-This prevents accidental mixing of market-price and implied-carry conventions.
+When futures are valued as observed marks only, `dividend_rho` is evaluated
+at the carry implied by that mark (basis folded into carry, matching the
+`IndexFuturesCurve` convention):
+
+```text
+q_impl = r - ln(F_mkt / S) / T
+dividend_rho = -S * T * exp((r - q_impl) * T) * 0.01 = -T * F_mkt * 0.01
+```
+
+Assert both forms agree, and that the sign is negative for long futures.
+Pricing itself remains the exogenous mark; only the carry sensitivity is
+derived from it. (This mode still cannot drive the option-side rhoq bucket
+table — `calculate_futures_rhoq_buckets` continues to reject `MARKET_PRICE`
+because the mode supplies no carry curve for repricing the option.)
 
 ### 7. Portfolio net rhoq is offset by futures hedge
 
@@ -1018,7 +1030,9 @@ Risk reports should separate:
 - Do not hide the option's own `rhoq` after hedging.
 - Do not make futures-tenor delta a replacement for scalar spot delta.
 - Do not infer futures quotes from spot when live marks are available.
-- Do not silently use implied-carry behavior under `market_price` mode.
+- Do not use implied-carry behavior for **pricing** under `market_price` mode
+  (the mark stays exogenous); the futures instrument's own `dividend_rho` at
+  the mark's implied carry is the documented exception, not option repricing.
 - Do not add a general optimizer in the first implementation.
 - Do not round hedge hands inside the Greek API. Fractional hands are the API
   output; integer rounding belongs to execution/reporting.
@@ -1042,8 +1056,9 @@ Risk reports should separate:
   `rhoq` can be computed.
 - Existing scalar Greeks continue to work for flat-dividend and term-dividend
   modes.
-- Market-price futures mode remains explicit and does not accidentally report
-  model carry Greeks.
+- Market-price futures mode prices from the exogenous mark and reports the
+  futures `dividend_rho` at the mark's implied carry (`−T·F_mkt·0.01`); it
+  still cannot drive option-side rhoq bucket tables.
 - Flat extrapolation beyond the last futures node is pinned by test, and
   bucket rows are flagged `extrapolated_tail` when the option maturity lies
   outside the quoted node range.

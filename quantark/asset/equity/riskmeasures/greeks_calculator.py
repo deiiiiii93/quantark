@@ -1075,7 +1075,7 @@ class GreeksCalculator:
         if resolved_mode is FuturesCarryRiskMode.MARKET_PRICE:
             raise ValidationError(
                 "calculate_futures_rhoq_buckets does not support MARKET_PRICE "
-                "mode (model carry rhoq is zero by convention there)"
+                "mode (it supplies no carry curve for repricing the option)"
             )
         div_bump = div_bump if div_bump is not None else self._bump_config.div_bump
         if div_bump <= 0.0:

@@ -39,13 +39,19 @@ def test_futures_theoretical_dividend_rho():
     assert greeks["dividend_rho"] < 0.0  # long theoretical futures: rhoq < 0
 
 
-# --- spec test 6: market-price mode keeps model rhoq at zero ---
+# --- spec test 6: market-price mode rhoq at the mark's implied carry ---
 
-def test_futures_market_price_dividend_rho_zero():
-    env = _env()
+def test_futures_market_price_dividend_rho_from_implied_carry():
+    env = _env()  # spot 5000, r 3%
     fut = Futures(underlying="IC", multiplier=1.0, maturity=0.5, market_price=5100.0)
     greeks = DeltaOneEngine(use_market_price=True).calculate_greeks(fut, env)
-    assert greeks["dividend_rho"] == 0.0
+    S, T, r, F = 5000.0, 0.5, 0.03, 5100.0
+    implied_q = r - math.log(F / S) / T
+    expected = -S * T * math.exp((r - implied_q) * T) * 0.01
+    assert greeks["dividend_rho"] == pytest.approx(expected, rel=1e-12)
+    # at the implied carry the formula collapses to -T * F_mkt * 0.01
+    assert greeks["dividend_rho"] == pytest.approx(-T * F * 0.01, rel=1e-12)
+    assert greeks["dividend_rho"] < 0.0
 
 
 from copy import deepcopy

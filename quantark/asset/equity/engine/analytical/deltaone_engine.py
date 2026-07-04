@@ -267,7 +267,13 @@ class DeltaOneEngine(BaseEngine):
             greeks["vega"] = 0.0
             greeks["theta"] = 0.0  # Market price is fixed
             greeks["rho"] = 0.0  # Market price independent of model rate
-            greeks["dividend_rho"] = 0.0  # market price independent of model carry
+            # Dividend rho at the carry implied by the observed mark:
+            # q_impl = r - ln(F_mkt/S)/T (basis folded into carry), so
+            # dF/dq = -S*T*exp((r - q_impl)*T) = -T*F_mkt. Per 1% q change.
+            implied_q = r - math.log(product.market_price / S) / T
+            greeks["dividend_rho"] = (
+                -S * T * math.exp((r - implied_q) * T) * 0.01
+            )
             return greeks
         
         # Theoretical Greeks
