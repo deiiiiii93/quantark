@@ -52,15 +52,18 @@ def bin_conditional(stock_values, variance_values, num_bins, method):
     else:
         raise ValidationError(f"unknown binning method: {method}")
 
+    # Contiguous segments on the sorted array. side="right" places a sample exactly on
+    # an interior boundary into the LEFT bin, reproducing the historical mask convention
+    # (bin 0 inclusive both edges [b_0, b_1]; bin k>0 half-open (b_k, b_{k+1}]). This
+    # replaces the old O(num_bins * n) boolean-mask scan with a single searchsorted.
+    splits = np.searchsorted(s_sorted, boundaries[1:-1], side="right")
+    seg_starts = np.concatenate([[0], splits]).astype(int)
+    seg_ends = np.concatenate([splits, [n]]).astype(int)
+    bin_counts = seg_ends - seg_starts
     bin_means = np.zeros(num_bins)
-    bin_counts = np.zeros(num_bins, dtype=int)
     for k in range(num_bins):
-        bl, br = boundaries[k], boundaries[k + 1]
-        mask = (s_sorted >= bl) & (s_sorted <= br) if k == 0 else (s_sorted > bl) & (s_sorted <= br)
-        idx = np.where(mask)[0]
-        bin_counts[k] = idx.size
-        if idx.size > 0:
-            bin_means[k] = float(np.mean(v_sorted[idx]))
+        if bin_counts[k] > 0:
+            bin_means[k] = float(np.mean(v_sorted[seg_starts[k]:seg_ends[k]]))
     global_mean = float(np.mean(v_sorted))
     for k in range(num_bins):
         if bin_counts[k] == 0:
