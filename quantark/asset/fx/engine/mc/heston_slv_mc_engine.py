@@ -71,6 +71,7 @@ class FxHestonSLVMCEngine(BaseFxEngine):
             disc_factor=float(fx_env.domestic_curve.get_discount_factor(T)), eta=self.eta,
             num_paths=self.num_paths, num_bins=self.num_bins, bin_method=self.bin_method,
             seed=self.seed, leverage_surface=leverage,
+            use_antithetic=bool(getattr(self.params, "use_antithetic", False)),
         )
         return fx_contract_value(product, fx_env, unit)
 

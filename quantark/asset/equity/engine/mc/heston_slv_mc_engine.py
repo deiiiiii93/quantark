@@ -81,6 +81,7 @@ class HestonSLVMCEngine(BaseEngine):
             num_paths=int(self.params.num_paths), num_bins=self.num_bins,
             bin_method=self.bin_method, seed=int(self.params.seed),
             leverage_surface=leverage,
+            use_antithetic=bool(getattr(self.params, "use_antithetic", False)),
         )
         return unit * float(getattr(product, "contract_multiplier", 1.0))
 

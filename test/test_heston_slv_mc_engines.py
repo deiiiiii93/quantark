@@ -92,3 +92,43 @@ def test_fx_slv_reprices_flat_vanilla():
     gk = GarmanKohlhagenEngine().price(opt, env)
     slv = FxHestonSLVMCEngine(P, eta=1.0, num_paths=80_000, time_steps=100, seed=9).price(opt, env)
     assert slv == pytest.approx(gk, rel=3e-2)
+
+
+def test_equity_slv_engine_forwards_use_antithetic(monkeypatch):
+    # WS-D3: MCParams(use_antithetic=...) must reach price_european_slv_mc (was silently
+    # dropped). Spy the kernel and assert the flag is forwarded.
+    import quantark.asset.equity.engine.mc.heston_slv_mc_engine as eng
+    captured = {}
+
+    def _spy(**kwargs):
+        captured["use_antithetic"] = kwargs.get("use_antithetic")
+        return 1.0
+
+    monkeypatch.setattr(eng, "price_european_slv_mc", _spy)
+    env = _grid_env(0.2, 0.0, 0.0)
+    opt = EuropeanVanillaOption(strike=100.0, option_type=OptionType.CALL, maturity=1.0)
+    HestonSLVMCEngine(P, eta=1.0, params=MCParams(num_paths=1000, time_steps=5, seed=1,
+                                                  use_antithetic=True)).price(opt, env)
+    assert captured["use_antithetic"] is True
+    HestonSLVMCEngine(P, eta=1.0, params=MCParams(num_paths=1000, time_steps=5, seed=1,
+                                                  use_antithetic=False)).price(opt, env)
+    assert captured["use_antithetic"] is False
+
+
+def test_fx_slv_engine_forwards_use_antithetic(monkeypatch):
+    import quantark.asset.fx.engine.mc.heston_slv_mc_engine as fxeng
+    from quantark.asset.fx.engine.mc.fx_mc_params import FxMCParams
+    captured = {}
+
+    def _spy(**kwargs):
+        captured["use_antithetic"] = kwargs.get("use_antithetic")
+        return 1.0
+
+    monkeypatch.setattr(fxeng, "price_european_slv_mc", _spy)
+    # Build a minimal FX env + product mirroring the FX SLV engine tests below.
+    fx_env = _fx_grid_env(0.1, 0.02, 0.01)
+    opt = FxVanillaOption(strike=1.20, option_type=OptionType.CALL, maturity=1.0,
+                          notional_foreign=1_000_000.0)
+    FxHestonSLVMCEngine(P, eta=1.0, params=FxMCParams(use_antithetic=True),
+                        num_paths=1000, time_steps=5, seed=1).price(opt, fx_env)
+    assert captured["use_antithetic"] is True
