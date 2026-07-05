@@ -71,3 +71,21 @@ def test_slv_adi_price_regression_pinned_for_batch_swap():
     p = price_european_slv_pde(100.0, 100.0, True, 1.0, params, lev, 0.03, 0.01,
                                n_x=120, n_v=60, n_t=60)
     assert np.isclose(p, 9.008727342033493, rtol=1e-13)
+
+
+def test_slv_pde_bit_identical_after_core_refactor():
+    # WS-D1: delegating to HestonSLVADICore reproduces the pre-refactor SLV prices/greeks.
+    from quantark.volmodels.slv.slv_pde_kernel import price_delta_gamma_slv_pde
+    Pp = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
+    K = np.array([60., 80., 100., 120., 160.]); Tg = np.array([0.0, 0.5, 1.0])
+    lg = 1.0 + 0.1 * np.sin(np.linspace(0, 3, 5))[None, :] + 0.05 * np.linspace(0, 1, 3)[:, None]
+    lev = LeverageSurface(Tg, K, lg)
+    a = price_european_slv_pde(100., 100., True, 1.0, Pp, lev, r=0.03, carry=0.01, eta=1.0, n_x=100, n_v=60, n_t=50, scheme=ADIScheme.CRAIG_SNEYD)
+    b = price_european_slv_pde(100., 110., False, 0.8, Pp, lev, r=0.02, carry=0.0, eta=0.8, n_x=100, n_v=60, n_t=50, scheme=ADIScheme.DOUGLAS)
+    c = price_delta_gamma_slv_pde(100., 100., True, 1.0, Pp, lev, r=0.03, carry=0.01, eta=1.0, n_x=100, n_v=60, n_t=50)
+    PINS = (9.5109821527178, 12.579161305704869,
+            (9.502979872769755, 0.6108734180756159, 0.017726519763518103))
+    assert abs(a - PINS[0]) <= 1e-12 * max(1.0, abs(PINS[0]))
+    assert abs(b - PINS[1]) <= 1e-12 * max(1.0, abs(PINS[1]))
+    for got, ref in zip(c, PINS[2]):
+        assert abs(got - ref) <= 1e-12 * max(1.0, abs(ref))
