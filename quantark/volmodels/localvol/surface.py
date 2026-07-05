@@ -20,16 +20,22 @@ class LocalVolSurface:
         strike_grid: strictly increasing spot/strike grid (nK >= 2,).
         time_grid: strictly increasing time grid in years (nT >= 1,).
         lv_grid: local vols, shape (nT, nK), axis 0 = time, axis 1 = strike.
+        interp: strike-axis interpolation, "linear_s" (default, bilinear in S) or
+            "linear_logs" (bilinear in log-strike, matching LeverageSurface). Time interp
+            stays linear-in-vol in both modes.
     """
 
     strike_grid: np.ndarray
     time_grid: np.ndarray
     lv_grid: np.ndarray
+    interp: str = "linear_s"
 
     def __post_init__(self) -> None:
         self.strike_grid = np.asarray(self.strike_grid, dtype=float)
         self.time_grid = np.asarray(self.time_grid, dtype=float)
         self.lv_grid = np.asarray(self.lv_grid, dtype=float)
+        if self.interp not in ("linear_s", "linear_logs"):
+            raise ValidationError("interp must be 'linear_s' or 'linear_logs'")
         nT, nK = self.time_grid.size, self.strike_grid.size
         if nK < 2 or nT < 1:
             raise ValidationError("LocalVolSurface needs >= 2 strikes and >= 1 time")
@@ -65,7 +71,11 @@ class LocalVolSurface:
         s_flat = np.clip(s_b.ravel(), K[0], K[-1])
         jK = np.clip(np.searchsorted(K, s_flat, side="right"), 1, K.size - 1)
         j0, j1 = jK - 1, jK
-        wK = (s_flat - K[j0]) / (K[j1] - K[j0])
+        if self.interp == "linear_logs":
+            lnK = np.log(K)
+            wK = (np.log(s_flat) - lnK[j0]) / (lnK[j1] - lnK[j0])
+        else:
+            wK = (s_flat - K[j0]) / (K[j1] - K[j0])
 
         g = self.lv_grid
         if self.time_grid.size == 1:
