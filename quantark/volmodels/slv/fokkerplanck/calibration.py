@@ -64,7 +64,7 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
         # Backward-Euler march: L-stable and positivity-near-preserving. The ADI/Craig-Sneyd variant
         # is von-Neumann-unstable for this Dirac-seeded correlated forward density (negative mass
         # grows under time refinement), so calibration uses the fully-coupled implicit solve.
-        f = solver.step(f, L, dt[n], implicit=True, b=float(rf[n] - cf[n]), state=march_state)
+        f = solver.march_step(f, L, dt[n], b=float(rf[n] - cf[n]), state=march_state, is_first=(n == 0))
         m = solver.total_mass(f)
         neg = float(solver.w @ np.maximum(-f, 0.0))
         max_neg = max(max_neg, neg)

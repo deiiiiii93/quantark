@@ -161,3 +161,31 @@ class ForwardFPADI:
         if not np.all(np.isfinite(out)):
             raise NumericalError("forward FP step produced non-finite density")
         return out
+
+    _TRBDF2_GAMMA = 2.0 - np.sqrt(2.0)
+
+    def march_step(self, f, L, dt, b, state, is_first):
+        """Advance one step under cfg.time_scheme.
+
+        ``backward_euler``: identical to ``step(implicit=True, state=state)`` (L-stable, damps the seed).
+        ``tr_bdf2``: second-order L-stable one-step scheme (gamma=2-sqrt2). ``is_first=True`` forces a
+        backward-Euler step (Rannacher-style start-up) to damp the singular Dirac seed. Because
+        gamma=2-sqrt2 makes ``1/2*gamma == (1-gamma)/(2-gamma)``, the TR and BDF2 substeps share the SAME
+        implicit operator M -- one factorization / one lagged preconditioner serves both solves.
+        """
+        if self.cfg.time_scheme == "backward_euler" or is_first:
+            return self.step(f, L, dt, implicit=True, b=b, state=state)
+        g = self._TRBDF2_GAMMA
+        L = np.asarray(L, float)
+        Ax, Az, Axz = build_directional_operators(self.x, self.z, L, self.params, self.eta, float(b))
+        A = (Ax + Az + Axz).tocsc()
+        M = (self._I - 0.5 * g * dt * A).tocsc()          # SAME matrix serves both substeps
+        # TR substep to t + gamma*dt
+        y_g = self._solve_implicit(M, f + 0.5 * g * dt * (A @ f), state, advance=True)
+        # BDF2 substep to t + dt (reuse M/preconditioner: advance=False)
+        c1 = 1.0 / (g * (2.0 - g))
+        c0 = (1.0 - g) ** 2 / (g * (2.0 - g))
+        out = self._solve_implicit(M, c1 * y_g - c0 * f, state, advance=False)
+        if not np.all(np.isfinite(out)):
+            raise NumericalError("TR-BDF2 FP step produced non-finite density")
+        return out
