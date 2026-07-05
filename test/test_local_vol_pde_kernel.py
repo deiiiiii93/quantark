@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.localvol.surface import LocalVolSurface
-from quantark.volmodels.localvol.pde_kernel import price_european_lv_pde, _thomas_solve
+from quantark.util.numerical import solve_tridiag
+from quantark.volmodels.localvol.pde_kernel import price_european_lv_pde
 from quantark.volmodels.black_scholes import bs_call_price, bs_put_price
 
 
@@ -60,7 +61,7 @@ def test_thomas_solver_matches_numpy_including_one_interior_node():
         for i in range(m - 1):
             A[i + 1, i] = sub[i]
             A[i, i + 1] = sup[i]
-        x = _thomas_solve(sub, diag, sup, rhs)
+        x = solve_tridiag(sub, diag, sup, rhs)
         assert np.allclose(x, np.linalg.solve(A, rhs), atol=1e-10)
 
 
@@ -117,3 +118,15 @@ def test_rejects_step_sum_not_equal_T():
     with pytest.raises(ValidationError):
         price_european_lv_pde(100.0, 100.0, True, 1.0, lv, np.full(50, 0.01),
                               np.zeros(50), np.zeros(50), n_s=200)  # sum=0.5 != T=1.0
+
+
+def test_price_regression_pinned_for_solver_swap():
+    # Captured from the pre-solve_banded implementation (sequential Thomas), WS-B2.
+    # Gate: <= 1e-12 relative (LAPACK banded solve differs only in arithmetic order).
+    surf = LocalVolSurface(strike_grid=np.array([50.0, 100.0, 200.0]),
+                           time_grid=np.array([0.0, 1.0]),
+                           lv_grid=np.array([[0.30, 0.22, 0.20], [0.32, 0.24, 0.21]]))
+    dt = np.full(50, 0.02)
+    price = price_european_lv_pde(100.0, 105.0, True, 1.0, surf, dt,
+                                  np.full(50, 0.03), np.full(50, 0.01), n_s=200)
+    assert np.isclose(price, 7.931287902952514, rtol=1e-12)

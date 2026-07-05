@@ -1,7 +1,7 @@
 """Crank-Nicolson PDE pricer for European options under a LocalVolSurface.
 
 Backward PDE: V_t + 0.5 sigma(S,t)^2 S^2 V_SS + (r(t) - carry(t)) S V_S - r(t) V = 0.
-Uniform S-grid in [0, Smax], Thomas tri-diagonal solve, local vol at the temporal
+Uniform S-grid in [0, Smax], LAPACK banded tri-diagonal solve, local vol at the temporal
 midpoint of each step. Rates/carry are PER-STEP forwards (no flat terminal rate);
 boundary values use cumulative remaining discount factors so the term structure is
 honored. Deterministic; never invokes Monte Carlo.
@@ -11,43 +11,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from quantark.util.exceptions import NumericalError, ValidationError
-from quantark.util.numerical import safe_exp
+from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import safe_exp, solve_tridiag
 from quantark.volmodels.localvol.surface import LocalVolSurface
-
-
-def _thomas_solve(sub: np.ndarray, diag: np.ndarray, sup: np.ndarray, rhs: np.ndarray) -> np.ndarray:
-    """Solve a tridiagonal system (sub/sup length m-1, diag/rhs length m)."""
-    diag = np.asarray(diag, dtype=float)
-    rhs = np.asarray(rhs, dtype=float)
-    m = diag.shape[0]
-    if m == 1:
-        if diag[0] == 0.0:
-            raise NumericalError("singular tridiagonal system (m=1)")
-        return np.array([rhs[0] / diag[0]])
-    sub = np.asarray(sub, dtype=float)
-    sup = np.asarray(sup, dtype=float)
-    c = np.empty(m - 1)
-    d = np.empty(m)
-    if diag[0] == 0.0:
-        raise NumericalError("zero pivot in tridiagonal solve")
-    c[0] = sup[0] / diag[0]
-    d[0] = rhs[0] / diag[0]
-    for i in range(1, m - 1):
-        denom = diag[i] - sub[i - 1] * c[i - 1]
-        if denom == 0.0:
-            raise NumericalError("zero pivot in tridiagonal solve")
-        c[i] = sup[i] / denom
-        d[i] = (rhs[i] - sub[i - 1] * d[i - 1]) / denom
-    denom_last = diag[m - 1] - sub[m - 2] * c[m - 2]
-    if denom_last == 0.0:
-        raise NumericalError("zero pivot in tridiagonal solve")
-    d[m - 1] = (rhs[m - 1] - sub[m - 2] * d[m - 2]) / denom_last
-    x = np.empty(m)
-    x[m - 1] = d[m - 1]
-    for i in range(m - 2, -1, -1):
-        x[i] = d[i] - c[i] * x[i + 1]
-    return x
 
 
 def price_european_lv_pde(
@@ -147,7 +113,7 @@ def price_european_lv_pde(
         rhs[0] += (1.0 - theta) * dt_m * A[0] * left_next + theta * dt_m * A[0] * left_curr
         rhs[-1] += (1.0 - theta) * dt_m * C[-1] * right_next + theta * dt_m * C[-1] * right_curr
 
-        v[1:-1] = _thomas_solve(sub_A, diag_A, sup_A, rhs)
+        v[1:-1] = solve_tridiag(sub_A, diag_A, sup_A, rhs)
         v[0], v[-1] = left_curr, right_curr
 
     return float(np.interp(s0, s_grid, v))
