@@ -16,7 +16,7 @@ from quantark.util.numerical import safe_exp, solve_tridiag
 from quantark.volmodels.localvol.surface import LocalVolSurface
 
 
-def price_european_lv_pde(
+def _solve_lv_pde(
     s0: float,
     strike: float,
     is_call: bool,
@@ -29,8 +29,8 @@ def price_european_lv_pde(
     s_max_mult: float = 4.0,
     s_max: float = 0.0,
     theta: float = 0.5,
-) -> float:
-    """Price a European vanilla under local volatility via Crank-Nicolson.
+):
+    """Solve the local-vol Crank-Nicolson PDE; return ``(s_grid, v)`` (price curve vs S).
 
     Args:
         s0, strike, is_call, T: option/market spec (all positive; T > 0).
@@ -116,4 +116,38 @@ def price_european_lv_pde(
         v[1:-1] = solve_tridiag(sub_A, diag_A, sup_A, rhs)
         v[0], v[-1] = left_curr, right_curr
 
+    return s_grid, v
+
+
+def price_european_lv_pde(
+    s0: float, strike: float, is_call: bool, T: float, lv_surface: LocalVolSurface,
+    step_dt: np.ndarray, r_fwd: np.ndarray, carry_fwd: np.ndarray, n_s: int = 300,
+    s_max_mult: float = 4.0, s_max: float = 0.0, theta: float = 0.5,
+) -> float:
+    """Price a European vanilla under local volatility via Crank-Nicolson.
+
+    See ``_solve_lv_pde`` for argument semantics.
+    """
+    s_grid, v = _solve_lv_pde(s0, strike, is_call, T, lv_surface, step_dt, r_fwd, carry_fwd,
+                              n_s, s_max_mult, s_max, theta)
     return float(np.interp(s0, s_grid, v))
+
+
+def price_delta_gamma_european_lv_pde(
+    s0: float, strike: float, is_call: bool, T: float, lv_surface: LocalVolSurface,
+    step_dt: np.ndarray, r_fwd: np.ndarray, carry_fwd: np.ndarray, n_s: int = 300,
+    s_max_mult: float = 4.0, s_max: float = 0.0, theta: float = 0.5,
+) -> "tuple[float, float, float]":
+    """(price, spot-delta, spot-gamma) from a single LV Crank-Nicolson solve.
+
+    Delta/gamma are spatial derivatives of the solved price curve on the S-grid
+    (``np.gradient``, edge_order=2), mirroring the ADI readers — not FD re-bumps of the
+    interpolated price (which would give meaningless curvature). The price read-off shares
+    the exact ``_solve_lv_pde`` curve used by ``price_european_lv_pde``.
+    """
+    s_grid, v = _solve_lv_pde(s0, strike, is_call, T, lv_surface, step_dt, r_fwd, carry_fwd,
+                              n_s, s_max_mult, s_max, theta)
+    price = float(np.interp(s0, s_grid, v))
+    dVdS = np.gradient(v, s_grid, edge_order=2)
+    d2VdS2 = np.gradient(dVdS, s_grid, edge_order=2)
+    return price, float(np.interp(s0, s_grid, dVdS)), float(np.interp(s0, s_grid, d2VdS2))

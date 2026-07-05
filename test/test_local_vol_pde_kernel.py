@@ -130,3 +130,25 @@ def test_price_regression_pinned_for_solver_swap():
     price = price_european_lv_pde(100.0, 105.0, True, 1.0, surf, dt,
                                   np.full(50, 0.03), np.full(50, 0.01), n_s=200)
     assert np.isclose(price, 7.931287902952514, rtol=1e-12)
+
+
+def test_lv_pde_delta_gamma_matches_bs_and_price():
+    # WS-D3: the delta/gamma reader shares the exact solve read-off as price_european_lv_pde
+    # and matches BS greeks on a flat surface (delta ~ N(d1), gamma > 0).
+    from quantark.volmodels.localvol.pde_kernel import price_delta_gamma_european_lv_pde
+    sigma, s0, k, T, r, q = 0.2, 100.0, 100.0, 1.0, 0.03, 0.01
+    dt, rf, cf = _const_steps(T, 200, r, q)
+    price, delta, gamma = price_delta_gamma_european_lv_pde(
+        s0, k, True, T, _flat_lv(sigma), dt, rf, cf, n_s=600)
+    price_only = price_european_lv_pde(s0, k, True, T, _flat_lv(sigma), dt, rf, cf, n_s=600)
+    assert price == pytest.approx(price_only, abs=1e-9)         # shared read-off
+    # BS closed-form greeks (q-adjusted)
+    from math import log, sqrt, exp
+    from statistics import NormalDist
+    nd = NormalDist()
+    d1 = (log(s0 / k) + (r - q + 0.5 * sigma ** 2) * T) / (sigma * sqrt(T))
+    bs_delta = exp(-q * T) * nd.cdf(d1)
+    bs_gamma = exp(-q * T) * nd.pdf(d1) / (s0 * sigma * sqrt(T))
+    assert delta == pytest.approx(bs_delta, abs=5e-3)
+    assert gamma == pytest.approx(bs_gamma, abs=5e-4)
+    assert 0.0 < delta < 1.0 and gamma > 0.0
