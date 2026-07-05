@@ -51,12 +51,28 @@ class ForwardFPADI:
         return cls(x, z, params, eta, b, config)
 
     def seed_dirac(self, s0, v0):
-        """Discrete unit-mass seed at the node nearest (ln s0, ln v0): f(node) = 1/w_node."""
+        """Discrete unit-mass seed at (ln s0, ln v0).
+
+        ``flux_scheme='central'``: all mass on the nearest node, f(node) = 1/w_node (legacy).
+        ``flux_scheme='chang_cooper'``: bilinear split over the <=4 bracketing nodes with weights
+        divided by their quadrature weights -- total mass exactly 1, seed mean location exact to O(h^2).
+        """
         f = np.zeros(self.nx * self.nz)
-        i = int(np.argmin(np.abs(self.x - np.log(s0))))
-        j = int(np.argmin(np.abs(self.z - np.log(v0))))
-        k = i * self.nz + j
-        f[k] = 1.0 / self.w[k]
+        xs, zs = float(np.log(s0)), float(np.log(v0))
+        if self.cfg.flux_scheme != "chang_cooper":
+            i = int(np.argmin(np.abs(self.x - xs)))
+            j = int(np.argmin(np.abs(self.z - zs)))
+            k = i * self.nz + j
+            f[k] = 1.0 / self.w[k]
+            return f
+        i = int(np.clip(np.searchsorted(self.x, xs) - 1, 0, self.nx - 2))
+        j = int(np.clip(np.searchsorted(self.z, zs) - 1, 0, self.nz - 2))
+        tx = np.clip((xs - self.x[i]) / (self.x[i + 1] - self.x[i]), 0.0, 1.0)
+        tz = np.clip((zs - self.z[j]) / (self.z[j + 1] - self.z[j]), 0.0, 1.0)
+        for di, wx in ((0, 1.0 - tx), (1, tx)):
+            for dj, wz in ((0, 1.0 - tz), (1, tz)):
+                k = (i + di) * self.nz + (j + dj)
+                f[k] += (wx * wz) / self.w[k]
         return f
 
     def total_mass(self, f):

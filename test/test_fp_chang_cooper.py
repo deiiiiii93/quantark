@@ -71,3 +71,43 @@ def test_cc_directional_split_sums_to_full():
     Ax, Az, Axz = build_directional_operators(x, z, L, params=_P, eta=1.0, b=0.02,
                                               flux_scheme="chang_cooper")
     assert np.max(np.abs((A - (Ax + Az + Axz)).toarray())) < 1e-12
+
+
+from quantark.volmodels.slv.fokkerplanck.config import FpCalibrationConfig
+from quantark.volmodels.slv.fokkerplanck.fp_solver import ForwardFPADI
+
+
+def _solver(flux_scheme):
+    cfg = FpCalibrationConfig(n_x=81, n_z=61, flux_scheme=flux_scheme)
+    return ForwardFPADI.from_config(100.0, _P, eta=1.0, b=0.0,
+                                    step_dt=np.full(10, 0.1), config=cfg)
+
+
+def test_seed_unit_mass_both_schemes():
+    for scheme in ("central", "chang_cooper"):
+        s = _solver(scheme)
+        f = s.seed_dirac(100.0, _P.v0)
+        assert abs(s.total_mass(f) - 1.0) < 1e-12
+
+
+def test_central_seed_is_still_nearest_node():
+    s = _solver("central")
+    f = s.seed_dirac(100.0, _P.v0)
+    assert int(np.count_nonzero(f)) == 1     # exactly one node carries mass
+
+
+def test_bilinear_seed_preserves_mean_to_second_order():
+    # place the seed strictly between nodes; bilinear mean matches (ln s0, ln v0) to O(h^2)
+    s = _solver("chang_cooper")
+    # pick a spot/vol landing between grid nodes
+    xs = 0.5 * (s.x[40] + s.x[41]); zs = 0.5 * (s.z[30] + s.z[31])
+    s0, v0 = np.exp(xs), np.exp(zs)
+    f = s.seed_dirac(s0, v0)
+    assert abs(s.total_mass(f) - 1.0) < 1e-12
+    F = f.reshape(s.nx, s.nz)
+    mean_x = float((s.w.reshape(s.nx, s.nz) * F).sum(axis=1) @ s.x)  # sum_k w_k f_k x_i
+    mean_z = float((s.w.reshape(s.nx, s.nz) * F).sum(axis=0) @ s.z)
+    hx = s.x[41] - s.x[40]; hz = s.z[31] - s.z[30]
+    assert abs(mean_x - xs) < hx ** 2 + 1e-12
+    assert abs(mean_z - zs) < hz ** 2 + 1e-12
+    assert int(np.count_nonzero(f)) <= 4     # at most the 4 bracketing nodes
