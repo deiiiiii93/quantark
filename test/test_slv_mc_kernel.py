@@ -142,3 +142,28 @@ def test_recorded_leverage_clips_at_upper_band():
                                  num_paths=20_000, num_bins=10, seed=7)
     assert np.allclose(surf.leverage_grid, 20.0, rtol=1e-12)
     assert surf.diagnostics["n_clipped"] == surf.leverage_grid.size
+
+
+def test_antithetic_default_off_is_bit_identical():
+    # Default (use_antithetic omitted) must equal use_antithetic=False exactly — the
+    # z-stream is unchanged when antithetic is off (WS-D3/F27).
+    lv = _flat_lv_surface(0.2)
+    s0, k, T, r, q = 100.0, 100.0, 1.0, 0.0, 0.0
+    dt, rf, cf = _const(T, 40, r, q)
+    p_default = price_european_slv_mc(s0, k, True, P, lv, dt, rf, cf, disc_factor=1.0,
+                                      num_paths=20_000, num_bins=20, seed=11)
+    p_off = price_european_slv_mc(s0, k, True, P, lv, dt, rf, cf, disc_factor=1.0,
+                                  num_paths=20_000, num_bins=20, seed=11, use_antithetic=False)
+    assert p_default == p_off
+
+
+def test_antithetic_reduces_stderr():
+    lv = _flat_lv_surface(0.2)
+    s0, k, T, r, q = 100.0, 100.0, 1.0, 0.0, 0.0
+    dt, rf, cf = _const(T, 40, r, q)
+    _, se_plain = price_european_slv_mc(s0, k, True, P, lv, dt, rf, cf, disc_factor=1.0,
+                                        num_paths=20_000, num_bins=20, seed=11, return_stderr=True)
+    _, se_anti = price_european_slv_mc(s0, k, True, P, lv, dt, rf, cf, disc_factor=1.0,
+                                       num_paths=20_000, num_bins=20, seed=11,
+                                       return_stderr=True, use_antithetic=True)
+    assert se_anti < se_plain

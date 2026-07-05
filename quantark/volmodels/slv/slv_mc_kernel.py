@@ -33,7 +33,8 @@ _KMIN = 1e-8
 
 def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
                   num_paths, num_bins, bin_method, rng, record_grid=None,
-                  leverage_surface=None, leverage_clip=DEFAULT_LEVERAGE_CLIP):
+                  leverage_surface=None, leverage_clip=DEFAULT_LEVERAGE_CLIP,
+                  use_antithetic=False):
     """Full-truncation log-Euler SLV with a shared correlated Brownian.
 
     Variance and the rho-correlated part of spot are driven by the SAME Brownian dW_v,
@@ -88,8 +89,17 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
 
         v_plus = np.maximum(v, 0.0)
         sqrt_vp = np.sqrt(v_plus)
-        dW_v = sqrt_dt * rng.standard_normal(num_paths)
-        dW_s = rho * dW_v + rho_bar * sqrt_dt * rng.standard_normal(num_paths)
+        if use_antithetic:
+            # First half drawn, second half is its antithetic mirror (both z-streams).
+            # z draws happen exactly here, so use_antithetic=False leaves the stream unchanged.
+            half = num_paths // 2
+            z_v_h = rng.standard_normal(half)
+            z_i_h = rng.standard_normal(half)
+            dW_v = sqrt_dt * np.concatenate([z_v_h, -z_v_h])
+            dW_s = rho * dW_v + rho_bar * sqrt_dt * np.concatenate([z_i_h, -z_i_h])
+        else:
+            dW_v = sqrt_dt * rng.standard_normal(num_paths)
+            dW_s = rho * dW_v + rho_bar * sqrt_dt * rng.standard_normal(num_paths)
 
         # spot: martingale log-Euler with leverage-adjusted vol sigma_hat*sqrt(v)
         log_s = np.maximum(
@@ -136,6 +146,7 @@ def price_european_slv_mc(
     bin_method: BinMethod = BinMethod.EQUAL_WEIGHTED, seed: Optional[int] = 42,
     return_stderr: bool = False, leverage_surface: Optional[LeverageSurface] = None,
     leverage_clip: Tuple[float, float] = DEFAULT_LEVERAGE_CLIP,
+    use_antithetic: bool = False,
 ) -> Union[float, Tuple[float, float]]:
     """Price a European vanilla under Heston SLV via MC.
 
@@ -151,15 +162,27 @@ def price_european_slv_mc(
     if leverage_surface is not None and not isinstance(leverage_surface, LeverageSurface):
         raise ValidationError("leverage_surface must be a LeverageSurface when provided")
     rng = np.random.default_rng(seed)
+    # Antithetic: simulate 2*half paths (half originals + half mirrors), then average each
+    # pair's discounted payoff — mirroring the Heston MC convention. Default off is an
+    # unchanged z-stream (bit-identical to the pre-change kernel).
+    half = (num_paths + 1) // 2
+    n_eff = 2 * half if use_antithetic else num_paths
     s_terminal, _, _ = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
-                                     num_paths, num_bins, bin_method, rng,
+                                     n_eff, num_bins, bin_method, rng,
                                      leverage_surface=leverage_surface,
-                                     leverage_clip=leverage_clip)
+                                     leverage_clip=leverage_clip,
+                                     use_antithetic=use_antithetic)
     if not np.all(np.isfinite(s_terminal)):
         from quantark.util.exceptions import NumericalError
         raise NumericalError("SLV MC produced non-finite terminal spots")
     payoff = np.maximum(s_terminal - strike, 0.0) if is_call else np.maximum(strike - s_terminal, 0.0)
     discounted = float(disc_factor) * payoff
+    if use_antithetic:
+        pair = 0.5 * (discounted[:half] + discounted[half:2 * half])
+        price = float(np.mean(pair))
+        if return_stderr:
+            return price, (float(np.std(pair, ddof=1) / np.sqrt(half)) if half > 1 else 0.0)
+        return price
     price = float(np.mean(discounted))
     if return_stderr:
         return price, (float(np.std(discounted, ddof=1) / np.sqrt(num_paths)) if num_paths > 1 else 0.0)
