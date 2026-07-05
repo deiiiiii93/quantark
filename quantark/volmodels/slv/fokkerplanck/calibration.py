@@ -14,7 +14,7 @@ from quantark.volmodels.heston.params import HestonParams
 from quantark.volmodels.slv.leverage import LeverageSurface
 from quantark.volmodels.slv.slv_mc_kernel import _validate_common
 from quantark.volmodels.slv.fokkerplanck.config import FpCalibrationConfig
-from quantark.volmodels.slv.fokkerplanck.fp_solver import ForwardFPADI
+from quantark.volmodels.slv.fokkerplanck.fp_solver import ForwardFPADI, _MarchState
 from quantark.volmodels.slv.fokkerplanck.bootstrap import leverage_from_slice
 
 
@@ -45,6 +45,7 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
 
     S_nodes = np.exp(solver.x)
     rows, mass_res, n_blend, n_clip, max_neg = [], [], 0, 0, 0.0
+    march_state = _MarchState()               # lagged Krylov preconditioner carried across the march
     f = solver.seed_dirac(s0, params.v0)
     for n in range(dt.size):
         t = record_times[n]
@@ -63,7 +64,7 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
         # Backward-Euler march: L-stable and positivity-near-preserving. The ADI/Craig-Sneyd variant
         # is von-Neumann-unstable for this Dirac-seeded correlated forward density (negative mass
         # grows under time refinement), so calibration uses the fully-coupled implicit solve.
-        f = solver.step(f, L, dt[n], implicit=True, b=float(rf[n] - cf[n]))
+        f = solver.step(f, L, dt[n], implicit=True, b=float(rf[n] - cf[n]), state=march_state)
         m = solver.total_mass(f)
         neg = float(solver.w @ np.maximum(-f, 0.0))
         max_neg = max(max_neg, neg)
