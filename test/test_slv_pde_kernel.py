@@ -57,3 +57,17 @@ def test_slv_pde_validation():
         price_european_slv_pde(100.0, 100.0, True, 1.0, P, lev, 0.0, 0.0, n_x=2)
     with pytest.raises(ValidationError):
         price_european_slv_pde(100.0, 100.0, True, 1.0, P, lev, 0.0, 0.0, scheme=ADIScheme.MCS)
+
+
+def test_slv_adi_price_regression_pinned_for_batch_swap():
+    # Captured from the pre-batching implementation (per-system Python Thomas), WS-B2.
+    # The batched sweep preserves per-system arithmetic order -> 1e-13 relative.
+    params = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.5, rho=-0.7)
+    lev = LeverageSurface(time_grid=np.array([0.0, 0.5, 1.0]),
+                          strike_grid=np.array([60.0, 100.0, 160.0]),
+                          leverage_grid=np.array([[1.3, 1.0, 0.9],
+                                                  [1.25, 1.0, 0.92],
+                                                  [1.2, 1.0, 0.95]]))
+    p = price_european_slv_pde(100.0, 100.0, True, 1.0, params, lev, 0.03, 0.01,
+                               n_x=120, n_v=60, n_t=60)
+    assert np.isclose(p, 9.008727342033493, rtol=1e-13)

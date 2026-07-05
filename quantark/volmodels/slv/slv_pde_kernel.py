@@ -17,6 +17,7 @@ import numpy as np
 
 from quantark.util.enum.engine_enums import ADIScheme
 from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.numerical import solve_tridiag_batch
 from quantark.volmodels.heston.params import HestonParams
 from quantark.volmodels.slv.leverage import LeverageSurface
 
@@ -48,22 +49,6 @@ class _HestonSLVADI:
 
     def _L(self, t):
         return np.asarray(self.lev.leverage(self._S_int, t), dtype=float)
-
-    @staticmethod
-    def _thomas(a, b, c, d):
-        n = len(d)
-        cp = np.zeros(n); dp = np.zeros(n); x = np.zeros(n)
-        cp[0] = c[0] / b[0]; dp[0] = d[0] / b[0]
-        for i in range(1, n):
-            denom = b[i] - a[i] * cp[i - 1]
-            if abs(denom) < 1e-14:
-                raise NumericalError("zero pivot in SLV ADI tridiagonal solve (refine grid)")
-            cp[i] = c[i] / denom
-            dp[i] = (d[i] - a[i] * dp[i - 1]) / denom
-        x[n - 1] = dp[n - 1]
-        for i in range(n - 2, -1, -1):
-            x[i] = dp[i] - cp[i] * x[i + 1]
-        return x
 
     def _A1(self, U, t):
         out = np.zeros_like(U)
@@ -121,19 +106,28 @@ class _HestonSLVADI:
         return rhs
 
     def _solve_S(self, source, A1U, dt_step, theta_loc, tau, t_mid):
-        N = self.N_S
-        L2 = self._L(t_mid) ** 2
-        Y = np.empty_like(source)
-        for j in range(self.N_V):
-            vj = max(float(self.V_grid[j]), 1e-10)
-            c2 = 0.5 * (L2 * vj) / (self.dx * self.dx)
-            c1 = ((self.r - self.q) - 0.5 * (L2 * vj)) / (2.0 * self.dx)
-            a = np.zeros(N); b = np.ones(N); c = np.zeros(N)
-            a[1:-1] = -theta_loc * dt_step * (c2 - c1)
-            b[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2)
-            c[1:-1] = -theta_loc * dt_step * (c2 + c1)
-            rhs = self._s_rhs_bc(source[:, j] - theta_loc * dt_step * A1U[:, j], tau)
-            Y[:, j] = self._thomas(a, b, c, rhs)
+        # One tridiagonal system per V-slice, batched. The S-coefficients depend on
+        # t_mid through the leverage L, so they are rebuilt each step (no caching),
+        # but vectorized over (N_V, N_S) instead of a per-j Python loop.
+        L2 = self._L(t_mid) ** 2                                 # (N_S-2,) interior
+        V = np.maximum(self.V_grid, 1e-10)[:, None]              # (N_V, 1)
+        c2 = 0.5 * (L2[None, :] * V) / (self.dx * self.dx)      # (N_V, N_S-2)
+        c1 = ((self.r - self.q) - 0.5 * (L2[None, :] * V)) / (2.0 * self.dx)
+        a = np.zeros((self.N_V, self.N_S))
+        b = np.ones((self.N_V, self.N_S))
+        c = np.zeros((self.N_V, self.N_S))
+        a[:, 1:-1] = -theta_loc * dt_step * (c2 - c1)
+        b[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2)
+        c[:, 1:-1] = -theta_loc * dt_step * (c2 + c1)
+        rhs = source - theta_loc * dt_step * A1U                 # (N_S, N_V), fresh array
+        if self._opt_is_call:
+            rhs[0, :] = 0.0
+            rhs[-1, :] = max(0.0, self.S_max * np.exp(-self.q * tau)
+                             - self.K * np.exp(-self.r * tau))
+        else:
+            rhs[0, :] = self.K * np.exp(-self.r * tau)
+            rhs[-1, :] = 0.0
+        Y = solve_tridiag_batch(a, b, c, rhs.T).T
         self._bc(Y, tau)
         return Y
 
@@ -147,11 +141,13 @@ class _HestonSLVADI:
         b[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * coef_d2[1:-1])
         c[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] + coef_d1[1:-1])
         b[0] = 1.0; c[0] = -1.0; a[-1] = -1.0; b[-1] = 1.0
-        U_out = np.empty_like(source)
-        for i in range(self.N_S):
-            rhs = source[i, :] - theta_loc * dt_step * A2U[i, :]
-            rhs[0] = 0.0; rhs[-1] = 0.0
-            U_out[i, :] = self._thomas(a, b, c, rhs)
+        rhs = source - theta_loc * dt_step * A2U                 # (N_S, N_V), fresh array
+        rhs[:, 0] = 0.0
+        rhs[:, -1] = 0.0
+        U_out = solve_tridiag_batch(np.broadcast_to(a, (self.N_S, N)),
+                                    np.broadcast_to(b, (self.N_S, N)),
+                                    np.broadcast_to(c, (self.N_S, N)),
+                                    rhs)                         # one system per S-row
         self._bc(U_out, tau)
         return U_out
 
