@@ -26,6 +26,10 @@ class FpCalibrationConfig:
     mass_tol: float = 1e-3            # per-slice |sum(w*f) - 1| budget (tripwire)
     tail_mass_floor: float = 1e-6     # relative cell-mass below which leverage blends to uncond. mean
     leverage_clip: Tuple[float, float] = DEFAULT_LEVERAGE_CLIP
+    flux_scheme: str = "central"          # {"central","chang_cooper"} spatial face-flux scheme (WS-C4)
+    linear_solver: str = "direct"         # {"direct","krylov_lagged"} implicit-solve backend (WS-B3)
+    refactor_every: int = 5               # krylov_lagged: refresh splu preconditioner every N steps
+    time_scheme: str = "backward_euler"   # {"backward_euler","tr_bdf2"} FP time integrator (WS-C6)
     tol_neg: float = 0.5              # max negative probability mass sum_k w_k*max(-f_k,0). The central
     #                                   mixed-derivative (correlation) term is inherently not positivity-
     #                                   preserving (~10-15% for typical |rho|); negatives are clamped in
@@ -51,3 +55,11 @@ class FpCalibrationConfig:
         lo, hi = self.leverage_clip
         if not (math.isfinite(lo) and math.isfinite(hi) and 0.0 < lo < hi):
             raise ValidationError("leverage_clip must be a positive ordered (lo, hi) tuple")
+        if self.flux_scheme not in ("central", "chang_cooper"):
+            raise ValidationError("flux_scheme must be 'central' or 'chang_cooper'")
+        if self.linear_solver not in ("direct", "krylov_lagged"):
+            raise ValidationError("linear_solver must be 'direct' or 'krylov_lagged'")
+        if self.time_scheme not in ("backward_euler", "tr_bdf2"):
+            raise ValidationError("time_scheme must be 'backward_euler' or 'tr_bdf2'")
+        if not (isinstance(self.refactor_every, Integral) and self.refactor_every >= 1):
+            raise ValidationError("refactor_every must be an integer >= 1")

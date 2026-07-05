@@ -29,3 +29,27 @@ def test_removed_fields_raise_typeerror():
         FpCalibrationConfig(rannacher_steps=2)
     with pytest.raises(TypeError):
         FpCalibrationConfig(scheme=None)
+
+
+def test_new_switch_defaults_preserve_current_behavior():
+    cfg = FpCalibrationConfig()
+    assert cfg.flux_scheme == "central"
+    assert cfg.linear_solver == "direct"
+    assert cfg.time_scheme == "backward_euler"
+    assert cfg.refactor_every == 5
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("flux_scheme", "upwind"),
+    ("linear_solver", "gmres"),
+    ("time_scheme", "crank_nicolson"),
+])
+def test_invalid_scheme_strings_raise(field, bad):
+    with pytest.raises(ValidationError):
+        FpCalibrationConfig(**{field: bad})
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2.5])
+def test_refactor_every_must_be_positive_integer(bad):
+    with pytest.raises(ValidationError):
+        FpCalibrationConfig(refactor_every=bad)
