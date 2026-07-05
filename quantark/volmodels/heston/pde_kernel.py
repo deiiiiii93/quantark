@@ -21,6 +21,7 @@ import scipy.sparse.linalg as spla
 
 from quantark.util.enum.engine_enums import ADIScheme
 from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.numerical import solve_tridiag_batch
 from quantark.volmodels.heston.params import HestonParams
 
 # Below this vol-of-vol the variance is effectively deterministic and the ADI grid is
@@ -42,6 +43,8 @@ class _HestonADI:
         self._opt_is_call = True
         self._S_lu_cache: Dict[Tuple[float, float], List] = {}
         self._V_lu_cache: Dict[Tuple[float, float], object] = {}
+        self._S_tri_cache: Dict[Tuple[float, float], Tuple] = {}
+        self._V_tri_cache: Dict[Tuple[float, float], Tuple] = {}
         self._setup_grid(n_x, n_v, n_t)
 
     def _setup_grid(self, N_S, N_V, N_T):
@@ -65,22 +68,31 @@ class _HestonADI:
 
     # ---- dense tridiagonal builders ----
     def _tri_S(self, dt_step, theta_loc):
-        # Returns per-V tridiagonals as (alpha, beta, gamma) arrays shape (N_V, N_S).
-        N = self.N_S
+        # Per-V tridiagonals as (alpha, beta, gamma) arrays of shape (N_V, N_S); the
+        # Heston S-operator is time-independent, so the arrays are cached per
+        # (dt_step, theta_loc) exactly like the sparse-LU cache.
+        key = (float(dt_step), float(theta_loc))
+        cached = self._S_tri_cache.get(key)
+        if cached is not None:
+            return cached
         dx = self.dx
-        out = []
-        for j in range(self.N_V):
-            V = max(float(self.V_grid[j]), 1e-10)
-            c2 = 0.5 * V / (dx * dx)
-            c1 = ((self.r - self.q) - 0.5 * V) / (2.0 * dx)
-            alpha = np.zeros(N); beta = np.ones(N); gamma = np.zeros(N)
-            alpha[1:-1] = -theta_loc * dt_step * (c2 - c1)
-            beta[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2)
-            gamma[1:-1] = -theta_loc * dt_step * (c2 + c1)
-            out.append((alpha, beta, gamma))
-        return out
+        V = np.maximum(self.V_grid, 1e-10)[:, None]              # (N_V, 1)
+        c2 = 0.5 * V / (dx * dx)
+        c1 = ((self.r - self.q) - 0.5 * V) / (2.0 * dx)
+        alpha = np.zeros((self.N_V, self.N_S))
+        beta = np.ones((self.N_V, self.N_S))
+        gamma = np.zeros((self.N_V, self.N_S))
+        alpha[:, 1:-1] = -theta_loc * dt_step * (c2 - c1)
+        beta[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2)
+        gamma[:, 1:-1] = -theta_loc * dt_step * (c2 + c1)
+        self._S_tri_cache[key] = (alpha, beta, gamma)
+        return alpha, beta, gamma
 
     def _tri_V(self, dt_step, theta_loc):
+        key = (float(dt_step), float(theta_loc))
+        cached = self._V_tri_cache.get(key)
+        if cached is not None:
+            return cached
         N = self.N_V
         dV = self.dV
         v = np.maximum(self.V_grid, 1e-10)
@@ -91,31 +103,17 @@ class _HestonADI:
         beta[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * coef_d2[1:-1])
         gamma[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] + coef_d1[1:-1])
         beta[0] = 1.0; gamma[0] = -1.0; alpha[-1] = -1.0; beta[-1] = 1.0
+        self._V_tri_cache[key] = (alpha, beta, gamma)
         return alpha, beta, gamma
-
-    @staticmethod
-    def _thomas(a, b, c, d):
-        n = len(d)
-        cp = np.zeros(n); dp = np.zeros(n); x = np.zeros(n)
-        cp[0] = c[0] / b[0]; dp[0] = d[0] / b[0]
-        for i in range(1, n):
-            denom = b[i] - a[i] * cp[i - 1]
-            if abs(denom) < 1e-14:
-                raise NumericalError("zero pivot in Heston ADI tridiagonal solve (refine grid)")
-            cp[i] = c[i] / denom
-            dp[i] = (d[i] - a[i] * dp[i - 1]) / denom
-        x[n - 1] = dp[n - 1]
-        for i in range(n - 2, -1, -1):
-            x[i] = dp[i] - cp[i] * x[i + 1]
-        return x
 
     def _ensure_S_lus(self, dt_step, theta_loc):
         key = (float(dt_step), float(theta_loc))
         if key in self._S_lu_cache:
             return self._S_lu_cache[key]
         lus = []
-        for (alpha, beta, gamma) in self._tri_S(dt_step, theta_loc):
-            A = sp.diags([alpha[1:], beta, gamma[:-1]], offsets=[-1, 0, 1], format="csc")
+        alpha, beta, gamma = self._tri_S(dt_step, theta_loc)
+        for j in range(self.N_V):
+            A = sp.diags([alpha[j, 1:], beta[j], gamma[j, :-1]], offsets=[-1, 0, 1], format="csc")
             lus.append(spla.splu(A))
         self._S_lu_cache[key] = lus
         return lus
@@ -196,11 +194,16 @@ class _HestonADI:
                 rhs = self._s_boundary_rhs(source[:, j] - theta_loc * dt_step * A1U[:, j], tau)
                 Y[:, j] = lus[j].solve(rhs)
         else:
-            tris = self._tri_S(dt_step, theta_loc)
-            for j in range(self.N_V):
-                a, b, c = tris[j]
-                rhs = self._s_boundary_rhs(source[:, j] - theta_loc * dt_step * A1U[:, j], tau)
-                Y[:, j] = self._thomas(a, b, c, rhs)
+            alpha, beta, gamma = self._tri_S(dt_step, theta_loc)
+            rhs = source - theta_loc * dt_step * A1U             # (N_S, N_V), fresh array
+            if self._opt_is_call:
+                rhs[0, :] = 0.0
+                rhs[-1, :] = max(0.0, self.S_max * np.exp(-self.q * tau)
+                                 - self.K * np.exp(-self.r * tau))
+            else:
+                rhs[0, :] = self.K * np.exp(-self.r * tau)
+                rhs[-1, :] = 0.0
+            Y = solve_tridiag_batch(alpha, beta, gamma, rhs.T).T  # one system per V-slice
         self._bc(Y, tau)
         return Y
 
@@ -214,10 +217,13 @@ class _HestonADI:
                 U_out[i, :] = lu.solve(rhs)
         else:
             a, b, c = self._tri_V(dt_step, theta_loc)
-            for i in range(self.N_S):
-                rhs = source[i, :] - theta_loc * dt_step * A2U[i, :]
-                rhs[0] = 0.0; rhs[-1] = 0.0
-                U_out[i, :] = self._thomas(a, b, c, rhs)
+            rhs = source - theta_loc * dt_step * A2U             # (N_S, N_V), fresh array
+            rhs[:, 0] = 0.0
+            rhs[:, -1] = 0.0
+            U_out = solve_tridiag_batch(np.broadcast_to(a, (self.N_S, self.N_V)),
+                                        np.broadcast_to(b, (self.N_S, self.N_V)),
+                                        np.broadcast_to(c, (self.N_S, self.N_V)),
+                                        rhs)                     # one system per S-row
         self._bc(U_out, tau)
         return U_out
 

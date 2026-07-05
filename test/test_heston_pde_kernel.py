@@ -77,3 +77,21 @@ def test_grid_greeks_gamma_matches_analytic():
     ana_delta = (heston_call_price(s0 + h, k, T, P, r, q) - heston_call_price(s0 - h, k, T, P, r, q)) / (2 * h)
     assert delta == pytest.approx(ana_delta, abs=0.02)
     assert gamma == pytest.approx(ana_gamma, abs=4e-3)  # positive, right magnitude
+
+
+# --- WS-B2: pinned regressions for the batched-tridiagonal swap (bit-identity gate) ---
+
+_REG_PARAMS = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.5, rho=-0.7)
+
+
+@pytest.mark.parametrize("scheme,is_call,pinned", [
+    (ADIScheme.CRAIG_SNEYD, True, 8.871149965932108),
+    (ADIScheme.CRAIG_SNEYD, False, 6.8968024932586),
+    (ADIScheme.DOUGLAS, True, 8.885793431146555),
+])
+def test_adi_price_regression_pinned_for_batch_swap(scheme, is_call, pinned):
+    # Captured from the pre-batching implementation (per-system Python Thomas).
+    # The batched sweep preserves per-system arithmetic order -> 1e-13 relative.
+    p = price_european_heston_pde(100.0, 100.0, is_call, 1.0, _REG_PARAMS, 0.03, 0.01,
+                                  n_x=120, n_v=60, n_t=60, scheme=scheme)
+    assert np.isclose(p, pinned, rtol=1e-13)
