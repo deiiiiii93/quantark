@@ -181,3 +181,53 @@ def test_w_floor_above_builds():
                                vol_floor=1e-4)
     except NumericalError as exc:
         assert "total implied variance" not in str(exc)
+
+
+# --- WS-D5 / F3: edge-row-aware arbitrage tolerance (one-sided stencils) ---
+
+def _flat_in_strike_surface(w_rows):
+    """GridVolSurface whose total variance w = iv^2 * T is constant across strike (so
+    w_y = w_yy = 0, denom = 1) and equals ``w_rows[i]`` at maturity i. Rates/div are zero,
+    so dw/dT|_y == dw/dT|_K and only the calendar structure of w_rows is exercised."""
+    mats = [0.4, 0.8, 1.2, 1.6, 2.0]
+    T = np.array(mats)
+    strikes = list(np.round(100.0 * np.exp(np.linspace(-0.4, 0.4, 5)), 4))
+    w = np.array(w_rows)[:, None] * np.ones(5)[None, :]
+    iv = np.sqrt(w / T[:, None])
+    return GridVolSurface(strikes, mats, iv)
+
+
+def test_edge_stencil_false_rejection_is_tolerated():
+    # w = [.04,.05,.06,.07,.0733320] is STRICTLY INCREASING (calendar-arb-free), but the
+    # last-maturity one-sided backward stencil (3f_n-4f_{n-1}+f_{n-2})/(2h) reads dw/dT ~
+    # -5e-6 there. The 10*PRECISION edge slack tolerates this false rejection; the tiny
+    # negative local variance at that boundary node is absorbed by vol_floor. Interior
+    # tolerance would have raised on the arbitrage check.
+    surf = _flat_in_strike_surface([0.04, 0.05, 0.06, 0.07, 0.0733320])
+    lv = build_dupire_local_vol(
+        surf, spot=100.0, rate_curve=FlatRateCurve(0.0), div_yield=lambda t: 0.0,
+        vol_floor=0.05,
+    )
+    assert lv is not None
+
+
+def test_interior_calendar_violation_still_raises():
+    # An interior node with dw/dT|_y ~ -3e-6 (< -PRECISION) is a real violation and must
+    # still raise even with vol_floor set — the edge slack does not apply to interior nodes.
+    surf = _flat_in_strike_surface([0.04, 0.06, 0.06, 0.06 - 2e-6, 0.09])
+    with pytest.raises(NumericalError) as exc:
+        build_dupire_local_vol(
+            surf, spot=100.0, rate_curve=FlatRateCurve(0.0), div_yield=lambda t: 0.0,
+            vol_floor=0.05,
+        )
+    assert "one-sided stencil" not in str(exc.value)   # interior node -> no boundary hint
+
+
+def test_boundary_rejection_includes_stencil_hint():
+    # A large last-maturity calendar violation (beyond the edge slack) raises WITH the
+    # one-sided-stencil hint so the user knows the boundary may be the cause.
+    surf = _flat_in_strike_surface([0.04, 0.05, 0.06, 0.07, 0.04])
+    with pytest.raises(NumericalError, match="one-sided stencil"):
+        build_dupire_local_vol(
+            surf, spot=100.0, rate_curve=FlatRateCurve(0.0), div_yield=lambda t: 0.0,
+        )

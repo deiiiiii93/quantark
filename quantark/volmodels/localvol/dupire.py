@@ -33,6 +33,11 @@ from quantark.volmodels.localvol.surface import LocalVolSurface
 # the butterfly check (safe_divide's 0-fallback pointed the failure the wrong way).
 _W_FLOOR = 1e-12
 
+# Appended to an arbitrage-rejection message when a boundary node is implicated, so the
+# user knows the one-sided edge stencil (not necessarily true arbitrage) may be the cause.
+_EDGE_HINT = ("; boundary node — one-sided stencil, consider extending the input grid "
+              "one strike/maturity")
+
 
 def build_dupire_local_vol(
     iv_surface,
@@ -101,19 +106,33 @@ def build_dupire_local_vol(
     )
 
     if validate_arbitrage:
-        if np.any(dw_dT_y < -Tolerance.PRECISION):
-            idx = np.argwhere(dw_dT_y < -Tolerance.PRECISION)
+        # Boundary nodes (first/last maturity row, first/last strike column) use one-sided
+        # FD stencils, which can manufacture tiny spurious arbitrage violations on an
+        # otherwise-admissible surface. Give those nodes 10x the interior tolerance (F3);
+        # interior nodes keep the exact check. The rejection message hints at the cause.
+        is_edge = np.zeros((nT, nK), dtype=bool)
+        is_edge[0, :] = is_edge[-1, :] = True     # first/last maturity: one-sided dw/dT
+        is_edge[:, 0] = is_edge[:, -1] = True      # first/last strike: one-sided w_y/w_yy
+
+        cal_thresh = np.where(is_edge, 10.0 * Tolerance.PRECISION, Tolerance.PRECISION)
+        cal_bad = dw_dT_y < -cal_thresh
+        if np.any(cal_bad):
+            idx = np.argwhere(cal_bad)
+            hint = _EDGE_HINT if np.any(is_edge & cal_bad) else ""
             raise NumericalError(
-                f"calendar arbitrage: dw/dT|_y < 0 (moneyness) at nodes {idx.tolist()}"
+                f"calendar arbitrage: dw/dT|_y < 0 (moneyness) at nodes {idx.tolist()}{hint}"
             )
-        # Butterfly no-arbitrage requires a non-negative denominator. A strictly
-        # negative denominator is arbitrage; a tiny non-negative denominator is a
-        # numerical-stability concern handled by the lv2 check below (it yields a
-        # non-finite/blown-up local variance there), not an arbitrage rejection.
-        if np.any(denom < 0.0):
-            idx = np.argwhere(denom < 0.0)
+        # Butterfly no-arbitrage requires a non-negative denominator. A strictly negative
+        # denominator is arbitrage; a tiny non-negative denominator is a numerical-stability
+        # concern handled by the lv2 check below, not an arbitrage rejection. Interior nodes
+        # reject at denom < 0; boundary nodes get 10*PRECISION slack for one-sided stencils.
+        bf_thresh = np.where(is_edge, 10.0 * Tolerance.PRECISION, 0.0)
+        bf_bad = denom < -bf_thresh
+        if np.any(bf_bad):
+            idx = np.argwhere(bf_bad)
+            hint = _EDGE_HINT if np.any(is_edge & bf_bad) else ""
             raise NumericalError(
-                f"butterfly arbitrage: Dupire denominator < 0 at nodes {idx.tolist()}"
+                f"butterfly arbitrage: Dupire denominator < 0 at nodes {idx.tolist()}{hint}"
             )
 
     with np.errstate(divide="ignore", invalid="ignore"):
