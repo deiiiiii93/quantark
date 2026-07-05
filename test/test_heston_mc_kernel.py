@@ -117,3 +117,26 @@ def test_quadexp_converges_to_analytic_feller_violated():
                                  num_paths=200_000, seed=42)
     analytic = heston_call_price(100.0, 100.0, 1.0, params, 0.03, 0.01)
     assert abs(p - analytic) < 0.10          # pre-fix error was ~2.3
+
+
+# --- WS-B4: u_var drawn only for QUADEXP; z/u streams pinned across the change ---
+
+@pytest.mark.parametrize("scheme,use_antithetic,pinned", [
+    (HestonMCScheme.EULER, False, 8.05990821865451),
+    (HestonMCScheme.EULER, True, 8.090175350910078),
+    (HestonMCScheme.EULERLOG, False, 8.071218418656654),
+    (HestonMCScheme.EULERLOG, True, 8.1013457393631),
+    (HestonMCScheme.QUADEXP, False, 8.145397651538548),
+    (HestonMCScheme.QUADEXP, True, 8.119291373836068),
+])
+def test_seed_stability_pinned_across_u_var_change(scheme, use_antithetic, pinned):
+    # Captured BEFORE u_var became QUADEXP-only. u draws happen after z draws, so
+    # removing them for EULER/EULERLOG cannot perturb the z-stream, and QUADEXP's
+    # u-stream is unchanged. Exact equality: the random streams must not move.
+    params = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.5, rho=-0.7)
+    dt = np.full(12, 1.0 / 12.0)
+    p = price_european_heston_mc(100.0, 100.0, True, params, dt,
+                                 np.full(12, 0.03), np.full(12, 0.01),
+                                 disc_factor=float(np.exp(-0.03)), scheme=scheme,
+                                 num_paths=20_000, seed=42, use_antithetic=use_antithetic)
+    assert p == pinned

@@ -173,17 +173,24 @@ def price_european_heston_mc(
     half = (num_paths + 1) // 2
     n_eff = 2 * half if use_antithetic else num_paths
 
+    # Uniforms are consumed only by the QE variance inverse-CDF; EULER/EULERLOG skip the
+    # draw entirely. u draws come after the z draws, so the z-streams (and QUADEXP's
+    # u-stream) are seed-identical to the always-draw layout.
+    need_u = scheme == HestonMCScheme.QUADEXP
     if use_antithetic:
         z_var_h = rng.standard_normal((half, M))
         z_ind_h = rng.standard_normal((half, M))
-        u_var_h = rng.random((half, M))
         z_var = np.concatenate([z_var_h, -z_var_h], axis=0)
         z_ind = np.concatenate([z_ind_h, -z_ind_h], axis=0)
-        u_var = np.concatenate([u_var_h, 1.0 - u_var_h], axis=0)
+        if need_u:
+            u_var_h = rng.random((half, M))
+            u_var = np.concatenate([u_var_h, 1.0 - u_var_h], axis=0)
+        else:
+            u_var = None
     else:
         z_var = rng.standard_normal((n_eff, M))
         z_ind = rng.standard_normal((n_eff, M))
-        u_var = rng.random((n_eff, M))
+        u_var = rng.random((n_eff, M)) if need_u else None
 
     s_terminal = _simulate_terminal_spot(s0, params, scheme, dt, rf, cf, z_var, z_ind, u_var)
     if not np.all(np.isfinite(s_terminal)):
