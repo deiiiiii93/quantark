@@ -11,7 +11,11 @@ from scipy.optimize import least_squares
 
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.black_scholes import bs_call_price, implied_vol_call
-from quantark.volmodels.heston.analytical_kernel import heston_call_prices_vectorized
+from quantark.volmodels.heston.analytical_kernel import (
+    heston_call_price,
+    heston_call_prices_vectorized,
+    heston_implied_vol,
+)
 from quantark.volmodels.heston.params import HestonParams
 
 
@@ -50,7 +54,7 @@ def calibrate_heston(
     ),
     target: str = "price",
     regularize_feller: float = 1e-4,
-    method: str = "gatheral",
+    method: str = "lewis",
     max_nfev: int = 200,
     xtol: float = 1e-6,
     ftol: float = 1e-6,
@@ -63,10 +67,12 @@ def calibrate_heston(
         (dividend for equity, foreign rate for FX). initial: starting guess.
         bounds: (lower, upper) parameter bounds. target: "price" or "iv".
         regularize_feller: weight of the max(0, sigma^2 - 2 kappa theta) penalty.
-        method: retained for API compatibility and validated, but the objective now always
-            prices via the strike-vectorized Lewis pricer (heston_call_prices_vectorized).
-            Lewis/Gatheral/Weber agree to ~1e-10, so the calibrated optimum is unchanged;
-            the one-off pricers still honour ``method``.
+        method: CF pricer for the objective. "lewis" (default) uses the strike-vectorized
+            fixed-quadrature pricer (heston_call_prices_vectorized) — one CF sweep per
+            maturity, the fast path. "gatheral"/"weber" use the per-option adaptive pricer
+            (the pre-WS-B1 objective), preserved for compatibility; they are ~10x+ slower
+            but numerically agree with lewis to ~1e-10. The default changed from "gatheral"
+            to "lewis" in WS-B1 to deliver the speedup by default.
         max_nfev, xtol, ftol, gtol: least-squares solver controls.
 
     Notes:
@@ -161,15 +167,30 @@ def calibrate_heston(
     def residuals(x: np.ndarray) -> np.ndarray:
         p = unpack(x)
         model = np.empty(Ks.shape[0], dtype=float)
-        for Tg, rate_g, carry_g, idx in groups:
-            call_prices = heston_call_prices_vectorized(s0, Ks[idx], Tg, p, rate_g, carry_g)
+        if method == "lewis":
+            # Fast path: one strike-vectorized Lewis CF sweep per maturity group.
+            for Tg, rate_g, carry_g, idx in groups:
+                call_prices = heston_call_prices_vectorized(s0, Ks[idx], Tg, p, rate_g, carry_g)
+                if target == "price":
+                    model[idx] = call_prices
+                else:  # invert each group call to Black-Scholes implied vol
+                    model[idx] = [
+                        implied_vol_call(s0, float(k), Tg, float(cp), rate_g, carry_g)
+                        for k, cp in zip(Ks[idx], call_prices)
+                    ]
+        else:
+            # Compatibility path: per-option adaptive pricer with the requested CF method
+            # (gatheral/weber) — exactly the pre-WS-B1 objective.
             if target == "price":
-                model[idx] = call_prices
-            else:  # target == "iv": invert each group call to Black-Scholes implied vol
-                model[idx] = [
-                    implied_vol_call(s0, float(k), Tg, float(cp), rate_g, carry_g)
-                    for k, cp in zip(Ks[idx], call_prices)
-                ]
+                model = np.array([
+                    heston_call_price(s0, K, T, p, rate_i, carry_i, method=method)
+                    for K, T, rate_i, carry_i in zip(Ks, Ts, rates, carries)
+                ])
+            else:
+                model = np.array([
+                    heston_implied_vol(s0, K, T, p, rate_i, carry_i, method=method)
+                    for K, T, rate_i, carry_i in zip(Ks, Ts, rates, carries)
+                ])
         res = (model - y) * np.sqrt(w)
         # Fixed-length residual: always append the penalty term when enabled (it is 0
         # when Feller is satisfied) so least_squares sees a constant dimension.

@@ -79,6 +79,44 @@ def test_calibration_params_unchanged_after_vectorization():
     assert res.cost < 1e-8                                    # fit quality not degraded
 
 
+def test_calibration_method_dispatch_gatheral_matches_legacy():
+    # method="gatheral" must dispatch to the per-option (legacy) objective, reproducing the
+    # pre-WS-B1 optimum exactly (it IS that path) — proving method is honored, not ignored.
+    from quantark.volmodels.heston import (
+        HestonParams, MarketOption, calibrate_heston, heston_call_price,
+    )
+    s0, r, q = 100.0, 0.02, 0.0
+    true = HestonParams(v0=0.05, kappa=1.5, theta=0.05, sigma=0.3, rho=-0.5)
+    strikes = [80.0, 90.0, 100.0, 110.0, 120.0]
+    mats = [0.5, 1.0, 1.5]
+    opts = [MarketOption(K=k, T=t, price=heston_call_price(s0, k, t, true, r, q))
+            for t in mats for k in strikes]
+    init = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.2)
+    res = calibrate_heston(s0, opts, r, q, init, target="price", regularize_feller=0.0,
+                           method="gatheral")
+    PRE = [0.05000000000010962, 1.5000000000519667, 0.049999999999948704,
+           0.3000000000075705, -0.4999999999933314]
+    got = [res.params.v0, res.params.kappa, res.params.theta, res.params.sigma, res.params.rho]
+    assert np.max(np.abs(np.array(got) - np.array(PRE))) < 1e-9
+
+
+def test_calibration_method_weber_dispatches_and_succeeds():
+    # method="weber" routes through the per-option Weber pricer and still calibrates well.
+    from quantark.volmodels.heston import (
+        HestonParams, MarketOption, calibrate_heston, heston_call_price,
+    )
+    s0, r, q = 100.0, 0.02, 0.0
+    true = HestonParams(v0=0.05, kappa=1.5, theta=0.05, sigma=0.3, rho=-0.5)
+    opts = [MarketOption(K=k, T=t, price=heston_call_price(s0, k, t, true, r, q))
+            for t in (0.5, 1.0, 1.5) for k in (80.0, 100.0, 120.0)]
+    init = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.2)
+    res = calibrate_heston(s0, opts, r, q, init, target="price", regularize_feller=0.0,
+                           method="weber")
+    assert res.success
+    assert res.params.v0 == pytest.approx(true.v0, abs=5e-3)
+    assert res.params.rho == pytest.approx(true.rho, abs=5e-2)
+
+
 def test_calibration_rejects_initial_outside_bounds():
     from quantark.util.exceptions import ValidationError
     from quantark.volmodels.heston import (
