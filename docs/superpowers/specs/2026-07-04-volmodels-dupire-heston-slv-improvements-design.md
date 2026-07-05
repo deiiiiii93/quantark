@@ -108,11 +108,14 @@ Replace `inv_w = safe_divide(1.0, w)` with an explicit guard: if any `w <= W_FLO
 - MC-binning gains clip diagnostics: `LeverageSurface.diagnostics = {"method": "mc_binning", "n_clipped": …}` (currently `None`), where `n_clipped` is a **scalar total across all recorded (t, S) nodes**, matching the FFP convention.
 - The lower bound of the old band (`sigma_hat² ≥ 1e-8` → L ≥ 1e-4) widens to L ≥ 0.05; the upper widens from 3.16 to 20. **This changes MC-binning results in high/low-leverage regimes by design.** Goldens that exercised the saturated region are updated deliberately with a note.
 
-*Acceptance:*
+*Acceptance (as amended during implementation — see rationale below):*
 1. Unit test (deterministic, no simulation): recording path with a fixture where `σ_LV=0.4` and the binned `E[v|S]=0.01` (wants L=4) — recorded leverage now 4.0, previously 3.162.
-2. Cross-route gate (extends `test_slv_calibration_spec_method.py`): Heston `v0=θ=0.04, κ=1.5, σ=0.8, ρ=−0.7`, flat-skewed Dupire fixture already used by that suite, `T=1.0` monthly steps; MC-binning with `seed=42, num_paths=200_000, num_bins=30` vs FFP defaults; metric = max abs **relative** leverage difference over the common (t, S) nodes with S within ±2 total-vol stds of s0; threshold **0.10**.
-3. High-leverage fixture that previously saturated: same comparison with `v0=θ=0.01` and flat `σ_LV=0.40` (true L ≈ 4 everywhere) — passes the same 0.10 gate; under the old clip this fixture fails by construction (MC route pinned at 3.162).
-4. `n_clipped` present in diagnostics for both routes (scalar; asserted ≥ 0 and, on fixture 3 with the new band, == 0).
+2. Cross-route gate (extends `test_slv_calibration_spec_method.py`): Heston `v0=θ=0.04, κ=1.5, σ=0.5, ρ=−0.7`, inline skewed LV fixture, `T=1.0` at 48 steps; MC-binning with `seed=42, num_paths=200_000, num_bins=30` vs FFP defaults; metric = max abs **relative** leverage difference evaluated at 11 interior times over S within **±2 conditional stds per time** (`±2√(v_ref·t)`); threshold **0.10**.
+3. High-leverage fixture that previously saturated: same comparison with `v0=θ=0.01, σ=0.2` and flat `σ_LV=0.40` (true L ≈ 4 in the bulk) — passes the same 0.10 gate; the test also asserts `max(leverage_grid) > 3.163` (the old cap would have bound) and `n_clipped == 0`.
+4. `n_clipped` present in diagnostics for both routes (scalar).
+5. Extreme-regime guard: at the originally-specified `σ=0.8`, both routes are O(dt)-dominated at coarse steps (a single full-truncation Euler shock pins v at 0), so a fixed-step 0.10 gate would measure time-discretization error, not route agreement (measured: 0.55 at 48 steps → 0.26 at 96 → converging; ≈400 steps to reach 0.10). A convergence-trend test asserts the 48→96-step gap ratio < 0.65 instead.
+
+**Amendments rationale (2026-07-05):** (a) the original "±2 total-vol stds" window read ±7 *conditional* stds at t=1/12 — deep tails where the two routes differ *by design* (MC flat-extrapolates tail-bin means; FFP blends to the unconditional CIR mean), so the window is per-time; (b) σ=0.8 vol-of-vol moved to the convergence-trend guard (see 5); (c) fixture 3's stated intent ("true L≈4") requires the variance to remain identifiable near v0 — at σ=0.8 full-truncation dynamics pin v at 0 and L is nowhere near 4, so fixture 3 uses σ=0.2.
 
 ### WS-A3: Stale docs, dead config, dead fallbacks (F23, F14)
 
