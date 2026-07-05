@@ -95,3 +95,23 @@ def test_adi_price_regression_pinned_for_batch_swap(scheme, is_call, pinned):
     p = price_european_heston_pde(100.0, 100.0, is_call, 1.0, _REG_PARAMS, 0.03, 0.01,
                                   n_x=120, n_v=60, n_t=60, scheme=scheme)
     assert np.isclose(p, pinned, rtol=1e-13)
+
+
+def test_heston_pde_bit_identical_after_core_refactor():
+    # WS-D1: delegating to HestonSLVADICore reproduces the pre-refactor prices/greeks
+    # bit-identically (dense CS, sparse Douglas, grid_spot delta/gamma).
+    import numpy as np
+    from quantark.util.enum.engine_enums import ADIScheme
+    from quantark.volmodels.heston.params import HestonParams
+    from quantark.volmodels.heston.pde_kernel import (
+        price_european_heston_pde, price_delta_gamma_heston_pde)
+    P = HestonParams(v0=0.04, kappa=1.5, theta=0.05, sigma=0.4, rho=-0.6)
+    a = price_european_heston_pde(100,100,True,1.0,P,0.03,0.01, n_x=80,n_v=48,n_t=40, scheme=ADIScheme.CRAIG_SNEYD)
+    b = price_european_heston_pde(100,110,False,0.7,P,0.05,0.0, n_x=80,n_v=48,n_t=40, scheme=ADIScheme.DOUGLAS, use_sparse=True)
+    c = price_delta_gamma_heston_pde(100,100,True,1.0,P,0.03,0.01, n_x=80,n_v=48,n_t=40, grid_spot=100.0)
+    PINS = (9.17122199075139, 10.190455924886752,
+            (9.155133525343599, 0.6228799259201608, 0.019042706789453905))
+    assert abs(a - PINS[0]) <= 1e-13 * max(1.0, abs(PINS[0]))
+    assert abs(b - PINS[1]) <= 1e-13 * max(1.0, abs(PINS[1]))
+    for got, ref in zip(c, PINS[2]):
+        assert abs(got - ref) <= 1e-13 * max(1.0, abs(ref))
