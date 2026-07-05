@@ -23,9 +23,15 @@ from typing import Callable, Optional
 import numpy as np
 
 from quantark.util.exceptions import NumericalError, ValidationError
-from quantark.util.numerical import safe_divide, safe_exp, safe_log, safe_sqrt
+from quantark.util.numerical import safe_exp, safe_log, safe_sqrt
 from quantark.util.numerical.constants import Tolerance
 from quantark.volmodels.localvol.surface import LocalVolSurface
+
+# Absolute floor on total implied variance w = iv^2 * T. Deliberately NOT derived from
+# Tolerance.ZERO (1e-10): legitimate short-dated low-vol rows (iv=0.03, T=1e-4 -> w=9e-8)
+# must pass, while genuinely degenerate rows must raise instead of silently bypassing
+# the butterfly check (safe_divide's 0-fallback pointed the failure the wrong way).
+_W_FLOOR = 1e-12
 
 
 def _fd1(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
@@ -139,7 +145,13 @@ def build_dupire_local_vol(
     dlnF_dT = _fd1(ln_fwd, T)                            # (nT,)
     dw_dT_y = dw_dT_K + dlnF_dT[:, None] * w_y           # dw/dT at fixed moneyness
 
-    inv_w = safe_divide(1.0, w)
+    if np.any(w <= _W_FLOOR):
+        idx = np.argwhere(w <= _W_FLOOR)
+        raise NumericalError(
+            f"total implied variance w <= {_W_FLOOR} at (T, K) nodes {idx.tolist()}; "
+            "the input surface has a degenerate row — fix the input, do not floor"
+        )
+    inv_w = 1.0 / w
     denom = (
         1.0
         - y * inv_w * w_y

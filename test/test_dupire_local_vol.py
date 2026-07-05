@@ -154,3 +154,30 @@ def test_local_vol_vectorized_matches_scalar():
     assert vec.shape == (3,)
     for i in range(3):
         assert vec[i] == pytest.approx(float(lv.local_vol(spots[i], times[i])), abs=1e-12)
+
+
+def test_w_floor_below_raises():
+    # front row w = (1e-5)^2 * 1e-3 = 1e-13 < 1e-12: degenerate row must raise, not
+    # silently bypass the butterfly check (pre-fix, safe_divide returned 0 for 1/w)
+    strikes = [90.0, 100.0, 110.0]
+    mats = [1e-3, 0.5, 1.0]
+    iv = np.array([[1e-5] * 3, [0.2] * 3, [0.2] * 3])
+    surface = GridVolSurface(strikes, mats, iv)
+    with pytest.raises(NumericalError, match="total implied variance"):
+        build_dupire_local_vol(surface, spot=100.0, rate_curve=FlatRateCurve(0.02),
+                               div_yield=lambda t: 0.0, validate_arbitrage=False)
+
+
+def test_w_floor_above_builds():
+    # front row w = (1e-4)^2 * 0.5 = 5e-9 > 1e-12 -> must NOT trip the floor
+    strikes = [90.0, 100.0, 110.0]
+    mats = [0.5, 0.75, 1.0]
+    iv = np.array([[1e-4] * 3, [0.2] * 3, [0.2] * 3])
+    surface = GridVolSurface(strikes, mats, iv)
+    # non-flat in T so Dupire may reject on other numerical grounds, but NOT the w-floor
+    try:
+        build_dupire_local_vol(surface, spot=100.0, rate_curve=FlatRateCurve(0.02),
+                               div_yield=lambda t: 0.0, validate_arbitrage=False,
+                               vol_floor=1e-4)
+    except NumericalError as exc:
+        assert "total implied variance" not in str(exc)
