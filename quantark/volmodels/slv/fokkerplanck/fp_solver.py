@@ -7,8 +7,17 @@ seed). Task 5b adds Craig-Sneyd as the faster default with a Rannacher (implicit
 from __future__ import annotations
 
 import numpy as np
+import scipy
 import scipy.sparse as sp
 from scipy.sparse.linalg import splu, bicgstab, LinearOperator
+
+# SciPy renamed the iterative-solver relative-tolerance kwarg tol -> rtol in 1.12 (tol removed in 1.14).
+# Support the declared floor (scipy>=1.10) by selecting the right kwarg name at import time.
+_SCIPY_RTOL_KW = tuple(int(p) for p in scipy.__version__.split(".")[:2]) >= (1, 12)
+
+
+def _bicgstab_reltol(value):
+    return {"rtol": value} if _SCIPY_RTOL_KW else {"tol": value}
 
 from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.volmodels.heston.params import HestonParams
@@ -20,12 +29,14 @@ from quantark.volmodels.slv.fokkerplanck.fp_operators import build_directional_o
 
 
 class _MarchState:
-    """Carries the lagged splu preconditioner for the krylov_lagged linear solver across march steps."""
-    __slots__ = ("precond", "steps_since_refactor")
+    """Carries per-march solver state: the lagged krylov_lagged splu preconditioner, and the direct-mode
+    LU factorization so TR-BDF2's two same-matrix substeps share a single factorization."""
+    __slots__ = ("precond", "steps_since_refactor", "lu")
 
     def __init__(self):
         self.precond = None
         self.steps_since_refactor = 0
+        self.lu = None
 
 
 class ForwardFPADI:
@@ -102,23 +113,26 @@ class ForwardFPADI:
     def _solve_implicit(self, M, rhs, state, *, advance=True):
         """Solve M x = rhs. ``direct``: splu. ``krylov_lagged``: BiCGStab + lagged splu preconditioner.
 
-        ``advance``: when True (default) this solve participates in the refactor cadence (may refresh the
-        preconditioner at the ``refactor_every`` boundary and increments the step counter). Pass
-        ``advance=False`` for TR-BDF2's second substep, which reuses the first substep's identical M.
+        ``advance``: when True (default) this solve owns the step's factorization work (direct: factor M;
+        krylov: refresh the lagged preconditioner at the ``refactor_every`` boundary + tick the counter).
+        Pass ``advance=False`` for TR-BDF2's second substep, which REUSES the first substep's factorization
+        of the identical M -- so both the direct LU and the lagged preconditioner are built once per step.
         """
         if self.cfg.linear_solver == "direct":
-            return self._splu(M).solve(rhs)
+            if advance or state.lu is None:              # TR-BDF2 2nd substep reuses the 1st substep's LU
+                state.lu = self._splu(M)
+            return state.lu.solve(rhs)
         # krylov_lagged: BiCGStab against a lagged splu preconditioner refreshed every refactor_every steps
         if state.precond is None or (advance and state.steps_since_refactor >= self.cfg.refactor_every):
             state.precond = self._splu(M)
             state.steps_since_refactor = 0
         Mpre = LinearOperator(M.shape, matvec=state.precond.solve)
-        x, info = bicgstab(M, rhs, M=Mpre, rtol=1e-13, atol=0.0, maxiter=300)
+        x, info = bicgstab(M, rhs, M=Mpre, atol=0.0, maxiter=300, **_bicgstab_reltol(1e-13))
         if info != 0:                                    # one refactor + retry, then raise (no silent degrade)
             state.precond = self._splu(M)
             state.steps_since_refactor = 0
             Mpre = LinearOperator(M.shape, matvec=state.precond.solve)
-            x, info = bicgstab(M, rhs, M=Mpre, rtol=1e-13, atol=0.0, maxiter=300)
+            x, info = bicgstab(M, rhs, M=Mpre, atol=0.0, maxiter=300, **_bicgstab_reltol(1e-13))
             if info != 0:
                 raise NumericalError(f"Krylov FP solve failed to converge (info={info}); refine grid/steps")
         if advance:

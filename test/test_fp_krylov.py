@@ -45,6 +45,18 @@ def test_krylov_lagged_parity_is_calibration_negligible(rho):
     assert np.max(np.abs(a.leverage_grid - b.leverage_grid)) < 1e-6
 
 
+def test_bicgstab_reltol_kw_matches_installed_scipy():
+    # SciPy renamed the iterative-solver tol -> rtol in 1.12 (tol removed in 1.14). The shim must select
+    # a kwarg name the INSTALLED bicgstab accepts, else krylov_lagged TypeErrors at the declared floor.
+    import inspect
+    from scipy.sparse.linalg import bicgstab
+    import quantark.volmodels.slv.fokkerplanck.fp_solver as mod
+    kw = mod._bicgstab_reltol(1e-13)
+    key = next(iter(kw))
+    assert key in ("rtol", "tol")
+    assert key in inspect.signature(bicgstab).parameters
+
+
 def test_krylov_mode_actually_uses_bicgstab(monkeypatch):
     import quantark.volmodels.slv.fokkerplanck.fp_solver as mod
     calls = {"n": 0}

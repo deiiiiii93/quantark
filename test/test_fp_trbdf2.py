@@ -53,9 +53,7 @@ def test_trbdf2_mass_and_negativity_no_worse_than_be():
     assert tr.diagnostics["max_negative_mass"] <= 10.0 * be.diagnostics["max_negative_mass"] + 1e-9
 
 
-def test_trbdf2_krylov_reuses_matrix_within_step(monkeypatch):
-    # TR-BDF2 does two solves per step against the SAME M (gamma=2-sqrt2). With refactor_every=1 the
-    # lagged-Krylov cadence must refresh only ONCE per step (advance=False on the 2nd substep), not twice.
+def _count_splu(monkeypatch, time_scheme, n, **cfg_over):
     import quantark.volmodels.slv.fokkerplanck.fp_solver as mod
     calls = {"n": 0}
     real = mod.splu
@@ -65,6 +63,21 @@ def test_trbdf2_krylov_reuses_matrix_within_step(monkeypatch):
         return real(*a, **k)
 
     monkeypatch.setattr(mod, "splu", _spy)
+    _calibrate(time_scheme, n, **cfg_over)
+    return calls["n"]
+
+
+def test_trbdf2_krylov_reuses_matrix_within_step(monkeypatch):
+    # TR-BDF2 does two solves per step against the SAME M (gamma=2-sqrt2). With refactor_every=1 the
+    # lagged-Krylov cadence must refresh only ONCE per step (advance=False on the 2nd substep), not twice.
     n = 12
-    _calibrate("tr_bdf2", n, linear_solver="krylov_lagged", refactor_every=1)
-    assert calls["n"] == n                            # once/step (step 0 backward-Euler start-up), NOT 2n-1
+    c = _count_splu(monkeypatch, "tr_bdf2", n, linear_solver="krylov_lagged", refactor_every=1)
+    assert c == n                                     # once/step (step 0 backward-Euler start-up), NOT 2n-1
+
+
+def test_trbdf2_direct_reuses_lu_within_step(monkeypatch):
+    # direct mode (default): the two TR-BDF2 substeps share ONE LU factorization of the identical M
+    # (advance=False on the 2nd substep reuses state.lu). n steps => n splu calls, not 2n-1.
+    n = 12
+    c = _count_splu(monkeypatch, "tr_bdf2", n)        # linear_solver defaults to "direct"
+    assert c == n
