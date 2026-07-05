@@ -10,7 +10,7 @@ from quantark.util.enum import HestonAnalyticalMethod as HAM_TOPLEVEL  # re-expo
 
 def test_method_enum_members():
     assert {m.name for m in HestonAnalyticalMethod} == {"LEWIS", "GATHERAL", "WEBER"}
-    assert {m.name for m in HestonMCScheme} == {"EULER", "EULERLOG", "QUADEXP"}
+    assert {m.name for m in HestonMCScheme} == {"EULER", "EULERLOG", "QUADEXP", "QUADEXP_M"}
     assert {m.name for m in ADIScheme} == {"DOUGLAS", "CRAIG_SNEYD", "MCS"}
     assert {m.name for m in LeverageCalibrationMethod} == {
         "MC_BINNING", "FORWARD_FOKKER_PLANCK", "UNCONDITIONAL_MEAN"
