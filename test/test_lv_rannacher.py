@@ -71,6 +71,30 @@ def test_strike_is_mid_cell_and_boundary_nodes_preserved():
     assert np.isclose(s_grid[-1], ds * (len(s_grid) - 1))
 
 
+def test_deep_itm_low_strike_does_not_reject():
+    # Codex code-review [high]: for strike << spot the mid-cell adjustment must NOT shrink
+    # smax below spot and reject the contract. Deep-ITM call/put must price sanely.
+    T, r, q, vol = 1.0, 0.03, 0.0, 0.2
+    surface = _flat_surface(vol)
+    dt = np.full(20, T / 20); rf = np.full(20, r); cf = np.full(20, q)
+    for s0, k in [(100.0, 0.5), (100.0, 0.1), (100.0, 5.0), (500.0, 10.0)]:
+        c = price_european_lv_pde(s0, k, True, T, surface, dt, rf, cf, n_s=101)
+        p = price_european_lv_pde(s0, k, False, T, surface, dt, rf, cf, n_s=101)
+        assert np.isfinite(c) and np.isfinite(p)
+        # deep-ITM call ~ s0 - k*df ; deep-OTM put ~ 0
+        assert abs(c - (s0 - k * np.exp(-r * T))) < 0.5
+        assert 0.0 <= p < 0.5
+
+
+def test_explicit_smax_is_not_shrunk_below_domain():
+    # grow-only: an explicit s_max must never be reduced below what covers spot.
+    T, r, q, vol = 1.0, 0.03, 0.0, 0.2
+    surface = _flat_surface(vol)
+    dt = np.full(20, T / 20); rf = np.full(20, r); cf = np.full(20, q)
+    s_grid, _ = _solve_lv_pde(100.0, 5.0, True, T, surface, dt, rf, cf, n_s=101, s_max=400.0)
+    assert s_grid[0] == 0.0 and s_grid[-1] >= 400.0  # never shrinks below the requested bound
+
+
 def test_put_and_low_spot_prices_match_bs():
     # The mid-cell change must not corrupt puts or low-spot cases (boundary economics).
     T, r, q, vol = 1.0, 0.03, 0.01, 0.2

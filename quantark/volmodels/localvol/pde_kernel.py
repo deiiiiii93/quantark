@@ -74,13 +74,16 @@ def _solve_lv_pde(
     # Strike mid-cell (kink-averaging): adjust the SPACING so K sits halfway between two
     # nodes while s_grid[0] stays exactly at S=0 and s_grid[-1] stays the upper boundary.
     # Deliberate golden move (WS-C7). (Never shift the whole grid off S=0.)
+    # GROW-ONLY: pick the largest cell index j whose midpoint hosts K with ds >= ds_nom, so
+    # the recomputed smax can only grow past the original domain-covering bound, never shrink
+    # below s0 (which would reject valid deep-ITM contracts — Codex code-review [high]).
     ds_nom = smax / (N - 1)
-    j_cell = max(int(round(strike / ds_nom - 0.5)), 0)   # cell index whose midpoint hosts K
-    ds = strike / (j_cell + 0.5)                          # K == (j_cell + 0.5) * ds (mid-cell)
-    smax = ds * (N - 1)                                   # upper bound moves by < ds
-    if smax <= s0:
-        raise ValidationError("s_max (after mid-cell adjustment) must exceed spot")
+    j_cell = int(np.floor(strike / ds_nom - 0.5))         # largest j with strike/(j+0.5) >= ds_nom
+    if j_cell >= 0:
+        smax = (strike / (j_cell + 0.5)) * (N - 1)        # ds >= ds_nom => smax grows, never shrinks
+    # else: strike sits in the first half-cell (already off-node); keep the original grid.
     s_grid = np.linspace(0.0, smax, N)                    # s_grid[0] == 0 preserved
+    ds = smax / (N - 1)
     s_int = s_grid[1:-1]
 
     # node times t_0=0 .. t_M=T and cumulative remaining discount factors to T
