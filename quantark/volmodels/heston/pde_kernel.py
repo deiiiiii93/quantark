@@ -43,11 +43,13 @@ def price_european_heston_pde(
     rannacher: bool = True,
     use_sparse: bool = False,
     grid_spot: float = 0.0,
+    v0_boundary: str = "neumann",
 ) -> float:
     """Price a European vanilla under Heston via ADI finite differences.
 
     grid_spot (> 0) pins the spatial grid centering for clean Greeks across spot bumps;
-    when 0 the grid centers on s0.
+    when 0 the grid centers on s0. v0_boundary "degenerate_pde" replaces the Neumann
+    v=0 row with the degenerate convection PDE row (opt-in; helps Feller-violated cases).
     """
     if s0 <= 0 or strike <= 0 or T <= 0:
         raise ValidationError("s0, strike, T must be positive")
@@ -63,7 +65,8 @@ def price_european_heston_pde(
         return _deterministic_pde_price(s0, strike, is_call, T, params, r, carry)
     solver = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
                               leverage=None, eta=1.0, use_sparse=use_sparse,
-                              grid_spot=(grid_spot if grid_spot > 0 else None))
+                              grid_spot=(grid_spot if grid_spot > 0 else None),
+                              v0_boundary=v0_boundary)
     if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
         raise ValidationError("s0 falls outside the PDE grid (grid_spot too far from s0)")
     U = solver.solve(is_call, scheme, theta, rannacher)
@@ -77,7 +80,7 @@ def price_delta_gamma_heston_pde(
     s0: float, strike: float, is_call: bool, T: float, params: HestonParams,
     r: float, carry: float, n_x: int = 200, n_v: int = 100, n_t: int = 100,
     scheme: ADIScheme = ADIScheme.CRAIG_SNEYD, theta: float = 0.5, rannacher: bool = True,
-    use_sparse: bool = False, grid_spot: float = 0.0,
+    use_sparse: bool = False, grid_spot: float = 0.0, v0_boundary: str = "neumann",
 ) -> Tuple[float, float, float]:
     """Return (price, spot-delta, spot-gamma) from a single PDE solve.
 
@@ -97,7 +100,8 @@ def price_delta_gamma_heston_pde(
         return p, (pu - pd) / (2 * eps), (pu - 2 * p + pd) / (eps * eps)
     solver = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
                               leverage=None, eta=1.0, use_sparse=use_sparse,
-                              grid_spot=(grid_spot if grid_spot > 0 else None))
+                              grid_spot=(grid_spot if grid_spot > 0 else None),
+                              v0_boundary=v0_boundary)
     if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
         raise ValidationError("s0 falls outside the PDE grid (grid_spot too far from s0)")
     U = solver.solve(is_call, scheme, theta, rannacher)

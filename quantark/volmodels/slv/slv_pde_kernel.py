@@ -27,6 +27,7 @@ def price_european_slv_pde(
     lev_surface: LeverageSurface, r: float, carry: float, eta: float = 1.0,
     n_x: int = 200, n_v: int = 100, n_t: int = 100,
     scheme: ADIScheme = ADIScheme.CRAIG_SNEYD, theta: float = 0.5, rannacher: bool = True,
+    v0_boundary: str = "neumann",
 ) -> float:
     """Price a European vanilla under Heston SLV via backward ADI (given a LeverageSurface)."""
     if s0 <= 0 or strike <= 0 or T <= 0:
@@ -42,7 +43,7 @@ def price_european_slv_pde(
     if eta < 0:
         raise ValidationError("eta must be non-negative")
     solver = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
-                              leverage=lev_surface, eta=eta)
+                              leverage=lev_surface, eta=eta, v0_boundary=v0_boundary)
     if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
         raise ValidationError("s0 falls outside the PDE grid")
     U = solver.solve(is_call, scheme, theta, rannacher)
@@ -57,6 +58,7 @@ def price_delta_gamma_slv_pde(
     lev_surface: LeverageSurface, r: float, carry: float, eta: float = 1.0,
     n_x: int = 200, n_v: int = 100, n_t: int = 100,
     scheme: ADIScheme = ADIScheme.CRAIG_SNEYD, theta: float = 0.5, rannacher: bool = True,
+    v0_boundary: str = "neumann",
 ) -> Tuple[float, float, float]:
     """(price, spot-delta, spot-gamma) from a single backward SLV PDE solve."""
     if s0 <= 0 or strike <= 0 or T <= 0:
@@ -72,7 +74,7 @@ def price_delta_gamma_slv_pde(
     if eta < 0:
         raise ValidationError("eta must be non-negative")
     solver = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
-                              leverage=lev_surface, eta=eta)
+                              leverage=lev_surface, eta=eta, v0_boundary=v0_boundary)
     if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
         raise ValidationError("s0 falls outside the PDE grid")
     U = solver.solve(is_call, scheme, theta, rannacher)

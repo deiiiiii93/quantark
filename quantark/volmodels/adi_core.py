@@ -21,6 +21,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from quantark.util.enum.engine_enums import ADIScheme
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import solve_tridiag_batch
 from quantark.volmodels.heston.params import HestonParams
 
@@ -41,7 +42,7 @@ class HestonSLVADICore:
 
     def __init__(self, s0, strike, T, r, carry, params: HestonParams,
                  n_x, n_v, n_t, *, leverage=None, eta=1.0,
-                 use_sparse=False, grid_spot=None):
+                 use_sparse=False, grid_spot=None, v0_boundary="neumann"):
         self.S0, self.K, self.T, self.r, self.q = s0, strike, T, r, carry
         self.kappa, self.theta, self.sigma, self.rho, self.v0 = (
             params.kappa, params.theta, params.sigma, params.rho, params.v0,
@@ -54,6 +55,10 @@ class HestonSLVADICore:
         self.use_sparse = bool(use_sparse) and self._constant_leverage
         self._opt_is_call = True
         self.N_S, self.N_V, self.N_T = n_x, n_v, n_t
+        if v0_boundary not in ("neumann", "degenerate_pde"):
+            raise ValidationError("v0_boundary must be 'neumann' or 'degenerate_pde'")
+        self.v0_boundary = v0_boundary
+        self._degenerate_v0 = v0_boundary == "degenerate_pde"
 
         # ---- grid (identical extent logic to both original kernels) ----
         var_eff = max(self.theta, self.v0, 0.25 * self.sig_eff2, 0.04)
@@ -109,6 +114,10 @@ class HestonSLVADICore:
         U_VV = (U[1:-1, 2:] - 2.0 * U[1:-1, 1:-1] + U[1:-1, :-2]) / (self.dV * self.dV)
         U_V = (U[1:-1, 2:] - U[1:-1, :-2]) / (2.0 * self.dV)
         out[1:-1, 1:-1] = coef_d2 * U_VV + coef_d1 * U_V
+        if self._degenerate_v0:
+            # v=0 row: only kappa*theta*U_v survives (diffusion vanishes); 2-point forward.
+            dV0 = float(self.V_grid[1] - self.V_grid[0])
+            out[1:-1, 0] = self.kappa * self.theta * (U[1:-1, 1] - U[1:-1, 0]) / dV0
         return out
 
     def _A0(self, U, t):
@@ -128,7 +137,8 @@ class HestonSLVADICore:
         else:
             U[0, :] = self.K * np.exp(-self.r * tau)
             U[-1, :] = 0.0
-        U[:, 0] = U[:, 1]
+        if not self._degenerate_v0:
+            U[:, 0] = U[:, 1]
         U[:, -1] = U[:, -2]
 
     def _terminal(self, is_call):
@@ -183,7 +193,14 @@ class HestonSLVADICore:
         a[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] - coef_d1[1:-1])
         b[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * coef_d2[1:-1])
         c[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] + coef_d1[1:-1])
-        b[0] = 1.0; c[0] = -1.0; a[-1] = -1.0; b[-1] = 1.0
+        if self._degenerate_v0:
+            # degenerate v=0 PDE row: (I - theta*dt * kappa*theta*U_v) with 2-point forward.
+            conv = self.kappa * self.theta / dV
+            b[0] = 1.0 + theta_loc * dt_step * conv
+            c[0] = -theta_loc * dt_step * conv
+        else:
+            b[0] = 1.0; c[0] = -1.0
+        a[-1] = -1.0; b[-1] = 1.0
         self._V_tri_cache[key] = (a, b, c)
         return a, b, c
 
@@ -238,13 +255,16 @@ class HestonSLVADICore:
             lu = self._ensure_V_lu(dt_step, theta_loc)
             for i in range(self.N_S):
                 rhs = source[i, :] - theta_loc * dt_step * A2U[i, :]
-                rhs[0] = 0.0; rhs[-1] = 0.0
+                if not self._degenerate_v0:
+                    rhs[0] = 0.0
+                rhs[-1] = 0.0
                 U_out[i, :] = lu.solve(rhs)
             self._bc(U_out, tau)
             return U_out
         a, b, c = self._tri_V(dt_step, theta_loc)
         rhs = source - theta_loc * dt_step * A2U                    # (N_S, N_V), fresh array
-        rhs[:, 0] = 0.0
+        if not self._degenerate_v0:
+            rhs[:, 0] = 0.0
         rhs[:, -1] = 0.0
         U_out = solve_tridiag_batch(np.broadcast_to(a, (self.N_S, self.N_V)),
                                     np.broadcast_to(b, (self.N_S, self.N_V)),
