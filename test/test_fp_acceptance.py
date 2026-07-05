@@ -85,6 +85,60 @@ def test_ffp_stable_under_time_refinement_and_high_correlation():
         prev = neg
 
 
+def _max_neg(sigma=0.7, rho=-0.9, n=60):
+    p = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=sigma, rho=rho)
+    cfg = FpCalibrationConfig(n_x=161, n_z=121, tol_neg=0.9)
+    lev = _calibrate(_surface(skew=True), p, n=n, fp_config=cfg)
+    return lev.diagnostics["max_negative_mass"]
+
+
+def test_directional_operators_are_already_m_matrices():
+    # Investigation finding (2026-07): the FP negativity is NOT a directional-convection artifact.
+    # The x/z directional operators already have zero negative off-diagonals (they are M-matrices), so
+    # exponential-fitting / Chang-Cooper on them cannot help. All negativity is the anisotropic mixed
+    # (correlation) term, which is the sole M-matrix violator (grid-aligned positivity is infeasible
+    # there: b/a ~ up to 4900x, |c| > min(a,b) almost everywhere). This regression pins the diagnosis.
+    from quantark.volmodels.slv.fokkerplanck.coordinates import concentrated_grid
+    from quantark.volmodels.slv.fokkerplanck.fp_operators import build_directional_operators
+    p = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.7, rho=-0.9)
+    x = concentrated_grid(np.log(60.0), np.log(160.0), np.log(100.0), 31, 0.1)
+    z = concentrated_grid(np.log(0.01), np.log(0.30), np.log(p.v0), 25, 0.1)
+    L = np.linspace(0.8, 1.3, x.size)
+    Ax, Az, Axz = build_directional_operators(x, z, L, p, 1.0, 0.05)
+    for M in (Ax, Az):
+        Md = M.toarray().copy()
+        np.fill_diagonal(Md, 0.0)
+        assert Md.min() >= -1e-12                # directional op is an M-matrix (no negative off-diagonal)
+    Axzd = Axz.toarray().copy()
+    np.fill_diagonal(Axzd, 0.0)
+    assert Axzd.min() < -1.0                     # the mixed operator is the sole M-matrix violator
+
+
+def test_negativity_is_mixed_term_only():
+    # rho=0 turns the mixed term off -> the density stays non-negative to machine precision: direct
+    # confirmation that the correlation term is the entire negativity budget.
+    assert _max_neg(sigma=0.7, rho=0.0) < 1e-12
+
+
+def test_negativity_within_operating_bound_justifies_tol_neg():
+    # tol_neg is tightened 0.5 -> 0.05 as an empirical operating-domain tripwire (observed bound with
+    # clamped read-off, NOT a positivity claim). Even on the worst realistic fixture (sigma=0.7,
+    # |rho|=0.9) the clamped negative mass stays well under 0.03, so 0.05 keeps ~2.7x margin while still
+    # catching genuine divergence (mass ~ unit total).
+    assert _max_neg(sigma=0.7, rho=-0.9) < 0.03
+
+
+def test_bilinear_seed_still_reprices_flat_vanilla():
+    # the opt-in seed_split must not perturb the exact-vanilla property (seed accuracy only)
+    p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
+    cfg = FpCalibrationConfig(n_x=201, n_z=101, seed_split=True)
+    lev = _calibrate(_surface(skew=False), p, fp_config=cfg)
+    price = price_european_slv_pde(100.0, 100.0, True, 1.0, p, lev, 0.02, 0.0,
+                                   eta=1.0, n_x=180, n_v=70, n_t=70)
+    bs = bs_call_price(100.0, 100.0, 1.0, 0.20, 0.02, 0.0)
+    assert abs(price - bs) < 0.25
+
+
 def test_ffp_agrees_with_mc_binning_core():
     from quantark.util.enum.engine_enums import LeverageCalibrationMethod
     p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)

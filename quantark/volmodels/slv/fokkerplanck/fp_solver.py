@@ -53,13 +53,14 @@ class ForwardFPADI:
     def seed_dirac(self, s0, v0):
         """Discrete unit-mass seed at (ln s0, ln v0).
 
-        ``flux_scheme='central'``: all mass on the nearest node, f(node) = 1/w_node (legacy).
-        ``flux_scheme='chang_cooper'``: bilinear split over the <=4 bracketing nodes with weights
-        divided by their quadrature weights -- total mass exactly 1, seed mean location exact to O(h^2).
+        ``seed_split=False`` (default): all mass on the nearest node, f(node) = 1/w_node (legacy).
+        ``seed_split=True``: bilinear split over the <=4 bracketing nodes with weights divided by their
+        quadrature weights -- total mass exactly 1, seed mean location exact to O(h^2) (removes the
+        legacy O(h) placement bias). Independent of any flux scheme.
         """
         f = np.zeros(self.nx * self.nz)
         xs, zs = float(np.log(s0)), float(np.log(v0))
-        if self.cfg.flux_scheme != "chang_cooper":
+        if not self.cfg.seed_split:
             i = int(np.argmin(np.abs(self.x - xs)))
             j = int(np.argmin(np.abs(self.z - zs)))
             k = i * self.nz + j

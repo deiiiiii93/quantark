@@ -26,14 +26,21 @@ class FpCalibrationConfig:
     mass_tol: float = 1e-3            # per-slice |sum(w*f) - 1| budget (tripwire)
     tail_mass_floor: float = 1e-6     # relative cell-mass below which leverage blends to uncond. mean
     leverage_clip: Tuple[float, float] = DEFAULT_LEVERAGE_CLIP
-    flux_scheme: str = "central"          # {"central","chang_cooper"} spatial face-flux scheme (WS-C4)
+    seed_split: bool = False              # bilinear Dirac seed split (O(h^2) mean) vs nearest-node (WS-C4)
     linear_solver: str = "direct"         # {"direct","krylov_lagged"} implicit-solve backend (WS-B3)
     refactor_every: int = 5               # krylov_lagged: refresh splu preconditioner every N steps
     time_scheme: str = "backward_euler"   # {"backward_euler","tr_bdf2"} FP time integrator (WS-C6)
-    tol_neg: float = 0.5              # max negative probability mass sum_k w_k*max(-f_k,0). The central
-    #                                   mixed-derivative (correlation) term is inherently not positivity-
-    #                                   preserving (~10-15% for typical |rho|); negatives are clamped in
-    #                                   the read-off. This catches genuine divergence (mass ~ unit total).
+    tol_neg: float = 0.05             # max negative probability mass sum_k w_k*max(-f_k,0). The mixed
+    #                                   (correlation) cross-derivative term is inherently not positivity-
+    #                                   preserving and is the SOLE source of negativity (the x/z directional
+    #                                   operators are already M-matrices); grid-aligned positivity is
+    #                                   infeasible under the log-variance anisotropy, so negatives are
+    #                                   clamped in the read-off. Tightened 0.5 -> 0.05 (2026-07) as an
+    #                                   EMPIRICAL operating-domain tripwire: measured max negative mass
+    #                                   stays < 0.03 across realistic high-stress fixtures (incl. sigma=0.7,
+    #                                   |rho|=0.9) and is bounded under time refinement. This is an observed
+    #                                   bound, NOT a positivity guarantee; it still catches genuine
+    #                                   divergence (mass ~ unit total).
     eps_mass: float = 1e-300          # absolute guard for the E[v|x] ratio denominator
 
     def __post_init__(self) -> None:
@@ -55,8 +62,8 @@ class FpCalibrationConfig:
         lo, hi = self.leverage_clip
         if not (math.isfinite(lo) and math.isfinite(hi) and 0.0 < lo < hi):
             raise ValidationError("leverage_clip must be a positive ordered (lo, hi) tuple")
-        if self.flux_scheme not in ("central", "chang_cooper"):
-            raise ValidationError("flux_scheme must be 'central' or 'chang_cooper'")
+        if not isinstance(self.seed_split, bool):
+            raise ValidationError("seed_split must be a bool")
         if self.linear_solver not in ("direct", "krylov_lagged"):
             raise ValidationError("linear_solver must be 'direct' or 'krylov_lagged'")
         if self.time_scheme not in ("backward_euler", "tr_bdf2"):

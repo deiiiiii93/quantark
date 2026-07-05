@@ -33,20 +33,24 @@ def test_removed_fields_raise_typeerror():
 
 def test_new_switch_defaults_preserve_current_behavior():
     cfg = FpCalibrationConfig()
-    assert cfg.flux_scheme == "central"
+    assert cfg.seed_split is False
     assert cfg.linear_solver == "direct"
     assert cfg.time_scheme == "backward_euler"
     assert cfg.refactor_every == 5
 
 
 @pytest.mark.parametrize("field,bad", [
-    ("flux_scheme", "upwind"),
     ("linear_solver", "gmres"),
     ("time_scheme", "crank_nicolson"),
 ])
 def test_invalid_scheme_strings_raise(field, bad):
     with pytest.raises(ValidationError):
         FpCalibrationConfig(**{field: bad})
+
+
+def test_seed_split_must_be_bool():
+    with pytest.raises(ValidationError):
+        FpCalibrationConfig(seed_split="yes")
 
 
 @pytest.mark.parametrize("bad", [0, -1, 2.5])
