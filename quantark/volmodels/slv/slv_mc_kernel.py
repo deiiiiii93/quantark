@@ -21,6 +21,7 @@ import numpy as np
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston.params import HestonParams
 from quantark.volmodels.slv.leverage import (
+    DEFAULT_LEVERAGE_CLIP,
     BinMethod,
     LeverageSurface,
     bin_conditional,
@@ -32,7 +33,7 @@ _KMIN = 1e-8
 
 def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
                   num_paths, num_bins, bin_method, rng, record_grid=None,
-                  leverage_surface=None):
+                  leverage_surface=None, leverage_clip=DEFAULT_LEVERAGE_CLIP):
     """Full-truncation log-Euler SLV with a shared correlated Brownian.
 
     Variance and the rho-correlated part of spot are driven by the SAME Brownian dW_v,
@@ -46,12 +47,14 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
     rho = float(np.clip(params.rho, -0.999, 0.999))
     rho_bar = np.sqrt(max(1.0 - rho * rho, 0.0))
     sigma_eff = float(eta) * sigma
+    lo, hi = leverage_clip
     M = step_dt.size
 
     log_s = np.full(num_paths, np.log(max(s0, 1e-12)))
     v = np.full(num_paths, max(params.v0, 0.0))
     t = 0.0
     records = []
+    n_clip_records = 0
 
     for i in range(M):
         dt = step_dt[i]
@@ -63,16 +66,18 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
             boundaries, bin_means = bin_conditional(S, v, num_bins, bin_method)
             econd = np.maximum(eval_binned(S, boundaries, bin_means), _KMIN)
             sigma_lv = np.asarray(lv_surface.local_vol(S, t), dtype=float)
-            sigma_hat2 = np.clip(sigma_lv * sigma_lv / econd, 1e-8, 10.0)
-            sigma_hat = np.sqrt(sigma_hat2)
+            sigma_hat = np.clip(sigma_lv / np.sqrt(econd), lo, hi)
+            sigma_hat2 = sigma_hat * sigma_hat
 
             if record_grid is not None:
                 econd_nodes = np.maximum(eval_binned(record_grid, boundaries, bin_means), _KMIN)
                 lv_nodes = np.asarray(lv_surface.local_vol(record_grid, t), dtype=float)
-                # Same clip as the in-simulation sigma_hat^2 so the recorded leverage matches
+                # Same clip as the in-simulation sigma_hat so the recorded leverage matches
                 # the effective leverage the MC used (consumed identically by the backward PDE).
-                sigma_hat2_nodes = np.clip(lv_nodes * lv_nodes / econd_nodes, 1e-8, 10.0)
-                records.append(np.sqrt(sigma_hat2_nodes))
+                raw_nodes = lv_nodes / np.sqrt(econd_nodes)
+                clipped_nodes = np.clip(raw_nodes, lo, hi)
+                n_clip_records += int(np.sum(clipped_nodes != raw_nodes))
+                records.append(clipped_nodes)
         else:
             sigma_hat = np.asarray(leverage_surface.leverage(S, t), dtype=float)
             sigma_hat2 = sigma_hat * sigma_hat
@@ -95,7 +100,13 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
         v = v + kappa * (theta - v_plus) * dt + sigma_eff * sqrt_vp * dW_v
         t += dt
 
-    return np.exp(log_s), records
+    return np.exp(log_s), records, n_clip_records
+
+
+def _validate_clip(leverage_clip) -> None:
+    lo, hi = leverage_clip
+    if not (np.isfinite(lo) and np.isfinite(hi) and 0.0 < lo < hi):
+        raise ValidationError("leverage_clip must be a finite positive ordered (lo, hi) tuple")
 
 
 def _validate_common(s0, strike, step_dt, r_fwd, carry_fwd, num_paths, num_bins, eta):
@@ -124,22 +135,26 @@ def price_european_slv_mc(
     eta: float = 1.0, num_paths: int = 50_000, num_bins: int = 20,
     bin_method: BinMethod = BinMethod.EQUAL_WEIGHTED, seed: Optional[int] = 42,
     return_stderr: bool = False, leverage_surface: Optional[LeverageSurface] = None,
+    leverage_clip: Tuple[float, float] = DEFAULT_LEVERAGE_CLIP,
 ) -> Union[float, Tuple[float, float]]:
     """Price a European vanilla under Heston SLV via MC.
 
-    Leverage is calibrated on-the-fly by default. Supplying ``leverage_surface`` uses
-    that precomputed artifact directly, which is required for reproducible structured
-    model risk under frozen/recalibrated leverage conventions.
+    Leverage is calibrated on-the-fly by default (clipped to ``leverage_clip``, the band
+    shared with the FFP route). Supplying ``leverage_surface`` uses that precomputed
+    artifact directly — consumed as-is, never re-clipped — which is required for
+    reproducible structured model risk under frozen/recalibrated leverage conventions.
     """
     dt, rf, cf = _validate_common(s0, strike, step_dt, r_fwd, carry_fwd, num_paths, num_bins, eta)
+    _validate_clip(leverage_clip)
     if not np.isfinite(disc_factor) or disc_factor <= 0:
         raise ValidationError("disc_factor must be finite and positive")
     if leverage_surface is not None and not isinstance(leverage_surface, LeverageSurface):
         raise ValidationError("leverage_surface must be a LeverageSurface when provided")
     rng = np.random.default_rng(seed)
-    s_terminal, _ = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
-                                  num_paths, num_bins, bin_method, rng,
-                                  leverage_surface=leverage_surface)
+    s_terminal, _, _ = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
+                                     num_paths, num_bins, bin_method, rng,
+                                     leverage_surface=leverage_surface,
+                                     leverage_clip=leverage_clip)
     if not np.all(np.isfinite(s_terminal)):
         from quantark.util.exceptions import NumericalError
         raise NumericalError("SLV MC produced non-finite terminal spots")
@@ -157,26 +172,32 @@ def _calibrate_mc_binning(
     eta: float = 1.0, num_paths: int = 50_000, num_bins: int = 20,
     bin_method: BinMethod = BinMethod.EQUAL_WEIGHTED, seed: Optional[int] = 42,
     n_strike_nodes: int = 41, strike_span_stds: float = 4.0,
+    leverage_clip: Tuple[float, float] = DEFAULT_LEVERAGE_CLIP,
 ) -> LeverageSurface:
     """Materialize the SLV leverage L(S,t) on a fixed (t, S) grid via MC binning.
 
     The leverage is recorded at each simulation time node on a fixed log-spaced strike
-    grid spanning +/- strike_span_stds total-vol standard deviations around s0.
+    grid spanning +/- strike_span_stds total-vol standard deviations around s0, clipped
+    to ``leverage_clip`` (the band shared with the FFP route).
     """
     dt, rf, cf = _validate_common(s0, strike=s0, step_dt=step_dt, r_fwd=r_fwd,
                                   carry_fwd=carry_fwd, num_paths=num_paths, num_bins=num_bins, eta=eta)
+    _validate_clip(leverage_clip)
     T = float(dt.sum())
     width = strike_span_stds * np.sqrt(max(params.theta, params.v0, 0.04) * max(T, 1e-12))
     strike_grid = s0 * np.exp(np.linspace(-width, width, n_strike_nodes))
     rng = np.random.default_rng(seed)
-    _, records = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
-                               num_paths, num_bins, bin_method, rng, record_grid=strike_grid)
+    _, records, n_clip = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
+                                       num_paths, num_bins, bin_method, rng,
+                                       record_grid=strike_grid, leverage_clip=leverage_clip)
     # records[i] is recorded at the START of step i, i.e. at time node t_i (t_0 = 0).
     # There are M records at t_0 .. t_{M-1}; the leverage at t in (t_{M-1}, T] is covered
     # by flat extrapolation in the LeverageSurface (the backward PDE starts at T from the payoff).
     record_times = np.concatenate([[0.0], np.cumsum(dt)])[:-1]  # t_0 .. t_{M-1}
     leverage_grid = np.vstack(records)
-    return LeverageSurface(time_grid=record_times, strike_grid=strike_grid, leverage_grid=leverage_grid)
+    return LeverageSurface(time_grid=record_times, strike_grid=strike_grid,
+                           leverage_grid=leverage_grid,
+                           diagnostics={"method": "mc_binning", "n_clipped": int(n_clip)})
 
 
 _UNSET = object()   # sentinel: distinguishes "MC option not provided" from an explicit value (e.g. seed=None)
@@ -185,7 +206,8 @@ _UNSET = object()   # sentinel: distinguishes "MC option not provided" from an e
 def calibrate_leverage_surface(
     s0, params, lv_surface, step_dt, r_fwd, carry_fwd, eta=1.0,
     num_paths=_UNSET, num_bins=_UNSET, bin_method=_UNSET, seed=_UNSET,
-    n_strike_nodes=_UNSET, strike_span_stds=_UNSET, *, method=None, fp_config=None,
+    n_strike_nodes=_UNSET, strike_span_stds=_UNSET, leverage_clip=_UNSET,
+    *, method=None, fp_config=None,
 ):
     """Dispatch leverage calibration. Default: forward Fokker-Planck (deterministic).
 
@@ -202,6 +224,7 @@ def calibrate_leverage_surface(
     mc_opts = {k: v for k, v in dict(
         num_paths=num_paths, num_bins=num_bins, bin_method=bin_method, seed=seed,
         n_strike_nodes=n_strike_nodes, strike_span_stds=strike_span_stds,
+        leverage_clip=leverage_clip,
     ).items() if v is not _UNSET}
     if method is LeverageCalibrationMethod.MC_BINNING:
         if fp_config is not None:

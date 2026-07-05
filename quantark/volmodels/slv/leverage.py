@@ -12,11 +12,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Tuple
 
 import numpy as np
 
 from quantark.util.exceptions import ValidationError
+
+# Shared clip band for CALIBRATION-GENERATED leverage (both the MC-binning and the
+# forward-Fokker-Planck routes). Clip applies to L (not L^2). User-supplied precomputed
+# LeverageSurface artifacts are consumed as-is and never re-clipped.
+DEFAULT_LEVERAGE_CLIP: Tuple[float, float] = (0.05, 20.0)
 
 
 class BinMethod(Enum):

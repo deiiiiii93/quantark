@@ -6,6 +6,7 @@ from numbers import Integral
 from typing import Tuple
 
 from quantark.util.exceptions import ValidationError
+from quantark.volmodels.slv.leverage import DEFAULT_LEVERAGE_CLIP
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ class FpCalibrationConfig:
     n_strike_nodes: int = 41          # output LeverageSurface strike resolution (subsampled from x-grid)
     mass_tol: float = 1e-3            # per-slice |sum(w*f) - 1| budget (tripwire)
     tail_mass_floor: float = 1e-6     # relative cell-mass below which leverage blends to uncond. mean
-    leverage_clip: Tuple[float, float] = (0.05, 20.0)
+    leverage_clip: Tuple[float, float] = DEFAULT_LEVERAGE_CLIP
     tol_neg: float = 0.5              # max negative probability mass sum_k w_k*max(-f_k,0). The central
     #                                   mixed-derivative (correlation) term is inherently not positivity-
     #                                   preserving (~10-15% for typical |rho|); negatives are clamped in

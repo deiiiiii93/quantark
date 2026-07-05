@@ -27,7 +27,8 @@ def test_mc_binning_still_available_when_pinned():
                                       np.zeros(20), np.zeros(20), eta=1.0,
                                       method=LeverageCalibrationMethod.MC_BINNING,
                                       num_paths=20_000, seed=1)
-    assert surf.diagnostics is None                       # MC path leaves diagnostics None
+    # MC path now fills diagnostics too (WS-A2 unified clip band, 2026-07-04 spec)
+    assert surf.diagnostics["method"] == "mc_binning"
 
 
 def test_mismatched_options_raise():
@@ -51,7 +52,8 @@ def test_positional_mc_options_bind_correctly():
     surf = calibrate_leverage_surface(100.0, p, _lv(), np.full(20, 0.05),
                                       np.zeros(20), np.zeros(20), 1.0, 15_000, 18,
                                       method=LeverageCalibrationMethod.MC_BINNING)
-    assert surf.diagnostics is None                       # ran MC binning (positional num_paths/num_bins)
+    # ran MC binning (positional num_paths/num_bins); MC fills diagnostics since WS-A2
+    assert surf.diagnostics["method"] == "mc_binning"
 
 
 def test_mc_seed_none_is_nondeterministic_not_dropped():

@@ -99,3 +99,46 @@ def test_slv_mc_accepts_precomputed_leverage_surface_deterministically():
     second = price_european_slv_mc(**kwargs)
     assert first == pytest.approx(second, abs=0.0)
     assert first > 0.0
+
+
+# --- WS-A2: unified leverage clip band (2026-07-04 volmodels spec) ---
+
+from quantark.volmodels.slv.slv_mc_kernel import _calibrate_mc_binning
+from quantark.volmodels.slv.leverage import DEFAULT_LEVERAGE_CLIP
+
+
+def _direct_flat_lv(sigma):
+    return LocalVolSurface(strike_grid=np.array([1.0, 1000.0]),
+                           time_grid=np.array([0.0, 5.0]),
+                           lv_grid=np.full((2, 2), sigma))
+
+
+def test_clip_band_default_is_ffp_band():
+    from quantark.volmodels.slv.fokkerplanck.config import FpCalibrationConfig
+    assert DEFAULT_LEVERAGE_CLIP == (0.05, 20.0)
+    assert FpCalibrationConfig().leverage_clip == DEFAULT_LEVERAGE_CLIP
+
+
+def test_recorded_leverage_reaches_four_with_new_band():
+    # eta=0, kappa=0 -> variance frozen at v0=0.01 on every path; flat sigma_LV=0.4
+    # -> true leverage 0.4/0.1 = 4.0 everywhere. Old band capped this at sqrt(10)=3.162.
+    params = HestonParams(v0=0.01, kappa=0.0, theta=0.01, sigma=0.5, rho=0.0)
+    dt = np.full(4, 0.25)
+    surf = _calibrate_mc_binning(100.0, params, _direct_flat_lv(0.4), dt,
+                                 np.zeros(4), np.zeros(4), eta=0.0,
+                                 num_paths=20_000, num_bins=10, seed=7)
+    assert np.allclose(surf.leverage_grid, 4.0, rtol=1e-10)
+    assert surf.diagnostics is not None
+    assert surf.diagnostics["method"] == "mc_binning"
+    assert surf.diagnostics["n_clipped"] == 0
+
+
+def test_recorded_leverage_clips_at_upper_band():
+    # frozen v = 0.0025 (sqrt = 0.05), sigma_LV = 1.2 -> raw L = 24 -> clipped to 20.
+    params = HestonParams(v0=0.0025, kappa=0.0, theta=0.0025, sigma=0.5, rho=0.0)
+    dt = np.full(2, 0.5)
+    surf = _calibrate_mc_binning(100.0, params, _direct_flat_lv(1.2), dt,
+                                 np.zeros(2), np.zeros(2), eta=0.0,
+                                 num_paths=20_000, num_bins=10, seed=7)
+    assert np.allclose(surf.leverage_grid, 20.0, rtol=1e-12)
+    assert surf.diagnostics["n_clipped"] == surf.leverage_grid.size
