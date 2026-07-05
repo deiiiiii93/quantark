@@ -49,6 +49,10 @@ from .finite_difference import (
     fd1_nonuniform,
     fd2_nonuniform,
 )
+from .tridiag import (
+    solve_tridiag,
+    solve_tridiag_batch,
+)
 from .validation import (
     is_valid_number,
     is_finite,
@@ -99,6 +103,9 @@ __all__ = [
     # Finite differences
     'fd1_nonuniform',
     'fd2_nonuniform',
+    # Tridiagonal solvers
+    'solve_tridiag',
+    'solve_tridiag_batch',
     # Validation
     'is_valid_number',
     'is_finite',
