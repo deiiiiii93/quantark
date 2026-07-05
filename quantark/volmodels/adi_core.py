@@ -92,7 +92,11 @@ class HestonSLVADICore:
         L2v = (self._L(t) ** 2)[:, None] * v_int[None, :]
         U_xx = (U[2:, 1:-1] - 2.0 * U[1:-1, 1:-1] + U[:-2, 1:-1]) / (self.dx * self.dx)
         U_x = (U[2:, 1:-1] - U[:-2, 1:-1]) / (2.0 * self.dx)
-        out[1:-1, 1:-1] = 0.5 * L2v * U_xx + ((self.r - self.q) - 0.5 * L2v) * U_x
+        # WS-C1: the -rU reaction is carried implicitly in the S-direction (folded into A1
+        # here and into the _tri_S diagonal), so the predictor no longer applies it.
+        out[1:-1, 1:-1] = (0.5 * L2v * U_xx
+                           + ((self.r - self.q) - 0.5 * L2v) * U_x
+                           - self.r * U[1:-1, 1:-1])
         return out
 
     def _A2(self, U):
@@ -158,7 +162,8 @@ class HestonSLVADICore:
         b = np.ones((self.N_V, self.N_S))
         c = np.zeros((self.N_V, self.N_S))
         a[:, 1:-1] = -theta_loc * dt_step * (c2 - c1)
-        b[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2)
+        # WS-C1: (I - theta*dt*A1) diagonal gains +theta*dt*r from the implicit -rU reaction.
+        b[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2 + self.r)
         c[:, 1:-1] = -theta_loc * dt_step * (c2 + c1)
         if self._constant_leverage:
             self._S_tri_cache[key] = (a, b, c)
@@ -252,21 +257,25 @@ class HestonSLVADICore:
     def _douglas_step(self, U, dt_step, tau, theta_loc, t_mid):
         A1U, A2U = self._A1(U, t_mid), self._A2(U)
         A0U = self._A0(U, t_mid)
-        Y0 = U + dt_step * (A1U + A2U + A0U - self.r * U)
+        # WS-C1: -rU is inside A1U now, so the predictor drops the explicit - r*U term.
+        Y0 = U + dt_step * (A1U + A2U + A0U)
         Y1 = self._solve_S(Y0, A1U, dt_step, theta_loc, tau, t_mid)
         return self._solve_V(Y1, A2U, dt_step, theta_loc, tau)
 
     def _cs_step(self, U, dt_step, tau, theta_loc, t_mid):
         A1U, A2U = self._A1(U, t_mid), self._A2(U)
         A0U = self._A0(U, t_mid)
-        Y0 = U + dt_step * (A1U + A2U + A0U - self.r * U)
+        Y0 = U + dt_step * (A1U + A2U + A0U)
         Y1 = self._solve_S(Y0, A1U, dt_step, theta_loc, tau, t_mid)
         Y2 = self._solve_V(Y1, A2U, dt_step, theta_loc, tau)
+        # Craig-Sneyd corrector: restart from the explicit predictor Y0 (NOT Y2 — restarting
+        # from the already-swept Y2 re-applies the implicit operators and degrades CS to a
+        # first-order double-Douglas). With Y0, CS is genuinely second-order.
         if abs(self.rho) > 1e-12:
-            Ycorr = Y2 + 0.5 * dt_step * (self._A0(Y2, t_mid) - A0U)
+            Ycorr = Y0 + 0.5 * dt_step * (self._A0(Y2, t_mid) - A0U)
             self._bc(Ycorr, tau)
         else:
-            Ycorr = Y2
+            Ycorr = Y0
         Z1 = self._solve_S(Ycorr, A1U, dt_step, theta_loc, tau, t_mid)
         return self._solve_V(Z1, A2U, dt_step, theta_loc, tau)
 

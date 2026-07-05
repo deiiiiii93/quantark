@@ -85,22 +85,22 @@ _REG_PARAMS = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.5, rho=-0.7)
 
 
 @pytest.mark.parametrize("scheme,is_call,pinned", [
-    (ADIScheme.CRAIG_SNEYD, True, 8.871149965932108),
-    (ADIScheme.CRAIG_SNEYD, False, 6.8968024932586),
-    (ADIScheme.DOUGLAS, True, 8.885793431146555),
+    (ADIScheme.CRAIG_SNEYD, True, 8.882379432432987),
+    (ADIScheme.CRAIG_SNEYD, False, 6.9082903890508),
+    (ADIScheme.DOUGLAS, True, 8.884504985480513),
 ])
 def test_adi_price_regression_pinned_for_batch_swap(scheme, is_call, pinned):
-    # Captured from the pre-batching implementation (per-system Python Thomas).
-    # The batched sweep preserves per-system arithmetic order -> 1e-13 relative.
+    # Regression anchor for the current scheme. WS-C1 (2026-07-05) deliberately moved these
+    # values: the Craig-Sneyd corrector fix (base Y0, not Y2) + implicit -rU restore
+    # 2nd-order-in-time; prices moved within discretization tolerance.
     p = price_european_heston_pde(100.0, 100.0, is_call, 1.0, _REG_PARAMS, 0.03, 0.01,
                                   n_x=120, n_v=60, n_t=60, scheme=scheme)
     assert np.isclose(p, pinned, rtol=1e-13)
 
 
-def test_heston_pde_bit_identical_after_core_refactor():
-    # WS-D1: delegating to HestonSLVADICore reproduces the pre-refactor prices/greeks
-    # bit-identically (dense CS, sparse Douglas, grid_spot delta/gamma).
-    import numpy as np
+def test_heston_pde_cs_reference_values():
+    # Regression anchor via the unified HestonSLVADICore (dense CS, sparse Douglas,
+    # grid_spot delta/gamma). Values reflect the WS-C1 corrected-CS + implicit-rU scheme.
     from quantark.util.enum.engine_enums import ADIScheme
     from quantark.volmodels.heston.params import HestonParams
     from quantark.volmodels.heston.pde_kernel import (
@@ -109,9 +109,9 @@ def test_heston_pde_bit_identical_after_core_refactor():
     a = price_european_heston_pde(100,100,True,1.0,P,0.03,0.01, n_x=80,n_v=48,n_t=40, scheme=ADIScheme.CRAIG_SNEYD)
     b = price_european_heston_pde(100,110,False,0.7,P,0.05,0.0, n_x=80,n_v=48,n_t=40, scheme=ADIScheme.DOUGLAS, use_sparse=True)
     c = price_delta_gamma_heston_pde(100,100,True,1.0,P,0.03,0.01, n_x=80,n_v=48,n_t=40, grid_spot=100.0)
-    PINS = (9.17122199075139, 10.190455924886752,
-            (9.155133525343599, 0.6228799259201608, 0.019042706789453905))
-    assert abs(a - PINS[0]) <= 1e-13 * max(1.0, abs(PINS[0]))
-    assert abs(b - PINS[1]) <= 1e-13 * max(1.0, abs(PINS[1]))
+    PINS = (9.19048150136939, 10.189989602224074,
+            (9.174386304782422, 0.6232661496627931, 0.018848069046049663))
+    assert abs(a - PINS[0]) <= 1e-12 * max(1.0, abs(PINS[0]))
+    assert abs(b - PINS[1]) <= 1e-12 * max(1.0, abs(PINS[1]))
     for got, ref in zip(c, PINS[2]):
-        assert abs(got - ref) <= 1e-13 * max(1.0, abs(ref))
+        assert abs(got - ref) <= 1e-12 * max(1.0, abs(ref))
