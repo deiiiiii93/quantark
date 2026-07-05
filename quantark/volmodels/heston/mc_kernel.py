@@ -70,7 +70,8 @@ def _simulate_terminal_spot(
             v = v + kappa * (theta - v_plus) * dt + sigma * sqrt_vp * z1 + 0.25 * sigma2 * (z1 * z1 - dt)
         return np.exp(log_s)
 
-    if scheme == HestonMCScheme.QUADEXP:
+    if scheme in (HestonMCScheme.QUADEXP, HestonMCScheme.QUADEXP_M):
+        martingale = scheme == HestonMCScheme.QUADEXP_M
         psi_c = 1.5
         deterministic_vol = sigma <= 1e-8
         # When variance is deterministic, spot diffusion is the FULL Brownian (no
@@ -127,7 +128,38 @@ def _simulate_terminal_spot(
                 corr = 0.0
             else:
                 corr = (rho / sigma) * (v_np - v_n - kappa * (theta - v_bar) * dt)
-            log_s = log_s + (drift - 0.5 * v_bar) * dt + corr + np.sqrt(v_bar) * sqrt_dt * diff_coef * z_ind[:, i]
+            if martingale and not deterministic_vol:
+                # Andersen §4.2 Prop. 4.1: swap the approximate constant K0 = -rho*kappa*theta*dt/sigma
+                # for the exact per-path K0* so E[S_{t+dt}|F_t] = S_t*e^{drift*dt} exactly.
+                ros = rho / sigma
+                K3 = 0.5 * (1.0 - rho * rho) * dt          # == K4 (central gamma = 1/2)
+                K1 = 0.5 * dt * (kappa * ros - 0.5) - ros
+                K2 = 0.5 * dt * (kappa * ros - 0.5) + ros
+                A = K2 + 0.5 * K3                           # coefficient on V_{t+dt} after E_Z
+                quad_mask = psi <= psi_c
+                denom_q = 1.0 - 2.0 * A * a                 # quadratic-branch MGF domain
+                denom_e = beta - A                          # exponential-branch MGF domain
+                bad = (quad_mask & (denom_q <= 0.0)) | (~quad_mask & (denom_e <= 0.0))
+                if np.any(bad):
+                    from quantark.util.exceptions import NumericalError
+                    raise NumericalError(
+                        "QE-M martingale MGF is undefined at these parameters "
+                        "(A outside the CIR-transition MGF domain); tighten dt or use QUADEXP"
+                    )
+                safe_q = np.where(denom_q > 0.0, denom_q, 1.0)
+                safe_e = np.where(denom_e > 0.0, denom_e, 1.0)
+                m_quad = np.exp(A * a * b * b / safe_q) / np.sqrt(safe_q)
+                m_exp = p + (1.0 - p) * beta / safe_e
+                M = np.where(quad_mask, m_quad, m_exp)
+                ln_M = np.log(M)
+                K0 = -ros * kappa * theta * dt
+                K0_star = -ln_M - (K1 + 0.5 * K3) * v_n
+                # replace K0 with K0* on top of the standard increment
+                log_s = (log_s + (drift - 0.5 * v_bar) * dt + corr - K0 + K0_star
+                         + np.sqrt(v_bar) * sqrt_dt * diff_coef * z_ind[:, i])
+            else:
+                # QUADEXP: preserve the exact original expression grouping (bit-identical seed pins).
+                log_s = log_s + (drift - 0.5 * v_bar) * dt + corr + np.sqrt(v_bar) * sqrt_dt * diff_coef * z_ind[:, i]
             v_n = v_np
         return np.exp(log_s)
 
@@ -176,7 +208,7 @@ def price_european_heston_mc(
     # Uniforms are consumed only by the QE variance inverse-CDF; EULER/EULERLOG skip the
     # draw entirely. u draws come after the z draws, so the z-streams (and QUADEXP's
     # u-stream) are seed-identical to the always-draw layout.
-    need_u = scheme == HestonMCScheme.QUADEXP
+    need_u = scheme in (HestonMCScheme.QUADEXP, HestonMCScheme.QUADEXP_M)
     if use_antithetic:
         z_var_h = rng.standard_normal((half, M))
         z_ind_h = rng.standard_normal((half, M))

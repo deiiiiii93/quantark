@@ -200,6 +200,7 @@ class HestonMCScheme(Enum):
     EULER = auto()       # full-truncation Euler on variance
     EULERLOG = auto()    # Euler in log-spot
     QUADEXP = auto()     # Andersen (2008) quadratic-exponential
+    QUADEXP_M = auto()   # QUADEXP + Andersen §4.2 exact martingale (K0*) correction
 
     def __str__(self):
         return self.name.title()
