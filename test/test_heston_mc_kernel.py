@@ -3,7 +3,7 @@ import pytest
 from quantark.util.enum.engine_enums import HestonMCScheme
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams, heston_call_price
-from quantark.volmodels.heston.mc_kernel import price_european_heston_mc
+from quantark.volmodels.heston.mc_kernel import _simulate_terminal_spot, price_european_heston_mc
 
 
 P = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
@@ -84,3 +84,36 @@ def test_quadexp_zero_kappa_matches_analytic():
         use_antithetic=True, return_stderr=True)
     analytic = heston_call_price(s0, k, T, p, r, q)
     assert abs(price - analytic) < 4 * se + 0.05
+
+
+# --- QE exponential-branch sign fix (found during WS-B4, 2026-07-05) ---
+
+def test_quadexp_martingale_feller_violated():
+    # Feller 2*kappa*theta/sigma^2 = 0.48 (violated): psi > 1.5 fires the exponential
+    # branch constantly. Pre-fix, Psi^{-1} was negated -> every branch-B draw clamped
+    # to 0 -> variance collapse -> E[S_T]/forward ~ 1.033 at 100 steps. Post-fix the
+    # martingale property holds to MC error.
+    params = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.5, rho=-0.7)
+    M, n = 100, 200_000
+    rng = np.random.default_rng(42)
+    z_var = rng.standard_normal((n, M))
+    z_ind = rng.standard_normal((n, M))
+    u = rng.random((n, M))
+    dt = np.full(M, 1.0 / M)
+    s = _simulate_terminal_spot(100.0, params, HestonMCScheme.QUADEXP, dt,
+                                np.full(M, 0.03), np.full(M, 0.01), z_var, z_ind, u)
+    assert abs(np.mean(s) / (100.0 * np.exp(0.02)) - 1.0) < 3e-3
+
+
+def test_quadexp_converges_to_analytic_feller_violated():
+    from quantark.volmodels.heston.analytical_kernel import heston_call_price
+    params = HestonParams(v0=0.04, kappa=1.5, theta=0.04, sigma=0.5, rho=-0.7)
+    M = 100
+    dt = np.full(M, 1.0 / M)
+    p = price_european_heston_mc(100.0, 100.0, True, params, dt,
+                                 np.full(M, 0.03), np.full(M, 0.01),
+                                 disc_factor=float(np.exp(-0.03)),
+                                 scheme=HestonMCScheme.QUADEXP,
+                                 num_paths=200_000, seed=42)
+    analytic = heston_call_price(100.0, 100.0, 1.0, params, 0.03, 0.01)
+    assert abs(p - analytic) < 0.10          # pre-fix error was ~2.3

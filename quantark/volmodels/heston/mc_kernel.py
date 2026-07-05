@@ -108,12 +108,16 @@ def _simulate_terminal_spot(
             zv = z_var[:, i]
             v_a = a * (b + zv) * (b + zv)
 
-            # Branch B: exponential with Bernoulli mass at zero (psi > psi_c)
+            # Branch B: exponential with Bernoulli mass at zero (psi > psi_c).
+            # Inverse CDF (Andersen 2008, eq. 25): Psi^{-1}(u) = ln((1-p)/(1-u)) / beta,
+            # POSITIVE for u > p. A historical sign error negated it, so every branch-B
+            # draw was clamped to 0 and the variance collapsed whenever psi > psi_c
+            # (Feller-violated regimes), leaving a persistent martingale bias in spot.
             p = np.clip((psi - 1.0) / (psi + 1.0), 0.0, 0.999999)
             beta = np.maximum((1.0 - p) / np.maximum(m, _KMIN), _KMIN)
             u_clip = np.clip(u_var[:, i], 1e-12, 1.0 - 1e-12)
             with np.errstate(divide="ignore", invalid="ignore"):
-                v_b = np.where(u_clip <= p, 0.0, -np.log((1.0 - p) / (1.0 - u_clip)) / beta)
+                v_b = np.where(u_clip <= p, 0.0, np.log((1.0 - p) / (1.0 - u_clip)) / beta)
 
             v_np = np.where(psi <= psi_c, v_a, v_b)
             v_np = np.maximum(v_np, 0.0)
