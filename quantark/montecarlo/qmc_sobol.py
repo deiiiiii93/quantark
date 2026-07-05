@@ -82,6 +82,16 @@ class PseudoRandomNormalGenerator:
         """
         return self._rng.standard_normal(size=(n_paths, dim))
 
+    def uniform(
+        self, n_paths: int, dim: int, batch_id: Optional[int] = None
+    ) -> np.ndarray:
+        """Uniform (0,1) samples, the dual of ``normal`` for inverse-CDF draws.
+
+        ``batch_id`` is accepted for API symmetry but ignored (independent batches
+        come from the RNG state).
+        """
+        return self._rng.random(size=(n_paths, dim))
+
 
 def _next_power_of_two(n: int) -> int:
     """Return the smallest power of two >= n."""
@@ -186,6 +196,34 @@ class SobolNormalGenerator:
             z = z[:n_paths]
 
         return np.asarray(z, dtype=float)
+
+    def uniform(
+        self, n_paths: int, dim: int, batch_id: Optional[int] = None
+    ) -> np.ndarray:
+        """Scrambled Sobol uniforms in (0,1) (pre-ndtri), the dual of ``normal``.
+
+        Uses exactly 2**m points (m = ceil(log2 n_paths)) to preserve balance, then
+        truncates to ``n_paths``; clipped off {0,1} so downstream ndtri stays finite.
+        """
+        if n_paths <= 0:
+            raise ValueError("n_paths must be positive")
+        if dim <= 0:
+            raise ValueError("dim must be positive")
+        self._check_scipy()
+        n_total = _next_power_of_two(n_paths)
+        if self.strict_power_of_two and n_total != n_paths:
+            raise ValueError(
+                f"SobolNormalGenerator with strict_power_of_two=True requires "
+                f"n_paths to be a power of two, got {n_paths}."
+            )
+        m = int(np.log2(n_total))
+        engine = self._make_engine(dim=dim, batch_id=batch_id)
+        u = engine.random_base2(m)
+        eps = 1e-12
+        u = np.clip(u, eps, 1.0 - eps)
+        if n_paths != n_total:
+            u = u[:n_paths]
+        return np.asarray(u, dtype=float)
 
 
 __all__ = [

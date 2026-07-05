@@ -28,6 +28,7 @@ def price_european_lv_mc(
     num_paths: int = 50_000,
     seed: Optional[int] = 42,
     use_antithetic: bool = False,
+    sampler=None,
     return_stderr: bool = False,
 ) -> Union[float, Tuple[float, float]]:
     """Price a European vanilla under local volatility via Monte Carlo.
@@ -41,6 +42,10 @@ def price_european_lv_mc(
         disc_factor: discount factor to maturity DF(T) in (0, 1].
         num_paths, seed, use_antithetic, return_stderr: MC controls. With antithetic
             sampling the stderr is computed from pair-average payoffs.
+        sampler (optional): a quantark.montecarlo generator exposing ``uniform(n, dim)``.
+            QMC dimension layout: columns [z(M)] (one normal stream per step), ndtri-
+            transformed. Mutually exclusive with ``use_antithetic``; default None keeps
+            the pseudo path bit-identical.
     """
     dt = np.asarray(step_dt, dtype=float)
     rf = np.asarray(r_fwd, dtype=float)
@@ -59,9 +64,19 @@ def price_european_lv_mc(
     if num_paths <= 0:
         raise ValidationError("num_paths must be positive")
 
-    rng = np.random.default_rng(seed)
     half = (num_paths + 1) // 2
     n_eff = 2 * half if use_antithetic else num_paths
+
+    if sampler is not None:
+        if use_antithetic:
+            raise ValidationError("sampler and use_antithetic are mutually exclusive")
+        from scipy.special import ndtri
+        block = np.clip(np.asarray(sampler.uniform(num_paths, n), dtype=float),
+                        1e-12, 1.0 - 1e-12)
+        z_all = ndtri(block)                 # (num_paths, M); one normal stream per step
+    else:
+        rng = np.random.default_rng(seed)
+        z_all = None
 
     s = np.full(n_eff, float(s0), dtype=float)
     drift = rf - cf
@@ -69,7 +84,9 @@ def price_european_lv_mc(
     t = 0.0
     for i in range(n):
         sigma = np.asarray(lv_surface.local_vol(s, t), dtype=float)
-        if use_antithetic:
+        if z_all is not None:
+            z = z_all[:, i]
+        elif use_antithetic:
             z_half = rng.standard_normal(half)
             z = np.concatenate([z_half, -z_half])
         else:

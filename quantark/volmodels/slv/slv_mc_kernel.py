@@ -34,7 +34,7 @@ _KMIN = 1e-8
 def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
                   num_paths, num_bins, bin_method, rng, record_grid=None,
                   leverage_surface=None, leverage_clip=DEFAULT_LEVERAGE_CLIP,
-                  use_antithetic=False):
+                  use_antithetic=False, qmc_z=None):
     """Full-truncation log-Euler SLV with a shared correlated Brownian.
 
     Variance and the rho-correlated part of spot are driven by the SAME Brownian dW_v,
@@ -89,7 +89,11 @@ def _simulate_slv(s0, params, lv_surface, eta, step_dt, r_fwd, carry_fwd,
 
         v_plus = np.maximum(v, 0.0)
         sqrt_vp = np.sqrt(v_plus)
-        if use_antithetic:
+        if qmc_z is not None:
+            # QMC: low-discrepancy normals, column 0 = variance, column 1 = spot-independent.
+            dW_v = sqrt_dt * qmc_z[:, 0, i]
+            dW_s = rho * dW_v + rho_bar * sqrt_dt * qmc_z[:, 1, i]
+        elif use_antithetic:
             # First half drawn, second half is its antithetic mirror (both z-streams).
             # z draws happen exactly here, so use_antithetic=False leaves the stream unchanged.
             half = num_paths // 2
@@ -147,6 +151,7 @@ def price_european_slv_mc(
     return_stderr: bool = False, leverage_surface: Optional[LeverageSurface] = None,
     leverage_clip: Tuple[float, float] = DEFAULT_LEVERAGE_CLIP,
     use_antithetic: bool = False,
+    sampler=None,
 ) -> Union[float, Tuple[float, float]]:
     """Price a European vanilla under Heston SLV via MC.
 
@@ -154,6 +159,11 @@ def price_european_slv_mc(
     shared with the FFP route). Supplying ``leverage_surface`` uses that precomputed
     artifact directly — consumed as-is, never re-clipped — which is required for
     reproducible structured model risk under frozen/recalibrated leverage conventions.
+
+    sampler (optional): a quantark.montecarlo generator exposing ``uniform(n, dim)``.
+        QMC dimension layout: columns [z_var(M) | z_ind(M)] reshaped to (n, 2, M) after
+        ndtri (col 0 = variance normal, col 1 = spot-independent). Mutually exclusive with
+        ``use_antithetic``; default None keeps the pseudo path bit-identical.
     """
     dt, rf, cf = _validate_common(s0, strike, step_dt, r_fwd, carry_fwd, num_paths, num_bins, eta)
     _validate_clip(leverage_clip)
@@ -161,17 +171,26 @@ def price_european_slv_mc(
         raise ValidationError("disc_factor must be finite and positive")
     if leverage_surface is not None and not isinstance(leverage_surface, LeverageSurface):
         raise ValidationError("leverage_surface must be a LeverageSurface when provided")
+    M = dt.size
+    qmc_z = None
+    if sampler is not None:
+        if use_antithetic:
+            raise ValidationError("sampler and use_antithetic are mutually exclusive")
+        from scipy.special import ndtri
+        raw = np.clip(np.asarray(sampler.uniform(num_paths, 2 * M), dtype=float),
+                      1e-12, 1.0 - 1e-12)
+        qmc_z = ndtri(raw).reshape(num_paths, 2, M)   # [:,0,:]=z_var, [:,1,:]=z_ind
     rng = np.random.default_rng(seed)
     # Antithetic: simulate 2*half paths (half originals + half mirrors), then average each
     # pair's discounted payoff — mirroring the Heston MC convention. Default off is an
     # unchanged z-stream (bit-identical to the pre-change kernel).
     half = (num_paths + 1) // 2
-    n_eff = 2 * half if use_antithetic else num_paths
+    n_eff = num_paths if sampler is not None else (2 * half if use_antithetic else num_paths)
     s_terminal, _, _ = _simulate_slv(s0, params, lv_surface, eta, dt, rf, cf,
                                      n_eff, num_bins, bin_method, rng,
                                      leverage_surface=leverage_surface,
                                      leverage_clip=leverage_clip,
-                                     use_antithetic=use_antithetic)
+                                     use_antithetic=use_antithetic, qmc_z=qmc_z)
     if not np.all(np.isfinite(s_terminal)):
         from quantark.util.exceptions import NumericalError
         raise NumericalError("SLV MC produced non-finite terminal spots")

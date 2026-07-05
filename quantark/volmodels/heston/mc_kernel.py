@@ -179,9 +179,17 @@ def price_european_heston_mc(
     num_paths: int = 50_000,
     seed: Optional[int] = 42,
     use_antithetic: bool = False,
+    sampler=None,
     return_stderr: bool = False,
 ) -> Union[float, Tuple[float, float]]:
-    """Price a European vanilla under Heston via Monte Carlo (terminal spot)."""
+    """Price a European vanilla under Heston via Monte Carlo (terminal spot).
+
+    sampler (optional): a quantark.montecarlo generator exposing ``uniform(n, dim)``.
+        When provided, draws one low-discrepancy uniform block of dimension
+        ``n_streams*M`` and splits columns [z_var(M) | z_ind(M) | u_var(M)] (the u block
+        present only for QE/QE-M), transforming the z columns via ndtri. Mutually
+        exclusive with ``use_antithetic``. Default None keeps the pseudo path bit-identical.
+    """
     dt = np.asarray(step_dt, dtype=float)
     rf = np.asarray(r_fwd, dtype=float)
     cf = np.asarray(carry_fwd, dtype=float)
@@ -201,7 +209,6 @@ def price_european_heston_mc(
     if not isinstance(scheme, HestonMCScheme):
         raise ValidationError("scheme must be a HestonMCScheme")
 
-    rng = np.random.default_rng(seed)
     half = (num_paths + 1) // 2
     n_eff = 2 * half if use_antithetic else num_paths
 
@@ -209,20 +216,32 @@ def price_european_heston_mc(
     # draw entirely. u draws come after the z draws, so the z-streams (and QUADEXP's
     # u-stream) are seed-identical to the always-draw layout.
     need_u = scheme in (HestonMCScheme.QUADEXP, HestonMCScheme.QUADEXP_M)
-    if use_antithetic:
-        z_var_h = rng.standard_normal((half, M))
-        z_ind_h = rng.standard_normal((half, M))
-        z_var = np.concatenate([z_var_h, -z_var_h], axis=0)
-        z_ind = np.concatenate([z_ind_h, -z_ind_h], axis=0)
-        if need_u:
-            u_var_h = rng.random((half, M))
-            u_var = np.concatenate([u_var_h, 1.0 - u_var_h], axis=0)
-        else:
-            u_var = None
+    if sampler is not None:
+        if use_antithetic:
+            raise ValidationError("sampler and use_antithetic are mutually exclusive")
+        from scipy.special import ndtri
+        n_streams = 3 if need_u else 2          # [z_var | z_ind | (u_var)]
+        block = np.asarray(sampler.uniform(num_paths, n_streams * M), dtype=float)
+        block = np.clip(block, 1e-12, 1.0 - 1e-12)
+        z_var = ndtri(block[:, 0:M])
+        z_ind = ndtri(block[:, M:2 * M])
+        u_var = block[:, 2 * M:3 * M] if need_u else None
     else:
-        z_var = rng.standard_normal((n_eff, M))
-        z_ind = rng.standard_normal((n_eff, M))
-        u_var = rng.random((n_eff, M)) if need_u else None
+        rng = np.random.default_rng(seed)
+        if use_antithetic:
+            z_var_h = rng.standard_normal((half, M))
+            z_ind_h = rng.standard_normal((half, M))
+            z_var = np.concatenate([z_var_h, -z_var_h], axis=0)
+            z_ind = np.concatenate([z_ind_h, -z_ind_h], axis=0)
+            if need_u:
+                u_var_h = rng.random((half, M))
+                u_var = np.concatenate([u_var_h, 1.0 - u_var_h], axis=0)
+            else:
+                u_var = None
+        else:
+            z_var = rng.standard_normal((n_eff, M))
+            z_ind = rng.standard_normal((n_eff, M))
+            u_var = rng.random((n_eff, M)) if need_u else None
 
     s_terminal = _simulate_terminal_spot(s0, params, scheme, dt, rf, cf, z_var, z_ind, u_var)
     if not np.all(np.isfinite(s_terminal)):
