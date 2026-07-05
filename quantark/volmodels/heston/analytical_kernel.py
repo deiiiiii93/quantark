@@ -18,6 +18,91 @@ from quantark.util.numerical import safe_exp, safe_log, safe_sqrt
 # deterministic-variance (sigma -> 0) limit is used instead.
 _SIGMA_MIN = 1e-4
 
+# Fixed-rule vectorized Lewis quadrature. A linear GL rule on a decay-truncated [0, u_max]
+# cannot hit the <1e-8*s0 gate on the short-T deep-wing corner: the exponential-decay u_max
+# is large there (slow CF decay), so GL nodes spread too thinly to resolve the high-freq
+# oscillation, while a hard truncation drops tail mass (~1e-4 floor). Instead map the whole
+# semi-infinite domain with u = a*tan(theta), theta in [0, pi/2): no truncation, nodes
+# concentrate near u=0 where the integrand mass sits. _TAN_SCALE=a sets the median node
+# (theta=pi/4 -> u=a); a=40 with n_nodes=256 clears the full validation grid
+# (moneyness 0.5-2.0, T 0.05-5.0, Feller-satisfied & violated, |rho|<=0.95) to <3e-7.
+_TAN_SCALE = 40.0
+
+# Gauss-Legendre nodes/weights on [-1, 1] are parameter-independent; cache by node count
+# so the residual inner loop (one call per maturity group per least_squares eval) does not
+# repeat the eigen-decomposition.
+_LEGGAUSS_CACHE: dict = {}
+
+
+def _leggauss_cached(n_nodes: int):
+    key = int(n_nodes)
+    cached = _LEGGAUSS_CACHE.get(key)
+    if cached is None:
+        cached = np.polynomial.legendre.leggauss(key)
+        _LEGGAUSS_CACHE[key] = cached
+    return cached
+
+
+def heston_call_prices_vectorized(
+    s0, strikes, T, params, r, carry, *, n_nodes: int = 256, tan_scale: float = _TAN_SCALE
+) -> np.ndarray:
+    """European CALL prices for many strikes at one maturity (Lewis, fixed quadrature).
+
+    Evaluates phi(u_j) once on a fixed Gauss-Legendre rule over the tan-mapped semi-infinite
+    domain and prices all strikes as a single matrix-vector product against e^{-i u_j y_k}.
+    Reference-gated against the adaptive ``price_european_lewis`` to < 1e-8*s0; the fixed
+    rule must pass by raising ``n_nodes`` (there is no runtime fallback to adaptive quad).
+    A NumericalError from ``_validate_call_noarb`` at extreme trial parameters propagates by
+    design (see ``calibrate_heston`` docs — the remedy is tighter bounds, not a fallback).
+
+    Args:
+        s0: spot. strikes: 1-D array of strikes (same maturity/rate/carry). T: maturity.
+        params: HestonParams. r: discount rate. carry: continuous yield.
+        n_nodes: Gauss-Legendre node count (resolution knob; raise to tighten accuracy).
+        tan_scale: tan-map scale ``a`` (median node lands at u=a); default ``_TAN_SCALE``.
+
+    Returns:
+        np.ndarray of call prices, one per strike, in input order.
+    """
+    strikes = np.asarray(strikes, dtype=float)
+    if strikes.ndim != 1 or strikes.size == 0:
+        raise ValidationError("strikes must be a non-empty 1-D array")
+    if s0 <= 0 or np.any(strikes <= 0):
+        raise ValidationError("s0 and strikes must be positive")
+    if T <= 0:
+        raise ValidationError("maturity must be positive")
+    if params.sigma < _SIGMA_MIN:
+        return np.array([
+            _deterministic_limit_call(s0, r, carry, params, float(k), T) for k in strikes
+        ])
+
+    f = s0 * float(safe_exp((r - carry) * T))
+    v = params.sigma ** 2
+
+    nodes, weights = _leggauss_cached(int(n_nodes))
+    theta = 0.25 * np.pi * (nodes + 1.0)          # map [-1, 1] -> [0, pi/2]
+    w_theta = 0.25 * np.pi * weights
+    u = tan_scale * np.tan(theta)                 # semi-infinite domain, no truncation
+    du = tan_scale / np.cos(theta) ** 2           # d u / d theta
+    gw = du * w_theta                             # quadrature weights in u
+
+    k_c = u + 0.5j
+    beta = params.kappa + 1j * params.rho * params.sigma * k_c
+    d = np.sqrt(beta ** 2 + v * k_c * (k_c - 1j))
+    A, B = _cf_core(beta, d, T, params)
+    phi = np.exp(A * params.theta + B * params.v0)          # (n_nodes,)
+
+    psi = 2.0 * phi / (u ** 2 + 0.25) * gw                  # (n_nodes,)
+    y = np.log(f / strikes)                                 # (n_strikes,)
+    expo = np.exp(-1j * np.outer(u, y))                     # (n_nodes, n_strikes)
+    integral = np.real(psi @ expo)                          # (n_strikes,)
+    i1 = integral / (2.0 * np.pi)
+    prices = f * np.exp(-r * T) - np.sqrt(strikes * f) * np.exp(-r * T) * i1
+    return np.array([
+        _validate_call_noarb(float(p), s0, r, carry, float(k), T)
+        for p, k in zip(prices, strikes)
+    ])
+
 
 def _validate(s0: float, strike: float, T: float, params) -> None:
     if s0 <= 0 or strike <= 0:
