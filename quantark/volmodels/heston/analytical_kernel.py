@@ -60,6 +60,31 @@ def _validate_call_noarb(price: float, s0, r, carry, strike, T) -> float:
     return min(max(price, lower), upper)
 
 
+def _cf_core(beta, d, T, params):
+    """Shared Heston CF algebra (F13): given method-specific ``beta`` and ``d``,
+    return coefficients ``(A, B)`` with CF exponent ``A * params.theta + B * params.v0``.
+
+    F13 sketched ``_cf_core(u_complex, b0, ...)``, but the ``d**2`` discriminant is
+    method-specific (Lewis ``d**2 = beta**2 + v*k_c*(k_c - i)``, Gatheral
+    ``d**2 = beta**2 - 2 a v``, Weber ``d**2 = beta**2 - v*u*(s*i - u)``). So each method
+    forms its own ``beta``/``d`` and passes them in; this owns exactly the shared
+    ``g / e^{-dT} / log((1 - g e^{-dT})/(1 - g))`` block that was duplicated. One canonical
+    operation order ⇒ each method's integrand is reproduced to <=1e-13 relative
+    (Weber/Gatheral reorder the ``/v`` division), pinned in test_heston_cf_core.py.
+
+    ``beta``, ``d`` may be complex scalars or ``np.ndarray`` (vectorized over the
+    integration variable); all operations are elementwise.
+    """
+    v = params.sigma ** 2
+    g = (beta - d) / (beta + d)
+    q = np.exp(-d * T)
+    t_m = (beta - d) / v
+    one_minus_gq = 1.0 - g * q
+    B = t_m * (1.0 - q) / one_minus_gq
+    A = params.kappa * (T * t_m - (2.0 / v) * np.log(one_minus_gq / (1.0 - g)))
+    return A, B
+
+
 def price_european_lewis(s0, r, carry, params, strike, T) -> float:
     """European CALL via Lewis (2000) single-integral formulation."""
     _validate(s0, strike, T, params)
@@ -69,19 +94,17 @@ def price_european_lewis(s0, r, carry, params, strike, T) -> float:
     f = s0 * float(safe_exp((r - carry) * T))
     v = params.sigma ** 2
 
+    y_lm = float(safe_log(f / k))                    # hoisted: constant across u
+
     def phi(k_in: float) -> complex:
         k_complex = k_in + 0.5j
         b = params.kappa + 1j * params.rho * params.sigma * k_complex
         d = np.sqrt(b ** 2 + v * k_complex * (k_complex - 1j))
-        g = (b - d) / (b + d)
-        q_exp = np.exp(-d * T)
-        t_m = (b - d) / v
-        tt = t_m * (1.0 - q_exp) / (1.0 - g * q_exp)
-        w = params.kappa * params.theta * (T * t_m - 2.0 * np.log((1.0 - g * q_exp) / (1.0 - g)) / v)
-        return np.exp(w + params.v0 * tt)
+        A, B = _cf_core(b, d, T, params)
+        return np.exp(A * params.theta + B * params.v0)
 
     def integrand(u: float) -> float:
-        return 2.0 * np.real(np.exp(-1j * u * np.log(f / k)) * phi(u)) / (u ** 2 + 0.25)
+        return 2.0 * np.real(np.exp(-1j * u * y_lm) * phi(u)) / (u ** 2 + 0.25)
 
     integral, _ = integrate.quad(integrand, 0.0, np.inf, limit=500)
     i1 = integral / (2.0 * np.pi)
@@ -105,13 +128,9 @@ def price_european_gatheral(s0, r, carry, params, strike, T) -> float:
             b = params.kappa - params.rho * params.sigma * j - params.rho * params.sigma * 1j * u
             g = v / 2.0
             d = np.sqrt(b ** 2 - 4.0 * a * g)
-            r_plus = (b + d) / (2.0 * g)
-            r_minus = (b - d) / (2.0 * g)
-            rr = r_minus / r_plus
-            q_exp = np.exp(-d * T)
-            dd = r_minus * (1.0 - q_exp) / (1.0 - rr * q_exp)
-            cc = params.kappa * (r_minus * T - (2.0 / v) * np.log((1.0 - rr * q_exp) / (1.0 - rr)))
-            phi = np.exp(cc * params.theta + dd * params.v0 + 1j * u * x0) / (1j * u)
+            # Gatheral d**2 = b**2 - 2 a v; r_minus = (b-d)/v, rr = r_minus/r_plus = g_core.
+            A, B = _cf_core(b, d, T, params)
+            phi = np.exp(A * params.theta + B * params.v0 + 1j * u * x0) / (1j * u)
             return np.real(phi)
 
         integral, _ = integrate.quad(integrand, 0.0, np.inf, limit=500)
@@ -131,18 +150,14 @@ def price_european_weber(s0, r, carry, params, strike, T) -> float:
     k = float(strike)
     v = params.sigma ** 2
 
+    y_w = float(safe_log(s0 / (k * np.exp(-(r - carry) * T))))    # hoisted: constant across u
+
     def compute_f(s: float, b0: float) -> float:
         def integrand(u: float) -> float:
             beta = b0 - 1j * params.rho * params.sigma * u
             d = np.sqrt(beta ** 2 - v * u * (s * 1j - u))
-            g = (beta - d) / (beta + d)
-            q_exp = np.exp(-d * T)
-            bb = (beta - d) * (1.0 - q_exp) / (1.0 - g * q_exp) / v
-            aa = params.kappa * ((beta - d) * T - 2.0 * np.log((1.0 - g * q_exp) / (1.0 - g))) / v
-            phi = np.exp(
-                aa * params.theta + bb * params.v0
-                + 1j * u * np.log(s0 / (k * np.exp(-(r - carry) * T)))
-            ) / (u * 1j)
+            A, B = _cf_core(beta, d, T, params)
+            phi = np.exp(A * params.theta + B * params.v0 + 1j * u * y_w) / (u * 1j)
             return np.real(phi)
 
         integral, _ = integrate.quad(integrand, 0.0, np.inf, limit=500)
