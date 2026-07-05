@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from numbers import Integral
 from typing import Tuple
 
-from quantark.util.enum.engine_enums import ADIScheme
 from quantark.util.exceptions import ValidationError
 
 
@@ -23,8 +22,6 @@ class FpCalibrationConfig:
     x_concentration: float = 0.1      # sinh width around ln s0
     z_concentration: float = 0.1      # sinh width around ln v0
     n_strike_nodes: int = 41          # output LeverageSurface strike resolution (subsampled from x-grid)
-    scheme: ADIScheme = ADIScheme.CRAIG_SNEYD
-    rannacher_steps: int = 2          # fully-implicit coupled start-up steps
     mass_tol: float = 1e-3            # per-slice |sum(w*f) - 1| budget (tripwire)
     tail_mass_floor: float = 1e-6     # relative cell-mass below which leverage blends to uncond. mean
     leverage_clip: Tuple[float, float] = (0.05, 20.0)
@@ -50,10 +47,6 @@ class FpCalibrationConfig:
                           ("tol_neg", self.tol_neg), ("eps_mass", self.eps_mass)):
             if not (math.isfinite(val) and val > 0.0):
                 raise ValidationError(f"{name} must be finite and positive")
-        if not (isinstance(self.rannacher_steps, Integral) and self.rannacher_steps >= 0):
-            raise ValidationError("rannacher_steps must be a non-negative integer")
-        if self.scheme is not ADIScheme.CRAIG_SNEYD:
-            raise ValidationError("only ADIScheme.CRAIG_SNEYD is specified in v1")
         lo, hi = self.leverage_clip
         if not (math.isfinite(lo) and math.isfinite(hi) and 0.0 < lo < hi):
             raise ValidationError("leverage_clip must be a positive ordered (lo, hi) tuple")

@@ -8,14 +8,15 @@ from quantark.volmodels.slv.fokkerplanck.fp_solver import ForwardFPADI
 def _run(scheme_implicit_all):
     s0, K, T, r = 100.0, 100.0, 1.0, 0.02
     p = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
-    cfg = FpCalibrationConfig(n_x=241, n_z=121, rannacher_steps=2)
+    cfg = FpCalibrationConfig(n_x=241, n_z=121)
+    rannacher_steps = 2                               # implicit start-up steps (local test choice)
     n_t = 80
     step_dt = np.full(n_t, T / n_t)
     solver = ForwardFPADI.from_config(s0, p, eta=1.0, b=r, step_dt=step_dt, config=cfg)
     f = solver.seed_dirac(s0, p.v0)
     L = np.ones(solver.x.size)
     for n in range(n_t):
-        implicit = scheme_implicit_all or (n < cfg.rannacher_steps)
+        implicit = scheme_implicit_all or (n < rannacher_steps)
         f = solver.step(f, L, step_dt[n], implicit=implicit)
     marg = solver.spot_marginal(f)
     S = np.exp(solver.x)

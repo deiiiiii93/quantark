@@ -25,8 +25,6 @@ def calibrate_leverage_surface_fp(s0, params: HestonParams, lv_surface, step_dt,
     dt, rf, cf = _validate_common(s0, s0, step_dt, r_fwd, carry_fwd, num_paths=2, num_bins=2, eta=eta)
     if params.v0 <= 0.0:
         raise ValidationError("FFP requires v0 > 0")
-    # rannacher_steps need no upper bound: the loop's `n < rannacher_steps` self-clamps (extra
-    # implicit start-up steps are harmless), and the deterministic branch ignores them entirely.
     t_nodes = np.concatenate([[0.0], np.cumsum(dt)])
     record_times = t_nodes[:-1]                            # t_0 .. t_{M-1}
 

@@ -106,17 +106,13 @@ def calibrate_heston(
     if target == "price":
         y = np.array([
             opt.price if opt.price is not None
-            else bs_call_price(
-                s0, opt.K, opt.T, opt.iv if opt.iv is not None else 0.2, rate_i, carry_i
-            )
+            else bs_call_price(s0, opt.K, opt.T, opt.iv, rate_i, carry_i)
             for opt, rate_i, carry_i in zip(options, rates, carries)
         ])
     else:
         y = np.array([
             opt.iv if opt.iv is not None
-            else implied_vol_call(
-                s0, opt.K, opt.T, opt.price if opt.price is not None else 0.0, rate_i, carry_i
-            )
+            else implied_vol_call(s0, opt.K, opt.T, opt.price, rate_i, carry_i)
             for opt, rate_i, carry_i in zip(options, rates, carries)
         ])
 

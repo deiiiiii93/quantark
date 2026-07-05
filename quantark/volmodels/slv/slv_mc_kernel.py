@@ -2,8 +2,11 @@
 
 Simulates spot + variance with a leverage L(S,t) = sigma_LV(S,t)/sqrt(E[v|S]) where
 the conditional expectation is estimated on-the-fly by binning (van der Stoep,
-Grzelak & Oosterlee 2014). The variance follows the QE scheme with vol-of-vol
-eta*sigma. Asset-neutral per-step forwards (carry = dividend yield / foreign rate).
+Grzelak & Oosterlee 2014). The variance follows full-truncation Euler (CIR) with
+vol-of-vol eta*sigma; spot and variance share the same correlated Brownian, so the
+spot scheme is martingale-consistent up to the O(dt) Euler bias (QE was deliberately
+avoided here — see _simulate_slv's docstring for the rationale). Asset-neutral
+per-step forwards (carry = dividend yield / foreign rate).
 
 Also provides calibrate_leverage_surface, which materializes the calibrated leverage
 on a fixed (t, S) grid as a LeverageSurface for the deterministic backward SLV PDE.
