@@ -45,6 +45,10 @@ from .formatting import (
     format_scientific,
     NumberFormatter,
 )
+from .finite_difference import (
+    fd1_nonuniform,
+    fd2_nonuniform,
+)
 from .validation import (
     is_valid_number,
     is_finite,
@@ -92,6 +96,9 @@ __all__ = [
     'format_with_sign',
     'format_scientific',
     'NumberFormatter',
+    # Finite differences
+    'fd1_nonuniform',
+    'fd2_nonuniform',
     # Validation
     'is_valid_number',
     'is_finite',

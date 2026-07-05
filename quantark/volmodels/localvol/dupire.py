@@ -23,7 +23,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from quantark.util.exceptions import NumericalError, ValidationError
-from quantark.util.numerical import safe_exp, safe_log, safe_sqrt
+from quantark.util.numerical import fd1_nonuniform, fd2_nonuniform, safe_exp, safe_log, safe_sqrt
 from quantark.util.numerical.constants import Tolerance
 from quantark.volmodels.localvol.surface import LocalVolSurface
 
@@ -32,65 +32,6 @@ from quantark.volmodels.localvol.surface import LocalVolSurface
 # must pass, while genuinely degenerate rows must raise instead of silently bypassing
 # the butterfly check (safe_divide's 0-fallback pointed the failure the wrong way).
 _W_FLOOR = 1e-12
-
-
-def _fd1(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
-    """First derivative along last axis.
-
-    Non-uniform central differences on the interior and 3-point Lagrange one-sided
-    formulas at both ends (second-order; exact for quadratics).
-    """
-    d = np.zeros_like(arr)
-    dxm = x[1:-1] - x[:-2]
-    dxp = x[2:] - x[1:-1]
-    d[..., 1:-1] = (
-        -arr[..., :-2] * dxp / (dxm * (dxm + dxp))
-        + arr[..., 1:-1] * (dxp - dxm) / (dxm * dxp)
-        + arr[..., 2:] * dxm / (dxp * (dxm + dxp))
-    )
-    # Left end: Lagrange derivative through (x0, x1, x2) evaluated at x0.
-    a, b, c = x[0], x[1], x[2]
-    d[..., 0] = (
-        arr[..., 0] * ((a - b) + (a - c)) / ((a - b) * (a - c))
-        + arr[..., 1] * (a - c) / ((b - a) * (b - c))
-        + arr[..., 2] * (a - b) / ((c - a) * (c - b))
-    )
-    # Right end: Lagrange derivative through (x[-3], x[-2], x[-1]) evaluated at x[-1].
-    a, b, c = x[-3], x[-2], x[-1]
-    d[..., -1] = (
-        arr[..., -3] * (c - b) / ((a - b) * (a - c))
-        + arr[..., -2] * (c - a) / ((b - a) * (b - c))
-        + arr[..., -1] * ((c - a) + (c - b)) / ((c - a) * (c - b))
-    )
-    return d
-
-
-def _fd2(arr: np.ndarray, x: np.ndarray) -> np.ndarray:
-    """Second derivative along last axis.
-
-    Non-uniform central differences on the interior; 3-point Lagrange second
-    derivative (constant across the stencil, exact for quadratics) at both ends.
-    """
-    d2 = np.zeros_like(arr)
-    dxm = x[1:-1] - x[:-2]
-    dxp = x[2:] - x[1:-1]
-    denom = 0.5 * dxm * dxp * (dxm + dxp)
-    d2[..., 1:-1] = (
-        arr[..., :-2] * dxp - arr[..., 1:-1] * (dxm + dxp) + arr[..., 2:] * dxm
-    ) / denom
-    a, b, c = x[0], x[1], x[2]
-    d2[..., 0] = (
-        arr[..., 0] * 2.0 / ((a - b) * (a - c))
-        + arr[..., 1] * 2.0 / ((b - a) * (b - c))
-        + arr[..., 2] * 2.0 / ((c - a) * (c - b))
-    )
-    a, b, c = x[-3], x[-2], x[-1]
-    d2[..., -1] = (
-        arr[..., -3] * 2.0 / ((a - b) * (a - c))
-        + arr[..., -2] * 2.0 / ((b - a) * (b - c))
-        + arr[..., -1] * 2.0 / ((c - a) * (c - b))
-    )
-    return d2
 
 
 def build_dupire_local_vol(
@@ -137,12 +78,12 @@ def build_dupire_local_vol(
     w = iv ** 2 * T[:, None]                             # total variance (nT, nK)
     y = ln_k[None, :] - ln_fwd[:, None]                  # log-moneyness (nT, nK)
 
-    w_y = _fd1(w, ln_k)                                  # dw/dy == dw/dln K at fixed T
-    w_yy = _fd2(w, ln_k)
-    dw_dT_K = _fd1(w.T, T).T                             # dw/dT at fixed strike
-    # d ln(F_T)/dT via the SAME _fd1 stencil as dw_dT_K, so dw/dT|_y is a consistent
+    w_y = fd1_nonuniform(w, ln_k)                                  # dw/dy == dw/dln K at fixed T
+    w_yy = fd2_nonuniform(w, ln_k)
+    dw_dT_K = fd1_nonuniform(w.T, T).T                             # dw/dT at fixed strike
+    # d ln(F_T)/dT via the SAME fd1_nonuniform stencil as dw_dT_K, so dw/dT|_y is a consistent
     # discrete operator (b(T) = d ln F/dT); avoids backward/central stencil mismatch.
-    dlnF_dT = _fd1(ln_fwd, T)                            # (nT,)
+    dlnF_dT = fd1_nonuniform(ln_fwd, T)                            # (nT,)
     dw_dT_y = dw_dT_K + dlnF_dT[:, None] * w_y           # dw/dT at fixed moneyness
 
     if np.any(w <= _W_FLOOR):
