@@ -121,15 +121,17 @@ def test_rejects_step_sum_not_equal_T():
 
 
 def test_price_regression_pinned_for_solver_swap():
-    # Captured from the pre-solve_banded implementation (sequential Thomas), WS-B2.
-    # Gate: <= 1e-12 relative (LAPACK banded solve differs only in arithmetic order).
+    # WS-C7 (mid-cell strike grid + Rannacher start-up, default on) deliberately moved
+    # this golden 7.931287902952514 -> 7.928091486750843. The new value is CLOSER to the
+    # fine-grid reference (7.92398): err 4.1e-3 vs the old 7.3e-3 — a genuine accuracy
+    # gain, not drift. Gate stays <= 1e-12 relative on the updated pin.
     surf = LocalVolSurface(strike_grid=np.array([50.0, 100.0, 200.0]),
                            time_grid=np.array([0.0, 1.0]),
                            lv_grid=np.array([[0.30, 0.22, 0.20], [0.32, 0.24, 0.21]]))
     dt = np.full(50, 0.02)
     price = price_european_lv_pde(100.0, 105.0, True, 1.0, surf, dt,
                                   np.full(50, 0.03), np.full(50, 0.01), n_s=200)
-    assert np.isclose(price, 7.931287902952514, rtol=1e-12)
+    assert np.isclose(price, 7.928091486750843, rtol=1e-12)
 
 
 def test_lv_pde_delta_gamma_matches_bs_and_price():
