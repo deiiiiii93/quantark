@@ -34,8 +34,27 @@ def _coo(rows, cols, vals, n):
                          shape=(n, n)).tocsr()
 
 
-def _x_operator(x, z, L, params: HestonParams, eta: float, b: float):
-    """x-direction flux: J_x = (b - 0.5 nu L^2) f - d_x(0.5 nu L^2 f). Conservative central FV."""
+def _cc_delta(P):
+    """Chang-Cooper face weight delta = 1/P - 1/expm1(P); guarded to the exact central limit 1/2 at P->0.
+
+    Series near zero: delta = 1/2 - P/12 + O(P^2). Replaces the 0.5 convective average weight so the
+    face flux is exponentially fitted to the local convection-diffusion balance (positivity-preserving).
+    """
+    P = np.asarray(P, float)
+    out = np.empty(P.shape, float)
+    small = np.abs(P) < 1e-6
+    Pb = P[~small]
+    out[~small] = 1.0 / Pb - 1.0 / np.expm1(Pb)
+    out[small] = 0.5 - P[small] / 12.0
+    return out
+
+
+def _x_operator(x, z, L, params: HestonParams, eta: float, b: float, flux_scheme: str):
+    """x-direction flux: J_x = (b - 0.5 nu L^2) f - d_x(0.5 nu L^2 f). Conservative FV.
+
+    ``flux_scheme='chang_cooper'`` replaces the 0.5 convective average with the exponentially-fitted
+    Chang-Cooper weight delta (node-local diffusion unchanged) -> positivity-preserving, and reduces to
+    the central scheme exactly as the local Peclet P -> 0 (delta -> 1/2)."""
     nx, nz = x.size, z.size
     n = nx * nz
     nu = np.exp(z)
@@ -44,8 +63,13 @@ def _x_operator(x, z, L, params: HestonParams, eta: float, b: float):
     mu = b - D                                                  # (nx, nz)
     h = (x[1:] - x[:-1])[:, None]                               # (nx-1, 1)
     mu_f = 0.5 * (mu[:-1, :] + mu[1:, :])                       # (nx-1, nz)
-    cL = 0.5 * mu_f + D[:-1, :] / h                             # coeff on f_i  at face i+1/2
-    cR = 0.5 * mu_f - D[1:, :] / h                              # coeff on f_{i+1}
+    if flux_scheme == "chang_cooper":
+        D_f = 0.5 * (D[:-1, :] + D[1:, :])                      # face diffusion (nx-1, nz), > 0
+        delta = _cc_delta(mu_f * h / D_f)                       # local Peclet P = mu_f*h/D_f
+    else:
+        delta = 0.5
+    cL = delta * mu_f + D[:-1, :] / h                           # coeff on f_i  at face i+1/2
+    cR = (1.0 - delta) * mu_f - D[1:, :] / h                    # coeff on f_{i+1}
     iL = np.arange(nx - 1)[:, None]; iR = iL + 1
     jj = np.arange(nz)[None, :]
     kL = iL * nz + jj; kR = iR * nz + jj                        # node indices
@@ -58,8 +82,11 @@ def _x_operator(x, z, L, params: HestonParams, eta: float, b: float):
                 np.concatenate([v.ravel() for v in vals]), n)
 
 
-def _z_operator(x, z, L, params: HestonParams, eta: float, b: float):
-    """z-direction flux: J_z = ((k th - se^2/2)/nu - k) f - d_z(0.5 se^2 / nu f). Conservative FV."""
+def _z_operator(x, z, L, params: HestonParams, eta: float, b: float, flux_scheme: str):
+    """z-direction flux: J_z = ((k th - se^2/2)/nu - k) f - d_z(0.5 se^2 / nu f). Conservative FV.
+
+    Chang-Cooper delta-reweight of the convective average (node-local diffusion unchanged), as in the
+    x-operator."""
     nx, nz = x.size, z.size
     n = nx * nz
     nu = np.exp(z)
@@ -70,8 +97,13 @@ def _z_operator(x, z, L, params: HestonParams, eta: float, b: float):
     wz = trapezoid_weights(z)
     h = z[1:] - z[:-1]                                          # (nz-1,)
     mu_f = 0.5 * (mu_z[:-1] + mu_z[1:])                         # (nz-1,)
-    cL = 0.5 * mu_f + Dz[:-1] / h                               # (nz-1,)  coeff on f_j at face j+1/2
-    cR = 0.5 * mu_f - Dz[1:] / h
+    if flux_scheme == "chang_cooper":
+        D_f = 0.5 * (Dz[:-1] + Dz[1:])                          # (nz-1,), > 0
+        delta = _cc_delta(mu_f * h / D_f)                       # (nz-1,)
+    else:
+        delta = 0.5
+    cL = delta * mu_f + Dz[:-1] / h                             # (nz-1,)  coeff on f_j at face j+1/2
+    cR = (1.0 - delta) * mu_f - Dz[1:] / h
     ii = np.arange(nx)[:, None]
     jL = np.arange(nz - 1)[None, :]; jR = jL + 1
     kL = ii * nz + jL; kR = ii * nz + jR
@@ -85,8 +117,11 @@ def _z_operator(x, z, L, params: HestonParams, eta: float, b: float):
                 np.concatenate([np.broadcast_to(v, kL.shape).ravel() for v in vals]), n)
 
 
-def _mixed_operator(x, z, L, params: HestonParams, eta: float, b: float):
-    """Mixed flux assigned to z: J_z^mixed = -rho*se*d_x(L f). Conservative in z (telescoping)."""
+def _mixed_operator(x, z, L, params: HestonParams, eta: float, b: float, flux_scheme: str):
+    """Mixed flux assigned to z: J_z^mixed = -rho*se*d_x(L f). Conservative in z (telescoping).
+
+    Unchanged by flux_scheme (spec WS-C4: the mixed operator stays central); the parameter is accepted
+    only for a uniform call signature with the x/z operators."""
     nx, nz = x.size, z.size
     n = nx * nz
     rho_se = params.rho * eta * params.sigma
@@ -117,20 +152,22 @@ def _mixed_operator(x, z, L, params: HestonParams, eta: float, b: float):
                 np.concatenate(vals_list), n)
 
 
-def build_directional_operators(x, z, L, params: HestonParams, eta: float, b: float):
+def build_directional_operators(x, z, L, params: HestonParams, eta: float, b: float,
+                                *, flux_scheme: str = "central"):
     """Return (Ax, Az, Axz) sparse CSR pieces of the forward generator for the ADI split."""
     x, z, L = _check(x, z, L)
-    return (_x_operator(x, z, L, params, eta, b),
-            _z_operator(x, z, L, params, eta, b),
-            _mixed_operator(x, z, L, params, eta, b))
+    return (_x_operator(x, z, L, params, eta, b, flux_scheme),
+            _z_operator(x, z, L, params, eta, b, flux_scheme),
+            _mixed_operator(x, z, L, params, eta, b, flux_scheme))
 
 
-def build_forward_operator(x, z, L, params: HestonParams, eta: float, b: float):
+def build_forward_operator(x, z, L, params: HestonParams, eta: float, b: float,
+                           *, flux_scheme: str = "central"):
     """Sparse CSR forward Fokker-Planck generator A on the (x,z) grid (SLV log-variance density).
 
     Layout: row-major index k = i*nz + j for (x_i, z_j). Mass-conserving by construction
     (quadrature-weighted constant is a left-null vector). Densify via ``.toarray()`` only for
     small-grid tests; the production grid is far too large to densify.
     """
-    Ax, Az, Axz = build_directional_operators(x, z, L, params, eta, b)
+    Ax, Az, Axz = build_directional_operators(x, z, L, params, eta, b, flux_scheme=flux_scheme)
     return (Ax + Az + Axz).tocsr()
