@@ -44,6 +44,7 @@ def price_european_heston_pde(
     use_sparse: bool = False,
     grid_spot: float = 0.0,
     v0_boundary: str = "neumann",
+    grid_style: str = "uniform",
 ) -> float:
     """Price a European vanilla under Heston via ADI finite differences.
 
@@ -66,7 +67,7 @@ def price_european_heston_pde(
     solver = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
                               leverage=None, eta=1.0, use_sparse=use_sparse,
                               grid_spot=(grid_spot if grid_spot > 0 else None),
-                              v0_boundary=v0_boundary)
+                              v0_boundary=v0_boundary, grid_style=grid_style)
     if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
         raise ValidationError("s0 falls outside the PDE grid (grid_spot too far from s0)")
     U = solver.solve(is_call, scheme, theta, rannacher)
@@ -81,6 +82,7 @@ def price_delta_gamma_heston_pde(
     r: float, carry: float, n_x: int = 200, n_v: int = 100, n_t: int = 100,
     scheme: ADIScheme = ADIScheme.CRAIG_SNEYD, theta: float = 0.5, rannacher: bool = True,
     use_sparse: bool = False, grid_spot: float = 0.0, v0_boundary: str = "neumann",
+    grid_style: str = "uniform",
 ) -> Tuple[float, float, float]:
     """Return (price, spot-delta, spot-gamma) from a single PDE solve.
 
@@ -101,7 +103,7 @@ def price_delta_gamma_heston_pde(
     solver = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
                               leverage=None, eta=1.0, use_sparse=use_sparse,
                               grid_spot=(grid_spot if grid_spot > 0 else None),
-                              v0_boundary=v0_boundary)
+                              v0_boundary=v0_boundary, grid_style=grid_style)
     if not (solver.S_grid[0] <= s0 <= solver.S_grid[-1]):
         raise ValidationError("s0 falls outside the PDE grid (grid_spot too far from s0)")
     U = solver.solve(is_call, scheme, theta, rannacher)

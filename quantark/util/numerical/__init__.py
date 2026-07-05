@@ -48,6 +48,8 @@ from .formatting import (
 from .finite_difference import (
     fd1_nonuniform,
     fd2_nonuniform,
+    fd1_interior_coeffs,
+    fd2_interior_coeffs,
 )
 from .tridiag import (
     solve_tridiag,
@@ -103,6 +105,8 @@ __all__ = [
     # Finite differences
     'fd1_nonuniform',
     'fd2_nonuniform',
+    'fd1_interior_coeffs',
+    'fd2_interior_coeffs',
     # Tridiagonal solvers
     'solve_tridiag',
     'solve_tridiag_batch',

@@ -22,8 +22,12 @@ import scipy.sparse.linalg as spla
 
 from quantark.util.enum.engine_enums import ADIScheme
 from quantark.util.exceptions import ValidationError
-from quantark.util.numerical import solve_tridiag_batch
+from quantark.util.numerical import (
+    solve_tridiag_batch, fd1_interior_coeffs, fd2_interior_coeffs,
+)
 from quantark.volmodels.heston.params import HestonParams
+# NB: concentrated_grid / z_extents are imported lazily inside __init__ (only on the
+# opt-in concentrated path) to avoid a circular import via quantark.volmodels.slv.__init__.
 
 
 class HestonSLVADICore:
@@ -42,7 +46,8 @@ class HestonSLVADICore:
 
     def __init__(self, s0, strike, T, r, carry, params: HestonParams,
                  n_x, n_v, n_t, *, leverage=None, eta=1.0,
-                 use_sparse=False, grid_spot=None, v0_boundary="neumann"):
+                 use_sparse=False, grid_spot=None, v0_boundary="neumann",
+                 grid_style="uniform"):
         self.S0, self.K, self.T, self.r, self.q = s0, strike, T, r, carry
         self.kappa, self.theta, self.sigma, self.rho, self.v0 = (
             params.kappa, params.theta, params.sigma, params.rho, params.v0,
@@ -51,14 +56,18 @@ class HestonSLVADICore:
         self._constant_leverage = leverage is None
         self.sig_eff = float(eta) * self.sigma
         self.sig_eff2 = self.sig_eff ** 2
-        # Sparse SuperLU is only valid when the S-operator is time-independent (L constant).
-        self.use_sparse = bool(use_sparse) and self._constant_leverage
         self._opt_is_call = True
         self.N_S, self.N_V, self.N_T = n_x, n_v, n_t
         if v0_boundary not in ("neumann", "degenerate_pde"):
             raise ValidationError("v0_boundary must be 'neumann' or 'degenerate_pde'")
         self.v0_boundary = v0_boundary
         self._degenerate_v0 = v0_boundary == "degenerate_pde"
+        if grid_style not in ("uniform", "concentrated"):
+            raise ValidationError("grid_style must be 'uniform' or 'concentrated'")
+        self._uniform = grid_style == "uniform"
+        # Sparse SuperLU is only valid when the S-operator is time-independent (L constant)
+        # AND the grid is uniform (the concentrated path always uses batched-Thomas).
+        self.use_sparse = bool(use_sparse) and self._constant_leverage and self._uniform
 
         # ---- grid (identical extent logic to both original kernels) ----
         var_eff = max(self.theta, self.v0, 0.25 * self.sig_eff2, 0.04)
@@ -66,13 +75,45 @@ class HestonSLVADICore:
         grid_center = grid_spot if grid_spot is not None else s0
         x_center = float(np.log(max(grid_center, 1e-12)))
         self.x_min, self.x_max = x_center - x_width, x_center + x_width
-        self.X_grid = np.linspace(self.x_min, self.x_max, n_x)
+        self.V_max = max(5.0 * self.theta, 0.5, 2.0 * self.v0)
+
+        if self._uniform:
+            self.X_grid = np.linspace(self.x_min, self.x_max, n_x)
+            self.V_grid = np.linspace(0.0, self.V_max, n_v)
+            self.dx = float(self.X_grid[1] - self.X_grid[0])
+            self.dV = float(self.V_grid[1] - self.V_grid[0])
+        else:
+            # x concentrated around ln K (payoff kink); v concentrated around min(v0, theta),
+            # widening V_max by a CIR-quantile upper extent when vol-of-vol is live.
+            from quantark.volmodels.slv.fokkerplanck.coordinates import (
+                concentrated_grid, z_extents,
+            )
+            xk = float(np.log(max(self.K, 1e-12)))
+            xk = min(max(xk, self.x_min), self.x_max)
+            self.X_grid = concentrated_grid(self.x_min, self.x_max, xk, n_x,
+                                            concentration=max(0.25 * x_width, 1e-6))
+            if self.sig_eff > 0.0:
+                t_probe = np.array([0.25 * T, 0.5 * T, T])
+                try:
+                    _, q_hi = z_extents(params, float(eta), t_probe,
+                                        cir_quantile=1e-5, v_floor=1e-8)
+                    self.V_max = max(self.V_max, q_hi)
+                except ValidationError:
+                    pass  # keep the envelope V_max (degenerate CIR)
+            v_center = min(max(self.v0, 0.0), self.theta) if self.theta > 0 else self.v0
+            v_center = min(max(v_center, 0.0), self.V_max)
+            self.V_grid = concentrated_grid(0.0, self.V_max, v_center, n_v,
+                                            concentration=max(0.5 * self.V_max, 1e-6))
+            # per-node interior stencil coefficients for both directions
+            self._xx = fd2_interior_coeffs(self.X_grid)   # (wm, w0, wp) each (n_x-2,)
+            self._x1 = fd1_interior_coeffs(self.X_grid)
+            self._vv = fd2_interior_coeffs(self.V_grid)
+            self._v1 = fd1_interior_coeffs(self.V_grid)
+            self.dx = None  # scalar spacing undefined on a concentrated grid
+            self.dV = None
+
         self.S_grid = np.exp(self.X_grid)
         self.S_max = float(self.S_grid[-1])
-        self.V_max = max(5.0 * self.theta, 0.5, 2.0 * self.v0)
-        self.V_grid = np.linspace(0.0, self.V_max, n_v)
-        self.dx = float(self.X_grid[1] - self.X_grid[0])
-        self.dV = float(self.V_grid[1] - self.V_grid[0])
         self.dt = float(T / max(n_t, 1))
         self._S_int = self.S_grid[1:-1]
         self._ones_int = np.ones(self.N_S - 2)
@@ -95,8 +136,16 @@ class HestonSLVADICore:
             return out
         v_int = self.V_grid[1:-1]
         L2v = (self._L(t) ** 2)[:, None] * v_int[None, :]
-        U_xx = (U[2:, 1:-1] - 2.0 * U[1:-1, 1:-1] + U[:-2, 1:-1]) / (self.dx * self.dx)
-        U_x = (U[2:, 1:-1] - U[:-2, 1:-1]) / (2.0 * self.dx)
+        if self._uniform:
+            U_xx = (U[2:, 1:-1] - 2.0 * U[1:-1, 1:-1] + U[:-2, 1:-1]) / (self.dx * self.dx)
+            U_x = (U[2:, 1:-1] - U[:-2, 1:-1]) / (2.0 * self.dx)
+        else:
+            wm2, w02, wp2 = self._xx
+            wm1, w01, wp1 = self._x1
+            U_xx = (U[:-2, 1:-1] * wm2[:, None] + U[1:-1, 1:-1] * w02[:, None]
+                    + U[2:, 1:-1] * wp2[:, None])
+            U_x = (U[:-2, 1:-1] * wm1[:, None] + U[1:-1, 1:-1] * w01[:, None]
+                   + U[2:, 1:-1] * wp1[:, None])
         # WS-C1: the -rU reaction is carried implicitly in the S-direction (folded into A1
         # here and into the _tri_S diagonal), so the predictor no longer applies it.
         out[1:-1, 1:-1] = (0.5 * L2v * U_xx
@@ -111,8 +160,14 @@ class HestonSLVADICore:
         v_int = self.V_grid[1:-1]
         coef_d2 = 0.5 * self.sig_eff2 * v_int
         coef_d1 = self.kappa * (self.theta - v_int)
-        U_VV = (U[1:-1, 2:] - 2.0 * U[1:-1, 1:-1] + U[1:-1, :-2]) / (self.dV * self.dV)
-        U_V = (U[1:-1, 2:] - U[1:-1, :-2]) / (2.0 * self.dV)
+        if self._uniform:
+            U_VV = (U[1:-1, 2:] - 2.0 * U[1:-1, 1:-1] + U[1:-1, :-2]) / (self.dV * self.dV)
+            U_V = (U[1:-1, 2:] - U[1:-1, :-2]) / (2.0 * self.dV)
+        else:
+            wm2, w02, wp2 = self._vv
+            wm1, w01, wp1 = self._v1
+            U_VV = U[1:-1, :-2] * wm2 + U[1:-1, 1:-1] * w02 + U[1:-1, 2:] * wp2
+            U_V = U[1:-1, :-2] * wm1 + U[1:-1, 1:-1] * w01 + U[1:-1, 2:] * wp1
         out[1:-1, 1:-1] = coef_d2 * U_VV + coef_d1 * U_V
         if self._degenerate_v0:
             # v=0 row: only kappa*theta*U_v survives (diffusion vanishes); 2-point forward.
@@ -126,7 +181,14 @@ class HestonSLVADICore:
             return out
         v_int = self.V_grid[1:-1]
         Lv = self._L(t)[:, None] * v_int[None, :]
-        U_xv = (U[2:, 2:] - U[2:, :-2] - U[:-2, 2:] + U[:-2, :-2]) / (4.0 * self.dx * self.dV)
+        if self._uniform:
+            U_xv = (U[2:, 2:] - U[2:, :-2] - U[:-2, 2:] + U[:-2, :-2]) / (4.0 * self.dx * self.dV)
+        else:
+            # non-uniform cross derivative = fd1_x then fd1_v (outer product of 1D stencils)
+            wxm, wx0, wxp = self._x1
+            wvm, wv0, wvp = self._v1
+            Ux = U[:-2, :] * wxm[:, None] + U[1:-1, :] * wx0[:, None] + U[2:, :] * wxp[:, None]
+            U_xv = Ux[:, :-2] * wvm + Ux[:, 1:-1] * wv0 + Ux[:, 2:] * wvp
         out[1:-1, 1:-1] = self.rho * self.sig_eff * Lv * U_xv
         return out
 
@@ -166,15 +228,29 @@ class HestonSLVADICore:
                 return cached
         L2 = self._L(t_mid) ** 2                                # (N_S-2,) interior
         V = np.maximum(self.V_grid, 1e-10)[:, None]             # (N_V, 1)
-        c2 = 0.5 * (L2[None, :] * V) / (self.dx * self.dx)      # (N_V, N_S-2)
-        c1 = ((self.r - self.q) - 0.5 * (L2[None, :] * V)) / (2.0 * self.dx)
         a = np.zeros((self.N_V, self.N_S))
         b = np.ones((self.N_V, self.N_S))
         c = np.zeros((self.N_V, self.N_S))
-        a[:, 1:-1] = -theta_loc * dt_step * (c2 - c1)
-        # WS-C1: (I - theta*dt*A1) diagonal gains +theta*dt*r from the implicit -rU reaction.
-        b[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2 + self.r)
-        c[:, 1:-1] = -theta_loc * dt_step * (c2 + c1)
+        if self._uniform:
+            c2 = 0.5 * (L2[None, :] * V) / (self.dx * self.dx)      # (N_V, N_S-2)
+            c1 = ((self.r - self.q) - 0.5 * (L2[None, :] * V)) / (2.0 * self.dx)
+            a[:, 1:-1] = -theta_loc * dt_step * (c2 - c1)
+            # WS-C1: (I - theta*dt*A1) diagonal gains +theta*dt*r from the implicit -rU reaction.
+            b[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2 + self.r)
+            c[:, 1:-1] = -theta_loc * dt_step * (c2 + c1)
+        else:
+            # per-node operator L = d2*fd2 + d1*fd1; implicit (I - theta*dt*L) with the
+            # WS-C1 +r reaction folded onto the diagonal. x-coeffs broadcast across V-slices.
+            d2 = 0.5 * (L2[None, :] * V)                            # (N_V, N_S-2) diffusion coeff
+            d1 = (self.r - self.q) - 0.5 * (L2[None, :] * V)        # convection coeff
+            wm2, w02, wp2 = self._xx                                # (N_S-2,)
+            wm1, w01, wp1 = self._x1
+            sub_op = d2 * wm2[None, :] + d1 * wm1[None, :]
+            diag_op = d2 * w02[None, :] + d1 * w01[None, :]
+            sup_op = d2 * wp2[None, :] + d1 * wp1[None, :]
+            a[:, 1:-1] = -theta_loc * dt_step * sub_op
+            b[:, 1:-1] = 1.0 - theta_loc * dt_step * diag_op + theta_loc * dt_step * self.r
+            c[:, 1:-1] = -theta_loc * dt_step * sup_op
         if self._constant_leverage:
             self._S_tri_cache[key] = (a, b, c)
         return a, b, c
@@ -185,17 +261,31 @@ class HestonSLVADICore:
         if cached is not None:
             return cached
         N = self.N_V
-        dV = self.dV
         v = np.maximum(self.V_grid, 1e-10)
-        coef_d2 = 0.5 * self.sig_eff2 * v / (dV * dV)
-        coef_d1 = self.kappa * (self.theta - v) / (2.0 * dV)
         a = np.zeros(N); b = np.zeros(N); c = np.zeros(N)
-        a[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] - coef_d1[1:-1])
-        b[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * coef_d2[1:-1])
-        c[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] + coef_d1[1:-1])
+        if self._uniform:
+            dV = self.dV
+            coef_d2 = 0.5 * self.sig_eff2 * v / (dV * dV)
+            coef_d1 = self.kappa * (self.theta - v) / (2.0 * dV)
+            a[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] - coef_d1[1:-1])
+            b[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * coef_d2[1:-1])
+            c[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] + coef_d1[1:-1])
+        else:
+            v_int = v[1:-1]
+            d2 = 0.5 * self.sig_eff2 * v_int          # operator diffusion coeff (unscaled)
+            d1 = self.kappa * (self.theta - v_int)    # operator convection coeff
+            wm2, w02, wp2 = self._vv
+            wm1, w01, wp1 = self._v1
+            sub_op = d2 * wm2 + d1 * wm1
+            diag_op = d2 * w02 + d1 * w01             # w02 < 0 (fd2 center weight)
+            sup_op = d2 * wp2 + d1 * wp1
+            a[1:-1] = -theta_loc * dt_step * sub_op
+            b[1:-1] = 1.0 - theta_loc * dt_step * diag_op   # MINUS: I - theta*dt*L
+            c[1:-1] = -theta_loc * dt_step * sup_op
+        dV0 = float(self.V_grid[1] - self.V_grid[0])
         if self._degenerate_v0:
             # degenerate v=0 PDE row: (I - theta*dt * kappa*theta*U_v) with 2-point forward.
-            conv = self.kappa * self.theta / dV
+            conv = self.kappa * self.theta / dV0
             b[0] = 1.0 + theta_loc * dt_step * conv
             c[0] = -theta_loc * dt_step * conv
         else:
