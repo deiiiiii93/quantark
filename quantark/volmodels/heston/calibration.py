@@ -11,7 +11,7 @@ from scipy.optimize import least_squares
 
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.black_scholes import bs_call_price, implied_vol_call
-from quantark.volmodels.heston.analytical_kernel import heston_call_price, heston_implied_vol
+from quantark.volmodels.heston.analytical_kernel import heston_call_prices_vectorized
 from quantark.volmodels.heston.params import HestonParams
 
 
@@ -63,11 +63,27 @@ def calibrate_heston(
         (dividend for equity, foreign rate for FX). initial: starting guess.
         bounds: (lower, upper) parameter bounds. target: "price" or "iv".
         regularize_feller: weight of the max(0, sigma^2 - 2 kappa theta) penalty.
-        method: analytical CF method used inside the objective.
+        method: retained for API compatibility and validated, but the objective now always
+            prices via the strike-vectorized Lewis pricer (heston_call_prices_vectorized).
+            Lewis/Gatheral/Weber agree to ~1e-10, so the calibrated optimum is unchanged;
+            the one-off pricers still honour ``method``.
         max_nfev, xtol, ftol, gtol: least-squares solver controls.
+
+    Notes:
+        A NumericalError raised by the CF pricer at extreme trial parameters propagates by
+        design (there is no fallback residual). If calibration aborts this way, tighten the
+        bounds so least_squares does not probe those parameters. The fixed-quadrature
+        vectorized pricer with the no-arbitrage clamp makes this substantially rarer than
+        the old adaptive-quad path (quad tail failures were the main source).
+
+    Raises:
+        ValidationError: on bad inputs, inverted bounds, or an initial guess outside
+            [lower, upper].
     """
     if target not in ("price", "iv"):
         raise ValidationError("target must be 'price' or 'iv'")
+    if method not in ("lewis", "gatheral", "weber"):
+        raise ValidationError("method must be 'lewis', 'gatheral', or 'weber'")
     if not options:
         raise ValidationError("at least one market option is required")
     if not (np.isfinite(regularize_feller) and regularize_feller >= 0.0):
@@ -123,19 +139,37 @@ def calibrate_heston(
     x0 = np.array([initial.v0, initial.kappa, initial.theta, initial.sigma, initial.rho], dtype=float)
     lower = np.array(bounds[0], dtype=float)
     upper = np.array(bounds[1], dtype=float)
+    # Validate bounds/initial up front with a clear error (else scipy raises a raw
+    # "x0 is infeasible" ValueError deep in least_squares).
+    if np.any(lower > upper):
+        raise ValidationError("each lower bound must not exceed its upper bound")
+    if np.any(x0 < lower) or np.any(x0 > upper):
+        raise ValidationError(
+            "initial parameters must lie within [lower, upper]; tighten the initial "
+            "guess or widen the bounds"
+        )
+
+    # Group options by maturity: the Heston CF is strike-independent, so all strikes at one
+    # maturity share a single phi(u) sweep. resolve() is deterministic in T, so options with
+    # equal T share the same resolved rate/carry.
+    uniqueT, inv = np.unique(Ts, return_inverse=True)
+    groups = []  # (Tg, rate_g, carry_g, member_indices)
+    for g in range(uniqueT.size):
+        idx = np.nonzero(inv == g)[0]
+        groups.append((float(uniqueT[g]), float(rates[idx[0]]), float(carries[idx[0]]), idx))
 
     def residuals(x: np.ndarray) -> np.ndarray:
         p = unpack(x)
-        if target == "price":
-            model = np.array([
-                heston_call_price(s0, K, T, p, rate_i, carry_i, method=method)
-                for K, T, rate_i, carry_i in zip(Ks, Ts, rates, carries)
-            ])
-        else:
-            model = np.array([
-                heston_implied_vol(s0, K, T, p, rate_i, carry_i, method=method)
-                for K, T, rate_i, carry_i in zip(Ks, Ts, rates, carries)
-            ])
+        model = np.empty(Ks.shape[0], dtype=float)
+        for Tg, rate_g, carry_g, idx in groups:
+            call_prices = heston_call_prices_vectorized(s0, Ks[idx], Tg, p, rate_g, carry_g)
+            if target == "price":
+                model[idx] = call_prices
+            else:  # target == "iv": invert each group call to Black-Scholes implied vol
+                model[idx] = [
+                    implied_vol_call(s0, float(k), Tg, float(cp), rate_g, carry_g)
+                    for k, cp in zip(Ks[idx], call_prices)
+                ]
         res = (model - y) * np.sqrt(w)
         # Fixed-length residual: always append the penalty term when enabled (it is 0
         # when Feller is satisfied) so least_squares sees a constant dimension.
