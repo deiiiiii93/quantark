@@ -1,0 +1,9 @@
+# Sample-tag artifacts are regenerable TEST outputs — not committed deliverables.
+# The committed deliverables are the real-data (latest) artifacts + the sample SNAPSHOT.
+mo_iv_surface_sample.json
+mo_reprice_localvol_sample.json
+mo_reprice_slv_sample.json
+mo_calib_heston_sample.json
+mo_volmodels_lecture_sample.html
+comparison_summary_sample.csv
+plots/*_sample.png

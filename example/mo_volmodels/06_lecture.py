@@ -97,6 +97,13 @@ def main() -> None:
     )
 
     feller_ok = he["feller"] >= 1.0
+    # Loud banner if this render is the synthetic test fixture, never the real deliverable.
+    fixture_banner = "" if t == "latest" else (
+        '<div style="background:#b5432f;color:#fff;padding:.7rem 1rem;border-radius:8px;'
+        'margin:1rem 0;font-weight:600">⚠ SYNTHETIC TEST FIXTURE (tag=' + t + ') — arbitrage-free '
+        'sample data for automated tests, NOT real market data. The real-data lecture is '
+        '<code style="color:#fff">mo_volmodels_lecture_latest.html</code> (run stage 01 to refresh).</div>'
+    )
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Volatility Model Calibration on MO Options — A Practical Lecture</title>
@@ -141,7 +148,7 @@ footer {{ margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); f
   code {{ background:#1c2634; }} .callout {{ background:#1b1512; }} .callout.key {{ background:#111a26; }}
 }}
 </style></head><body><div class="wrap">
-
+{fixture_banner}
 <h1>Volatility Model Calibration on MO Index Options</h1>
 <p class="lede">A hands-on study: recovering an implied-volatility surface from live CSI&nbsp;1000
 (中证1000, <code>000852.SH</code>) option quotes, then calibrating three volatility models —
