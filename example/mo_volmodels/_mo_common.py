@@ -156,6 +156,33 @@ def otm_implied_vol(oq: "OtmQuote", s0, r, q_carry, forward, discount_factor, T)
         return None
 
 
+def build_env(surface_json: dict):
+    """Reconstruct (PricingEnvironment, GridVolSurface, s0) from stage-02 output.
+
+    The rate curve and dividend/carry curve are built from the per-expiry parity
+    pillars, so the pricing environment carries the exact term structure the surface
+    was calibrated against. Both curve types require >= 2 pillars (guaranteed by the
+    stage-02 >=2-expiry check).
+    """
+    from datetime import datetime
+
+    from quantark.param import GridVolSurface, SpotQuote
+    from quantark.param.rrf.rate_curve import LinearRateCurve
+    from quantark.param.div import TermStructureDividendYield
+    from quantark.priceenv import PricingEnvironment
+
+    s0 = float(surface_json["s0"])
+    surf = GridVolSurface(surface_json["strikes"], surface_json["maturities"],
+                          np.array(surface_json["iv_grid"]))
+    pe = surface_json["per_expiry"]
+    ts = [p["T"] for p in pe]
+    rate = LinearRateCurve([(p["T"], p["r"]) for p in pe])
+    div = TermStructureDividendYield(times=ts, yields=[p["q"] for p in pe])
+    env = PricingEnvironment(rate_curve=rate, valuation_date=datetime(2026, 7, 6),
+                             spot_quote=SpotQuote(spot=s0), vol_surface=surf, div_yield=div)
+    return env, surf, s0
+
+
 def plot_smiles(rows, path, title="MO implied-vol smiles"):
     """rows = list of (label, strikes, ivs). Saves a PNG; returns the path."""
     import matplotlib

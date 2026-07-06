@@ -82,11 +82,13 @@ def main() -> None:
 
     out = {"s0": s0, "fetched_at": snap["fetched_at"], "strikes": strikes,
            "maturities": maturities, "iv_grid": grid.tolist(), "per_expiry": per_expiry}
-    (HERE / "data/mo_iv_surface_latest.json").write_text(json.dumps(out, indent=2))
-    mc.plot_smiles(smile_rows, HERE / "data/plots/02_smiles.png",
+    # Artifacts are keyed by the snapshot tag so the deterministic 'sample' pipeline
+    # (tests) and the live 'latest' pipeline (lecture) never clobber each other.
+    (HERE / f"data/mo_iv_surface_{args.snapshot}.json").write_text(json.dumps(out, indent=2))
+    mc.plot_smiles(smile_rows, HERE / f"data/plots/02_smiles_{args.snapshot}.png",
                    title=f"MO (000852.SH) implied-vol smiles — spot {s0:.0f}")
     print(f"surface: {len(maturities)} maturities x {len(strikes)} strikes "
-          f"-> data/mo_iv_surface_latest.json")
+          f"-> data/mo_iv_surface_{args.snapshot}.json")
 
 
 if __name__ == "__main__":

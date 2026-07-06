@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "example/mo_volmodels/data/mo_iv_surface_latest.json"
+OUT = ROOT / "example/mo_volmodels/data/mo_iv_surface_sample.json"
 
 
 def test_stage02_builds_surface():
