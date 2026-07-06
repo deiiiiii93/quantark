@@ -130,6 +130,10 @@ barrier equal to spot or a non-positive barrier with a `ValidationError`.
 ## 6. Out of scope
 
 - Double / window / partial-time / soft barriers; American exercise; discrete cash dividends.
+- Per-date `ObservationSchedule` (varying barrier/payoff per observation): rejected with `ValidationError`
+  in v1 (flat scalar barrier/rebate + `observation_dates` is supported). `participation_rate` **is**
+  honored (applied once at each engine wrapper). Continuous monitoring uses a Brownian-bridge crossing
+  correction (not grid-node monitoring).
 - SR 11-7 two-developer validation package (the 4-way cross-check tests + Codex gate are the agreed
   rigor).
 - Greeks for the barrier engines beyond what the shared greek helpers already provide (revaluation

@@ -13,6 +13,9 @@
 - Honor `BarrierOption.pay_at_hit`: KO rebate PV = `rebate` at hit (`pay_at_hit=True`) else `rebate·DF(t_hit→T)`.
 - Knock-in is rebate-correct: MC prices KI directly (payoff if breached else `rebate` at expiry); PDE uses `KI = Vanilla − KO(rebate=0) + rebate·NoTouch`. `KI+KO=Vanilla` asserted only at `rebate=0`.
 - All 4 `BarrierType` (UP/DOWN × IN/OUT); `ObservationType.CONTINUOUS` and `DISCRETE` (via `observation_dates`).
+- **`participation_rate`:** `BarrierOption.participation_rate` (default 1.0) scales the option payoff (as the existing BSM engines do). Every MC/PDE wrapper multiplies the unit price by `participation_rate` **exactly once**; every kernel/test covers `participation_rate != 1.0`. (Applied at the wrapper, not the barrier core, so the payoff-monitoring math stays payoff-agnostic.)
+- **`observation_schedule` (v1 scope):** the per-observation `ObservationSchedule` (per-date barriers/payoffs) is **out of scope for v1**; every new engine raises `ValidationError` when `product.observation_schedule is not None`, with a test asserting the rejection. Flat scalar `barrier`/`rebate` + `observation_dates` (discrete) or continuous is fully supported.
+- **Continuous monitoring = Brownian-bridge crossing correction, NOT grid monitoring.** Recording running extrema on time nodes misses between-step crossings and biases KO/no-touch. For `ObservationType.CONTINUOUS`, each step contributes a per-path **no-crossing probability** via the Brownian bridge (reuse/mirror `quantark.asset.equity.process.bsm.qmc_brownian_bridge.compute_step_crossing_probabilities`, with the step's local vol frozen for Heston/SLV); a path carries a **survival weight** `w = Π(1 − p_cross,i)`. Discrete monitoring uses hard breach at observation samples. Convergence tests over `time_steps` against the continuous analytical barrier are required.
 - `quantark.util.numerical` for tolerances/protected math. No MC inside PDE. Canonical `quantark.*` imports.
 - Barrier ≤ 0 or barrier == spot exactly → `ValidationError`. Barrier already breached at t=0 handled explicitly.
 - Tests under `test/`, run `.venv/bin/python -m pytest -n0 <file>` while developing.
@@ -35,11 +38,17 @@
 **Files:** Create `quantark/volmodels/barrier.py`; Test `test/volmodels/test_barrier_core.py`.
 
 **Interfaces — Produces:**
-- `BarrierSpec` dataclass: `is_up: bool, is_out: bool, is_call: bool, barrier: float, strike: float, rebate: float, pay_at_hit: bool`.
-- `mc_barrier_cashflows(terminal_s, breached_mask, hit_step_dt_cumT, spec, disc_T) -> np.ndarray`
-  returns per-path **present value** (discounted) cashflows, honoring KO/KI + rebate + `pay_at_hit`.
-- `monitored_breach(run_min, run_max, samples, spec) -> (breached: bool[np], first_hit_idx: int[np])`
-  given continuous running extrema OR discrete monitoring samples.
+- `BarrierSpec` dataclass: `is_up: bool, is_out: bool, is_call: bool, barrier: float, strike: float, rebate: float, pay_at_hit: bool`. (No `participation_rate`/`observation_schedule` — handled at the engine wrapper.)
+- `mc_barrier_cashflows(terminal_s, survival_w, hit_cumT, spec, disc_scalar_or_vec, maturity) -> np.ndarray`
+  returns per-path **PV**, honoring KO/KI + rebate + `pay_at_hit`. `survival_w ∈ [0,1]` per path is the
+  probability the path did **not** breach: hard 0/1 for discrete, Brownian-bridge product for continuous.
+  KO PV `= w·payoff·DF(T) + (1−w)·rebate·DF(rebate_time)`; KI PV `= (1−w)·payoff·DF(T) + w·rebate·DF(T)`.
+  `rebate_time = hit_cumT` if `pay_at_hit` else `T`.
+- `discrete_survival(samples, spec) -> (w: float[np] in {0,1}, first_hit_idx: int[np])` — hard breach at
+  observation samples (up: any sample ≥ B; down: any ≤ B).
+- `bridge_survival(path_nodes, step_local_vol, step_dt, spec) -> (w: float[np], first_hit_idx)` — continuous:
+  per-step no-crossing probability via the Brownian bridge (mirror `compute_step_crossing_probabilities`),
+  `w = Π(1−p_cross,i)`; `first_hit_idx` = first step with a hard node breach (for `pay_at_hit` timing).
 - `validate_barrier(spec, s0)` → raises `ValidationError` on `barrier<=0` or `barrier==s0`.
 
 - [ ] **Step 1: Failing test** — payoff logic on hand-built inputs.
@@ -52,16 +61,16 @@ from quantark.util.exceptions import ValidationError
 
 def test_up_out_call_knocks_out_with_rebate():
     spec = BarrierSpec(is_up=True, is_out=True, is_call=True, barrier=120., strike=100., rebate=5., pay_at_hit=False)
-    term = np.array([130., 110.])          # path0 breaches (up>=120), path1 does not
-    breached = np.array([True, False]); hitT = np.array([0.5, 0.0])
-    pv = mc_barrier_cashflows(term, breached, hitT, spec, disc_T=lambda t: np.exp(-0.02*t))
-    # path0: knocked out -> rebate 5 discounted to T=1; path1: alive call payoff (110-100)=10 disc to T
-    assert pv[0] == pytest.approx(5*np.exp(-0.02*1.0), rel=1e-9)
-    assert pv[1] == pytest.approx(10*np.exp(-0.02*1.0), rel=1e-9)
+    term = np.array([130., 110.]); w = np.array([0.0, 1.0])   # path0 breached (w=0), path1 survived (w=1)
+    hitT = np.array([0.5, 0.0])
+    pv = mc_barrier_cashflows(term, w, hitT, spec, disc=lambda t: np.exp(-0.02*np.asarray(t)), maturity=1.0)
+    assert pv[0] == pytest.approx(5*np.exp(-0.02*1.0), rel=1e-9)     # KO -> rebate at T
+    assert pv[1] == pytest.approx(10*np.exp(-0.02*1.0), rel=1e-9)    # survived -> call payoff at T
 
 def test_pay_at_hit_discounts_to_hit_time():
     spec = BarrierSpec(True, True, True, 120., 100., 5., pay_at_hit=True)
-    pv = mc_barrier_cashflows(np.array([130.]), np.array([True]), np.array([0.5]), spec, lambda t: np.exp(-0.02*t))
+    pv = mc_barrier_cashflows(np.array([130.]), np.array([0.0]), np.array([0.5]),
+                              spec, disc=lambda t: np.exp(-0.02*np.asarray(t)), maturity=1.0)
     assert pv[0] == pytest.approx(5*np.exp(-0.02*0.5), rel=1e-9)
 
 def test_validate_rejects_barrier_at_spot():
@@ -92,25 +101,23 @@ def validate_barrier(spec: "BarrierSpec", s0: float) -> None:
 def _vanilla(term, spec):
     return np.maximum(term - spec.strike, 0.0) if spec.is_call else np.maximum(spec.strike - term, 0.0)
 
-def mc_barrier_cashflows(terminal_s, breached, hit_cumT, spec, disc_T):
-    """Per-path PV. disc_T(t)->DF from 0 to t. T is the last time (=hit_cumT max horizon)."""
-    T = float(np.max(hit_cumT[breached])) if np.any(breached) else None
-    # infer horizon: caller passes hit_cumT for breached paths and T via the terminal disc; use maturity
+def mc_barrier_cashflows(terminal_s, survival_w, hit_cumT, spec, disc, maturity):
+    """Per-path PV. survival_w in [0,1] = prob path did NOT breach. disc(t)->DF(0->t),
+    scalar or vector. Uses expected KO/KI split so continuous (bridge) weights work as-is."""
     payoff = _vanilla(terminal_s, spec)
-    dfT = disc_T(_MATURITY.value)  # set by caller via set_maturity; see note
-    pv = np.empty(terminal_s.shape[0])
-    surv = ~breached
-    if spec.is_out:
-        pv[surv] = payoff[surv] * dfT                       # survived KO -> option pays
-        reb_df = disc_T(hit_cumT[breached]) if spec.pay_at_hit else dfT
-        pv[breached] = spec.rebate * reb_df                 # knocked out -> rebate
-    else:  # knock-in
-        pv[breached] = payoff[breached] * dfT               # knocked in -> option pays at T
-        pv[surv] = spec.rebate * dfT                        # never knocked in -> rebate at expiry
-    return pv
+    dfT = float(disc(maturity))
+    reb_df = disc(hit_cumT) if spec.pay_at_hit else dfT     # PV of rebate leg per path
+    w = np.clip(survival_w, 0.0, 1.0)
+    if spec.is_out:                                         # survive -> option ; breach -> rebate
+        return w * payoff * dfT + (1.0 - w) * spec.rebate * reb_df
+    # knock-in: breach -> option at T ; survive -> rebate at T
+    return (1.0 - w) * payoff * dfT + w * spec.rebate * dfT
 ```
 
-Note: pass maturity + a vectorized `disc_T` from the kernel (a closure over `r_fwd`); implement `disc_T` to accept scalar or array and return `DF(0→t)`. Add `monitored_breach` computing breach from continuous `run_min/run_max` vs `barrier` (up: `run_max>=B`; down: `run_min<=B`) or from discrete `samples` (any obs beyond barrier), returning `first_hit_idx` for `pay_at_hit`.
+Note: `disc` is a vectorized closure over `r_fwd` returning `DF(0→t)` for scalar or array `t`; `maturity`
+is passed explicitly (no globals). `discrete_survival` returns hard `w∈{0,1}` from observation samples;
+`bridge_survival` returns the Brownian-bridge product `w=Π(1−p_cross,i)` for continuous monitoring, plus
+`first_hit_idx` (first hard node breach) used only for `pay_at_hit` rebate timing.
 
 - [ ] **Step 4:** Run → PASS. **Step 5:** Commit `feat(volmodels): shared barrier payoff/monitoring core`.
 
@@ -118,7 +125,7 @@ Note: pass maturity + a vectorized `disc_T` from the kernel (a closure over `r_f
 
 **Files:** Modify `quantark/volmodels/localvol/mc_kernel.py`; Test `test/volmodels/test_barrier_lv_mc.py`.
 
-**Produces:** `price_barrier_lv_mc(s0, strike, is_call, lv_surface, step_dt, r_fwd, carry_fwd, barrier, is_up, is_out, rebate, pay_at_hit, observe_idx=None, num_paths, seed, use_antithetic, return_stderr)`. `observe_idx=None` → continuous (running extremum); else discrete indices into the step grid.
+**Produces:** `price_barrier_lv_mc(s0, strike, is_call, lv_surface, step_dt, r_fwd, carry_fwd, barrier, is_up, is_out, rebate, pay_at_hit, continuous=True, observe_idx=None, num_paths, seed, use_antithetic, return_stderr)`. `continuous=True` → Brownian-bridge survival weights; `continuous=False` → hard breach at `observe_idx` samples. Same `continuous`/`observe_idx` block on `price_barrier_heston_mc` / `price_barrier_slv_mc`.
 
 - [ ] **Step 1: Failing tests** — European limit + BSM-flat analytical + in-out parity(rebate=0).
 
@@ -176,20 +183,23 @@ class LocalVolBarrierMCEngine(BaseEngine):
     def price(self, product, env):
         if not isinstance(product, BarrierOption):
             raise PricingError("LocalVolBarrierMCEngine supports BarrierOption only")
+        if product.observation_schedule is not None:
+            raise ValidationError("observation_schedule (per-date barriers) is out of scope for v1")
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0., T, n+1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid); carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
         lv = self._prebuilt or build_dupire_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve, div_yield=env.get_div_yield)
-        observe_idx = _observation_indices(product, t_grid)   # None if continuous; else np indices
+        continuous = product.observation_type == ObservationType.CONTINUOUS
+        observe_idx = None if continuous else _observation_indices(product, t_grid)  # np indices for discrete
         unit = price_barrier_lv_mc(float(env.spot), float(product.strike), product.option_type==OptionType.CALL,
             lv, np.diff(t_grid), r_fwd, carry_fwd, barrier=float(product.barrier),
             is_up=product.is_up_barrier, is_out=product.is_knock_out, rebate=float(product.rebate),
-            pay_at_hit=product.pay_at_hit, observe_idx=observe_idx,
+            pay_at_hit=product.pay_at_hit, continuous=continuous, observe_idx=observe_idx,
             num_paths=self.params.num_paths, seed=self.params.seed, use_antithetic=self.params.use_antithetic)
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        return unit * float(product.participation_rate) * float(getattr(product, "contract_multiplier", 1.0))
 ```
 
-Add a shared `_observation_indices(product, t_grid)` helper (module-level, reused by all six engines). Register the three in `mc/__init__.py`. **Step 4:** PASS. **Step 5:** Commit.
+Shared module-level helpers reused by all six engines: `_observation_indices(product, t_grid)` (snap `observation_dates` to grid, `ValidationError` on a date > T) and the `observation_schedule`-rejection + `participation_rate`-multiply lines. Add tests: `participation_rate=2.0` doubles the price; `observation_schedule != None` raises `ValidationError`. Register the three in `mc/__init__.py`. **Step 4:** PASS. **Step 5:** Commit.
 
 ---
 
