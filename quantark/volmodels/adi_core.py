@@ -149,6 +149,7 @@ class HestonSLVADICore:
         self._V_tri_cache: dict = {}
         self._S_lu_cache: dict = {}
         self._V_lu_cache: dict = {}
+        self._boundary_hook = None
 
     def _L(self, t):
         if self._constant_leverage:
@@ -237,6 +238,10 @@ class HestonSLVADICore:
         if not self._degenerate_v0:
             U[:, 0] = U[:, 1]
         U[:, -1] = U[:, -2]
+        if self._boundary_hook is not None:
+            hooked = self._boundary_hook(U, tau)
+            if hooked is not None:
+                U[:, :] = hooked
 
     def _terminal(self, is_call):
         S_mesh, _ = np.meshgrid(self.S_grid, self.V_grid, indexing="ij")
@@ -245,7 +250,7 @@ class HestonSLVADICore:
         self._bc(U, 0.0)
         return U
 
-    def _s_boundary_rhs(self, rhs, tau):
+    def _s_boundary_rhs(self, rhs, tau, v_index=0):
         if self._opt_is_call:
             rhs[0] = 0.0
             rhs[-1] = max(0.0, self.S_max * np.exp(-self.q * tau) - self.K * np.exp(-self.r * tau))
@@ -257,7 +262,21 @@ class HestonSLVADICore:
                 rhs[-1] = self._ko_bnd(tau)
             else:
                 rhs[0] = self._ko_bnd(tau)
+        custom = self._custom_s_boundary_values(tau)
+        if custom is not None:
+            low, high = custom
+            rhs[0] = low[int(v_index)]
+            rhs[-1] = high[int(v_index)]
         return rhs
+
+    def _custom_s_boundary_values(self, tau):
+        if self._boundary_hook is None:
+            return None
+        U = np.zeros((self.N_S, self.N_V), dtype=float)
+        hooked = self._boundary_hook(U, tau)
+        if hooked is not None:
+            U[:, :] = hooked
+        return U[0, :].copy(), U[-1, :].copy()
 
     # ---- tridiagonal builders (cached where the operator is time-independent) ----
     def _tri_S(self, dt_step, theta_loc, t_mid):
@@ -362,7 +381,9 @@ class HestonSLVADICore:
             Y = np.empty_like(source)
             lus = self._ensure_S_lus(dt_step, theta_loc)
             for j in range(self.N_V):
-                rhs = self._s_boundary_rhs(source[:, j] - theta_loc * dt_step * A1U[:, j], tau)
+                rhs = self._s_boundary_rhs(
+                    source[:, j] - theta_loc * dt_step * A1U[:, j], tau, v_index=j
+                )
                 Y[:, j] = lus[j].solve(rhs)
             self._bc(Y, tau)
             return Y
@@ -380,6 +401,11 @@ class HestonSLVADICore:
                 rhs[-1, :] = self._ko_bnd(tau)
             else:
                 rhs[0, :] = self._ko_bnd(tau)
+        custom = self._custom_s_boundary_values(tau)
+        if custom is not None:
+            low, high = custom
+            rhs[0, :] = low
+            rhs[-1, :] = high
         Y = solve_tridiag_batch(a, b, c, rhs.T).T                   # one system per V-slice
         self._bc(Y, tau)
         return Y
@@ -434,7 +460,16 @@ class HestonSLVADICore:
         Z1 = self._solve_S(Ycorr, A1U, dt_step, theta_loc, tau, t_mid)
         return self._solve_V(Z1, A2U, dt_step, theta_loc, tau)
 
-    def solve(self, is_call, scheme, theta, rannacher, step_hook=None, terminal_override=None):
+    def solve(
+        self,
+        is_call,
+        scheme,
+        theta,
+        rannacher,
+        step_hook=None,
+        terminal_override=None,
+        boundary_hook=None,
+    ):
         """Backward ADI solve.
 
         step_hook(U, tau) -> U (optional): applied to the value surface after the terminal
@@ -442,31 +477,43 @@ class HestonSLVADICore:
         Used to inject a barrier knock-out condition without duplicating the ADI loop.
         terminal_override (optional ndarray, shape (n_x, n_v)): replaces the vanilla terminal
         payoff (e.g. a constant 1 for a survival / no-touch leg).
+        boundary_hook(U, tau) -> U (optional): overrides boundary rows for non-vanilla
+        terminal-value problems while keeping the ADI core reusable.
         """
-        U = self._terminal(is_call) if terminal_override is None else np.array(terminal_override, dtype=float)
-        tau = 0.0
-        if step_hook is not None:
-            U = step_hook(U, tau)
-        if rannacher and self.N_T >= 1:
-            dt_half = 0.5 * self.dt
-            for _ in range(2):
-                tau += dt_half
-                U = self._douglas_step(U, dt_half, tau, 1.0, self.T - tau + 0.5 * dt_half)
-                if step_hook is not None:
-                    U = step_hook(U, tau)
-            steps_remaining = self.N_T - 1
-        else:
-            steps_remaining = self.N_T
-        for _ in range(steps_remaining):
-            tau += self.dt
-            t_mid = self.T - tau + 0.5 * self.dt
-            if scheme == ADIScheme.DOUGLAS:
-                U = self._douglas_step(U, self.dt, tau, theta, t_mid)
-            else:  # CRAIG_SNEYD (MCS is rejected by the wrappers)
-                U = self._cs_step(U, self.dt, tau, theta, t_mid)
+        previous_hook = self._boundary_hook
+        self._boundary_hook = boundary_hook
+        try:
+            if terminal_override is None:
+                U = self._terminal(is_call)
+            else:
+                U = np.array(terminal_override, dtype=float)
+                if boundary_hook is not None:
+                    self._bc(U, 0.0)
+            tau = 0.0
             if step_hook is not None:
                 U = step_hook(U, tau)
-        return U
+            if rannacher and self.N_T >= 1:
+                dt_half = 0.5 * self.dt
+                for _ in range(2):
+                    tau += dt_half
+                    U = self._douglas_step(U, dt_half, tau, 1.0, self.T - tau + 0.5 * dt_half)
+                    if step_hook is not None:
+                        U = step_hook(U, tau)
+                steps_remaining = self.N_T - 1
+            else:
+                steps_remaining = self.N_T
+            for _ in range(steps_remaining):
+                tau += self.dt
+                t_mid = self.T - tau + 0.5 * self.dt
+                if scheme == ADIScheme.DOUGLAS:
+                    U = self._douglas_step(U, self.dt, tau, theta, t_mid)
+                else:  # CRAIG_SNEYD (MCS is rejected by the wrappers)
+                    U = self._cs_step(U, self.dt, tau, theta, t_mid)
+                if step_hook is not None:
+                    U = step_hook(U, tau)
+            return U
+        finally:
+            self._boundary_hook = previous_hook
 
     # ---- read-off ----
     def interpolate(self, U, x_val, v_val):

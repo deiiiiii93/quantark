@@ -23,6 +23,11 @@ from .mc import (
     LocalVolMCEngine,
     HestonMCEngine,
     HestonSLVMCEngine,
+    LocalVolSnowballMCEngine,
+    HestonSnowballMCEngine,
+    QESnowballMCEngine,
+    HestonSLVSnowballMCEngine,
+    HestonSLVQESnowballMCEngine,
 )
 from .pde import (
     BasePDESolver,
@@ -37,6 +42,9 @@ from .pde import (
     LocalVolPDESolver,
     HestonPDESolver,
     HestonSLVPDESolver,
+    LocalVolSnowballPDESolver,
+    HestonSnowballPDESolver,
+    HestonSLVSnowballPDESolver,
     TimeGrid,
     SpatialGrid,
 )
@@ -70,6 +78,11 @@ __all__ = [
     "LocalVolMCEngine",
     "HestonMCEngine",
     "HestonSLVMCEngine",
+    "LocalVolSnowballMCEngine",
+    "HestonSnowballMCEngine",
+    "QESnowballMCEngine",
+    "HestonSLVSnowballMCEngine",
+    "HestonSLVQESnowballMCEngine",
     # Unified PDE Engine
     "PDEEngine",
     # PDE Solvers
@@ -85,6 +98,9 @@ __all__ = [
     "LocalVolPDESolver",
     "HestonPDESolver",
     "HestonSLVPDESolver",
+    "LocalVolSnowballPDESolver",
+    "HestonSnowballPDESolver",
+    "HestonSLVSnowballPDESolver",
     # Grid utilities
     "TimeGrid",
     "SpatialGrid",

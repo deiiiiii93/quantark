@@ -1,0 +1,462 @@
+"""Snowball PDE solvers under Local Vol / Heston / Heston-SLV processes."""
+
+from __future__ import annotations
+
+from typing import Dict, Optional
+
+import numpy as np
+
+from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.param import PDEParams
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.param import GridVolSurface
+from quantark.priceenv import PricingEnvironment
+from quantark.priceenv.term_sampling import TermCoefficients
+from quantark.util.enum import ObservationType
+from quantark.util.enum.engine_enums import ADIScheme, EngineType
+from quantark.util.exceptions import PricingError, ValidationError
+from quantark.util.numerical import is_close, is_zero
+from quantark.volmodels.adi_core import HestonSLVADICore
+from quantark.volmodels.heston import HestonParams
+from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
+from quantark.volmodels.slv.leverage import LeverageSurface
+
+
+class LocalVolSnowballPDESolver(SnowballPDESolver):
+    """Two-surface Snowball PDE with Dupire local volatility on the S grid."""
+
+    engine_type = EngineType.PDE
+    _solver_name = "LocalVolSnowballPDESolver"
+
+    def __init__(
+        self,
+        params: Optional[PDEParams] = None,
+        local_vol_surface: Optional[LocalVolSurface] = None,
+        enable_profiling: bool = False,
+    ):
+        super().__init__(params=params, enable_profiling=enable_profiling)
+        self._prebuilt = local_vol_surface
+        self._active_lv_surface: Optional[LocalVolSurface] = None
+        self._active_s_vec: Optional[np.ndarray] = None
+
+    def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
+        if self._prebuilt is not None:
+            return self._prebuilt
+        if not isinstance(env.vol_surface, GridVolSurface):
+            raise PricingError(
+                "LocalVolSnowballPDESolver needs a GridVolSurface or a prebuilt LocalVolSurface"
+            )
+        return build_dupire_local_vol(
+            env.vol_surface,
+            spot=env.spot,
+            rate_curve=env.rate_curve,
+            div_yield=env.get_div_yield,
+        )
+
+    def _with_surface(self, env: PricingEnvironment, fn):
+        previous = self._active_lv_surface
+        self._active_lv_surface = self._build_surface(env)
+        try:
+            return fn()
+        finally:
+            self._active_lv_surface = previous
+
+    def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
+        return self._with_surface(
+            pricing_env,
+            lambda: SnowballPDESolver.price(self, product, pricing_env),
+        )
+
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        return self._with_surface(
+            pricing_env,
+            lambda: SnowballPDESolver.calculate_greeks(self, product, pricing_env),
+        )
+
+    def calculate_event_stats(self, product, pricing_env, **kwargs):
+        return self._with_surface(
+            pricing_env,
+            lambda: SnowballPDESolver.calculate_event_stats(
+                self, product, pricing_env, **kwargs
+            ),
+        )
+
+    def _build_grids(self, product, pricing_env, spot, sigma, tau, r, q):
+        result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
+        self._active_s_vec = result[1]
+        return result
+
+    def _build_step_coefficients(
+        self,
+        pricing_env: PricingEnvironment,
+        ref_strike: float,
+        t_vec: np.ndarray,
+        dx_vec: np.ndarray,
+        num_x: int,
+    ) -> StepCoefficients:
+        if self._active_lv_surface is None or self._active_s_vec is None:
+            raise PricingError("Local-vol surface is not initialized for this solve")
+
+        tc = TermCoefficients.from_env(
+            pricing_env, np.asarray(t_vec, dtype=float), ref_strike=float(ref_strike)
+        )
+        s_vec = np.asarray(self._active_s_vec, dtype=float)
+        dt = np.diff(np.asarray(t_vec, dtype=float))
+        lcu_sets = []
+        for j, dt_j in enumerate(dt):
+            t_mid = float(t_vec[j] + 0.5 * dt_j)
+            sigma_vec = np.asarray(self._active_lv_surface.local_vol(s_vec, t_mid), dtype=float)
+            lcu_sets.append(
+                self._local_vol_coefficients(
+                    float(tc.fwd_rates[j]),
+                    float(tc.fwd_carry[j]),
+                    sigma_vec,
+                    dx_vec,
+                    num_x,
+                )
+            )
+        return StepCoefficients(
+            lcu_sets=lcu_sets,
+            set_index=np.arange(len(lcu_sets), dtype=int),
+            n_unique=len(lcu_sets),
+        )
+
+    def _flat_exact_step_coefficients(self, sc, r, q, sigma, dx_vec, num_x):
+        return sc
+
+    @staticmethod
+    def _local_vol_coefficients(r, q, sigma_vec, dx_vec, num_x):
+        sigma_vec = np.asarray(sigma_vec, dtype=float)
+        if sigma_vec.shape[0] != num_x:
+            raise ValidationError("local-vol vector length must match PDE spatial grid")
+        if not np.all(np.isfinite(sigma_vec)) or np.any(sigma_vec <= 0.0):
+            raise ValidationError("local-vol surface returned non-positive or non-finite vols")
+
+        diff = 0.5 * sigma_vec * sigma_vec
+        drift = float(r) - float(q) - diff
+        dx_vec = np.asarray(dx_vec, dtype=float)
+
+        if is_close(float(np.max(dx_vec)), float(np.min(dx_vec))):
+            dx = float(dx_vec[0])
+            l = diff / (dx * dx) - drift / (2.0 * dx)
+            c = -2.0 * diff / (dx * dx) - float(r)
+            u = diff / (dx * dx) + drift / (2.0 * dx)
+            return l, c, u
+
+        h_m, h_p = dx_vec[:-1], dx_vec[1:]
+        h_sum, h_prod = h_m + h_p, h_m * h_p
+        d_i = diff[1:-1]
+        mu_i = drift[1:-1]
+        l = np.zeros(num_x)
+        c = np.zeros(num_x)
+        u = np.zeros(num_x)
+        l[1:-1] = 2.0 * d_i / (h_m * h_sum) - mu_i * h_p / (h_m * h_sum)
+        c[1:-1] = -2.0 * d_i / h_prod + mu_i * (h_p - h_m) / h_prod - float(r)
+        u[1:-1] = 2.0 * d_i / (h_p * h_sum) + mu_i * h_m / (h_p * h_sum)
+        l[0], c[0], u[0] = l[1], c[1], u[1]
+        l[-1], c[-1], u[-1] = l[-2], c[-2], u[-2]
+        return l, c, u
+
+
+class _Heston2DSnowballPDEBase(SnowballPDESolver):
+    engine_type = EngineType.PDE
+    _solver_name = "Heston2DSnowballPDESolver"
+
+    def __init__(
+        self,
+        model_params: HestonParams,
+        params: Optional[PDEParams] = None,
+        n_x: int = 200,
+        n_v: int = 100,
+        n_t: int = 100,
+        scheme: ADIScheme | str = ADIScheme.CRAIG_SNEYD,
+        grid_style: str = "concentrated",
+    ):
+        if not isinstance(model_params, HestonParams):
+            raise ValidationError("model_params must be a HestonParams")
+        super().__init__(params=params or PDEParams())
+        try:
+            scheme = ADIScheme[scheme.upper()] if isinstance(scheme, str) else scheme
+        except KeyError:
+            raise ValidationError(f"unknown ADI scheme: {scheme}")
+        if scheme == ADIScheme.MCS:
+            raise ValidationError("MCS is not implemented for the Heston/SLV Snowball PDE")
+        self.model_params = model_params
+        self.n_x = int(n_x)
+        self.n_v = int(n_v)
+        self.n_t = int(n_t)
+        self.scheme = scheme
+        self.grid_style = grid_style
+
+    def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
+        return HestonSLVADICore(
+            float(env.spot),
+            float(product.strike),
+            T,
+            float(env.get_rate(T)),
+            float(env.get_div_yield(T)),
+            self.model_params,
+            self.n_x,
+            self.n_v,
+            self.n_t,
+            leverage=None,
+            eta=1.0,
+            grid_style=self.grid_style,
+            barrier_concentrate=self._primary_barrier(product),
+        )
+
+    def _primary_barrier(self, product: SnowballOption) -> float:
+        barriers = self._get_barriers(product)
+        return float(max(barriers)) if barriers else float(product.strike)
+
+    def calculate_event_stats(self, product, pricing_env, **kwargs):
+        return None
+
+    def calculate_greeks(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Dict[str, float]:
+        return BaseEngine.calculate_greeks(self, product, pricing_env)
+
+    def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
+        self._check_product_type(product)
+        if pricing_env is None:
+            raise ValidationError(f"PricingEnvironment is required for {self._solver_name}")
+        self._validate_product(product)
+
+        spot = float(pricing_env.spot)
+        T = float(product.get_maturity(pricing_env))
+        if T <= 0.0 or is_zero(T):
+            return self._calculate_terminal_value(product, spot, pricing_env)
+        if self._is_knocked_out_at_valuation(product, spot, pricing_env):
+            return self._get_immediate_ko_payoff(product, pricing_env)
+
+        ki_continuous = (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        knocked_in = self._is_knocked_in_at_valuation(
+            product, spot, pricing_env, ki_continuous=ki_continuous
+        )
+        self._prepare_state(product, pricing_env, T, ki_continuous)
+
+        core = self._make_core(product, pricing_env, T)
+        if not (core.S_grid[0] <= spot <= core.S_grid[-1]):
+            raise ValidationError("spot falls outside the Heston/SLV Snowball PDE grid")
+
+        v1_snapshots: dict[float, np.ndarray] = {}
+        event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
+
+        terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
+        U1 = core.solve(
+            is_call=True,
+            scheme=self.scheme,
+            theta=float(self.params.theta),
+            rannacher=bool(self.params.use_rannacher),
+            terminal_override=terminal_v1,
+            boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=True),
+            step_hook=self._v1_hook(core, product, pricing_env, T, event_maps, v1_snapshots),
+        )
+
+        if knocked_in:
+            surface = U1
+        else:
+            terminal_v0 = self._terminal_surface(core, product, pricing_env, knocked_in=False)
+            surface = core.solve(
+                is_call=True,
+                scheme=self.scheme,
+                theta=float(self.params.theta),
+                rannacher=bool(self.params.use_rannacher),
+                terminal_override=terminal_v0,
+                boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=False),
+                step_hook=self._v0_hook(
+                    core, product, pricing_env, T, event_maps, v1_snapshots
+                ),
+            )
+
+        return float(core.interpolate(surface, np.log(spot), self.model_params.v0))
+
+    def _prepare_state(self, product, pricing_env, T: float, ki_continuous: bool) -> None:
+        self._total_tau = float(T)
+        self._is_reverse = product.is_reverse
+        self._ki_continuous = bool(ki_continuous)
+        self._bgk_active = False
+        self._ki_barrier = 0.0
+        self._ki_barrier_by_tidx.clear()
+        if product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            self._ki_barrier = float(ki_barrier[0] if isinstance(ki_barrier, list) else ki_barrier)
+
+    def _terminal_surface(self, core, product, env, knocked_in: bool) -> np.ndarray:
+        if knocked_in:
+            values = [product.get_maturity_payoff_v1(float(s), env) for s in core.S_grid]
+        else:
+            values = [product.get_maturity_payoff_v0(float(s), env) for s in core.S_grid]
+        return np.repeat(np.asarray(values, dtype=float)[:, None], core.V_grid.size, axis=1)
+
+    def _boundary_hook(self, core, product, env, knocked_in: bool):
+        def hook(U, tau):
+            grid = np.zeros((core.S_grid.size, 1), dtype=float)
+            if knocked_in:
+                self._set_boundary_conditions_v1(
+                    grid, core.X_grid, core.S_grid, 0, float(tau), product, env
+                )
+            else:
+                self._set_boundary_conditions_v0(
+                    grid, core.X_grid, core.S_grid, 0, float(tau), product, env
+                )
+            U[0, :] = grid[0, 0]
+            U[-1, :] = grid[-1, 0]
+            return U
+
+        return hook
+
+    def _build_event_maps(self, product, env, T: float, dt: float):
+        ko_by_key: dict[int, list] = {}
+        for rec in self._get_cached_ko_records(env, product):
+            if rec.observation_time is None:
+                continue
+            obs_time = float(rec.observation_time)
+            if -1e-12 <= obs_time <= T + 1e-12:
+                key = self._integer_tau_key(T - obs_time, dt)
+                ko_by_key.setdefault(key, []).append(rec)
+
+        ki_by_key: dict[int, float] = {}
+        if product.has_ki_barrier and not self._ki_continuous:
+            profile = self._get_cached_ki_profile(env, product)
+            times = profile.get("observation_times") or []
+            barriers = profile.get("barriers") or []
+            for obs_time, barrier in zip(times, barriers):
+                if obs_time is None or barrier is None:
+                    continue
+                obs_time = float(obs_time)
+                if -1e-12 <= obs_time <= T + 1e-12:
+                    ki_by_key[self._integer_tau_key(T - obs_time, dt)] = float(barrier)
+
+        return {"ko": ko_by_key, "ki": ki_by_key, "dt": float(dt)}
+
+    @staticmethod
+    def _integer_tau_key(tau: float, dt: float) -> int:
+        if dt <= 0:
+            raise ValidationError("ADI time step must be positive")
+        return int(round(max(float(tau), 0.0) / float(dt)))
+
+    @staticmethod
+    def _hook_tau_key(tau: float, dt: float) -> Optional[int]:
+        if dt <= 0:
+            return None
+        k_float = float(tau) / float(dt)
+        k = int(round(k_float))
+        if abs(k_float - k) > 1e-8:
+            return None
+        return k
+
+    @staticmethod
+    def _snapshot_key(tau: float) -> float:
+        return round(float(tau), 12)
+
+    def _apply_ko(self, U, core, product, env, T: float, tau: float, event_maps):
+        k = self._hook_tau_key(tau, event_maps["dt"])
+        if k is None:
+            return U
+        for rec in event_maps["ko"].get(k, []):
+            if rec.barrier is None:
+                continue
+            cashflow = rec.payoff if rec.payoff is not None else 0.0
+            current_time = max(T - float(tau), 0.0)
+            value = self._cashflow_value_at_time(
+                pricing_env=env,
+                cashflow=cashflow,
+                current_time=current_time,
+                settlement_time=rec.settlement_time,
+            )
+            mask = self._get_barrier_mask(
+                core.S_grid, float(rec.barrier), product.is_reverse, is_up_barrier=True
+            )
+            U[mask, :] = float(value)
+        return U
+
+    def _should_apply_ki(self, tau: float, event_maps) -> tuple[bool, Optional[float]]:
+        if self._ki_continuous:
+            return True, float(self._ki_barrier)
+        k = self._hook_tau_key(tau, event_maps["dt"])
+        if k is None:
+            return False, None
+        barrier = event_maps["ki"].get(k)
+        if barrier is None:
+            return False, None
+        return True, float(barrier)
+
+    def _v1_hook(self, core, product, env, T, event_maps, snapshots):
+        def hook(U, tau):
+            U = self._apply_ko(U, core, product, env, T, tau, event_maps)
+            snapshots[self._snapshot_key(tau)] = np.array(U, copy=True)
+            return U
+
+        return hook
+
+    def _v0_hook(self, core, product, env, T, event_maps, snapshots):
+        def hook(U, tau):
+            U = self._apply_ko(U, core, product, env, T, tau, event_maps)
+            if product.has_ki_barrier:
+                should_apply, barrier = self._should_apply_ki(tau, event_maps)
+                if should_apply and barrier is not None:
+                    key = self._snapshot_key(tau)
+                    v1 = snapshots.get(key)
+                    if v1 is None:
+                        raise PricingError("missing V1 snapshot for Heston/SLV Snowball KI jump")
+                    mask = self._get_barrier_mask(
+                        core.S_grid, barrier, product.is_reverse, is_up_barrier=False
+                    )
+                    U[mask, :] = v1[mask, :]
+            return U
+
+        return hook
+
+
+class HestonSnowballPDESolver(_Heston2DSnowballPDEBase):
+    """Two-surface Snowball PDE under the Heston stochastic-volatility model."""
+
+    _solver_name = "HestonSnowballPDESolver"
+
+
+class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
+    """Two-surface Snowball PDE under Heston-SLV using a calibrated leverage surface."""
+
+    _solver_name = "HestonSLVSnowballPDESolver"
+
+    def __init__(
+        self,
+        model_params: HestonParams,
+        leverage_surface: LeverageSurface,
+        eta: float = 1.0,
+        **kwargs,
+    ):
+        if not isinstance(leverage_surface, LeverageSurface):
+            raise ValidationError("leverage_surface must be a calibrated LeverageSurface")
+        if eta < 0:
+            raise ValidationError("eta must be non-negative")
+        super().__init__(model_params=model_params, **kwargs)
+        self.leverage_surface = leverage_surface
+        self.eta = float(eta)
+
+    def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
+        return HestonSLVADICore(
+            float(env.spot),
+            float(product.strike),
+            T,
+            float(env.get_rate(T)),
+            float(env.get_div_yield(T)),
+            self.model_params,
+            self.n_x,
+            self.n_v,
+            self.n_t,
+            leverage=self.leverage_surface,
+            eta=self.eta,
+            grid_style=self.grid_style,
+            barrier_concentrate=self._primary_barrier(product),
+        )
