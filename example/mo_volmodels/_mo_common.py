@@ -38,6 +38,19 @@ class ExpirySlice:
     volume: Dict[Tuple[float, str], int] = field(default_factory=dict)
 
 
+def _quote_price(q: dict) -> float:
+    """Price used for a quote: bid/ask mid when both sides are live, else last.
+
+    Real MO deep quotes can carry a stale 'last' far from the current book; the mid is
+    the cleaner mark. The synthetic sample sets bid/ask symmetrically around last, so the
+    mid equals last there — this choice is neutral on the sample and better on live data.
+    """
+    bid, ask = q.get("bid"), q.get("ask")
+    if bid is not None and ask is not None and bid > 0 and ask > 0:
+        return 0.5 * (float(bid) + float(ask))
+    return float(q["last"])
+
+
 def iter_expiries(snapshot: dict) -> List[ExpirySlice]:
     """Reshape the flat quote list of each expiry into strike-indexed maps."""
     out: List[ExpirySlice] = []
@@ -46,7 +59,7 @@ def iter_expiries(snapshot: dict) -> List[ExpirySlice]:
         puts: Dict[float, float] = {}
         vol: Dict[Tuple[float, str], int] = {}
         for q in exp["quotes"]:
-            (calls if q["type"] == "C" else puts)[float(q["strike"])] = float(q["last"])
+            (calls if q["type"] == "C" else puts)[float(q["strike"])] = _quote_price(q)
             vol[(float(q["strike"]), q["type"])] = int(q.get("volume", 0))
         out.append(ExpirySlice(exp["expiry_date"], float(exp["T_years"]), calls, puts, vol))
     return out
