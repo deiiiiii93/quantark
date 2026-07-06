@@ -282,3 +282,77 @@ def calibrate_leverage_surface(
         return calibrate_leverage_surface_fp(s0, params, lv_surface, step_dt, r_fwd, carry_fwd,
                                              eta=eta, config=fp_config)
     raise ValidationError("UNCONDITIONAL_MEAN is not a calibration method")
+
+
+def price_barrier_slv_mc(
+    s0, strike, is_call, params, leverage_surface, step_dt, r_fwd, carry_fwd, disc_factor,
+    barrier, is_up, is_out, rebate=0.0, pay_at_hit=False, continuous=True, eta=1.0,
+    observe_idx=None, num_paths=50_000, seed=42, return_stderr=False,
+):
+    """Single-barrier option under Heston-SLV via MC using a precomputed leverage surface.
+
+    Full-truncation log-Euler mirroring ``_simulate_slv`` (precomputed-leverage branch); the
+    per-step effective vol is L(S,t)*sqrt(v_+), recorded together with the path nodes so the
+    shared barrier core applies continuous (Brownian-bridge) or discrete monitoring.
+    """
+    from quantark.volmodels.barrier import (
+        BarrierSpec, bridge_survival, discrete_survival, disc_closure, mc_barrier_cashflows, validate_barrier,
+    )
+    from quantark.volmodels.slv.leverage import LeverageSurface
+    dt = np.asarray(step_dt, dtype=float); rf = np.asarray(r_fwd, dtype=float); cf = np.asarray(carry_fwd, dtype=float)
+    n = dt.size
+    if n < 1 or rf.size != n or cf.size != n:
+        raise ValidationError("step_dt, r_fwd, carry_fwd must be equal-length, length >= 1")
+    if not isinstance(leverage_surface, LeverageSurface):
+        raise ValidationError("price_barrier_slv_mc requires a precomputed LeverageSurface")
+    if s0 <= 0 or strike <= 0:
+        raise ValidationError("s0 and strike must be positive")
+    if num_paths <= 0:
+        raise ValidationError("num_paths must be positive")
+    spec = BarrierSpec(bool(is_up), bool(is_out), bool(is_call), float(barrier), float(strike),
+                       float(rebate), bool(pay_at_hit))
+    validate_barrier(spec, s0)
+    if not continuous and observe_idx is None:
+        raise ValidationError("discrete monitoring requires observe_idx")
+
+    kappa, theta, sigma = params.kappa, params.theta, params.sigma
+    rho = float(np.clip(params.rho, -0.999, 0.999))
+    rho_bar = np.sqrt(max(1.0 - rho * rho, 0.0))
+    sigma_eff = float(eta) * sigma
+    rng = np.random.default_rng(seed)
+
+    nodes = np.empty((num_paths, n + 1), dtype=float)
+    vols = np.empty((num_paths, n), dtype=float)
+    log_s = np.full(num_paths, np.log(max(float(s0), 1e-12)))
+    v = np.full(num_paths, max(params.v0, 0.0))
+    nodes[:, 0] = np.exp(log_s)
+    t = 0.0
+    for i in range(n):
+        h = dt[i]; sh = np.sqrt(h)
+        S = np.exp(log_s)
+        sigma_hat = np.asarray(leverage_surface.leverage(S, t), dtype=float)
+        vp = np.maximum(v, 0.0); svp = np.sqrt(vp)
+        eff = sigma_hat * svp                        # effective instantaneous vol on this step
+        vols[:, i] = eff
+        dW_v = sh * rng.standard_normal(num_paths)
+        dW_s = rho * dW_v + rho_bar * sh * rng.standard_normal(num_paths)
+        log_s = np.maximum(log_s + (rf[i] - cf[i] - 0.5 * eff * eff) * h + eff * dW_s, np.log(1e-12))
+        v = v + kappa * (theta - vp) * h + sigma_eff * svp * dW_v
+        nodes[:, i + 1] = np.exp(log_s)
+        t += h
+
+    disc, node_times = disc_closure(dt, rf)
+    T = float(node_times[-1])
+    if continuous:
+        w, first = bridge_survival(nodes, vols, dt, spec)
+        hit_cumT = node_times[np.minimum(first, n)]
+    else:
+        idx = np.asarray(observe_idx, dtype=int)
+        w, first = discrete_survival(nodes[:, idx], spec)
+        hit_cumT = node_times[idx[np.minimum(first, idx.size - 1)]]
+
+    pv = mc_barrier_cashflows(nodes[:, -1], w, hit_cumT, spec, disc, T)
+    price = float(np.mean(pv))
+    if return_stderr:
+        return price, (float(np.std(pv, ddof=1) / np.sqrt(num_paths)) if num_paths > 1 else 0.0)
+    return price
