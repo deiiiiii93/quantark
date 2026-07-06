@@ -1,0 +1,5 @@
+model,overall_rmse_iv_volpts,note
+Black-Scholes (flat ATM vol),8.7692,no smile — baseline
+Local Volatility (Dupire),1.1682,exact smile fit in theory; raw-data arbitrage limits it
+Heston (stochastic vol),1.9459,"5 params, arbitrage-free, robust"
+Heston-SLV (leverage),4.5189,smile-consistent dynamics; PDE bias on vanillas
