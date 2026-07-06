@@ -261,3 +261,72 @@ def price_european_heston_mc(
     if return_stderr:
         return price, (float(np.std(discounted, ddof=1) / np.sqrt(num_paths)) if num_paths > 1 else 0.0)
     return price
+
+
+def price_barrier_heston_mc(
+    s0, strike, is_call, params, step_dt, r_fwd, carry_fwd, disc_factor,
+    barrier, is_up, is_out, rebate=0.0, pay_at_hit=False, continuous=True,
+    observe_idx=None, num_paths=50_000, seed=42, return_stderr=False,
+):
+    """Single-barrier option under Heston via MC (log-Euler full-truncation path recorder).
+
+    Uses the positivity-preserving EULERLOG scheme and records nodes + per-step effective
+    vol sqrt(v_+) so the shared barrier core applies continuous (Brownian-bridge) or discrete
+    monitoring. The European limit (barrier far) matches ``price_european_heston_mc`` under the
+    same EULERLOG scheme. See ``quantark.volmodels.barrier`` for payoff/monitoring semantics.
+    """
+    from quantark.volmodels.barrier import (
+        BarrierSpec, bridge_survival, discrete_survival, disc_closure, mc_barrier_cashflows, validate_barrier,
+    )
+    dt = np.asarray(step_dt, dtype=float)
+    rf = np.asarray(r_fwd, dtype=float)
+    cf = np.asarray(carry_fwd, dtype=float)
+    n = dt.size
+    if n < 1 or rf.size != n or cf.size != n:
+        raise ValidationError("step_dt, r_fwd, carry_fwd must be equal-length, length >= 1")
+    if s0 <= 0 or strike <= 0:
+        raise ValidationError("s0 and strike must be positive")
+    if num_paths <= 0:
+        raise ValidationError("num_paths must be positive")
+    spec = BarrierSpec(bool(is_up), bool(is_out), bool(is_call), float(barrier), float(strike),
+                       float(rebate), bool(pay_at_hit))
+    validate_barrier(spec, s0)
+    if not continuous and observe_idx is None:
+        raise ValidationError("discrete monitoring requires observe_idx")
+
+    kappa, theta, sigma, rho, v0 = params.kappa, params.theta, params.sigma, params.rho, params.v0
+    rho_hat = np.sqrt(max(1.0 - rho * rho, 0.0))
+    sigma2 = sigma * sigma
+    rng = np.random.default_rng(seed)
+
+    nodes = np.empty((num_paths, n + 1), dtype=float)
+    vols = np.empty((num_paths, n), dtype=float)
+    log_s = np.full(num_paths, np.log(max(float(s0), 1e-12)))
+    v = np.full(num_paths, max(float(v0), 0.0))
+    nodes[:, 0] = np.exp(log_s)
+    for i in range(n):
+        h = dt[i]; sh = np.sqrt(h)
+        z1 = rng.standard_normal(num_paths) * sh
+        z2 = rng.standard_normal(num_paths) * sh
+        z_s = rho * z1 + rho_hat * z2
+        vp = np.maximum(v, 0.0); svp = np.sqrt(vp)
+        vols[:, i] = svp
+        log_s = log_s + (rf[i] - cf[i] - 0.5 * vp) * h + svp * z_s
+        v = v + kappa * (theta - vp) * h + sigma * svp * z1 + 0.25 * sigma2 * (z1 * z1 - h)
+        nodes[:, i + 1] = np.exp(log_s)
+
+    disc, node_times = disc_closure(dt, rf)
+    T = float(node_times[-1])
+    if continuous:
+        w, first = bridge_survival(nodes, vols, dt, spec)
+        hit_cumT = node_times[np.minimum(first, n)]
+    else:
+        idx = np.asarray(observe_idx, dtype=int)
+        w, first = discrete_survival(nodes[:, idx], spec)
+        hit_cumT = node_times[idx[np.minimum(first, idx.size - 1)]]
+
+    pv = mc_barrier_cashflows(nodes[:, -1], w, hit_cumT, spec, disc, T)
+    price = float(np.mean(pv))
+    if return_stderr:
+        return price, (float(np.std(pv, ddof=1) / np.sqrt(num_paths)) if num_paths > 1 else 0.0)
+    return price

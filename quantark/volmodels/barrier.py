@@ -33,6 +33,19 @@ class BarrierSpec:
     pay_at_hit: bool
 
 
+def disc_closure(step_dt: np.ndarray, r_fwd: np.ndarray):
+    """Return (disc, node_times): disc(t)->DF(0->t) under piecewise-constant per-step rates;
+    node_times holds the cumulative time at each grid node (length n_steps + 1)."""
+    node_times = np.concatenate([[0.0], np.cumsum(step_dt)])
+    cum_r = np.concatenate([[0.0], np.cumsum(np.asarray(r_fwd, float) * np.asarray(step_dt, float))])
+
+    def disc(t):
+        integ = np.interp(np.asarray(t, dtype=float), node_times, cum_r)
+        return np.exp(-integ)
+
+    return disc, node_times
+
+
 def validate_barrier(spec: BarrierSpec, s0: float) -> None:
     if not np.isfinite(spec.barrier) or spec.barrier <= 0:
         raise ValidationError("barrier must be positive and finite")
