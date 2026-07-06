@@ -87,3 +87,36 @@ def imply_forward_and_rate(sl: "ExpirySlice", s0: float) -> "ParityResult":
     r = float(-safe_log(df) / sl.T)
     q = float(r - safe_log(forward / s0) / sl.T)
     return ParityResult(r=r, forward=forward, discount_factor=float(df), q=q, n_pairs=len(pairs))
+
+
+@dataclass
+class OtmQuote:
+    """A single out-of-the-money quote surviving the liquidity filter."""
+
+    strike: float
+    kind: str  # "C" or "P"
+    price: float
+
+
+def select_otm(sl: "ExpirySlice", forward: float, min_volume: int = 1) -> List["OtmQuote"]:
+    """Keep only OTM options: puts below the forward, calls at/above it, liquid & sane.
+
+    The desk convention: only OTM options carry clean volatility information. Deep-ITM
+    quotes are dominated by intrinsic value and are typically stale/wide, so a small
+    pricing error there is a large IV error. We therefore take the put wing below the
+    forward and the call wing at/above it.
+    """
+    out: List[OtmQuote] = []
+    strikes = sorted(set(sl.calls) | set(sl.puts))
+    for k in strikes:
+        kind = "P" if k < forward else "C"
+        book = sl.puts if kind == "P" else sl.calls
+        if k not in book:
+            continue  # that side not quoted at this strike
+        if sl.volume.get((k, kind), 0) < min_volume:
+            continue  # illiquid / no trades
+        price = book[k]
+        if price <= 0.0:
+            continue  # non-positive quote
+        out.append(OtmQuote(strike=k, kind=kind, price=price))
+    return out
