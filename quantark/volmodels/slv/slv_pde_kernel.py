@@ -84,3 +84,56 @@ def price_delta_gamma_slv_pde(
     if not (np.isfinite(price) and np.isfinite(delta) and np.isfinite(gamma)):
         raise NumericalError("SLV PDE produced non-finite price/greeks")
     return price, delta, gamma
+
+
+def price_barrier_slv_pde(
+    s0, strike, is_call, T, params, lev_surface, r, carry, barrier, is_up, is_out,
+    rebate=0.0, pay_at_hit=False, continuous=True, observe_taus=None, eta=1.0,
+    n_x=200, n_v=100, n_t=100, scheme=ADIScheme.CRAIG_SNEYD, theta=0.5, rannacher=True,
+):
+    """Single-barrier option under Heston-SLV via 2D ADI with knock-out injection.
+
+    Identical barrier machinery to ``price_barrier_heston_pde`` but over the leverage-scaled
+    SLV ADI operators. Knock-in = Vanilla - KO(rebate=0) + rebate * NoTouch.
+    """
+    from quantark.volmodels.barrier import BarrierSpec, validate_barrier
+    spec = BarrierSpec(bool(is_up), bool(is_out), bool(is_call), float(barrier), float(strike),
+                       float(rebate), bool(pay_at_hit))
+    validate_barrier(spec, s0)
+
+    def _make_core():
+        return HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
+                                leverage=lev_surface, eta=eta)
+
+    core = _make_core()
+    ko_rows = (core.S_grid >= barrier) if is_up else (core.S_grid <= barrier)
+    obs = None if continuous else set(float(x) for x in (observe_taus or []))
+
+    def _ko_val(tau):
+        return float(rebate) if pay_at_hit else float(rebate) * float(np.exp(-r * tau))
+
+    def _hook_factory(zero_beyond):
+        def hook(U, tau):
+            if obs is not None and tau > 0.0 and not any(abs(tau - o) < 1e-9 for o in obs):
+                return U
+            U = np.array(U, dtype=float)
+            U[ko_rows, :] = 0.0 if zero_beyond else _ko_val(tau)
+            return U
+        return hook
+
+    if is_out:
+        U = core.solve(is_call, scheme, theta, rannacher, step_hook=_hook_factory(False))
+        return core.interpolate(U, float(np.log(s0)), params.v0)
+
+    van = price_european_slv_pde(s0, strike, is_call, T, params, lev_surface, r, carry, eta,
+                                 n_x, n_v, n_t, scheme=scheme, theta=theta, rannacher=rannacher)
+    core2 = _make_core()
+    U0 = core2.solve(is_call, scheme, theta, rannacher, step_hook=_hook_factory(False))
+    ki = van - core2.interpolate(U0, float(np.log(s0)), params.v0)
+    if rebate > 0.0:
+        core3 = _make_core()
+        ones = np.ones((core3.X_grid.size, core3.V_grid.size))
+        Un = core3.solve(is_call, scheme, theta, rannacher, step_hook=_hook_factory(True),
+                         terminal_override=ones)
+        ki += float(rebate) * core3.interpolate(Un, float(np.log(s0)), params.v0)
+    return ki
