@@ -266,7 +266,7 @@ def price_european_heston_mc(
 def price_barrier_heston_mc(
     s0, strike, is_call, params, step_dt, r_fwd, carry_fwd, disc_factor,
     barrier, is_up, is_out, rebate=0.0, pay_at_hit=False, continuous=True,
-    observe_idx=None, num_paths=50_000, seed=42, return_stderr=False,
+    observe_idx=None, participation=1.0, num_paths=50_000, seed=42, return_stderr=False,
 ):
     """Single-barrier option under Heston via MC (log-Euler full-truncation path recorder).
 
@@ -293,6 +293,8 @@ def price_barrier_heston_mc(
     validate_barrier(spec, s0)
     if not continuous and observe_idx is None:
         raise ValidationError("discrete monitoring requires observe_idx")
+    if continuous and pay_at_hit:
+        raise ValidationError("pay_at_hit=True is not supported with continuous bridge MC; use discrete monitoring or the PDE engine")
 
     kappa, theta, sigma, rho, v0 = params.kappa, params.theta, params.sigma, params.rho, params.v0
     rho_hat = np.sqrt(max(1.0 - rho * rho, 0.0))
@@ -325,7 +327,7 @@ def price_barrier_heston_mc(
         w, first = discrete_survival(nodes[:, idx], spec)
         hit_cumT = node_times[idx[np.minimum(first, idx.size - 1)]]
 
-    pv = mc_barrier_cashflows(nodes[:, -1], w, hit_cumT, spec, disc, T)
+    pv = mc_barrier_cashflows(nodes[:, -1], w, hit_cumT, spec, disc, T, participation=participation)
     price = float(np.mean(pv))
     if return_stderr:
         return price, (float(np.std(pv, ddof=1) / np.sqrt(num_paths)) if num_paths > 1 else 0.0)

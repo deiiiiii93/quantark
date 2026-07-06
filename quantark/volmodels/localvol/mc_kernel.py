@@ -144,6 +144,7 @@ def price_barrier_lv_mc(
     pay_at_hit: bool = False,
     continuous: bool = True,
     observe_idx: Optional[np.ndarray] = None,
+    participation: float = 1.0,
     num_paths: int = 50_000,
     seed: Optional[int] = 42,
     use_antithetic: bool = False,
@@ -174,6 +175,12 @@ def price_barrier_lv_mc(
     validate_barrier(spec, s0)
     if not continuous and observe_idx is None:
         raise ValidationError("discrete monitoring requires observe_idx")
+    if continuous and pay_at_hit:
+        raise ValidationError(
+            "pay_at_hit=True is not supported with continuous (Brownian-bridge) MC monitoring: "
+            "a bridge-only crossing has no sampled hit time. Use discrete monitoring for at-hit "
+            "rebates, or the continuous PDE engine (which prices the at-hit rebate exactly)."
+        )
 
     half = (num_paths + 1) // 2
     n_eff = 2 * half if use_antithetic else num_paths
@@ -208,7 +215,7 @@ def price_barrier_lv_mc(
         w, first = discrete_survival(nodes[:, idx], spec)
         hit_cumT = node_times[idx[np.minimum(first, idx.size - 1)]]
 
-    pv = mc_barrier_cashflows(nodes[:, -1], w, hit_cumT, spec, disc, T)
+    pv = mc_barrier_cashflows(nodes[:, -1], w, hit_cumT, spec, disc, T, participation=participation)
 
     if use_antithetic:
         pair = 0.5 * (pv[:half] + pv[half:2 * half])

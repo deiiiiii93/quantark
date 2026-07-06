@@ -52,9 +52,15 @@ def _check_barrier(engine_name: str, product) -> None:
 
 
 def _monitoring(product: BarrierOption, t_grid: np.ndarray):
-    """Return (continuous: bool, observe_idx: Optional[np.ndarray]) snapping discrete dates to grid."""
+    """Return (continuous: bool, observe_idx: Optional[np.ndarray]) snapping discrete dates to grid.
+
+    ObservationType.EXPIRY (barrier checked only at maturity) is discrete monitoring at the
+    single terminal node; CONTINUOUS uses the Brownian bridge; DISCRETE snaps observation_dates.
+    """
     if product.observation_type == ObservationType.CONTINUOUS:
         return True, None
+    if product.observation_type == ObservationType.EXPIRY:
+        return False, np.asarray([t_grid.size - 1], dtype=int)  # terminal node only
     dates = product.observation_dates or []
     if not dates:
         raise ValidationError("discrete monitoring requires observation_dates")
@@ -70,7 +76,8 @@ def _monitoring(product: BarrierOption, t_grid: np.ndarray):
 def _barrier_kwargs(product: BarrierOption, continuous, observe_idx):
     return dict(barrier=float(product.barrier), is_up=product.is_up_barrier, is_out=product.is_knock_out,
                 rebate=float(product.rebate), pay_at_hit=bool(product.pay_at_hit),
-                continuous=continuous, observe_idx=observe_idx)
+                continuous=continuous, observe_idx=observe_idx,
+                participation=float(product.participation_rate))
 
 
 class LocalVolBarrierMCEngine(BaseEngine):
@@ -101,7 +108,7 @@ class LocalVolBarrierMCEngine(BaseEngine):
                                    num_paths=int(self.params.num_paths), seed=self.params.seed,
                                    use_antithetic=bool(self.params.use_antithetic),
                                    **_barrier_kwargs(product, continuous, observe_idx))
-        return unit * float(product.participation_rate) * float(getattr(product, "contract_multiplier", 1.0))
+        return unit * float(getattr(product, "contract_multiplier", 1.0))
 
 
 class HestonBarrierMCEngine(BaseEngine):
@@ -127,7 +134,7 @@ class HestonBarrierMCEngine(BaseEngine):
                                        np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
                                        num_paths=int(self.params.num_paths), seed=self.params.seed,
                                        **_barrier_kwargs(product, continuous, observe_idx))
-        return unit * float(product.participation_rate) * float(getattr(product, "contract_multiplier", 1.0))
+        return unit * float(getattr(product, "contract_multiplier", 1.0))
 
 
 class HestonSLVBarrierMCEngine(BaseEngine):
@@ -159,4 +166,4 @@ class HestonSLVBarrierMCEngine(BaseEngine):
                                     float(env.get_discount_factor(T)), eta=self.eta,
                                     num_paths=int(self.params.num_paths), seed=self.params.seed,
                                     **_barrier_kwargs(product, continuous, observe_idx))
-        return unit * float(product.participation_rate) * float(getattr(product, "contract_multiplier", 1.0))
+        return unit * float(getattr(product, "contract_multiplier", 1.0))

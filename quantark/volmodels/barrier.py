@@ -61,7 +61,8 @@ def _vanilla(term: np.ndarray, spec: BarrierSpec) -> np.ndarray:
     return np.maximum(spec.strike - term, 0.0)
 
 
-def mc_barrier_cashflows(terminal_s, survival_w, hit_cumT, spec: BarrierSpec, disc, maturity):
+def mc_barrier_cashflows(terminal_s, survival_w, hit_cumT, spec: BarrierSpec, disc, maturity,
+                         participation: float = 1.0):
     """Per-path present value.
 
     Args:
@@ -72,11 +73,13 @@ def mc_barrier_cashflows(terminal_s, survival_w, hit_cumT, spec: BarrierSpec, di
         spec: BarrierSpec.
         disc: vectorized discount closure, disc(t) -> DF(0 -> t) for scalar or array t.
         maturity: option maturity T.
+        participation: scales ONLY the option payoff leg, never the rebate leg (matching the
+            existing BarrierOption/analytical-engine contract).
 
     Returns:
         per-path discounted cashflow (np.ndarray).
     """
-    payoff = _vanilla(np.asarray(terminal_s, dtype=float), spec)
+    payoff = float(participation) * _vanilla(np.asarray(terminal_s, dtype=float), spec)
     w = np.clip(np.asarray(survival_w, dtype=float), 0.0, 1.0)
     df_t = float(disc(maturity))
     reb_df = np.asarray(disc(hit_cumT), dtype=float) if spec.pay_at_hit else df_t

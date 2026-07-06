@@ -42,20 +42,36 @@ def _check(name, product):
 
 
 def _bkw(product):
+    """Barrier kwargs shared by both leg pricings (rebate passed separately via the closure)."""
     return dict(barrier=float(product.barrier), is_up=product.is_up_barrier, is_out=product.is_knock_out,
-                rebate=float(product.rebate), pay_at_hit=bool(product.pay_at_hit))
+                pay_at_hit=bool(product.pay_at_hit))
 
 
 def _obs_dates(product, T):
-    dates = product.observation_dates or []
+    """(continuous, dates): CONTINUOUS -> (True, None); EXPIRY -> (False, []) (terminal only);
+    DISCRETE -> (False, observation_dates)."""
     if product.observation_type == ObservationType.CONTINUOUS:
         return True, None
+    if product.observation_type == ObservationType.EXPIRY:
+        return False, []  # terminal-node knock-out only (handled by the terminal injection)
+    dates = product.observation_dates or []
     if not dates:
         raise ValidationError("discrete monitoring requires observation_dates")
     for d in dates:
         if d > T + 1e-12:
             raise ValidationError(f"observation date {d} exceeds maturity {T}")
     return False, list(dates)
+
+
+def _apply_participation(product, price_of_rebate):
+    """Apply participation to the OPTION leg only (never the rebate leg), by superposition:
+    V = V(full rebate) + (participation - 1) * V(rebate=0). Reduces to participation*V when
+    rebate == 0, and to V when participation == 1 -- one PDE solve in the common cases."""
+    p = float(product.participation_rate)
+    reb = float(product.rebate)
+    if p == 1.0 or reb == 0.0:
+        return p * price_of_rebate(reb)
+    return price_of_rebate(reb) + (p - 1.0) * price_of_rebate(0.0)
 
 
 class LocalVolBarrierPDESolver(BaseEngine):
@@ -81,12 +97,16 @@ class LocalVolBarrierPDESolver(BaseEngine):
                                         div_yield=env.get_div_yield)
         continuous, dates = _obs_dates(product, T)
         observe_steps = None if continuous else [int(np.argmin(np.abs(t_grid - d))) for d in dates]
-        unit = price_barrier_lv_pde(float(env.spot), float(product.strike),
-                                    product.option_type == OptionType.CALL, T, lv,
-                                    np.diff(t_grid), r_fwd, carry_fwd, continuous=continuous,
-                                    observe_steps=observe_steps, n_s=int(self.params.grid_size),
-                                    **_bkw(product))
-        return unit * float(product.participation_rate) * float(getattr(product, "contract_multiplier", 1.0))
+        is_call = product.option_type == OptionType.CALL
+
+        def price_of_rebate(reb):
+            return price_barrier_lv_pde(float(env.spot), float(product.strike), is_call, T, lv,
+                                        np.diff(t_grid), r_fwd, carry_fwd, rebate=reb,
+                                        continuous=continuous, observe_steps=observe_steps,
+                                        n_s=int(self.params.grid_size), **_bkw(product))
+
+        unit = _apply_participation(product, price_of_rebate)
+        return unit * float(getattr(product, "contract_multiplier", 1.0))
 
 
 class _Heston2DBarrierBase(BaseEngine):
@@ -114,13 +134,17 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
         _check("HestonBarrierPDESolver", product)
         T = float(product.get_maturity(env))
         continuous, observe_taus = self._observe_taus(product, T)
-        unit = price_barrier_heston_pde(float(env.spot), float(product.strike),
-                                        product.option_type == OptionType.CALL, T, self.model_params,
-                                        float(env.get_rate(T)), float(env.get_div_yield(T)),
-                                        continuous=continuous, observe_taus=observe_taus,
-                                        n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
-                                        **_bkw(product))
-        return unit * float(product.participation_rate) * float(getattr(product, "contract_multiplier", 1.0))
+        is_call = product.option_type == OptionType.CALL
+
+        def price_of_rebate(reb):
+            return price_barrier_heston_pde(float(env.spot), float(product.strike), is_call, T,
+                                            self.model_params, float(env.get_rate(T)), float(env.get_div_yield(T)),
+                                            rebate=reb, continuous=continuous, observe_taus=observe_taus,
+                                            n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
+                                            **_bkw(product))
+
+        unit = _apply_participation(product, price_of_rebate)
+        return unit * float(getattr(product, "contract_multiplier", 1.0))
 
 
 class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
@@ -141,10 +165,15 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
         _check("HestonSLVBarrierPDESolver", product)
         T = float(product.get_maturity(env))
         continuous, observe_taus = self._observe_taus(product, T)
-        unit = price_barrier_slv_pde(float(env.spot), float(product.strike),
-                                     product.option_type == OptionType.CALL, T, self.model_params,
-                                     self.leverage_surface, float(env.get_rate(T)), float(env.get_div_yield(T)),
-                                     eta=self.eta, continuous=continuous, observe_taus=observe_taus,
-                                     n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
-                                     **_bkw(product))
-        return unit * float(product.participation_rate) * float(getattr(product, "contract_multiplier", 1.0))
+        is_call = product.option_type == OptionType.CALL
+
+        def price_of_rebate(reb):
+            return price_barrier_slv_pde(float(env.spot), float(product.strike), is_call, T,
+                                         self.model_params, self.leverage_surface,
+                                         float(env.get_rate(T)), float(env.get_div_yield(T)),
+                                         eta=self.eta, rebate=reb, continuous=continuous, observe_taus=observe_taus,
+                                         n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
+                                         **_bkw(product))
+
+        unit = _apply_participation(product, price_of_rebate)
+        return unit * float(getattr(product, "contract_multiplier", 1.0))
