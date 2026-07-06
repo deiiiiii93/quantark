@@ -20,11 +20,17 @@ from .phoenix_pde_solver import PhoenixPDESolver
 from .local_vol_pde_solver import LocalVolPDESolver
 from .heston_pde_solver import HestonPDESolver
 from .heston_slv_pde_solver import HestonSLVPDESolver
+from .barrier_vol_pde_solvers import (
+    LocalVolBarrierPDESolver, HestonBarrierPDESolver, HestonSLVBarrierPDESolver,
+)
 
 __all__ = [
     "LocalVolPDESolver",
     "HestonPDESolver",
     "HestonSLVPDESolver",
+    "LocalVolBarrierPDESolver",
+    "HestonBarrierPDESolver",
+    "HestonSLVBarrierPDESolver",
     # Grid utilities
     'TimeGrid',
     'SpatialGrid',
