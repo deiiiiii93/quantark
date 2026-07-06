@@ -16,12 +16,18 @@ from .accumulator_mc_engine import AccumulatorMCEngine
 from .local_vol_mc_engine import LocalVolMCEngine
 from .heston_mc_engine import HestonMCEngine
 from .heston_slv_mc_engine import HestonSLVMCEngine
+from .barrier_vol_mc_engines import (
+    LocalVolBarrierMCEngine, HestonBarrierMCEngine, HestonSLVBarrierMCEngine,
+)
 from .sabr_mc_engine import SABRMCEngine
 
 __all__ = [
     "LocalVolMCEngine",
     "HestonMCEngine",
     "HestonSLVMCEngine",
+    "LocalVolBarrierMCEngine",
+    "HestonBarrierMCEngine",
+    "HestonSLVBarrierMCEngine",
     "SABRMCEngine",
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
