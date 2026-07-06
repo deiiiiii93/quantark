@@ -61,16 +61,19 @@ def main() -> None:
     # guess MUST sit strictly inside `bounds`, or calibrate_heston rejects it.
     atm = _atm_iv_shortest(pe)
     v_level = float(np.clip(atm ** 2, 0.01, 0.2))
-    initial = HestonParams(v0=v_level, kappa=3.0, theta=v_level, sigma=1.0, rho=-0.4)
-    # kappa is capped at a realistic 10: the smile only weakly identifies kappa vs sigma
-    # (raising the cap chases marginal RMSE into implausible mean-reversion), so we
-    # regularize rather than overfit. target="iv" weights each strike's smile evenly,
-    # which avoids the price-weighted degeneracy that pinned theta at its bound.
-    bounds = ((1e-6, 1e-3, 1e-4, 1e-3, -0.95), (0.5, 10.0, 0.5, 3.0, 0.0))
+    initial = HestonParams(v0=v_level, kappa=2.0, theta=v_level, sigma=0.6, rho=-0.5)
+    # We deliberately cap vol-of-vol (sigma <= 0.7, kappa <= 3) and add a Feller penalty
+    # (regularize_feller). An unconstrained fit drives sigma huge to chase the short-dated
+    # smile, which (a) is a weakly-identified overfit and (b) leaves the variance process
+    # deeply Feller-violated (v hits 0), which the downstream ADI PDE prices with a
+    # systematic bias. Keeping Feller ~ 1 costs ~0.8 vol-pt of smile fit but makes BOTH the
+    # calibration and the Heston/SLV PDE trustworthy. target="iv" weights each strike evenly.
+    bounds = ((1e-6, 1e-3, 1e-4, 1e-3, -0.95), (0.5, 3.0, 0.5, 0.7, 0.0))
     # ----------------------------------------------------------------------------------
 
     result = calibrate_heston(s0=s0, options=options, r=r_of, carry=q_of,
-                              initial=initial, bounds=bounds, target="iv", method="lewis")
+                              initial=initial, bounds=bounds, target="iv", method="lewis",
+                              regularize_feller=0.05)
     hp = result.params
     feller = 2.0 * hp.kappa * hp.theta / (hp.sigma ** 2)
     print(f"start ATM={atm*100:.1f}%  ->  v0={hp.v0:.4f} kappa={hp.kappa:.3f} theta={hp.theta:.4f} "
