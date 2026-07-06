@@ -59,6 +59,10 @@ def main() -> None:
     fetched = surface.get("fetched_at", "n/a")
     bsflat = bs_flat_baseline(pe)
 
+    # Optional barrier-exotic artifact (stage 07); the section is omitted if absent.
+    barrier_path = HERE / f"data/mo_barrier_{t}.json"
+    barrier = json.loads(barrier_path.read_text()) if barrier_path.exists() else None
+
     rmse_rows = [
         ("Black-Scholes (flat ATM vol)", bsflat, "no smile — baseline"),
         ("Local Volatility (Dupire)", lv["overall_rmse_iv"], "exact smile fit in theory; raw-data arbitrage limits it"),
@@ -97,6 +101,44 @@ def main() -> None:
     )
 
     feller_ok = he["feller"] >= 1.0
+
+    # ---- Barrier exotic section (only if stage 07 ran) ----
+    barrier_section = ""
+    barrier_toc = ""
+    if barrier is not None:
+        sp = barrier["spec"]
+        order = ["BSM (flat ATM)", "Local Vol", "Heston", "SLV"]
+        rows_b = "".join(
+            f"<tr><td>{name}</td><td class='num'>{barrier['models'][name].get('mc', float('nan')):.3f}</td>"
+            f"<td class='num'>{barrier['models'][name].get('pde', float('nan')):.3f}</td></tr>"
+            for name in order if name in barrier["models"]
+        )
+        mc_lv = barrier["models"]["Local Vol"]["mc"]
+        mc_he = barrier["models"]["Heston"]["mc"]
+        spread = (mc_he - mc_lv) / mc_lv * 100 if mc_lv else float("nan")
+        barrier_toc = ('<li><a href="#s5">Exotics: where models diverge</a> — an up-and-out call, '
+                       'priced MC &amp; PDE under all four models</li>')
+        barrier_section = f"""
+<h2 id="s5">5 &nbsp; Exotics: where the models diverge</h2>
+<p>Every model so far was tuned to the <em>same</em> vanilla smile, and on vanillas they largely
+agree. A <b>barrier option</b> breaks that tie: its payoff depends on the <em>path</em>, hence on the
+<b>forward-volatility dynamics</b> — how volatility evolves after the spot moves — which the terminal
+smile alone does not pin down. We price a <b>reverse up-and-out call</b> (strike {sp['strike']:.0f},
+barrier {sp['barrier']:.0f} &asymp; 110% spot, {sp['monitoring']} / weekly discrete monitoring,
+T&nbsp;=&nbsp;{sp['T']:.2f}) under all four models, each by <b>two independent methods</b> — Monte
+Carlo and PDE — using the new <code>quantark</code> barrier engines.</p>
+<table><thead><tr><th>model</th><th>MC price</th><th>PDE price</th></tr></thead>
+<tbody>{rows_b}</tbody></table>
+{fig(HERE / f"data/plots/07_barrier_{t}.png", "Up-and-out call price by model (MC vs PDE). Same vanilla smile, different barrier prices.")}
+<div class="callout key"><b>The payoff of the whole course.</b> Local vol prices the up-and-out close to
+flat Black-Scholes, but the <b>stochastic-vol models price it about {spread:+.0f}% differently</b> — a
+first-order economic gap produced entirely by dynamics the vanilla smile cannot see. This is why the
+model you calibrate is only half the decision: for a path-dependent exotic you must also choose the
+<em>dynamics</em>. MC and PDE agree tightly for the 1-D cases (BSM) and to within demo grid resolution
+for the 2-D ADI (Heston/SLV) — two independent numerical methods cross-checking one price. This is the
+concrete reason SLV exists: it keeps the exact market smile <em>and</em> a realistic, tunable
+forward-vol process for exactly these products.</div>
+"""
     # Loud banner if this render is the synthetic test fixture, never the real deliverable.
     fixture_banner = "" if t == "latest" else (
         '<div style="background:#b5432f;color:#fff;padding:.7rem 1rem;border-radius:8px;'
@@ -166,8 +208,9 @@ snapshot {fetched} &middot; data via AKShare (Sina) &middot; models from <code>q
 <li><a href="#s2">Dupire Local Volatility</a> — the forward equation and butterfly arbitrage</li>
 <li><a href="#s3">Heston Stochastic Volatility</a> — CIR variance, the Feller condition, identification</li>
 <li><a href="#s4">Heston-SLV</a> — the leverage function and which model for which product</li>
-<li><a href="#s5">Model comparison &amp; takeaways</a></li>
-<li><a href="#s6">Reproducing this study</a></li>
+{barrier_toc}
+<li><a href="#s6">Model comparison &amp; takeaways</a></li>
+<li><a href="#s7">Reproducing this study</a></li>
 </ol></div>
 
 <h2 id="s1">1 &nbsp; Market data and the implied-vol surface</h2>
@@ -267,7 +310,8 @@ not vanilla repricing</b> — Heston already handles vanillas, exactly and cheap
 <b>exotics</b> (barriers, autocallables, forward-starting and cliquet structures) where <em>both</em> the market
 smile <em>and</em> realistic forward-vol dynamics matter. The leverage surface above is the reusable deliverable.</div>
 
-<h2 id="s5">5 &nbsp; Model comparison and takeaways</h2>
+{barrier_section}
+<h2 id="s6">6 &nbsp; Model comparison and takeaways</h2>
 <table><thead><tr><th>model</th><th>overall IV RMSE (vol-pts)</th><th>note</th></tr></thead>
 <tbody>{rmse_table}</tbody></table>
 <h3>Per-expiry IV RMSE (vol-points)</h3>
@@ -282,7 +326,7 @@ simultaneously smile-consistent and stochastic — the right tool once you leave
 The recurring theme: <em>market data is not arbitrage-free, parameters are not fully identified, and the
 calibration objective must respect the numerics that will consume its output.</em></div>
 
-<h2 id="s6">6 &nbsp; Reproducing this study</h2>
+<h2 id="s7">7 &nbsp; Reproducing this study</h2>
 <p>Two interpreters are involved: AKShare (data) and quantark (models) do not share one environment.</p>
 <div class="eq"><span class="c"># stage 01 fetches live data — AKShare interpreter</span>
 /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_snapshot.py

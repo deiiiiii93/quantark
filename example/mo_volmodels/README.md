@@ -49,8 +49,15 @@ fixture) so the test pipeline and the live pipeline never clobber each other's f
 | `03_dupire_localvol.py`   | Dupire σ_LV(K,T); reprice via local-vol PDE; RMSE + surface plot |
 | `04_heston_calibration.py`| calibrate (v0,κ,θ,σ,ρ); Feller check; smile-fit plot + RMSE |
 | `05_slv_calibration.py`   | Fokker-Planck leverage surface L(S,t); reprice via SLV PDE + plot |
+| `07_barrier_exotic.py`    | up-and-out call priced **MC and PDE** under BSM/LV/Heston/SLV → model-divergence table + bar chart |
 | `06_lecture.py`           | weave everything into the HTML lecture + comparison CSV |
-| `_mo_common.py`           | shared helpers (snapshot IO, parity, OTM filter, IV inversion, env build, plots) |
+| `_mo_common.py`           | shared helpers (snapshot IO, parity, OTM filter, IV inversion, env build, leverage, plots) |
+
+Stage 07 exercises the standalone barrier engines added to `quantark`
+(`quantark/volmodels/barrier.py` + the `*BarrierMCEngine` / `*BarrierPDESolver` classes under
+`quantark/asset/equity/engine/`), which price a single-barrier option under Local Vol, Heston,
+and SLV by both Monte Carlo and 2-D ADI PDE. Run it after stage 05:
+`.venv/bin/python example/mo_volmodels/07_barrier_exotic.py --tag latest --vol-floor 0.05`.
 
 ## What the real data teaches
 

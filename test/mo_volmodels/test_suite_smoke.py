@@ -10,6 +10,7 @@ STAGES = [
     ("03_dupire_localvol.py", ["--tag", "sample"]),
     ("04_heston_calibration.py", ["--tag", "sample"]),
     ("05_slv_calibration.py", ["--tag", "sample"]),
+    ("07_barrier_exotic.py", ["--tag", "sample"]),
     ("06_lecture.py", ["--tag", "sample"]),
 ]
 
