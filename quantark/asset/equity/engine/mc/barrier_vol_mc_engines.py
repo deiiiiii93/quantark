@@ -30,11 +30,25 @@ from quantark.volmodels.slv.leverage import LeverageSurface
 from quantark.volmodels.slv.slv_mc_kernel import price_barrier_slv_mc
 
 
+def _reject_nonuniform_schedule(product) -> None:
+    """A discrete-dates product carries a uniform ObservationSchedule (built via from_legacy);
+    that is fine. Only a schedule with per-observation VARYING barriers/payoffs is out of scope."""
+    sched = product.observation_schedule
+    recs = getattr(sched, "records", None) if sched is not None else None
+    if not recs:
+        return
+    # A legacy (uniform) schedule repeats one barrier level and no per-date payoff -> fine.
+    # Reject only if the barrier VARIES across observations or a per-date payoff is set.
+    barriers = {(r.barrier, r.upper_barrier, r.lower_barrier) for r in recs}
+    payoffs = {r.payoff for r in recs}
+    if len(barriers) > 1 or len(payoffs) > 1:
+        raise ValidationError("per-observation ObservationSchedule (varying barriers/payoffs) is out of scope for v1")
+
+
 def _check_barrier(engine_name: str, product) -> None:
     if not isinstance(product, BarrierOption):
         raise PricingError(f"{engine_name} supports BarrierOption only")
-    if product.observation_schedule is not None:
-        raise ValidationError("observation_schedule (per-date barriers) is out of scope for v1")
+    _reject_nonuniform_schedule(product)
 
 
 def _monitoring(product: BarrierOption, t_grid: np.ndarray):

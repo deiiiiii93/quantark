@@ -107,14 +107,17 @@ def price_barrier_slv_pde(
 
     core = _make_core()
     ko_rows = (core.S_grid >= barrier) if is_up else (core.S_grid <= barrier)
-    obs = None if continuous else set(float(x) for x in (observe_taus or []))
+    # Snap discrete observations to the ADI step grid (dt = T/n_t); exact-tau matching never
+    # fires because the solve advances tau by whole dt.
+    dt_grid = float(T) / float(n_t)
+    obs_ks = None if continuous else set(int(round(float(o) / dt_grid)) for o in (observe_taus or []))
 
     def _ko_val(tau):
         return float(rebate) if pay_at_hit else float(rebate) * float(np.exp(-r * tau))
 
     def _hook_factory(zero_beyond):
         def hook(U, tau):
-            if obs is not None and tau > 0.0 and not any(abs(tau - o) < 1e-9 for o in obs):
+            if obs_ks is not None and tau > 0.0 and int(round(tau / dt_grid)) not in obs_ks:
                 return U
             U = np.array(U, dtype=float)
             U[ko_rows, :] = 0.0 if zero_beyond else _ko_val(tau)

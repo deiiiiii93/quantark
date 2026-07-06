@@ -33,8 +33,12 @@ from quantark.volmodels.slv.slv_pde_kernel import price_barrier_slv_pde
 def _check(name, product):
     if not isinstance(product, BarrierOption):
         raise PricingError(f"{name} supports BarrierOption only")
-    if product.observation_schedule is not None:
-        raise ValidationError("observation_schedule (per-date barriers) is out of scope for v1")
+    sched = product.observation_schedule
+    recs = getattr(sched, "records", None) if sched is not None else None
+    if recs:
+        barriers = {(r.barrier, r.upper_barrier, r.lower_barrier) for r in recs}
+        if len(barriers) > 1 or len({r.payoff for r in recs}) > 1:
+            raise ValidationError("per-observation ObservationSchedule (varying barriers/payoffs) is out of scope for v1")
 
 
 def _bkw(product):

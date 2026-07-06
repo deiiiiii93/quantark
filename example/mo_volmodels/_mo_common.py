@@ -183,6 +183,18 @@ def build_env(surface_json: dict):
     return env, surf, s0
 
 
+def calibrate_leverage_for(env, hp, lv, t_max, n_steps=40, n_x=161, n_z=81):
+    """Calibrate an SLV leverage surface up to t_max (forward Fokker-Planck), as in stage 05."""
+    from quantark.volmodels.slv import calibrate_leverage_surface, FpCalibrationConfig
+    from quantark.volmodels.curves import forward_carry_on_grid
+    s0 = float(env.spot)
+    t_grid = np.linspace(0.0, float(t_max), n_steps + 1)
+    r_fwd = np.array([env.rate_curve.get_forward_rate(t_grid[i], t_grid[i + 1]) for i in range(n_steps)])
+    carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
+    return calibrate_leverage_surface(s0, hp, lv, np.diff(t_grid), r_fwd, carry_fwd,
+                                      eta=1.0, fp_config=FpCalibrationConfig(n_x=n_x, n_z=n_z))
+
+
 def plot_smiles(rows, path, title="MO implied-vol smiles"):
     """rows = list of (label, strikes, ivs). Saves a PNG; returns the path."""
     import matplotlib
