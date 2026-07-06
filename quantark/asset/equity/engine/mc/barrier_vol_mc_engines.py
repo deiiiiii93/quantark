@@ -80,7 +80,19 @@ def _barrier_kwargs(product: BarrierOption, continuous, observe_idx):
                 participation=float(product.participation_rate))
 
 
-class LocalVolBarrierMCEngine(BaseEngine):
+class _StdErrMixin:
+    """Records the MC standard error of the last pricing run.
+
+    Mirrors ``BarrierOptionMCEngine.get_last_std_error`` (house style): ``price`` returns the
+    point estimate and stores the standard error on ``self._last_std_error`` for callers that
+    want to quantify Monte-Carlo noise (e.g. an MC-vs-PDE cross-check gate).
+    """
+
+    def get_last_std_error(self):
+        return getattr(self, "_last_std_error", None)
+
+
+class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
     """Barrier MC under a Dupire local-volatility surface."""
 
     engine_type = EngineType.MONTE_CARLO
@@ -102,16 +114,18 @@ class LocalVolBarrierMCEngine(BaseEngine):
             lv = build_dupire_local_vol(env.vol_surface, spot=env.spot, rate_curve=env.rate_curve,
                                         div_yield=env.get_div_yield)
         continuous, observe_idx = _monitoring(product, t_grid)
-        unit = price_barrier_lv_mc(float(env.spot), float(product.strike),
-                                   product.option_type == OptionType.CALL, lv,
-                                   np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
-                                   num_paths=int(self.params.num_paths), seed=self.params.seed,
-                                   use_antithetic=bool(self.params.use_antithetic),
-                                   **_barrier_kwargs(product, continuous, observe_idx))
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        unit, se = price_barrier_lv_mc(float(env.spot), float(product.strike),
+                                       product.option_type == OptionType.CALL, lv,
+                                       np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
+                                       num_paths=int(self.params.num_paths), seed=self.params.seed,
+                                       use_antithetic=bool(self.params.use_antithetic), return_stderr=True,
+                                       **_barrier_kwargs(product, continuous, observe_idx))
+        mult = float(getattr(product, "contract_multiplier", 1.0))
+        self._last_std_error = float(se) * mult
+        return unit * mult
 
 
-class HestonBarrierMCEngine(BaseEngine):
+class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
     """Barrier MC under the Heston stochastic-volatility model."""
 
     engine_type = EngineType.MONTE_CARLO
@@ -129,15 +143,18 @@ class HestonBarrierMCEngine(BaseEngine):
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
         continuous, observe_idx = _monitoring(product, t_grid)
-        unit = price_barrier_heston_mc(float(env.spot), float(product.strike),
-                                       product.option_type == OptionType.CALL, self.model_params,
-                                       np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
-                                       num_paths=int(self.params.num_paths), seed=self.params.seed,
-                                       **_barrier_kwargs(product, continuous, observe_idx))
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        unit, se = price_barrier_heston_mc(float(env.spot), float(product.strike),
+                                           product.option_type == OptionType.CALL, self.model_params,
+                                           np.diff(t_grid), r_fwd, carry_fwd, float(env.get_discount_factor(T)),
+                                           num_paths=int(self.params.num_paths), seed=self.params.seed,
+                                           return_stderr=True,
+                                           **_barrier_kwargs(product, continuous, observe_idx))
+        mult = float(getattr(product, "contract_multiplier", 1.0))
+        self._last_std_error = float(se) * mult
+        return unit * mult
 
 
-class HestonSLVBarrierMCEngine(BaseEngine):
+class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
     """Barrier MC under Heston-SLV using a precomputed leverage surface."""
 
     engine_type = EngineType.MONTE_CARLO
@@ -160,10 +177,13 @@ class HestonSLVBarrierMCEngine(BaseEngine):
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
         carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
         continuous, observe_idx = _monitoring(product, t_grid)
-        unit = price_barrier_slv_mc(float(env.spot), float(product.strike),
-                                    product.option_type == OptionType.CALL, self.model_params,
-                                    self.leverage_surface, np.diff(t_grid), r_fwd, carry_fwd,
-                                    float(env.get_discount_factor(T)), eta=self.eta,
-                                    num_paths=int(self.params.num_paths), seed=self.params.seed,
-                                    **_barrier_kwargs(product, continuous, observe_idx))
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        unit, se = price_barrier_slv_mc(float(env.spot), float(product.strike),
+                                        product.option_type == OptionType.CALL, self.model_params,
+                                        self.leverage_surface, np.diff(t_grid), r_fwd, carry_fwd,
+                                        float(env.get_discount_factor(T)), eta=self.eta,
+                                        num_paths=int(self.params.num_paths), seed=self.params.seed,
+                                        return_stderr=True,
+                                        **_barrier_kwargs(product, continuous, observe_idx))
+        mult = float(getattr(product, "contract_multiplier", 1.0))
+        self._last_std_error = float(se) * mult
+        return unit * mult

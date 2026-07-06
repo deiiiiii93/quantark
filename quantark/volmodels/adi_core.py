@@ -47,7 +47,8 @@ class HestonSLVADICore:
     def __init__(self, s0, strike, T, r, carry, params: HestonParams,
                  n_x, n_v, n_t, *, leverage=None, eta=1.0,
                  use_sparse=False, grid_spot=None, v0_boundary="neumann",
-                 grid_style="uniform"):
+                 grid_style="uniform", barrier=0.0, barrier_is_up=True,
+                 rebate=0.0, pay_at_hit=False, barrier_concentrate=0.0):
         self.S0, self.K, self.T, self.r, self.q = s0, strike, T, r, carry
         self.kappa, self.theta, self.sigma, self.rho, self.v0 = (
             params.kappa, params.theta, params.sigma, params.rho, params.v0,
@@ -77,6 +78,21 @@ class HestonSLVADICore:
         self.x_min, self.x_max = x_center - x_width, x_center + x_width
         self.V_max = max(5.0 * self.theta, 0.5, 2.0 * self.v0)
 
+        # Continuous knock-out barrier (opt-in; barrier==0 leaves grid + boundaries untouched, so
+        # European and discrete-injection pricing are byte-identical). Truncate the log-spot domain
+        # AT the barrier and impose a Dirichlet KO value on that boundary throughout the solve --
+        # exact continuous monitoring, no region-zeroing pollution (the 1-D LV kernel's approach).
+        self._barrier_active = bool(barrier and barrier > 0.0)
+        self._barrier_is_up = bool(barrier_is_up)
+        self._barrier_rebate = float(rebate)
+        self._barrier_pay_at_hit = bool(pay_at_hit)
+        if self._barrier_active:
+            x_b = float(np.log(barrier))
+            if self._barrier_is_up:
+                self.x_max = x_b
+            else:
+                self.x_min = x_b
+
         if self._uniform:
             self.X_grid = np.linspace(self.x_min, self.x_max, n_x)
             self.V_grid = np.linspace(0.0, self.V_max, n_v)
@@ -88,10 +104,20 @@ class HestonSLVADICore:
             from quantark.volmodels.slv.fokkerplanck.coordinates import (
                 concentrated_grid, z_extents,
             )
-            xk = float(np.log(max(self.K, 1e-12)))
+            # Concentration center: the barrier (discrete KO — the value discontinuity that
+            # limits accuracy) when barrier_concentrate is set, else ln K (the payoff kink).
+            if barrier_concentrate and barrier_concentrate > 0.0:
+                xk = float(np.log(barrier_concentrate))
+                conc = max(0.06 * x_width, 1e-6)   # tight cluster around the barrier
+            else:
+                xk = float(np.log(max(self.K, 1e-12)))
+                conc = max(0.25 * x_width, 1e-6)
             xk = min(max(xk, self.x_min), self.x_max)
-            self.X_grid = concentrated_grid(self.x_min, self.x_max, xk, n_x,
-                                            concentration=max(0.25 * x_width, 1e-6))
+            self.X_grid = concentrated_grid(self.x_min, self.x_max, xk, n_x, concentration=conc)
+            if barrier_concentrate and barrier_concentrate > 0.0:
+                # pin the nearest node EXACTLY onto the barrier so the KO injection has no snap error
+                jb = int(np.argmin(np.abs(self.X_grid - xk)))
+                self.X_grid[jb] = xk
             if self.sig_eff > 0.0:
                 t_probe = np.array([0.25 * T, 0.5 * T, T])
                 try:
@@ -192,6 +218,10 @@ class HestonSLVADICore:
         out[1:-1, 1:-1] = self.rho * self.sig_eff * Lv * U_xv
         return out
 
+    def _ko_bnd(self, tau):
+        """Dirichlet knock-out value at the truncated barrier boundary (rebate now vs discounted)."""
+        return self._barrier_rebate if self._barrier_pay_at_hit else self._barrier_rebate * float(np.exp(-self.r * tau))
+
     def _bc(self, U, tau):
         if self._opt_is_call:
             U[0, :] = 0.0
@@ -199,6 +229,11 @@ class HestonSLVADICore:
         else:
             U[0, :] = self.K * np.exp(-self.r * tau)
             U[-1, :] = 0.0
+        if self._barrier_active:  # override the barrier-side x-boundary with the KO Dirichlet value
+            if self._barrier_is_up:
+                U[-1, :] = self._ko_bnd(tau)
+            else:
+                U[0, :] = self._ko_bnd(tau)
         if not self._degenerate_v0:
             U[:, 0] = U[:, 1]
         U[:, -1] = U[:, -2]
@@ -217,6 +252,11 @@ class HestonSLVADICore:
         else:
             rhs[0] = self.K * np.exp(-self.r * tau)
             rhs[-1] = 0.0
+        if self._barrier_active:
+            if self._barrier_is_up:
+                rhs[-1] = self._ko_bnd(tau)
+            else:
+                rhs[0] = self._ko_bnd(tau)
         return rhs
 
     # ---- tridiagonal builders (cached where the operator is time-independent) ----
@@ -335,6 +375,11 @@ class HestonSLVADICore:
         else:
             rhs[0, :] = self.K * np.exp(-self.r * tau)
             rhs[-1, :] = 0.0
+        if self._barrier_active:
+            if self._barrier_is_up:
+                rhs[-1, :] = self._ko_bnd(tau)
+            else:
+                rhs[0, :] = self._ko_bnd(tau)
         Y = solve_tridiag_batch(a, b, c, rhs.T).T                   # one system per V-slice
         self._bc(Y, tau)
         return Y

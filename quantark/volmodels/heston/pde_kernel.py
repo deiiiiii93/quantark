@@ -129,58 +129,132 @@ def _deterministic_pde_price(s0, strike, is_call, T, params, r, carry) -> float:
     return (bs_call_price if is_call else bs_put_price)(s0, strike, T, v_eff, r, carry)
 
 
+def _deterministic_barrier_price(s0, strike, is_call, T, params, r, carry, barrier, is_up, is_out,
+                                 rebate, pay_at_hit, continuous, observe_taus, n_x, n_t):
+    """BSM-limit (sigma -> 0) barrier price via the 1-D local-vol kernel at constant vol."""
+    from quantark.volmodels.localvol.surface import LocalVolSurface
+    from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde
+    v_eff = _deterministic_vol(T, params)
+    ks = s0 * np.exp(np.linspace(-2.5, 2.5, 7))
+    lv = LocalVolSurface(strike_grid=ks, time_grid=np.array([0.0, max(T, 1e-8)]),
+                         lv_grid=np.full((2, ks.size), v_eff))
+    n = max(int(n_t), 100)
+    dt = np.full(n, T / n); rf = np.full(n, float(r)); cf = np.full(n, float(carry))
+    if continuous:
+        obs_steps = None
+    else:
+        t_grid = np.linspace(0.0, T, n + 1)
+        obs_steps = [int(np.argmin(np.abs(t_grid - (T - float(o))))) for o in (observe_taus or [])]
+    return price_barrier_lv_pde(s0, strike, is_call, T, lv, dt, rf, cf, barrier=float(barrier),
+                                is_up=bool(is_up), is_out=bool(is_out), rebate=float(rebate),
+                                pay_at_hit=bool(pay_at_hit), continuous=continuous,
+                                observe_steps=obs_steps, n_s=max(int(n_x), 400))
+
+
+def _observation_step_set(observe_taus, dt_grid, n_t):
+    return {
+        min(max(int(round(float(tau) / dt_grid)), 0), int(n_t))
+        for tau in (observe_taus or [])
+    }
+
+
+def _is_observation_tau(tau, dt_grid, obs_ks):
+    if obs_ks is None:
+        return True
+    k_float = float(tau) / dt_grid
+    k = int(round(k_float))
+    # Rannacher startup evaluates the hook at half steps. Do not let e.g.
+    # tau=0.5*dt round into the terminal observation bucket.
+    if abs(k_float - k) > 1e-8:
+        return False
+    return k in obs_ks
+
+
 def price_barrier_heston_pde(
     s0, strike, is_call, T, params, r, carry, barrier, is_up, is_out,
     rebate=0.0, pay_at_hit=False, continuous=True, observe_taus=None,
     n_x=200, n_v=100, n_t=100, scheme=ADIScheme.CRAIG_SNEYD, theta=0.5, rannacher=True,
 ):
-    """Single-barrier option under Heston via 2D ADI with knock-out injection.
+    """Single-barrier option under Heston via 2D ADI.
 
-    Reuses the validated ADI operators; a step_hook overrides the value surface beyond the
-    barrier (all v) with the KO rebate value after each step (continuous) or at the nearest
-    observation nodes (discrete). Knock-in = Vanilla - KO(rebate=0) + rebate * NoTouch.
+    Continuous monitoring truncates the log-spot domain AT the barrier and imposes a Dirichlet
+    knock-out value on that boundary (exact continuous monitoring, matching the 1-D LV kernel).
+    Discrete monitoring keeps the full domain and injects the KO condition at the observation
+    steps via a step_hook. Knock-in = Vanilla - KO(rebate=0) + rebate * NoTouch.
     """
     from quantark.volmodels.barrier import BarrierSpec, validate_barrier
     spec = BarrierSpec(bool(is_up), bool(is_out), bool(is_call), float(barrier), float(strike),
                        float(rebate), bool(pay_at_hit))
     validate_barrier(spec, s0)
 
-    def _make_core():
-        return HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
-                                leverage=None, eta=1.0)
+    if params.sigma < _SIGMA_MIN:
+        # Deterministic-variance limit: the ADI grid is ill-conditioned, so price the barrier via
+        # the exact 1-D local-vol kernel at the BSM-equivalent constant vol (mirrors the European
+        # kernel's _deterministic bypass). Truncation (continuous) / injection (discrete) live there.
+        return _deterministic_barrier_price(s0, strike, is_call, T, params, r, carry, barrier, is_up,
+                                            is_out, rebate, pay_at_hit, continuous, observe_taus, n_x, n_t)
 
-    core = _make_core()
-    ko_rows = (core.S_grid >= barrier) if is_up else (core.S_grid <= barrier)
-    # Snap discrete observations to the ADI step grid (dt = T/n_t) so the KO is injected at the
-    # nearest step; exact-tau matching never fires because the solve advances tau by whole dt.
+    x0, v0 = float(np.log(s0)), params.v0
     dt_grid = float(T) / float(n_t)
-    obs_ks = None if continuous else set(int(round(float(o) / dt_grid)) for o in (observe_taus or []))
+    obs_ks = None if continuous else _observation_step_set(observe_taus, dt_grid, n_t)
 
-    def _ko_val(tau):
-        return float(rebate) if pay_at_hit else float(rebate) * float(np.exp(-r * tau))
+    def _ko_leg(reb):
+        """Knock-OUT leg with rebate ``reb``. Continuous -> domain truncation + Dirichlet KO
+        boundary (exact); discrete -> full domain with KO injected at the observation steps."""
+        if continuous:
+            core = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t, leverage=None,
+                                    eta=1.0, barrier=float(barrier), barrier_is_up=bool(is_up),
+                                    rebate=float(reb), pay_at_hit=bool(pay_at_hit))
+            U = core.solve(is_call, scheme, theta, rannacher)
+            return core.interpolate(U, x0, v0)
+        # Discrete: full domain (the value lives above the barrier between fixings) with the grid
+        # CONCENTRATED on the barrier and a node pinned there, so the KO injection is well-resolved.
+        core = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t, leverage=None, eta=1.0,
+                                grid_style="concentrated", barrier_concentrate=float(barrier))
+        tol = 1e-9 * float(barrier)
+        # Discrete monitoring has a jump discontinuity at the barrier. The grid is pinned at the
+        # barrier for resolution, but forcing that pinned node to the KO value makes the following
+        # backward interval behave like a continuous absorbing boundary on coarse grids. Since
+        # S == barrier has zero probability under the diffusion, keep the pinned node as the
+        # surviving-side left/right limit and zero only nodes strictly beyond the barrier.
+        ko_rows = (core.S_grid > barrier + tol) if is_up else (core.S_grid < barrier - tol)
 
-    def _hook_factory(zero_beyond):
         def hook(U, tau):
-            if obs_ks is not None and tau > 0.0 and int(round(tau / dt_grid)) not in obs_ks:
+            # Inject KO only at observation steps; the terminal step (tau=0) is an observation
+            # ONLY if maturity is in the schedule (0 in obs_ks), else an unmonitored tail must pay.
+            if not _is_observation_tau(tau, dt_grid, obs_ks):
                 return U
             U = np.array(U, dtype=float)
-            U[ko_rows, :] = 0.0 if zero_beyond else _ko_val(tau)
+            U[ko_rows, :] = float(reb) if pay_at_hit else float(reb) * float(np.exp(-r * tau))
             return U
-        return hook
+
+        U = core.solve(is_call, scheme, theta, rannacher, step_hook=hook)
+        return core.interpolate(U, x0, v0)
 
     if is_out:
-        U = core.solve(is_call, scheme, theta, rannacher, step_hook=_hook_factory(False))
-        return core.interpolate(U, float(np.log(s0)), params.v0)
+        return _ko_leg(rebate)
 
     van = price_european_heston_pde(s0, strike, is_call, T, params, r, carry, n_x, n_v, n_t,
                                     scheme=scheme, theta=theta, rannacher=rannacher)
-    core2 = _make_core()
-    U0 = core2.solve(is_call, scheme, theta, rannacher, step_hook=_hook_factory(False))
-    ki = van - core2.interpolate(U0, float(np.log(s0)), params.v0)
+    ki = van - _ko_leg(0.0)
     if rebate > 0.0:
-        core3 = _make_core()
+        # NoTouch (survival) leg: full-domain KO injection with terminal payoff 1. (Continuous
+        # truncation of the survival leg is a distinct boundary problem; kept on the injection path.)
+        core3 = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t, leverage=None, eta=1.0,
+                                 grid_style=("concentrated" if not continuous else "uniform"),
+                                 barrier_concentrate=(float(barrier) if not continuous else 0.0))
+        tol3 = 1e-9 * float(barrier)
+        ko_rows3 = (core3.S_grid > barrier + tol3) if is_up else (core3.S_grid < barrier - tol3)
+        obs3 = None if continuous else obs_ks
+
+        def hook_nt(U, tau):
+            if not _is_observation_tau(tau, dt_grid, obs3):
+                return U
+            U = np.array(U, dtype=float)
+            U[ko_rows3, :] = 0.0
+            return U
+
         ones = np.ones((core3.X_grid.size, core3.V_grid.size))
-        Un = core3.solve(is_call, scheme, theta, rannacher, step_hook=_hook_factory(True),
-                         terminal_override=ones)
-        ki += float(rebate) * core3.interpolate(Un, float(np.log(s0)), params.v0)
+        Un = core3.solve(is_call, scheme, theta, rannacher, step_hook=hook_nt, terminal_override=ones)
+        ki += float(rebate) * core3.interpolate(Un, x0, v0)
     return ki

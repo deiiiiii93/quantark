@@ -43,6 +43,34 @@ def test_barrier_far_reproduces_european():
     assert abs(p_bar - p_eur) < 0.15
 
 
+def test_discrete_terminal_observation_ignores_rannacher_half_step():
+    lev = _unit_lev()
+    p_rannacher = price_barrier_slv_pde(
+        100., 100., True, 1.0, HEST, lev, 0.03, 0.01, barrier=125.,
+        is_up=True, is_out=True, continuous=False, observe_taus=[0.0],
+        n_x=160, n_v=64, n_t=80, rannacher=True,
+    )
+    p_plain = price_barrier_slv_pde(
+        100., 100., True, 1.0, HEST, lev, 0.03, 0.01, barrier=125.,
+        is_up=True, is_out=True, continuous=False, observe_taus=[0.0],
+        n_x=160, n_v=64, n_t=80, rannacher=False,
+    )
+    assert abs(p_rannacher - p_plain) < 0.02
+
+
+def test_discrete_pinned_barrier_uses_surviving_side_limit():
+    lev = _unit_lev()
+    p = price_barrier_slv_pde(
+        100., 100., True, 1.0, HEST, lev, 0.03, 0.01, barrier=125.,
+        is_up=True, is_out=True, continuous=False,
+        observe_taus=[1.0, 0.75, 0.5, 0.25, 0.0],
+        n_x=160, n_v=64, n_t=80,
+    )
+    # Regression: zeroing the grid node pinned exactly at the discrete barrier
+    # over-knocked the coarse PDE and produced about 4.29 for this case.
+    assert p > 4.35
+
+
 def test_mc_pde_agreement():
     lev = _unit_lev()
     dt = np.full(120, 1.0 / 120); rf = np.full(120, 0.03); cf = np.full(120, 0.01); df = np.exp(-0.03)
@@ -51,5 +79,6 @@ def test_mc_pde_agreement():
     p_mc, se = price_barrier_slv_mc(100., 100., True, HEST, lev, dt, rf, cf, df, barrier=125., is_up=True,
                                     is_out=True, rebate=0., pay_at_hit=False, continuous=True,
                                     num_paths=150_000, seed=19, return_stderr=True)
-    # PDE per-step injection vs MC Brownian bridge: agree to O(sqrt(dt)) monitoring discretization.
+    # Continuous PDE truncates the domain at the barrier; MC uses Brownian-bridge survival over
+    # simulated SLV paths. They should agree within MC/statistical and path-discretization error.
     assert abs(p_pde - p_mc) < max(0.5, 4 * se)

@@ -58,6 +58,17 @@ def main() -> None:
     pe = surface["per_expiry"]
     fetched = surface.get("fetched_at", "n/a")
     bsflat = bs_flat_baseline(pe)
+    smoothing = lv.get("target_smoothing") or he.get("target_smoothing") or slv.get("target_smoothing") or {"method": "none"}
+    smooth_method = smoothing.get("method", "none")
+    smooth_rmse = smoothing.get("raw_grid_rmse_iv")
+    smooth_adj = smoothing.get("calendar_adjusted_nodes", 0)
+    smooth_text = (
+        f"The model-calibration target is a <b>SABR-smoothed, calendar-projected</b> IV grid "
+        f"(beta={smoothing.get('beta', 1.0):.1f}); it differs from the raw rectangular grid by "
+        f"<b>{smooth_rmse*100:.2f} vol-points</b> RMSE and adjusted {smooth_adj} total-variance nodes."
+        if smooth_method == "sabr_calendar_projected" and smooth_rmse is not None
+        else "The model-calibration target is the raw IV grid."
+    )
 
     # Optional barrier-exotic artifact (stage 07); the section is omitted if absent.
     barrier_path = HERE / f"data/mo_barrier_{t}.json"
@@ -65,14 +76,14 @@ def main() -> None:
 
     rmse_rows = [
         ("Black-Scholes (flat ATM vol)", bsflat, "no smile — baseline"),
-        ("Local Volatility (Dupire)", lv["overall_rmse_iv"], "exact smile fit in theory; raw-data arbitrage limits it"),
-        ("Heston (stochastic vol)", he["overall_rmse_iv"], "5 params, arbitrage-free, robust"),
+        ("Local Volatility (Dupire)", lv["overall_rmse_iv"], "PDE reprice of the smoothed no-arb target"),
+        ("Heston (stochastic vol)", he["overall_rmse_iv"], "5 params, fit to the same smoothed target"),
         ("Heston-SLV (leverage)", slv["overall_rmse_iv"], "smile-consistent dynamics; PDE bias on vanillas"),
     ]
 
     # comparison CSV
     with (HERE / f"data/comparison_summary_{t}.csv").open("w", newline="") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["model", "overall_rmse_iv_volpts", "note"])
         for name, r, note in rmse_rows:
             w.writerow([name, f"{r*100:.4f}", note])
@@ -108,36 +119,52 @@ def main() -> None:
     if barrier is not None:
         sp = barrier["spec"]
         order = ["BSM (flat ATM)", "Local Vol", "Heston", "SLV"]
-        rows_b = "".join(
-            f"<tr><td>{name}</td><td class='num'>{barrier['models'][name].get('mc', float('nan')):.3f}</td>"
-            f"<td class='num'>{barrier['models'][name].get('pde', float('nan')):.3f}</td></tr>"
-            for name in order if name in barrier["models"]
-        )
+
+        def _brow(name):
+            m = barrier["models"][name]
+            mc = m.get("mc", float("nan")); se = m.get("mc_stderr", float("nan"))
+            pde = m.get("pde", float("nan")); gap = m.get("gap", abs(mc - pde))
+            ok = m.get("cross_check")
+            tick = ("<span style='color:#1a7f37;font-weight:700'>&#10003;</span>" if ok
+                    else "<span style='color:#b5432f;font-weight:700'>&#8211;</span>")
+            se_txt = f" &plusmn;{se:.3f}" if se == se else ""
+            return (f"<tr><td>{name}</td><td class='num'>{mc:.3f}{se_txt}</td>"
+                    f"<td class='num'>{pde:.3f}</td><td class='num'>{gap:.3f}</td>"
+                    f"<td style='text-align:center'>{tick}</td></tr>")
+        rows_b = "".join(_brow(name) for name in order if name in barrier["models"])
         mc_lv = barrier["models"]["Local Vol"]["mc"]
         mc_he = barrier["models"]["Heston"]["mc"]
         spread = (mc_he - mc_lv) / mc_lv * 100 if mc_lv else float("nan")
         barrier_toc = ('<li><a href="#s5">Exotics: where models diverge</a> — an up-and-out call, '
-                       'priced MC &amp; PDE under all four models</li>')
+                       'MC reference prices with PDE diagnostics under all four models</li>')
         barrier_section = f"""
 <h2 id="s5">5 &nbsp; Exotics: where the models diverge</h2>
 <p>Every model so far was tuned to the <em>same</em> vanilla smile, and on vanillas they largely
 agree. A <b>barrier option</b> breaks that tie: its payoff depends on the <em>path</em>, hence on the
 <b>forward-volatility dynamics</b> — how volatility evolves after the spot moves — which the terminal
 smile alone does not pin down. We price a <b>reverse up-and-out call</b> (strike {sp['strike']:.0f},
-barrier {sp['barrier']:.0f} &asymp; 110% spot, {sp['monitoring']} / weekly discrete monitoring,
-T&nbsp;=&nbsp;{sp['T']:.2f}) under all four models, each by <b>two independent methods</b> — Monte
-Carlo and PDE — using the new <code>quantark</code> barrier engines.</p>
-<table><thead><tr><th>model</th><th>MC price</th><th>PDE price</th></tr></thead>
+barrier {sp['barrier']:.0f} &asymp; 110% spot, {sp['monitoring']} monitoring —
+{sp.get('n_obs', 0)} weekly observations, T&nbsp;=&nbsp;{sp['T']:.2f}) under all four models, each by
+Monte Carlo and PDE using the new <code>quantark</code> barrier engines. The <b>MC column is the
+reference</b> for the model-divergence story. The PDE column is an independent diagnostic: MC and
+PDE run on the <em>same</em> {sp.get('n_steps', '?')}-step time grid, so both knock the barrier out on
+the identical weekly dates; the MC leg carries its standard error and the <b>cross-check</b> passes
+only when |MC&nbsp;&minus;&nbsp;PDE| falls inside max(2%&nbsp;of&nbsp;price,&nbsp;3&nbsp;s.e.) —
+agreement is <em>measured</em>, not asserted.</p>
+<table><thead><tr><th>model</th><th>MC price (&plusmn;1 s.e.)</th><th>PDE price</th>
+<th>|gap|</th><th>cross-check</th></tr></thead>
 <tbody>{rows_b}</tbody></table>
 {fig(HERE / f"data/plots/07_barrier_{t}.png", "Up-and-out call price by model (MC vs PDE). Same vanilla smile, different barrier prices.")}
 <div class="callout key"><b>The payoff of the whole course.</b> Local vol prices the up-and-out close to
 flat Black-Scholes, but the <b>stochastic-vol models price it about {spread:+.0f}% differently</b> — a
 first-order economic gap produced entirely by dynamics the vanilla smile cannot see. This is why the
 model you calibrate is only half the decision: for a path-dependent exotic you must also choose the
-<em>dynamics</em>. MC and PDE agree tightly for the 1-D cases (BSM) and to within demo grid resolution
-for the 2-D ADI (Heston/SLV) — two independent numerical methods cross-checking one price. This is the
-concrete reason SLV exists: it keeps the exact market smile <em>and</em> a realistic, tunable
-forward-vol process for exactly these products.</div>
+<em>dynamics</em>. The PDE diagnostics should be read honestly: after switching the local-vol target
+from a floored raw Dupire surface to the SABR-smoothed no-arb grid, the LV row becomes a genuine
+MC/PDE cross-check rather than a data-repair warning. The robust conclusion remains the
+<b>MC spread across models</b>, now with PDE confirmation where the numerical method is stable.
+This is the concrete reason SLV exists: it keeps the market smile
+<em>and</em> a realistic, tunable forward-vol process for exactly these products.</div>
 """
     # Loud banner if this render is the synthetic test fixture, never the real deliverable.
     fixture_banner = "" if t == "latest" else (
@@ -251,17 +278,17 @@ such that a one-factor diffusion <code>dS = (r&minus;q)S dt + σ<sub>LV</sub>(S,
 + ¼(&minus;¼ &minus; 1/w + y²/w²)(&part;<sub>y</sub>w)² + ½&part;<sub>yy</sub>w ]</div>
 <p>The denominator is a <b>butterfly no-arbitrage</b> term; the numerator is a <b>calendar no-arbitrage</b>
 term. Both must be positive. On real quotes they often are <em>not</em>:</p>
-<div class="callout"><b>Butterfly arbitrage in raw data.</b> Building Dupire directly from the MO surface
-raises a no-arbitrage rejection at wing and short-dated nodes — the second strike-derivative
-<code>&part;<sub>yy</sub>w</code> estimated on a coarse, bid/ask-quantized grid produces a negative denominator.
-The builder <em>refuses</em> to fabricate a local vol there; the pipeline explicitly opts into a small
-<code>vol_floor</code> to proceed. A production desk would instead fit an arbitrage-free smile (SVI/SABR)
-upstream and keep validation on.</div>
+<div class="callout"><b>Butterfly arbitrage in raw data.</b> Building Dupire directly from the raw MO surface
+can raise a no-arbitrage rejection at wing and short-dated nodes — the second strike-derivative
+<code>&part;<sub>yy</sub>w</code> estimated on a coarse, bid/ask-quantized grid can produce a negative denominator.
+The builder <em>refuses</em> to fabricate a local vol there. The pipeline now does the desk-style repair
+upstream: fit a SABR smile to each expiry, evaluate a smooth rectangular IV grid, then project total
+variance to be non-decreasing in maturity before running Dupire with validation on. {smooth_text}</div>
 {fig(HERE / f"data/plots/03_localvol_surface_{t}.png", "Reconstructed Dupire local-volatility surface σ_LV(K,T).")}
 <p>Repricing every OTM option through the local-vol PDE and re-inverting gives an overall IV RMSE of
-<b>{lv['overall_rmse_iv']*100:.2f} vol-points</b>, largest at the short end where the smile is noisiest and the
-floor bites hardest. In the continuous, arbitrage-free limit Dupire reprices the surface <em>exactly</em>;
-the gap here is the price of using raw quotes without an arbitrage-free parameterization.</p>
+<b>{lv['overall_rmse_iv']*100:.2f} vol-points</b> against that smoothed target. In the continuous,
+arbitrage-free limit Dupire reprices the target surface <em>exactly</em>; the remaining gap is finite-grid
+PDE error plus the explicit choice to smooth noisy raw quotes before differentiating them.</p>
 
 <h2 id="s3">3 &nbsp; Heston Stochastic Volatility</h2>
 <p>Heston (1993) makes variance itself stochastic — a mean-reverting CIR process correlated with spot:</p>
@@ -277,9 +304,10 @@ characteristic function by Fourier inversion (Lewis form), which is what the fas
 <tbody><tr><td class="num">{p['v0']:.4f}</td><td class="num">{p['kappa']:.3f}</td><td class="num">{p['theta']:.4f}</td>
 <td class="num">{p['sigma']:.3f}</td><td class="num">{p['rho']:+.3f}</td>
 <td class="num">{he['feller']:.2f} {'✓' if feller_ok else '(violated)'}</td></tr></tbody></table>
-<p>Overall smile fit: <b>{he['overall_rmse_iv']*100:.2f} vol-points</b> across all {len(pe)} expiries — and unlike
-Dupire this is achieved by an <b>arbitrage-free</b> model that cannot manufacture butterfly violations.</p>
-{fig(HERE / f"data/plots/04_heston_fit_{t}.png", "Heston fit (thin) vs market smiles (marked) per expiry.")}
+<p>Overall smile fit: <b>{he['overall_rmse_iv']*100:.2f} vol-points</b> across all {len(pe)} expiries against
+the same smoothed target — and unlike raw Dupire this is achieved by an <b>arbitrage-free</b> stochastic
+model that cannot manufacture butterfly violations.</p>
+{fig(HERE / f"data/plots/04_heston_fit_{t}.png", "Heston fit (thin) vs smoothed target smiles (marked) per expiry.")}
 <div class="callout key"><b>Two calibration lessons.</b>
 (1) <b>Identification.</b> With only a handful of maturities the smile pins the combination
 <code>σ²/κ</code>, not <code>κ</code> alone — an unconstrained fit sends <code>κ</code> to any ceiling for
@@ -304,9 +332,9 @@ expectation. The resulting leverage ranges <code>L ∈ [{slv['leverage_min']:.2f
 {fig(HERE / f"data/plots/05_slv_leverage_{t}.png", "Calibrated SLV leverage surface L(S,t).")}
 <div class="callout"><b>Which model for which product?</b> The SLV PDE reprices these European vanillas to
 <b>{slv['overall_rmse_iv']*100:.2f} vol-points</b> — <em>not</em> better than analytic Heston. That is expected,
-not a failure: the SLV PDE carries an inherent few-vol-point discretization bias (visible even on a trivial
-flat-vol test), and on raw arbitrage-tainted data SLV also inherits the floored local vol. <b>SLV's value is
-not vanilla repricing</b> — Heston already handles vanillas, exactly and cheaply. SLV earns its keep on
+not a failure: the SLV PDE carries a finite-grid discretization bias, while Heston vanillas use a
+semi-analytical Fourier pricer. <b>SLV's value is not vanilla repricing</b> — Heston already handles vanillas,
+exactly and cheaply. SLV earns its keep on
 <b>exotics</b> (barriers, autocallables, forward-starting and cliquet structures) where <em>both</em> the market
 smile <em>and</em> realistic forward-vol dynamics matter. The leverage surface above is the reusable deliverable.</div>
 
@@ -319,9 +347,9 @@ smile <em>and</em> realistic forward-vol dynamics matter. The leverage surface a
 <tbody>{perT_rows}</tbody></table>
 <div class="callout key"><b>The arc of the study.</b>
 A flat-vol Black-Scholes leaves a <b>{bsflat*100:.1f} vol-point</b> smile on the table.
-<b>Local vol</b> can in principle remove all of it, but raw-data butterfly arbitrage limits it in practice.
-<b>Heston</b>, arbitrage-free by construction and Feller-regularized for numerical health, fits the whole
-surface robustly to a few vol-points. <b>SLV</b> then layers a leverage surface on top so the model is
+<b>Local vol</b> can in principle remove all of it, but only after the raw quotes are turned into a smooth
+no-arbitrage target. <b>Heston</b>, arbitrage-free by construction and Feller-regularized for numerical health,
+fits that target robustly to a few vol-points. <b>SLV</b> then layers a leverage surface on top so the model is
 simultaneously smile-consistent and stochastic — the right tool once you leave vanillas for exotics.
 The recurring theme: <em>market data is not arbitrage-free, parameters are not fully identified, and the
 calibration objective must respect the numerics that will consume its output.</em></div>
@@ -333,9 +361,9 @@ calibration objective must respect the numerics that will consume its output.</e
 
 <span class="c"># stages 02-06 replay the snapshot offline — quantark .venv</span>
 .venv/bin/python example/mo_volmodels/02_build_iv_surface.py --snapshot latest
-.venv/bin/python example/mo_volmodels/03_dupire_localvol.py   --tag latest --vol-floor 0.05
+.venv/bin/python example/mo_volmodels/03_dupire_localvol.py   --tag latest
 .venv/bin/python example/mo_volmodels/04_heston_calibration.py --tag latest
-.venv/bin/python example/mo_volmodels/05_slv_calibration.py    --tag latest --vol-floor 0.05
+.venv/bin/python example/mo_volmodels/05_slv_calibration.py    --tag latest
 .venv/bin/python example/mo_volmodels/06_lecture.py           --tag latest</div>
 <p><span class="pill">tip</span> A committed synthetic <code>--snapshot sample</code> (arbitrage-free by
 construction) drives the automated tests and lets stages 02–06 run with no network.</p>

@@ -35,10 +35,21 @@ def _atm_iv_shortest(per_expiry):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="latest")
+    ap.add_argument("--iv-smoothing", choices=["sabr", "none"], default="sabr",
+                    help="model target preparation: SABR + calendar projection (default) or raw")
+    ap.add_argument("--sabr-beta", type=float, default=1.0,
+                    help="SABR beta used by --iv-smoothing sabr; beta=1 is lognormal")
     args = ap.parse_args()
-    surface = json.loads((HERE / f"data/mo_iv_surface_{args.tag}.json").read_text())
+    raw_surface = json.loads((HERE / f"data/mo_iv_surface_{args.tag}.json").read_text())
+    surface = mc.prepare_model_surface(raw_surface, iv_smoothing=args.iv_smoothing,
+                                       sabr_beta=args.sabr_beta)
     s0 = float(surface["s0"])
     pe = surface["per_expiry"]
+    smoothing = surface.get("target_smoothing", {"method": "none"})
+    if smoothing.get("method") == "sabr_calendar_projected":
+        print("SABR-smoothed Heston target: "
+              f"raw-grid RMSE={smoothing['raw_grid_rmse_iv']*100:.3f} vol-pts, "
+              f"calendar-adjusted nodes={smoothing['calendar_adjusted_nodes']}")
 
     # Term-structure r(T), q(T) as callables interpolated from the parity pillars.
     Ts = np.array([p["T"] for p in pe])
@@ -83,12 +94,13 @@ def main() -> None:
           f"cost={result.cost:.3e}  success={result.success}")
 
     # Per-expiry IV RMSE via the semi-analytical Heston pricer, plus model-vs-market smiles.
-    per_expiry, sq, smile_rows = [], [], []
+    per_expiry, sq, raw_sq, smile_rows = [], [], [], []
     for p in pe:
         ks = np.array([k for k, _ in p["points"]])
         mkt = np.array([v for _, v in p["points"]])
+        raw_by_k = {float(k): float(v) for k, v in p.get("raw_points", [])}
         hprices = heston_call_prices_vectorized(s0, ks, p["T"], hp, r_of(p["T"]), q_of(p["T"]))
-        model_iv, errs = [], []
+        model_iv, errs, raw_errs = [], [], []
         for k, mv, hpx in zip(ks, mkt, hprices):
             try:
                 miv = implied_vol_call(s0, float(k), p["T"], float(hpx), p["r"], p["q"])
@@ -97,24 +109,36 @@ def main() -> None:
                 continue
             model_iv.append(miv)
             errs.append(miv - mv)
+            if raw_by_k:
+                raw_errs.append(miv - raw_by_k[float(k)])
         if errs:
             rmse = float(np.sqrt(np.mean(np.square(errs))))
-            per_expiry.append({"T": p["T"], "rmse_iv": rmse})
+            row = {"T": p["T"], "rmse_iv": rmse}
+            if raw_errs:
+                row["raw_rmse_iv"] = float(np.sqrt(np.mean(np.square(raw_errs))))
+                raw_sq.extend(raw_errs)
+            per_expiry.append(row)
             sq.extend(errs)
             print(f"  T={p['T']:.3f}  Heston RMSE={rmse*100:.3f} vol-pts")
-        smile_rows.append((f"mkt T={p['T']:.2f}", ks.tolist(), mkt.tolist()))
+        smile_rows.append((f"target T={p['T']:.2f}", ks.tolist(), mkt.tolist()))
         smile_rows.append((f"Heston T={p['T']:.2f}", ks.tolist(), model_iv))
 
     overall = float(np.sqrt(np.mean(np.square(sq))))
+    raw_overall = float(np.sqrt(np.mean(np.square(raw_sq)))) if raw_sq else None
     out = {
         "params": {"v0": hp.v0, "kappa": hp.kappa, "theta": hp.theta, "sigma": hp.sigma, "rho": hp.rho},
         "feller": feller, "cost": result.cost, "success": result.success,
         "overall_rmse_iv": overall, "per_expiry": per_expiry,
+        "target_smoothing": smoothing,
     }
+    if raw_overall is not None:
+        out["raw_overall_rmse_iv"] = raw_overall
     (HERE / f"data/mo_calib_heston_{args.tag}.json").write_text(json.dumps(out, indent=2))
     mc.plot_smiles(smile_rows, HERE / f"data/plots/04_heston_fit_{args.tag}.png",
-                   title="Heston fit vs market — MO (000852.SH)")
+                   title="Heston fit vs calibration target — MO (000852.SH)")
     print(f"overall Heston RMSE = {overall*100:.3f} vol-pts")
+    if raw_overall is not None:
+        print(f"overall Heston vs raw quotes = {raw_overall*100:.3f} vol-pts")
 
 
 if __name__ == "__main__":

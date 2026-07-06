@@ -1,6 +1,6 @@
 """Stage 05 — calibrate the Heston-SLV leverage surface and reprice.
 
-Run: .venv/bin/python example/mo_volmodels/05_slv_calibration.py [--tag latest|sample] [--vol-floor 0.05]
+Run: .venv/bin/python example/mo_volmodels/05_slv_calibration.py [--tag latest|sample]
 
 Stochastic-Local Volatility grafts a deterministic leverage function L(S,t) onto the
 calibrated Heston process: the SLV instantaneous vol is L(S,t) * sqrt(v_t). L is solved
@@ -36,24 +36,41 @@ N_STEPS = 40  # leverage-calibration time grid (modest -> runs in seconds)
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="latest")
+    ap.add_argument("--iv-smoothing", choices=["sabr", "none"], default="sabr",
+                    help="model target preparation: SABR + calendar projection (default) or raw")
+    ap.add_argument("--sabr-beta", type=float, default=1.0,
+                    help="SABR beta used by --iv-smoothing sabr; beta=1 is lognormal")
     ap.add_argument("--vol-floor", type=float, default=None,
-                    help="opt-in local-vol floor for arbitrage-tainted real surfaces (e.g. 0.05)")
+                    help="opt-in local-vol floor for arbitrage-tainted real surfaces; diagnostic raw mode only")
     args = ap.parse_args()
-    surface = json.loads((HERE / f"data/mo_iv_surface_{args.tag}.json").read_text())
+    raw_surface = json.loads((HERE / f"data/mo_iv_surface_{args.tag}.json").read_text())
+    surface = mc.prepare_model_surface(raw_surface, iv_smoothing=args.iv_smoothing,
+                                       sabr_beta=args.sabr_beta)
     calib = json.loads((HERE / f"data/mo_calib_heston_{args.tag}.json").read_text())["params"]
     s0 = float(surface["s0"])
     pe = surface["per_expiry"]
     env, surf, _ = mc.build_env(surface)
     hp = HestonParams(**calib)
+    smoothing = surface.get("target_smoothing", {"method": "none"})
+    if smoothing.get("method") == "sabr_calendar_projected":
+        print("SABR-smoothed SLV target: "
+              f"raw-grid RMSE={smoothing['raw_grid_rmse_iv']*100:.3f} vol-pts, "
+              f"calendar-adjusted nodes={smoothing['calendar_adjusted_nodes']}")
 
-    # Dupire local vol is the SLV calibration TARGET. Same opt-in flooring as stage 03.
+    # Dupire local vol is the SLV calibration TARGET. The default path smooths and
+    # calendar-projects the IV surface upstream so Dupire validation can remain enabled.
     if args.vol_floor is None:
         try:
             lv = build_dupire_local_vol(surf, spot=s0, rate_curve=env.rate_curve,
                                         div_yield=env.get_div_yield)
         except NumericalError as e:
-            print(f"ARBITRAGE in raw surface: {e}")
-            sys.exit(f"\nRe-run with an explicit floor, e.g. --tag {args.tag} --vol-floor 0.05")
+            if args.iv_smoothing == "none":
+                print(f"ARBITRAGE in raw surface: {e}")
+                sys.exit(
+                    f"\nRe-run with default SABR smoothing, or diagnostic raw mode: "
+                    f"--tag {args.tag} --iv-smoothing none --vol-floor 0.05"
+                )
+            sys.exit(f"SABR-smoothed surface failed Dupire validation: {e}")
     else:
         print(f"OPT-IN regularization: vol_floor={args.vol_floor:.3f}, validate_arbitrage=False")
         lv = build_dupire_local_vol(surf, spot=s0, rate_curve=env.rate_curve,
@@ -71,26 +88,40 @@ def main() -> None:
           f"(L=1 => pure Heston; L!=1 bends vol toward the market local vol)")
 
     solver = HestonSLVPDESolver(hp, leverage, eta=1.0, n_x=180, n_v=64, n_t=80)
-    per_expiry, sq = [], []
+    per_expiry, sq, raw_sq = [], [], []
     for p in pe:
         T, r, q = p["T"], p["r"], p["q"]
-        errs = []
+        raw_by_k = {float(k): float(v) for k, v in p.get("raw_points", [])}
+        errs, raw_errs = [], []
         for k, mkt_iv in p["points"]:
             price = solver.price(EuropeanVanillaOption(strike=k, option_type=OptionType.CALL, maturity=T), env)
             try:
-                errs.append(implied_vol_call(s0, k, T, price, r, q) - mkt_iv)
+                model_iv = implied_vol_call(s0, k, T, price, r, q)
             except Exception:
                 continue
+            errs.append(model_iv - mkt_iv)
+            if raw_by_k:
+                raw_errs.append(model_iv - raw_by_k[float(k)])
         if errs:
             rmse = float(np.sqrt(np.mean(np.square(errs))))
-            per_expiry.append({"T": T, "rmse_iv": rmse})
+            row = {"T": T, "rmse_iv": rmse}
+            if raw_errs:
+                row["raw_rmse_iv"] = float(np.sqrt(np.mean(np.square(raw_errs))))
+                raw_sq.extend(raw_errs)
+            per_expiry.append(row)
             sq.extend(errs)
             print(f"  T={T:.3f}  SLV RMSE={rmse*100:.3f} vol-pts")
     overall = float(np.sqrt(np.mean(np.square(sq))))
+    raw_overall = float(np.sqrt(np.mean(np.square(raw_sq)))) if raw_sq else None
     out = {"overall_rmse_iv": overall, "per_expiry": per_expiry,
-           "leverage_min": float(lg.min()), "leverage_max": float(lg.max())}
+           "leverage_min": float(lg.min()), "leverage_max": float(lg.max()),
+           "target_smoothing": smoothing}
+    if raw_overall is not None:
+        out["raw_overall_rmse_iv"] = raw_overall
     (HERE / f"data/mo_reprice_slv_{args.tag}.json").write_text(json.dumps(out, indent=2))
     print(f"overall SLV RMSE = {overall*100:.3f} vol-pts")
+    if raw_overall is not None:
+        print(f"overall SLV vs raw quotes = {raw_overall*100:.3f} vol-pts")
 
     # Leverage surface heatmap L(S, t).
     import matplotlib

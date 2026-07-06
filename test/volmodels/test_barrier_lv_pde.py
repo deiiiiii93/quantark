@@ -4,7 +4,7 @@ from datetime import datetime
 from quantark.param import GridVolSurface, FlatRateCurve, SpotQuote
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
-from quantark.volmodels.localvol import build_dupire_local_vol
+from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde, price_european_lv_pde
 from quantark.volmodels.localvol.mc_kernel import price_barrier_lv_mc
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
@@ -65,3 +65,39 @@ def test_mc_pde_agreement():
                                    is_out=True, rebate=0., pay_at_hit=False, continuous=True,
                                    num_paths=150_000, seed=11, return_stderr=True)
     assert abs(p_pde - p_mc) < max(0.25, 4 * se)
+
+
+def test_discrete_up_barrier_default_grid_places_barrier_midcell():
+    lv = LocalVolSurface(np.array([1.0, 20_000.0]), np.array([0.0, 1.0]),
+                         np.full((2, 2), 0.288))
+    s0 = 8489.3
+    strike = s0
+    barrier = 1.10 * s0
+    T = 0.452
+    n_t = 260
+    t_grid = np.linspace(0.0, T, n_t + 1)
+    dt = np.diff(t_grid)
+    rf = np.full(n_t, 0.0117)
+    cf = np.full(n_t, 0.1345)
+    obs = sorted({round(d, 6) for d in np.arange(1, int(T * 52) + 1) / 52.0 if d < T}
+                 | {float(T)})
+    observe_steps = [int(np.argmin(np.abs(t_grid - d))) for d in obs]
+
+    default_500 = price_barrier_lv_pde(
+        s0, strike, True, T, lv, dt, rf, cf, barrier=barrier, is_up=True,
+        is_out=True, continuous=False, observe_steps=observe_steps, n_s=500,
+    )
+    refined = price_barrier_lv_pde(
+        s0, strike, True, T, lv, dt, rf, cf, barrier=barrier, is_up=True,
+        is_out=True, continuous=False, observe_steps=observe_steps, n_s=2000,
+    )
+    # Simulate the pre-fix production grid by explicitly freezing the unaligned far boundary.
+    unaligned_smax = max(4.0 * max(s0, strike), 1.5 * barrier)
+    unaligned_500 = price_barrier_lv_pde(
+        s0, strike, True, T, lv, dt, rf, cf, barrier=barrier, is_up=True,
+        is_out=True, continuous=False, observe_steps=observe_steps, n_s=500,
+        s_max=unaligned_smax,
+    )
+
+    assert abs(default_500 - refined) < 0.15
+    assert abs(unaligned_500 - refined) > 0.75

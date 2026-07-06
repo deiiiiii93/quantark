@@ -195,6 +195,27 @@ def _barrier_boundary_value(rebate, pay_at_hit, df_to_T):
     return float(rebate) if pay_at_hit else float(rebate) * float(df_to_T)
 
 
+def _align_discrete_barrier_midcell(smax: float, barrier: float, n_s: int) -> float:
+    """Grow a uniform [0, smax] grid so a discrete barrier sits halfway between nodes.
+
+    Discrete barriers are applied as a hard mask at observation times. If the barrier drifts
+    across node locations as ``n_s`` changes, the discontinuity can sit almost on a surviving
+    node for one grid and almost one full cell away for the next, creating large odd-even
+    oscillations. Placing the barrier at a cell midpoint gives the mask an unambiguous
+    surviving side and knocked-out side. The domain only grows, so callers keep at least the
+    requested far boundary.
+    """
+    base_smax = float(smax)
+    if base_smax <= 0.0 or barrier <= 0.0 or n_s < 4:
+        return base_smax
+    ds_nom = base_smax / (int(n_s) - 1)
+    j_cell = int(np.floor(float(barrier) / ds_nom - 0.5))
+    if j_cell < 0:
+        return base_smax
+    aligned = (float(barrier) / (j_cell + 0.5)) * (int(n_s) - 1)
+    return max(base_smax, float(aligned))
+
+
 def _solve_ko_lv(s0, strike, is_call, T, lv_surface, step_dt, r_fwd, carry_fwd, barrier, is_up,
                  rebate, pay_at_hit, terminal_one, observe_steps, n_s, s_max, theta):
     """Backward CN for a knock-OUT claim under local vol. Returns (s_grid, value_curve).
@@ -217,6 +238,8 @@ def _solve_ko_lv(s0, strike, is_call, T, lv_surface, step_dt, r_fwd, carry_fwd, 
         s_grid = np.linspace(float(barrier), smax, N)
     else:
         smax = float(s_max) if s_max > 0 else max(4.0 * max(s0, strike), 1.5 * barrier)
+        if s_max <= 0:
+            smax = _align_discrete_barrier_midcell(smax, barrier, N)
         s_grid = np.linspace(0.0, smax, N)
     ds = s_grid[1] - s_grid[0]; s_int = s_grid[1:-1]
     node_t = np.concatenate([[0.0], np.cumsum(dt)])
@@ -238,7 +261,12 @@ def _solve_ko_lv(s0, strike, is_call, T, lv_surface, step_dt, r_fwd, carry_fwd, 
         v = np.ones(N)
     else:
         v = np.maximum(s_grid - strike, 0.0) if is_call else np.maximum(strike - s_grid, 0.0)
-    v = inject(v, M)  # apply at maturity too (a terminal breach knocks out)
+    # Knock out on a terminal breach ONLY when the barrier is monitored at maturity: always for
+    # continuous monitoring, but for discrete monitoring only if maturity (backward step M) is an
+    # observation. Otherwise a path finishing beyond the barrier in an UNMONITORED tail (last obs
+    # < T) must still pay — silently monitoring maturity would over-knock and underprice.
+    if continuous or M in observe_steps:
+        v = inject(v, M)
 
     for m in range(M - 1, -1, -1):
         r_m, c_m, dt_m = rf[m], cf[m], dt[m]

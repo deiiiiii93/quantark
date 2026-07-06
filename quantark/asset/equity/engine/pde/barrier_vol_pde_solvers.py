@@ -53,7 +53,7 @@ def _obs_dates(product, T):
     if product.observation_type == ObservationType.CONTINUOUS:
         return True, None
     if product.observation_type == ObservationType.EXPIRY:
-        return False, []  # terminal-node knock-out only (handled by the terminal injection)
+        return False, [float(T)]  # single observation AT maturity (the terminal knock-out)
     dates = product.observation_dates or []
     if not dates:
         raise ValidationError("discrete monitoring requires observation_dates")
