@@ -389,14 +389,26 @@ class HestonSLVADICore:
         Z1 = self._solve_S(Ycorr, A1U, dt_step, theta_loc, tau, t_mid)
         return self._solve_V(Z1, A2U, dt_step, theta_loc, tau)
 
-    def solve(self, is_call, scheme, theta, rannacher):
-        U = self._terminal(is_call)
+    def solve(self, is_call, scheme, theta, rannacher, step_hook=None, terminal_override=None):
+        """Backward ADI solve.
+
+        step_hook(U, tau) -> U (optional): applied to the value surface after the terminal
+        condition and after every time step, with tau = time-to-maturity of the new node.
+        Used to inject a barrier knock-out condition without duplicating the ADI loop.
+        terminal_override (optional ndarray, shape (n_x, n_v)): replaces the vanilla terminal
+        payoff (e.g. a constant 1 for a survival / no-touch leg).
+        """
+        U = self._terminal(is_call) if terminal_override is None else np.array(terminal_override, dtype=float)
         tau = 0.0
+        if step_hook is not None:
+            U = step_hook(U, tau)
         if rannacher and self.N_T >= 1:
             dt_half = 0.5 * self.dt
             for _ in range(2):
                 tau += dt_half
                 U = self._douglas_step(U, dt_half, tau, 1.0, self.T - tau + 0.5 * dt_half)
+                if step_hook is not None:
+                    U = step_hook(U, tau)
             steps_remaining = self.N_T - 1
         else:
             steps_remaining = self.N_T
@@ -407,6 +419,8 @@ class HestonSLVADICore:
                 U = self._douglas_step(U, self.dt, tau, theta, t_mid)
             else:  # CRAIG_SNEYD (MCS is rejected by the wrappers)
                 U = self._cs_step(U, self.dt, tau, theta, t_mid)
+            if step_hook is not None:
+                U = step_hook(U, tau)
         return U
 
     # ---- read-off ----
