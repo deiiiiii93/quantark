@@ -10,6 +10,8 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from quantark.util.numerical import safe_log
+from quantark.volmodels.black_scholes import implied_vol_call
+from quantark.util.exceptions import NumericalError
 
 _REQUIRED = {"fetched_at", "underlying", "expiries"}
 
@@ -120,3 +122,44 @@ def select_otm(sl: "ExpirySlice", forward: float, min_volume: int = 1) -> List["
             continue  # non-positive quote
         out.append(OtmQuote(strike=k, kind=kind, price=price))
     return out
+
+
+def otm_implied_vol(oq: "OtmQuote", s0, r, q_carry, forward, discount_factor, T):
+    """Invert an OTM quote to Black IV via its call-equivalent price. None if uninvertible.
+
+    An OTM put is turned into the price of the call at the same strike using put-call
+    parity, C = P + DF*(F - K). A single call inverter then handles both wings, and the
+    put/call smiles agree at the forward by construction — the no-arbitrage property the
+    Dupire builder needs. A quote outside the no-arb band yields None (excluded, never
+    fabricated) per the project's no-fallback rule.
+    """
+    if oq.kind == "P":
+        call_equiv = oq.price + discount_factor * (forward - oq.strike)
+    else:
+        call_equiv = oq.price
+    try:
+        return implied_vol_call(s0, oq.strike, T, call_equiv, r, q_carry)
+    except NumericalError:
+        return None
+
+
+def plot_smiles(rows, path, title="MO implied-vol smiles"):
+    """rows = list of (label, strikes, ivs). Saves a PNG; returns the path."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for label, strikes, ivs in rows:
+        ax.plot(strikes, np.array(ivs) * 100, marker="o", ms=3, label=label)
+    ax.set_xlabel("strike")
+    ax.set_ylabel("implied vol (%)")
+    ax.set_title(title)
+    ax.legend(fontsize=7)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return path
