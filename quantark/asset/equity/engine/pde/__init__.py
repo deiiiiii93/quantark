@@ -28,6 +28,11 @@ from .snowball_vol_pde_solvers import (
     HestonSnowballPDESolver,
     HestonSLVSnowballPDESolver,
 )
+from .phoenix_vol_pde_solvers import (
+    LocalVolPhoenixPDESolver,
+    HestonPhoenixPDESolver,
+    HestonSLVPhoenixPDESolver,
+)
 
 __all__ = [
     "LocalVolPDESolver",
@@ -39,6 +44,9 @@ __all__ = [
     "LocalVolSnowballPDESolver",
     "HestonSnowballPDESolver",
     "HestonSLVSnowballPDESolver",
+    "LocalVolPhoenixPDESolver",
+    "HestonPhoenixPDESolver",
+    "HestonSLVPhoenixPDESolver",
     # Grid utilities
     'TimeGrid',
     'SpatialGrid',

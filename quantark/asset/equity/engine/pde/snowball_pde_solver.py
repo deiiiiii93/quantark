@@ -2138,15 +2138,28 @@ class SnowballPDESolver(BasePDESolver):
             or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
         )
         if product.has_ki_barrier:
-            ki_profile = self._get_cached_ki_profile(pricing_env, product)
-            ki_barriers = tuple(
-                round(float(b), 12) for b in (ki_profile.get("barriers") or [])
-            )
-            ki_times = tuple(
-                round(float(t), 12)
-                for t in (ki_profile.get("observation_times") or [])
-                if 0.0 <= float(t) <= tau
-            )
+            if ki_continuous:
+                raw_barrier = product.barrier_config.ki_barrier
+                if isinstance(raw_barrier, (list, tuple, np.ndarray)):
+                    raw_barriers = raw_barrier
+                else:
+                    raw_barriers = [raw_barrier]
+                ki_barriers = tuple(
+                    round(float(b), 12)
+                    for b in raw_barriers
+                    if b is not None and float(b) > 0.0
+                )
+                ki_times = ()
+            else:
+                ki_profile = self._get_cached_ki_profile(pricing_env, product)
+                ki_barriers = tuple(
+                    round(float(b), 12) for b in (ki_profile.get("barriers") or [])
+                )
+                ki_times = tuple(
+                    round(float(t), 12)
+                    for t in (ki_profile.get("observation_times") or [])
+                    if 0.0 <= float(t) <= tau
+                )
             ki_key = (ki_continuous, ki_barriers, ki_times)
 
         return base_key + (ko_key, ki_key)

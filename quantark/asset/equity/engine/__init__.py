@@ -34,6 +34,11 @@ from .mc import (
     QESnowballMCEngine,
     HestonSLVSnowballMCEngine,
     HestonSLVQESnowballMCEngine,
+    LocalVolPhoenixMCEngine,
+    HestonPhoenixMCEngine,
+    QEPhoenixMCEngine,
+    HestonSLVPhoenixMCEngine,
+    HestonSLVQEPhoenixMCEngine,
 )
 from .pde import (
     BasePDESolver,
@@ -51,6 +56,9 @@ from .pde import (
     LocalVolSnowballPDESolver,
     HestonSnowballPDESolver,
     HestonSLVSnowballPDESolver,
+    LocalVolPhoenixPDESolver,
+    HestonPhoenixPDESolver,
+    HestonSLVPhoenixPDESolver,
     TimeGrid,
     SpatialGrid,
 )
@@ -93,6 +101,11 @@ __all__ = [
     "QESnowballMCEngine",
     "HestonSLVSnowballMCEngine",
     "HestonSLVQESnowballMCEngine",
+    "LocalVolPhoenixMCEngine",
+    "HestonPhoenixMCEngine",
+    "QEPhoenixMCEngine",
+    "HestonSLVPhoenixMCEngine",
+    "HestonSLVQEPhoenixMCEngine",
     # Unified PDE Engine
     "PDEEngine",
     # PDE Solvers
@@ -111,6 +124,9 @@ __all__ = [
     "LocalVolSnowballPDESolver",
     "HestonSnowballPDESolver",
     "HestonSLVSnowballPDESolver",
+    "LocalVolPhoenixPDESolver",
+    "HestonPhoenixPDESolver",
+    "HestonSLVPhoenixPDESolver",
     # Grid utilities
     "TimeGrid",
     "SpatialGrid",

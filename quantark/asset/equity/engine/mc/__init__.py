@@ -26,6 +26,13 @@ from .snowball_vol_mc_engines import (
     HestonSLVSnowballMCEngine,
     HestonSLVQESnowballMCEngine,
 )
+from .phoenix_vol_mc_engines import (
+    LocalVolPhoenixMCEngine,
+    HestonPhoenixMCEngine,
+    QEPhoenixMCEngine,
+    HestonSLVPhoenixMCEngine,
+    HestonSLVQEPhoenixMCEngine,
+)
 from .sabr_mc_engine import SABRMCEngine
 
 __all__ = [
@@ -40,6 +47,11 @@ __all__ = [
     "QESnowballMCEngine",
     "HestonSLVSnowballMCEngine",
     "HestonSLVQESnowballMCEngine",
+    "LocalVolPhoenixMCEngine",
+    "HestonPhoenixMCEngine",
+    "QEPhoenixMCEngine",
+    "HestonSLVPhoenixMCEngine",
+    "HestonSLVQEPhoenixMCEngine",
     "SABRMCEngine",
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",

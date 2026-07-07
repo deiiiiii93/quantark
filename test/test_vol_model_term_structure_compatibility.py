@@ -9,14 +9,19 @@ from quantark.asset.equity.engine.capabilities import (
 )
 from quantark.asset.equity.engine.pde import (
     HestonBarrierPDESolver,
+    HestonPhoenixPDESolver,
     HestonSnowballPDESolver,
     HestonSLVBarrierPDESolver,
+    HestonSLVPhoenixPDESolver,
     HestonSLVSnowballPDESolver,
     LocalVolBarrierPDESolver,
+    LocalVolPhoenixPDESolver,
     LocalVolSnowballPDESolver,
 )
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.option import BarrierOption
+from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
+from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.asset.equity.product.option.snowball_config import BarrierConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.param import (
@@ -101,6 +106,28 @@ def _snowball():
     )
 
 
+def _phoenix():
+    return PhoenixOption(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        contract_multiplier=1.0,
+        is_reverse=False,
+        barrier_config=BarrierConfig(
+            ko_barrier=105.0,
+            ko_rate=0.12,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=None,
+        ),
+        coupon_config=CouponBarrierConfig(
+            coupon_barrier=90.0,
+            coupon_rate=0.02,
+            memory_coupon=False,
+        ),
+    )
+
+
 def _heston_params():
     return HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
 
@@ -130,6 +157,20 @@ def test_local_vol_snowball_pde_sees_non_flat_rate_and_carry():
     env_term = _term_env()
     product = _snowball()
     solver = LocalVolSnowballPDESolver(
+        PDEParams(grid_size=70, time_steps=36, auto_grid=False)
+    )
+
+    px_term = solver.price(product, env_term)
+    px_collapsed = solver.price(product, _collapsed_flat_env(env_term, 1.0))
+
+    assert np.isfinite(px_term)
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_local_vol_phoenix_pde_sees_non_flat_rate_and_carry():
+    env_term = _term_env()
+    product = _phoenix()
+    solver = LocalVolPhoenixPDESolver(
         PDEParams(grid_size=70, time_steps=36, auto_grid=False)
     )
 
@@ -188,10 +229,47 @@ def test_heston_snowball_pde_sees_non_flat_rate_and_carry():
     assert px_term != pytest.approx(px_collapsed, rel=1e-5)
 
 
+def test_heston_phoenix_pde_sees_non_flat_rate_and_carry():
+    env_term = _term_env()
+    product = _phoenix()
+    solver = HestonPhoenixPDESolver(
+        _heston_params(),
+        n_x=60,
+        n_v=20,
+        n_t=24,
+        grid_style="uniform",
+    )
+
+    px_term = solver.price(product, env_term)
+    px_collapsed = solver.price(product, _collapsed_flat_env(env_term, 1.0))
+
+    assert np.isfinite(px_term)
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
 def test_slv_snowball_pde_sees_non_flat_rate_and_carry():
     env_term = _term_env()
     product = _snowball()
     solver = HestonSLVSnowballPDESolver(
+        _heston_params(),
+        _unit_leverage(),
+        n_x=60,
+        n_v=20,
+        n_t=24,
+        grid_style="uniform",
+    )
+
+    px_term = solver.price(product, env_term)
+    px_collapsed = solver.price(product, _collapsed_flat_env(env_term, 1.0))
+
+    assert np.isfinite(px_term)
+    assert px_term != pytest.approx(px_collapsed, rel=1e-5)
+
+
+def test_slv_phoenix_pde_sees_non_flat_rate_and_carry():
+    env_term = _term_env()
+    product = _phoenix()
+    solver = HestonSLVPhoenixPDESolver(
         _heston_params(),
         _unit_leverage(),
         n_x=60,
