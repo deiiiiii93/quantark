@@ -30,6 +30,49 @@ from quantark.volmodels.heston.params import HestonParams
 # opt-in concentrated path) to avoid a circular import via quantark.volmodels.slv.__init__.
 
 
+def _positive_spot_levels(value) -> list[float]:
+    if value is None:
+        return []
+    try:
+        arr = np.atleast_1d(np.asarray(value, dtype=float))
+    except (TypeError, ValueError):
+        return []
+    return [float(v) for v in arr.ravel() if np.isfinite(v) and v > 0.0]
+
+
+def _unique_sorted(values: list[float], tol: float = 1e-12) -> list[float]:
+    out: list[float] = []
+    for value in sorted(float(v) for v in values if np.isfinite(v)):
+        if not out or abs(value - out[-1]) > tol:
+            out.append(value)
+    return out
+
+
+def _pin_grid_targets(grid: np.ndarray, targets: list[float]) -> np.ndarray:
+    """Move nearest interior nodes exactly onto requested targets while preserving order."""
+    if not targets:
+        return grid
+
+    pinned = np.asarray(grid, dtype=float).copy()
+    used: set[int] = set()
+    n = pinned.size
+    for target in _unique_sorted(targets):
+        if target <= pinned[0] or target >= pinned[-1]:
+            continue
+        for idx_raw in np.argsort(np.abs(pinned - target)):
+            idx = int(idx_raw)
+            if idx == 0 or idx == n - 1 or idx in used:
+                continue
+            if pinned[idx - 1] < target < pinned[idx + 1]:
+                pinned[idx] = target
+                used.add(idx)
+                break
+
+    if np.any(np.diff(pinned) <= 0):
+        raise ValidationError("non-monotone grid after critical point pinning")
+    return pinned
+
+
 class HestonSLVADICore:
     """Shared ADI core for the Heston and Heston-SLV backward PDEs.
 
@@ -45,10 +88,11 @@ class HestonSLVADICore:
     """
 
     def __init__(self, s0, strike, T, r, carry, params: HestonParams,
-                 n_x, n_v, n_t, *, leverage=None, eta=1.0,
+                 n_x, n_v, n_t, *, market_context=None, leverage=None, eta=1.0,
                  use_sparse=False, grid_spot=None, v0_boundary="neumann",
                  grid_style="uniform", barrier=0.0, barrier_is_up=True,
-                 rebate=0.0, pay_at_hit=False, barrier_concentrate=0.0):
+                 rebate=0.0, pay_at_hit=False, barrier_concentrate=0.0,
+                 critical_spots=None):
         self.S0, self.K, self.T, self.r, self.q = s0, strike, T, r, carry
         self.kappa, self.theta, self.sigma, self.rho, self.v0 = (
             params.kappa, params.theta, params.sigma, params.rho, params.v0,
@@ -59,6 +103,27 @@ class HestonSLVADICore:
         self.sig_eff2 = self.sig_eff ** 2
         self._opt_is_call = True
         self.N_S, self.N_V, self.N_T = n_x, n_v, n_t
+        self.market_context = market_context
+        self._time_grid = np.linspace(0.0, float(T), int(n_t) + 1)
+        if market_context is None:
+            self.r_fwd = np.full(int(n_t), float(r))
+            self.q_fwd = np.full(int(n_t), float(carry))
+            self.node_dfs = np.exp(-float(r) * self._time_grid)
+            self.carry_node_dfs = np.exp(-float(carry) * self._time_grid)
+        else:
+            market_grid = np.asarray(market_context.t_grid, dtype=float)
+            if market_grid.shape != (int(n_t) + 1,):
+                raise ValidationError("market_context grid must have n_t + 1 nodes")
+            if (
+                abs(float(market_grid[0])) > 1e-12
+                or abs(float(market_grid[-1]) - float(T)) > 1e-12
+            ):
+                raise ValidationError("market_context grid must run from 0 to T")
+            self._time_grid = market_grid
+            self.r_fwd = np.asarray(market_context.fwd_rates, dtype=float)
+            self.q_fwd = np.asarray(market_context.fwd_carry, dtype=float)
+            self.node_dfs = np.asarray(market_context.node_dfs, dtype=float)
+            self.carry_node_dfs = np.asarray(market_context.carry_node_dfs, dtype=float)
         if v0_boundary not in ("neumann", "degenerate_pde"):
             raise ValidationError("v0_boundary must be 'neumann' or 'degenerate_pde'")
         self.v0_boundary = v0_boundary
@@ -104,20 +169,24 @@ class HestonSLVADICore:
             from quantark.volmodels.slv.fokkerplanck.coordinates import (
                 concentrated_grid, z_extents,
             )
-            # Concentration center: the barrier (discrete KO — the value discontinuity that
-            # limits accuracy) when barrier_concentrate is set, else ln K (the payoff kink).
-            if barrier_concentrate and barrier_concentrate > 0.0:
-                xk = float(np.log(barrier_concentrate))
-                conc = max(0.06 * x_width, 1e-6)   # tight cluster around the barrier
+            concentration_levels = _positive_spot_levels(barrier_concentrate)
+            critical_levels = _positive_spot_levels(critical_spots)
+            # Concentration center: caller-supplied critical level when provided
+            # (for barriers/exotics), else ln K (the vanilla payoff kink).
+            if concentration_levels:
+                xk = float(np.log(concentration_levels[0]))
+                conc = max(0.06 * x_width, 1e-6)   # tight cluster around the selected critical level
             else:
                 xk = float(np.log(max(self.K, 1e-12)))
                 conc = max(0.25 * x_width, 1e-6)
             xk = min(max(xk, self.x_min), self.x_max)
             self.X_grid = concentrated_grid(self.x_min, self.x_max, xk, n_x, concentration=conc)
-            if barrier_concentrate and barrier_concentrate > 0.0:
-                # pin the nearest node EXACTLY onto the barrier so the KO injection has no snap error
-                jb = int(np.argmin(np.abs(self.X_grid - xk)))
-                self.X_grid[jb] = xk
+            pin_targets = [
+                float(np.log(level))
+                for level in concentration_levels + critical_levels
+                if level > 0.0 and self.x_min < float(np.log(level)) < self.x_max
+            ]
+            self.X_grid = _pin_grid_targets(self.X_grid, pin_targets)
             if self.sig_eff > 0.0:
                 t_probe = np.array([0.25 * T, 0.5 * T, T])
                 try:
@@ -156,11 +225,56 @@ class HestonSLVADICore:
             return self._ones_int
         return np.asarray(self.lev.leverage(self._S_int, t), dtype=float)
 
+    def _forward_step_index(self, t: float) -> int:
+        idx = int(np.searchsorted(self._time_grid, float(t), side="right") - 1)
+        return min(max(idx, 0), self.r_fwd.size - 1)
+
+    def _rq_at(self, t: float) -> tuple[float, float]:
+        idx = self._forward_step_index(t)
+        return float(self.r_fwd[idx]), float(self.q_fwd[idx])
+
+    def _forward_time_from_tau(self, tau: float) -> float:
+        return min(max(float(self.T) - float(tau), 0.0), float(self.T))
+
+    def _node_factor_at_time(
+        self,
+        t: float,
+        node_factors: np.ndarray,
+        fwd_values: np.ndarray,
+    ) -> float:
+        current = min(max(float(t), 0.0), float(self.T))
+        if current <= self._time_grid[0] + 1e-14:
+            return float(node_factors[0])
+        if current >= self._time_grid[-1] - 1e-14:
+            return float(node_factors[-1])
+        idx = self._forward_step_index(current)
+        return float(
+            node_factors[idx]
+            * np.exp(-float(fwd_values[idx]) * (current - self._time_grid[idx]))
+        )
+
+    def _factor_to_maturity(
+        self,
+        tau: float,
+        node_factors: np.ndarray,
+        fwd_values: np.ndarray,
+    ) -> float:
+        current = self._forward_time_from_tau(tau)
+        node_factor = self._node_factor_at_time(current, node_factors, fwd_values)
+        return float(node_factors[-1] / node_factor)
+
+    def df_to_maturity(self, tau: float) -> float:
+        return self._factor_to_maturity(tau, self.node_dfs, self.r_fwd)
+
+    def carry_df_to_maturity(self, tau: float) -> float:
+        return self._factor_to_maturity(tau, self.carry_node_dfs, self.q_fwd)
+
     # ---- operators ----
     def _A1(self, U, t):
         out = np.zeros_like(U)
         if self.N_S < 3 or self.N_V < 3:
             return out
+        r_step, q_step = self._rq_at(t)
         v_int = self.V_grid[1:-1]
         L2v = (self._L(t) ** 2)[:, None] * v_int[None, :]
         if self._uniform:
@@ -176,8 +290,8 @@ class HestonSLVADICore:
         # WS-C1: the -rU reaction is carried implicitly in the S-direction (folded into A1
         # here and into the _tri_S diagonal), so the predictor no longer applies it.
         out[1:-1, 1:-1] = (0.5 * L2v * U_xx
-                           + ((self.r - self.q) - 0.5 * L2v) * U_x
-                           - self.r * U[1:-1, 1:-1])
+                           + ((r_step - q_step) - 0.5 * L2v) * U_x
+                           - r_step * U[1:-1, 1:-1])
         return out
 
     def _A2(self, U):
@@ -221,14 +335,20 @@ class HestonSLVADICore:
 
     def _ko_bnd(self, tau):
         """Dirichlet knock-out value at the truncated barrier boundary (rebate now vs discounted)."""
-        return self._barrier_rebate if self._barrier_pay_at_hit else self._barrier_rebate * float(np.exp(-self.r * tau))
+        return (
+            self._barrier_rebate
+            if self._barrier_pay_at_hit
+            else self._barrier_rebate * self.df_to_maturity(tau)
+        )
 
     def _bc(self, U, tau):
+        df = self.df_to_maturity(tau)
+        carry_df = self.carry_df_to_maturity(tau)
         if self._opt_is_call:
             U[0, :] = 0.0
-            U[-1, :] = max(0.0, self.S_max * np.exp(-self.q * tau) - self.K * np.exp(-self.r * tau))
+            U[-1, :] = max(0.0, self.S_max * carry_df - self.K * df)
         else:
-            U[0, :] = self.K * np.exp(-self.r * tau)
+            U[0, :] = self.K * df
             U[-1, :] = 0.0
         if self._barrier_active:  # override the barrier-side x-boundary with the KO Dirichlet value
             if self._barrier_is_up:
@@ -251,11 +371,13 @@ class HestonSLVADICore:
         return U
 
     def _s_boundary_rhs(self, rhs, tau, v_index=0):
+        df = self.df_to_maturity(tau)
+        carry_df = self.carry_df_to_maturity(tau)
         if self._opt_is_call:
             rhs[0] = 0.0
-            rhs[-1] = max(0.0, self.S_max * np.exp(-self.q * tau) - self.K * np.exp(-self.r * tau))
+            rhs[-1] = max(0.0, self.S_max * carry_df - self.K * df)
         else:
-            rhs[0] = self.K * np.exp(-self.r * tau)
+            rhs[0] = self.K * df
             rhs[-1] = 0.0
         if self._barrier_active:
             if self._barrier_is_up:
@@ -280,8 +402,9 @@ class HestonSLVADICore:
 
     # ---- tridiagonal builders (cached where the operator is time-independent) ----
     def _tri_S(self, dt_step, theta_loc, t_mid):
+        r_step, q_step = self._rq_at(t_mid)
         if self._constant_leverage:
-            key = (float(dt_step), float(theta_loc))
+            key = (float(dt_step), float(theta_loc), self._forward_step_index(t_mid))
             cached = self._S_tri_cache.get(key)
             if cached is not None:
                 return cached
@@ -292,23 +415,23 @@ class HestonSLVADICore:
         c = np.zeros((self.N_V, self.N_S))
         if self._uniform:
             c2 = 0.5 * (L2[None, :] * V) / (self.dx * self.dx)      # (N_V, N_S-2)
-            c1 = ((self.r - self.q) - 0.5 * (L2[None, :] * V)) / (2.0 * self.dx)
+            c1 = ((r_step - q_step) - 0.5 * (L2[None, :] * V)) / (2.0 * self.dx)
             a[:, 1:-1] = -theta_loc * dt_step * (c2 - c1)
             # WS-C1: (I - theta*dt*A1) diagonal gains +theta*dt*r from the implicit -rU reaction.
-            b[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2 + self.r)
+            b[:, 1:-1] = 1.0 + theta_loc * dt_step * (2.0 * c2 + r_step)
             c[:, 1:-1] = -theta_loc * dt_step * (c2 + c1)
         else:
             # per-node operator L = d2*fd2 + d1*fd1; implicit (I - theta*dt*L) with the
             # WS-C1 +r reaction folded onto the diagonal. x-coeffs broadcast across V-slices.
             d2 = 0.5 * (L2[None, :] * V)                            # (N_V, N_S-2) diffusion coeff
-            d1 = (self.r - self.q) - 0.5 * (L2[None, :] * V)        # convection coeff
+            d1 = (r_step - q_step) - 0.5 * (L2[None, :] * V)        # convection coeff
             wm2, w02, wp2 = self._xx                                # (N_S-2,)
             wm1, w01, wp1 = self._x1
             sub_op = d2 * wm2[None, :] + d1 * wm1[None, :]
             diag_op = d2 * w02[None, :] + d1 * w01[None, :]
             sup_op = d2 * wp2[None, :] + d1 * wp1[None, :]
             a[:, 1:-1] = -theta_loc * dt_step * sub_op
-            b[:, 1:-1] = 1.0 - theta_loc * dt_step * diag_op + theta_loc * dt_step * self.r
+            b[:, 1:-1] = 1.0 - theta_loc * dt_step * diag_op + theta_loc * dt_step * r_step
             c[:, 1:-1] = -theta_loc * dt_step * sup_op
         if self._constant_leverage:
             self._S_tri_cache[key] = (a, b, c)
@@ -353,11 +476,11 @@ class HestonSLVADICore:
         self._V_tri_cache[key] = (a, b, c)
         return a, b, c
 
-    def _ensure_S_lus(self, dt_step, theta_loc):
-        key = (float(dt_step), float(theta_loc))
+    def _ensure_S_lus(self, dt_step, theta_loc, t_mid):
+        key = (float(dt_step), float(theta_loc), self._forward_step_index(t_mid))
         if key in self._S_lu_cache:
             return self._S_lu_cache[key]
-        alpha, beta, gamma = self._tri_S(dt_step, theta_loc, 0.0)   # constant L -> t_mid inert
+        alpha, beta, gamma = self._tri_S(dt_step, theta_loc, t_mid)
         lus = []
         for j in range(self.N_V):
             A = sp.diags([alpha[j, 1:], beta[j], gamma[j, :-1]], offsets=[-1, 0, 1], format="csc")
@@ -379,7 +502,7 @@ class HestonSLVADICore:
     def _solve_S(self, source, A1U, dt_step, theta_loc, tau, t_mid):
         if self.use_sparse:
             Y = np.empty_like(source)
-            lus = self._ensure_S_lus(dt_step, theta_loc)
+            lus = self._ensure_S_lus(dt_step, theta_loc, t_mid)
             for j in range(self.N_V):
                 rhs = self._s_boundary_rhs(
                     source[:, j] - theta_loc * dt_step * A1U[:, j], tau, v_index=j
@@ -389,12 +512,13 @@ class HestonSLVADICore:
             return Y
         a, b, c = self._tri_S(dt_step, theta_loc, t_mid)
         rhs = source - theta_loc * dt_step * A1U                    # (N_S, N_V), fresh array
+        df = self.df_to_maturity(tau)
+        carry_df = self.carry_df_to_maturity(tau)
         if self._opt_is_call:
             rhs[0, :] = 0.0
-            rhs[-1, :] = max(0.0, self.S_max * np.exp(-self.q * tau)
-                             - self.K * np.exp(-self.r * tau))
+            rhs[-1, :] = max(0.0, self.S_max * carry_df - self.K * df)
         else:
-            rhs[0, :] = self.K * np.exp(-self.r * tau)
+            rhs[0, :] = self.K * df
             rhs[-1, :] = 0.0
         if self._barrier_active:
             if self._barrier_is_up:

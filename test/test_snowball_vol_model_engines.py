@@ -17,14 +17,14 @@ from quantark.asset.equity.engine.pde import (
 )
 from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.asset.equity.product.option import EuropeanVanillaOption
-from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+from quantark.asset.equity.product.option.snowball_config import BarrierConfig, PayoffConfig
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.param import FlatRateCurve, GridVolSurface, SpotQuote
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, OptionType
 from quantark.util.enum.engine_enums import HestonMCScheme, MonteCarloMethod
-from quantark.util.exceptions import PricingError
+from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.slv.leverage import LeverageSurface
 
@@ -59,6 +59,26 @@ def _snowball():
             ko_observation_type=ObservationType.DISCRETE,
             ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
             ki_barrier=75.0,
+            ki_observation_type=ObservationType.CONTINUOUS,
+            ki_continuous=True,
+        ),
+    )
+
+
+def _principal_excluded_snowball():
+    return SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=2.0,
+        contract_multiplier=1.0,
+        is_reverse=False,
+        payoff_config=PayoffConfig(include_principal=False),
+        barrier_config=BarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.12,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[i / 12.0 for i in range(1, 25)],
+            ki_barrier=80.0,
             ki_observation_type=ObservationType.CONTINUOUS,
             ki_continuous=True,
         ),
@@ -264,6 +284,44 @@ def test_snowball_heston_and_slv_pde_engines_run():
     assert np.isfinite(slv)
     assert 0.0 < heston < product.initial_price * product.contract_multiplier * 1.2
     assert slv == pytest.approx(heston, rel=0.02)
+
+
+def test_snowball_heston_pde_auto_grid_focuses_ki():
+    product = _principal_excluded_snowball()
+    env = _env()
+    solver = HestonSnowballPDESolver(_heston(), n_x=80, n_v=24, n_t=24)
+
+    assert solver._grid_concentration_spot(product, env) == pytest.approx(80.0)
+
+    core = solver._make_core(product, env, product.get_maturity(env))
+    assert float(np.min(np.abs(core.S_grid - 80.0))) == pytest.approx(0.0, abs=1e-10)
+
+
+def test_snowball_heston_pde_can_pin_critical_spots_for_diagnostics():
+    product = _principal_excluded_snowball()
+    env = _env()
+    solver = HestonSnowballPDESolver(
+        _heston(), n_x=80, n_v=24, n_t=24, pin_critical_spots=True
+    )
+
+    core = solver._make_core(product, env, product.get_maturity(env))
+    for level in [80.0, 100.0, 103.0]:
+        assert float(np.min(np.abs(core.S_grid - level))) == pytest.approx(0.0, abs=1e-10)
+
+
+def test_snowball_heston_pde_grid_focus_override_keeps_legacy_ko_focus():
+    product = _principal_excluded_snowball()
+    env = _env()
+    solver = HestonSnowballPDESolver(
+        _heston(), n_x=80, n_v=24, n_t=24, grid_focus="ko"
+    )
+
+    assert solver._grid_concentration_spot(product, env) == pytest.approx(103.0)
+
+
+def test_snowball_heston_pde_rejects_unknown_grid_focus():
+    with pytest.raises(ValidationError):
+        HestonSnowballPDESolver(_heston(), grid_focus="coupon")
 
 
 def test_snowball_vol_model_engines_reject_non_snowball_products():

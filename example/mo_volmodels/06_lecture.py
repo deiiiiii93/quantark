@@ -3,10 +3,11 @@
 Run: .venv/bin/python example/mo_volmodels/06_lecture.py [--tag latest|sample]
 
 Reads every artifact produced by stages 02-05 (the IV surface, the local-vol / Heston /
-SLV reprice results, the calibrated parameters, and the PNG figures) and weaves them into
-a single course-style HTML page: theory, the recovered market numbers, the model math,
-the calibration results, and the honest lessons. No external assets (figures are embedded
-as base64), so the page opens offline in any browser.
+SLV reprice results, the calibrated parameters, and the PNG figures), plus optional
+stage-07/08/09 exotic and hedging artifacts when present, and weaves them into a single course-style
+HTML page: theory, the recovered market numbers, the model math, the calibration
+results, and the honest lessons. No external assets (figures are embedded as base64),
+so the page opens offline in any browser.
 """
 import argparse
 import base64
@@ -73,6 +74,12 @@ def main() -> None:
     # Optional barrier-exotic artifact (stage 07); the section is omitted if absent.
     barrier_path = HERE / f"data/mo_barrier_{t}.json"
     barrier = json.loads(barrier_path.read_text()) if barrier_path.exists() else None
+    # Optional Snowball exotic artifact (stage 08); omitted if absent.
+    snowball_path = HERE / f"data/mo_snowball_{t}.json"
+    snowball = json.loads(snowball_path.read_text()) if snowball_path.exists() else None
+    # Optional delta-hedging artifact (stage 09); omitted if absent.
+    hedge_path = HERE / f"data/mo_hedging_{t}.json"
+    hedge = json.loads(hedge_path.read_text()) if hedge_path.exists() else None
 
     rmse_rows = [
         ("Black-Scholes (flat ATM vol)", bsflat, "no smile — baseline"),
@@ -113,9 +120,70 @@ def main() -> None:
 
     feller_ok = he["feller"] >= 1.0
 
-    # ---- Barrier exotic section (only if stage 07 ran) ----
+    # ---- Exotic sections (only if stages 07/08 ran) ----
     barrier_section = ""
     barrier_toc = ""
+    snowball_block = ""
+    hedge_section = ""
+    hedge_toc = ""
+    if snowball is not None:
+        sp_s = snowball["spec"]
+        order_s = ["BSM (flat ATM)", "Local Vol", "Heston QE", "SLV", "SLV QE"]
+
+        def _srow(name):
+            m = snowball["models"][name]
+            mc = m.get("mc_pct_initial", float("nan"))
+            se = m.get("mc_stderr", float("nan"))
+            notional = sp_s.get("notional", sp_s.get("s0", 1.0)) or 1.0
+            se_pct = 100.0 * se / notional if se == se else float("nan")
+            pde = m.get("pde_pct_initial")
+            pde_txt = "n/a" if pde is None else f"{pde:.3f}%"
+            gap = m.get("gap_pct")
+            gap_txt = "n/a" if gap is None else f"{gap:.2f}%"
+            ko = m.get("ko_probability")
+            ko_txt = "n/a" if ko is None else f"{ko*100:.1f}%"
+            ok = m.get("cross_check")
+            tick = (
+                "n/a" if ok is None else
+                ("<span style='color:#1a7f37;font-weight:700'>&#10003;</span>" if ok
+                 else "<span style='color:#b5432f;font-weight:700'>&#8211;</span>")
+            )
+            se_txt = f" &plusmn;{se_pct:.3f}%" if se_pct == se_pct else ""
+            return (f"<tr><td>{name}</td><td class='num'>{mc:.3f}%{se_txt}</td>"
+                    f"<td class='num'>{pde_txt}</td><td class='num'>{gap_txt}</td>"
+                    f"<td class='num'>{ko_txt}</td><td style='text-align:center'>{tick}</td></tr>")
+
+        rows_s = "".join(_srow(name) for name in order_s if name in snowball["models"])
+        lv_s = snowball["models"].get("Local Vol", {}).get("mc_pct_initial")
+        slv_qe_s = snowball["models"].get("SLV QE", {}).get("mc_pct_initial")
+        spread_s = (
+            slv_qe_s - lv_s
+            if lv_s is not None and slv_qe_s is not None
+            else float("nan")
+        )
+        snowball_block = f"""
+<h3>Snowball autocallable: same smile, different path dynamics</h3>
+<p>Stage 08 prices a <b>standard Snowball</b> (strike {sp_s['strike']:.0f},
+KO {sp_s['ko_barrier']:.0f}, KI {sp_s['ki_barrier']:.0f}, {sp_s['ko_monitoring']} KO,
+{sp_s['ki_monitoring']} KI, T&nbsp;=&nbsp;{sp_s['T']:.2f}, <b>principal {sp_s.get('principal', 'included')}</b>)
+under the same MO surface. The
+MC column is expressed as a percentage of initial notional. BSM, Local Vol, Heston QE,
+and SLV have PDE diagnostics where a PDE analogue exists; <b>SLV QE is MC-only</b> because
+QE is a Monte Carlo variance discretization, not a PDE scheme. The 2D Heston/SLV PDE
+rows use a Snowball-aware ADI grid ({sp_s.get('pde_grid_policy', 'critical levels pinned')})
+because a single KO-focused grid is too coarse for the KI/downside transition in this
+principal-excluded payoff.</p>
+<table><thead><tr><th>model</th><th>MC PV (% initial)</th><th>PDE PV</th>
+<th>|gap| / MC</th><th>KO probability</th><th>cross-check</th></tr></thead>
+<tbody>{rows_s}</tbody></table>
+{fig(HERE / f"data/plots/08_snowball_{t}.png", "Snowball PV by model (MC vs PDE where available).")}
+<div class="callout key"><b>Autocallable lesson.</b> A Snowball is even more path-dependent than
+the single barrier: KO timing, continuous KI, stochastic variance, and leverage all interact.
+On this fixture the standalone SLV QE MC row differs from Local Vol by {spread_s:+.2f} percentage
+points of initial notional, while preserving the same vanilla smile input. That gap is the economic
+content of forward-vol dynamics.</div>
+"""
+
     if barrier is not None:
         sp = barrier["spec"]
         order = ["BSM (flat ATM)", "Local Vol", "Heston", "SLV"]
@@ -135,10 +203,14 @@ def main() -> None:
         mc_lv = barrier["models"]["Local Vol"]["mc"]
         mc_he = barrier["models"]["Heston"]["mc"]
         spread = (mc_he - mc_lv) / mc_lv * 100 if mc_lv else float("nan")
-        barrier_toc = ('<li><a href="#s5">Exotics: where models diverge</a> — an up-and-out call, '
-                       'MC reference prices with PDE diagnostics under all four models</li>')
+        toc_tail = (
+            " and a Snowball autocallable" if snowball_block else ""
+        )
+        barrier_toc = (f'<li><a href="#s5">Exotics: where models diverge</a> — an up-and-out call'
+                       f'{toc_tail}, MC reference prices with PDE diagnostics</li>')
         barrier_section = f"""
 <h2 id="s5">5 &nbsp; Exotics: where the models diverge</h2>
+<h3>Barrier option: forward-vol dynamics beyond the terminal smile</h3>
 <p>Every model so far was tuned to the <em>same</em> vanilla smile, and on vanillas they largely
 agree. A <b>barrier option</b> breaks that tie: its payoff depends on the <em>path</em>, hence on the
 <b>forward-volatility dynamics</b> — how volatility evolves after the spot moves — which the terminal
@@ -165,6 +237,61 @@ MC/PDE cross-check rather than a data-repair warning. The robust conclusion rema
 <b>MC spread across models</b>, now with PDE confirmation where the numerical method is stable.
 This is the concrete reason SLV exists: it keeps the market smile
 <em>and</em> a realistic, tunable forward-vol process for exactly these products.</div>
+{snowball_block}
+"""
+    elif snowball_block:
+        barrier_toc = ('<li><a href="#s5">Exotics: where models diverge</a> — a Snowball '
+                       'autocallable under BSM, LV, Heston QE, SLV, and SLV QE</li>')
+        barrier_section = f"""
+<h2 id="s5">5 &nbsp; Exotics: where the models diverge</h2>
+{snowball_block}
+"""
+    if hedge is not None:
+        hs = hedge["spec"]
+        order_h = ["BSM (flat vol)", "Local Vol", "Heston", "SLV"]
+
+        def _hrow(name):
+            m = hedge["models"][name]
+            pnl_pct = 100.0 * m["total_residual_pnl"] / hs["s0"]
+            return (
+                f"<tr><td>{name}</td>"
+                f"<td class='num'>{m['initial_delta']:+.4f}</td>"
+                f"<td class='num'>{-m['initial_delta']:+.4f}</td>"
+                f"<td class='num'>{m['total_rebalance_units']:.3f}</td>"
+                f"<td class='num'>{m['total_residual_pnl']:+.3f} ({pnl_pct:+.3f}%)</td></tr>"
+            )
+
+        rows_h = "".join(_hrow(name) for name in order_h if name in hedge["models"])
+        lv_turn = hedge["models"].get("Local Vol", {}).get("total_rebalance_units")
+        slv_turn = hedge["models"].get("SLV", {}).get("total_rebalance_units")
+        turn_spread = (
+            slv_turn - lv_turn
+            if lv_turn is not None and slv_turn is not None
+            else float("nan")
+        )
+        hedge_toc = (
+            '<li><a href="#s6">Delta-neutral hedging</a> — BSM, LV, Heston, and SLV '
+            'produce different hedge ratios on the same spot path</li>'
+        )
+        hedge_section = f"""
+<h2 id="s6">6 &nbsp; Delta-neutral hedging: same smile, different hedge behavior</h2>
+<p>Stage 09 takes <b>BSM flat vol</b> plus the calibrated <b>LV, Heston, and SLV</b> models and asks a desk question:
+if we are long one ATM European call (strike {hs['strike']:.0f}, T&nbsp;=&nbsp;{hs['T']:.2f}) and
+rebalance to <b>delta neutral</b> on the same deterministic down-up spot path, how do the hedge
+ratios differ? At each rebalance the stock/futures hedge is <code>-model_delta</code>. The residual
+PnL is computed as <code>dV - previous_delta * dS</code>; funding, transaction costs, and model
+recalibration are deliberately excluded so the chart isolates model-delta behavior. The BSM row
+uses one flat ATM implied volatility ({hs.get('flat_vol', float('nan'))*100:.2f}%).</p>
+<table><thead><tr><th>model</th><th>initial delta</th><th>initial hedge</th>
+<th>total rebalanced units</th><th>cum residual PnL</th></tr></thead>
+<tbody>{rows_h}</tbody></table>
+{fig(HERE / f"data/plots/09_delta_hedging_{t}.png", "Delta-neutral hedge units and residual PnL under BSM, LV, Heston, and SLV.")}
+<div class="callout key"><b>Hedging lesson.</b> A single vanilla smile does not imply a single
+hedge book. BSM gives the flat-vol baseline; Local vol gives a deterministic smile-surface delta; Heston changes the hedge through
+stochastic-variance convexity; SLV keeps the smile-consistent local response while importing
+Heston-style forward-vol dynamics. On this path, SLV rebalances {turn_spread:+.2f} more
+underlying units than Local Vol, showing that model choice changes not only price but also
+hedge inventory, turnover, and residual PnL under a delta-neutral strategy.</div>
 """
     # Loud banner if this render is the synthetic test fixture, never the real deliverable.
     fixture_banner = "" if t == "latest" else (
@@ -236,8 +363,9 @@ snapshot {fetched} &middot; data via AKShare (Sina) &middot; models from <code>q
 <li><a href="#s3">Heston Stochastic Volatility</a> — CIR variance, the Feller condition, identification</li>
 <li><a href="#s4">Heston-SLV</a> — the leverage function and which model for which product</li>
 {barrier_toc}
-<li><a href="#s6">Model comparison &amp; takeaways</a></li>
-<li><a href="#s7">Reproducing this study</a></li>
+{hedge_toc}
+<li><a href="#s7">Model comparison &amp; takeaways</a></li>
+<li><a href="#s8">Reproducing this study</a></li>
 </ol></div>
 
 <h2 id="s1">1 &nbsp; Market data and the implied-vol surface</h2>
@@ -339,7 +467,22 @@ exactly and cheaply. SLV earns its keep on
 smile <em>and</em> realistic forward-vol dynamics matter. The leverage surface above is the reusable deliverable.</div>
 
 {barrier_section}
-<h2 id="s6">6 &nbsp; Model comparison and takeaways</h2>
+{hedge_section}
+<h2 id="s7">7 &nbsp; Model comparison and takeaways</h2>
+<p><b>What is IV RMSE?</b> For every quoted strike/maturity node, we first price the vanilla option
+under a candidate model, then convert that model price back into a Black implied volatility.
+The <b>implied-volatility root mean square error</b> is</p>
+<div class="eq">IV RMSE = &radic; mean<sub>K,T</sub> ( σ<sub>model-implied</sub>(K,T) &minus; σ<sub>market target</sub>(K,T) )²</div>
+<p>We report it in <b>vol-points</b>: 1.00 vol-point means 1 percentage point of annualized implied
+volatility. This is useful because it compares all models in the same market language, independent
+of option notional, moneyness, and maturity price scale. A low IV RMSE means the model reproduces
+the terminal vanilla smile well; a high IV RMSE means the model is visibly missing the traded smile.</p>
+<div class="callout"><b>What IV RMSE can and cannot tell us.</b> It is the right first diagnostic for
+separating flat BSM, Heston, Local Vol, and SLV on <em>vanilla smile fit</em>. It does not uniquely
+identify the forward-volatility dynamics. Two models can have similar IV RMSE and still produce
+different barrier prices, Snowball values, delta hedges, turnover, and residual PnL. That is why
+the lecture uses IV RMSE for the vanilla calibration story, then uses exotics and hedging to
+differentiate the dynamics.</div>
 <table><thead><tr><th>model</th><th>overall IV RMSE (vol-pts)</th><th>note</th></tr></thead>
 <tbody>{rmse_table}</tbody></table>
 <h3>Per-expiry IV RMSE (vol-points)</h3>
@@ -354,19 +497,22 @@ simultaneously smile-consistent and stochastic — the right tool once you leave
 The recurring theme: <em>market data is not arbitrage-free, parameters are not fully identified, and the
 calibration objective must respect the numerics that will consume its output.</em></div>
 
-<h2 id="s7">7 &nbsp; Reproducing this study</h2>
+<h2 id="s8">8 &nbsp; Reproducing this study</h2>
 <p>Two interpreters are involved: AKShare (data) and quantark (models) do not share one environment.</p>
 <div class="eq"><span class="c"># stage 01 fetches live data — AKShare interpreter</span>
 /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_snapshot.py
 
-<span class="c"># stages 02-06 replay the snapshot offline — quantark .venv</span>
+<span class="c"># stages 02-09 replay the snapshot offline — quantark .venv</span>
 .venv/bin/python example/mo_volmodels/02_build_iv_surface.py --snapshot latest
 .venv/bin/python example/mo_volmodels/03_dupire_localvol.py   --tag latest
 .venv/bin/python example/mo_volmodels/04_heston_calibration.py --tag latest
 .venv/bin/python example/mo_volmodels/05_slv_calibration.py    --tag latest
+.venv/bin/python example/mo_volmodels/07_barrier_exotic.py     --tag latest
+.venv/bin/python example/mo_volmodels/08_snowball_exotic.py    --tag latest
+.venv/bin/python example/mo_volmodels/09_delta_hedging.py      --tag latest
 .venv/bin/python example/mo_volmodels/06_lecture.py           --tag latest</div>
 <p><span class="pill">tip</span> A committed synthetic <code>--snapshot sample</code> (arbitrage-free by
-construction) drives the automated tests and lets stages 02–06 run with no network.</p>
+construction) drives the automated tests and lets stages 02–09 run with no network.</p>
 
 <footer>Generated by <code>example/mo_volmodels/06_lecture.py</code> from live artifacts (tag: <code>{t}</code>).
 Models: <code>quantark.volmodels</code> (Dupire / Heston / SLV). Data: AKShare CSI&nbsp;1000 option chain.

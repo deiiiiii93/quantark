@@ -3,6 +3,12 @@ Pricing engines for equity derivatives.
 """
 
 from .base_engine import BaseEngine
+from .capabilities import (
+    EngineCapability,
+    VolDynamicsType,
+    get_engine_capability,
+    validate_engine_capability,
+)
 from .analytical import (
     BlackScholesEngine,
     BarrierAnalyticalEngine,
@@ -60,6 +66,10 @@ from .quad import (
 __all__ = [
     # Base
     "BaseEngine",
+    "EngineCapability",
+    "VolDynamicsType",
+    "get_engine_capability",
+    "validate_engine_capability",
     # Analytical
     "BlackScholesEngine",
     "BarrierAnalyticalEngine",

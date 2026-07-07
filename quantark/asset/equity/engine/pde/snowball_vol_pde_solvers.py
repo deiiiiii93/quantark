@@ -13,7 +13,7 @@ from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.param import GridVolSurface
-from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.priceenv.term_sampling import TermCoefficients
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
@@ -176,6 +176,8 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         n_t: int = 100,
         scheme: ADIScheme | str = ADIScheme.CRAIG_SNEYD,
         grid_style: str = "concentrated",
+        grid_focus: str = "auto",
+        pin_critical_spots: bool = False,
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
@@ -186,14 +188,26 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             raise ValidationError(f"unknown ADI scheme: {scheme}")
         if scheme == ADIScheme.MCS:
             raise ValidationError("MCS is not implemented for the Heston/SLV Snowball PDE")
+        if grid_focus not in {"auto", "ko", "ki", "strike", "spot"}:
+            raise ValidationError(
+                "grid_focus must be one of: auto, ko, ki, strike, spot"
+            )
         self.model_params = model_params
         self.n_x = int(n_x)
         self.n_v = int(n_v)
         self.n_t = int(n_t)
         self.scheme = scheme
         self.grid_style = grid_style
+        self.grid_focus = grid_focus
+        self.pin_critical_spots = bool(pin_critical_spots)
 
     def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
+        t_grid = np.linspace(0.0, float(T), self.n_t + 1)
+        market = TermMarketContext.from_env(
+            env,
+            t_grid,
+            ref_strike=None,
+        )
         return HestonSLVADICore(
             float(env.spot),
             float(product.strike),
@@ -204,15 +218,101 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             self.n_x,
             self.n_v,
             self.n_t,
+            market_context=market,
             leverage=None,
             eta=1.0,
             grid_style=self.grid_style,
-            barrier_concentrate=self._primary_barrier(product),
+            barrier_concentrate=self._grid_concentration_spot(product, env),
+            critical_spots=(
+                self._grid_critical_spots(product, env)
+                if self.pin_critical_spots
+                else None
+            ),
         )
 
     def _primary_barrier(self, product: SnowballOption) -> float:
-        barriers = self._get_barriers(product)
-        return float(max(barriers)) if barriers else float(product.strike)
+        ko_barriers = self._positive_levels(product.barrier_config.ko_barrier)
+        if not ko_barriers:
+            return float(product.strike)
+        return float(min(ko_barriers) if product.is_reverse else max(ko_barriers))
+
+    @staticmethod
+    def _positive_levels(value) -> list[float]:
+        if value is None:
+            return []
+        if isinstance(value, np.ndarray):
+            raw_values = value.ravel()
+        elif isinstance(value, (list, tuple)):
+            raw_values = value
+        else:
+            raw_values = [value]
+        levels = []
+        for raw in raw_values:
+            try:
+                level = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(level) and level > 0.0:
+                levels.append(level)
+        return levels
+
+    @staticmethod
+    def _dedupe_levels(levels: list[float], tol: float = 1e-10) -> list[float]:
+        out: list[float] = []
+        for level in sorted(levels):
+            if not out or abs(level - out[-1]) > tol:
+                out.append(float(level))
+        return out
+
+    def _primary_ki_barrier(self, product: SnowballOption) -> Optional[float]:
+        ki_barriers = self._positive_levels(product.barrier_config.ki_barrier)
+        if not ki_barriers:
+            return None
+        return float(max(ki_barriers) if product.is_reverse else min(ki_barriers))
+
+    def _auto_grid_focus(self, product: SnowballOption) -> str:
+        # The KO level is still pinned as a critical point. The concentration
+        # center is set around the KI transition when it exists because the
+        # two-surface Snowball value is most grid-sensitive around that state
+        # switch and the terminal downside kink.
+        if product.has_ki_barrier:
+            return "ki"
+        return "strike"
+
+    def _grid_concentration_spot(
+        self, product: SnowballOption, env: PricingEnvironment
+    ) -> float:
+        focus = self._auto_grid_focus(product) if self.grid_focus == "auto" else self.grid_focus
+        if focus == "ko":
+            return self._primary_barrier(product)
+        if focus == "ki":
+            ki_barrier = self._primary_ki_barrier(product)
+            return float(ki_barrier if ki_barrier is not None else product.strike)
+        if focus == "spot":
+            return float(env.spot)
+        return float(product.strike)
+
+    def _grid_critical_spots(
+        self, product: SnowballOption, env: PricingEnvironment
+    ) -> list[float]:
+        levels = [
+            float(env.spot),
+            float(product.initial_price),
+            float(product.strike),
+        ]
+        levels.extend(self._positive_levels(product.barrier_config.ko_barrier))
+        levels.extend(self._positive_levels(product.barrier_config.ki_barrier))
+
+        call_strike = getattr(product.payoff_config, "call_strike", None)
+        if call_strike is not None:
+            levels.extend(self._positive_levels(call_strike))
+        airbag_barrier = getattr(product.airbag_config, "airbag_barrier", None)
+        if airbag_barrier is not None:
+            levels.extend(self._positive_levels(airbag_barrier))
+        airbag_strike = getattr(product.airbag_config, "airbag_strike", None)
+        if airbag_strike is not None:
+            levels.extend(self._positive_levels(airbag_strike))
+        return self._dedupe_levels(levels)
 
     def calculate_event_stats(self, product, pricing_env, **kwargs):
         return None
@@ -445,6 +545,12 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
         self.eta = float(eta)
 
     def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
+        t_grid = np.linspace(0.0, float(T), self.n_t + 1)
+        market = TermMarketContext.from_env(
+            env,
+            t_grid,
+            ref_strike=None,
+        )
         return HestonSLVADICore(
             float(env.spot),
             float(product.strike),
@@ -455,8 +561,14 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
             self.n_x,
             self.n_v,
             self.n_t,
+            market_context=market,
             leverage=self.leverage_surface,
             eta=self.eta,
             grid_style=self.grid_style,
-            barrier_concentrate=self._primary_barrier(product),
+            barrier_concentrate=self._grid_concentration_spot(product, env),
+            critical_spots=(
+                self._grid_critical_spots(product, env)
+                if self.pin_critical_spots
+                else None
+            ),
         )

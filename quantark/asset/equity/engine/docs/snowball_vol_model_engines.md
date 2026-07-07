@@ -45,10 +45,44 @@ surfaces, Snowball boundary hooks, and KO/KI step hooks. `V1` is solved first an
 snapshotted at ADI time nodes; `V0` then applies KI transitions from the matching `V1`
 surface after KO jumps, matching the existing Snowball PDE event order.
 
+For 2D Heston/SLV Snowball PDEs, the default log-spot grid focus is Snowball-aware.
+`grid_focus="auto"` centers the concentrated grid around the KI barrier when the product
+has KI. This avoids using a single KO-focused grid for principal-excluded structures
+whose value is dominated by the KI/downside transition. Callers can set
+`grid_focus="ko"`, `"ki"`, `"strike"`, or `"spot"` explicitly for diagnostics or legacy
+comparisons. `pin_critical_spots=True` additionally pins KO, KI, strike, spot, initial
+price, and optional payoff/airbag levels as exact grid nodes; this is opt-in because
+forcing far-away nodes into a single-center grid can be less stable on coarse meshes.
+
 ## Limitations
 
 - Heston/SLV Snowball PDE event stats are not exposed in this mount.
-- Heston/SLV PDE uses the same cumulative-to-maturity rate and carry convention as
-  the existing Heston/SLV Barrier PDE wrappers.
+- Heston/SLV path-dependent PDE routes consume a `TermMarketContext` on the ADI
+  grid for S-direction drift, reaction, boundary values, and maturity-paid
+  rebate discounting.
 - Heston/SLV PDE monitoring dates are snapped to the uniform ADI grid, following the
   current Barrier Heston/SLV PDE convention.
+- The 2D ADI grid still has one smooth concentration center. Exact multi-level pinning
+  is diagnostic-only by default; production cross-checks should still use spatial
+  convergence gates for long-dated or principal-excluded autocallables.
+
+## Term-Structured Market Inputs and Volatility Semantics
+
+The vol-model Snowball engines consume deterministic rates and carry on the
+engine time grid. Local Vol MC/PDE routes use per-step `r/q` plus a
+`LocalVolSurface`. Heston and Heston-SLV MC routes use per-step `r/q` in their
+path simulation. Heston and Heston-SLV path-dependent PDE routes pass a
+`TermMarketContext` into `HestonSLVADICore`, so S-direction drift, reaction,
+boundary values, and maturity-paid rebates are discounted from the curve rather
+than from scalar maturity rates.
+
+Market implied-volatility surfaces are not interpreted as direct scalar vol
+paths for Heston or SLV pricing. Heston engines price from `HestonParams`.
+Heston-SLV engines price from `HestonParams` plus a `LeverageSurface` and local
+volatility artifact. Market IV surfaces calibrate or rebuild those artifacts
+and belong to calibration and structured vol-risk APIs, not to legacy scalar
+`calculate_greeks()` vega.
+
+QUAD engines remain BSM/lognormal transition engines. Local Vol, Heston, and
+Heston-SLV QUAD requests must fail explicitly through the capability registry
+until a separate transition-kernel design is implemented.

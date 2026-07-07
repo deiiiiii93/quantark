@@ -12,6 +12,7 @@ from .credit_pricing_environment import (
     BasketCreditPricingEnvironment,
 )
 from .term_sampling import TermCoefficients
+from .market_context import TermMarketContext
 
 __all__ = [
     'PricingEnvironment',
@@ -21,4 +22,5 @@ __all__ = [
     'CreditPricingEnvironment',
     'BasketCreditPricingEnvironment',
     'TermCoefficients',
+    'TermMarketContext',
 ]

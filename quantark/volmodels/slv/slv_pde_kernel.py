@@ -88,7 +88,7 @@ def price_delta_gamma_slv_pde(
 
 def _deterministic_slv_barrier(s0, strike, is_call, T, params, lev_surface, r, carry, eta,
                                barrier, is_up, is_out, rebate, pay_at_hit, continuous, observe_taus,
-                               n_x, n_t):
+                               n_x, n_t, market_context=None):
     """BSM-limit (sigma -> 0) SLV barrier via the 1-D LV kernel at effective vol L(S,t)*sqrt(v_det)."""
     from quantark.volmodels.localvol.surface import LocalVolSurface
     from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde
@@ -99,8 +99,16 @@ def _deterministic_slv_barrier(s0, strike, is_call, T, params, lev_surface, r, c
     lv_grid = np.array([[max(float(np.asarray(lev_surface.leverage(np.array([k]), float(t))).ravel()[0]), 1e-8) * v_eff
                          for k in ks] for t in tg])
     lv = LocalVolSurface(strike_grid=ks, time_grid=tg, lv_grid=lv_grid)
-    n = max(int(n_t), 100)
-    dt = np.full(n, T / n); rf = np.full(n, float(r)); cf = np.full(n, float(carry))
+    if market_context is None:
+        n = max(int(n_t), 100)
+        dt = np.full(n, T / n)
+        rf = np.full(n, float(r))
+        cf = np.full(n, float(carry))
+    else:
+        dt = np.diff(market_context.t_grid)
+        rf = market_context.fwd_rates
+        cf = market_context.fwd_carry
+        n = int(dt.size)
     if continuous:
         obs_steps = None
     else:
@@ -135,6 +143,7 @@ def price_barrier_slv_pde(
     s0, strike, is_call, T, params, lev_surface, r, carry, barrier, is_up, is_out,
     rebate=0.0, pay_at_hit=False, continuous=True, observe_taus=None, eta=1.0,
     n_x=200, n_v=100, n_t=100, scheme=ADIScheme.CRAIG_SNEYD, theta=0.5, rannacher=True,
+    market_context=None,
 ):
     """Single-barrier option under Heston-SLV via 2D ADI.
 
@@ -155,7 +164,7 @@ def price_barrier_slv_pde(
         # exact 1-D local-vol kernel (the ADI grid is ill-conditioned at near-zero vol-of-vol).
         return _deterministic_slv_barrier(s0, strike, is_call, T, params, lev_surface, r, carry, eta,
                                           barrier, is_up, is_out, rebate, pay_at_hit, continuous,
-                                          observe_taus, n_x, n_t)
+                                          observe_taus, n_x, n_t, market_context=market_context)
 
     x0, v0 = float(np.log(s0)), params.v0
     dt_grid = float(T) / float(n_t)
@@ -167,11 +176,13 @@ def price_barrier_slv_pde(
         if continuous:
             core = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
                                     leverage=lev_surface, eta=eta, barrier=float(barrier),
-                                    barrier_is_up=bool(is_up), rebate=float(reb), pay_at_hit=bool(pay_at_hit))
+                                    barrier_is_up=bool(is_up), rebate=float(reb), pay_at_hit=bool(pay_at_hit),
+                                    market_context=market_context)
             U = core.solve(is_call, scheme, theta, rannacher)
             return core.interpolate(U, x0, v0)
         core = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t, leverage=lev_surface,
-                                eta=eta, grid_style="concentrated", barrier_concentrate=float(barrier))
+                                eta=eta, grid_style="concentrated", barrier_concentrate=float(barrier),
+                                market_context=market_context)
         tol = 1e-9 * float(barrier)
         # Discrete monitoring has a jump discontinuity at the barrier. The grid is pinned at the
         # barrier for resolution, but forcing that pinned node to the KO value makes the following
@@ -184,7 +195,7 @@ def price_barrier_slv_pde(
             if not _is_observation_tau(tau, dt_grid, obs_ks):
                 return U
             U = np.array(U, dtype=float)
-            U[ko_rows, :] = float(reb) if pay_at_hit else float(reb) * float(np.exp(-r * tau))
+            U[ko_rows, :] = float(reb) if pay_at_hit else float(reb) * core.df_to_maturity(tau)
             return U
 
         U = core.solve(is_call, scheme, theta, rannacher, step_hook=hook)
@@ -201,7 +212,8 @@ def price_barrier_slv_pde(
         core3 = HestonSLVADICore(s0, strike, T, r, carry, params, n_x, n_v, n_t,
                                  leverage=lev_surface, eta=eta,
                                  grid_style=("concentrated" if not continuous else "uniform"),
-                                 barrier_concentrate=(float(barrier) if not continuous else 0.0))
+                                 barrier_concentrate=(float(barrier) if not continuous else 0.0),
+                                 market_context=market_context)
         tol3 = 1e-9 * float(barrier)
         ko_rows3 = (core3.S_grid > barrier + tol3) if is_up else (core3.S_grid < barrier - tol3)
         obs3 = None if continuous else obs_ks

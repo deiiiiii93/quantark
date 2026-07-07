@@ -17,11 +17,10 @@ from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.param import GridVolSurface
-from quantark.priceenv import PricingEnvironment
+from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.util.enum import OptionType, ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.volmodels.curves import forward_carry_on_grid, forward_rates_on_grid
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.localvol.pde_kernel import price_barrier_lv_pde
 from quantark.volmodels.heston import HestonParams
@@ -87,8 +86,9 @@ class LocalVolBarrierPDESolver(BaseEngine):
         _check("LocalVolBarrierPDESolver", product)
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
-        r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
-        carry_fwd = forward_carry_on_grid(env.get_div_yield, t_grid)
+        market = TermMarketContext.from_env(env, t_grid, ref_strike=float(product.strike))
+        r_fwd = market.fwd_rates
+        carry_fwd = market.fwd_carry
         lv = self._prebuilt
         if lv is None:
             if not isinstance(env.vol_surface, GridVolSurface):
@@ -133,6 +133,10 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonBarrierPDESolver", product)
         T = float(product.get_maturity(env))
+        t_grid = np.linspace(0.0, T, self.n_t + 1)
+        market = TermMarketContext.from_env(
+            env, t_grid, ref_strike=None
+        )
         continuous, observe_taus = self._observe_taus(product, T)
         is_call = product.option_type == OptionType.CALL
 
@@ -141,6 +145,7 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
                                             self.model_params, float(env.get_rate(T)), float(env.get_div_yield(T)),
                                             rebate=reb, continuous=continuous, observe_taus=observe_taus,
                                             n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
+                                            market_context=market,
                                             **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)
@@ -164,6 +169,10 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonSLVBarrierPDESolver", product)
         T = float(product.get_maturity(env))
+        t_grid = np.linspace(0.0, T, self.n_t + 1)
+        market = TermMarketContext.from_env(
+            env, t_grid, ref_strike=None
+        )
         continuous, observe_taus = self._observe_taus(product, T)
         is_call = product.option_type == OptionType.CALL
 
@@ -173,6 +182,7 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
                                          float(env.get_rate(T)), float(env.get_div_yield(T)),
                                          eta=self.eta, rebate=reb, continuous=continuous, observe_taus=observe_taus,
                                          n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme,
+                                         market_context=market,
                                          **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)

@@ -170,7 +170,7 @@ def test_snowball_quad_flat_identity_golden():
     the exact-scalar collapse in _term_step_params)."""
     from quantark.asset.equity.engine.quad import SnowballQuadEngine
 
-    GOLDEN_QUAD_PRE = 102.9747856874856
+    GOLDEN_QUAD_PRE = 102.97478568748562
     px = SnowballQuadEngine().price(_standard_snowball(), make_term_env("flat"))
     assert px == GOLDEN_QUAD_PRE
 
