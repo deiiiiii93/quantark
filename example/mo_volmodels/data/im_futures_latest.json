@@ -1,0 +1,64 @@
+{
+  "source": "AKShare futures_zh_daily_sina / Sina",
+  "fetched_for_demo": "2026-07-08",
+  "valuation_date": "2026-07-06",
+  "underlying": {
+    "index_code": "000852.SH",
+    "futures_prefix": "IM",
+    "exchange": "CFFEX"
+  },
+  "notes": [
+    "Real listed IM futures closes aligned to the MO option snapshot date.",
+    "CFFEX CSI 1000 index futures multiplier is 200 CNY per index point."
+  ],
+  "quotes": [
+    {
+      "contract": "IM2607",
+      "expiry_date": "2026-07-17",
+      "maturity": 0.030136986301369864,
+      "close": 8458.0,
+      "open": 8610.4,
+      "high": 8617.6,
+      "low": 8406.0,
+      "volume": 61221,
+      "open_interest": 84489,
+      "multiplier": 200.0
+    },
+    {
+      "contract": "IM2608",
+      "expiry_date": "2026-08-21",
+      "maturity": 0.12602739726027398,
+      "close": 8362.0,
+      "open": 8528.8,
+      "high": 8528.8,
+      "low": 8304.4,
+      "volume": 13051,
+      "open_interest": 23481,
+      "multiplier": 200.0
+    },
+    {
+      "contract": "IM2609",
+      "expiry_date": "2026-09-18",
+      "maturity": 0.20273972602739726,
+      "close": 8265.0,
+      "open": 8403.0,
+      "high": 8419.8,
+      "low": 8213.0,
+      "volume": 151626,
+      "open_interest": 215188,
+      "multiplier": 200.0
+    },
+    {
+      "contract": "IM2612",
+      "expiry_date": "2026-12-18",
+      "maturity": 0.4520547945205479,
+      "close": 8013.8,
+      "open": 8154.8,
+      "high": 8156.4,
+      "low": 7960.0,
+      "volume": 26467,
+      "open_interest": 101841,
+      "multiplier": 200.0
+    }
+  ]
+}

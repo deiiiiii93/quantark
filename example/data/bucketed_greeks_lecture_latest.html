@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bucketed Greeks for a 000852.SH Snowball</title>
+<style>
+:root {
+  color-scheme: light;
+  --paper: #f5f7f4;
+  --ink: #17211f;
+  --muted: #5d6964;
+  --line: #cfd8d1;
+  --panel: #ffffff;
+  --panel2: #eef4f0;
+  --teal: #006d77;
+  --red: #b23a48;
+  --amber: #9b6a08;
+  --blue: #3559a6;
+  --shadow: 0 18px 50px rgba(23, 33, 31, .08);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(0,109,119,.07) 0 1px, transparent 1px 100%),
+    linear-gradient(180deg, rgba(0,109,119,.06) 0 1px, transparent 1px 100%),
+    var(--paper);
+  background-size: 44px 44px;
+  color: var(--ink);
+  font-family: "Avenir Next", "Gill Sans", "Segoe UI", sans-serif;
+  line-height: 1.55;
+}
+a { color: var(--teal); }
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 28px 70px;
+}
+header.hero {
+  min-height: 78vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(340px, .88fr);
+  gap: 34px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 22px 0 34px;
+}
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--teal);
+  font-size: .76rem;
+  font-weight: 800;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+h1, h2, h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+h1 {
+  max-width: 900px;
+  margin: 0;
+  font-size: 4.25rem;
+  font-weight: 700;
+}
+h2 {
+  margin: 0 0 14px;
+  font-size: 2.15rem;
+}
+h3 {
+  margin: 22px 0 8px;
+  font-size: 1.28rem;
+}
+p { max-width: 880px; margin: 0 0 14px; }
+.lede {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 1.14rem;
+  max-width: 760px;
+}
+.market-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+.chip {
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.7);
+  padding: 8px 11px;
+  border-radius: 999px;
+  font-size: .9rem;
+}
+.hero-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  border-radius: 8px;
+  padding: 22px;
+}
+.price-big {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  padding-bottom: 18px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.price-big span { color: var(--muted); font-size: .82rem; text-transform: uppercase; }
+.price-big strong {
+  font-size: 2.55rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hero-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.metric {
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  border-radius: 7px;
+  padding: 12px;
+  min-height: 80px;
+}
+.metric small {
+  display: block;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+  font-size: .68rem;
+}
+.metric b {
+  display: block;
+  margin-top: 5px;
+  font-size: 1.22rem;
+  font-variant-numeric: tabular-nums;
+}
+section {
+  padding: 42px 0;
+  border-bottom: 1px solid var(--line);
+}
+.section-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, .72fr) minmax(0, 1.28fr);
+  gap: 28px;
+  align-items: start;
+}
+.rail {
+  position: sticky;
+  top: 18px;
+}
+.rail p { color: var(--muted); }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+.timeline {
+  margin: 22px 0 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 18px;
+}
+.track {
+  position: relative;
+  height: 11px;
+  background: #dfe8e2;
+  border-radius: 999px;
+  margin: 28px 8px 22px;
+}
+.track::before, .track::after {
+  position: absolute;
+  top: -26px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+.track::before { content: "trade date"; left: 0; }
+.track::after { content: "2Y maturity"; right: 0; }
+.dot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--teal);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--teal);
+}
+.barrier-map {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+.barrier {
+  border-left: 4px solid var(--teal);
+  background: #f8fbf9;
+  padding: 10px 12px;
+  min-height: 78px;
+}
+.barrier.ki { border-color: var(--red); }
+.barrier.carry { border-color: var(--amber); }
+.barrier b { display: block; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 22px;
+  font-size: .9rem;
+  background: var(--panel);
+}
+th {
+  text-align: left;
+  background: #edf2ee;
+  color: #26322e;
+  border: 1px solid var(--line);
+  padding: 9px 10px;
+  font-weight: 800;
+}
+td {
+  border: 1px solid var(--line);
+  padding: 9px 10px;
+  vertical-align: top;
+}
+td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+table.kv th {
+  width: 210px;
+  background: #f3f6f2;
+}
+code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  background: #edf2ee;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: .92em;
+}
+.note {
+  border-left: 4px solid var(--teal);
+  background: #edf7f5;
+  padding: 13px 15px;
+  margin: 14px 0 22px;
+  border-radius: 0 8px 8px 0;
+}
+.note.warn { border-color: var(--amber); background: #fff7e3; }
+.note.error { border-color: var(--red); background: #fff0f2; }
+.formula {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  background: #17211f;
+  color: #edf7f5;
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+.toc a {
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: .88rem;
+}
+footer {
+  color: var(--muted);
+  font-size: .86rem;
+  padding-top: 24px;
+}
+@media (max-width: 900px) {
+  .wrap { padding: 22px 16px 46px; }
+  header.hero, .section-grid { grid-template-columns: 1fr; }
+  header.hero { min-height: auto; }
+  h1 { font-size: 2.75rem; }
+  .rail { position: static; }
+  .barrier-map, .hero-metrics { grid-template-columns: 1fr; }
+  table { display: block; overflow-x: auto; white-space: nowrap; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <div>
+    <p class="eyebrow">Bucketed Greeks lecture</p>
+    <h1>2Y monthly KO Snowball on 000852.SH, hedged with IM futures</h1>
+    <p class="lede">The goal is not to produce one impressive Greek. The goal is
+    to locate the risk on the tradable market coordinates: which IM futures
+    contract, which carry node, and which volatility tenor bucket moves the
+    Snowball PnL.</p>
+    <div class="market-strip">
+      <span class="chip">MO snapshot 2026-07-06T11:07:14</span>
+      <span class="chip">IM futures date 2026-07-06</span>
+      <span class="chip">spot 8,489.3</span>
+      <span class="chip">notional CNY 10.000m</span>
+    </div>
+    <nav class="toc">
+      <a href="#terms">Product terms</a>
+      <a href="#market">Market data</a>
+      <a href="#buckets">Bucket Greeks</a>
+      <a href="#checks">Finite-difference checks</a>
+      <a href="#model">Vol-model inputs</a>
+    </nav>
+  </div>
+  <aside class="hero-panel">
+    <div class="price-big">
+      <span>base option-leg PV</span>
+      <strong>-CNY 464,174</strong>
+      <span>-4.64% of notional, principal excluded</span>
+    </div>
+    <div class="hero-metrics">
+      <div class="metric"><small>Largest IM hedge</small><b>IM2612: -6.61</b></div>
+      <div class="metric"><small>Largest carry node</small><b>IM2612</b></div>
+      <div class="metric"><small>Largest vol bucket</small><b>1Y (0.5-1y)</b></div>
+      <div class="metric"><small>Difference mode</small><b>central</b></div>
+    </div>
+  </aside>
+</header>
+
+<section id="terms">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 1</p>
+      <h2>Explain the product before the Greeks</h2>
+      <p>A Snowball is path-dependent. KO dates, KI monitoring, barrier levels,
+      coupon convention, principal treatment, and notional scaling all change
+      the meaning of the risk table.</p>
+    </div>
+    <div>
+      <div class="panel"><table class='kv'><tbody><tr><th>Underlying</th><td>CSI 1000 index, 000852.SH, spot 8,489.3</td></tr><tr><th>Hedge instrument</th><td>CFFEX IM CSI 1000 index futures</td></tr><tr><th>Notional</th><td>CNY 10.000m</td></tr><tr><th>Tenor</th><td>2.0 years</td></tr><tr><th>KO schedule</th><td>24 monthly observations, flat 103% barrier</td></tr><tr><th>KO barrier</th><td>8,744.0</td></tr><tr><th>Coupon on KO</th><td>12.00% p.a.</td></tr><tr><th>KI monitoring</th><td>continuous, 75% barrier</td></tr><tr><th>KI barrier</th><td>6,366.9</td></tr><tr><th>Payoff scaling</th><td>principal excluded; option-leg PV scaled to notional</td></tr><tr><th>Pricing model</th><td>SnowballQuadEngine with MO implied-vol surface</td></tr></tbody></table></div>
+      <div class="timeline">
+        <div class="track">
+          <span class="dot" style="left:4.17%"></span><span class="dot" style="left:8.33%"></span>
+          <span class="dot" style="left:12.5%"></span><span class="dot" style="left:16.67%"></span>
+          <span class="dot" style="left:20.83%"></span><span class="dot" style="left:25%"></span>
+          <span class="dot" style="left:29.17%"></span><span class="dot" style="left:33.33%"></span>
+          <span class="dot" style="left:37.5%"></span><span class="dot" style="left:41.67%"></span>
+          <span class="dot" style="left:45.83%"></span><span class="dot" style="left:50%"></span>
+          <span class="dot" style="left:54.17%"></span><span class="dot" style="left:58.33%"></span>
+          <span class="dot" style="left:62.5%"></span><span class="dot" style="left:66.67%"></span>
+          <span class="dot" style="left:70.83%"></span><span class="dot" style="left:75%"></span>
+          <span class="dot" style="left:79.17%"></span><span class="dot" style="left:83.33%"></span>
+          <span class="dot" style="left:87.5%"></span><span class="dot" style="left:91.67%"></span>
+          <span class="dot" style="left:95.83%"></span><span class="dot" style="left:100%"></span>
+        </div>
+        <div class="barrier-map">
+          <div class="barrier"><b>Monthly KO</b>Any observation above 103% redeems and pays accrued coupon.</div>
+          <div class="barrier ki"><b>Continuous KI</b>Any path touch below 75% changes terminal downside.</div>
+          <div class="barrier carry"><b>Principal excluded</b>PV and Greeks shown for the option leg scaled to notional.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="market">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 2</p>
+      <h2>Use real 000852.SH and IM market marks</h2>
+      <p>The volatility surface comes from MO options on CSI 1000. The hedge
+      curve uses listed IM futures closes on the same market date. That lets
+      carry risk and futures delta be reported against the instruments a desk
+      can actually trade.</p>
+    </div>
+    <div>
+      <h3>MO parity surface inputs</h3>
+      <table><thead><tr><th>expiry</th><th>T</th><th>MO forward</th><th>implied r</th><th>implied q</th><th>OTM strikes</th></tr></thead><tbody><tr><td>2026-07-17</td><td>0.030y</td><td>8,434.7</td><td>+2.25%</td><td>+23.64%</td><td>28</td></tr><tr><td>2026-08-21</td><td>0.126y</td><td>8,352.1</td><td>-8.34%</td><td>+4.59%</td><td>27</td></tr><tr><td>2026-09-18</td><td>0.203y</td><td>8,258.6</td><td>+2.00%</td><td>+15.59%</td><td>31</td></tr><tr><td>2026-12-18</td><td>0.452y</td><td>8,031.0</td><td>+1.17%</td><td>+13.45%</td><td>19</td></tr><tr><td>2027-03-19</td><td>0.701y</td><td>7,844.7</td><td>+5.20%</td><td>+16.46%</td><td>18</td></tr><tr><td>2027-06-18</td><td>0.951y</td><td>7,611.9</td><td>+10.55%</td><td>+22.02%</td><td>12</td></tr></tbody></table>
+      <h3>IM futures hedge curve</h3>
+      <table><thead><tr><th>contract</th><th>expiry</th><th>T</th><th>close</th><th>basis vs spot</th><th>volume</th><th>open interest</th></tr></thead><tbody><tr><td>IM2607</td><td>2026-07-17</td><td>0.030y</td><td>8,458.0</td><td>-0.37%</td><td>61221</td><td>84489</td></tr><tr><td>IM2608</td><td>2026-08-21</td><td>0.126y</td><td>8,362.0</td><td>-1.50%</td><td>13051</td><td>23481</td></tr><tr><td>IM2609</td><td>2026-09-18</td><td>0.203y</td><td>8,265.0</td><td>-2.64%</td><td>151626</td><td>215188</td></tr><tr><td>IM2612</td><td>2026-12-18</td><td>0.452y</td><td>8,013.8</td><td>-5.60%</td><td>26467</td><td>101841</td></tr></tbody></table>
+      <div class="note warn"><b>Curve source.</b> real listed IM futures closes from AKShare/Sina, aligned to the MO option snapshot date. The
+      Snowball is 2Y while the listed IM curve here reaches 0.452y,
+      so the last carry node is a tail extrapolation. The table marks this
+      explicitly through the bucket metadata and makes the model assumption visible.</div>
+    </div>
+  </div>
+</section>
+
+<section id="buckets">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 3</p>
+      <h2>Bucketed Greeks make the hedge actionable</h2>
+      <p>Scalar delta, rhoq, and vega compress away where the risk lives. The
+      consolidated API returns normalized points, so each coordinate carries
+      the same fields: <code>derivative</code>, <code>reported</code>,
+      <code>pnl</code>, <code>bump_size</code>, and <code>difference_mode</code>.</p>
+    </div>
+    <div>
+      <h3>Futures delta: bump one IM close</h3>
+      <table><thead><tr><th>IM contract</th><th>T</th><th>F close</th><th>dPV/dF</th><th>hedge hands</th><th>PnL @ +5pt</th></tr></thead><tbody><tr><td>IM2607</td><td>0.030y</td><td>8,458.0</td><td>+CNY 190.46</td><td>-0.952</td><td>+CNY 952.29</td></tr><tr><td>IM2608</td><td>0.126y</td><td>8,362.0</td><td>+CNY 89.97</td><td>-0.450</td><td>+CNY 449.85</td></tr><tr><td>IM2609</td><td>0.203y</td><td>8,265.0</td><td>+CNY 93.63</td><td>-0.468</td><td>+CNY 468.17</td></tr><tr><td>IM2612</td><td>0.452y</td><td>8,013.8</td><td>+CNY 1,321</td><td>-6.605</td><td>+CNY 6,605</td></tr></tbody></table>
+      <div class="note"><b>Why it matters.</b> The sign and size of
+      <code>hedge_hands</code> tell the desk which IM contract to trade. A
+      scalar spot delta cannot distinguish IM2607 from IM2612.</div>
+      <h3>Carry rhoq: bump one implied q node</h3>
+      <table><thead><tr><th>carry node</th><th>T</th><th>rhoq +1%</th><th>raw dPV/dq</th><th>PnL @ +1bp</th></tr></thead><tbody><tr><td>IM2607</td><td>0.030y</td><td>-CNY 485.47</td><td>-CNY 48,547</td><td>-CNY 4.85</td></tr><tr><td>IM2608</td><td>0.126y</td><td>-CNY 948.15</td><td>-CNY 94,815</td><td>-CNY 9.48</td></tr><tr><td>IM2609</td><td>0.203y</td><td>-CNY 1,569</td><td>-CNY 156,895</td><td>-CNY 15.69</td></tr><tr><td>IM2612</td><td>0.452y</td><td>-CNY 47,857</td><td>-CNY 4.786m</td><td>-CNY 478.57</td></tr></tbody></table>
+      <div class="note"><b>Why it matters.</b> CSI 1000 Snowballs are highly
+      exposed to futures basis. Bucketed rhoq shows whether the risk is front
+      carry, quarter-end carry, or the extrapolated tail.</div>
+      <h3>Vol-tenor vega: bump one maturity interval</h3>
+      <table><thead><tr><th>vol bucket</th><th>mode</th><th>vega +1 vol pt</th><th>raw dPV/dsigma</th><th>PnL @ +1vol</th></tr></thead><tbody><tr><td>1M (0-0.0833y)</td><td>central</td><td>-CNY 3,055</td><td>-CNY 305,532</td><td>-CNY 3,055</td></tr><tr><td>3M (0.0833-0.25y)</td><td>central</td><td>-CNY 3,054</td><td>-CNY 305,419</td><td>-CNY 3,054</td></tr><tr><td>6M (0.25-0.5y)</td><td>central</td><td>-CNY 3,323</td><td>-CNY 332,311</td><td>-CNY 3,323</td></tr><tr><td>1Y (0.5-1y)</td><td>central</td><td>-CNY 7,502</td><td>-CNY 750,227</td><td>-CNY 7,502</td></tr><tr><td>1Y+ (1-2y)</td><td>central</td><td>-CNY 259.87</td><td>-CNY 25,987</td><td>-CNY 259.87</td></tr></tbody></table>
+      <div class="note"><b>Why it matters.</b> KO and KI features concentrate
+      exposure around observation and barrier-relevant horizons. A single flat
+      vega hides this term profile.</div>
+    </div>
+  </div>
+</section>
+
+<section id="checks">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 4</p>
+      <h2>Finite differences are explicit</h2>
+      <p>This example requests central mode per coordinate. That is the least
+      biased finite-difference choice when both up and down bumps are valid.</p>
+    </div>
+    <div>
+      <div class="formula">central derivative = (PV_up - PV_down) / (2 * bump)</div>
+      <table><thead><tr><th>coordinate</th><th>bucket</th><th>API</th><th>manual</th><th>PV up</th><th>PV down</th></tr></thead><tbody><tr><td>futures delta</td><td>IM2612</td><td>+CNY 1,321</td><td>+CNY 1,321</td><td>CNY -457,582</td><td>CNY -470,792</td></tr><tr><td>carry rhoq +1%</td><td>IM2612</td><td>-CNY 47,857</td><td>-CNY 47,857</td><td>CNY -464,652</td><td>CNY -463,695</td></tr><tr><td>vol vega +1pt</td><td>1Y (0.5-1y)</td><td>-CNY 7,502</td><td>-CNY 7,502</td><td>CNY -472,973</td><td>CNY -457,969</td></tr></tbody></table>
+      <div class="note"><b>Per-coordinate overrides.</b> The request sets
+      futures delta, carry rhoq, and vol-tenor vega to central mode through
+      <code>difference_mode_overrides</code>. The API still preserves older
+      coordinate defaults when callers do not override them.</div>
+    </div>
+  </div>
+</section>
+
+
+<section id="model">
+  <p class="eyebrow">Model-aware bucket input</p>
+  <h2>Keeping LocalVol, Heston, and SLV inputs distinct</h2>
+  <p>The consolidated API does not pretend that every vega is the same bump.
+  <code>VOL_TENOR_VEGA</code> directly bumps the pricing environment surface;
+  <code>MARKET_IV_VEGA</code> delegates to the volatility-model risk backend, so
+  LocalVol can rebuild a Dupire surface and Heston/SLV can use their calibration
+  artifacts.</p>
+  <table><thead><tr><th>scenario</th><th>model</th><th>mode</th><th>status</th><th>reported +1vol</th><th>raw derivative</th></tr></thead><tbody><tr><td>market_iv.parallel</td><td>dupire_local_vol</td><td>central</td><td>ok</td><td>+CNY 30,447</td><td>+CNY 3.045m</td></tr><tr><td>market_iv.maturity_row[2]</td><td>dupire_local_vol</td><td>central</td><td>ok</td><td>+CNY 5,485</td><td>+CNY 548,528</td></tr><tr><td>market_iv.maturity_row[5]</td><td>dupire_local_vol</td><td>central</td><td>ok</td><td>+CNY 37,160</td><td>+CNY 3.716m</td></tr></tbody></table>
+  <table><thead><tr><th>model artifact</th><th>vanilla IV RMSE</th></tr></thead><tbody><tr><td>Heston</td><td>1.98 vol pts</td></tr><tr><td>Heston-SLV</td><td>4.65 vol pts</td></tr></tbody></table>
+</section>
+
+
+<footer>
+Generated 2026-07-08 14:44:14 from local artifact tag <code>latest</code>.
+MO data date 2026-07-06; IM data date 2026-07-06.
+</footer>
+</div>
+</body>
+</html>

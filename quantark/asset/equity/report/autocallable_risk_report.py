@@ -43,7 +43,12 @@ from quantark.asset.equity.report.surfaces import (
     compute_surfaces_from_pv,
     derivative_1d,
 )
-from quantark.asset.equity.riskmeasures import GreeksCalculator
+from quantark.asset.equity.riskmeasures import (
+    BucketedGreekCoordinate,
+    BucketedGreekDifferenceMode,
+    BucketedGreeksRequest,
+    GreeksCalculator,
+)
 from quantark.param import FlatVolSurface, SpotQuote
 from quantark.param import TermStructureVolSurface
 from quantark.param.div import ContinuousDividendYield, DividendYield, TermStructureDividendYield
@@ -52,13 +57,9 @@ from quantark.util.enum import EquityGreek
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_divide, safe_log, safe_sqrt
 from quantark.asset.equity.report.term_structure import (
-    BucketedDividendYield,
-    BucketedVolSurface,
     ScaledVolSurface,
     ShiftedDividendYield,
     SkewSmileVolSurface,
-    TenorBucket,
-    default_tenor_buckets,
 )
 from quantark.portfolio import Portfolio
 from quantark.stresstest.equity.config import EquityStressConfig
@@ -733,10 +734,6 @@ def _compute_vanna_volga(
     return vanna, volga
 
 
-def _bucket_label(bucket: TenorBucket) -> str:
-    return f"{bucket.label} ({bucket.start:.3g}-{bucket.end:.3g}y)"
-
-
 def _compute_bucketed_greeks(
     product: SnowballOption,
     pricing_env: PricingEnvironment,
@@ -745,47 +742,44 @@ def _compute_bucketed_greeks(
     vol_bump: float = 0.01,
     div_bump: float = 1e-4,
 ) -> pd.DataFrame:
-    maturity = product.get_maturity(pricing_env)
-    buckets = default_tenor_buckets(maturity)
-    base_pv = float(engine.price(product, pricing_env))
-
+    result = GreeksCalculator().calculate_bucketed_greeks(
+        product,
+        pricing_env,
+        engine,
+        BucketedGreeksRequest(
+            coordinates=(
+                BucketedGreekCoordinate.VOL_TENOR_VEGA,
+                BucketedGreekCoordinate.CARRY_RHOQ,
+            ),
+            vol_bump=vol_bump,
+            carry_bump=div_bump,
+            difference_mode_overrides={
+                BucketedGreekCoordinate.VOL_TENOR_VEGA: (
+                    BucketedGreekDifferenceMode.ONE_SIDED_UP
+                ),
+                BucketedGreekCoordinate.CARRY_RHOQ: (
+                    BucketedGreekDifferenceMode.ONE_SIDED_UP
+                ),
+            },
+        ),
+    )
+    vega_by_bucket = {
+        point.bucket: point.derivative
+        for point in result.by_coordinate(BucketedGreekCoordinate.VOL_TENOR_VEGA)
+    }
+    rhoq_by_bucket = {
+        point.bucket: point.reported
+        for point in result.by_coordinate(BucketedGreekCoordinate.CARRY_RHOQ)
+    }
     rows = []
-    for bucket in buckets:
-        # Bucketed Vega
-        if pricing_env.vol_surface is None:
-            raise ValidationError("vol_surface is required for bucketed vega.")
-        vol_surface = BucketedVolSurface(
-            base=pricing_env.vol_surface,
-            bucket_start=bucket.start,
-            bucket_end=bucket.end,
-            bump=vol_bump,
-        )
-        env_vol = _clone_env(pricing_env, vol_surface=vol_surface)
-        pv_vol = float(engine.price(product, env_vol))
-        vega_bucket = (pv_vol - base_pv) / vol_bump
-
-        # Bucketed Dividend Rho
-        if pricing_env.div_yield is None:
-            base_div = ContinuousDividendYield(div_yield=0.0)
-        else:
-            base_div = pricing_env.div_yield
-        div_yield = BucketedDividendYield(
-            base=base_div,
-            bucket_start=bucket.start,
-            bucket_end=bucket.end,
-            bump=div_bump,
-        )
-        env_div = _clone_env(pricing_env, div_yield=div_yield)
-        pv_div = float(engine.price(product, env_div))
-        rho_q = (pv_div - base_pv) * (0.01 / div_bump)
-        rho_b = -rho_q
-
+    for bucket in vega_by_bucket:
+        rho_q = float(rhoq_by_bucket[bucket])
         rows.append(
             {
-                "bucket": _bucket_label(bucket),
-                "bucket_vega": vega_bucket,
+                "bucket": bucket,
+                "bucket_vega": float(vega_by_bucket[bucket]),
                 "bucket_rho_q": rho_q,
-                "bucket_rho_b": rho_b,
+                "bucket_rho_b": -rho_q,
             }
         )
 

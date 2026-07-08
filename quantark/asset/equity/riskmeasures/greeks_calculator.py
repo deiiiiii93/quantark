@@ -13,6 +13,13 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import EuropeanVanillaOption
+from quantark.asset.equity.riskmeasures.bucketed_greeks import (
+    BucketedGreekCoordinate,
+    BucketedGreekDifferenceMode,
+    BucketedGreekPoint,
+    BucketedGreeksRequest,
+    BucketedGreeksResult,
+)
 from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import CommonGreek, EquityGreek
@@ -170,6 +177,724 @@ class GreeksCalculator:
             return True
         # AUTO mode: use for PDE engines
         return getattr(engine, "engine_type", None) == EngineType.PDE
+
+    def _resolve_bucketed_coordinates(
+        self, request: BucketedGreeksRequest
+    ) -> Tuple[BucketedGreekCoordinate, ...]:
+        if request.coordinates is not None:
+            coordinates = tuple(request.coordinates)
+        elif request.futures_curve is not None:
+            coordinates = (
+                BucketedGreekCoordinate.FUTURES_DELTA,
+                BucketedGreekCoordinate.CARRY_RHOQ,
+            )
+        else:
+            coordinates = (
+                BucketedGreekCoordinate.VOL_TENOR_VEGA,
+                BucketedGreekCoordinate.CARRY_RHOQ,
+            )
+
+        for coordinate in request.difference_mode_overrides:
+            if coordinate not in coordinates:
+                raise ValidationError(
+                    f"difference_mode override coordinate {coordinate.value} "
+                    "is not in the requested coordinate set"
+                )
+        return coordinates
+
+    @staticmethod
+    def _coordinate_default_difference_mode(
+        coordinate: BucketedGreekCoordinate,
+    ) -> BucketedGreekDifferenceMode:
+        if coordinate in (
+            BucketedGreekCoordinate.FUTURES_DELTA,
+            BucketedGreekCoordinate.CARRY_RHOQ,
+        ):
+            return BucketedGreekDifferenceMode.ONE_SIDED_UP
+        return BucketedGreekDifferenceMode.CENTRAL
+
+    def _resolve_bucketed_difference_mode(
+        self,
+        coordinate: BucketedGreekCoordinate,
+        request: BucketedGreeksRequest,
+    ) -> BucketedGreekDifferenceMode:
+        mode = request.difference_mode_overrides.get(
+            coordinate, request.difference_mode
+        )
+        if mode == BucketedGreekDifferenceMode.COORDINATE_DEFAULT:
+            mode = self._coordinate_default_difference_mode(coordinate)
+        if (
+            coordinate
+            in (
+                BucketedGreekCoordinate.MARKET_IV_VEGA,
+                BucketedGreekCoordinate.MODEL_ARTIFACT,
+            )
+            and mode == BucketedGreekDifferenceMode.ONE_SIDED_UP
+        ):
+            raise ValidationError(
+                f"{coordinate.value} does not support one_sided_up in v1; "
+                "request central mode or extend VolModelRiskCalculator"
+            )
+        return mode
+
+    def calculate_bucketed_greeks(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        engine: BaseEngine,
+        request: Optional[BucketedGreeksRequest] = None,
+    ) -> BucketedGreeksResult:
+        request = request or BucketedGreeksRequest()
+        coordinates = self._resolve_bucketed_coordinates(request)
+        if (
+            BucketedGreekCoordinate.FUTURES_DELTA in coordinates
+            and request.futures_curve is None
+        ):
+            raise ValidationError("FUTURES_DELTA requires request.futures_curve")
+
+        points: List[BucketedGreekPoint] = []
+        for coordinate in coordinates:
+            mode = self._resolve_bucketed_difference_mode(coordinate, request)
+            if coordinate == BucketedGreekCoordinate.FUTURES_DELTA:
+                points.extend(
+                    self._calculate_bucketed_futures_delta_points(
+                        product, pricing_env, engine, request, mode
+                    )
+                )
+            elif coordinate == BucketedGreekCoordinate.CARRY_RHOQ:
+                points.extend(
+                    self._calculate_bucketed_carry_rhoq_points(
+                        product, pricing_env, engine, request, mode
+                    )
+                )
+            elif coordinate == BucketedGreekCoordinate.VOL_TENOR_VEGA:
+                points.extend(
+                    self._calculate_bucketed_vol_tenor_vega_points(
+                        product, pricing_env, engine, request, mode
+                    )
+                )
+            elif coordinate in (
+                BucketedGreekCoordinate.MARKET_IV_VEGA,
+                BucketedGreekCoordinate.MODEL_ARTIFACT,
+            ):
+                points.extend(
+                    self._calculate_bucketed_vol_model_points(
+                        product, pricing_env, engine, request, coordinate, mode
+                    )
+                )
+            else:
+                raise ValidationError(
+                    f"unsupported bucketed Greek coordinate: {coordinate}"
+                )
+
+        return BucketedGreeksResult(
+            points=tuple(points),
+            metadata={
+                "coordinates": tuple(coordinate.value for coordinate in coordinates),
+            },
+        )
+
+    def _calculate_bucketed_futures_delta_points(
+        self, product, pricing_env, engine, request, mode
+    ) -> List[BucketedGreekPoint]:
+        if request.futures_curve is None:
+            raise ValidationError("FUTURES_DELTA requires request.futures_curve")
+        if mode == BucketedGreekDifferenceMode.ONE_SIDED_UP:
+            return self._calculate_futures_delta_one_sided_points(
+                product, pricing_env, engine, request
+            )
+        if mode == BucketedGreekDifferenceMode.CENTRAL:
+            return self._calculate_futures_delta_central_points(
+                product, pricing_env, engine, request
+            )
+        raise ValidationError(
+            f"unsupported FUTURES_DELTA difference mode: {mode.value}"
+        )
+
+    def _calculate_futures_delta_one_sided_points(
+        self, product, pricing_env, engine, request
+    ) -> List[BucketedGreekPoint]:
+        rows = self.calculate_futures_delta_buckets(
+            product,
+            pricing_env,
+            engine,
+            request.futures_curve,
+            mode=request.futures_carry_mode,
+            price_bump=request.futures_price_bump,
+        )
+        points: List[BucketedGreekPoint] = []
+        for row in rows:
+            derivative = float(row["delta_bucket"])
+            bump_size = float(row["price_bump"])
+            points.append(
+                BucketedGreekPoint(
+                    coordinate=BucketedGreekCoordinate.FUTURES_DELTA,
+                    name=f"futures_delta.{row['contract']}",
+                    reported=derivative,
+                    derivative=derivative,
+                    pnl=derivative * bump_size,
+                    bump_size=bump_size,
+                    convention_scale=1.0,
+                    base_price=0.0,
+                    difference_mode=BucketedGreekDifferenceMode.ONE_SIDED_UP.value,
+                    contract=str(row["contract"]),
+                    maturity=float(row["maturity"]),
+                    future_price=float(row["future_price"]),
+                    delta_per_hand=float(row["delta_per_hand"]),
+                    hedge_hands=float(row["hedge_hands"]),
+                    extrapolated_tail=bool(row["extrapolated_tail"]),
+                    metadata={"source": "calculate_futures_delta_buckets"},
+                )
+            )
+        return points
+
+    def _calculate_futures_delta_central_points(
+        self, product, pricing_env, engine, request
+    ) -> List[BucketedGreekPoint]:
+        from quantark.asset.equity.market import hedge_hands as _hedge_hands
+        from quantark.util.enum import FuturesCarryRiskMode
+
+        futures_curve = request.futures_curve
+        resolved_mode = (
+            request.futures_carry_mode
+            if request.futures_carry_mode is not None
+            else futures_curve.mode
+        )
+        if resolved_mode is not FuturesCarryRiskMode.IMPLIED_FUTURES_CARRY:
+            raise ValidationError(
+                "calculate_futures_delta_buckets requires IMPLIED_FUTURES_CARRY "
+                f"mode, got {resolved_mode}"
+            )
+
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
+        base_env = deepcopy(pricing_env)
+        base_env.div_yield = futures_curve.to_dividend_yield_curve(
+            pricing_env.rate_curve
+        )
+        base_price = bump_engine.price(product, base_env)
+        maturity = product.get_maturity(pricing_env)
+        last_index = len(futures_curve.quotes) - 1
+        points: List[BucketedGreekPoint] = []
+
+        for i, quote in enumerate(futures_curve.quotes):
+            up_curve = futures_curve.bump_contract(
+                quote.contract, request.futures_price_bump
+            )
+            down_curve = futures_curve.bump_contract(
+                quote.contract, -request.futures_price_bump
+            )
+            up_env = deepcopy(pricing_env)
+            up_env.div_yield = up_curve.to_dividend_yield_curve(
+                pricing_env.rate_curve
+            )
+            down_env = deepcopy(pricing_env)
+            down_env.div_yield = down_curve.to_dividend_yield_curve(
+                pricing_env.rate_curve
+            )
+            up_price = bump_engine.price(product, up_env)
+            down_price = bump_engine.price(product, down_env)
+            derivative = (up_price - down_price) / (
+                2.0 * request.futures_price_bump
+            )
+            per_hand = futures_curve.delta_per_hand(quote.contract)
+            extrapolated_tail = (
+                i == last_index and maturity > quote.maturity
+            ) or (i == 0 and maturity < quote.maturity)
+            points.append(
+                BucketedGreekPoint(
+                    coordinate=BucketedGreekCoordinate.FUTURES_DELTA,
+                    name=f"futures_delta.{quote.contract}",
+                    reported=derivative,
+                    derivative=derivative,
+                    pnl=(up_price - down_price) / 2.0,
+                    bump_size=float(request.futures_price_bump),
+                    convention_scale=1.0,
+                    base_price=float(base_price),
+                    up_price=float(up_price),
+                    down_price=float(down_price),
+                    difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                    contract=quote.contract,
+                    maturity=float(quote.maturity),
+                    future_price=float(quote.price),
+                    delta_per_hand=float(per_hand),
+                    hedge_hands=float(_hedge_hands(derivative, per_hand)),
+                    extrapolated_tail=bool(extrapolated_tail),
+                    metadata={"source": "central_futures_mark_bump"},
+                )
+            )
+        return points
+
+    def _calculate_bucketed_carry_rhoq_points(
+        self, product, pricing_env, engine, request, mode
+    ) -> List[BucketedGreekPoint]:
+        div_bump = request.carry_bump or self._bump_config.div_bump
+        if request.futures_curve is not None:
+            if mode == BucketedGreekDifferenceMode.ONE_SIDED_UP:
+                return self._calculate_futures_rhoq_one_sided_points(
+                    product, pricing_env, engine, request, div_bump
+                )
+            if mode == BucketedGreekDifferenceMode.CENTRAL:
+                return self._calculate_futures_rhoq_central_points(
+                    product, pricing_env, engine, request, div_bump
+                )
+            raise ValidationError(
+                f"unsupported CARRY_RHOQ difference mode: {mode.value}"
+            )
+        return self._calculate_generic_carry_rhoq_points(
+            product, pricing_env, engine, request, mode, div_bump
+        )
+
+    def _calculate_futures_rhoq_one_sided_points(
+        self, product, pricing_env, engine, request, div_bump
+    ) -> List[BucketedGreekPoint]:
+        rows = self.calculate_futures_rhoq_buckets(
+            product,
+            pricing_env,
+            engine,
+            request.futures_curve,
+            mode=request.futures_carry_mode,
+            div_bump=div_bump,
+        )
+        points: List[BucketedGreekPoint] = []
+        for row in rows:
+            reported = float(row["rhoq_bucket"])
+            derivative = reported / 0.01
+            points.append(
+                BucketedGreekPoint(
+                    coordinate=BucketedGreekCoordinate.CARRY_RHOQ,
+                    name=f"carry_rhoq.{row['contract']}",
+                    reported=reported,
+                    derivative=derivative,
+                    pnl=derivative * float(row["div_bump"]),
+                    bump_size=float(row["div_bump"]),
+                    convention_scale=0.01,
+                    base_price=0.0,
+                    difference_mode=BucketedGreekDifferenceMode.ONE_SIDED_UP.value,
+                    contract=str(row["contract"]),
+                    maturity=float(row["maturity"]),
+                    future_price=float(row["future_price"]),
+                    extrapolated_tail=bool(row["extrapolated_tail"]),
+                    metadata={"source": "calculate_futures_rhoq_buckets"},
+                )
+            )
+        return points
+
+    def _calculate_futures_rhoq_central_points(
+        self, product, pricing_env, engine, request, div_bump
+    ) -> List[BucketedGreekPoint]:
+        from quantark.asset.equity.market import bump_term_yield_node
+        from quantark.asset.equity.report.term_structure import BucketedDividendYield
+        from quantark.param.div import ContinuousDividendYield
+        from quantark.util.enum import FuturesCarryRiskMode
+
+        futures_curve = request.futures_curve
+        resolved_mode = (
+            request.futures_carry_mode
+            if request.futures_carry_mode is not None
+            else futures_curve.mode
+        )
+        if resolved_mode is FuturesCarryRiskMode.MARKET_PRICE:
+            raise ValidationError(
+                "calculate_futures_rhoq_buckets does not support MARKET_PRICE "
+                "mode (it supplies no carry curve for repricing the option)"
+            )
+
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
+        maturity = product.get_maturity(pricing_env)
+        last_index = len(futures_curve.quotes) - 1
+
+        def _tail_flag(i, quote):
+            return (i == last_index and maturity > quote.maturity) or (
+                i == 0 and maturity < quote.maturity
+            )
+
+        points: List[BucketedGreekPoint] = []
+        if resolved_mode is FuturesCarryRiskMode.IMPLIED_FUTURES_CARRY:
+            base_div = futures_curve.to_dividend_yield_curve(pricing_env.rate_curve)
+            base_env = deepcopy(pricing_env)
+            base_env.div_yield = base_div
+            base_price = bump_engine.price(product, base_env)
+            for i, quote in enumerate(futures_curve.quotes):
+                up_env = deepcopy(pricing_env)
+                up_env.div_yield = bump_term_yield_node(base_div, i, div_bump)
+                down_env = deepcopy(pricing_env)
+                down_env.div_yield = bump_term_yield_node(base_div, i, -div_bump)
+                up_price = bump_engine.price(product, up_env)
+                down_price = bump_engine.price(product, down_env)
+                derivative = (up_price - down_price) / (2.0 * div_bump)
+                points.append(
+                    self._carry_rhoq_point(
+                        name=f"carry_rhoq.{quote.contract}",
+                        derivative=derivative,
+                        bump_size=div_bump,
+                        base_price=base_price,
+                        up_price=up_price,
+                        down_price=down_price,
+                        difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                        contract=quote.contract,
+                        maturity=quote.maturity,
+                        future_price=quote.price,
+                        extrapolated_tail=_tail_flag(i, quote),
+                        source="central_futures_implied_carry_node_bump",
+                    )
+                )
+            return points
+
+        base_price = bump_engine.price(product, pricing_env)
+        base_div = pricing_env.div_yield or ContinuousDividendYield(0.0)
+        edges = [0.0] + [q.maturity for q in futures_curve.quotes]
+        if maturity > edges[-1]:
+            edges[-1] = maturity
+        for i, quote in enumerate(futures_curve.quotes):
+            up_env = deepcopy(pricing_env)
+            up_env.div_yield = BucketedDividendYield(
+                base=base_div,
+                bucket_start=edges[i],
+                bucket_end=edges[i + 1],
+                bump=div_bump,
+            )
+            down_env = deepcopy(pricing_env)
+            down_env.div_yield = BucketedDividendYield(
+                base=base_div,
+                bucket_start=edges[i],
+                bucket_end=edges[i + 1],
+                bump=-div_bump,
+            )
+            up_price = bump_engine.price(product, up_env)
+            down_price = bump_engine.price(product, down_env)
+            derivative = (up_price - down_price) / (2.0 * div_bump)
+            points.append(
+                self._carry_rhoq_point(
+                    name=f"carry_rhoq.{quote.contract}",
+                    derivative=derivative,
+                    bump_size=div_bump,
+                    base_price=base_price,
+                    up_price=up_price,
+                    down_price=down_price,
+                    difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                    contract=quote.contract,
+                    maturity=quote.maturity,
+                    future_price=quote.price,
+                    extrapolated_tail=_tail_flag(i, quote),
+                    source="central_theoretical_carry_bucket_bump",
+                )
+            )
+        return points
+
+    def _calculate_generic_carry_rhoq_points(
+        self, product, pricing_env, engine, request, mode, div_bump
+    ) -> List[BucketedGreekPoint]:
+        from quantark.asset.equity.report.term_structure import (
+            BucketedDividendYield,
+            default_tenor_buckets,
+        )
+        from quantark.param.div import ContinuousDividendYield
+
+        if mode not in (
+            BucketedGreekDifferenceMode.ONE_SIDED_UP,
+            BucketedGreekDifferenceMode.CENTRAL,
+        ):
+            raise ValidationError(
+                f"unsupported CARRY_RHOQ difference mode: {mode.value}"
+            )
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
+        maturity = product.get_maturity(pricing_env)
+        buckets = tuple(request.tenor_buckets or default_tenor_buckets(maturity))
+        base_div = pricing_env.div_yield or ContinuousDividendYield(0.0)
+        base_price = bump_engine.price(product, pricing_env)
+        points: List[BucketedGreekPoint] = []
+        for bucket in buckets:
+            up_env = deepcopy(pricing_env)
+            up_env.div_yield = BucketedDividendYield(
+                base=base_div,
+                bucket_start=bucket.start,
+                bucket_end=bucket.end,
+                bump=div_bump,
+            )
+            up_price = bump_engine.price(product, up_env)
+            if mode == BucketedGreekDifferenceMode.ONE_SIDED_UP:
+                derivative = (up_price - base_price) / div_bump
+                points.append(
+                    self._carry_rhoq_point(
+                        name=f"carry_rhoq.{bucket.label}",
+                        derivative=derivative,
+                        bump_size=div_bump,
+                        base_price=base_price,
+                        up_price=up_price,
+                        down_price=None,
+                        difference_mode=BucketedGreekDifferenceMode.ONE_SIDED_UP.value,
+                        bucket=self._bucket_label(bucket),
+                        source="generic_tenor_carry_bucket_bump",
+                    )
+                )
+                continue
+
+            down_env = deepcopy(pricing_env)
+            down_env.div_yield = BucketedDividendYield(
+                base=base_div,
+                bucket_start=bucket.start,
+                bucket_end=bucket.end,
+                bump=-div_bump,
+            )
+            down_price = bump_engine.price(product, down_env)
+            derivative = (up_price - down_price) / (2.0 * div_bump)
+            points.append(
+                self._carry_rhoq_point(
+                    name=f"carry_rhoq.{bucket.label}",
+                    derivative=derivative,
+                    bump_size=div_bump,
+                    base_price=base_price,
+                    up_price=up_price,
+                    down_price=down_price,
+                    difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                    bucket=self._bucket_label(bucket),
+                    source="generic_tenor_carry_bucket_bump",
+                )
+            )
+        return points
+
+    @staticmethod
+    def _bucket_label(bucket) -> str:
+        return f"{bucket.label} ({bucket.start:.3g}-{bucket.end:.3g}y)"
+
+    def _carry_rhoq_point(
+        self,
+        *,
+        name,
+        derivative,
+        bump_size,
+        base_price,
+        up_price,
+        down_price,
+        difference_mode,
+        source,
+        bucket=None,
+        contract=None,
+        maturity=None,
+        future_price=None,
+        extrapolated_tail=None,
+    ) -> BucketedGreekPoint:
+        reported = derivative * 0.01
+        if difference_mode == BucketedGreekDifferenceMode.CENTRAL.value:
+            pnl = (up_price - down_price) / 2.0
+        else:
+            pnl = up_price - base_price
+        return BucketedGreekPoint(
+            coordinate=BucketedGreekCoordinate.CARRY_RHOQ,
+            name=name,
+            reported=reported,
+            derivative=derivative,
+            pnl=pnl,
+            bump_size=float(bump_size),
+            convention_scale=0.01,
+            base_price=float(base_price),
+            up_price=None if up_price is None else float(up_price),
+            down_price=None if down_price is None else float(down_price),
+            difference_mode=difference_mode,
+            bucket=bucket,
+            contract=contract,
+            maturity=None if maturity is None else float(maturity),
+            future_price=None if future_price is None else float(future_price),
+            extrapolated_tail=extrapolated_tail,
+            metadata={"source": source},
+        )
+
+    def _calculate_bucketed_vol_tenor_vega_points(
+        self, product, pricing_env, engine, request, mode
+    ) -> List[BucketedGreekPoint]:
+        from quantark.asset.equity.report.term_structure import (
+            BucketedVolSurface,
+            default_tenor_buckets,
+        )
+        from quantark.volmodels.heston import HestonParams
+
+        if isinstance(getattr(engine, "model_params", None), HestonParams):
+            engine_name = type(engine).__name__
+            if "SLV" in engine_name:
+                raise ValidationError(
+                    "VOL_TENOR_VEGA bumps pricing_env.vol_surface directly; "
+                    "SLV market vega requires local-vol/leverage recalibration. "
+                    "Request MARKET_IV_VEGA instead."
+                )
+            raise ValidationError(
+                "VOL_TENOR_VEGA bumps pricing_env.vol_surface directly; "
+                "Heston uses model params calibrated from market IV. "
+                "Request MARKET_IV_VEGA instead."
+            )
+        if pricing_env.vol_surface is None:
+            raise ValidationError("vol_surface is required for bucketed vega.")
+        if mode not in (
+            BucketedGreekDifferenceMode.ONE_SIDED_UP,
+            BucketedGreekDifferenceMode.CENTRAL,
+        ):
+            raise ValidationError(
+                f"unsupported VOL_TENOR_VEGA difference mode: {mode.value}"
+            )
+
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
+        maturity = product.get_maturity(pricing_env)
+        buckets = tuple(request.tenor_buckets or default_tenor_buckets(maturity))
+        base_price = bump_engine.price(product, pricing_env)
+        points: List[BucketedGreekPoint] = []
+        for bucket in buckets:
+            up_env = deepcopy(pricing_env)
+            up_env.vol_surface = BucketedVolSurface(
+                base=pricing_env.vol_surface,
+                bucket_start=bucket.start,
+                bucket_end=bucket.end,
+                bump=request.vol_bump,
+            )
+            up_price = bump_engine.price(product, up_env)
+            if mode == BucketedGreekDifferenceMode.ONE_SIDED_UP:
+                derivative = (up_price - base_price) / request.vol_bump
+                points.append(
+                    self._vol_tenor_vega_point(
+                        bucket=bucket,
+                        derivative=derivative,
+                        bump_size=request.vol_bump,
+                        base_price=base_price,
+                        up_price=up_price,
+                        down_price=None,
+                        difference_mode=BucketedGreekDifferenceMode.ONE_SIDED_UP.value,
+                    )
+                )
+                continue
+
+            down_env = deepcopy(pricing_env)
+            down_env.vol_surface = BucketedVolSurface(
+                base=pricing_env.vol_surface,
+                bucket_start=bucket.start,
+                bucket_end=bucket.end,
+                bump=-request.vol_bump,
+            )
+            down_price = bump_engine.price(product, down_env)
+            derivative = (up_price - down_price) / (2.0 * request.vol_bump)
+            points.append(
+                self._vol_tenor_vega_point(
+                    bucket=bucket,
+                    derivative=derivative,
+                    bump_size=request.vol_bump,
+                    base_price=base_price,
+                    up_price=up_price,
+                    down_price=down_price,
+                    difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                )
+            )
+        return points
+
+    def _vol_tenor_vega_point(
+        self,
+        *,
+        bucket,
+        derivative,
+        bump_size,
+        base_price,
+        up_price,
+        down_price,
+        difference_mode,
+    ) -> BucketedGreekPoint:
+        if difference_mode == BucketedGreekDifferenceMode.CENTRAL.value:
+            pnl = (up_price - down_price) / 2.0
+        else:
+            pnl = up_price - base_price
+        return BucketedGreekPoint(
+            coordinate=BucketedGreekCoordinate.VOL_TENOR_VEGA,
+            name=f"vol_tenor_vega.{bucket.label}",
+            reported=derivative * 0.01,
+            derivative=derivative,
+            pnl=pnl,
+            bump_size=float(bump_size),
+            convention_scale=0.01,
+            base_price=float(base_price),
+            up_price=float(up_price),
+            down_price=None if down_price is None else float(down_price),
+            difference_mode=difference_mode,
+            bucket=self._bucket_label(bucket),
+            metadata={"source": "generic_tenor_vol_bucket_bump"},
+        )
+
+    def _calculate_bucketed_vol_model_points(
+        self, product, pricing_env, engine, request, coordinate, mode
+    ) -> List[BucketedGreekPoint]:
+        from quantark.asset.equity.riskmeasures.vol_model_risk import (
+            VolModelRiskCalculator,
+        )
+
+        if mode != BucketedGreekDifferenceMode.CENTRAL:
+            raise ValidationError(
+                f"{coordinate.value} does not support {mode.value} in v1; "
+                "request central mode or extend VolModelRiskCalculator"
+            )
+        risk_calc = VolModelRiskCalculator(
+            heston_calibration_spec=request.heston_calibration_spec,
+            slv_calibration_spec=request.slv_calibration_spec,
+        )
+        if coordinate == BucketedGreekCoordinate.MARKET_IV_VEGA:
+            vol_result = risk_calc.calculate_market_vega(
+                product, pricing_env, engine, request.market_vega_request
+            )
+            return self._vol_risk_result_to_bucketed_points(
+                coordinate=BucketedGreekCoordinate.MARKET_IV_VEGA,
+                result=vol_result,
+                convention_scale=0.01,
+            )
+        if request.model_risk_request is None:
+            raise ValidationError("MODEL_ARTIFACT requires request.model_risk_request")
+        model_result = risk_calc.calculate_model_risk(
+            product, pricing_env, engine, request.model_risk_request
+        )
+        return self._vol_risk_result_to_bucketed_points(
+            coordinate=BucketedGreekCoordinate.MODEL_ARTIFACT,
+            result=model_result,
+            convention_scale=1.0,
+        )
+
+    def _vol_risk_result_to_bucketed_points(
+        self, *, coordinate, result, convention_scale
+    ) -> List[BucketedGreekPoint]:
+        model = result.metadata.get("model")
+        points: List[BucketedGreekPoint] = []
+        for point in result.points:
+            reported = None
+            if point.derivative is not None:
+                reported = point.derivative * convention_scale
+            if point.status == "failed":
+                points.append(
+                    BucketedGreekPoint.failed(
+                        coordinate=coordinate,
+                        name=point.name,
+                        bump_size=point.bump_size,
+                        base_price=result.base_price,
+                        error=point.error or "vol-model scenario failed",
+                        convention_scale=convention_scale,
+                        difference_mode=point.difference_mode,
+                        up_price=point.up_price,
+                        down_price=point.down_price,
+                        model=model,
+                        metadata=result.metadata,
+                    )
+                )
+                continue
+            points.append(
+                BucketedGreekPoint(
+                    coordinate=coordinate,
+                    name=point.name,
+                    reported=reported,
+                    derivative=point.derivative,
+                    pnl=point.pnl,
+                    bump_size=point.bump_size,
+                    convention_scale=convention_scale,
+                    base_price=result.base_price,
+                    up_price=point.up_price,
+                    down_price=point.down_price,
+                    difference_mode=point.difference_mode,
+                    status=point.status,
+                    error=point.error,
+                    model=model,
+                    metadata=result.metadata,
+                )
+            )
+        return points
 
     def _ensure_base_price(
         self,

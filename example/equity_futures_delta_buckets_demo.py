@@ -16,8 +16,17 @@ discontinuous KO/KI payoff makes small-bump finite differences noisy even
 with a fixed seed.
 
 Run: python example/equity_futures_delta_buckets_demo.py
+
+The same futures/carry bucket calculations are also available through the
+consolidated GreeksCalculator.calculate_bucketed_greeks() facade. See
+example/bucketed_greeks_consolidated_api_demo.py for the normalized result
+shape and per-coordinate difference-mode overrides.
 """
 from datetime import datetime
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from quantark.asset.equity.engine.analytical.deltaone_engine import DeltaOneEngine
 from quantark.asset.equity.engine.mc import SnowballMCEngine
