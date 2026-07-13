@@ -112,6 +112,53 @@ def term_env(r, q, sigma, spot=6000.0, tenors=(0.5, 1.0, 2.0)):
     )
 
 
+def synthetic_quote_book(sigma=0.20, spot=6000.0, r=0.0356, f_target=5800.0):
+    """(quotes, valuation_date, spot, rate_curve, carry_curve): one expiry,
+    clean OTM quotes priced exactly at Black-76(sigma), plus one bad quote
+    per cleaning rule (crossed, zero-bid, wide-spread, illiquid,
+    above-upper-bound, no-price, ITM side)."""
+    from datetime import datetime as _dt, timedelta as _td
+
+    from quantark.param import FlatRateCurve
+    from quantark.param.div.forward_carry_curve import ForwardCarryCurve
+    from quantark.param.vol.marketquotes import OptionQuote, black_price
+
+    import numpy as np
+
+    valuation_date = _dt(2023, 1, 3)
+    expiry = valuation_date + _td(days=91)
+    t = 91 / 365.0
+    rate_curve = FlatRateCurve(rate=r)
+    b0 = float(np.log(f_target / spot))
+    carry_curve = ForwardCarryCurve([(t, b0), (2 * t, 2 * b0)])
+    df = float(np.exp(-r * t))
+    liquid = dict(volume=100.0, open_interest=500.0)
+
+    def _quote(strike, cp, mid=None, spread=0.02, **kw):
+        is_call = cp.lower() in ("c", "call")
+        if mid is None:
+            mid = black_price(f_target, strike, t, sigma, df, is_call)
+        params = dict(bid=mid - spread / 2, ask=mid + spread / 2, **liquid)
+        params.update(kw)
+        return OptionQuote(expiry=expiry, strike=strike, call_put=cp, **params)
+
+    quotes = [
+        _quote(6000.0, "C"),                       # clean OTM call
+        _quote(6400.0, "call"),                    # clean OTM call (alias)
+        _quote(5600.0, "P"),                       # clean OTM put
+        _quote(5200.0, "put"),                     # clean OTM put (parity pair)
+        _quote(5200.0, "C"),                       # ITM call -> itm_side
+        _quote(6200.0, "C", bid=5.0, ask=4.0),     # crossed
+        _quote(6300.0, "C", bid=0.0, ask=4.0),     # zero bid
+        _quote(6800.0, "C", mid=20.0, spread=15.0),   # wide spread (75%)
+        _quote(5000.0, "P", volume=0.0, open_interest=1.0),  # illiquid
+        _quote(5600.0, "P", mid=df * 5600.0 * 1.05, spread=1.0),  # > upper bound
+        OptionQuote(expiry=expiry, strike=6100.0, call_put="C",
+                    last=30.0, **liquid),          # no bid/ask -> no_price
+    ]
+    return quotes, valuation_date, spot, rate_curve, carry_curve
+
+
 def flat_env(r, q, sigma, spot=6000.0):
     from datetime import datetime as _dt
 
