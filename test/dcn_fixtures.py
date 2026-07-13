@@ -191,3 +191,48 @@ def synthetic_svi_slices():
     f1 = fit_svi_slice(y, p1.total_variance(y), None, expiry_t=0.25)
     f2 = fit_svi_slice(y, p2.total_variance(y), None, expiry_t=0.5)
     return [f1, f2]
+
+
+def synthetic_cleaned_set(heston_params=None):
+    """CleanedQuoteSet generated from the Heston CF pricer (2 expiries x 7
+    strikes) via clean_and_imply — ground truth for calibration round-trips
+    and the surface shock pipeline."""
+    from datetime import datetime as _dt, timedelta as _td
+
+    import numpy as np
+
+    from quantark.param import FlatRateCurve
+    from quantark.param.div.forward_carry_curve import ForwardCarryCurve
+    from quantark.param.vol.marketquotes import OptionQuote, clean_and_imply
+    from quantark.volmodels.heston import HestonParams
+    from quantark.volmodels.heston.analytical_kernel import heston_call_price
+
+    params = heston_params or HestonParams(
+        v0=0.04, kappa=1.5, theta=0.04, sigma=0.5, rho=-0.5
+    )
+    spot, r, q = 6000.0, 0.0356, 0.02
+    valuation_date = _dt(2023, 1, 3)
+    rate_curve = FlatRateCurve(rate=r)
+    day_counts = (91, 182)
+    ts = [d / 365.0 for d in day_counts]
+    carry_curve = ForwardCarryCurve([(t, (r - q) * t) for t in ts])
+    liquid = dict(volume=100.0, open_interest=500.0)
+
+    quotes = []
+    for days, t in zip(day_counts, ts):
+        expiry = valuation_date + _td(days=days)
+        f = carry_curve.forward(spot, t)
+        df = float(np.exp(-r * t))
+        for mult in (0.85, 0.90, 0.95, 1.0, 1.05, 1.10, 1.20):
+            k = round(f * mult, 2)
+            call = heston_call_price(spot, k, t, params, r, q)
+            if k >= f:
+                mid, cp = call, "C"
+            else:
+                mid, cp = call - df * (f - k), "P"   # parity, same D/F
+            quotes.append(OptionQuote(
+                expiry=expiry, strike=k, call_put=cp,
+                bid=mid - 0.01, ask=mid + 0.01, **liquid,
+            ))
+    return clean_and_imply(quotes, valuation_date, spot, rate_curve, carry_curve), \
+        rate_curve, carry_curve, params

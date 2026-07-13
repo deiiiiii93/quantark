@@ -14,6 +14,7 @@ from .analytical_kernel import (
     price_european_weber,
 )
 from .calibration import CalibrationResult, MarketOption, calibrate_heston
+from .from_quotes import HestonQuoteCalibration, calibrate_heston_from_quotes
 
 __all__ = [
     "HestonParams",
@@ -27,4 +28,6 @@ __all__ = [
     "MarketOption",
     "CalibrationResult",
     "calibrate_heston",
+    "calibrate_heston_from_quotes",
+    "HestonQuoteCalibration",
 ]
