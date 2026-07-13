@@ -8,6 +8,7 @@ from .bucketed_greeks import (
     BucketedGreeksRequest,
     BucketedGreeksResult,
 )
+from .greek_conventions_report import CashGreeksReport, build_cash_greeks_report
 from .greeks_calculator import GreeksCalculator
 from .vol_model_risk import VolModelRiskCalculator
 
@@ -18,5 +19,7 @@ __all__ = [
     "BucketedGreeksRequest",
     "BucketedGreeksResult",
     "GreeksCalculator",
+    "CashGreeksReport",
+    "build_cash_greeks_report",
     "VolModelRiskCalculator",
 ]
