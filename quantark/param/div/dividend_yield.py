@@ -131,3 +131,41 @@ class NoDividend(DividendYield):
     
     def __repr__(self):
         return "NoDividend()"
+
+
+@dataclass(frozen=True)
+class CarryInvariantDividendYield(DividendYield):
+    """Dividend yield re-derived so the forward F(0,T) is invariant under a
+    discount-curve bump (spec WP3.3 desk convention).
+
+    With cumulative carry B(T) = (r(T) - q(T)) * T held fixed, a rate bump
+    Delta_r(T) implies q'(T) = q(T) + Delta_r(T) pointwise, so the drift
+    r_fwd - q_fwd (and hence every simulated path) is unchanged and the bump
+    is pure discounting.
+    """
+
+    base: DividendYield
+    base_rate_curve: object      # RateCurve before the bump
+    bumped_rate_curve: object    # RateCurve after the bump
+
+    def get_yield(self, time_to_maturity):
+        t = time_to_maturity
+        base_q = self.base.get_yield(t)
+        try:
+            return base_q + (
+                self.bumped_rate_curve.get_rate(t)
+                - self.base_rate_curve.get_rate(t)
+            )
+        except TypeError:
+            # array input: evaluate pointwise (RateCurve API is scalar)
+            import numpy as np
+
+            arr = np.asarray(t, dtype=float)
+            delta = np.array(
+                [
+                    self.bumped_rate_curve.get_rate(float(x))
+                    - self.base_rate_curve.get_rate(float(x))
+                    for x in arr.ravel()
+                ]
+            ).reshape(arr.shape)
+            return base_q + delta

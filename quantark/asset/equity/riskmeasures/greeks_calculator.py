@@ -340,14 +340,35 @@ class GreeksCalculator:
         bump = request.rate_bump if request.rate_bump is not None else 1e-4
         bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
         base_price = bump_engine.price(product, pricing_env)
+
+        def _rate_bumped_env(bumped_curve):
+            # desk convention (spec WP3.3): carry B(T) is the invariant, so
+            # a discount bump re-derives q pointwise and F(0,T) is unchanged
+            # -> the bump is pure discounting
+            from quantark.param.div.dividend_yield import (
+                CarryInvariantDividendYield,
+            )
+
+            env = deepcopy(pricing_env)
+            env.rate_curve = bumped_curve
+            if pricing_env.div_yield is not None:
+                env.div_yield = CarryInvariantDividendYield(
+                    base=pricing_env.div_yield,
+                    base_rate_curve=curve,
+                    bumped_rate_curve=bumped_curve,
+                )
+            return env
+
         points: List[BucketedGreekPoint] = []
         for tenor, role in zip(tenors, info.roles):
             if role is not NodeRole.CALIBRATED:
                 continue
-            up_env = deepcopy(pricing_env)
-            up_env.rate_curve = key_rate_bumped_zero_curve(curve, tenor, +bump)
-            down_env = deepcopy(pricing_env)
-            down_env.rate_curve = key_rate_bumped_zero_curve(curve, tenor, -bump)
+            up_env = _rate_bumped_env(
+                key_rate_bumped_zero_curve(curve, tenor, +bump)
+            )
+            down_env = _rate_bumped_env(
+                key_rate_bumped_zero_curve(curve, tenor, -bump)
+            )
             up_price = bump_engine.price(product, up_env)
             down_price = bump_engine.price(product, down_env)
             derivative = (up_price - down_price) / (2.0 * bump)
@@ -371,15 +392,13 @@ class GreeksCalculator:
                     metadata={
                         "unit": "per_1bp",
                         "roles_inferred": info.roles_inferred,
-                        "rebuild_rule": "zero-rate pillar bump, curve "
-                        "interpolation rebuilds between pillars",
+                        "rebuild_rule": "zero-rate pillar bump; carry-invariant "
+                        "q re-derivation (F unchanged) -> pure discounting",
                     },
                 )
             )
-        par_up = deepcopy(pricing_env)
-        par_up.rate_curve = ParallelShiftRateCurve(curve, +bump)
-        par_down = deepcopy(pricing_env)
-        par_down.rate_curve = ParallelShiftRateCurve(curve, -bump)
+        par_up = _rate_bumped_env(ParallelShiftRateCurve(curve, +bump))
+        par_down = _rate_bumped_env(ParallelShiftRateCurve(curve, -bump))
         par_derivative = (
             bump_engine.price(product, par_up)
             - bump_engine.price(product, par_down)
@@ -407,7 +426,8 @@ class GreeksCalculator:
                         <= 0.05 * max(abs(parallel_per_1bp), 1e-12)
                     ),
                     "roles_inferred": info.roles_inferred,
-                    "rebuild_rule": "ParallelShiftRateCurve",
+                    "rebuild_rule": "ParallelShiftRateCurve; carry-invariant "
+                    "q re-derivation (F unchanged)",
                 },
             )
         )
