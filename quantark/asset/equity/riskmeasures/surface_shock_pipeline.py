@@ -49,6 +49,7 @@ class SurfaceShockResult:
     no_arb_passed: bool
     notes: Tuple[str, ...]
     calibration: Optional[dict] = None   # heston: base/shocked convergence
+    artifact_diagnostics: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -62,6 +63,10 @@ class SurfaceShockResult:
             "notes": list(self.notes),
             "calibration": (
                 dict(self.calibration) if self.calibration else None
+            ),
+            "artifact_diagnostics": (
+                dict(self.artifact_diagnostics)
+                if self.artifact_diagnostics else None
             ),
         }
 
@@ -142,6 +147,7 @@ def run_surface_shock_pipeline(
     if not isinstance(mode, SurfaceShockMode):
         raise ValidationError(f"mode must be SurfaceShockMode, got {mode!r}")
     notes = []
+    artifact_diagnostics = None
     shock = {
         "layer": SHOCK_LAYER,
         "dsigma": float(dsigma),
@@ -181,6 +187,32 @@ def run_surface_shock_pipeline(
                 div_yield=shocked_env.get_div_yield,
             )
             engine = engine_factory(model, shocked_lv)
+        artifact_diagnostics = {
+            "base_local_vol": {
+                "min": float(base_lv.lv_grid.min()),
+                "max": float(base_lv.lv_grid.max()),
+                "n_times": int(base_lv.time_grid.size),
+                "n_strikes": int(base_lv.strike_grid.size),
+                "time_range": [
+                    float(base_lv.time_grid[0]),
+                    float(base_lv.time_grid[-1]),
+                ],
+                "strike_range": [
+                    float(base_lv.strike_grid[0]),
+                    float(base_lv.strike_grid[-1]),
+                ],
+            },
+            "shocked_local_vol": {
+                "min": float(
+                    (base_lv if mode is SurfaceShockMode.FROZEN else shocked_lv)
+                    .lv_grid.min()
+                ),
+                "max": float(
+                    (base_lv if mode is SurfaceShockMode.FROZEN else shocked_lv)
+                    .lv_grid.max()
+                ),
+            },
+        }
         pv_shocked = float(engine.price(product, shocked_env))
     else:  # heston
         calibration_info = {}
@@ -229,4 +261,5 @@ def run_surface_shock_pipeline(
         no_arb_passed=bool(no_arb_passed),
         notes=tuple(notes),
         calibration=(calibration_info if model == "heston" else None),
+        artifact_diagnostics=artifact_diagnostics,
     )

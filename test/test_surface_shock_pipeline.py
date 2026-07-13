@@ -86,6 +86,12 @@ def test_lv_recalibrate_transmits_the_shock():
     assert res.pnl != 0.0
     assert res.no_arb_passed
     assert res.shock["layer"] == "cleaned_market_iv_nodes"
+    diagnostics = res.artifact_diagnostics
+    assert diagnostics["base_local_vol"]["min"] > 0.0
+    assert diagnostics["shocked_local_vol"]["min"] > 0.0
+    assert diagnostics["shocked_local_vol"]["max"] >= (
+        diagnostics["shocked_local_vol"]["min"]
+    )
 
 
 def test_heston_frozen_is_zero_with_note():
