@@ -176,3 +176,18 @@ def flat_env(r, q, sigma, spot=6000.0):
         valuation_date=_dt(2023, 1, 3),
         day_count_convention=DayCountConvention.ACT_365,
     )
+
+
+def synthetic_svi_slices():
+    """Two calendar-consistent SVISliceFit objects (T=0.25, 0.5) from known
+    params, scaled so w(y, 0.5) > w(y, 0.25) on y in [-1.5, 1.5]."""
+    import numpy as np
+
+    from quantark.param.vol.svi import SVIParams, fit_svi_slice
+
+    y = np.linspace(-0.8, 0.8, 15)
+    p1 = SVIParams(a=0.008, b=0.10, rho=-0.3, m=0.02, sigma=0.2)
+    p2 = SVIParams(a=0.020, b=0.16, rho=-0.3, m=0.02, sigma=0.25)
+    f1 = fit_svi_slice(y, p1.total_variance(y), None, expiry_t=0.25)
+    f2 = fit_svi_slice(y, p2.total_variance(y), None, expiry_t=0.5)
+    return [f1, f2]
