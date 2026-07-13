@@ -55,8 +55,14 @@ def build_dcn_grid_context(product: DCNOption) -> DCNGridContext:
         is_k.append(m.is_ko_obs)
         # merged-date convention (spec WP1.1): one a_k per merged eligible
         # month; the samples have exactly one k per row, so accrual == a.
-        acc_c.append(a * len(m.month_indices) if m.is_coupon_obs else 0.0)
-        acc_k.append(a * len(m.month_indices) if m.is_ko_obs else 0.0)
+        coupon_periods = sum(
+            k >= s.spec.lock_months for k in m.month_indices
+        )
+        ko_periods = sum(
+            k >= s.spec.ko_lock_months for k in m.month_indices
+        )
+        acc_c.append(a * coupon_periods if m.is_coupon_obs else 0.0)
+        acc_k.append(a * ko_periods if m.is_ko_obs else 0.0)
         pay_c.append(_yf(v, m.coupon_payment_date))
         pay_k.append(_yf(v, m.ko_payment_date))
         kmap.append(m.month_indices)

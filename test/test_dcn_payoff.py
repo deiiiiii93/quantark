@@ -101,14 +101,18 @@ def test_knocked_in_at_valuation_pays_no_coupons_ever():
     assert cf.loss_pv[0] < 0.0
 
 
-def test_valuation_date_breach_not_monitored():
-    # column 0 (valuation date) at/below KI must NOT knock in (seed authoritative)
+def test_valuation_date_breach_is_monitored():
+    # The contract observes every SSE trading day in [valuation, maturity],
+    # inclusive.  The historical seed is sticky but does not suppress today's
+    # contractual closing-price observation.
     p = make_dcn(DCN_A)
     ctx = build_dcn_grid_context(p)
     path = _flat_path(ctx, 5000.0)
     path[0, 0] = 4000.0
     ctx, cf = _run(p, path[0])
-    assert not bool(cf.knocked_in[0])
+    assert bool(cf.knocked_in[0])
+    assert cf.fixed_coupon_pv[0] == 0.0
+    assert cf.loss_pv[0] < 0.0
 
 
 def test_ki_at_maturity_settles_at_settlement_date_df():

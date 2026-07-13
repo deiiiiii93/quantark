@@ -128,7 +128,9 @@ def build_cash_greeks_report(
 
     v_up = _reprice_vol(product, pricing_env, engine, +vol_abs_bump)
     v_dn = _reprice_vol(product, pricing_env, engine, -vol_abs_bump)
-    vega_1pct = (v_up - v_dn) / 2.0  # bump IS 1 vol pt
+    vega_1pct = (
+        (v_up - v_dn) / (2.0 * vol_abs_bump) * 0.01
+    )
 
     r_up = _reprice_rate(product, pricing_env, engine, +rate_abs_bump)
     r_dn = _reprice_rate(product, pricing_env, engine, -rate_abs_bump)

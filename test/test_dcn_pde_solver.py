@@ -14,7 +14,14 @@ from quantark.asset.equity.engine.pde.dcn_pde_solver import (
 )
 from quantark.asset.equity.product.option.dcn_option import DCNDirection
 
-from dcn_fixtures import DCN_A, DCN_B, FLAT, flat_env, make_dcn
+from dcn_fixtures import (
+    DCN_A,
+    FLAT,
+    SAMPLE_DCN_A,
+    SAMPLE_DCN_B,
+    flat_env,
+    make_dcn,
+)
 
 # Decided validation setting: >= 2^17 Sobol paths, and stderr must be
 # < 2bp*N (raise paths, never widen the gate). DCN-B's loss leg carries more
@@ -68,16 +75,22 @@ def test_event_operator_ordering():
     assert v1_out[0] == -100.0 and v1_out[2] == -100.0  # v1 never gets coupons
 
 
-@pytest.mark.parametrize("contract,ident", [(DCN_A, "DCN-A"), (DCN_B, "DCN-B")],
-                         ids=["DCN-A", "DCN-B"])
-def test_mc_pde_cross_validation_gate(contract, ident):
-    p = make_dcn(contract)
-    env = flat_env(**FLAT)
+@pytest.mark.parametrize(
+    "contract,ident,direction",
+    [
+        (SAMPLE_DCN_A, "DCN-A", DCNDirection.BUYER),
+        (SAMPLE_DCN_B, "DCN-B", DCNDirection.SELLER),
+    ],
+    ids=["DCN-A", "DCN-B"],
+)
+def test_mc_pde_cross_validation_gate(contract, ident, direction):
+    p = make_dcn(contract, direction=direction)
+    env = flat_env(**FLAT, spot=contract["initial_price"])
     paths, batches = GATE_SETTINGS[ident]
     mc = DCNMCEngine(
         num_paths=paths, num_batches=batches, seed=42
     ).price_detailed(p, env)
-    pde = DCNPDEEngine().price(p, env)
+    pde = DCNPDEEngine(num_space_nodes=2401).price(p, env)
     notional = contract["notional"]
     assert mc.std_error < 2e-4 * notional, "stderr gate: raise paths, not tolerance"
     gate = max(3.0 * mc.std_error, 5e-4 * notional)
@@ -99,6 +112,15 @@ def test_pde_knocked_in_seed_prices_v1():
     base = DCNPDEEngine().price(make_dcn(DCN_A), env)
     ki = DCNPDEEngine().price(make_dcn(DCN_A, knocked_in_at_valuation=True), env)
     assert ki < base  # V1 <= V0 pointwise: no coupons + short put
+
+
+def test_pde_valuation_date_breach_selects_knocked_in_surface():
+    env = flat_env(**FLAT, spot=4000.0)  # below the 4500 KI barrier
+    observed_today = DCNPDEEngine().price(make_dcn(DCN_A), env)
+    seeded = DCNPDEEngine().price(
+        make_dcn(DCN_A, knocked_in_at_valuation=True), env
+    )
+    assert observed_today == seeded
 
 
 def test_pde_deterministic():

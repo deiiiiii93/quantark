@@ -16,7 +16,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.mc.dcn_mc_engine import DCNMCEngine
 from quantark.param import GridVolSurface
-from quantark.util.exceptions import PricingError
+from quantark.util.exceptions import PricingError, ValidationError
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 
@@ -72,18 +72,39 @@ class LocalVolDCNMCEngine(DCNMCEngine):
 
 
 class HestonDCNMCEngine(DCNMCEngine):
-    """DCN MC under Heston (full-truncation Euler, phoenix precedent)."""
+    """DCN MC under Heston full-truncation log-Euler.
 
-    def __init__(self, model_params: HestonParams, **kwargs):
+    ``substeps_per_interval`` refines variance/spot evolution between two
+    contractual SSE observation dates while recording only the contractual
+    nodes consumed by the payoff kernel.
+    """
+
+    def __init__(
+        self,
+        model_params: HestonParams,
+        substeps_per_interval: int = 1,
+        **kwargs,
+    ):
+        if (
+            isinstance(substeps_per_interval, bool)
+            or not isinstance(substeps_per_interval, (int, np.integer))
+            or int(substeps_per_interval) < 1
+        ):
+            raise ValidationError(
+                "substeps_per_interval must be a positive integer"
+            )
         super().__init__(**kwargs)
         self.model_params = model_params
+        self.substeps_per_interval = int(substeps_per_interval)
 
     def _simulate(self, spot0, term, dt_array, pricing_env,
                   n_paths, batch_id) -> np.ndarray:
         p = self.model_params
         n_steps = dt_array.size
-        z_all = self._draws(2 * n_steps, n_paths, batch_id)
-        z_all = z_all.reshape(-1, 2, n_steps)
+        substeps = self.substeps_per_interval
+        n_fine = n_steps * substeps
+        z_all = self._draws(2 * n_fine, n_paths, batch_id)
+        z_all = z_all.reshape(-1, 2, n_fine)
         n = z_all.shape[0]
         nodes = np.empty((n, n_steps + 1))
         log_s = np.full(n, np.log(float(spot0)))
@@ -91,16 +112,29 @@ class HestonDCNMCEngine(DCNMCEngine):
         nodes[:, 0] = np.exp(log_s)
         rho = float(np.clip(p.rho, -0.999, 0.999))
         rho_bar = float(np.sqrt(max(1.0 - rho * rho, 0.0)))
+        fine = 0
         for i in range(n_steps):
-            dt = float(dt_array[i])
+            dt = float(dt_array[i]) / substeps
             sqrt_dt = np.sqrt(dt)
-            v_plus = np.maximum(var, 0.0)
-            sqrt_v = np.sqrt(v_plus)
-            d_w_v = z_all[:, 0, i] * sqrt_dt
-            d_w_s = (rho * z_all[:, 0, i] + rho_bar * z_all[:, 1, i]) * sqrt_dt
             drift = float(term.rrf[i] - term.div[i])
-            log_s = log_s + (drift - 0.5 * v_plus) * dt + sqrt_v * d_w_s
-            var = var + p.kappa * (p.theta - v_plus) * dt \
-                + p.sigma * sqrt_v * d_w_v
+            for _ in range(substeps):
+                v_plus = np.maximum(var, 0.0)
+                sqrt_v = np.sqrt(v_plus)
+                d_w_v = z_all[:, 0, fine] * sqrt_dt
+                d_w_s = (
+                    rho * z_all[:, 0, fine]
+                    + rho_bar * z_all[:, 1, fine]
+                ) * sqrt_dt
+                log_s = (
+                    log_s
+                    + (drift - 0.5 * v_plus) * dt
+                    + sqrt_v * d_w_s
+                )
+                var = (
+                    var
+                    + p.kappa * (p.theta - v_plus) * dt
+                    + p.sigma * sqrt_v * d_w_v
+                )
+                fine += 1
             nodes[:, i + 1] = np.exp(log_s)
         return nodes

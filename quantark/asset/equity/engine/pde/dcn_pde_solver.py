@@ -225,7 +225,11 @@ class DCNPDEEngine(BaseEngine):
                     # after t=0): discrete KI projection, consistent with MC
                     v0 = np.where(ki_mask, v1, v0)
 
-        surface = v1 if product.knocked_in_at_valuation else v0
+        observed_ki_at_valuation = (
+            bool(product.knocked_in_at_valuation)
+            or float(pricing_env.spot) <= product.ki_barrier
+        )
+        surface = v1 if observed_ki_at_valuation else v0
         pv_unsigned = float(np.interp(np.log(float(pricing_env.spot)), x, surface))
         pv = product.direction_sign * pv_unsigned
         return DCNPDEResult(

@@ -101,3 +101,31 @@ def test_to_dataframe_columns():
         "is_coupon_obs", "is_ko_obs", "coupon_payment_date", "ko_payment_date",
     ]
     assert len(df) == 22
+
+
+def test_merged_row_ko_accrual_counts_only_eligible_month_indices():
+    import dataclasses
+
+    from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
+    from dcn_fixtures import make_dcn
+
+    product = make_dcn(DCN_B)
+    rows = list(product.schedule.monthly)
+    k5 = next(m for m in rows if m.month_indices == (5,))
+    k6 = next(m for m in rows if m.month_indices == (6,))
+    merged = dataclasses.replace(
+        k6,
+        month_indices=(5, 6),
+        benchmark_date=k5.benchmark_date,
+        is_coupon_obs=True,
+        is_ko_obs=True,
+    )
+    rows = [m for m in rows if m.month_indices not in ((5,), (6,))]
+    rows.append(merged)
+    rows.sort(key=lambda m: m.observation_date)
+    product.schedule = dataclasses.replace(product.schedule, monthly=tuple(rows))
+
+    ctx = build_dcn_grid_context(product)
+    j = ctx.month_index_map.index((5, 6))
+    assert ctx.coupon_accruals[j] == pytest.approx(2 * product.accrual_per_period)
+    assert ctx.ko_accruals[j] == pytest.approx(product.accrual_per_period)

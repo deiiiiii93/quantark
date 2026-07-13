@@ -122,6 +122,12 @@ def build_dcn_schedule(
         )
     if valuation_date < initial_date:
         raise ValidationError("valuation_date before initial_date")
+    if valuation_date > maturity_date:
+        raise ValidationError("valuation_date after maturity_date")
+    if not calendar.is_business_day(valuation_date):
+        raise ValidationError(
+            "valuation_date must be a trading day on the schedule calendar"
+        )
 
     _assert_calendar_coverage(
         calendar, max(maturity_date, settlement_date) + timedelta(days=31)

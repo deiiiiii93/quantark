@@ -193,6 +193,33 @@ class BucketedGreekPoint:
 
         object.__setattr__(self, "metadata", dict(self.metadata))
 
+    def to_dict(self) -> dict:
+        return {
+            "coordinate": self.coordinate.value,
+            "name": self.name,
+            "reported": self.reported,
+            "derivative": self.derivative,
+            "pnl": self.pnl,
+            "bump_size": self.bump_size,
+            "convention_scale": self.convention_scale,
+            "base_price": self.base_price,
+            "up_price": self.up_price,
+            "down_price": self.down_price,
+            "difference_mode": self.difference_mode,
+            "status": self.status,
+            "bucket": self.bucket,
+            "contract": self.contract,
+            "maturity": self.maturity,
+            "future_price": self.future_price,
+            "delta_per_hand": self.delta_per_hand,
+            "hedge_hands": self.hedge_hands,
+            "extrapolated_tail": self.extrapolated_tail,
+            "model": self.model,
+            "unit": self.unit,
+            "error": self.error,
+            "metadata": dict(self.metadata),
+        }
+
     @staticmethod
     def _validate_finite(name: str, value: float) -> None:
         if not math.isfinite(float(value)):
@@ -265,3 +292,9 @@ class BucketedGreeksResult:
         self, coordinate: BucketedGreekCoordinate
     ) -> Tuple[BucketedGreekPoint, ...]:
         return tuple(point for point in self.points if point.coordinate is coordinate)
+
+    def to_dict(self) -> dict:
+        return {
+            "points": [point.to_dict() for point in self.points],
+            "metadata": dict(self.metadata),
+        }

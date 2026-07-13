@@ -17,6 +17,7 @@ from .double_one_touch_pde_solver import DoubleOneTouchPDESolver
 from .snowball_pde_solver import SnowballPDESolver
 from .ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
 from .phoenix_pde_solver import PhoenixPDESolver
+from .dcn_pde_solver import DCNPDEEngine, DCNPDEResult
 from .local_vol_pde_solver import LocalVolPDESolver
 from .heston_pde_solver import HestonPDESolver
 from .heston_slv_pde_solver import HestonSLVPDESolver
@@ -61,4 +62,6 @@ __all__ = [
     'SnowballPDESolver',
     'KOResetSnowballPDESolver',
     'PhoenixPDESolver',
+    'DCNPDEEngine',
+    'DCNPDEResult',
 ]

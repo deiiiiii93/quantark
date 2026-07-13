@@ -93,6 +93,9 @@ def test_bucketed_result_filters_points():
     assert result.successful_points == (ok,)
     assert result.failed_points == (failed,)
     assert result.by_coordinate(BucketedGreekCoordinate.CARRY_RHOQ) == (ok,)
+    payload = result.to_dict()
+    assert payload["points"][0]["coordinate"] == "carry_rhoq"
+    assert payload["points"][1]["status"] == "failed"
 
 
 def _basic_env(spot=100.0):

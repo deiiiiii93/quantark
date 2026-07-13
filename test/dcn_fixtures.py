@@ -1,4 +1,9 @@
-"""Shared DCN sample-contract fixtures (values from the DCN problem statement)."""
+"""Shared DCN fixtures.
+
+``DCN_A``/``DCN_B`` are compact synthetic contracts used by hand-payoff unit
+tests. ``SAMPLE_DCN_A``/``SAMPLE_DCN_B`` reproduce the case's exact economics
+for acceptance gates.
+"""
 from datetime import datetime
 
 from quantark.util.calendar import CalendarType, create_calendar
@@ -40,6 +45,35 @@ DCN_B = dict(
     ko_settlement_offset=0,
     settlement_date=datetime(2026, 1, 7),
     ki_put_strike_ratio=1.15,
+)
+
+SAMPLE_DCN_A = dict(
+    DCN_A,
+    notional=10_000_000.0,
+    initial_price=6423.7013,
+    coupon_barrier_ratio=0.85,
+    ko_barrier_ratio=1.10,
+    ki_barrier_ratio=0.80,
+    ki_put_strike_ratio=1.10,
+    coupon_rate=0.04,
+    ko_coupon_rate=0.045,
+)
+
+SAMPLE_DCN_B = dict(
+    SAMPLE_DCN_A,
+    maturity_date=datetime(2026, 1, 5),
+    tenor_months=36,
+    lock_months=3,
+    ko_lock_months=6,
+    coupon_settlement_offset=0,
+    ko_settlement_offset=0,
+    settlement_date=datetime(2026, 1, 7),
+    coupon_barrier_ratio=0.80,
+    ko_barrier_ratio=1.15,
+    ki_barrier_ratio=0.75,
+    ki_put_strike_ratio=1.15,
+    coupon_rate=0.05,
+    ko_coupon_rate=0.055,
 )
 
 SCHEDULE_KEYS = (

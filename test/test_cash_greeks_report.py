@@ -80,3 +80,22 @@ def test_unified_greeks_entry_point_accepts_dcn():
         p, env, engine, greeks=["price", "delta"]
     )
     assert "delta" in out and "price" in out
+
+
+def test_vega_presentation_scales_nondefault_bump_to_one_vol_point():
+    class LinearVolEngine:
+        def price(self, product, env):
+            return 1_000_000.0 * env.vol_surface.get_vol(
+                product.initial_price, 1.0, env.spot
+            )
+
+    product = make_dcn(DCN_A)
+    env = flat_env(**FLAT)
+    default = build_cash_greeks_report(
+        product, env, LinearVolEngine(), calendar=SSE, vol_abs_bump=0.01
+    )
+    half_bump = build_cash_greeks_report(
+        product, env, LinearVolEngine(), calendar=SSE, vol_abs_bump=0.005
+    )
+    assert default.vega_1pct == pytest.approx(10_000.0)
+    assert half_bump.vega_1pct == pytest.approx(default.vega_1pct)

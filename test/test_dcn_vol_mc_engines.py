@@ -8,6 +8,7 @@ from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import (
     LocalVolDCNMCEngine,
 )
 from quantark.param import GridVolSurface
+from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 
 from dcn_fixtures import DCN_A, FLAT, flat_env, make_dcn
@@ -57,3 +58,22 @@ def test_leg_invariant_holds_for_vol_engines():
         p, _grid_env()
     )
     assert r.pv == r.pv_fixed_coupons + r.pv_ko_coupons + r.pv_loss_leg
+
+
+def test_heston_rejects_invalid_substeps():
+    params = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.5)
+    with pytest.raises(ValidationError, match="substeps_per_interval"):
+        HestonDCNMCEngine(model_params=params, substeps_per_interval=0)
+
+
+def test_heston_substeps_preserve_contract_grid_output():
+    p = make_dcn(DCN_A)
+    params = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.5)
+    result = HestonDCNMCEngine(
+        model_params=params,
+        substeps_per_interval=2,
+        num_paths=2 ** 10,
+        seed=42,
+    ).price_detailed(p, flat_env(**FLAT))
+    assert np.isfinite(result.pv)
+    assert result.num_paths == 2 ** 10
