@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 class BucketedGreekCoordinate(Enum):
     FUTURES_DELTA = "futures_delta"
+    RATE_KEYRATE = "rate_keyrate"
     CARRY_RHOQ = "carry_rhoq"
     VOL_TENOR_VEGA = "vol_tenor_vega"
     MARKET_IV_VEGA = "market_iv_vega"
@@ -45,6 +46,7 @@ class BucketedGreeksRequest:
     futures_curve: Optional[object] = None
     futures_price_bump: float = 1.0
     carry_bump: Optional[float] = None
+    rate_bump: Optional[float] = None
     vol_bump: float = 0.01
     tenor_buckets: Optional[Tuple["TenorBucket", ...]] = None
     futures_carry_mode: Optional[object] = None

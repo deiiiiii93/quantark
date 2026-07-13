@@ -359,9 +359,18 @@ class CubicSplineRateCurve(InterpolatedRateCurve):
     Provides smooth first and second derivatives.
     """
     
-    def __init__(self, pillars: List[Tuple[float, float]]):
+    def __init__(
+        self,
+        pillars: List[Tuple[float, float]],
+        node_roles=None,
+        last_observable_tenor: Optional[float] = None,
+    ):
         """Initialize and compute spline coefficients."""
-        super().__init__(pillars)
+        super().__init__(
+            pillars,
+            node_roles=node_roles,
+            last_observable_tenor=last_observable_tenor,
+        )
         self._compute_spline_coefficients()
     
     def _compute_spline_coefficients(self):

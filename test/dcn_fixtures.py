@@ -85,6 +85,33 @@ def make_dcn(contract: dict, **overrides):
     return DCNOption(**kwargs)
 
 
+def term_env(r, q, sigma, spot=6000.0, tenors=(0.5, 1.0, 2.0)):
+    """Flat values on TERM-STRUCTURE objects: exercises the term-aware code
+    paths (node-aligned buckets etc.) while PVs match flat_env."""
+    from datetime import datetime as _dt
+
+    from quantark.param import SpotQuote
+    from quantark.param.div.dividend_yield import TermStructureDividendYield
+    from quantark.param.rrf.rate_curve import LinearRateCurve
+    from quantark.param.vol.vol_surface import TermStructureVolSurface
+    from quantark.priceenv import PricingEnvironment
+    from quantark.util.calendar import DayCountConvention
+
+    tenors = [float(t) for t in tenors]
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=spot),
+        vol_surface=TermStructureVolSurface(
+            times=tenors, vols=[sigma] * len(tenors)
+        ),
+        rate_curve=LinearRateCurve([(t, r) for t in tenors]),
+        div_yield=TermStructureDividendYield(
+            times=tenors, yields=[q] * len(tenors)
+        ),
+        valuation_date=_dt(2023, 1, 3),
+        day_count_convention=DayCountConvention.ACT_365,
+    )
+
+
 def flat_env(r, q, sigma, spot=6000.0):
     from datetime import datetime as _dt
 

@@ -24,7 +24,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import CommonGreek, EquityGreek
 from quantark.util.enum.engine_enums import EngineType, GreeksCalculationMode
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.numerical import is_zero
 
 
@@ -253,9 +253,27 @@ class GreeksCalculator:
             raise ValidationError("FUTURES_DELTA requires request.futures_curve")
 
         points: List[BucketedGreekPoint] = []
+        result_metadata: dict = {}
         for coordinate in coordinates:
             mode = self._resolve_bucketed_difference_mode(coordinate, request)
-            if coordinate == BucketedGreekCoordinate.FUTURES_DELTA:
+            if coordinate == BucketedGreekCoordinate.RATE_KEYRATE:
+                keyrate_points = self._calculate_bucketed_rate_keyrate_points(
+                    product, pricing_env, engine, request, mode
+                )
+                points.extend(keyrate_points)
+                for pt in keyrate_points:
+                    if pt.name == "rate_keyrate.parallel":
+                        result_metadata.update(
+                            {
+                                "sum_of_buckets": pt.metadata["sum_of_buckets"],
+                                "parallel": pt.reported,
+                                "reconciles": pt.metadata["reconciles"],
+                                "roles_inferred": pt.metadata.get(
+                                    "roles_inferred"
+                                ),
+                            }
+                        )
+            elif coordinate == BucketedGreekCoordinate.FUTURES_DELTA:
                 points.extend(
                     self._calculate_bucketed_futures_delta_points(
                         product, pricing_env, engine, request, mode
@@ -287,12 +305,113 @@ class GreeksCalculator:
                     f"unsupported bucketed Greek coordinate: {coordinate}"
                 )
 
+        result_metadata["coordinates"] = tuple(
+            coordinate.value for coordinate in coordinates
+        )
         return BucketedGreeksResult(
             points=tuple(points),
-            metadata={
-                "coordinates": tuple(coordinate.value for coordinate in coordinates),
-            },
+            metadata=result_metadata,
         )
+
+    def _calculate_bucketed_rate_keyrate_points(
+        self, product, pricing_env, engine, request, mode
+    ) -> List[BucketedGreekPoint]:
+        """Per-CALIBRATED-pillar zero-rate bumps + a parallel reconciliation
+        point (spec WP3.3). Reported per +1bp; central differences."""
+        from quantark.param.node_roles import NodeRole, resolve_node_roles
+        from quantark.param.rrf import ParallelShiftRateCurve
+        from quantark.param.rrf.key_rate import key_rate_bumped_zero_curve
+
+        if mode != BucketedGreekDifferenceMode.CENTRAL:
+            raise ValidationError(
+                f"RATE_KEYRATE supports central mode only, got {mode.value}"
+            )
+        curve = pricing_env.rate_curve
+        tenors = list(getattr(curve, "tenors", []) or [])
+        if not tenors:
+            raise ValidationError(
+                "RATE_KEYRATE requires an interpolated rate curve with pillars"
+            )
+        info = resolve_node_roles(
+            tenors,
+            getattr(curve, "node_roles", None),
+            getattr(curve, "last_observable_tenor", None),
+        )
+        bump = request.rate_bump if request.rate_bump is not None else 1e-4
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
+        base_price = bump_engine.price(product, pricing_env)
+        points: List[BucketedGreekPoint] = []
+        for tenor, role in zip(tenors, info.roles):
+            if role is not NodeRole.CALIBRATED:
+                continue
+            up_env = deepcopy(pricing_env)
+            up_env.rate_curve = key_rate_bumped_zero_curve(curve, tenor, +bump)
+            down_env = deepcopy(pricing_env)
+            down_env.rate_curve = key_rate_bumped_zero_curve(curve, tenor, -bump)
+            up_price = bump_engine.price(product, up_env)
+            down_price = bump_engine.price(product, down_env)
+            derivative = (up_price - down_price) / (2.0 * bump)
+            points.append(
+                BucketedGreekPoint(
+                    coordinate=BucketedGreekCoordinate.RATE_KEYRATE,
+                    name=f"rate_keyrate.{tenor:g}y",
+                    reported=derivative * 1e-4,
+                    derivative=derivative,
+                    pnl=(up_price - down_price) / 2.0,
+                    bump_size=float(bump),
+                    convention_scale=1e-4,
+                    base_price=float(base_price),
+                    up_price=float(up_price),
+                    down_price=float(down_price),
+                    difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                    maturity=float(tenor),
+                    extrapolated_tail=bool(
+                        tenor > info.last_observable_tenor
+                    ),
+                    metadata={
+                        "unit": "per_1bp",
+                        "roles_inferred": info.roles_inferred,
+                        "rebuild_rule": "zero-rate pillar bump, curve "
+                        "interpolation rebuilds between pillars",
+                    },
+                )
+            )
+        par_up = deepcopy(pricing_env)
+        par_up.rate_curve = ParallelShiftRateCurve(curve, +bump)
+        par_down = deepcopy(pricing_env)
+        par_down.rate_curve = ParallelShiftRateCurve(curve, -bump)
+        par_derivative = (
+            bump_engine.price(product, par_up)
+            - bump_engine.price(product, par_down)
+        ) / (2.0 * bump)
+        parallel_per_1bp = par_derivative * 1e-4
+        sum_of_buckets = float(
+            sum(pt.reported for pt in points if pt.reported is not None)
+        )
+        points.append(
+            BucketedGreekPoint(
+                coordinate=BucketedGreekCoordinate.RATE_KEYRATE,
+                name="rate_keyrate.parallel",
+                reported=parallel_per_1bp,
+                derivative=par_derivative,
+                pnl=parallel_per_1bp,
+                bump_size=float(bump),
+                convention_scale=1e-4,
+                base_price=float(base_price),
+                difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                metadata={
+                    "unit": "per_1bp",
+                    "sum_of_buckets": sum_of_buckets,
+                    "reconciles": bool(
+                        abs(sum_of_buckets - parallel_per_1bp)
+                        <= 0.05 * max(abs(parallel_per_1bp), 1e-12)
+                    ),
+                    "roles_inferred": info.roles_inferred,
+                    "rebuild_rule": "ParallelShiftRateCurve",
+                },
+            )
+        )
+        return points
 
     def _calculate_bucketed_futures_delta_points(
         self, product, pricing_env, engine, request, mode
@@ -597,6 +716,15 @@ class GreeksCalculator:
             raise ValidationError(
                 f"unsupported CARRY_RHOQ difference mode: {mode.value}"
             )
+        # spec WP3.3: with no explicit buckets and a term-structure carry
+        # curve, buckets align to the curve's calibrated NODES (node bumps
+        # rebuild the curve; no window-step discontinuities)
+        if request.tenor_buckets is None and hasattr(
+            pricing_env.div_yield, "times"
+        ):
+            return self._calculate_node_aligned_carry_rhoq_points(
+                product, pricing_env, engine, mode, div_bump
+            )
         bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
         maturity = product.get_maturity(pricing_env)
         buckets = tuple(request.tenor_buckets or default_tenor_buckets(maturity))
@@ -651,6 +779,51 @@ class GreeksCalculator:
                     source="generic_tenor_carry_bucket_bump",
                 )
             )
+        return points
+
+    def _calculate_node_aligned_carry_rhoq_points(
+        self, product, pricing_env, engine, mode, div_bump
+    ) -> List[BucketedGreekPoint]:
+        """Central node bumps on a TermStructureDividendYield, one point per
+        CALIBRATED node (spec WP3.3). The term curve's own interpolation
+        rebuilds carry between nodes."""
+        from quantark.asset.equity.market.index_futures_curve import (
+            bump_term_yield_node,
+        )
+        from quantark.param.node_roles import NodeRole, resolve_node_roles
+
+        term_div = pricing_env.div_yield
+        info = resolve_node_roles(
+            list(term_div.times),
+            getattr(term_div, "node_roles", None),
+            getattr(term_div, "last_observable_tenor", None),
+        )
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
+        base_price = bump_engine.price(product, pricing_env)
+        points: List[BucketedGreekPoint] = []
+        for i, (tenor, role) in enumerate(zip(term_div.times, info.roles)):
+            if role is not NodeRole.CALIBRATED:
+                continue
+            up_env = deepcopy(pricing_env)
+            up_env.div_yield = bump_term_yield_node(term_div, i, +div_bump)
+            down_env = deepcopy(pricing_env)
+            down_env.div_yield = bump_term_yield_node(term_div, i, -div_bump)
+            up_price = bump_engine.price(product, up_env)
+            down_price = bump_engine.price(product, down_env)
+            derivative = (up_price - down_price) / (2.0 * div_bump)
+            point = self._carry_rhoq_point(
+                name=f"carry_rhoq.node_{tenor:g}y",
+                derivative=derivative,
+                bump_size=div_bump,
+                base_price=base_price,
+                up_price=up_price,
+                down_price=down_price,
+                difference_mode=BucketedGreekDifferenceMode.CENTRAL.value,
+                maturity=float(tenor),
+                extrapolated_tail=bool(tenor > info.last_observable_tenor),
+                source="node_aligned_term_yield_bump",
+            )
+            points.append(point)
         return points
 
     @staticmethod
@@ -731,6 +904,16 @@ class GreeksCalculator:
                 f"unsupported VOL_TENOR_VEGA difference mode: {mode.value}"
             )
 
+        # spec WP3.3: with no explicit buckets and a term-structure ATM
+        # curve, bump NODE vols and rebuild total variance (no window-step
+        # calendar-arb discontinuities on dense grids)
+        if request.tenor_buckets is None and hasattr(
+            pricing_env.vol_surface, "times"
+        ):
+            return self._calculate_node_aligned_vol_vega_points(
+                product, pricing_env, engine, request
+            )
+
         bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
         maturity = product.get_maturity(pricing_env)
         buckets = tuple(request.tenor_buckets or default_tenor_buckets(maturity))
@@ -781,6 +964,111 @@ class GreeksCalculator:
                 )
             )
         return points
+
+    def _calculate_node_aligned_vol_vega_points(
+        self, product, pricing_env, engine, request
+    ) -> List[BucketedGreekPoint]:
+        """Central node-vol bumps on a term ATM curve, one point per
+        CALIBRATED node, reported per +1 vol pt (spec WP3.3). If a down bump
+        produces negative forward variance (calendar arbitrage on the pricing
+        grid), fall back to one-sided-up and record the adjustment."""
+        from quantark.param.node_roles import NodeRole, resolve_node_roles
+
+        surface = pricing_env.vol_surface
+        info = resolve_node_roles(
+            list(surface.times),
+            getattr(surface, "node_roles", None),
+            getattr(surface, "last_observable_tenor", None),
+        )
+        vol_bump = float(request.vol_bump)
+        bump_engine = self._resolve_bump_engine(product, pricing_env, engine)
+        base_price = bump_engine.price(product, pricing_env)
+        points: List[BucketedGreekPoint] = []
+        for i, (tenor, role) in enumerate(zip(surface.times, info.roles)):
+            if role is not NodeRole.CALIBRATED:
+                continue
+            def _try_price(node_bump: float):
+                env = deepcopy(pricing_env)
+                env.vol_surface = self._bump_term_vol_node(
+                    surface, i, node_bump
+                )
+                try:
+                    return bump_engine.price(product, env), None
+                except NumericalError as exc:
+                    # negative forward variance: this bump direction is not
+                    # representable on the pricing grid (calendar arbitrage)
+                    return None, str(exc)
+
+            up_price, up_error = _try_price(+vol_bump)
+            down_price, down_error = _try_price(-vol_bump)
+            adjusted = up_price is None or down_price is None
+            status, error = "ok", None
+            if up_price is not None and down_price is not None:
+                derivative = (up_price - down_price) / (2.0 * vol_bump)
+                pnl = (up_price - down_price) / 2.0
+                diff_mode = BucketedGreekDifferenceMode.CENTRAL.value
+            elif up_price is not None:
+                # one-sided-up is explicitly allowed when recorded (§6.3)
+                derivative = (up_price - base_price) / vol_bump
+                pnl = up_price - base_price
+                diff_mode = BucketedGreekDifferenceMode.ONE_SIDED_UP.value
+            elif down_price is not None:
+                derivative = (base_price - down_price) / vol_bump
+                pnl = base_price - down_price
+                diff_mode = "one_sided_down"
+            else:
+                derivative, pnl = None, None
+                diff_mode = BucketedGreekDifferenceMode.CENTRAL.value
+                status = "failed"
+                error = f"up: {up_error}; down: {down_error}"
+            points.append(
+                BucketedGreekPoint(
+                    coordinate=BucketedGreekCoordinate.VOL_TENOR_VEGA,
+                    name=f"vol_tenor_vega.node_{tenor:g}y",
+                    reported=(
+                        None if derivative is None else derivative * 0.01
+                    ),
+                    derivative=derivative,
+                    pnl=pnl,
+                    bump_size=vol_bump,
+                    convention_scale=0.01,
+                    base_price=float(base_price),
+                    up_price=None if up_price is None else float(up_price),
+                    down_price=(
+                        None if down_price is None else float(down_price)
+                    ),
+                    difference_mode=diff_mode,
+                    status=status,
+                    error=error,
+                    maturity=float(tenor),
+                    extrapolated_tail=bool(tenor > info.last_observable_tenor),
+                    metadata={
+                        "unit": "per_1volpt",
+                        "source": "node_aligned_term_vol_bump",
+                        "rebuild_rule": "node vol bump, total variance "
+                        "rebuilt by term interpolation",
+                        "adjusted_to_one_sided": adjusted,
+                        "roles_inferred": info.roles_inferred,
+                    },
+                )
+            )
+        return points
+
+    @staticmethod
+    def _bump_term_vol_node(surface, node_index: int, bump: float):
+        """Copy of a term ATM vol curve with one node's vol bumped."""
+        from quantark.param.vol.vol_surface import TermStructureVolSurface
+
+        vols = [float(v) for v in surface.vols]
+        vols[node_index] += float(bump)
+        return TermStructureVolSurface(
+            times=list(surface.times),
+            vols=vols,
+            node_roles=getattr(surface, "node_roles", None),
+            last_observable_tenor=getattr(
+                surface, "last_observable_tenor", None
+            ),
+        )
 
     def _vol_tenor_vega_point(
         self,
