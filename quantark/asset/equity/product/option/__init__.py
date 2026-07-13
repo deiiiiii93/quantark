@@ -50,6 +50,13 @@ from .range_accrual_helpers import (
 from .single_sharkfin_option import SingleSharkfinOption
 from .double_sharkfin_option import DoubleSharkfinOption
 from .accumulator_option import AccumulatorOption
+from .dcn_schedule import (
+    DCNMonthlyObservation,
+    DCNSchedule,
+    DCNScheduleSpec,
+    build_dcn_schedule,
+)
+from .dcn_option import DCNDirection, DCNOption
 
 __all__ = [
     "BaseEquityOption",
@@ -104,4 +111,11 @@ __all__ = [
     "DoubleSharkfinOption",
     # Accumulator option
     "AccumulatorOption",
+    # DCN (digital coupon note)
+    "DCNOption",
+    "DCNDirection",
+    "DCNSchedule",
+    "DCNScheduleSpec",
+    "DCNMonthlyObservation",
+    "build_dcn_schedule",
 ]

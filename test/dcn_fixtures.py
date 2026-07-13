@@ -53,3 +53,33 @@ def schedule_kwargs(contract: dict) -> dict:
     kw = {k: contract[k] for k in SCHEDULE_KEYS}
     kw["calendar"] = SSE
     return kw
+
+
+PRODUCT_KEYS = (
+    "notional", "initial_price", "coupon_barrier_ratio", "ko_barrier_ratio",
+    "ki_barrier_ratio", "ki_put_strike_ratio", "coupon_rate", "ko_coupon_rate",
+    "participation", "coupon_counted_days", "coupon_days_denom",
+    "settlement_date",
+)
+
+
+def make_dcn(contract: dict, **overrides):
+    from quantark.asset.equity.product.option.dcn_option import (
+        DCNDirection, DCNOption,
+    )
+    from quantark.asset.equity.product.option.dcn_schedule import (
+        build_dcn_schedule,
+    )
+
+    c = dict(contract, **{k: v for k, v in overrides.items() if k in contract})
+    schedule = build_dcn_schedule(**schedule_kwargs(c))
+    kwargs = {k: c[k] for k in PRODUCT_KEYS}
+    kwargs.update(
+        direction=overrides.get("direction", DCNDirection.BUYER),
+        schedule=schedule,
+        knocked_in_at_valuation=overrides.get("knocked_in_at_valuation", False),
+    )
+    for k, v in overrides.items():
+        if k in kwargs:
+            kwargs[k] = v
+    return DCNOption(**kwargs)
