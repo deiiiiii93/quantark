@@ -1,6 +1,7 @@
 """
 Dividend yield representations.
 """
+from .forward_carry_curve import ForwardCarryCurve
 from .dividend_yield import (
     DividendYield,
     ContinuousDividendYield,
@@ -9,6 +10,7 @@ from .dividend_yield import (
 )
 
 __all__ = [
+    'ForwardCarryCurve',
     "DividendYield",
     "ContinuousDividendYield",
     "NoDividend",
