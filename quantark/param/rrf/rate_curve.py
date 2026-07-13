@@ -3,7 +3,7 @@ Risk-free rate curve representations.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 import math
 from quantark.util.exceptions import ValidationError
 
@@ -154,29 +154,51 @@ class InterpolatedRateCurve(RateCurve):
         pillars: List of (time, rate) tuples, sorted by time
     """
     
-    def __init__(self, pillars: List[Tuple[float, float]]):
+    def __init__(
+        self,
+        pillars: List[Tuple[float, float]],
+        node_roles=None,
+        last_observable_tenor: Optional[float] = None,
+    ):
         """
         Initialize interpolated rate curve.
-        
+
         Args:
             pillars: List of (time_to_maturity, rate) tuples
-            
+            node_roles: Optional per-pillar NodeRole metadata (spec WP3.2).
+                Purely informational; consumed by risk reports.
+            last_observable_tenor: Optional last market-observable tenor.
+
         Raises:
             ValidationError: If pillars are invalid
         """
         if not pillars:
             raise ValidationError("Must provide at least one pillar")
-        
+
         # Sort pillars by time
         self.pillars = sorted(pillars, key=lambda x: x[0])
-        
+
         # Validate pillars
         for i, (time, rate) in enumerate(self.pillars):
             if time < 0:
                 raise ValidationError(f"Pillar {i}: time must be non-negative, got {time}")
             if i > 0 and time == self.pillars[i-1][0]:
                 raise ValidationError(f"Duplicate time pillar at {time}")
-    
+
+        # Node-provenance metadata (store-only; no pricing behavior change)
+        self.node_roles = node_roles
+        self.last_observable_tenor = last_observable_tenor
+
+    @property
+    def tenors(self) -> List[float]:
+        """Pillar times (sorted)."""
+        return [p[0] for p in self.pillars]
+
+    @property
+    def rates(self) -> List[float]:
+        """Pillar rates (sorted by time)."""
+        return [p[1] for p in self.pillars]
+
     def _find_bracketing_pillars(self, time: float) -> Tuple[int, int]:
         """
         Find indices of pillars that bracket the given time.

@@ -39,6 +39,9 @@ from .index import (
 )
 
 __all__ = [
+    'NodeRole',
+    'NodeRoleInfo',
+    'resolve_node_roles',
     "SpotQuote",
     "BlackImpliedVolSurface",
     "VolatilitySurface",
@@ -75,3 +78,5 @@ __all__ = [
     "LIBOR_3M",
     "LIBOR_6M",
 ]
+
+from quantark.param.node_roles import NodeRole, NodeRoleInfo, resolve_node_roles

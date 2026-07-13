@@ -4,7 +4,7 @@ Volatility surface representations.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_divide, safe_sqrt, validate_positive
@@ -102,6 +102,8 @@ class TermStructureVolSurface(BlackImpliedVolSurface):
 
     times: list[float]
     vols: list[float]
+    node_roles: Optional[list] = None          # spec WP3.2, store-only
+    last_observable_tenor: Optional[float] = None
 
     def __post_init__(self) -> None:
         if len(self.times) != len(self.vols):
