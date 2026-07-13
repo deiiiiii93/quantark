@@ -217,6 +217,34 @@ class Calendar:
 
         return current
 
+    def trading_days_after(self, date: datetime, n: int) -> datetime:
+        """Trading date n trading days strictly after ``date`` (desk convention).
+
+        ``date`` itself is not counted; ``n == 0`` returns ``date`` unchanged.
+        Unlike ``get_next_trading_date`` (legacy: advances n-1 from a
+        trading-day base with default args), this is the DCN/settlement-offset
+        primitive.
+
+        Args:
+            date: Base trading date (must be a business day)
+            n: Number of trading days to advance (>= 0)
+
+        Returns:
+            The trading date n trading days after ``date``
+
+        Raises:
+            ValidationError: If ``date`` is not a trading day or ``n`` < 0.
+        """
+        if n < 0:
+            raise ValidationError(f"n must be >= 0, got {n}")
+        if not self.is_business_day(date):
+            raise ValidationError(
+                f"trading_days_after base date {date:%Y-%m-%d} is not a trading day"
+            )
+        if n == 0:
+            return date
+        return self.add_business_days(date, n)
+
     def count_business_days(
         self,
         start_date: datetime,
