@@ -100,3 +100,37 @@ class KOResetEventStats(AutocallableEventStats):
     pre_ko_probability_total: float = 0.0
     post_ko_probability_total: float = 0.0
     expected_discounted_post_ko_cashflow: float = 0.0
+
+
+@dataclass(frozen=True)
+class DCNEventStats:
+    """Unconditional Q-measure event statistics for a DCN (spec WP1.3).
+
+    Attributes:
+        ki_probability: P(KI at any monitored date after valuation, or seeded).
+        ko_probability: P(KO at any KO observation).
+        ko_timing_distribution: Unconditional P(KO at obs j); sums to
+            ko_probability.
+        coupon_probability: P(fixed coupon paid at period j); KO coupon
+            excluded (visible via ko_timing_distribution).
+        expected_life_years: E[min(tau_KO_obs, T_last_obs)] in ACT/365F years
+            measured at observation (not payment) dates.
+        prob_survive_no_ki: P(alive at maturity and never knocked in).
+        prob_survive_ki: P(alive at maturity and knocked in).
+        expected_discounted_loss_leg: Signed expected discounted loss-leg PV.
+    """
+
+    ki_probability: float
+    ko_probability: float
+    ko_timing_distribution: tuple
+    coupon_probability: tuple
+    expected_life_years: float
+    prob_survive_no_ki: float
+    prob_survive_ki: float
+    expected_discounted_loss_leg: float
+
+    def to_dict(self) -> dict:
+        return {
+            k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in self.__dict__.items()
+        }

@@ -83,3 +83,22 @@ def make_dcn(contract: dict, **overrides):
         if k in kwargs:
             kwargs[k] = v
     return DCNOption(**kwargs)
+
+
+def flat_env(r, q, sigma, spot=6000.0):
+    from datetime import datetime as _dt
+
+    from quantark.param import (
+        ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote,
+    )
+    from quantark.priceenv import PricingEnvironment
+    from quantark.util.calendar import DayCountConvention
+
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=spot),
+        vol_surface=FlatVolSurface(volatility=sigma),
+        rate_curve=FlatRateCurve(rate=r),
+        div_yield=ContinuousDividendYield(div_yield=q),
+        valuation_date=_dt(2023, 1, 3),
+        day_count_convention=DayCountConvention.ACT_365,
+    )
