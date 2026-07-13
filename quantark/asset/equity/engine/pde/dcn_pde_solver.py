@@ -18,9 +18,11 @@ from typing import Optional
 import numpy as np
 from scipy.linalg import solve_banded
 
+from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.priceenv.term_sampling import TermCoefficients, make_df_fn
+from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 
 
@@ -115,8 +117,10 @@ def apply_dcn_events(
     return v0, v1
 
 
-class DCNPDEEngine:
+class DCNPDEEngine(BaseEngine):
     """Two-surface Crank-Nicolson (Rannacher-restarted) DCN engine."""
+
+    engine_type = EngineType.PDE
 
     def __init__(
         self,
@@ -126,6 +130,7 @@ class DCNPDEEngine:
         rannacher_steps: int = 2,
         concentration: float = 0.15,
     ):
+        super().__init__()
         if num_space_nodes < 201:
             raise ValidationError("num_space_nodes must be >= 201")
         self.n = int(num_space_nodes)

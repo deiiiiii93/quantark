@@ -114,18 +114,18 @@ def test_discount_bump_beyond_last_payment_is_inert():
 
 
 def test_carry_bump_touches_only_overlapping_steps():
-    # unit-level isolation evidence for B(T): bumping one carry node changes
+    # unit-level isolation evidence for B(T): bumping one CARRY NODE changes
     # only the per-step forward carries whose intervals overlap the node's
-    # segments (spec WP3.4: unit-level assertion IS the isolation evidence)
+    # segments (spec WP3.4: unit-level assertion IS the isolation evidence).
+    # The bump is applied on the carry curve itself and re-derived through
+    # the pointwise q(T) = (r(T)T - B(T))/T adapter.
     from copy import deepcopy
 
     from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
-    from quantark.asset.equity.market.index_futures_curve import (
-        bump_term_yield_node,
-    )
     from quantark.asset.equity.product.option.dcn_grid import (
         build_dcn_grid_context,
     )
+    from quantark.param.div.forward_carry_curve import ForwardCarryCurve
 
     p = make_dcn(DCN_A)
     env = _curve_env()
@@ -133,14 +133,17 @@ def test_carry_bump_touches_only_overlapping_steps():
     dt = np.diff(ctx.times)
     base = build_mc_term_inputs(env, 6000.0, float(ctx.times[-1]), dt.size, dt)
 
+    nodes = env.carry_curve.nodes
+    nodes[1] = (nodes[1][0], nodes[1][1] + 0.01)  # bump B at the 1.0y node
+    bumped_carry = ForwardCarryCurve(nodes)
     env_b = deepcopy(env)
-    env_b.div_yield = bump_term_yield_node(env.div_yield, 1, 0.01)  # 1.0y node
+    env_b.div_yield = bumped_carry.to_dividend_yield(env.rate_curve)
     bumped = build_mc_term_inputs(env_b, 6000.0, float(ctx.times[-1]), dt.size, dt)
 
     changed = ~np.isclose(base.div, bumped.div, rtol=0.0, atol=1e-14)
     mid = (ctx.times[:-1] + ctx.times[1:]) / 2.0
     assert changed.any()
-    # the 1.0y node's influence spans (0.5, 1.5) via linear interpolation
+    # the 1.0y node's influence spans (0.5, 1.5) via linear-in-B interpolation
     assert not changed[mid < 0.5].any()
     assert not changed[mid > 1.5].any()
 

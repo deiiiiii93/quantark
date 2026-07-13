@@ -11,10 +11,13 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
+from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import validate_positive
 
 from .dcn_schedule import DCNSchedule
+
+_DAYS_PER_YEAR = 365.0  # ACT/365F fixed by the problem
 
 
 class DCNDirection(Enum):
@@ -24,12 +27,13 @@ class DCNDirection(Enum):
     SELLER = -1
 
 
-class DCNOption:
-    """DCN product: instrument fields + derived absolute levels only.
+class DCNOption(BaseEquityProduct):
+    """DCN product: instrument fields + derived absolute levels.
 
-    Deliberately engine-agnostic (no payoff evaluation here — the path
-    kernel lives in engine/mc/dcn_payoff.py and the PDE events in
-    engine/pde/dcn_pde_solver.py, both driven by these fields).
+    Payoff evaluation stays engine-side (the path kernel in
+    engine/mc/dcn_payoff.py and the PDE events in
+    engine/pde/dcn_pde_solver.py); the BaseEquityProduct hooks below cover
+    the repository-wide product contract (unified Greeks, dispatch).
     """
 
     def __init__(
@@ -92,6 +96,32 @@ class DCNOption:
     @property
     def direction_sign(self) -> float:
         return float(self.direction.value)
+
+    # -- BaseEquityProduct contract -----------------------------------------
+    def get_maturity(self, pricing_env=None) -> float:
+        """ACT/365F years from the valuation date to the final observation."""
+        s = self.schedule
+        return (
+            s.monthly[-1].observation_date - s.valuation_date
+        ).days / _DAYS_PER_YEAR
+
+    def get_payoff(self, spot: float, knocked_in: bool = False) -> float:
+        """Final-observation-date cashflow EXCLUDING coupons (signed).
+
+        The DCN payoff is path-dependent; this hook returns only the
+        terminal loss-leg amount for a given knocked-in state (the piece a
+        terminal-spot payoff can express): 0 when never knocked in, else
+        -(N/S0)*participation*max(K_loss - spot, 0), times direction_sign.
+        Engines never call this — they use the path kernel.
+        """
+        if not knocked_in:
+            return 0.0
+        return (
+            self.direction_sign
+            * -(self.notional / self.initial_price)
+            * self.participation
+            * max(self.k_loss - float(spot), 0.0)
+        )
 
     def validate(self) -> None:
         validate_positive(self.notional, "notional")

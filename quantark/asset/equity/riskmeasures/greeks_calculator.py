@@ -344,19 +344,27 @@ class GreeksCalculator:
         def _rate_bumped_env(bumped_curve):
             # desk convention (spec WP3.3): carry B(T) is the invariant, so
             # a discount bump re-derives q pointwise and F(0,T) is unchanged
-            # -> the bump is pure discounting
+            # -> the bump is pure discounting. This applies ALSO when
+            # div_yield is None (PricingEnvironment treats None as zero
+            # yield): wrap an explicit zero-yield base, otherwise the
+            # forward would move and the F-unchanged metadata would be false.
+            from quantark.param.div import ContinuousDividendYield
             from quantark.param.div.dividend_yield import (
                 CarryInvariantDividendYield,
             )
 
             env = deepcopy(pricing_env)
             env.rate_curve = bumped_curve
-            if pricing_env.div_yield is not None:
-                env.div_yield = CarryInvariantDividendYield(
-                    base=pricing_env.div_yield,
-                    base_rate_curve=curve,
-                    bumped_rate_curve=bumped_curve,
-                )
+            base_div = (
+                pricing_env.div_yield
+                if pricing_env.div_yield is not None
+                else ContinuousDividendYield(0.0)
+            )
+            env.div_yield = CarryInvariantDividendYield(
+                base=base_div,
+                base_rate_curve=curve,
+                bumped_rate_curve=bumped_curve,
+            )
             return env
 
         points: List[BucketedGreekPoint] = []

@@ -73,3 +73,23 @@ def test_rejects_unsorted_or_nonpositive_tenors():
         ForwardCarryCurve([(0.5, -0.01), (0.25, -0.02)])
     with pytest.raises(ValidationError):
         ForwardCarryCurve([(0.0, 0.0), (0.5, -0.01)])
+
+
+def test_to_dividend_yield_pointwise_between_and_beyond_nodes():
+    # review regression: q must satisfy q(T)*T = r(T)*T - B(T) POINTWISE,
+    # not just at nodes (linear-in-q resampling distorts non-flat carry)
+    from quantark.param import FlatRateCurve
+
+    r = 0.03
+    c = ForwardCarryCurve([(0.5, -0.01), (1.0, -0.08), (2.0, -0.10)])
+    dy = c.to_dividend_yield(FlatRateCurve(rate=r))
+    for T in (0.25, 0.75, 1.4, 2.0, 3.0):  # interpolated + extrapolated
+        assert dy.get_yield(T) * T == pytest.approx(
+            r * T - c.carry(T), abs=1e-14
+        )
+    # array path (grid samplers): T=0 entry is a discarded placeholder
+    arr = dy.get_yield(np.array([0.0, 0.75, 3.0]))
+    assert arr[0] == 0.0
+    assert arr[1] * 0.75 == pytest.approx(r * 0.75 - c.carry(0.75), abs=1e-14)
+    # metadata carried through
+    assert dy.last_observable_tenor == 2.0

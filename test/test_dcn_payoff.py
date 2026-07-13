@@ -121,3 +121,16 @@ def test_ki_at_maturity_settles_at_settlement_date_df():
         -(N / 6000.0) * max(6600.0 - 4400.0, 0.0) * _df(ctx.loss_pay_time)
     )
     assert cf.loss_pv[0] == pytest.approx(expected_loss)
+
+
+def test_ki_breach_after_ko_not_counted():
+    # review regression: the contract terminates at KO; a KI-level breach on
+    # a later date is not a contractual event and must not set knocked_in
+    p = make_dcn(DCN_A)
+    ctx = build_dcn_grid_context(p)
+    path = _flat_path(ctx, 5000.0)
+    path[0, ctx.obs_cols[0]] = 6100.0          # KO at first obs
+    path[0, ctx.obs_cols[0] + 5] = 4000.0      # deep breach AFTER termination
+    ctx, cf = _run(p, path[0])
+    assert cf.ko_obs_row[0] == 0
+    assert not bool(cf.knocked_in[0])

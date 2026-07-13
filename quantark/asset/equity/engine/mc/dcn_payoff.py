@@ -68,10 +68,14 @@ def compute_dcn_cashflows(
     prev_col = 0
     for j in range(n_obs):
         c = int(ctx.obs_cols[j])
-        # 1) daily KI over (prev_obs, this obs], BEFORE monthly processing
+        # 1) daily KI over (prev_obs, this obs], BEFORE monthly processing.
+        #    Only ALIVE paths monitor: the contract terminates at KO, so a
+        #    breach after a KO observation is not a contractual KI event
+        #    (same-date KI-before-KO ordering is preserved because a path
+        #    KO'ing at THIS observation is still alive during this update).
         seg = paths[:, prev_col + 1:c + 1]
         if seg.shape[1] > 0:
-            knocked_in |= (seg <= b_ki).any(axis=1)
+            knocked_in |= alive & (seg <= b_ki).any(axis=1)
         s_obs = paths[:, c]
         # 2) KO priority (alive paths, KO-eligible obs)
         if ctx.obs_is_ko[j]:

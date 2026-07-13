@@ -99,3 +99,28 @@ def test_vol_bucket_one_sided_fallback_recorded():
         pt.difference_mode in ("one_sided_up", "one_sided_down")
         for pt in flagged if pt.status == "ok"
     )
+
+
+def test_rate_keyrate_carry_invariant_with_none_div_yield():
+    # review regression: div_yield=None means zero yield; the carry-invariant
+    # wrapper must apply there too, so None and an explicit zero-dividend
+    # environment produce IDENTICAL key-rate risk (pure discounting)
+    from copy import deepcopy
+
+    from quantark.param.div import ContinuousDividendYield
+
+    env_zero = term_env(r=FLAT["r"], q=0.0, sigma=FLAT["sigma"])
+    env_none = deepcopy(env_zero)
+    env_none.div_yield = None
+    env_zero.div_yield = ContinuousDividendYield(0.0)
+
+    def _points(env):
+        res = GreeksCalculator().calculate_bucketed_greeks(
+            make_dcn(DCN_A), env, DCNMCEngine(num_paths=PATHS, seed=42),
+            request=BucketedGreeksRequest(
+                coordinates=(BucketedGreekCoordinate.RATE_KEYRATE,)
+            ),
+        )
+        return {pt.name: pt.reported for pt in res.points}
+
+    assert _points(env_none) == _points(env_zero)

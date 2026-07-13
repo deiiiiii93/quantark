@@ -27,9 +27,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional, Tuple
 
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 
 SHOCK_LAYER = "cleaned_market_iv_nodes"
+MAX_CALIBRATION_RMSE_IV = 0.02  # 2 vol pts: reject unusable Heston fits
 
 
 class SurfaceShockMode(Enum):
@@ -47,6 +48,7 @@ class SurfaceShockResult:
     pnl: float
     no_arb_passed: bool
     notes: Tuple[str, ...]
+    calibration: Optional[dict] = None   # heston: base/shocked convergence
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +60,9 @@ class SurfaceShockResult:
             "pnl": self.pnl,
             "no_arb_passed": self.no_arb_passed,
             "notes": list(self.notes),
+            "calibration": (
+                dict(self.calibration) if self.calibration else None
+            ),
         }
 
 
@@ -93,6 +98,27 @@ def _fit_surface(cleaned, carry_curve, spot):
     return surface, report.passed
 
 
+def _checked_calibration(cleaned, rate_curve, carry_curve, label: str,
+                         max_rmse_iv: float):
+    """Calibrate and fail CLOSED on non-convergence or poor fit (§7.5:
+    silently pricing unconverged parameters is worse than failing)."""
+    from quantark.volmodels.heston import calibrate_heston_from_quotes
+
+    calib = calibrate_heston_from_quotes(cleaned, rate_curve, carry_curve)
+    if not calib.result.success:
+        raise NumericalError(
+            f"{label} Heston calibration did not converge: "
+            f"{calib.result.message}"
+        )
+    if calib.residual_report.rmse_iv > max_rmse_iv:
+        raise NumericalError(
+            f"{label} Heston calibration residual rmse_iv="
+            f"{calib.residual_report.rmse_iv:.4f} exceeds the "
+            f"{max_rmse_iv:.4f} gate"
+        )
+    return calib
+
+
 def run_surface_shock_pipeline(
     product,
     base_env_builder: Callable[[object], object],  # surface -> PricingEnvironment
@@ -106,9 +132,9 @@ def run_surface_shock_pipeline(
     dsigma: float = 0.01,
     tenor_bucket: Optional[Tuple[float, float]] = None,
     moneyness_bucket: Optional[Tuple[float, float]] = None,
+    max_calibration_rmse_iv: float = MAX_CALIBRATION_RMSE_IV,
 ) -> SurfaceShockResult:
     """One auditable shock cell: base PV, shocked PV, PnL, no-arb, notes."""
-    from quantark.volmodels.heston import calibrate_heston_from_quotes
     from quantark.volmodels.localvol import build_dupire_local_vol
 
     if model not in ("local_vol", "heston"):
@@ -157,9 +183,16 @@ def run_surface_shock_pipeline(
             engine = engine_factory(model, shocked_lv)
         pv_shocked = float(engine.price(product, shocked_env))
     else:  # heston
-        base_calib = calibrate_heston_from_quotes(
-            cleaned, rate_curve, carry_curve
+        calibration_info = {}
+        base_calib = _checked_calibration(
+            cleaned, rate_curve, carry_curve, "base", max_calibration_rmse_iv
         )
+        calibration_info["base"] = {
+            "success": base_calib.result.success,
+            "cost": base_calib.result.cost,
+            "nfev": base_calib.result.nfev,
+            "rmse_iv": base_calib.residual_report.rmse_iv,
+        }
         base_env = base_env_builder(base_surface)
         base_engine = engine_factory(model, base_calib.params)
         pv_base = float(base_engine.price(product, base_env))
@@ -171,9 +204,16 @@ def run_surface_shock_pipeline(
                 "the model absorbs quote shocks only via recalibration)"
             )
         else:
-            shocked_calib = calibrate_heston_from_quotes(
-                shocked, rate_curve, carry_curve
+            shocked_calib = _checked_calibration(
+                shocked, rate_curve, carry_curve, "shocked",
+                max_calibration_rmse_iv,
             )
+            calibration_info["shocked"] = {
+                "success": shocked_calib.result.success,
+                "cost": shocked_calib.result.cost,
+                "nfev": shocked_calib.result.nfev,
+                "rmse_iv": shocked_calib.residual_report.rmse_iv,
+            }
             engine = engine_factory(model, shocked_calib.params)
             pv_shocked = float(
                 engine.price(product, base_env_builder(shocked_surface))
@@ -188,4 +228,5 @@ def run_surface_shock_pipeline(
         pnl=pv_shocked - pv_base,
         no_arb_passed=bool(no_arb_passed),
         notes=tuple(notes),
+        calibration=(calibration_info if model == "heston" else None),
     )

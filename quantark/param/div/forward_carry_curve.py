@@ -90,20 +90,15 @@ class ForwardCarryCurve:
         return (self.carry(t1) - self.carry(t0)) / (t1 - t0)
 
     def to_dividend_yield(self, rate_curve):
-        """TermStructureDividendYield with q(T)*T = r(T)*T - B(T) at nodes."""
-        from quantark.param.div.dividend_yield import TermStructureDividendYield
+        """Dividend-yield adapter with q(T)*T = r(T)*T - B(T) POINTWISE.
 
-        tenors = self._t[1:]
-        if tenors.size < 2:
-            raise ValidationError(
-                "to_dividend_yield needs >= 2 carry nodes "
-                "(TermStructureDividendYield requires >= 2 points)"
-            )
-        yields = [
-            (float(rate_curve.get_rate(T)) * T - self.carry(T)) / T
-            for T in tenors
-        ]
-        return TermStructureDividendYield(times=list(tenors), yields=yields)
+        Returns a view over this curve and the rate curve (not a resampled
+        TermStructureDividendYield): sampling q at nodes and re-interpolating
+        q linearly would distort B(T) between and beyond nodes for non-flat
+        carry. The view honors this curve's extrapolation scheme and carries
+        its node metadata.
+        """
+        return _CarryImpliedDividendYield(carry_curve=self, rate_curve=rate_curve)
 
     @classmethod
     def from_index_futures(cls, futures_curve, rate_curve) -> "ForwardCarryCurve":
@@ -126,3 +121,43 @@ class ForwardCarryCurve:
         return cls(
             [(float(T), float(np.log(float(F) / float(s0)))) for T, F in nodes]
         )
+
+
+from quantark.param.div.dividend_yield import DividendYield  # noqa: E402
+
+
+class _CarryImpliedDividendYield(DividendYield):
+    """DividendYield view: q(T) = (r(T)*T - B(T)) / T pointwise.
+
+    Exact for every T (interpolated, node, and extrapolated regions alike);
+    array inputs are supported for the grid samplers. Entries at T <= 0 map
+    to 0.0 in ARRAY calls only — grid samplers weight by q(T)*T, so the
+    T = 0 entry is mathematically irrelevant; scalar calls at T <= 0 raise.
+    """
+
+    def __init__(self, carry_curve: ForwardCarryCurve, rate_curve):
+        self._carry = carry_curve
+        self._rate = rate_curve
+        self.node_roles = carry_curve.node_roles
+        self.last_observable_tenor = carry_curve.last_observable_tenor
+
+    def get_yield(self, time_to_maturity):
+        t = time_to_maturity
+        if np.ndim(t) == 0:
+            t = float(t)
+            if t <= 0.0:
+                raise ValidationError(
+                    f"carry-implied yield needs T > 0, got {t}"
+                )
+            return (
+                float(self._rate.get_rate(t)) * t - self._carry.carry(t)
+            ) / t
+        arr = np.asarray(t, dtype=float)
+        out = np.zeros_like(arr)
+        pos = arr > 0.0
+        for idx in np.flatnonzero(pos):
+            ti = float(arr.flat[idx])
+            out.flat[idx] = (
+                float(self._rate.get_rate(ti)) * ti - self._carry.carry(ti)
+            ) / ti
+        return out

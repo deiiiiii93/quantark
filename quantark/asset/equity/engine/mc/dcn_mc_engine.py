@@ -18,6 +18,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import DCNEventStats
 from quantark.asset.equity.engine.mc.dcn_payoff import compute_dcn_cashflows
 from quantark.asset.equity.engine.mc.qmc_draws import qmc_normals
@@ -25,6 +26,7 @@ from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.priceenv.term_sampling import make_df_fn
+from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 
 _BATCH_SEED_STRIDE = 1000  # matches the snowball/phoenix batch-seed convention
@@ -116,13 +118,15 @@ class _LegAccumulator:
         self.life_sum += float(life.sum())
 
 
-class DCNMCEngine:
+class DCNMCEngine(BaseEngine):
     """GBM MC engine for DCNOption; flat markets are just flat curves.
 
     Sobol QMC by default (fixed seed => bit-reproducible in the same
     environment). Subclasses override ``_simulate`` only (path generation);
     payoff, discounting, leg decomposition and event stats are shared.
     """
+
+    engine_type = EngineType.MONTE_CARLO
 
     def __init__(
         self,
@@ -132,6 +136,7 @@ class DCNMCEngine:
         use_antithetic: bool = False,
         num_batches: int = 1,
     ):
+        super().__init__()
         if use_sobol and use_antithetic:
             raise ValidationError("Sobol QMC and antithetic are mutually exclusive")
         if num_paths <= 0:
@@ -188,8 +193,23 @@ class DCNMCEngine:
 
         sign = product.direction_sign
         n = acc.n
-        totals = sign * np.concatenate(acc.totals)
-        stderr = float(totals.std(ddof=1) / np.sqrt(n))
+        if self.use_sobol and self.num_batches >= 2:
+            # RQMC: paths inside one Sobol batch are NOT independent, so the
+            # IID pathwise formula is invalid; estimate the error from the
+            # variance of the independent per-scramble batch means (same
+            # convention as the repo's RQMC driver).
+            batch_means = np.array(
+                [float(sign * t.mean()) for t in acc.totals]
+            )
+            stderr = float(
+                batch_means.std(ddof=1) / np.sqrt(batch_means.size)
+            )
+        else:
+            # pseudorandom IID paths (exact), or single-batch Sobol where
+            # the pathwise formula is only a conservative upper-bound proxy
+            # — use num_batches >= 2 for a valid QMC error estimate.
+            totals = sign * np.concatenate(acc.totals)
+            stderr = float(totals.std(ddof=1) / np.sqrt(n))
         # legs first; pv is DEFINED as their sum (exact invariant)
         pv_fixed = float(sign * acc.fixed_sum / n)
         pv_ko = float(sign * acc.ko_sum / n)

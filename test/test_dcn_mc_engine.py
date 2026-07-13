@@ -46,13 +46,16 @@ def test_probabilities_consistent():
 
 
 def test_high_q_makes_ki_dominant():
-    # q = 14.06% >> r drags the forward down hard: KI is substantial, almost
-    # no path survives to maturity without knocking in, and the buyer PV is
-    # negative (loss leg dominates the coupons).
+    # q = 14.06% >> r drags the forward down hard: KI before termination is
+    # substantial, almost no path survives to maturity without knocking in,
+    # and the buyer PV is negative (loss leg dominates the coupons).
+    # ki_probability counts KI on ALIVE paths only (contract terminates at
+    # KO), so it is bounded by 1 - early-KO mass.
     p = make_dcn(DCN_B)
     r = _engine().price_detailed(p, flat_env(**FLAT))
-    assert r.ki_probability > 0.5
-    assert r.prob_survive_no_ki < 0.1
+    assert r.ki_probability > 0.3
+    assert r.prob_survive_ki > 0.3           # KI'd survivors carry the loss
+    assert r.prob_survive_no_ki < 0.05       # surviving without KI is rare
     assert r.pv < 0.0
     assert r.pv_loss_leg < 0.0
 

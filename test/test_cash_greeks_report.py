@@ -62,3 +62,21 @@ def test_theta_requires_calendar_and_spec():
             p, flat_env(**FLAT), DCNMCEngine(num_paths=PATHS, seed=42),
             calendar=None,
         )
+
+
+def test_unified_greeks_entry_point_accepts_dcn():
+    # review regression: DCNOption implements the BaseEquityProduct contract
+    # so the unified GreeksCalculator entry point must work
+    from quantark.asset.equity.riskmeasures.greeks_calculator import (
+        GreeksCalculator,
+    )
+
+    p = make_dcn(DCN_A)
+    env = flat_env(**FLAT)
+    engine = DCNMCEngine(num_paths=2 ** 12, seed=42)
+    assert p.is_linear is False
+    assert p.get_maturity(env) == pytest.approx(731 / 365.0)
+    out = GreeksCalculator().calculate(
+        p, env, engine, greeks=["price", "delta"]
+    )
+    assert "delta" in out and "price" in out
