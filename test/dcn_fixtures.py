@@ -223,7 +223,9 @@ def synthetic_cleaned_set(heston_params=None):
         expiry = valuation_date + _td(days=days)
         f = carry_curve.forward(spot, t)
         df = float(np.exp(-r * t))
-        for mult in (0.85, 0.90, 0.95, 1.0, 1.05, 1.10, 1.20):
+        # wide moneyness range so the SVI wings are pinned by data and the
+        # dense calendar cross-check (y in [-1.5, 1.5]) is satisfiable
+        for mult in (0.60, 0.75, 0.85, 0.95, 1.0, 1.05, 1.15, 1.30, 1.55):
             k = round(f * mult, 2)
             call = heston_call_price(spot, k, t, params, r, q)
             if k >= f:
