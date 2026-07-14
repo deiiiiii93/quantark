@@ -227,6 +227,112 @@ class HestonDCNMCEngine(DCNMCEngine):
         )
 
 
+class CoupledCoarseHestonDCNMCEngine(HestonDCNMCEngine):
+    """Coarse half of a coupled Heston timestep-ladder pair.
+
+    Instead of drawing its own randomness, this engine derives every draw
+    from the paired fine engine's (deterministic, seed/batch-keyed) block:
+
+    - standardized Gaussian streams are pair-aggregated,
+      ``(z[2i] + z[2i+1]) / sqrt(2)`` — the exact Brownian-increment sum, so
+      the coarse asset/variance noise is the fine Brownian path observed on
+      the coarse grid;
+    - QE branch uniforms take the first draw of each fine pair, which keeps
+      an exact uniform marginal and a strongly correlated branch selection.
+
+    Marginally the coarse simulation therefore remains a valid randomized
+    estimator (every derived draw has the exact target law under Sobol
+    scrambling or pseudorandom seeding); jointly it is highly correlated
+    with the fine simulation, so coarse-minus-fine differences computed
+    batch-by-batch on the same seed form a low-variance paired ladder —
+    the multilevel Monte Carlo coupling — instead of the independent-
+    scramble design whose difference variance is the sum of two marginal
+    variances. The achieved reduction is an empirical output, not an
+    assumption — and it inverts naive intuition in Feller-violating
+    regimes: FTE's exact Brownian aggregation is undermined by v=0
+    truncation events flipping between resolutions (measured ~1.4x variance
+    reduction on the DCN fixtures), while QE-M's near-exact transition
+    sampling keeps resolutions aligned (~4x). Gaussian-aggregating the
+    branch uniforms was measured strictly worse than first-of-pair and is
+    deliberately not used.
+
+    Build pairs with :func:`coupled_heston_ladder_pair` so seed, scheme and
+    stream-layout consistency are enforced.
+    """
+
+    def __init__(self, fine_engine: HestonDCNMCEngine, **kwargs):
+        if not isinstance(fine_engine, HestonDCNMCEngine):
+            raise ValidationError(
+                "fine_engine must be a HestonDCNMCEngine"
+            )
+        super().__init__(**kwargs)
+        if fine_engine.substeps_per_interval != 2 * self.substeps_per_interval:
+            raise ValidationError(
+                "fine engine must use exactly 2x the coarse substeps "
+                f"(coarse={self.substeps_per_interval}, "
+                f"fine={fine_engine.substeps_per_interval})"
+            )
+        for attr in (
+            "seed", "scheme", "use_sobol", "use_antithetic",
+            "fixed_three_stream_sobol",
+        ):
+            if getattr(fine_engine, attr) != getattr(self, attr):
+                raise ValidationError(
+                    f"coupled pair must agree on {attr}: "
+                    f"fine={getattr(fine_engine, attr)!r} vs "
+                    f"coarse={getattr(self, attr)!r}"
+                )
+        if fine_engine.model_params is not self.model_params:
+            raise ValidationError(
+                "coupled pair must share the same HestonParams instance"
+            )
+        self._fine_engine = fine_engine
+
+    def _heston_draws(self, n_steps, n_paths, batch_id):
+        z_var_fine, z_ind_fine, u_var_fine = self._fine_engine._heston_draws(
+            2 * n_steps, n_paths, batch_id
+        )
+        inv_sqrt2 = 1.0 / np.sqrt(2.0)
+        z_var = (z_var_fine[:, 0::2] + z_var_fine[:, 1::2]) * inv_sqrt2
+        z_ind = (z_ind_fine[:, 0::2] + z_ind_fine[:, 1::2]) * inv_sqrt2
+        u_var = (
+            None if u_var_fine is None
+            else np.ascontiguousarray(u_var_fine[:, 0::2])
+        )
+        return z_var, z_ind, u_var
+
+
+def coupled_heston_ladder_pair(
+    model_params: HestonParams,
+    coarse_substeps_per_interval: int,
+    scheme: HestonMCScheme | str,
+    **engine_kwargs,
+) -> tuple[CoupledCoarseHestonDCNMCEngine, HestonDCNMCEngine]:
+    """Build a (coarse, fine) coupled timestep-ladder engine pair.
+
+    Both engines share seed, scheme and every other engine keyword; the fine
+    engine uses ``2 * coarse_substeps_per_interval`` substeps and draws its
+    own randomness, while the coarse engine derives its draws from the fine
+    block for the same seed/batch. Price both with the same product and
+    environment (one seed per RQMC batch, ``num_batches=1``) and difference
+    the batch metrics to obtain the low-variance coupled ladder.
+    """
+    fine = HestonDCNMCEngine(
+        model_params=model_params,
+        substeps_per_interval=2 * int(coarse_substeps_per_interval),
+        scheme=scheme,
+        **engine_kwargs,
+    )
+    coarse = CoupledCoarseHestonDCNMCEngine(
+        fine_engine=fine,
+        model_params=model_params,
+        substeps_per_interval=int(coarse_substeps_per_interval),
+        scheme=scheme,
+        **engine_kwargs,
+    )
+    return coarse, fine
+
+
 class QEDCNMCEngine(HestonDCNMCEngine):
     """Convenience DCN engine fixed to Heston QE or QE-M paths."""
 

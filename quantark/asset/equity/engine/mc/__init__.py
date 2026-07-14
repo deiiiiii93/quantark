@@ -7,9 +7,11 @@ from .american_option_mc_engine import AmericanOptionMCEngine, AmericanMCResult
 from .snowball_mc_engine import SnowballMCEngine
 from .dcn_mc_engine import DCNMCEngine, DCNMCResult
 from .dcn_vol_mc_engines import (
+    CoupledCoarseHestonDCNMCEngine,
     HestonDCNMCEngine,
     LocalVolDCNMCEngine,
     QEDCNMCEngine,
+    coupled_heston_ladder_pair,
 )
 from .phoenix_mc_engine import PhoenixMCEngine, PhoenixMCResult
 from .asian_option_mc_engine import AsianOptionMCEngine, AsianMCResult
@@ -66,8 +68,10 @@ __all__ = [
     "DCNMCEngine",
     "DCNMCResult",
     "LocalVolDCNMCEngine",
+    "CoupledCoarseHestonDCNMCEngine",
     "HestonDCNMCEngine",
     "QEDCNMCEngine",
+    "coupled_heston_ladder_pair",
     "PhoenixMCEngine",
     "PhoenixMCResult",
     "AsianOptionMCEngine",
