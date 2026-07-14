@@ -6,7 +6,11 @@ from .euro_mc_engine import EuropeanMCEngine
 from .american_option_mc_engine import AmericanOptionMCEngine, AmericanMCResult
 from .snowball_mc_engine import SnowballMCEngine
 from .dcn_mc_engine import DCNMCEngine, DCNMCResult
-from .dcn_vol_mc_engines import HestonDCNMCEngine, LocalVolDCNMCEngine
+from .dcn_vol_mc_engines import (
+    HestonDCNMCEngine,
+    LocalVolDCNMCEngine,
+    QEDCNMCEngine,
+)
 from .phoenix_mc_engine import PhoenixMCEngine, PhoenixMCResult
 from .asian_option_mc_engine import AsianOptionMCEngine, AsianMCResult
 from .digital_option_mc_engine import DigitalOptionMCEngine
@@ -63,6 +67,7 @@ __all__ = [
     "DCNMCResult",
     "LocalVolDCNMCEngine",
     "HestonDCNMCEngine",
+    "QEDCNMCEngine",
     "PhoenixMCEngine",
     "PhoenixMCResult",
     "AsianOptionMCEngine",

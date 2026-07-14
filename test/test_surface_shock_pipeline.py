@@ -100,6 +100,21 @@ def test_heston_frozen_is_zero_with_note():
     assert any("frozen params" in n for n in res.notes)
 
 
+def test_heston_calibration_policy_is_threaded_and_reported():
+    res = _run(
+        "heston",
+        SurfaceShockMode.FROZEN,
+        heston_calibration_config={
+            "regularize_feller": 0.0,
+            "enforce_feller": False,
+        },
+    )
+    assert res.calibration["base"]["feller_policy"] == {
+        "regularize_feller": 0.0,
+        "enforce_feller": False,
+    }
+
+
 def test_lv_frozen_smaller_than_recalibrate():
     frozen = _run("local_vol", SurfaceShockMode.FROZEN)
     recal = _run("local_vol", SurfaceShockMode.RECALIBRATE)

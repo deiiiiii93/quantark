@@ -21,6 +21,10 @@ from .pde_engine import PDEEngine
 from .mc import (
     EuropeanMCEngine,
     AmericanOptionMCEngine,
+    DCNMCEngine,
+    LocalVolDCNMCEngine,
+    HestonDCNMCEngine,
+    QEDCNMCEngine,
     SnowballMCEngine,
     PhoenixMCEngine,
     DigitalOptionMCEngine,
@@ -88,6 +92,10 @@ __all__ = [
     # Monte Carlo
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
+    "DCNMCEngine",
+    "LocalVolDCNMCEngine",
+    "HestonDCNMCEngine",
+    "QEDCNMCEngine",
     "SnowballMCEngine",
     "PhoenixMCEngine",
     "DigitalOptionMCEngine",

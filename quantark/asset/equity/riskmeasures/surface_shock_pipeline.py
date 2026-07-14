@@ -103,13 +103,24 @@ def _fit_surface(cleaned, carry_curve, spot):
     return surface, report.passed
 
 
-def _checked_calibration(cleaned, rate_curve, carry_curve, label: str,
-                         max_rmse_iv: float):
+def _checked_calibration(
+    cleaned,
+    rate_curve,
+    carry_curve,
+    label: str,
+    max_rmse_iv: float,
+    calibration_config: Optional[dict] = None,
+):
     """Calibrate and fail CLOSED on non-convergence or poor fit (§7.5:
     silently pricing unconverged parameters is worse than failing)."""
     from quantark.volmodels.heston import calibrate_heston_from_quotes
 
-    calib = calibrate_heston_from_quotes(cleaned, rate_curve, carry_curve)
+    calib = calibrate_heston_from_quotes(
+        cleaned,
+        rate_curve,
+        carry_curve,
+        config=dict(calibration_config or {}),
+    )
     if not calib.result.success:
         raise NumericalError(
             f"{label} Heston calibration did not converge: "
@@ -138,6 +149,7 @@ def run_surface_shock_pipeline(
     tenor_bucket: Optional[Tuple[float, float]] = None,
     moneyness_bucket: Optional[Tuple[float, float]] = None,
     max_calibration_rmse_iv: float = MAX_CALIBRATION_RMSE_IV,
+    heston_calibration_config: Optional[dict] = None,
 ) -> SurfaceShockResult:
     """One auditable shock cell: base PV, shocked PV, PnL, no-arb, notes."""
     from quantark.volmodels.localvol import build_dupire_local_vol
@@ -146,6 +158,10 @@ def run_surface_shock_pipeline(
         raise ValidationError(f"model must be local_vol or heston, got {model}")
     if not isinstance(mode, SurfaceShockMode):
         raise ValidationError(f"mode must be SurfaceShockMode, got {mode!r}")
+    if heston_calibration_config is not None and not isinstance(
+        heston_calibration_config, dict
+    ):
+        raise ValidationError("heston_calibration_config must be a dict or None")
     notes = []
     artifact_diagnostics = None
     shock = {
@@ -217,13 +233,19 @@ def run_surface_shock_pipeline(
     else:  # heston
         calibration_info = {}
         base_calib = _checked_calibration(
-            cleaned, rate_curve, carry_curve, "base", max_calibration_rmse_iv
+            cleaned,
+            rate_curve,
+            carry_curve,
+            "base",
+            max_calibration_rmse_iv,
+            heston_calibration_config,
         )
         calibration_info["base"] = {
             "success": base_calib.result.success,
             "cost": base_calib.result.cost,
             "nfev": base_calib.result.nfev,
             "rmse_iv": base_calib.residual_report.rmse_iv,
+            "feller_policy": dict(base_calib.config["feller_policy"]),
         }
         base_env = base_env_builder(base_surface)
         base_engine = engine_factory(model, base_calib.params)
@@ -239,12 +261,16 @@ def run_surface_shock_pipeline(
             shocked_calib = _checked_calibration(
                 shocked, rate_curve, carry_curve, "shocked",
                 max_calibration_rmse_iv,
+                heston_calibration_config,
             )
             calibration_info["shocked"] = {
                 "success": shocked_calib.result.success,
                 "cost": shocked_calib.result.cost,
                 "nfev": shocked_calib.result.nfev,
                 "rmse_iv": shocked_calib.residual_report.rmse_iv,
+                "feller_policy": dict(
+                    shocked_calib.config["feller_policy"]
+                ),
             }
             engine = engine_factory(model, shocked_calib.params)
             pv_shocked = float(

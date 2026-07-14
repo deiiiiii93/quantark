@@ -36,6 +36,8 @@ class HestonQuoteCalibration:
     config: dict
 
     def to_dict(self) -> dict:
+        two_kappa_theta = 2.0 * self.params.kappa * self.params.theta
+        sigma_squared = self.params.sigma * self.params.sigma
         return {
             "params": {
                 "v0": self.params.v0, "kappa": self.params.kappa,
@@ -45,6 +47,23 @@ class HestonQuoteCalibration:
             "success": self.result.success,
             "cost": self.result.cost,
             "nfev": self.result.nfev,
+            "objective": {
+                "total_cost": self.result.cost,
+                "data_cost": self.result.data_cost,
+                "feller_penalty_cost": self.result.feller_penalty_cost,
+            },
+            "feller": {
+                "enforced": self.result.enforce_feller,
+                "satisfied": self.result.feller_margin >= 0.0,
+                "margin": self.result.feller_margin,
+                "two_kappa_theta": two_kappa_theta,
+                "sigma_squared": sigma_squared,
+                "ratio": (
+                    two_kappa_theta / sigma_squared
+                    if sigma_squared > 0.0 else None
+                ),
+            },
+            "optimizer": self.result.optimizer,
             "residual_report": self.residual_report.to_dict(),
             "config": dict(self.config),
         }
@@ -77,6 +96,9 @@ def calibrate_heston_from_quotes(
         rho=_DEFAULT_RHO,
     )
     bounds = cfg.pop("bounds", _DEFAULT_BOUNDS)
+    method = cfg.pop("method", "lewis")
+    regularize_feller = cfg.pop("regularize_feller", 1e-4)
+    enforce_feller = cfg.pop("enforce_feller", False)
     solver = dict(max_nfev=200, xtol=1e-6, ftol=1e-6, gtol=1e-6)
     solver.update(cfg)
 
@@ -100,6 +122,9 @@ def calibrate_heston_from_quotes(
         initial=initial,
         bounds=bounds,
         target="iv",
+        method=method,
+        regularize_feller=regularize_feller,
+        enforce_feller=enforce_feller,
         **solver,
     )
 
@@ -125,6 +150,11 @@ def calibrate_heston_from_quotes(
             "bounds": [list(bounds[0]), list(bounds[1])],
             "target": "iv",
             "weights": "vega-weighted (from quote cleaning)",
+            "method": method,
+            "feller_policy": {
+                "enforce_feller": enforce_feller,
+                "regularize_feller": regularize_feller,
+            },
             "stopping": {k: solver[k] for k in ("max_nfev", "xtol", "ftol",
                                                 "gtol")},
         },

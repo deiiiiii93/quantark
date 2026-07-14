@@ -3,7 +3,11 @@ import pytest
 from quantark.util.enum.engine_enums import HestonMCScheme
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams, heston_call_price
-from quantark.volmodels.heston.mc_kernel import _simulate_terminal_spot, price_european_heston_mc
+from quantark.volmodels.heston.mc_kernel import (
+    _simulate_terminal_spot,
+    price_european_heston_mc,
+    simulate_heston_spot_nodes,
+)
 
 
 P = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
@@ -11,6 +15,43 @@ P = HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.7)
 
 def _const(T, M, r, q):
     return np.full(M, T / M), np.full(M, r), np.full(M, q)
+
+
+@pytest.mark.parametrize(
+    "scheme",
+    [
+        HestonMCScheme.EULER,
+        HestonMCScheme.EULERLOG,
+        HestonMCScheme.FULL_TRUNCATION_EULER,
+        HestonMCScheme.QUADEXP,
+        HestonMCScheme.QUADEXP_M,
+    ],
+)
+def test_recorded_path_terminal_matches_terminal_kernel(scheme):
+    dt, rf, cf = _const(1.0, 8, 0.03, 0.01)
+    rng = np.random.default_rng(19)
+    z_var = rng.standard_normal((64, 8))
+    z_ind = rng.standard_normal((64, 8))
+    u_var = rng.random((64, 8))
+
+    nodes = simulate_heston_spot_nodes(
+        100.0,
+        P,
+        scheme,
+        dt,
+        rf,
+        cf,
+        z_var,
+        z_ind,
+        u_var,
+        record_steps=np.asarray([0, 8]),
+    )
+    terminal = _simulate_terminal_spot(
+        100.0, P, scheme, dt, rf, cf, z_var, z_ind, u_var
+    )
+
+    assert nodes.shape == (64, 2)
+    assert np.array_equal(nodes[:, -1], terminal)
 
 
 @pytest.mark.parametrize("scheme", [HestonMCScheme.EULER, HestonMCScheme.EULERLOG, HestonMCScheme.QUADEXP])

@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import least_squares, minimize
 
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.volmodels.black_scholes import bs_call_price, implied_vol_call
 from quantark.volmodels.heston.analytical_kernel import (
     heston_call_price,
@@ -37,6 +37,11 @@ class CalibrationResult:
     cost: float
     message: str
     nfev: int
+    data_cost: float = 0.0
+    feller_penalty_cost: float = 0.0
+    feller_margin: float = 0.0
+    enforce_feller: bool = False
+    optimizer: str = "least_squares"
 
 
 def calibrate_heston(
@@ -59,6 +64,7 @@ def calibrate_heston(
     xtol: float = 1e-6,
     ftol: float = 1e-6,
     gtol: float = 1e-6,
+    enforce_feller: bool = False,
 ) -> CalibrationResult:
     """Calibrate (v0, kappa, theta, sigma, rho) to market options via least squares.
 
@@ -73,14 +79,23 @@ def calibrate_heston(
             (the pre-WS-B1 objective), preserved for compatibility; they are ~10x+ slower
             but numerically agree with lewis to ~1e-10. The default changed from "gatheral"
             to "lewis" in WS-B1 to deliver the speedup by default.
-        max_nfev, xtol, ftol, gtol: least-squares solver controls.
+        max_nfev, xtol, ftol, gtol: least-squares solver controls.  The hard
+            Feller branch maps ``max_nfev`` and ``ftol`` to SLSQP's iteration
+            and objective tolerances; ``xtol`` and ``gtol`` retain their
+            validation and default-branch meanings.
+        enforce_feller: if True, minimize the same half squared-residual
+            objective under the nonlinear constraint
+            ``2 * kappa * theta >= sigma**2``.  This is a genuine constrained
+            solve; ``regularize_feller`` remains the independent soft-penalty
+            control used by the objective.
 
     Notes:
-        A NumericalError raised by the CF pricer at extreme trial parameters propagates by
-        design (there is no fallback residual). If calibration aborts this way, tighten the
-        bounds so least_squares does not probe those parameters. The fixed-quadrature
-        vectorized pricer with the no-arbitrage clamp makes this substantially rarer than
-        the old adaptive-quad path (quad tail failures were the main source).
+        In the default least-squares branch, a NumericalError raised by the CF
+        pricer at extreme trial parameters propagates by design.  The hard
+        constraint branch instead assigns an invalid SLSQP line-search trial a
+        large barrier objective; its final parameters are always repriced and
+        validated, so an invalid fit is never returned.  Tightening broad
+        custom bounds remains the preferred remedy for repeated invalid trials.
 
     Raises:
         ValidationError: on bad inputs, inverted bounds, or an initial guess outside
@@ -94,6 +109,8 @@ def calibrate_heston(
         raise ValidationError("at least one market option is required")
     if not (np.isfinite(regularize_feller) and regularize_feller >= 0.0):
         raise ValidationError("regularize_feller must be finite and non-negative")
+    if not isinstance(enforce_feller, bool):
+        raise ValidationError("enforce_feller must be a bool")
     if not (np.isfinite(s0) and s0 > 0):
         raise ValidationError("s0 must be finite and positive")
     def resolve(value, t: float, name: str) -> float:
@@ -154,6 +171,12 @@ def calibrate_heston(
             "initial parameters must lie within [lower, upper]; tighten the initial "
             "guess or widen the bounds"
         )
+    if enforce_feller:
+        max_box_margin = 2.0 * upper[1] * upper[2] - lower[3] * lower[3]
+        if max_box_margin <= 0.0:
+            raise ValidationError(
+                "bounds contain no parameters satisfying the Feller constraint"
+            )
 
     # Group options by maturity: the Heston CF is strike-independent, so all strikes at one
     # maturity share a single phi(u) sweep. resolve() is deterministic in T, so options with
@@ -164,7 +187,7 @@ def calibrate_heston(
         idx = np.nonzero(inv == g)[0]
         groups.append((float(uniqueT[g]), float(rates[idx[0]]), float(carries[idx[0]]), idx))
 
-    def residuals(x: np.ndarray) -> np.ndarray:
+    def data_residuals(x: np.ndarray) -> np.ndarray:
         p = unpack(x)
         model = np.empty(Ks.shape[0], dtype=float)
         if method == "lewis":
@@ -191,23 +214,120 @@ def calibrate_heston(
                     heston_implied_vol(s0, K, T, p, rate_i, carry_i, method=method)
                     for K, T, rate_i, carry_i in zip(Ks, Ts, rates, carries)
                 ])
-        res = (model - y) * np.sqrt(w)
+        return (model - y) * np.sqrt(w)
+
+    def feller_margin(x: np.ndarray) -> float:
+        return float(2.0 * x[1] * x[2] - x[3] * x[3])
+
+    def residuals(x: np.ndarray) -> np.ndarray:
+        res = data_residuals(x)
         # Fixed-length residual: always append the penalty term when enabled (it is 0
         # when Feller is satisfied) so least_squares sees a constant dimension.
         if regularize_feller > 0.0:
-            feller_violation = max(0.0, p.sigma * p.sigma - 2.0 * p.kappa * p.theta)
+            feller_violation = max(0.0, -feller_margin(x))
             res = np.concatenate([res, np.array([math.sqrt(regularize_feller) * feller_violation])])
         return res
 
-    res = least_squares(
-        residuals,
-        x0,
-        bounds=(lower, upper),
-        max_nfev=max_nfev,
-        xtol=xtol,
-        ftol=ftol,
-        gtol=gtol,
-        verbose=0,
+    if enforce_feller:
+        # A small positive buffer absorbs SLSQP's constraint tolerance while
+        # ensuring the returned HestonParams passes the strict public Feller
+        # predicate.  It is numerical slack, not an economic model margin.
+        hard_buffer = 1e-8
+        parameter_span = np.maximum(upper - lower, 1.0)
+
+        def objective(x: np.ndarray) -> float:
+            try:
+                values = residuals(x)
+            except NumericalError:
+                # SLSQP can probe an extreme yet box-feasible point during a
+                # line search.  Such a point has no valid Heston objective;
+                # use a smooth, overwhelmingly large barrier so the real
+                # constrained optimizer can reject the trial.  The final
+                # point is always repriced below, so an invalid result can
+                # never be returned as a calibration.
+                distance = (np.asarray(x, dtype=float) - x0) / parameter_span
+                return float(1e12 + 1e6 * np.dot(distance, distance))
+            return float(0.5 * np.dot(values, values))
+
+        def constraint(x: np.ndarray) -> float:
+            return feller_margin(x) - hard_buffer
+
+        def constraint_jacobian(x: np.ndarray) -> np.ndarray:
+            return np.array([
+                0.0, 2.0 * x[2], 2.0 * x[1], -2.0 * x[3], 0.0
+            ])
+
+        res = minimize(
+            objective,
+            x0,
+            method="SLSQP",
+            bounds=list(zip(lower, upper)),
+            constraints={
+                "type": "ineq",
+                "fun": constraint,
+                "jac": constraint_jacobian,
+            },
+            options={"maxiter": max_nfev, "ftol": ftol, "disp": False},
+        )
+        fitted_x = np.asarray(res.x, dtype=float)
+        margin = feller_margin(fitted_x)
+        if not np.all(np.isfinite(fitted_x)) or not math.isfinite(margin):
+            raise NumericalError(
+                "hard-Feller calibration returned non-finite parameters"
+            )
+        bound_scale = np.maximum(
+            1.0, np.maximum(np.abs(lower), np.abs(upper))
+        )
+        bound_tolerance = 1e-10 * bound_scale
+        if (
+            np.any(fitted_x < lower - bound_tolerance)
+            or np.any(fitted_x > upper + bound_tolerance)
+        ):
+            raise NumericalError(
+                "hard-Feller calibration returned parameters outside bounds"
+            )
+        if margin < 0.0:
+            raise NumericalError(
+                "hard-Feller calibration returned constraint-violating "
+                f"parameters: 2*kappa*theta-sigma^2={margin:.6g}"
+            )
+        success = bool(res.success)
+        message = str(res.message)
+        nfev = int(res.nfev)
+        optimizer = "SLSQP"
+    else:
+        res = least_squares(
+            residuals,
+            x0,
+            bounds=(lower, upper),
+            max_nfev=max_nfev,
+            xtol=xtol,
+            ftol=ftol,
+            gtol=gtol,
+            verbose=0,
+        )
+        fitted_x = np.asarray(res.x, dtype=float)
+        margin = feller_margin(fitted_x)
+        success = bool(res.success)
+        message = str(res.message)
+        nfev = int(res.nfev)
+        optimizer = "least_squares"
+
+    fitted_data_residuals = data_residuals(fitted_x)
+    data_cost = float(
+        0.5 * np.dot(fitted_data_residuals, fitted_data_residuals)
     )
-    return CalibrationResult(params=unpack(res.x), success=bool(res.success),
-                             cost=float(res.cost), message=str(res.message), nfev=int(res.nfev))
+    violation = max(0.0, -margin)
+    penalty_cost = float(0.5 * regularize_feller * violation * violation)
+    return CalibrationResult(
+        params=unpack(fitted_x),
+        success=success,
+        cost=data_cost + penalty_cost,
+        message=message,
+        nfev=nfev,
+        data_cost=data_cost,
+        feller_penalty_cost=penalty_cost,
+        feller_margin=margin,
+        enforce_feller=enforce_feller,
+        optimizer=optimizer,
+    )
