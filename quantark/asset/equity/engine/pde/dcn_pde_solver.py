@@ -54,13 +54,19 @@ def _sinh_grid(
     return x
 
 
-def _operator_coeffs(x: np.ndarray, r: float, q: float, sig: float):
-    """Non-uniform central-difference coefficients for the log-spot BSM
-    generator ``L V = 0.5 sig^2 V_xx + (r - q - 0.5 sig^2) V_x - r V``."""
+def _operator_coeffs(x: np.ndarray, r: float, q: float, sig):
+    """Non-uniform central-difference coefficients for the log-spot
+    generator ``L V = 0.5 sig^2 V_xx + (r - q - 0.5 sig^2) V_x - r V``.
+
+    ``sig`` may be a scalar (flat/term vol) or an array over the full grid
+    (state-dependent local vol); array input is sampled at interior nodes.
+    """
     dxm = x[1:-1] - x[:-2]
     dxp = x[2:] - x[1:-1]
-    mu = r - q - 0.5 * sig * sig
-    s2 = 0.5 * sig * sig
+    sig = np.asarray(sig, dtype=float)
+    sig_int = sig[1:-1] if sig.ndim else sig
+    mu = r - q - 0.5 * sig_int * sig_int
+    s2 = 0.5 * sig_int * sig_int
     lo = (2.0 * s2 - mu * dxp) / (dxm * (dxm + dxp))
     hi = (2.0 * s2 + mu * dxm) / (dxp * (dxm + dxp))
     mid = -(lo + hi) - r
@@ -142,6 +148,11 @@ class DCNPDEEngine(BaseEngine):
     def price(self, product, pricing_env) -> float:
         return self.price_detailed(product, pricing_env).pv
 
+    def _step_vol(self, s_grid, t, tc, i):
+        """Vol used on backward step ``[t_i, t_{i+1}]``: scalar term vol here;
+        subclasses may return a per-node array (state-dependent local vol)."""
+        return float(tc.step_vols[i])
+
     def price_detailed(self, product, pricing_env) -> DCNPDEResult:
         if not isinstance(product, DCNOption):
             raise PricingError("DCNPDEEngine only supports DCNOption")
@@ -200,7 +211,7 @@ class DCNPDEEngine(BaseEngine):
             dt = float(times[i + 1] - times[i])
             r_i = float(tc.fwd_rates[i])
             q_i = float(tc.fwd_carry[i])
-            sig_i = float(tc.step_vols[i])
+            sig_i = self._step_vol(s_grid, float(times[i]), tc, i)
             lo, mid, hi = _operator_coeffs(x, r_i, q_i, sig_i)
             if rann > 0:
                 v0 = _theta_step(v0, lo, mid, hi, dt / 2.0, 1.0)

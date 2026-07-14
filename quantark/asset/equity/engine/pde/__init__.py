@@ -18,6 +18,7 @@ from .snowball_pde_solver import SnowballPDESolver
 from .ko_reset_snowball_pde_solver import KOResetSnowballPDESolver
 from .phoenix_pde_solver import PhoenixPDESolver
 from .dcn_pde_solver import DCNPDEEngine, DCNPDEResult
+from .dcn_vol_pde_solvers import HestonDCNPDESolver, LocalVolDCNPDEEngine
 from .local_vol_pde_solver import LocalVolPDESolver
 from .heston_pde_solver import HestonPDESolver
 from .heston_slv_pde_solver import HestonSLVPDESolver
@@ -64,4 +65,6 @@ __all__ = [
     'PhoenixPDESolver',
     'DCNPDEEngine',
     'DCNPDEResult',
+    'HestonDCNPDESolver',
+    'LocalVolDCNPDEEngine',
 ]
