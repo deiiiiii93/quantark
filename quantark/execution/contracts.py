@@ -21,6 +21,7 @@ __all__ = [
     "PricingOutcome",
     "PricingFailure",
     "EngineCapabilities",
+    "PreparedState",
     "ScenarioSpec",
     "ScenarioOutcome",
     "economics_mapping",
@@ -120,6 +121,21 @@ class ScenarioOutcome:
     normalized_economics: tuple
     diagnostics: object
     manifest_fingerprint: str | None
+
+
+@dataclass(frozen=True)
+class PreparedState:
+    """Immutable request-scoped prepared state (spec section 6.3).
+
+    ``handles`` are cache ArtifactHandles the kernel closes in ``finally``
+    after execution, releasing the pinned entries.
+    """
+
+    payload: object
+    descriptors: tuple
+    fingerprint: str | None
+    byte_estimate: int | None
+    handles: tuple = ()
 
 
 def economics_mapping(outcome) -> dict:

@@ -32,6 +32,8 @@ class PricingRunContext:
     diagnostics_sink: object
     adapter_registry: object | None = None
     cancellation_token: object | None = None
+    artifact_cache: object | None = None
+    lease_manager: object | None = None
     run_id: str = field(default_factory=_new_run_id)
     parent_run_id: str | None = None
     config_snapshot: tuple = ()

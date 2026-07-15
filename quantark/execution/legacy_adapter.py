@@ -94,7 +94,7 @@ class LegacyPriceAdapter:
             fingerprint=None,
         )
 
-    def execute_native(self, engine, request, normalized, context):
+    def execute_native(self, engine, request, normalized, context, prepared=None):
         op = request.operation
         if op is PricingOperation.PRICE:
             value = self._call_price(engine, request)

@@ -51,11 +51,35 @@ class ExecutionKernel:
         adapter.validate(engine, request)
 
         normalized = adapter.normalize(engine, request)
+        lease_manager = context.lease_manager
+        slot = lease_manager.task_slot() if lease_manager is not None else None
+        prepared = None
+        prep_seconds = 0.0
         start = time.perf_counter()
-        value, economics = adapter.execute_native(
-            engine, request, normalized, context
-        )
+        try:
+            if slot is not None:
+                slot.__enter__()
+            if hasattr(adapter, "prepare"):
+                t_prep = time.perf_counter()
+                prepared = adapter.prepare(engine, request, context)
+                prep_seconds = time.perf_counter() - t_prep
+            value, economics = adapter.execute_native(
+                engine, request, normalized, context, prepared=prepared
+            )
+        finally:
+            if prepared is not None:
+                for handle in prepared.handles:
+                    handle.close()
+            if slot is not None:
+                slot.__exit__(None, None, None)
         elapsed = time.perf_counter() - start
+
+        records = ()
+        cache = context.artifact_cache
+        if cache is not None:
+            records = tuple(
+                f"cache:{k}={v}" for k, v in sorted(cache.stats().items())
+            )
 
         manifest = ReproducibilityManifest(
             schema_version=MANIFEST_SCHEMA_VERSION,
@@ -71,12 +95,18 @@ class ExecutionKernel:
                 context.resource_budget,
                 context.determinism_policy,
             ),
+            preparation_fingerprint=(
+                prepared.fingerprint if prepared is not None else None
+            ),
         )
         diagnostics = RunDiagnostics(
             adapter_id=caps.adapter_id,
-            timings=(("execute_seconds", elapsed),),
+            timings=(
+                ("execute_seconds", elapsed),
+                ("prepare_seconds", prep_seconds),
+            ),
             policy_sources=context.config_snapshot,
-            records=(),
+            records=records,
         )
         outcome = PricingOutcome(
             value=value,

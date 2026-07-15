@@ -28,6 +28,7 @@ class ReproducibilityManifest:
     versions: tuple           # (("python", "3.12.1"), ...)
     platform: str
     resolved_policy: tuple    # (("batch.backend", "serial"), ...)
+    preparation_fingerprint: str | None = None
 
 
 def build_versions() -> tuple:

@@ -29,6 +29,47 @@ class PricingSession:
         # — including caller-supplied ones, so a retained handle cannot alter
         # adapter resolution mid-session. freeze() is idempotent.
         context.adapter_registry.freeze()
+        # Cache and lease manager form ONE budget domain: supplied as a
+        # validated pair or created as a pair; partial injection is rejected.
+        # Supplied (borrowed) services are never closed by the session.
+        supplied_cache = context.artifact_cache
+        supplied_leases = context.lease_manager
+        self._owned_cache = None
+        self._owned_leases = None
+        if (supplied_cache is None) != (supplied_leases is None):
+            from quantark.util.exceptions import ValidationError
+
+            raise ValidationError(
+                "artifact_cache and lease_manager must be supplied together "
+                "(one shared budget domain) or both omitted"
+            )
+        if supplied_cache is not None:
+            if supplied_cache.lease_manager is not supplied_leases:
+                from quantark.util.exceptions import ValidationError
+
+                raise ValidationError(
+                    "supplied artifact_cache is not backed by the supplied "
+                    "lease_manager; budget domains would split"
+                )
+        else:
+            import dataclasses
+
+            from quantark.execution.cache.artifacts import PreparedArtifactCache
+            from quantark.execution.leases import ResourceLeaseManager
+
+            budget = context.resource_budget
+            if budget.artifact_cache_bytes is None:
+                budget = dataclasses.replace(
+                    budget, artifact_cache_bytes=512 * 2**20
+                )
+            leases = ResourceLeaseManager(budget)
+            cache = PreparedArtifactCache(leases)
+            self._owned_leases = leases
+            self._owned_cache = cache
+            context = dataclasses.replace(
+                context, resource_budget=budget,
+                lease_manager=leases, artifact_cache=cache,
+            )
         self._context = context
         self._closed = False
 
@@ -81,6 +122,10 @@ class PricingSession:
         )
 
     def close(self) -> None:
+        if not self._closed and self._owned_cache is not None:
+            self._owned_cache.close()
+        if not self._closed and self._owned_leases is not None:
+            self._owned_leases.close()
         self._closed = True
 
     def _ensure_open(self) -> None:
