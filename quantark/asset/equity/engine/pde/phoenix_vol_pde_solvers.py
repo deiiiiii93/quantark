@@ -87,6 +87,24 @@ class LocalVolPhoenixPDESolver(PhoenixPDESolver):
             ),
         )
 
+    def price_with_events(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        emit_distribution: bool = True,
+        streams: Optional[frozenset] = None,
+    ):
+        return self._with_surface(
+            pricing_env,
+            lambda: PhoenixPDESolver.price_with_events(
+                self,
+                product,
+                pricing_env,
+                emit_distribution=emit_distribution,
+                streams=streams,
+            ),
+        )
+
     def _build_grids(self, product, pricing_env, spot, sigma, tau, r, q):
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
         self._active_s_vec = result[1]
@@ -323,8 +341,61 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             levels.extend(self._positive_levels(airbag_strike))
         return self._dedupe_levels(levels)
 
-    def calculate_event_stats(self, product, pricing_env, **kwargs):
-        return None
+    def calculate_event_stats(
+        self,
+        product,
+        pricing_env,
+        *,
+        npv: Optional[float] = None,
+        streams: Optional[frozenset] = None,
+    ):
+        if not isinstance(product, PhoenixOption):
+            return None
+        if pricing_env is None:
+            return None
+        if product.has_memory_coupon:
+            raise ValidationError(
+                f"{self._solver_name} supports non-memory Phoenix coupons only; "
+                "use PhoenixPDESolver or a Phoenix MC engine for memory coupons."
+            )
+        pde_pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
+        return PhoenixPDESolver.calculate_event_stats(
+            self,
+            product,
+            pricing_env,
+            npv=pde_pv,
+            streams=streams,
+        )
+
+    def price_with_events(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        emit_distribution: bool = True,
+        streams: Optional[frozenset] = None,
+    ):
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+
+        npv = float(self.price(product, pricing_env))
+        if not emit_distribution:
+            return PricingResult(
+                npv=npv,
+                event_distribution=EventDistribution.trivial(
+                    product.get_maturity(pricing_env)
+                ),
+            )
+        stats = self.calculate_event_stats(product, pricing_env, npv=npv, streams=streams)
+        if stats is None:
+            return PricingResult(
+                npv=npv,
+                event_distribution=EventDistribution.trivial(
+                    product.get_maturity(pricing_env)
+                ),
+            )
+        return PricingResult(
+            npv=npv,
+            event_distribution=EventDistribution.from_autocallable_stats(stats),
+        )
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

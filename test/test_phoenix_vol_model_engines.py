@@ -10,6 +10,7 @@ from quantark.asset.equity.engine.mc import (
     LocalVolPhoenixMCEngine,
     QEPhoenixMCEngine,
 )
+from quantark.asset.equity.engine.event_stats import PhoenixEventStats
 from quantark.asset.equity.engine.pde import (
     HestonPhoenixPDESolver,
     HestonSLVPhoenixPDESolver,
@@ -259,6 +260,84 @@ def test_phoenix_vol_model_mc_rqmc_engines_run():
         assert result.batches_used == 2
         assert result.num_paths == 2 * params.num_paths
         assert 0.0 < price < product.initial_price * 1.2
+
+
+def _assert_phoenix_event_stats(stats: PhoenixEventStats, product: PhoenixOption):
+    assert isinstance(stats, PhoenixEventStats)
+    assert stats.ko_times.shape == stats.ko_probability.shape
+    assert stats.ko_times.shape == stats.survival_probability.shape
+    assert stats.ko_times.shape == stats.expected_discounted_ko_cashflow.shape
+    assert stats.ko_times.shape == stats.coupon_probability.shape
+    assert stats.ko_times.shape == stats.expected_discounted_coupon_cashflow.shape
+    assert stats.ko_times.size == len(product.barrier_config.ko_observation_dates)
+    assert np.isfinite(stats.pv)
+    assert np.all(np.isfinite(stats.ko_probability))
+    assert np.all(np.isfinite(stats.coupon_probability))
+    assert np.all(stats.ko_probability >= -1e-10)
+    assert np.all(stats.coupon_probability >= -1e-10)
+    assert stats.ki_ever_probability is not None
+    assert stats.ki_survive_knocked_in_probability is not None
+
+    parts = (
+        float(np.sum(stats.expected_discounted_ko_cashflow))
+        + float(np.sum(stats.expected_discounted_coupon_cashflow))
+        + float(stats.expected_discounted_maturity_cashflow)
+    )
+    assert float(stats.pv) - parts == pytest.approx(
+        float(stats.reconciliation_error), abs=1e-7
+    )
+
+
+def test_phoenix_vol_model_mc_engines_calculate_event_stats():
+    product = _phoenix(memory_coupon=False)
+    env = _env()
+    hp = _heston()
+    params = MCParams(num_paths=768, time_steps=24, seed=41)
+
+    engines = [
+        LocalVolPhoenixMCEngine(params),
+        HestonPhoenixMCEngine(hp, params),
+        QEPhoenixMCEngine(hp, params),
+        HestonSLVPhoenixMCEngine(hp, params=params, leverage_surface=_unit_leverage()),
+        HestonSLVQEPhoenixMCEngine(
+            hp,
+            params=params,
+            leverage_surface=_unit_leverage(),
+        ),
+    ]
+
+    for engine in engines:
+        _assert_phoenix_event_stats(engine.calculate_event_stats(product, env), product)
+
+
+def test_phoenix_vol_model_pde_engines_calculate_event_stats():
+    product = _phoenix(memory_coupon=False)
+    env = _env()
+    hp = _heston()
+    params = PDEParams(grid_size=90, time_steps=48, auto_grid=False)
+
+    engines = [
+        LocalVolPhoenixPDESolver(params),
+        HestonPhoenixPDESolver(hp, n_x=48, n_v=18, n_t=16, grid_style="uniform"),
+        HestonSLVPhoenixPDESolver(
+            hp,
+            _unit_leverage(),
+            n_x=48,
+            n_v=18,
+            n_t=16,
+            grid_style="uniform",
+        ),
+    ]
+
+    for engine in engines:
+        price = float(engine.price(product, env))
+        stats = engine.calculate_event_stats(product, env)
+        _assert_phoenix_event_stats(stats, product)
+        assert float(stats.pv) == pytest.approx(price, rel=0.0, abs=1e-8)
+
+        result = engine.price_with_events(product, env)
+        assert float(result.npv) == pytest.approx(price, rel=0.0, abs=1e-8)
+        assert result.event_distribution.event_times.shape == stats.ko_times.shape
 
 
 def test_phoenix_heston_and_slv_pde_engines_run():

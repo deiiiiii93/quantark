@@ -41,9 +41,17 @@ mount intentionally rejects memory coupons because memory requires a coupled
 multi-state ADI recursion; use `PhoenixPDESolver` or a Phoenix MC engine for
 memory coupon structures.
 
+Heston and Heston-SLV PDE event stats reuse the existing one-dimensional Phoenix PDE
+event-attribution sweep and reconcile the reported `pv` and maturity residual to the
+2D Heston/SLV PDE price. This exposes the standard event-stats API for cash-leg and
+reporting workflows while leaving native 2D first-passage indicator surfaces as a
+future enhancement.
+
 ## Limitations
 
-- Heston/SLV Phoenix PDE event stats are not exposed in this mount.
+- Heston/SLV Phoenix PDE event stats use delegated one-dimensional event attribution
+  with 2D PDE PV reconciliation; they are not native 2D ADI indicator-surface
+  probabilities.
 - Heston/SLV Phoenix PDE supports non-memory coupons only.
 - Heston/SLV path-dependent PDE routes snap monitoring dates to the uniform ADI
   grid, following the current Snowball and Barrier Heston/SLV PDE convention.

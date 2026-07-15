@@ -45,6 +45,12 @@ surfaces, Snowball boundary hooks, and KO/KI step hooks. `V1` is solved first an
 snapshotted at ADI time nodes; `V0` then applies KI transitions from the matching `V1`
 surface after KO jumps, matching the existing Snowball PDE event order.
 
+Heston and Heston-SLV PDE event stats reuse the existing one-dimensional Snowball PDE
+event-attribution sweep and reconcile the reported `pv` and maturity residual to the
+2D Heston/SLV PDE price. This exposes the standard event-stats API for cash-leg and
+reporting workflows while leaving native 2D first-passage indicator surfaces as a
+future enhancement.
+
 For 2D Heston/SLV Snowball PDEs, the default log-spot grid focus is Snowball-aware.
 `grid_focus="auto"` centers the concentrated grid around the KI barrier when the product
 has KI. This avoids using a single KO-focused grid for principal-excluded structures
@@ -56,7 +62,9 @@ forcing far-away nodes into a single-center grid can be less stable on coarse me
 
 ## Limitations
 
-- Heston/SLV Snowball PDE event stats are not exposed in this mount.
+- Heston/SLV Snowball PDE event stats use delegated one-dimensional event attribution
+  with 2D PDE PV reconciliation; they are not native 2D ADI indicator-surface
+  probabilities.
 - Heston/SLV path-dependent PDE routes consume a `TermMarketContext` on the ADI
   grid for S-direction drift, reaction, boundary values, and maturity-paid
   rebate discounting.
