@@ -763,8 +763,7 @@ def test_invalid_env_text_falls_back_to_default():
 def test_resource_budget_env_resolution():
     env = {"QUANTARK_EXEC_MEMORY_MB": "1024", "QUANTARK_EXEC_MAX_IN_FLIGHT": "2"}
     budget, sources = resolve_resource_budget(explicit=None, environ=env)
-    assert budget.total_memory_bytes == 1024 * 1024 * 1024 // 1024  # 1024 MiB in bytes
-    assert budget.total_memory_bytes == 1024 * 2**20
+    assert budget.total_memory_bytes == 1024 * 2**20  # 1024 MiB in bytes
     assert budget.max_in_flight == 2
     assert dict(sources)["total_memory_bytes"] == "env"
 ```
@@ -1348,6 +1347,15 @@ performs no caching, no batching, and no parallel submission, so its shallow
 normalized snapshot (``snapshot_complete=False``, no fingerprint) is safe:
 the raw objects are used exactly as a direct legacy call would use them, on
 the calling thread. Native legacy exceptions propagate unwrapped.
+
+Serial-boundary note (spec sections 12.4, 17.1): "serial" here means the
+FRAMEWORK submits no parallel work. Engine-internal legacy parallelism —
+Snowball/Phoenix ``use_dask=True``, ``QUANTARK_DCN_MC_WORKERS`` threads —
+is engine-owned preserved behavior and passes through unchanged, exactly as
+a direct call would run it. It is outside the framework's (Phase-0-empty)
+budget claims; later phases route it through budgeted plans. A session
+therefore never alters, rejects, or silently disables an engine's own
+configured execution.
 """
 from quantark.execution.contracts import (
     DEFAULT_OUTPUTS,
@@ -2064,8 +2072,17 @@ def test_temporary_legacy_rows_have_owner_and_milestone():
 
 
 def test_every_concrete_engine_is_session_reachable():
-    """Phase 0 exit gate: adapter resolution succeeds for every concrete
-    inventoried engine class through the default registry (serial)."""
+    """Phase 0 exit gate: for every concrete inventoried engine class, the
+    default registry resolves a serial adapter AND the class exposes a
+    ``price`` callable whose arity matches the declared call shape.
+
+    Full direct-versus-session numerical parity for every row is Phase 1's
+    exit gate (spec section 21, Phase 1: "direct versus session parity
+    across the matrix"); Phase 0 proves reachability plus the representative
+    per-family parity matrix in test_session_parity.py.
+    """
+    import inspect
+
     registry = build_default_registry()
     registry.freeze()
     for record in ENGINE_INVENTORY:
@@ -2077,6 +2094,18 @@ def test_every_concrete_engine_is_session_reachable():
         adapter = registry.resolve(fake)
         assert adapter.capabilities().adapter_id == "legacy-price", record.name
         assert adapter.call_shape == record.call_shape, record.name
+        price = getattr(cls, "price", None)
+        assert callable(price), f"{record.name} has no price method"
+        params = [
+            p for p in inspect.signature(price).parameters.values()
+            if p.name != "self" and p.kind is not p.VAR_KEYWORD
+        ]
+        required = [p for p in params if p.default is p.empty]
+        expected_args = 1 if record.call_shape == "env_bound" else 2
+        assert len(required) <= expected_args <= len(params), (
+            f"{record.name}: price arity {len(params)} does not fit "
+            f"declared call shape {record.call_shape}"
+        )
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2555,6 +2584,43 @@ class TestCrossFamilyParity:
             via_session = session.price(engine, product, env)
         assert via_session == direct
 
+    def test_legacy_internal_parallelism_preserved(self, cases):
+        """Spec sections 12.4/17.1: engine-owned parallel settings (Snowball
+        use_dask, DCN workers) behave identically through the session,
+        including the missing-Dask UserWarning fallback."""
+        import warnings
+
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.asset.equity.param import MCParams
+        from quantark.asset.equity.product.option import SnowballOption
+        from quantark.asset.equity.product.option.snowball_config import (
+            BarrierConfig,
+        )
+
+        _, _, eq_env, _ = cases["equity_mc_european"]
+        snowball = SnowballOption(
+            initial_price=100.0, strike=100.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=103.0, ko_rate=0.15,
+                ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+                ki_barrier=75.0, ki_continuous=True,
+            ),
+            contract_multiplier=10_000.0, maturity=1.0,
+        )
+
+        def _build():
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # missing-Dask UserWarning ok
+                return SnowballMCEngine(
+                    params=MCParams(num_paths=4000, seed=11),
+                    use_dask=True, num_batches=4,
+                )
+
+        direct = _build().price(snowball, eq_env)
+        with PricingSession() as session:
+            via_session = session.price(_build(), snowball, eq_env)
+        assert via_session == direct
+
     def test_goldens_match_current_serial_results(self, cases):
         import json
         import pathlib
@@ -2626,3 +2692,10 @@ git commit -m "test(execution): cross-family session parity matrix and phase-0 g
   normalization (`snapshot_complete=False`, no fingerprints), no resource
   leases (serial only), scenario contracts are data-only. These are Phase 1/5
   work, not gaps.
+- Review dispositions (Codex plan gate): budget-test arithmetic fixed;
+  engine-internal legacy parallelism (Snowball Dask, DCN workers) is
+  documented passthrough per spec §12.4/§17.1 with a dedicated parity test —
+  NOT rejected, since rejecting would change preserved direct behavior;
+  full per-row numerical parity is Phase 1's exit gate by spec §21, so the
+  Phase 0 reachability gate checks adapter resolution + price-method arity
+  per row plus representative per-family parity.
