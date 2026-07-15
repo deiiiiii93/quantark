@@ -64,6 +64,19 @@ class BaseEngine(ABC):
         """
         return self
 
+    def execute(self, request, context):
+        """Route a framework ``PricingRequest`` through the execution kernel.
+
+        Non-abstract compatibility entry point (execution-framework spec
+        section 5.4). Existing subclasses need no change; the kernel resolves
+        a capability adapter for this engine and falls back to the serial
+        LegacyPriceAdapter. Direct ``price``/``price_detailed`` calls are
+        unaffected.
+        """
+        from quantark.execution.kernel import ExecutionKernel
+
+        return ExecutionKernel.dispatch(self, request, context)
+
     def price_with_events(
         self,
         product: BaseEquityProduct,
