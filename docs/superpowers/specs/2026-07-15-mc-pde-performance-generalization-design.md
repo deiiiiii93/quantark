@@ -935,6 +935,15 @@ its current fallback behavior. DCN `price_detailed` continues returning the
 frozen native `DCNMCResult`/`DCNPDEResult` objects and their existing `to_dict`
 shapes. Session outcomes wrap and normalize these objects; direct calls do not.
 
+The DCN local-vol `_prepare_simulation`/`_resolve_surface` hook names and
+semantics are de facto public API: the frozen quant-mini-project deliverable
+subclasses them (`SurfaceAwareLVDCNEngine`) and stays pinned to wheel 0.2.6 /
+commit `318009e`, which this framework never touches. Those hooks survive on
+the direct legacy path until a separate deprecation spec exists. Section 6.3's
+replacement of mutable `_active_surface`-style state applies to the adapter
+execution path, which carries immutable `PreparedState` instead; it does not
+remove the hooks from the direct legacy route.
+
 Event-stat method signatures remain heterogeneous: PDE Snowball/Phoenix may
 accept `npv` and `streams`, while other engine families accept only product
 and environment or return `None`. Output-bundle adapters use the available
@@ -1155,6 +1164,14 @@ mechanism attribution.
 
 ## 21. Migration plan and gates
 
+Phases 0–2 are a standalone, releasable commitment with their own definition
+of done: every exported engine inventoried and serial-session-reachable,
+direct-versus-session parity across the matrix, and the fixed-batch MC
+exactness, memory, and speed gates. Phases 3–6 are re-scoped on evidence after
+Phase 2's isolated benchmarks show where the remaining wall time actually is;
+deferring or resizing them is a legitimate outcome. Section 24 defines
+completion of the full framework claim, not of the Phase 0–2 commitment.
+
 ### Phase 0 — Contracts and inventory
 
 - Add `quantark.execution` contracts, errors, policy resolution, registry, and
@@ -1227,8 +1244,10 @@ all compatibility, numerical, performance, and resource gates pass.
 ## 22. Versioning
 
 This document defines execution-framework contract v1. The proposed package
-release is `0.3.0`, but the version is cut only after Phase 6 gates pass. No
-partial phase may claim universal MC/PDE framework support.
+release is `0.3.0`, cut when the Phase 2 exit gates pass, with the inventory
+honestly marking `temporary_legacy` capability states where they apply. Later
+phases ship as further minor releases. No release at any phase may claim
+universal MC/PDE framework support until the Phase 6 gates pass.
 
 Serialized `WorkerSpec`, manifest, normalized-economics, and scenario schemas
 carry their own explicit schema versions. Readers reject unknown major schema
