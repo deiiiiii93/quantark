@@ -80,6 +80,8 @@ def test_default_registry_covers_engine_family_roots():
         "quantark.asset.bond.engine.pde.convertible.tf_engine.ConvertibleBondTFEngine",
         "quantark.asset.bond.engine.convertible."
         "convertible_bond_engine.ConvertibleBondEngine",
+        "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.LocalVolDCNMCEngine",
+        "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
     }
     assert set(registry.registered_paths()) == expected
 

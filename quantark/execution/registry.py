@@ -92,4 +92,30 @@ def build_default_registry() -> AdapterRegistry:
             path,
             (lambda s: (lambda: LegacyPriceAdapter(call_shape=s)))(shape),
         )
+    # Specialized exact-class adapters (lazy factory import at resolve time —
+    # this module keeps zero static asset-code dependencies).
+    registry.register(
+        "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.LocalVolDCNMCEngine",
+        _dcn_mc_adapter,
+    )
+    registry.register(
+        "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
+        _dcn_pde_adapter,
+    )
     return registry
+
+
+def _dcn_mc_adapter():
+    from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
+        DCNLocalVolMCAdapter,
+    )
+
+    return DCNLocalVolMCAdapter()
+
+
+def _dcn_pde_adapter():
+    from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
+        DCNLocalVolPDEAdapter,
+    )
+
+    return DCNLocalVolPDEAdapter()

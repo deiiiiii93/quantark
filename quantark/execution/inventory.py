@@ -44,23 +44,28 @@ class InventoryRecord:
     reason: str | None = None
 
 
-def _eq_mc(name, model, product, planning="fixed"):
+def _eq_mc(name, model, product, planning="fixed", adoption_state="temporary_legacy"):
     return InventoryRecord(
         name=name,
         import_path=f"quantark.asset.equity.engine.mc.{name}",
         engine_type="mc", asset_family="equity", model_family=model,
         product_family=product, planning=planning, call_shape="product_env",
+        adoption_state=adoption_state,
     )
 
 
-def _eq_pde(name, model, product, role="engine"):
+def _eq_pde(name, model, product, role="engine", adoption_state=None):
+    if adoption_state is None:
+        adoption_state = (
+            "not_applicable" if role == "abstract" else "temporary_legacy"
+        )
     return InventoryRecord(
         name=name,
         import_path=f"quantark.asset.equity.engine.pde.{name}",
         engine_type="pde", asset_family="equity", model_family=model,
         product_family=product, planning="fixed", call_shape="product_env",
         role=role,
-        adoption_state="not_applicable" if role == "abstract" else "temporary_legacy",
+        adoption_state=adoption_state,
         owner=None if role == "abstract" else _OWNER,
         milestone=None if role == "abstract" else _MILESTONE,
         reason="abstract base class" if role == "abstract" else None,
@@ -108,7 +113,8 @@ ENGINE_INVENTORY = (
     _eq_mc("HestonSLVPhoenixMCEngine", "slv", "phoenix", planning="both"),
     _eq_mc("HestonSLVQEPhoenixMCEngine", "slv", "phoenix", planning="both"),
     _eq_mc("DCNMCEngine", "bsm", "dcn", planning="both"),
-    _eq_mc("LocalVolDCNMCEngine", "lv", "dcn", planning="both"),
+    _eq_mc("LocalVolDCNMCEngine", "lv", "dcn", planning="both",
+           adoption_state="supported"),
     _eq_mc("HestonDCNMCEngine", "heston", "dcn", planning="both"),
     _eq_mc("QEDCNMCEngine", "heston", "dcn", planning="both"),
     _eq_mc("CoupledCoarseHestonDCNMCEngine", "heston", "dcn", planning="both"),
@@ -136,7 +142,7 @@ ENGINE_INVENTORY = (
     _eq_pde("HestonPhoenixPDESolver", "heston", "phoenix"),
     _eq_pde("HestonSLVPhoenixPDESolver", "slv", "phoenix"),
     _eq_pde("DCNPDEEngine", "bsm", "dcn"),
-    _eq_pde("LocalVolDCNPDEEngine", "lv", "dcn"),
+    _eq_pde("LocalVolDCNPDEEngine", "lv", "dcn", adoption_state="supported"),
     _eq_pde("HestonDCNPDESolver", "heston", "dcn"),
     # --- Equity facade ---
     InventoryRecord(
