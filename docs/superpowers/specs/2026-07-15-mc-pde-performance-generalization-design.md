@@ -345,12 +345,12 @@ Capabilities are structural protocols, not mandatory base classes:
 ```python
 class PreparedExecutionCapability(Protocol):
     def prepare(
-        self, request: PricingRequest, context: PricingRunContext
+        self, request: NormalizedPricingRequest, context: PricingRunContext
     ) -> PreparedState: ...
 
 class BatchExecutionCapability(Protocol):
     def plan_batches(
-        self, request: PricingRequest, state: PreparedState,
+        self, request: NormalizedPricingRequest, state: PreparedState,
         context: PricingRunContext,
     ) -> BatchPlan: ...
 
@@ -366,14 +366,24 @@ class BatchExecutionCapability(Protocol):
 
 class ReusableArtifactCapability(Protocol):
     def artifact_descriptors(
-        self, request: PricingRequest, context: PricingRunContext
+        self, request: NormalizedPricingRequest, context: PricingRunContext
     ) -> tuple[ArtifactDescriptor, ...]: ...
 
 class ProcessExecutionCapability(Protocol):
     def to_worker_spec(
-        self, request: PricingRequest, context: PricingRunContext
+        self, request: NormalizedPricingRequest, context: PricingRunContext
     ) -> WorkerSpec: ...
 ```
+
+Only invocation adapters (Section 4.1) and the normalization step itself see
+the raw `PricingRequest`. Every post-normalization capability method —
+preparation, planning, artifact enumeration, and `WorkerSpec` construction —
+receives the immutable `NormalizedPricingRequest`, so an adapter cannot
+accidentally cache, fingerprint, or serialize a raw mutable product or
+environment object. `WorkerSpec` fields are defined only in terms of canonical
+serialized snapshots and fingerprints; a payload containing a raw product or
+pricing-environment reference is a contract violation rejected by a
+registry-level contract test, not merely a convention.
 
 ### 6.1 Capability descriptor
 
@@ -582,8 +592,20 @@ uncacheable. Hash collisions are defended by retaining canonical metadata for
 equality verification on a hit.
 
 Artifacts declare their byte size, dependency tags, and immutable payload.
-Miss construction is single-flight. Eviction is LRU by bytes within the
-leased cache capacity; eviction never changes the numerical plan.
+Miss construction is single-flight with an explicit per-key state machine:
+the first requester becomes the leader and builds under its own reservation;
+followers wait on the in-flight entry with the context's cancellation token
+honored while waiting. On success the leader publishes the immutable entry and
+all waiters receive handles. On leader failure the exception is published to
+current waiters, the in-flight entry and the leader's reservation are removed
+atomically, and the next requester elects itself the new leader — one
+transient failure never poisons the key or strands waiters. Leader
+cancellation is treated as failure for election purposes but propagates
+`CancelledError` rather than a preparation error. Session shutdown cancels
+in-flight construction and releases waiters before closing the repository.
+The same contract applies to `DrawRepository` misses. Eviction is LRU by
+bytes within the leased cache capacity; eviction never changes the numerical
+plan.
 
 Cache access returns a lease-backed immutable handle. The handle pins an entry
 until its task or `PreparedState` releases it. Pinned bytes remain charged even
@@ -636,9 +658,20 @@ estimate exceeds the total budget fails before execution. Unknown estimates
 force serialized admission and emit a diagnostic until an adapter supplies a
 conservative estimate.
 
-Admission control is the hard portable guarantee. Parent and worker RSS are
-also sampled for diagnostics and overrun detection; v1 does not claim the
-instantaneous hard enforcement of an operating-system cgroup on macOS.
+Admission control is a hard bound on *admitted estimates*, not an
+operating-system memory limit: estimates can be wrong for BLAS workspace,
+copy-on-write process growth, or native solver allocations, and v1 has no
+cgroup-style instantaneous enforcement on macOS. The framework therefore does
+not describe the byte budget as a hard host-memory guarantee. What it does
+guarantee is the response to overrun: parent and worker RSS are sampled, and
+when observed usage exceeds the admitted budget by the configured overrun
+threshold the kernel must, in order, stop admitting new tasks, shrink
+concurrency where policy permits, and finally cancel outstanding work and
+fail with `ResourceBudgetExceeded`. Overruns and the action taken are always
+recorded in diagnostics. Parallel admission additionally requires conservative
+estimates: an adapter whose peak-memory estimate is marked unavailable is
+restricted to serialized admission (as above) rather than admitted to a
+parallel backend on an unknown footprint.
 
 ### 11.1 Compatibility and explicit-session budgets
 
@@ -680,8 +713,10 @@ run context or numerical state.
 Process execution requires an importable, versioned `WorkerSpec`. It contains
 registered adapter/factory IDs, normalized constructor payloads, request or
 scenario descriptors, child policy, child budget, and expected fingerprints.
-It contains no closure, bound live engine, mutable environment, or worker
-global dictionary.
+It contains no closure, bound live engine, mutable environment, worker global
+dictionary, or raw product/pricing-environment object reference — payloads are
+canonical serialized snapshots and fingerprints only, enforced by a contract
+test at registration time.
 
 The process backend is tested using Python's spawn start method, including on
 macOS. Per-worker initialization may populate a child-local artifact cache,
@@ -1111,10 +1146,16 @@ and `PricingError`, plus contractual message fragments on direct calls.
 - bounded in-flight tasks and compact incremental reduction;
 - complete draw/artifact keys, hit verification, single-flight misses, LRU
   eviction, writable-copy isolation, and dependency invalidation;
+- single-flight leader failure, leader cancellation, and session shutdown
+  with concurrent waiters (no stranded waiter, no poisoned key, atomic
+  reservation cleanup);
 - counting builders proving expected local-vol/grid/operator build counts;
 - engine-instance reuse across sequential and concurrent sessions;
-- memory admission, cache clamps, child budgets, and oversize-task failure;
-- macOS spawn serialization, registry reconstruction, and no worker globals;
+- memory admission, cache clamps, child budgets, oversize-task failure, and
+  RSS-overrun response order (stop admitting, shrink, cancel-and-fail);
+- macOS spawn serialization, registry reconstruction, no worker globals, and
+  rejection of raw product/environment references in `WorkerSpec` payloads
+  and post-normalization adapter calls;
 - Dask and local backends consuming identical plans/reducers;
 - fixed-batch MC serial/thread exactness;
 - adaptive RQMC sequential compatibility and parallel-wave qualification;
