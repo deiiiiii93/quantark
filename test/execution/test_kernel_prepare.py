@@ -259,6 +259,60 @@ class TestDCNLocalVolAdapter:
             lambda: 1, size_bytes=1,
         ).close()
 
+    def test_replacement_during_prepare_raises_determinism_violation(
+        self, dcn_case, monkeypatch
+    ):
+        """Field REPLACEMENT (not just in-place mutation) during the build
+        is detected via identity verification (Codex code-gate finding 1)."""
+        import numpy as np
+
+        import quantark.asset.equity.engine.mc.dcn_execution_adapters as mod
+        from quantark.asset.equity.engine.mc import LocalVolDCNMCEngine
+        from quantark.execution.errors import DeterminismViolation
+        from quantark.param import GridVolSurface
+
+        product, grid_env = dcn_case
+        env = grid_env()
+        real_build = mod.build_dupire_local_vol
+
+        def replacing_build(*args, **kwargs):
+            surface = real_build(*args, **kwargs)
+            env.vol_surface = GridVolSurface(  # REPLACE, equal values
+                strikes=list(env.vol_surface.strikes),
+                maturities=list(env.vol_surface.maturities),
+                iv_grid=np.array(env.vol_surface.iv_grid),
+            )
+            return surface
+
+        monkeypatch.setattr(mod, "build_dupire_local_vol", replacing_build)
+        with PricingSession() as session:
+            with pytest.raises(DeterminismViolation):
+                session.price(
+                    LocalVolDCNMCEngine(num_paths=2**8), product, env
+                )
+
+    def test_cache_charge_reflects_measured_surface_size(self, dcn_case):
+        """Admission accounting uses the MEASURED surface size, not the
+        estimate (Codex code-gate finding 2)."""
+        from quantark.asset.equity.engine.mc import LocalVolDCNMCEngine
+        from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
+            _surface_nbytes,
+        )
+        from quantark.volmodels.localvol import build_dupire_local_vol
+
+        product, grid_env = dcn_case
+        env = grid_env()
+        expected = _surface_nbytes(
+            build_dupire_local_vol(
+                env.vol_surface, spot=env.spot,
+                rate_curve=env.rate_curve, div_yield=env.get_div_yield,
+            )
+        )
+        with PricingSession() as session:
+            session.price(LocalVolDCNMCEngine(num_paths=2**8), product, env)
+            stats = session.context.artifact_cache.stats()
+        assert stats["bytes_in_use"] == expected  # actual, not the estimate
+
     def test_prebuilt_surface_bypasses_cache(self, dcn_case):
         from quantark.asset.equity.engine.mc import LocalVolDCNMCEngine
         from quantark.volmodels.localvol import build_dupire_local_vol

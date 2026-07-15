@@ -81,7 +81,14 @@ class PreparedArtifactCache:
         }
 
     # -- public ----------------------------------------------------------
-    def get_or_build(self, descriptor, builder, size_bytes) -> ArtifactHandle:
+    def get_or_build(
+        self, descriptor, builder, size_bytes, measure=None
+    ) -> ArtifactHandle:
+        """``size_bytes`` is the pre-build admission ESTIMATE (reserved
+        before the builder runs); ``measure(value)`` — when supplied — yields
+        the actual byte size after the build, and the reservation is adjusted
+        to it (re-leasing with eviction, or bypassing the cache when the
+        actual size cannot be admitted)."""
         while True:
             with self._lock:
                 if self._closed:
@@ -102,7 +109,9 @@ class PreparedArtifactCache:
                     leader = False
                     self._stats["single_flight_waits"] += 1
             if leader:
-                return self._build_as_leader(descriptor, builder, size_bytes)
+                return self._build_as_leader(
+                    descriptor, builder, size_bytes, measure
+                )
             flight.event.wait()
             if flight.error is not None:
                 raise flight.error
@@ -137,7 +146,7 @@ class PreparedArtifactCache:
                 self._drop(d, count_eviction=False)
 
     # -- internals ---------------------------------------------------------
-    def _build_as_leader(self, descriptor, builder, size_bytes):
+    def _build_as_leader(self, descriptor, builder, size_bytes, measure=None):
         with self._lock:
             reserved = self._reserve(size_bytes)
         try:
@@ -151,6 +160,7 @@ class PreparedArtifactCache:
                 flight.error = exc
                 flight.event.set()
             raise
+        actual_bytes = size_bytes if measure is None else int(measure(value))
         with self._lock:
             if self._closed:
                 # close() raced the build: never publish or retain bytes
@@ -165,8 +175,15 @@ class PreparedArtifactCache:
                 raise error
             self._stats["misses"] += 1
             flight = self._in_flight.pop(descriptor, None)
+            if reserved and actual_bytes != size_bytes:
+                # Adjust the reservation to the MEASURED size: accounting
+                # must reflect real bytes, never the estimate (an oversize
+                # surface admitted under an understated charge would defeat
+                # the budget).
+                self._leases.release_bytes(size_bytes, self._POOL)
+                reserved = self._reserve(actual_bytes)
             if reserved:
-                entry = _Entry(descriptor, value, size_bytes)
+                entry = _Entry(descriptor, value, actual_bytes)
                 entry.pins = 1
                 self._entries[descriptor] = entry
             else:

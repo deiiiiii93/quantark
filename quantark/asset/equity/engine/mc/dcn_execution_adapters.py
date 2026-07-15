@@ -23,10 +23,19 @@ __all__ = ["DCNLocalVolMCAdapter", "DCNLocalVolPDEAdapter"]
 _DUPIRE_TAGS = frozenset({"vol_surface", "spot", "rate_curve", "dividend_curve"})
 _BUILDER_VERSION = "1"
 
-# Size is only known after the first build; admission uses a conservative
-# estimate (Phase 1: estimates are admission accounting, spec section 11).
-# 8 MiB covers realistic Dupire grids.
-_ESTIMATED_SURFACE_BYTES = 8 << 20
+def _estimate_surface_bytes(vol_surface) -> int:
+    """Pre-build admission estimate PROPORTIONAL to the source grid.
+
+    The Dupire local-vol grid has the same two-dimensional scale as the
+    input IV grid; the factor covers the derived arrays plus interpolants.
+    The cache re-measures the built surface (``measure=``) and adjusts the
+    charge to actual bytes, so this only needs to be the right order of
+    magnitude for reservation.
+    """
+    iv_nbytes = getattr(getattr(vol_surface, "iv_grid", None), "nbytes", None)
+    if isinstance(iv_nbytes, int) and iv_nbytes > 0:
+        return 8 * iv_nbytes + (256 << 10)
+    return 8 << 20  # unknown source grid: conservative 8 MiB
 
 
 def _surface_nbytes(surface) -> int:
@@ -49,8 +58,19 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
                 fingerprint=None, byte_estimate=None,
             )
         env = request.pricing_env
+        # CAPTURE every dependency once: the builder consumes ONLY the
+        # captured objects (including the dividend callable, bound to the
+        # captured dividend object rather than the live environment), so a
+        # concurrent field REPLACEMENT on the environment cannot mix market
+        # states inside one build.
         inputs = (env.vol_surface, env.spot_quote, env.rate_curve, env.div_yield)
-        spot, div_fn = env.spot, env.get_div_yield
+        spot = inputs[1].spot
+        div_obj = inputs[3]
+        if div_obj is None:
+            def div_fn(t):
+                return 0.0
+        else:
+            div_fn = div_obj.get_yield
         fp = try_fingerprint(inputs)
         cache = context.artifact_cache
 
@@ -70,16 +90,20 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
             dependency_tags=_DUPIRE_TAGS, builder_version=_BUILDER_VERSION,
         )
         handle = cache.get_or_build(
-            descriptor, builder, size_bytes=_ESTIMATED_SURFACE_BYTES,
+            descriptor, builder,
+            size_bytes=_estimate_surface_bytes(inputs[0]),
+            measure=_surface_nbytes,
         )
-        if try_fingerprint(inputs) != fp:
+        current = (env.vol_surface, env.spot_quote, env.rate_curve, env.div_yield)
+        replaced = any(a is not b for a, b in zip(current, inputs))
+        if replaced or try_fingerprint(inputs) != fp:
             handle.close()
             cache.invalidate_tags(_DUPIRE_TAGS)
             from quantark.execution.errors import DeterminismViolation
 
             raise DeterminismViolation(
-                "pricing environment mutated during preparation; the cached "
-                "Dupire surface no longer matches its key"
+                "pricing environment mutated or replaced during preparation; "
+                "the cached Dupire surface no longer matches its key"
             )
         return PreparedState(
             payload=handle.value, descriptors=(descriptor,),
