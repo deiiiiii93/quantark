@@ -1,0 +1,13 @@
+{
+  "values": {
+    "bond_pde_convertible_tf": 134.85230385014134,
+    "credit_mc_basket_cds": 1792766.1216071236,
+    "equity_mc_european": 10.344149121285533,
+    "equity_pde_european": 10.451984538239726,
+    "fx_mc_barrier": 0.014531038415561841
+  },
+  "versions": {
+    "numpy": "2.4.6",
+    "scipy": "1.17.1"
+  }
+}

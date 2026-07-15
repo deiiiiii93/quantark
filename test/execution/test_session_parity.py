@@ -141,3 +141,84 @@ def test_unsupported_output_raises(equity_env, european_option):
     with PricingSession() as session:
         with pytest.raises(CapabilityError):
             session.execute(_mc_engine(), req)
+
+
+class TestCrossFamilyParity:
+    """Phase 0 exit evidence: session == direct for one engine per family."""
+
+    @pytest.fixture(scope="class")
+    def cases(self):
+        from execution.freeze_goldens import build_representative_cases
+
+        return build_representative_cases()
+
+    @pytest.mark.parametrize(
+        "case_name",
+        [
+            "equity_mc_european",
+            "equity_pde_european",
+            "fx_mc_barrier",
+            "credit_mc_basket_cds",
+            "bond_pde_convertible_tf",
+        ],
+    )
+    def test_session_price_equals_direct(self, cases, case_name):
+        engine, product, env, call_shape = cases[case_name]
+        if call_shape == "env_bound":
+            direct = engine.price(product)
+        else:
+            direct = engine.price(product, env)
+        with PricingSession() as session:
+            via_session = session.price(engine, product, env)
+        assert via_session == direct
+
+    def test_legacy_internal_parallelism_preserved(self, cases):
+        """Spec sections 12.4/17.1: engine-owned parallel settings (Snowball
+        use_dask, DCN workers) behave identically through the session,
+        including the missing-Dask UserWarning fallback."""
+        import warnings
+
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.asset.equity.product.option import SnowballOption
+        from quantark.asset.equity.product.option.snowball_config import (
+            BarrierConfig,
+        )
+
+        _, _, eq_env, _ = cases["equity_mc_european"]
+        snowball = SnowballOption(
+            initial_price=100.0, strike=100.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=103.0, ko_rate=0.15,
+                ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+                ki_barrier=75.0, ki_continuous=True,
+            ),
+            contract_multiplier=10_000.0, maturity=1.0,
+        )
+
+        def _build():
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # missing-Dask UserWarning ok
+                return SnowballMCEngine(
+                    params=MCParams(num_paths=4000, seed=11),
+                    use_dask=True, num_batches=4,
+                )
+
+        direct = _build().price(snowball, eq_env)
+        with PricingSession() as session:
+            via_session = session.price(_build(), snowball, eq_env)
+        assert via_session == direct
+
+    def test_goldens_match_current_serial_results(self, cases):
+        import json
+        import pathlib
+
+        golden_path = (
+            pathlib.Path(__file__).parent / "goldens" / "phase0_goldens.json"
+        )
+        goldens = json.loads(golden_path.read_text())["values"]
+        for name, (engine, product, env, call_shape) in cases.items():
+            if call_shape == "env_bound":
+                value = float(engine.price(product))
+            else:
+                value = float(engine.price(product, env))
+            assert value == pytest.approx(goldens[name], abs=1e-10), name
