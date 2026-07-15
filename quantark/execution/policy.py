@@ -20,6 +20,7 @@ __all__ = [
     "ResourceBudget",
     "resolve_execution_policy",
     "resolve_resource_budget",
+    "policy_values",
 ]
 
 KNOWN_BACKENDS = ("serial", "threads", "processes", "dask")
@@ -115,6 +116,34 @@ def resolve_execution_policy(explicit=None, environ=None):
          ("retries", "default")]
     )
     return ExecutionPolicy(batch=batch, scenario=scenario), tuple(sources)
+
+
+def policy_values(policy, budget, determinism) -> tuple:
+    """Canonical value-bearing snapshot of the RESOLVED configuration.
+
+    This is what a reproducibility manifest records (spec section 14.3): the
+    effective values, not their sources. Source metadata lives separately in
+    diagnostics ``policy_sources``.
+    """
+    return (
+        ("batch.backend", policy.batch.backend),
+        ("batch.workers", str(policy.batch.workers)),
+        ("batch.max_in_flight", str(policy.batch.max_in_flight)),
+        ("scenario.backend", policy.scenario.backend),
+        ("scenario.workers", str(policy.scenario.workers)),
+        ("nested_execution", str(policy.nested_execution)),
+        ("fail_fast", str(policy.fail_fast)),
+        ("retries", str(policy.retries)),
+        ("budget.max_processes", str(budget.max_processes)),
+        ("budget.max_threads", str(budget.max_threads)),
+        ("budget.total_memory_bytes", str(budget.total_memory_bytes)),
+        ("budget.draw_cache_bytes", str(budget.draw_cache_bytes)),
+        ("budget.artifact_cache_bytes", str(budget.artifact_cache_bytes)),
+        ("budget.max_in_flight", str(budget.max_in_flight)),
+        ("determinism.require_manifest", str(determinism.require_manifest)),
+        ("determinism.changed_plan_profile", determinism.changed_plan_profile),
+        ("determinism.mismatch_raises", str(determinism.mismatch_raises)),
+    )
 
 
 def resolve_resource_budget(explicit=None, environ=None):

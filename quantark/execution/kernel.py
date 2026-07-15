@@ -17,6 +17,7 @@ from quantark.execution.manifest import (
     build_versions,
     platform_tag,
 )
+from quantark.execution.policy import policy_values
 from quantark.execution.registry import build_default_registry
 
 __all__ = ["ExecutionKernel"]
@@ -65,7 +66,11 @@ class ExecutionKernel:
             engine_class_path=normalized.engine_class_path,
             versions=build_versions(),
             platform=platform_tag(),
-            resolved_policy=context.config_snapshot,
+            resolved_policy=policy_values(
+                context.execution_policy,
+                context.resource_budget,
+                context.determinism_policy,
+            ),
         )
         diagnostics = RunDiagnostics(
             adapter_id=caps.adapter_id,

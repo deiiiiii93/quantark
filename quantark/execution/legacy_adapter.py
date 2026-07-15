@@ -29,14 +29,17 @@ __all__ = ["ADAPTER_ID", "ADAPTER_VERSION", "LegacyPriceAdapter"]
 ADAPTER_ID = "legacy-price"
 ADAPTER_VERSION = "0"
 
+# The outputs set is the adapter's GUARANTEE, not a description of the native
+# payload. Legacy result objects are heterogeneous (e.g. DCNPDEResult has no
+# error-estimate field), so this adapter can verify only PV across all
+# engines. Requesting any other OutputKind raises CapabilityError rather than
+# returning a success that silently omits a requested output; the full native
+# object is still returned as ``value``, with whatever fields it natively has.
+# Per-engine output bundles arrive with the native adapters (Phases 2/4).
 _OP_OUTPUTS = {
     PricingOperation.PRICE: frozenset({OutputKind.PV}),
-    PricingOperation.PRICE_DETAILED: frozenset(
-        {OutputKind.PV, OutputKind.ERROR_ESTIMATE, OutputKind.CASHFLOWS}
-    ),
-    PricingOperation.EVENT_STATS: frozenset(
-        {OutputKind.PV, OutputKind.EVENT_STATS, OutputKind.CASHFLOWS}
-    ),
+    PricingOperation.PRICE_DETAILED: frozenset({OutputKind.PV}),
+    PricingOperation.EVENT_STATS: frozenset({OutputKind.PV}),
 }
 
 
@@ -49,10 +52,7 @@ class LegacyPriceAdapter:
     def capabilities(self) -> EngineCapabilities:
         return EngineCapabilities(
             operations=frozenset(_OP_OUTPUTS),
-            output_kinds=frozenset(
-                {OutputKind.PV, OutputKind.ERROR_ESTIMATE,
-                 OutputKind.EVENT_STATS, OutputKind.CASHFLOWS}
-            ),
+            output_kinds=frozenset({OutputKind.PV}),
             supported_backends=frozenset({"serial"}),
             fixed_planning=None,
             prepared_state_thread_safe=False,

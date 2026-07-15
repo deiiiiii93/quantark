@@ -24,8 +24,11 @@ class PricingSession:
             import dataclasses
 
             registry = build_default_registry()
-            registry.freeze()
             context = dataclasses.replace(context, adapter_registry=registry)
+        # Registries freeze for the lifetime of a session (spec section 6.2)
+        # — including caller-supplied ones, so a retained handle cannot alter
+        # adapter resolution mid-session. freeze() is idempotent.
+        context.adapter_registry.freeze()
         self._context = context
         self._closed = False
 

@@ -143,6 +143,61 @@ def test_unsupported_output_raises(equity_env, european_option):
             session.execute(_mc_engine(), req)
 
 
+def test_requested_error_estimate_rejected_not_silently_omitted(
+    equity_env, european_option
+):
+    """The legacy adapter guarantees only PV; a request for ERROR_ESTIMATE
+    must fail loudly rather than return a success without the output
+    (Codex code-gate finding 1)."""
+    from quantark.execution import PricingOperation
+
+    req = PricingRequest(
+        product=european_option,
+        pricing_env=equity_env,
+        operation=PricingOperation.PRICE_DETAILED,
+        outputs=frozenset({OutputKind.PV, OutputKind.ERROR_ESTIMATE}),
+    )
+    with PricingSession() as session:
+        with pytest.raises(CapabilityError):
+            session.execute(_mc_engine(), req)
+
+
+def test_manifest_records_resolved_policy_values(equity_env, european_option):
+    """Manifests carry effective configuration values, not source labels
+    (Codex code-gate finding 2)."""
+    with PricingSession() as session:
+        outcome = session.execute(
+            _mc_engine(),
+            PricingRequest(product=european_option, pricing_env=equity_env),
+        )
+    resolved = dict(outcome.manifest.resolved_policy)
+    assert resolved["batch.backend"] == "serial"
+    assert resolved["batch.workers"] == "1"
+    assert resolved["budget.max_threads"] == "1"
+    assert resolved["determinism.require_manifest"] == "True"
+    # Source labels live in diagnostics, not the manifest.
+    assert dict(outcome.diagnostics.policy_sources)["batch.backend"] in (
+        "default", "env", "explicit", "env_invalid_default",
+    )
+
+
+def test_injected_registry_is_frozen_by_session(equity_env, european_option):
+    """A caller-supplied registry cannot be mutated after session
+    construction (Codex code-gate finding 3; spec section 6.2)."""
+    import dataclasses
+
+    from quantark.execution.context import default_context
+    from quantark.execution.registry import build_default_registry
+    from quantark.util.exceptions import ValidationError
+
+    registry = build_default_registry()  # deliberately not frozen
+    ctx = dataclasses.replace(default_context(), adapter_registry=registry)
+    with PricingSession(ctx) as session:
+        with pytest.raises(ValidationError):
+            registry.register("x.Y", lambda: None)
+        assert session.price(_mc_engine(), european_option, equity_env)
+
+
 class TestCrossFamilyParity:
     """Phase 0 exit evidence: session == direct for one engine per family."""
 
