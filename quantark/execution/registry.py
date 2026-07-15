@@ -55,6 +55,9 @@ class AdapterRegistry:
 
 _DEFAULT_REGISTRATIONS = (
     ("quantark.asset.equity.engine.base_engine.BaseEngine", "product_env"),
+    # SABRMCEngine does not inherit the equity BaseEngine (spec section A.4
+    # abstraction gap) but uses the standard price(product, env) shape.
+    ("quantark.asset.equity.engine.mc.sabr_mc_engine.SABRMCEngine", "product_env"),
     ("quantark.asset.fx.engine.base_fx_engine.BaseFxEngine", "product_env"),
     (
         "quantark.asset.credit.engine.base_credit_engine.BaseCreditEngine",

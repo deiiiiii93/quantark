@@ -72,6 +72,7 @@ def test_default_registry_covers_engine_family_roots():
     registry = build_default_registry()
     expected = {
         "quantark.asset.equity.engine.base_engine.BaseEngine",
+        "quantark.asset.equity.engine.mc.sabr_mc_engine.SABRMCEngine",
         "quantark.asset.fx.engine.base_fx_engine.BaseFxEngine",
         "quantark.asset.credit.engine.base_credit_engine.BaseCreditEngine",
         "quantark.asset.bond.engine.pde.convertible."
