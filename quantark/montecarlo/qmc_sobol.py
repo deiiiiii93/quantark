@@ -8,8 +8,11 @@ Created on Mon Nov 17 2025
 
 from __future__ import annotations
 
+import os
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Hashable, Optional, Protocol
 
 import numpy as np
 
@@ -91,6 +94,85 @@ class PseudoRandomNormalGenerator:
         come from the RNG state).
         """
         return self._rng.random(size=(n_paths, dim))
+
+
+class QMCDrawCache:
+    """Byte-budgeted, thread-safe LRU cache of deterministic draw blocks.
+
+    Scrambled-Sobol blocks are pure functions of (kind, seed, batch_id,
+    n_paths, dim), and CRN risk reports deliberately reprice with the same
+    seed, so identical blocks are otherwise regenerated on every bump.
+    Cached arrays are marked read-only: callers that need to mutate must
+    request a writable copy (see ``qmc_draws``). Eviction is least-recently
+    -used by total bytes; a block larger than the whole budget is simply
+    not cached.
+    """
+
+    def __init__(self, max_bytes: int):
+        self._store: "OrderedDict[Hashable, np.ndarray]" = OrderedDict()
+        self._lock = threading.Lock()
+        self._bytes = 0
+        self.max_bytes = int(max_bytes)
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, key: Hashable) -> Optional[np.ndarray]:
+        with self._lock:
+            block = self._store.get(key)
+            if block is None:
+                self.misses += 1
+                return None
+            self._store.move_to_end(key)
+            self.hits += 1
+            return block
+
+    def put(self, key: Hashable, block: np.ndarray) -> np.ndarray:
+        block.flags.writeable = False
+        if block.nbytes > self.max_bytes:
+            return block
+        with self._lock:
+            existing = self._store.pop(key, None)
+            if existing is not None:
+                self._bytes -= existing.nbytes
+            self._store[key] = block
+            self._bytes += block.nbytes
+            while self._bytes > self.max_bytes and self._store:
+                _, evicted = self._store.popitem(last=False)
+                self._bytes -= evicted.nbytes
+        return block
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+            self._bytes = 0
+
+    @property
+    def current_bytes(self) -> int:
+        return self._bytes
+
+
+def _default_cache_bytes() -> int:
+    """Budget from QUANTARK_QMC_CACHE_MB (default 2048 MB; 0 disables)."""
+    try:
+        megabytes = float(os.environ.get("QUANTARK_QMC_CACHE_MB", "2048"))
+    except ValueError:
+        megabytes = 2048.0
+    return max(int(megabytes * 1024 * 1024), 0)
+
+
+_DRAW_CACHE = QMCDrawCache(_default_cache_bytes())
+
+
+def get_qmc_draw_cache() -> QMCDrawCache:
+    """The process-wide draw cache shared by the QMC engine adapters."""
+    return _DRAW_CACHE
+
+
+def set_qmc_cache_budget_bytes(max_bytes: int) -> None:
+    """Resize (and prune) the process-wide draw cache budget."""
+    _DRAW_CACHE.max_bytes = max(int(max_bytes), 0)
+    if _DRAW_CACHE.current_bytes > _DRAW_CACHE.max_bytes:
+        _DRAW_CACHE.clear()
 
 
 def _next_power_of_two(n: int) -> int:
@@ -179,23 +261,25 @@ class SobolNormalGenerator:
 
         # Use random_base2 to get exactly 2**m points
         u = engine.random_base2(m)  # shape: (n_total, dim)
-        # Guard against 0/1 values that map to +/-inf under ndtri
+        # Guard against 0/1 values that map to +/-inf under ndtri; both the
+        # clip and the inverse-CDF run in place — bit-identical values, no
+        # intermediate full-block copies.
         eps = 1e-12
-        u = np.clip(u, eps, 1.0 - eps)
+        np.clip(u, eps, 1.0 - eps, out=u)
 
-        # Transform uniforms to standard normals using ndtri
         if special is None:
             # Fallback, should not happen if _check_scipy passed
             from scipy.stats import norm  # type: ignore
 
-            z = norm.ppf(u)
+            z = np.asarray(norm.ppf(u), dtype=float)
         else:
-            z = special.ndtri(u)
+            special.ndtri(u, out=u)
+            z = u
 
         if n_paths != n_total:
             z = z[:n_paths]
 
-        return np.asarray(z, dtype=float)
+        return z
 
     def uniform(
         self, n_paths: int, dim: int, batch_id: Optional[int] = None
@@ -220,14 +304,17 @@ class SobolNormalGenerator:
         engine = self._make_engine(dim=dim, batch_id=batch_id)
         u = engine.random_base2(m)
         eps = 1e-12
-        u = np.clip(u, eps, 1.0 - eps)
+        np.clip(u, eps, 1.0 - eps, out=u)
         if n_paths != n_total:
             u = u[:n_paths]
-        return np.asarray(u, dtype=float)
+        return u
 
 
 __all__ = [
     "RandomStream",
     "PseudoRandomNormalGenerator",
     "SobolNormalGenerator",
+    "QMCDrawCache",
+    "get_qmc_draw_cache",
+    "set_qmc_cache_budget_bytes",
 ]

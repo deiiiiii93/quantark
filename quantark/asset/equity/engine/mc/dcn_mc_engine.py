@@ -12,7 +12,9 @@ the snowball/phoenix engines.
 """
 from __future__ import annotations
 
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -30,6 +32,20 @@ from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 
 _BATCH_SEED_STRIDE = 1000  # matches the snowball/phoenix batch-seed convention
+
+
+def _default_num_workers() -> int:
+    """Batch-level thread workers from QUANTARK_DCN_MC_WORKERS (default 1).
+
+    Threads are effective because the per-batch work (Sobol generation,
+    ndtri, path arithmetic, payoff) is GIL-releasing array code; results are
+    reduced in batch-id order so any worker count is bit-identical to serial.
+    """
+    try:
+        workers = int(os.environ.get("QUANTARK_DCN_MC_WORKERS", "1"))
+    except ValueError:
+        workers = 1
+    return max(workers, 1)
 
 
 @dataclass(frozen=True)
@@ -135,6 +151,7 @@ class DCNMCEngine(BaseEngine):
         use_sobol: bool = True,
         use_antithetic: bool = False,
         num_batches: int = 1,
+        num_workers: Optional[int] = None,
     ):
         super().__init__()
         if use_sobol and use_antithetic:
@@ -146,11 +163,22 @@ class DCNMCEngine(BaseEngine):
                 "num_batches must be positive and divide num_paths, got "
                 f"{num_batches} for {num_paths} paths"
             )
+        if num_workers is None:
+            num_workers = _default_num_workers()
+        if (
+            isinstance(num_workers, bool)
+            or not isinstance(num_workers, int)
+            or num_workers < 1
+        ):
+            raise ValidationError(
+                f"num_workers must be a positive integer, got {num_workers!r}"
+            )
         self.num_paths = int(num_paths)
         self.seed = int(seed)
         self.use_sobol = bool(use_sobol)
         self.use_antithetic = bool(use_antithetic)
         self.num_batches = int(num_batches)
+        self.num_workers = int(num_workers)
         self._last_result: Optional[DCNMCResult] = None
 
     # -- BaseEngine-compatible entry point --
@@ -182,13 +210,26 @@ class DCNMCEngine(BaseEngine):
 
         acc = _LegAccumulator(n_obs=n_obs)
         batch_size = self.num_paths // self.num_batches
-        for b in range(self.num_batches):
+        self._prepare_simulation(product, pricing_env)
+
+        def run_batch(b: int):
             batch_id = None if self.num_batches == 1 else b
             paths = self._simulate(
                 spot0, term, dt_array, pricing_env,
                 n_paths=batch_size, batch_id=batch_id,
             )
-            cf = compute_dcn_cashflows(paths, product, ctx, df)
+            return compute_dcn_cashflows(paths, product, ctx, df)
+
+        workers = min(self.num_workers, self.num_batches)
+        if workers > 1:
+            # The per-batch work is GIL-releasing array code, so threads
+            # scale; reducing in batch-id order keeps every worker count
+            # bit-identical to the serial loop.
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                cashflows = list(pool.map(run_batch, range(self.num_batches)))
+        else:
+            cashflows = [run_batch(b) for b in range(self.num_batches)]
+        for cf in cashflows:
             acc.add(cf, obs_times)
 
         sign = product.direction_sign
@@ -258,6 +299,15 @@ class DCNMCEngine(BaseEngine):
         )
         self._last_result = result
         return result
+
+    # -- per-price-call setup (overridable; base = nothing to prepare) --
+    def _prepare_simulation(self, product, pricing_env) -> None:
+        """Called once per ``price_detailed`` before the batch loop.
+
+        Subclasses hoist environment-invariant per-call work here (e.g. the
+        LV engine's Dupire inversion) instead of repeating it per batch; the
+        default engine has none.
+        """
 
     # -- path generation (overridable; base = term-aware GBM) --
     def _draws(

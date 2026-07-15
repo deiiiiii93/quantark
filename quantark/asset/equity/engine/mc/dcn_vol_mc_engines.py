@@ -70,6 +70,8 @@ class LocalVolDCNMCEngine(DCNMCEngine):
     ):
         super().__init__(**kwargs)
         self._prebuilt = local_vol_surface
+        self._active_surface: Optional[LocalVolSurface] = None
+        self._active_surface_env = None
 
     def _build_surface(self, env) -> LocalVolSurface:
         if self._prebuilt is not None:
@@ -86,9 +88,29 @@ class LocalVolDCNMCEngine(DCNMCEngine):
             div_yield=env.get_div_yield,
         )
 
+    def _prepare_simulation(self, product, pricing_env) -> None:
+        """Invert Dupire ONCE per price call, not once per batch.
+
+        The environment is constant across the batch loop, so the rebuild is
+        env-invariant per call; bumped repricings still re-invert because
+        every ``price_detailed`` prepares afresh. The env identity check
+        below makes a stale surface impossible for direct ``_simulate``
+        callers.
+        """
+        self._active_surface = self._build_surface(pricing_env)
+        self._active_surface_env = pricing_env
+
+    def _resolve_surface(self, pricing_env) -> LocalVolSurface:
+        if (
+            self._active_surface is not None
+            and self._active_surface_env is pricing_env
+        ):
+            return self._active_surface
+        return self._build_surface(pricing_env)
+
     def _simulate(self, spot0, term, dt_array, pricing_env,
                   n_paths, batch_id) -> np.ndarray:
-        lv = self._build_surface(pricing_env)
+        lv = self._resolve_surface(pricing_env)
         n_steps = dt_array.size
         z_all = self._draws(n_steps, n_paths, batch_id)
         nodes = np.empty((z_all.shape[0], n_steps + 1))
@@ -163,8 +185,12 @@ class HestonDCNMCEngine(DCNMCEngine):
         if self.use_sobol and three_streams:
             from scipy.special import ndtri
 
+            # writable=True: this path transforms the block in place, so it
+            # needs a private copy rather than the shared read-only cache
+            # entry (the Sobol generation itself still caches).
             block = qmc_uniforms(
-                self.seed, n_paths, 3 * n_steps, batch_id=batch_id
+                self.seed, n_paths, 3 * n_steps, batch_id=batch_id,
+                writable=True,
             )
             np.clip(block, 1e-12, 1.0 - 1e-12, out=block)
             # In-place inverse-CDF transform keeps peak batch memory bounded to
