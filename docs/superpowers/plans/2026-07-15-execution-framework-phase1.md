@@ -327,12 +327,17 @@ class ResourceLeaseManager:
         self._in_flight = 0
         self._pools: dict = {}
         self._capacities = {"artifact_cache": budget.artifact_cache_bytes}
+        self._closed = False
 
     def task_slot(self):
         return _TaskSlot(self)
 
     def lease_bytes(self, n: int, pool: str) -> None:
         with self._lock:
+            if self._closed:
+                raise ResourceBudgetExceeded(
+                    "ResourceLeaseManager is closed; no post-close acquisitions"
+                )
             capacity = self._capacities.get(pool)
             used = self._pools.get(pool, 0)
             if capacity is not None and used + n > capacity:
@@ -352,11 +357,16 @@ class ResourceLeaseManager:
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             self._pools.clear()
             self._in_flight = 0
 
     def _acquire_slot(self) -> None:
         with self._lock:
+            if self._closed:
+                raise ResourceBudgetExceeded(
+                    "ResourceLeaseManager is closed; no post-close acquisitions"
+                )
             if self._in_flight >= self._budget.max_in_flight:
                 raise ResourceBudgetExceeded(
                     f"max_in_flight={self._budget.max_in_flight} exhausted"
@@ -532,6 +542,62 @@ def test_invalidate_tags():
     assert builds
 
 
+def test_close_during_build_fails_leader_and_leaks_nothing():
+    """Codex plan-gate finding 3: a leader finishing after close() must not
+    publish or retain bytes."""
+    import threading
+
+    mgr = ResourceLeaseManager(ResourceBudget(artifact_cache_bytes=1000))
+    cache = PreparedArtifactCache(mgr)
+    started = threading.Event()
+    release = threading.Event()
+    errors = []
+
+    def slow_build():
+        started.set()
+        release.wait(timeout=5)
+        return "LATE"
+
+    def leader():
+        try:
+            with cache.get_or_build(_desc("z"), slow_build, size_bytes=100):
+                errors.append("published")
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+
+    t = threading.Thread(target=leader)
+    t.start(); started.wait(timeout=5)
+    cache.close()
+    release.set(); t.join(timeout=10)
+    assert errors == ["PreparationError"]
+    assert mgr.pool_bytes("artifact_cache") == 0
+
+
+def test_reservation_precedes_build():
+    """Codex plan-gate finding 2: the byte lease is held BEFORE builder()."""
+    mgr = ResourceLeaseManager(ResourceBudget(artifact_cache_bytes=1000))
+    cache = PreparedArtifactCache(mgr)
+    seen = []
+
+    def builder():
+        seen.append(mgr.pool_bytes("artifact_cache"))
+        return "V"
+
+    with cache.get_or_build(_desc("r"), builder, size_bytes=100):
+        pass
+    assert seen == [100]  # lease already charged while building
+
+
+def test_lease_manager_rejects_after_close():
+    mgr = ResourceLeaseManager(ResourceBudget(artifact_cache_bytes=1000))
+    mgr.close()
+    with pytest.raises(Exception):
+        mgr.lease_bytes(1, "artifact_cache")
+    with pytest.raises(Exception):
+        with mgr.task_slot():
+            pass
+
+
 def test_close_is_idempotent_and_releases_bytes():
     mgr = ResourceLeaseManager(ResourceBudget(artifact_cache_bytes=1000))
     cache = PreparedArtifactCache(mgr)
@@ -617,6 +683,7 @@ class PreparedArtifactCache:
 
     def __init__(self, lease_manager):
         self._leases = lease_manager
+        self.lease_manager = lease_manager  # public: pairing identity check
         self._lock = threading.Lock()
         self._entries: "OrderedDict[ArtifactDescriptor, _Entry]" = OrderedDict()
         self._in_flight: dict = {}
@@ -684,43 +751,66 @@ class PreparedArtifactCache:
 
     # -- internals ---------------------------------------------------------
     def _build_as_leader(self, descriptor, builder, size_bytes):
-        flight = None
+        # RESERVE the estimated bytes BEFORE building (Codex plan-gate
+        # finding 2): the expensive allocation happens under a held lease,
+        # so concurrent distinct-key builds cannot collectively exceed the
+        # budget. If no lease is obtainable even after evicting unpinned
+        # entries, the build proceeds WITHOUT cache admission (bypass) —
+        # correctness never depends on caching, but the bypass is a
+        # deliberate, diagnosed state, not an accounting hole.
+        with self._lock:
+            reserved = self._reserve(size_bytes)
         try:
             value = builder()
         except BaseException as exc:
             with self._lock:
+                if reserved:
+                    self._leases.release_bytes(size_bytes, self._POOL)
                 flight = self._in_flight.pop(descriptor, None)
             if flight is not None:
                 flight.error = exc
                 flight.event.set()
             raise
         with self._lock:
+            if self._closed:
+                # close() raced the build (Codex plan-gate finding 3):
+                # never publish or retain bytes past session lifetime.
+                if reserved:
+                    self._leases.release_bytes(size_bytes, self._POOL)
+                flight = self._in_flight.pop(descriptor, None)
+                error = PreparationError("cache closed during build")
+                if flight is not None:
+                    flight.error = error
+                    flight.event.set()
+                raise error
             self._stats["misses"] += 1
             flight = self._in_flight.pop(descriptor, None)
-            admitted = self._admit(descriptor, value, size_bytes)
+            if reserved:
+                entry = _Entry(descriptor, value, size_bytes)
+                entry.pins = 1
+                self._entries[descriptor] = entry
+            else:
+                entry = None
         if flight is not None:
             flight.event.set()
-        if admitted is not None:
-            return ArtifactHandle(value, lambda e=admitted: self._unpin(e))
-        return ArtifactHandle(value, lambda: None)  # oversize: not cached
+        if entry is not None:
+            return ArtifactHandle(value, lambda e=entry: self._unpin(e))
+        return ArtifactHandle(value, lambda: None)  # bypass: not cached
 
-    def _admit(self, descriptor, value, size_bytes):
-        """Caller holds the lock. Returns the pinned entry or None."""
+    def _reserve(self, size_bytes) -> bool:
+        """Caller holds the lock. Lease bytes, evicting unpinned LRU entries
+        as needed; False means bypass (build uncached)."""
         while True:
             try:
                 self._leases.lease_bytes(size_bytes, self._POOL)
-                break
+                return True
             except ResourceBudgetExceeded:
                 victim = next(
                     (d for d, e in self._entries.items() if e.pins == 0), None
                 )
                 if victim is None:
-                    return None  # nothing evictable: bypass cache
+                    return False
                 self._drop(victim)
-        entry = _Entry(descriptor, value, size_bytes)
-        entry.pins = 1
-        self._entries[descriptor] = entry
-        return entry
 
     def _drop(self, descriptor, count_eviction=True):
         entry = self._entries.pop(descriptor)
@@ -940,10 +1030,29 @@ to `execute_native(self, engine, request, normalized, context, prepared=None)`.
 `api.py` `__init__` — after registry handling:
 
 ```python
-        needs_services = context.lease_manager is None or context.artifact_cache is None
+        # Codex plan-gate finding 4: cache and lease manager form ONE budget
+        # domain. They are supplied as a validated pair or created as a pair;
+        # partial injection is rejected, and a supplied pair must be linked.
+        supplied_cache = context.artifact_cache
+        supplied_leases = context.lease_manager
         self._owned_cache = None
         self._owned_leases = None
-        if needs_services:
+        if (supplied_cache is None) != (supplied_leases is None):
+            from quantark.util.exceptions import ValidationError
+
+            raise ValidationError(
+                "artifact_cache and lease_manager must be supplied together "
+                "(one shared budget domain) or both omitted"
+            )
+        if supplied_cache is not None:
+            if supplied_cache.lease_manager is not supplied_leases:
+                from quantark.util.exceptions import ValidationError
+
+                raise ValidationError(
+                    "supplied artifact_cache is not backed by the supplied "
+                    "lease_manager; budget domains would split"
+                )
+        else:
             import dataclasses
 
             from quantark.execution.cache.artifacts import PreparedArtifactCache
@@ -954,10 +1063,10 @@ to `execute_native(self, engine, request, normalized, context, prepared=None)`.
                 budget = dataclasses.replace(
                     budget, artifact_cache_bytes=512 * 2**20
                 )
-            leases = context.lease_manager or ResourceLeaseManager(budget)
-            cache = context.artifact_cache or PreparedArtifactCache(leases)
-            self._owned_leases = leases if context.lease_manager is None else None
-            self._owned_cache = cache if context.artifact_cache is None else None
+            leases = ResourceLeaseManager(budget)
+            cache = PreparedArtifactCache(leases)
+            self._owned_leases = leases
+            self._owned_cache = cache
             context = dataclasses.replace(
                 context, resource_budget=budget,
                 lease_manager=leases, artifact_cache=cache,
@@ -1107,6 +1216,60 @@ class TestDCNLocalVolAdapter:
                 LocalVolDCNPDEEngine(num_space_nodes=301), product, grid_env()
             ) == direct
 
+    def test_mutation_during_prepare_raises_determinism_violation(
+        self, dcn_case, monkeypatch
+    ):
+        """Codex plan-gate finding 1: env mutated mid-build -> loud failure,
+        never a cached surface that mismatches its key."""
+        import numpy as np
+
+        import quantark.asset.equity.engine.mc.dcn_execution_adapters as mod
+        from quantark.asset.equity.engine.mc import LocalVolDCNMCEngine
+        from quantark.execution.errors import DeterminismViolation
+
+        product, grid_env = dcn_case
+        env = grid_env()
+        real_build = mod.build_dupire_local_vol
+
+        def mutating_build(*args, **kwargs):
+            surface = real_build(*args, **kwargs)
+            env.vol_surface.iv_grid = env.vol_surface.iv_grid + 0.01
+            return surface
+
+        monkeypatch.setattr(mod, "build_dupire_local_vol", mutating_build)
+        with PricingSession() as session:
+            with pytest.raises(DeterminismViolation):
+                session.price(
+                    LocalVolDCNMCEngine(num_paths=2**8), product, env
+                )
+
+    def test_partial_service_injection_rejected(self):
+        """Codex plan-gate finding 4: cache/lease-manager come as a pair."""
+        import dataclasses
+
+        from quantark.execution.cache.artifacts import PreparedArtifactCache
+        from quantark.execution.context import default_context
+        from quantark.execution.leases import ResourceLeaseManager
+        from quantark.execution.policy import ResourceBudget
+        from quantark.util.exceptions import ValidationError
+
+        leases = ResourceLeaseManager(ResourceBudget(artifact_cache_bytes=100))
+        cache = PreparedArtifactCache(leases)
+        base = default_context()
+        with pytest.raises(ValidationError):
+            PricingSession(dataclasses.replace(base, artifact_cache=cache))
+        with pytest.raises(ValidationError):
+            PricingSession(dataclasses.replace(base, lease_manager=leases))
+        other = ResourceLeaseManager(ResourceBudget(artifact_cache_bytes=100))
+        with pytest.raises(ValidationError):
+            PricingSession(dataclasses.replace(
+                base, artifact_cache=cache, lease_manager=other,
+            ))
+        with PricingSession(dataclasses.replace(
+            base, artifact_cache=cache, lease_manager=leases,
+        )) as session:  # matched pair accepted; borrowed, not closed
+            assert session.context.artifact_cache is cache
+
     def test_prebuilt_surface_bypasses_cache(self, dcn_case):
         from quantark.asset.equity.engine.mc import LocalVolDCNMCEngine
         from quantark.volmodels.localvol import build_dupire_local_vol
@@ -1176,15 +1339,18 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
                 fingerprint=None, byte_estimate=None,
             )
         env = request.pricing_env
-        fp = try_fingerprint(
-            (env.vol_surface, env.spot_quote, env.rate_curve, env.div_yield)
-        )
+        # Codex plan-gate finding 1: BIND the preparation inputs once, so the
+        # cache key, the build, and the verification all see the same
+        # objects; verify the fingerprint after the build and raise
+        # DeterminismViolation on concurrent mutation (spec section 5.1).
+        inputs = (env.vol_surface, env.spot_quote, env.rate_curve, env.div_yield)
+        spot, div_fn = env.spot, env.get_div_yield
+        fp = try_fingerprint(inputs)
         cache = context.artifact_cache
 
         def builder():
             return build_dupire_local_vol(
-                env.vol_surface, spot=env.spot,
-                rate_curve=env.rate_curve, div_yield=env.get_div_yield,
+                inputs[0], spot=spot, rate_curve=inputs[2], div_yield=div_fn,
             )
 
         if fp is None or cache is None:
@@ -1198,9 +1364,17 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
             dependency_tags=_DUPIRE_TAGS, builder_version=_BUILDER_VERSION,
         )
         handle = cache.get_or_build(
-            descriptor, builder,
-            size_bytes=_probe_size(cache, descriptor, builder),
+            descriptor, builder, size_bytes=_ESTIMATED_SURFACE_BYTES,
         )
+        if try_fingerprint(inputs) != fp:
+            handle.close()
+            cache.invalidate_tags(_DUPIRE_TAGS)
+            from quantark.execution.errors import DeterminismViolation
+
+            raise DeterminismViolation(
+                "pricing environment mutated during preparation; the cached "
+                "Dupire surface no longer matches its key"
+            )
         return PreparedState(
             payload=handle.value, descriptors=(descriptor,),
             fingerprint=fp, byte_estimate=None, handles=(handle,),
@@ -1215,11 +1389,10 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
         return super().execute_native(clone, request, normalized, context)
 
 
-def _probe_size(cache, descriptor, builder):
-    # Size is only known after the first build; use a conservative estimate
-    # for admission and correct it never (Phase 1: estimates are admission
-    # accounting, spec section 11). 8 MiB covers realistic Dupire grids.
-    return 8 << 20
+# Size is only known after the first build; admission uses a conservative
+# estimate (Phase 1: estimates are admission accounting, spec section 11).
+# 8 MiB covers realistic Dupire grids.
+_ESTIMATED_SURFACE_BYTES = 8 << 20
 
 
 class DCNLocalVolMCAdapter(_DCNLocalVolAdapterBase):
@@ -2498,3 +2671,11 @@ known and out of scope).
   cache rather than failing the request (correctness first).
 - Fixture constructor shapes come from cited tests; Step 2 of Task 6
   explicitly budgets an iterative fix-up pass for drift.
+- Codex plan-gate dispositions (all four applied): (1) DCN prepare binds its
+  inputs once and re-verifies the fingerprint after build, raising
+  DeterminismViolation on mutation; (2) the cache reserves bytes BEFORE
+  invoking the builder, converting the reservation to the entry on publish;
+  (3) close() is synchronized with leader publication and the lease manager
+  rejects post-close acquisitions; (4) sessions reject partial cache/lease
+  injection and verify pair identity via cache.lease_manager. Borrowed
+  (supplied) services are never closed by the session.
