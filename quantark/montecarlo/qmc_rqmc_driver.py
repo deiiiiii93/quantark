@@ -81,6 +81,10 @@ class RQMCRunSpec:
     scheme: str
     finalize: object  # Callable[[RQMCResult], engine-native result]
     product: object = None  # the priced product (session postamble needs it)
+    # Resolved per-path draw dimension (streams_per_step * time_steps):
+    # distinguishes model schemes with different stream counts and sizes
+    # the memory admission estimate (code-gate finding 2026-07-16).
+    dimension: int = 0
 
 
 def run_rqmc_traced(

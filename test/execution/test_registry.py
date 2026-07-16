@@ -88,9 +88,29 @@ def test_default_registry_covers_engine_family_roots():
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.QEDCNMCEngine",
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines."
         "CoupledCoarseHestonDCNMCEngine",
-        # Phase 3: adaptive RQMC compatibility (non-exact: subclass-safe)
+        # Phase 3: adaptive RQMC compatibility (exact: 12 verified classes)
         "quantark.asset.equity.engine.mc.snowball_mc_engine.SnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "LocalVolSnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "HestonSnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "QESnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "HestonSLVSnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "HestonSLVQESnowballMCEngine",
         "quantark.asset.equity.engine.mc.phoenix_mc_engine.PhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "LocalVolPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "HestonPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "QEPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "HestonSLVPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "HestonSLVQEPhoenixMCEngine",
     }
     assert set(registry.registered_paths()) == expected
 

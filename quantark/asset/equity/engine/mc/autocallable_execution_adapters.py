@@ -5,10 +5,12 @@ instance on the calling thread, driving the same run_rqmc_traced loop the
 direct path uses, so the stopping sequence and every produced number are
 bit-identical to a direct call by construction. No cloning: the 12
 Snowball/Phoenix engines (BSM/LV/Heston/QE/SLV variants) flow through their
-own polymorphic hooks (_create_path_generator, _compute_payoffs), so a
-single NON-exact registration on each base class is subclass-safe -
-deliberately unlike the DCN batch adapters, whose fixed-signature cloning
-forces exact=True registrations.
+own polymorphic hooks (_create_path_generator, _compute_payoffs). Each of
+the 12 verified concrete classes is registered exact=True (code-gate
+finding 2026-07-16): the adapter drives the session-spec seam rather than
+engine.price(), so an unknown subclass overriding price() or preamble
+behavior must fall through to the legacy adapter and keep its complete
+public price path.
 
 Instance exclusion (plan-gate finding 2026-07-16): the engine mutates its
 request-scoped state (_term_ctx/_df/_last_result) during the run, exactly as
@@ -141,15 +143,18 @@ class AutocallableAdaptiveMCAdapter(LegacyPriceAdapter):
         cls = type(engine)
         engine_class_path = f"{cls.__module__}.{cls.__qualname__}"
         seed = int(engine.params.seed)
-        # paths + payoff work arrays; engine-native draw streams may double
-        # the per-step footprint (LV/Heston two-stream variants), and the
-        # finalizer's extra statistics batch peaks at one more batch (the
-        # RQMC batch memory is freed batch-by-batch, so ONE batch bound
-        # covers both phases; the x5 slack absorbs payoff work arrays)
-        est = 8 * spec.paths_per_batch * 5 * (spec.time_steps + 1) + (1 << 20)
+        dimension = int(spec.dimension) or int(spec.time_steps)
+        # One batch alive at a time (RQMC frees batch memory batch-by-batch
+        # and the finalizer's statistics batch peaks at the same bound):
+        # draw block + in-place transform copy (2 x dimension) + path-node
+        # matrix and payoff work arrays (4 x (steps+1)), plus fixed slack.
+        est = 8 * spec.paths_per_batch * (
+            2 * dimension + 4 * (spec.time_steps + 1)
+        ) + (1 << 20)
         return AdaptivePlan(
             plan_id=(
-                f"{engine_class_path}:{seed}:{spec.paths_per_batch}"
+                f"{engine_class_path}:{spec.scheme}:{seed}"
+                f":{spec.paths_per_batch}"
                 f":{spec.min_batches}-{spec.max_batches}:{spec.target_std!r}"
             ),
             engine_class_path=engine_class_path,
@@ -161,7 +166,7 @@ class AutocallableAdaptiveMCAdapter(LegacyPriceAdapter):
             stream_kind="sobol-rqmc",
             stream_layout="batch-shifted-sobol/v1",
             time_steps=int(spec.time_steps),
-            dimension=int(spec.time_steps),
+            dimension=dimension,
             dtype="float64",
             scheme=spec.scheme,
             stopping_rule="welford-batch-means/v1",
@@ -169,6 +174,25 @@ class AutocallableAdaptiveMCAdapter(LegacyPriceAdapter):
             reduction_order="batch-order-welford/v1",
             est_task_peak_bytes=est,
             implementation_fingerprint=f"{ADAPTER_ID}/{ADAPTER_VERSION}",
+        )
+
+    def execute_native(self, engine, request, normalized, context,
+                       prepared=None):
+        # Fail closed (code-gate finding 2026-07-16): ERROR_ESTIMATE is
+        # produced only by the adaptive RQMC route. A request that falls
+        # back to the native price() path (non-RQMC method, near-expiry)
+        # must not succeed while silently omitting a requested output.
+        if (
+            request.operation is PricingOperation.PRICE
+            and OutputKind.ERROR_ESTIMATE in request.outputs
+        ):
+            raise CapabilityError(
+                "ERROR_ESTIMATE requires the adaptive RQMC route; this "
+                "request fell back to the native price() path (non-RQMC "
+                "method or near-expiry shortcut)"
+            )
+        return super().execute_native(
+            engine, request, normalized, context, prepared=prepared
         )
 
     def execute_adaptive(self, engine, plan, prepared, context):

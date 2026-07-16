@@ -168,6 +168,13 @@ class LocalVolPhoenixMCEngine(_VolModelPhoenixMCBase):
 class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
     """Phoenix MC under the Heston stochastic-volatility model."""
 
+    def _rqmc_streams_per_step(self) -> int:
+        from quantark.util.enum.engine_enums import HestonMCScheme
+
+        if self.scheme in (HestonMCScheme.QUADEXP, HestonMCScheme.QUADEXP_M):
+            return 3  # [z_var | z_ind | u_var] uniform block
+        return 2      # [z_var | z_ind]
+
     def __init__(
         self,
         model_params: HestonParams,
@@ -420,6 +427,9 @@ class QEPhoenixMCEngine(HestonPhoenixMCEngine):
 class HestonSLVPhoenixMCEngine(_VolModelPhoenixMCBase):
     """Phoenix MC under Heston-SLV using a precomputed or on-the-fly leverage surface."""
 
+    def _rqmc_streams_per_step(self) -> int:
+        return 2  # correlated spot/variance normal pair
+
     def __init__(
         self,
         model_params: HestonParams,
@@ -551,6 +561,9 @@ class HestonSLVPhoenixMCEngine(_VolModelPhoenixMCBase):
 
 class HestonSLVQEPhoenixMCEngine(HestonSLVPhoenixMCEngine):
     """Standalone Phoenix MC under Heston-SLV with frozen-leverage QE variance."""
+
+    def _rqmc_streams_per_step(self) -> int:
+        return 3  # [z_var | z_ind | u_var] uniform block
 
     def __init__(
         self,

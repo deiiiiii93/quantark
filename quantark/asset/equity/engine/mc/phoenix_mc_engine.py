@@ -177,6 +177,19 @@ class PhoenixMCEngine(BaseEngine):
             raise PricingError(f"Negative price computed: {result.price}")
         return result.price
 
+    def _rqmc_streams_per_step(self) -> int:
+        """Random streams consumed per time step in RQMC mode (session
+        plan metadata; model-family subclasses override)."""
+        return 1
+
+    def _rqmc_scheme_label(self) -> str:
+        """Session plan scheme identifier: class plus model scheme, so two
+        configurations with different draw pipelines never share a plan
+        fingerprint (code-gate finding 2026-07-16)."""
+        scheme = getattr(self, "scheme", None)
+        suffix = f"-{scheme.name.lower()}" if hasattr(scheme, "name") else ""
+        return f"{type(self).__qualname__}{suffix}/rqmc-native/v1"
+
     def build_rqmc_session_spec(self, product, pricing_env):
         """Execution-framework seam: the price() preamble plus the RQMC run
         description, or None when a direct call would not take the adaptive
@@ -1269,9 +1282,10 @@ class PhoenixMCEngine(BaseEngine):
             target_std=target_std,
             paths_per_batch=per_batch_paths,
             time_steps=int(dt_array.size),
-            scheme=f"{type(self).__qualname__}/rqmc-native/v1",
+            scheme=self._rqmc_scheme_label(),
             finalize=finalize,
             product=product,
+            dimension=self._rqmc_streams_per_step() * int(dt_array.size),
         )
 
     def _price_rqmc(

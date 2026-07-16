@@ -324,3 +324,128 @@ class TestKernelAdaptiveDispatch:
             np.asarray(outcome.value.ko_probability),
             np.asarray(direct.ko_probability),
         )
+
+
+class TestCodeGateRegressions:
+    """Codex code-gate findings, 2026-07-16."""
+
+    def test_subclass_overriding_price_falls_to_legacy(self):
+        # Finding 1: exact registrations - an unknown subclass overriding
+        # price() must keep its complete public price path via the legacy
+        # adapter, never be driven through the inherited session-spec seam.
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.execution import PricingSession
+        from quantark.execution.contracts import PricingRequest
+        from quantark.execution.registry import build_default_registry
+        from quantark.util.enum.engine_enums import MonteCarloMethod
+
+        class FlatPriceSnowball(SnowballMCEngine):
+            def price(self, product, pricing_env):
+                return 123.0
+
+        registry = build_default_registry()
+        registry.freeze()
+        adapter = registry.resolve_class(FlatPriceSnowball)
+        assert adapter.capabilities().adapter_id == "legacy-price"
+
+        engine = FlatPriceSnowball(
+            params=_rqmc_params(), method=MonteCarloMethod.RANDOMIZED_QUASI,
+        )
+        with PricingSession() as session:
+            outcome = session.execute(
+                engine,
+                PricingRequest(product=_snowball(), pricing_env=_eq_flat_env()),
+            )
+        assert outcome.value == 123.0
+        assert outcome.manifest.adapter_id == "legacy-price"
+
+    def test_heston_schemes_produce_distinct_plans(self):
+        # Finding 2: the plan must identify the draw pipeline - EULERLOG
+        # (2 streams) and QUADEXP (3 streams) with identical controls must
+        # differ in dimension, scheme, and plan fingerprint.
+        from quantark.asset.equity.engine.mc import HestonSnowballMCEngine
+        from quantark.execution.cache.fingerprint import try_fingerprint
+        from quantark.util.enum.engine_enums import (
+            HestonMCScheme,
+            MonteCarloMethod,
+        )
+        from execution.matrix_fixtures import _eq_grid_env, _hp
+
+        from quantark.asset.equity.engine.mc.autocallable_execution_adapters import (
+            AutocallableAdaptiveMCAdapter,
+        )
+        from quantark.execution.context import default_context
+        from quantark.execution.contracts import PricingRequest
+
+        adapter = AutocallableAdaptiveMCAdapter()
+        plans = {}
+        for scheme in (HestonMCScheme.EULERLOG, HestonMCScheme.QUADEXP):
+            engine = HestonSnowballMCEngine(
+                _hp(), _rqmc_params(num_paths=512, time_steps=16),
+                scheme=scheme, method=MonteCarloMethod.RANDOMIZED_QUASI,
+            )
+            request = PricingRequest(
+                product=_snowball(), pricing_env=_eq_grid_env(),
+            )
+            prepared = adapter.prepare(engine, request, default_context())
+            try:
+                plans[scheme] = adapter.plan_adaptive(
+                    engine, request, prepared, default_context()
+                )
+            finally:
+                for handle in prepared.handles:
+                    handle.close()
+        euler, qe = (
+            plans[HestonMCScheme.EULERLOG], plans[HestonMCScheme.QUADEXP],
+        )
+        assert euler.dimension == 2 * euler.time_steps
+        assert qe.dimension == 3 * qe.time_steps
+        assert "eulerlog" in euler.scheme and "quadexp" in qe.scheme
+        assert try_fingerprint(euler) != try_fingerprint(qe)
+        # the estimate must cover the draw block itself
+        assert euler.est_task_peak_bytes >= 8 * 512 * 2 * euler.dimension
+        assert qe.est_task_peak_bytes >= 8 * 512 * 2 * qe.dimension
+
+    def test_bsm_plan_dimension_is_time_steps(self):
+        from quantark.asset.equity.engine.mc.autocallable_execution_adapters import (
+            AutocallableAdaptiveMCAdapter,
+        )
+        from quantark.execution.context import default_context
+        from quantark.execution.contracts import PricingRequest
+
+        adapter, engine = AutocallableAdaptiveMCAdapter(), _rqmc_snowball_engine()
+        request = PricingRequest(product=_snowball(), pricing_env=_eq_flat_env())
+        prepared = adapter.prepare(engine, request, default_context())
+        try:
+            plan = adapter.plan_adaptive(
+                engine, request, prepared, default_context()
+            )
+        finally:
+            for handle in prepared.handles:
+                handle.close()
+        assert plan.dimension == plan.time_steps
+
+    def test_error_estimate_fails_closed_on_native_fallback(self):
+        # Finding 3: a request for ERROR_ESTIMATE that falls back to the
+        # native price() path must raise, never succeed with pv-only
+        # economics.
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.execution import OutputKind, PricingSession
+        from quantark.execution.contracts import PricingRequest
+        from quantark.execution.errors import CapabilityError
+        from quantark.util.enum.engine_enums import MonteCarloMethod
+
+        outputs = frozenset({OutputKind.PV, OutputKind.ERROR_ESTIMATE})
+        request = PricingRequest(
+            product=_snowball(), pricing_env=_eq_flat_env(), outputs=outputs,
+        )
+        quasi = SnowballMCEngine(
+            params=_rqmc_params(), method=MonteCarloMethod.QUASI,
+        )
+        with PricingSession() as session:
+            with pytest.raises(CapabilityError, match="adaptive RQMC route"):
+                session.execute(quasi, request)
+        # the adaptive route still serves it
+        with PricingSession() as session:
+            outcome = session.execute(_rqmc_snowball_engine(), request)
+        assert "std_error" in dict(outcome.normalized_economics)

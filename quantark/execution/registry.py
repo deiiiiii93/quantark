@@ -144,18 +144,37 @@ def build_default_registry() -> AdapterRegistry:
         "CoupledCoarseHestonDCNMCEngine",
         _dcn_coupled_batch_adapter, exact=True,
     )
-    # Phase 3: adaptive RQMC compatibility plans. NON-exact by design: the
-    # adapter drives the live engine through its own polymorphic hooks (no
-    # cloning), so every Snowball/Phoenix vol-model subclass inherits it
-    # safely.
-    registry.register(
+    # Phase 3: adaptive RQMC compatibility plans for the 12 VERIFIED
+    # concrete autocallable engines. exact=True (code-gate finding
+    # 2026-07-16): the adapter drives the session-spec seam rather than
+    # engine.price(), so an unknown subclass that overrides price() (or
+    # any preamble behavior) must fall through the MRO to the legacy
+    # adapter, which calls the complete public price path.
+    for autocall in (
         "quantark.asset.equity.engine.mc.snowball_mc_engine.SnowballMCEngine",
-        _autocallable_adaptive_adapter,
-    )
-    registry.register(
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "LocalVolSnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "HestonSnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "QESnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "HestonSLVSnowballMCEngine",
+        "quantark.asset.equity.engine.mc.snowball_vol_mc_engines."
+        "HestonSLVQESnowballMCEngine",
         "quantark.asset.equity.engine.mc.phoenix_mc_engine.PhoenixMCEngine",
-        _autocallable_adaptive_adapter,
-    )
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "LocalVolPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "HestonPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "QEPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "HestonSLVPhoenixMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
+        "HestonSLVQEPhoenixMCEngine",
+    ):
+        registry.register(autocall, _autocallable_adaptive_adapter, exact=True)
     return registry
 
 
