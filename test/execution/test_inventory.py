@@ -221,3 +221,67 @@ def test_run_rqmc_single_solve_rows_carry_adaptive_deferral():
         rec = records[name]
         assert rec.adaptive_state == "temporary_legacy", name
         assert "run_rqmc" in rec.adaptive_rationale, name
+
+
+# --- Phase 4 exit gates: prepared_state audit (spec section 21) -----------
+
+_PHASE4_PREPARED_NAMES = {
+    # equity 1D base family
+    "EuropeanPDESolver", "AmericanPDESolver", "BarrierPDESolver",
+    "DoubleBarrierPDESolver", "OneTouchPDESolver", "DoubleOneTouchPDESolver",
+    "SnowballPDESolver", "KOResetSnowballPDESolver", "PhoenixPDESolver",
+    # LV family
+    "LocalVolPDESolver", "LocalVolBarrierPDESolver",
+    "LocalVolSnowballPDESolver", "LocalVolPhoenixPDESolver",
+    # Heston/SLV autocallables (rich outputs, no artifacts)
+    "HestonSnowballPDESolver", "HestonSLVSnowballPDESolver",
+    "HestonPhoenixPDESolver", "HestonSLVPhoenixPDESolver",
+    # DCN LV (Phase 1 surface artifact) + FX LV
+    "LocalVolDCNPDEEngine", "FxLocalVolPDESolver",
+    "LocalVolDCNMCEngine",
+}
+
+
+def test_prepared_states_are_valid():
+    from quantark.execution.inventory import PREPARED_STATES
+
+    for rec in ENGINE_INVENTORY:
+        assert rec.prepared_state in PREPARED_STATES, rec.name
+
+
+def test_prepared_capable_set_is_exactly_the_phase4_registrations():
+    names = {r.name for r in ENGINE_INVENTORY
+             if r.prepared_state == "prepared_capable"}
+    assert names == _PHASE4_PREPARED_NAMES
+
+
+def test_prepared_capable_rows_declare_profile_and_nonlegacy_adapter():
+    registry = build_default_registry()
+    registry.freeze()
+    for rec in ENGINE_INVENTORY:
+        if rec.prepared_state != "prepared_capable":
+            continue
+        assert rec.validation_profile, rec.name
+        assert rec.adoption_state == "supported", rec.name
+        module_path, _, class_name = rec.import_path.rpartition(".")
+        cls = getattr(importlib.import_module(module_path), class_name)
+        adapter = registry.resolve_class(cls)
+        # A prepared-capable row must resolve to an adapter that actually
+        # prepares (the Phase 1 DCN adapters keep the legacy adapter_id but
+        # implement prepare(); the Phase 4 adapters report their own ids).
+        assert hasattr(adapter, "prepare"), rec.name
+
+
+def test_every_pde_row_has_prepared_state_and_rationale():
+    for rec in ENGINE_INVENTORY:
+        if rec.engine_type != "pde":
+            continue
+        assert rec.prepared_state != "", rec.name
+        assert rec.prepared_rationale, rec.name
+
+
+def test_non_capable_prepared_rows_carry_specific_rationale():
+    for rec in ENGINE_INVENTORY:
+        if rec.prepared_state == "temporary_legacy":
+            assert rec.prepared_rationale, rec.name
+            assert rec.prepared_rationale != "", rec.name
