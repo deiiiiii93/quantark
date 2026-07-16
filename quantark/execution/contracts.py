@@ -22,6 +22,9 @@ __all__ = [
     "PricingFailure",
     "EngineCapabilities",
     "PreparedState",
+    "BatchTask",
+    "BatchPlan",
+    "BatchOutcome",
     "ScenarioSpec",
     "ScenarioOutcome",
     "economics_mapping",
@@ -136,6 +139,51 @@ class PreparedState:
     fingerprint: str | None
     byte_estimate: int | None
     handles: tuple = ()
+
+
+@dataclass(frozen=True)
+class BatchTask:
+    """One unit of MC work; ``batch_id`` is the engine stream-shift id
+    (None means the engine's single-batch stream)."""
+
+    plan_id: str
+    batch_index: int
+    batch_id: int | None
+    n_paths: int
+
+
+@dataclass(frozen=True)
+class BatchPlan:
+    """Immutable fixed-batch MC plan (spec section 8.1). The plan, not
+    executor completion order, determines economics."""
+
+    plan_id: str
+    engine_class_path: str
+    num_batches: int
+    paths_per_batch: int
+    total_paths: int
+    seed: int
+    stream_kind: str        # "sobol" | "pseudorandom" | "antithetic"
+    stream_layout: str
+    time_steps: int
+    dimension: int
+    dtype: str
+    scheme: str
+    stderr_mode: str        # "scramble_means" | "pathwise_iid"
+    reduction_order: str    # "batch_index/v1"
+    tasks: tuple
+    est_task_peak_bytes: int | None
+    est_outcome_bytes: int | None
+    implementation_fingerprint: str | None
+
+
+@dataclass(frozen=True)
+class BatchOutcome:
+    """Compact per-batch sufficient statistics (spec section 8.2)."""
+
+    batch_index: int
+    n_paths: int
+    payload: object
 
 
 def economics_mapping(outcome) -> dict:

@@ -149,7 +149,10 @@ def policy_values(policy, budget, determinism) -> tuple:
 def resolve_resource_budget(explicit=None, environ=None):
     """Resolve a ResourceBudget once; returns (budget, source map)."""
     if explicit is not None:
-        fields = ["total_memory_bytes", "artifact_cache_bytes", "max_in_flight"]
+        fields = [
+            "total_memory_bytes", "artifact_cache_bytes", "draw_cache_bytes",
+            "max_threads", "max_in_flight",
+        ]
         return explicit, tuple((f, "explicit") for f in fields)
 
     environ = os.environ if environ is None else environ
@@ -158,11 +161,17 @@ def resolve_resource_budget(explicit=None, environ=None):
                          None, "total_memory_bytes", sources)
     cache_mb = _env_int(environ, "QUANTARK_EXEC_CACHE_MB",
                         None, "artifact_cache_bytes", sources)
+    draw_mb = _env_int(environ, "QUANTARK_EXEC_DRAW_CACHE_MB",
+                       None, "draw_cache_bytes", sources)
+    max_threads = _env_int(environ, "QUANTARK_EXEC_MAX_THREADS",
+                           1, "max_threads", sources)
     max_in_flight = _env_int(environ, "QUANTARK_EXEC_MAX_IN_FLIGHT",
                              1, "max_in_flight", sources)
     return (
         ResourceBudget(
+            max_threads=max_threads,
             total_memory_bytes=None if memory_mb is None else memory_mb * 2**20,
+            draw_cache_bytes=None if draw_mb is None else draw_mb * 2**20,
             artifact_cache_bytes=None if cache_mb is None else cache_mb * 2**20,
             max_in_flight=max_in_flight,
         ),
