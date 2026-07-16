@@ -632,6 +632,19 @@ class BasePDESolver(BaseEngine):
             spot_log=np.log(spot),
         )
 
+    def _prepare_solve_state(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ):
+        """_solve's state preamble, shared with session preparation.
+
+        The base family carries no pre-grid solve state; the two-surface
+        autocallable solvers override this (KI regime, valuation flags,
+        barrier level) and BOTH their _solve and the session adapter's
+        prepare() call it, so grid-key evaluation on a fresh clone sees the
+        same state a direct solve would.
+        """
+        return None
+
     def _price_with_solution(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Tuple[float, Optional[PDESolutionResult]]:

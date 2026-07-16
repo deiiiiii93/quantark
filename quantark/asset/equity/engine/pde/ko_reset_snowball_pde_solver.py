@@ -318,28 +318,14 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
 
-        ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
-            product, spot, pricing_env, ki_continuous=ki_continuous
-        )
-        self._knocked_in_at_valuation = knocked_in_at_valuation
+        # State preamble shared with session preparation (see
+        # SnowballPDESolver._prepare_solve_state).
+        knocked_in_at_valuation = self._prepare_solve_state(product, pricing_env)
 
         strike = product.strike
         r = pricing_env.get_rate(tau)
         q = pricing_env.get_div_yield(tau)
         sigma = pricing_env.get_vol(strike, tau)
-
-        self._is_reverse = product.is_reverse
-        self._ki_continuous = ki_continuous
-        if product.has_ki_barrier:
-            ki_barrier = product.barrier_config.ki_barrier
-            if isinstance(ki_barrier, list):
-                self._ki_barrier = ki_barrier[0]
-            else:
-                self._ki_barrier = ki_barrier
 
         if self._profile_enabled:
             self._reset_profile_stats()

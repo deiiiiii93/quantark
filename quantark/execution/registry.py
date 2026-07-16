@@ -175,6 +175,60 @@ def build_default_registry() -> AdapterRegistry:
         "HestonSLVQEPhoenixMCEngine",
     ):
         registry.register(autocall, _autocallable_adaptive_adapter, exact=True)
+    # Phase 4: prepared PDE session adapters. exact=True throughout: every
+    # adapter clones the engine (fixed constructor signatures) and/or drives
+    # the _session_outputs seam instead of price(), so unknown subclasses
+    # fall through the MRO to the legacy adapter.
+    for pde_1d in (
+        "quantark.asset.equity.engine.pde.european_pde_solver.EuropeanPDESolver",
+        "quantark.asset.equity.engine.pde.american_pde_solver.AmericanPDESolver",
+        "quantark.asset.equity.engine.pde.barrier_pde_solver.BarrierPDESolver",
+        "quantark.asset.equity.engine.pde.double_barrier_pde_solver."
+        "DoubleBarrierPDESolver",
+        "quantark.asset.equity.engine.pde.one_touch_pde_solver.OneTouchPDESolver",
+        "quantark.asset.equity.engine.pde.double_one_touch_pde_solver."
+        "DoubleOneTouchPDESolver",
+    ):
+        registry.register(pde_1d, _equity_pde_1d_adapter, exact=True)
+    for pde_autocall in (
+        "quantark.asset.equity.engine.pde.snowball_pde_solver.SnowballPDESolver",
+        "quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver."
+        "KOResetSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_pde_solver.PhoenixPDESolver",
+    ):
+        registry.register(pde_autocall, _equity_pde_autocall_adapter, exact=True)
+    for pde_lv in (
+        "quantark.asset.equity.engine.pde.local_vol_pde_solver.LocalVolPDESolver",
+        "quantark.asset.equity.engine.pde.barrier_vol_pde_solvers."
+        "LocalVolBarrierPDESolver",
+    ):
+        registry.register(pde_lv, _equity_pde_lv_adapter, exact=True)
+    for pde_lv_autocall in (
+        "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
+        "LocalVolSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers."
+        "LocalVolPhoenixPDESolver",
+    ):
+        registry.register(
+            pde_lv_autocall, _equity_pde_lv_autocall_adapter, exact=True
+        )
+    for pde_heston_autocall in (
+        "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
+        "HestonSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
+        "HestonSLVSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers."
+        "HestonPhoenixPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers."
+        "HestonSLVPhoenixPDESolver",
+    ):
+        registry.register(
+            pde_heston_autocall, _equity_pde_heston_autocall_adapter, exact=True
+        )
+    registry.register(
+        "quantark.asset.fx.engine.pde.local_vol_pde_solver.FxLocalVolPDESolver",
+        _fx_pde_lv_adapter, exact=True,
+    )
     return registry
 
 
@@ -232,3 +286,51 @@ def _autocallable_adaptive_adapter():
     )
 
     return AutocallableAdaptiveMCAdapter()
+
+
+def _equity_pde_1d_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        EquityPDE1DSessionAdapter,
+    )
+
+    return EquityPDE1DSessionAdapter()
+
+
+def _equity_pde_autocall_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        EquityPDEAutocallableSessionAdapter,
+    )
+
+    return EquityPDEAutocallableSessionAdapter()
+
+
+def _equity_pde_lv_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        EquityLVPDESessionAdapter,
+    )
+
+    return EquityLVPDESessionAdapter()
+
+
+def _equity_pde_lv_autocall_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        EquityLVAutocallableSessionAdapter,
+    )
+
+    return EquityLVAutocallableSessionAdapter()
+
+
+def _equity_pde_heston_autocall_adapter():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        Heston2DAutocallableSessionAdapter,
+    )
+
+    return Heston2DAutocallableSessionAdapter()
+
+
+def _fx_pde_lv_adapter():
+    from quantark.asset.fx.engine.pde.fx_pde_execution_adapters import (
+        FxLVPDESessionAdapter,
+    )
+
+    return FxLVPDESessionAdapter()

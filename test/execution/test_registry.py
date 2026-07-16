@@ -111,6 +111,35 @@ def test_default_registry_covers_engine_family_roots():
         "HestonSLVPhoenixMCEngine",
         "quantark.asset.equity.engine.mc.phoenix_vol_mc_engines."
         "HestonSLVQEPhoenixMCEngine",
+        # Phase 4: prepared PDE session adapters (exact: 18 verified classes)
+        "quantark.asset.equity.engine.pde.european_pde_solver.EuropeanPDESolver",
+        "quantark.asset.equity.engine.pde.american_pde_solver.AmericanPDESolver",
+        "quantark.asset.equity.engine.pde.barrier_pde_solver.BarrierPDESolver",
+        "quantark.asset.equity.engine.pde.double_barrier_pde_solver."
+        "DoubleBarrierPDESolver",
+        "quantark.asset.equity.engine.pde.one_touch_pde_solver.OneTouchPDESolver",
+        "quantark.asset.equity.engine.pde.double_one_touch_pde_solver."
+        "DoubleOneTouchPDESolver",
+        "quantark.asset.equity.engine.pde.snowball_pde_solver.SnowballPDESolver",
+        "quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver."
+        "KOResetSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_pde_solver.PhoenixPDESolver",
+        "quantark.asset.equity.engine.pde.local_vol_pde_solver.LocalVolPDESolver",
+        "quantark.asset.equity.engine.pde.barrier_vol_pde_solvers."
+        "LocalVolBarrierPDESolver",
+        "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
+        "LocalVolSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers."
+        "LocalVolPhoenixPDESolver",
+        "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
+        "HestonSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.snowball_vol_pde_solvers."
+        "HestonSLVSnowballPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers."
+        "HestonPhoenixPDESolver",
+        "quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers."
+        "HestonSLVPhoenixPDESolver",
+        "quantark.asset.fx.engine.pde.local_vol_pde_solver.FxLocalVolPDESolver",
     }
     assert set(registry.registered_paths()) == expected
 

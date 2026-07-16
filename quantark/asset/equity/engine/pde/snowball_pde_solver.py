@@ -170,33 +170,15 @@ class SnowballPDESolver(BasePDESolver):
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
 
-        # Determine knocked-in state at valuation
-        ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
-            product, spot, pricing_env, ki_continuous=ki_continuous
-        )
-
-        # Store the state for potential use in calculate_greeks
-        self._knocked_in_at_valuation = knocked_in_at_valuation
+        # State preamble (KI regime, valuation flags, barrier level) shared
+        # with session preparation via the _prepare_solve_state seam.
+        knocked_in_at_valuation = self._prepare_solve_state(product, pricing_env)
 
         # Extract market data
         strike = product.strike
         r = pricing_env.get_rate(tau)
         q = pricing_env.get_div_yield(tau)
         sigma = pricing_env.get_vol(strike, tau)
-
-        # Store product properties for later use
-        self._is_reverse = product.is_reverse
-        self._ki_continuous = ki_continuous
-        if product.has_ki_barrier:
-            ki_barrier = product.barrier_config.ki_barrier
-            if isinstance(ki_barrier, list):
-                self._ki_barrier = ki_barrier[0]
-            else:
-                self._ki_barrier = ki_barrier
 
         # BGK state is resolved at the top of _build_grids so the time grid
         # drops interior KI nodes (and subclasses cannot skip it).
@@ -293,6 +275,33 @@ class SnowballPDESolver(BasePDESolver):
             s_vec=s_vec,
             spot_log=spot_log,
         )
+
+    def _prepare_solve_state(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> bool:
+        """_solve's state preamble (KI regime, valuation flags, KI barrier),
+        shared with session preparation so grid-key evaluation on a fresh
+        clone sees the same state a direct solve would. Returns
+        knocked_in_at_valuation."""
+        spot = pricing_env.spot
+        ki_continuous = (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+        )
+        knocked_in_at_valuation = self._is_knocked_in_at_valuation(
+            product, spot, pricing_env, ki_continuous=ki_continuous
+        )
+        # Store the state for potential use in calculate_greeks
+        self._knocked_in_at_valuation = knocked_in_at_valuation
+        self._is_reverse = product.is_reverse
+        self._ki_continuous = ki_continuous
+        if product.has_ki_barrier:
+            ki_barrier = product.barrier_config.ki_barrier
+            if isinstance(ki_barrier, list):
+                self._ki_barrier = ki_barrier[0]
+            else:
+                self._ki_barrier = ki_barrier
+        return knocked_in_at_valuation
 
     def _check_product_type(self, product: BaseEquityProduct) -> None:
         """
@@ -1774,11 +1783,17 @@ class SnowballPDESolver(BasePDESolver):
         self, banded: dict, step_coeffs, l, c, u, dt, theta, coeff_key
     ) -> None:
         # Route through _get_banded_system itself (single construction
-        # implementation) against a throwaway cache.
+        # implementation) against a throwaway cache. FIRST build wins,
+        # mirroring the engine's own cache: distinct dt floats can round to
+        # one 12-digit key, and the march reuses the first-built entry for
+        # all of them — the pack must hold that same entry bitwise.
+        key = (coeff_key, round(dt, 12), round(theta, 12))
+        if key in banded:
+            return
         saved, self._banded_cache = self._banded_cache, OrderedDict()
         try:
             entry = self._get_banded_system(l, c, u, dt, theta, coeff_key=coeff_key)
-            banded[(coeff_key, round(dt, 12), round(theta, 12))] = entry
+            banded[key] = entry
         finally:
             self._banded_cache = saved
 
