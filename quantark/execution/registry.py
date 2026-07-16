@@ -102,6 +102,22 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
         _dcn_pde_adapter,
     )
+    # Phase 2: fixed-batch capability for the plain GBM DCN MC engine.
+    registry.register(
+        "quantark.asset.equity.engine.mc.dcn_mc_engine.DCNMCEngine",
+        _dcn_batch_mc_adapter,
+    )
+    # MRO containment: the Heston DCN family inherits DCNMCEngine but its
+    # paired normal+uniform draw pipeline is not repository-routed yet
+    # (Phase 3), so exact pins keep it on the plain legacy adapter instead
+    # of inheriting the batch capability through the DCNMCEngine entry.
+    # QEDCNMCEngine resolves via the HestonDCNMCEngine pin (nearest base).
+    for heston_dcn in (
+        "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.HestonDCNMCEngine",
+        "quantark.asset.equity.engine.mc.dcn_vol_mc_engines."
+        "CoupledCoarseHestonDCNMCEngine",
+    ):
+        registry.register(heston_dcn, _legacy_product_env_adapter)
     return registry
 
 
@@ -119,3 +135,17 @@ def _dcn_pde_adapter():
     )
 
     return DCNLocalVolPDEAdapter()
+
+
+def _dcn_batch_mc_adapter():
+    from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
+        DCNBatchMCAdapter,
+    )
+
+    return DCNBatchMCAdapter()
+
+
+def _legacy_product_env_adapter():
+    from quantark.execution.legacy_adapter import LegacyPriceAdapter
+
+    return LegacyPriceAdapter(call_shape="product_env")

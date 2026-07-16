@@ -1,27 +1,74 @@
-"""Execution-framework adapters for the DCN local-vol engines (spec Phase 1).
+"""Execution-framework adapters for the DCN engines (spec Phases 1-2).
 
-The adapter path serves cache-fetched Dupire surfaces through PREBUILT-SURFACE
-FACTORY CLONES: a clone of the target engine is constructed with
-``local_vol_surface=<cached surface>``, so the original engine's
-``_prepare_simulation``/``_resolve_surface`` hooks and ``_active_surface``
-state are never touched (spec sections 6.3 + 17.1: mutable-state removal
-applies to the adapter path only; the direct path and its subclass hooks are
-preserved verbatim).
+Phase 1 (surfaces): the adapter path serves cache-fetched Dupire surfaces
+through PREBUILT-SURFACE FACTORY CLONES: a clone of the target engine is
+constructed with ``local_vol_surface=<cached surface>``, so the original
+engine's ``_prepare_simulation``/``_resolve_surface`` hooks and
+``_active_surface`` state are never touched (spec sections 6.3 + 17.1:
+mutable-state removal applies to the adapter path only; the direct path and
+its subclass hooks are preserved verbatim).
 
 Preparation inputs are BOUND once, so the cache key, the build, and the
 post-build verification all see the same objects; a fingerprint mismatch
 after the build raises ``DeterminismViolation`` (spec section 5.1).
+
+Phase 2 (fixed-batch MC): the MC adapters implement the batch capability
+(``plan_batches``/``execute_batch``/``reduce_batches``). ``execute_batch``
+returns COMPACT per-batch sufficient statistics whose merge in canonical
+batch-index order performs exactly the float additions the legacy
+per-batch accumulator loop performs, so session results are BIT-IDENTICAL
+to the direct path in every mode; per-path totals are retained only when
+the pathwise-IID stderr formula requires them (spec section 8.2 "compact
+whenever possible"). Sobol draws are served by the session
+``DrawRepository`` through a thread-safe pinning provider that rides in
+``PreparedState.handles`` (the kernel's ``finally`` releases every pinned
+master); non-Sobol modes fall through to the clone's legacy generators.
 """
+import threading
+import time
+from dataclasses import dataclass
+from typing import Optional
+
+import numpy as np
+
+from quantark.asset.equity.engine.mc.dcn_mc_engine import (
+    _finalize_dcn_result,
+    _LegAccumulator,
+)
+from quantark.asset.equity.engine.mc.dcn_payoff import compute_dcn_cashflows
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
+from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.execution.cache.artifacts import ArtifactDescriptor
 from quantark.execution.cache.fingerprint import try_fingerprint
-from quantark.execution.contracts import PreparedState
+from quantark.execution.contracts import (
+    BatchOutcome,
+    BatchPlan,
+    BatchTask,
+    EngineCapabilities,
+    OutputKind,
+    PreparedState,
+    PricingOperation,
+)
+from quantark.execution.errors import CapabilityError
 from quantark.execution.legacy_adapter import LegacyPriceAdapter
+from quantark.priceenv.term_sampling import make_df_fn
+from quantark.util.exceptions import ValidationError
 from quantark.volmodels.localvol import build_dupire_local_vol
 
-__all__ = ["DCNLocalVolMCAdapter", "DCNLocalVolPDEAdapter"]
+__all__ = ["DCNBatchMCAdapter", "DCNLocalVolMCAdapter", "DCNLocalVolPDEAdapter"]
 
 _DUPIRE_TAGS = frozenset({"vol_surface", "spot", "rate_curve", "dividend_curve"})
 _BUILDER_VERSION = "1"
+
+_BATCH_ADAPTER_ID = "dcn-batch-mc"
+_BATCH_ADAPTER_VERSION = "1"
+_BATCH_OUTPUTS = frozenset(
+    {OutputKind.PV, OutputKind.ERROR_ESTIMATE, OutputKind.EVENT_STATS}
+)
+_BATCH_OPS = frozenset(
+    {PricingOperation.PRICE, PricingOperation.PRICE_DETAILED}
+)
+
 
 def _estimate_surface_bytes(vol_surface) -> int:
     """Pre-build admission estimate PROPORTIONAL to the source grid.
@@ -47,11 +94,347 @@ def _surface_nbytes(surface) -> int:
     return total or (1 << 20)  # conservative floor: 1 MiB
 
 
-class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
+# ---------------------------------------------------------------------------
+# Phase 2: fixed-batch MC capability
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DCNBatchStats:
+    """Compact per-batch sufficient statistics: exactly the increments the
+    legacy ``_LegAccumulator.add`` produces from one batch, so merging them
+    in batch order reproduces the direct-path arithmetic bit-for-bit."""
+
+    n: int
+    fixed_sum: float
+    ko_sum: float
+    loss_sum: float
+    fixed_by_period: np.ndarray
+    ko_by_period: np.ndarray
+    coupon_paid: np.ndarray
+    ko_timing: np.ndarray
+    ki_count: int
+    survive_no_ki_count: int
+    survive_ki_count: int
+    life_sum: float
+    batch_mean: float
+    totals: Optional[np.ndarray]  # per-path totals; pathwise_iid mode only
+
+
+@dataclass(frozen=True)
+class _DCNSimContext:
+    """Immutable request-scoped simulation context (spec section 6.3):
+    everything a batch task needs, hoisted once out of the batch loop —
+    the same work the direct path performs once per ``price_detailed``."""
+
+    engine: object          # adapter-owned clone; num_workers=1 (nested off)
+    product: object
+    pricing_env: object
+    ctx: object
+    term: object
+    df: object
+    spot0: float
+    dt_array: np.ndarray
+    obs_times: np.ndarray
+    n_obs: int
+    stderr_mode: str
+    t0: float
+
+
+class _PinnedDrawProvider:
+    """Thread-safe draw fetcher; pins masters until the kernel closes it.
+
+    Rides in ``PreparedState.handles`` so the kernel's existing ``finally``
+    releases every pinned Sobol block after execution (spec section 8.3:
+    draw access uses the same lease-backed pinning contract as prepared
+    artifacts)."""
+
+    def __init__(self, repository, seed):
+        self._repo = repository
+        self._seed = seed
+        self._lock = threading.Lock()
+        self._handles = []
+
+    def __call__(self, n_dims, n_paths, batch_id):
+        handle = self._repo.normals_handle(
+            seed=self._seed, n_paths=n_paths, dim=n_dims, batch_id=batch_id
+        )
+        with self._lock:
+            self._handles.append(handle)
+        return handle.value
+
+    def close(self):
+        with self._lock:
+            handles, self._handles = self._handles, []
+        for handle in handles:
+            handle.close()
+
+
+class _DCNBatchMixin:
+    """Batch capability shared by the GBM and Local-Vol DCN MC adapters."""
+
+    _SCHEME = "gbm-term/v1"
+
+    def capabilities(self) -> EngineCapabilities:
+        return EngineCapabilities(
+            operations=_BATCH_OPS,
+            output_kinds=_BATCH_OUTPUTS,
+            supported_backends=frozenset({"serial", "threads"}),
+            fixed_planning=True,
+            prepared_state_thread_safe=True,
+            instance_reentrant=False,
+            process_reconstructable=False,
+            deterministic_reduction=True,
+            peak_memory_estimate="conservative",
+            adapter_id=_BATCH_ADAPTER_ID,
+            adapter_version=_BATCH_ADAPTER_VERSION,
+        )
+
+    def validate(self, engine, request) -> None:
+        if request.operation not in _BATCH_OPS:
+            raise CapabilityError(
+                f"operation {request.operation} unsupported by "
+                f"{_BATCH_ADAPTER_ID}"
+            )
+        extra = request.outputs - _BATCH_OUTPUTS
+        if extra:
+            raise CapabilityError(
+                f"outputs {sorted(k.value for k in extra)} unsupported by "
+                f"{_BATCH_ADAPTER_ID}"
+            )
+        if request.pricing_env is None:
+            raise CapabilityError(
+                "pricing_env is required for product_env engines"
+            )
+
+    # -- preparation helpers ------------------------------------------------
+    def _sim_context(self, clone, request, context) -> "_DCNSimContext":
+        t0 = time.perf_counter()
+        product = request.product
+        env = request.pricing_env
+        ctx = build_dcn_grid_context(product)
+        dt_array = np.diff(ctx.times)
+        if dt_array.size == 0:
+            raise ValidationError(
+                "DCN grid has no steps (valuation at maturity?)"
+            )
+        term = build_mc_term_inputs(
+            env,
+            ref_strike=product.initial_price,
+            maturity=float(ctx.times[-1]),
+            time_steps=dt_array.size,
+            dt_array=dt_array,
+        )
+        stderr_mode = (
+            "scramble_means"
+            if clone.use_sobol and clone.num_batches >= 2
+            else "pathwise_iid"
+        )
+        return _DCNSimContext(
+            engine=clone,
+            product=product,
+            pricing_env=env,
+            ctx=ctx,
+            term=term,
+            df=make_df_fn(env),
+            spot0=float(env.spot),
+            dt_array=dt_array,
+            obs_times=ctx.times[ctx.obs_cols],
+            n_obs=int(ctx.obs_cols.size),
+            stderr_mode=stderr_mode,
+            t0=t0,
+        )
+
+    def _attach_draw_provider(self, clone, context):
+        repository = getattr(context, "draw_repository", None)
+        if not clone.use_sobol or repository is None:
+            return None
+        provider = _PinnedDrawProvider(repository, clone.seed)
+        clone._draw_provider = provider
+        return provider
+
+    # -- batch capability ----------------------------------------------------
+    def plan_batches(self, engine, request, state, context) -> BatchPlan:
+        sim = state.payload
+        clone = sim.engine
+        num_batches = clone.num_batches
+        batch_size = clone.num_paths // num_batches
+        time_steps = int(sim.dt_array.size)
+        if clone.use_sobol:
+            stream_kind = "sobol"
+            stream_layout = "batch-shifted-sobol/v1"
+        elif clone.use_antithetic:
+            stream_kind = "antithetic"
+            stream_layout = "seed-stride-1000-antithetic/v1"
+        else:
+            stream_kind = "pseudorandom"
+            stream_layout = "seed-stride-1000/v1"
+        cls = type(clone)
+        engine_class_path = f"{cls.__module__}.{cls.__qualname__}"
+        plan_id = (
+            f"{engine_class_path}:{clone.seed}:{num_batches}:{clone.num_paths}"
+        )
+        tasks = tuple(
+            BatchTask(
+                plan_id=plan_id,
+                batch_index=i,
+                batch_id=None if num_batches == 1 else i,
+                n_paths=batch_size,
+            )
+            for i in range(num_batches)
+        )
+        pathwise = sim.stderr_mode == "pathwise_iid"
+        # draws + path nodes + cashflow work arrays, conservative slack
+        est_task = 8 * batch_size * (2 * time_steps + 1 + 6 * sim.n_obs)
+        est_task += 1 << 20
+        est_outcome = 8 * (6 * sim.n_obs + 16)
+        if pathwise:
+            est_outcome += 8 * batch_size
+        return BatchPlan(
+            plan_id=plan_id,
+            engine_class_path=engine_class_path,
+            num_batches=num_batches,
+            paths_per_batch=batch_size,
+            total_paths=clone.num_paths,
+            seed=clone.seed,
+            stream_kind=stream_kind,
+            stream_layout=stream_layout,
+            time_steps=time_steps,
+            dimension=time_steps,
+            dtype="float64",
+            scheme=self._SCHEME,
+            stderr_mode=sim.stderr_mode,
+            reduction_order="batch_index/v1",
+            tasks=tasks,
+            est_task_peak_bytes=est_task,
+            est_outcome_bytes=est_outcome,
+            implementation_fingerprint=(
+                f"{_BATCH_ADAPTER_ID}/{_BATCH_ADAPTER_VERSION}"
+            ),
+        )
+
+    def execute_batch(self, task, state, context) -> BatchOutcome:
+        sim = state.payload
+        clone = sim.engine
+        paths = clone._simulate(
+            sim.spot0, sim.term, sim.dt_array, sim.pricing_env,
+            n_paths=task.n_paths, batch_id=task.batch_id,
+        )
+        cf = compute_dcn_cashflows(paths, sim.product, sim.ctx, sim.df)
+        # one-batch accumulator: EXACTLY the legacy per-batch arithmetic
+        acc = _LegAccumulator(n_obs=sim.n_obs)
+        acc.add(cf, sim.obs_times)
+        stats = DCNBatchStats(
+            n=acc.n,
+            fixed_sum=acc.fixed_sum,
+            ko_sum=acc.ko_sum,
+            loss_sum=acc.loss_sum,
+            fixed_by_period=acc.fixed_by_period_sum,
+            ko_by_period=acc.ko_by_period_sum,
+            coupon_paid=acc.coupon_paid_sum,
+            ko_timing=acc.ko_timing_count,
+            ki_count=acc.ki_count,
+            survive_no_ki_count=acc.survive_no_ki_count,
+            survive_ki_count=acc.survive_ki_count,
+            life_sum=acc.life_sum,
+            batch_mean=float(cf.total_pv.mean()),
+            totals=(
+                cf.total_pv if sim.stderr_mode == "pathwise_iid" else None
+            ),
+        )
+        return BatchOutcome(
+            batch_index=task.batch_index, n_paths=acc.n, payload=stats
+        )
+
+    def reduce_batches(self, outcomes, plan, state, context):
+        sim = state.payload
+        acc = _LegAccumulator(n_obs=sim.n_obs)
+        batch_means = []
+        for outcome in outcomes:
+            s = outcome.payload
+            acc.n += s.n
+            acc.fixed_sum += s.fixed_sum
+            acc.ko_sum += s.ko_sum
+            acc.loss_sum += s.loss_sum
+            acc.fixed_by_period_sum += s.fixed_by_period
+            acc.ko_by_period_sum += s.ko_by_period
+            acc.coupon_paid_sum += s.coupon_paid
+            acc.ko_timing_count += s.ko_timing
+            acc.ki_count += s.ki_count
+            acc.survive_no_ki_count += s.survive_no_ki_count
+            acc.survive_ki_count += s.survive_ki_count
+            acc.life_sum += s.life_sum
+            batch_means.append(s.batch_mean)
+            if s.totals is not None:
+                acc.totals.append(s.totals)
+        sign = sim.product.direction_sign
+        if plan.stderr_mode == "scramble_means":
+            means = np.array([float(sign * m) for m in batch_means])
+            stderr = float(means.std(ddof=1) / np.sqrt(means.size))
+        else:
+            totals = sign * np.concatenate(acc.totals)
+            stderr = float(totals.std(ddof=1) / np.sqrt(acc.n))
+        result = _finalize_dcn_result(
+            acc, sim.product, sim.engine.seed, stderr, sim.t0
+        )
+        economics = (
+            ("pv", float(result.pv)),
+            ("std_error", float(result.std_error)),
+        )
+        return result, economics
+
+    def project_operation(self, result, operation):
+        if operation is PricingOperation.PRICE:
+            return result.pv
+        return result
+
+    def execute_native(self, engine, request, normalized, context,
+                       prepared=None):
+        # Non-batch fallback (kernel prefers plan_batches when present):
+        # run the prepared clone through the legacy call path.
+        if prepared is not None and isinstance(prepared.payload, _DCNSimContext):
+            return LegacyPriceAdapter.execute_native(
+                self, prepared.payload.engine, request, normalized, context
+            )
+        return LegacyPriceAdapter.execute_native(
+            self, engine, request, normalized, context, prepared=prepared
+        )
+
+
+class DCNBatchMCAdapter(_DCNBatchMixin, LegacyPriceAdapter):
+    """Batch adapter for the plain GBM ``DCNMCEngine``.
+
+    NOT inherited by the Heston DCN subclasses: the registry pins those
+    back to the plain legacy adapter (their paired normal+uniform draw
+    pipeline is not yet repository-routed — Phase 3)."""
+
     def __init__(self):
         super().__init__(call_shape="product_env")
 
     def prepare(self, engine, request, context) -> PreparedState:
+        clone = type(engine)(
+            num_paths=engine.num_paths, seed=engine.seed,
+            use_sobol=engine.use_sobol, use_antithetic=engine.use_antithetic,
+            num_batches=engine.num_batches,
+            num_workers=1,  # framework owns threading; nested execution off
+        )
+        sim = self._sim_context(clone, request, context)
+        provider = self._attach_draw_provider(clone, context)
+        handles = (provider,) if provider is not None else ()
+        return PreparedState(
+            payload=sim, descriptors=(), fingerprint=None,
+            byte_estimate=None, handles=handles,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: cached Dupire surface preparation (shared by LV MC + PDE)
+# ---------------------------------------------------------------------------
+
+class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
+    def __init__(self):
+        super().__init__(call_shape="product_env")
+
+    def _prepare_surface(self, engine, request, context) -> PreparedState:
         if engine._prebuilt is not None:
             return PreparedState(
                 payload=engine._prebuilt, descriptors=(),
@@ -110,6 +493,11 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
             fingerprint=fp, byte_estimate=None, handles=(handle,),
         )
 
+    # Phase-1 behavior (used by the PDE adapter): prepared payload IS the
+    # surface; execution clones the engine around it.
+    def prepare(self, engine, request, context) -> PreparedState:
+        return self._prepare_surface(engine, request, context)
+
     def execute_native(self, engine, request, normalized, context, prepared=None):
         if prepared is None:
             return super().execute_native(engine, request, normalized, context)
@@ -117,13 +505,35 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
         return super().execute_native(clone, request, normalized, context)
 
 
-class DCNLocalVolMCAdapter(_DCNLocalVolAdapterBase):
+class DCNLocalVolMCAdapter(_DCNBatchMixin, _DCNLocalVolAdapterBase):
+    """Batch-capable LV DCN MC adapter: cached Dupire surface (Phase 1)
+    composed with the fixed-batch capability (Phase 2)."""
+
+    _SCHEME = "lv-euler/v1"
+
+    def prepare(self, engine, request, context) -> PreparedState:
+        surface_state = self._prepare_surface(engine, request, context)
+        clone = self._clone_with_surface(engine, surface_state.payload)
+        sim = self._sim_context(clone, request, context)
+        provider = self._attach_draw_provider(clone, context)
+        handles = surface_state.handles
+        if provider is not None:
+            handles = handles + (provider,)
+        return PreparedState(
+            payload=sim,
+            descriptors=surface_state.descriptors,
+            fingerprint=surface_state.fingerprint,
+            byte_estimate=surface_state.byte_estimate,
+            handles=handles,
+        )
+
     def _clone_with_surface(self, engine, surface):
         return type(engine)(
             local_vol_surface=surface,
             num_paths=engine.num_paths, seed=engine.seed,
             use_sobol=engine.use_sobol, use_antithetic=engine.use_antithetic,
-            num_batches=engine.num_batches, num_workers=engine.num_workers,
+            num_batches=engine.num_batches,
+            num_workers=1,  # framework owns threading; nested execution off
         )
 
 
