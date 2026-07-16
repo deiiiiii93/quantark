@@ -308,6 +308,30 @@ class _DCNBatchMixin:
         clone._draw_provider = provider
         return provider
 
+    # -- plan-metadata hooks (Phase 3): the Heston adapters override these;
+    # the defaults preserve the Phase-2 GBM/LV plan fields verbatim -------
+    def _plan_scheme(self, sim) -> str:
+        return self._SCHEME
+
+    def _plan_dimension(self, sim, time_steps) -> int:
+        return time_steps
+
+    def _plan_stream_layout(self, clone):
+        if clone.use_sobol:
+            return "sobol", "batch-shifted-sobol/v1"
+        if clone.use_antithetic:
+            return "antithetic", "seed-stride-1000-antithetic/v1"
+        return "pseudorandom", "seed-stride-1000/v1"
+
+    def _plan_est_bytes(self, sim, clone, batch_size, time_steps):
+        # draws + path nodes + cashflow work arrays, conservative slack
+        est_task = 8 * batch_size * (2 * time_steps + 1 + 6 * sim.n_obs)
+        est_task += 1 << 20
+        est_outcome = 8 * (6 * sim.n_obs + 16)
+        if sim.stderr_mode == "pathwise_iid":
+            est_outcome += 8 * batch_size
+        return est_task, est_outcome
+
     # -- batch capability ----------------------------------------------------
     def plan_batches(self, engine, request, state, context) -> BatchPlan:
         sim = state.payload
@@ -315,15 +339,7 @@ class _DCNBatchMixin:
         num_batches = clone.num_batches
         batch_size = clone.num_paths // num_batches
         time_steps = int(sim.dt_array.size)
-        if clone.use_sobol:
-            stream_kind = "sobol"
-            stream_layout = "batch-shifted-sobol/v1"
-        elif clone.use_antithetic:
-            stream_kind = "antithetic"
-            stream_layout = "seed-stride-1000-antithetic/v1"
-        else:
-            stream_kind = "pseudorandom"
-            stream_layout = "seed-stride-1000/v1"
+        stream_kind, stream_layout = self._plan_stream_layout(clone)
         cls = type(clone)
         engine_class_path = f"{cls.__module__}.{cls.__qualname__}"
         plan_id = (
@@ -338,13 +354,9 @@ class _DCNBatchMixin:
             )
             for i in range(num_batches)
         )
-        pathwise = sim.stderr_mode == "pathwise_iid"
-        # draws + path nodes + cashflow work arrays, conservative slack
-        est_task = 8 * batch_size * (2 * time_steps + 1 + 6 * sim.n_obs)
-        est_task += 1 << 20
-        est_outcome = 8 * (6 * sim.n_obs + 16)
-        if pathwise:
-            est_outcome += 8 * batch_size
+        est_task, est_outcome = self._plan_est_bytes(
+            sim, clone, batch_size, time_steps
+        )
         return BatchPlan(
             plan_id=plan_id,
             engine_class_path=engine_class_path,
@@ -355,9 +367,9 @@ class _DCNBatchMixin:
             stream_kind=stream_kind,
             stream_layout=stream_layout,
             time_steps=time_steps,
-            dimension=time_steps,
+            dimension=self._plan_dimension(sim, time_steps),
             dtype="float64",
-            scheme=self._SCHEME,
+            scheme=self._plan_scheme(sim),
             stderr_mode=sim.stderr_mode,
             reduction_order="batch_index/v1",
             tasks=tasks,

@@ -144,6 +144,12 @@ class HestonDCNMCEngine(DCNMCEngine):
     ``[z_var | z_ind | u_var]``. Euler ignores the final uniform block.
     """
 
+    # Session draw-provider hook for the 3-stream Sobol uniform block,
+    # mirroring ``DCNMCEngine._draw_provider``; a provider MUST return a
+    # WRITABLE private (n_paths, 3*n_steps) block (this path clips and
+    # ndtri-transforms in place).
+    _uniform_provider = None
+
     def __init__(
         self,
         model_params: HestonParams,
@@ -185,13 +191,16 @@ class HestonDCNMCEngine(DCNMCEngine):
         if self.use_sobol and three_streams:
             from scipy.special import ndtri
 
-            # writable=True: this path transforms the block in place, so it
-            # needs a private copy rather than the shared read-only cache
-            # entry (the Sobol generation itself still caches).
-            block = qmc_uniforms(
-                self.seed, n_paths, 3 * n_steps, batch_id=batch_id,
-                writable=True,
-            )
+            if self._uniform_provider is not None:
+                block = self._uniform_provider(3 * n_steps, n_paths, batch_id)
+            else:
+                # writable=True: this path transforms the block in place, so
+                # it needs a private copy rather than the shared read-only
+                # cache entry (the Sobol generation itself still caches).
+                block = qmc_uniforms(
+                    self.seed, n_paths, 3 * n_steps, batch_id=batch_id,
+                    writable=True,
+                )
             np.clip(block, 1e-12, 1.0 - 1e-12, out=block)
             # In-place inverse-CDF transform keeps peak batch memory bounded to
             # one 3-stream block plus simulation state and contractual nodes.
