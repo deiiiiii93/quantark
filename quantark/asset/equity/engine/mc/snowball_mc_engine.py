@@ -23,7 +23,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats, KOResetEventStats
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
-from quantark.asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
+from quantark.montecarlo.qmc_rqmc_driver import RQMCRunSpec, run_rqmc
 from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
     SobolNormalGenerator,
@@ -256,14 +256,48 @@ class SnowballMCEngine(BaseEngine):
             else:
                 result = self._price_mc_or_qmc(product, pricing_env, S, T, r, q, sigma)
 
-        self._last_result = result
+        return self._complete_price(product, result)
 
+    def _complete_price(self, product, result) -> float:
+        """price() postamble shared with the session adaptive path."""
+        self._last_result = result
         # Negative PV is valid for some structures (e.g., principal-excluded notes)
         # where the payoff is effectively "coupon minus embedded option loss".
         if result.price < 0 and product.payoff_config.include_principal:
             raise PricingError(f"Negative price computed: {result.price}")
-
         return result.price
+
+    def build_rqmc_session_spec(self, product, pricing_env):
+        """Execution-framework seam: the price() preamble plus the RQMC run
+        description, or None when a direct call would not take the adaptive
+        RQMC route (non-RQMC method, near-expiry shortcut) - the session
+        then falls back to the native legacy call."""
+        if self.method != MonteCarloMethod.RANDOMIZED_QUASI:
+            return None
+        if not isinstance(product, (SnowballOption, KnockOutResetSnowballOption)):
+            raise PricingError(
+                "SnowballMCEngine only supports SnowballOption or "
+                f"KnockOutResetSnowballOption, got {type(product).__name__}"
+            )
+        S = pricing_env.spot
+        T = (
+            product.get_max_maturity_time(pricing_env)
+            if isinstance(product, KnockOutResetSnowballOption)
+            else product.get_maturity(pricing_env)
+        )
+        r = pricing_env.get_rate(T)
+        q = pricing_env.get_div_yield(T)
+        sigma = pricing_env.get_vol(product.strike, T)
+        self._validate_inputs(S, T, r, q, sigma, product)
+        self._term_ctx = (pricing_env, product.strike)
+        self._df = make_df_fn(pricing_env)
+        if T < 1e-10:
+            return None
+        if isinstance(product, KnockOutResetSnowballOption):
+            return self._ko_reset_rqmc_spec(
+                product, pricing_env, S, T, r, q, sigma
+            )
+        return self._rqmc_spec(product, pricing_env, S, T, r, q, sigma)
 
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -2088,7 +2122,7 @@ class SnowballMCEngine(BaseEngine):
             batches_used=batches_used,
         )
 
-    def _price_rqmc(
+    def _rqmc_spec(
         self,
         product: SnowballOption,
         pricing_env: PricingEnvironment,
@@ -2097,9 +2131,12 @@ class SnowballMCEngine(BaseEngine):
         r: float,
         q: float,
         sigma: float,
-    ) -> SnowballMCResult:
-        """
-        Price using Randomized QMC with adaptive batching.
+    ) -> RQMCRunSpec:
+        """Build the RQMC run description for a SnowballOption.
+
+        Shared by the direct path (_price_rqmc) and the execution-framework
+        session path (build_rqmc_session_spec): ONE construction of the
+        grid, pricer, generator, controls, and result assembly.
         """
         # Build time grid
         all_times, dt_array, ko_indices, ki_indices = self._build_time_grid(
@@ -2151,42 +2188,48 @@ class SnowballMCEngine(BaseEngine):
             S, r, q, sigma, T, dt_array, num_paths=per_batch_paths
         )
 
-        result = run_rqmc(
+        def finalize(result):
+            # Run one more batch to get statistics
+            paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
+            _, _, stats = self._compute_payoffs(
+                product,
+                pricing_env,
+                paths,
+                all_times,
+                ko_indices,
+                ki_indices,
+                r,
+                T,
+                sigma,
+                rng_seed=int(self.params.seed) + 1337,
+            )
+
+            return SnowballMCResult(
+                price=result.price,
+                std_error=result.std_error,
+                num_paths=result.total_paths,
+                ko_probability=stats["ko_probability"],
+                v0_probability=stats["v0_probability"],
+                v1_probability=stats["v1_probability"],
+                batches_used=result.batches_used,
+            )
+
+        return RQMCRunSpec(
             pricer_fn=pricer_fn,
             path_generator=generator,
             max_batches=max_batches,
-            target_std=target_std,
             min_batches=min_batches,
+            target_std=target_std,
+            paths_per_batch=per_batch_paths,
+            time_steps=int(dt_array.size),
+            scheme=f"{type(self).__qualname__}/rqmc-native/v1",
+            finalize=finalize,
+            product=product,
         )
 
-        # Run one more batch to get statistics
-        paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
-        _, _, stats = self._compute_payoffs(
-            product,
-            pricing_env,
-            paths,
-            all_times,
-            ko_indices,
-            ki_indices,
-            r,
-            T,
-            sigma,
-            rng_seed=int(self.params.seed) + 1337,
-        )
-
-        return SnowballMCResult(
-            price=result.price,
-            std_error=result.std_error,
-            num_paths=result.total_paths,
-            ko_probability=stats["ko_probability"],
-            v0_probability=stats["v0_probability"],
-            v1_probability=stats["v1_probability"],
-            batches_used=result.batches_used,
-        )
-
-    def _price_ko_reset_rqmc(
+    def _price_rqmc(
         self,
-        product: KnockOutResetSnowballOption,
+        product: SnowballOption,
         pricing_env: PricingEnvironment,
         S: float,
         T: float,
@@ -2195,8 +2238,29 @@ class SnowballMCEngine(BaseEngine):
         sigma: float,
     ) -> SnowballMCResult:
         """
-        Price KO-reset snowball using Randomized QMC with adaptive batching.
+        Price using Randomized QMC with adaptive batching.
         """
+        spec = self._rqmc_spec(product, pricing_env, S, T, r, q, sigma)
+        return spec.finalize(run_rqmc(
+            pricer_fn=spec.pricer_fn,
+            path_generator=spec.path_generator,
+            max_batches=spec.max_batches,
+            target_std=spec.target_std,
+            min_batches=spec.min_batches,
+        ))
+
+    def _ko_reset_rqmc_spec(
+        self,
+        product: KnockOutResetSnowballOption,
+        pricing_env: PricingEnvironment,
+        S: float,
+        T: float,
+        r: float,
+        q: float,
+        sigma: float,
+    ) -> RQMCRunSpec:
+        """Build the RQMC run description for a KO-reset snowball (shared
+        by the direct and session paths, mirroring _rqmc_spec)."""
         grid = self._build_time_grid_ko_reset(product, pricing_env, T)
 
         def pricer_fn(paths, aux):
@@ -2240,35 +2304,63 @@ class SnowballMCEngine(BaseEngine):
             S, r, q, sigma, T, grid["dt_array"], num_paths=per_batch_paths
         )
 
-        result = run_rqmc(
+        def finalize(result):
+            paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
+            _, _, stats, _ = self._compute_payoffs_ko_reset(
+                product,
+                pricing_env,
+                paths,
+                grid,
+                r,
+                T,
+                sigma,
+                rng_seed=int(self.params.seed) + 1337,
+            )
+
+            return SnowballMCResult(
+                price=result.price,
+                std_error=result.std_error,
+                num_paths=result.total_paths,
+                ko_probability=stats.get("ko_probability", 0.0),
+                v0_probability=stats.get("v0_probability", 0.0),
+                v1_probability=stats.get("v1_probability", 0.0),
+                batches_used=result.batches_used,
+            )
+
+        return RQMCRunSpec(
             pricer_fn=pricer_fn,
             path_generator=generator,
             max_batches=max_batches,
-            target_std=target_std,
             min_batches=min_batches,
+            target_std=target_std,
+            paths_per_batch=per_batch_paths,
+            time_steps=int(grid["dt_array"].size),
+            scheme=f"{type(self).__qualname__}/rqmc-native-ko-reset/v1",
+            finalize=finalize,
+            product=product,
         )
 
-        paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
-        _, _, stats, _ = self._compute_payoffs_ko_reset(
-            product,
-            pricing_env,
-            paths,
-            grid,
-            r,
-            T,
-            sigma,
-            rng_seed=int(self.params.seed) + 1337,
-        )
-
-        return SnowballMCResult(
-            price=result.price,
-            std_error=result.std_error,
-            num_paths=result.total_paths,
-            ko_probability=stats.get("ko_probability", 0.0),
-            v0_probability=stats.get("v0_probability", 0.0),
-            v1_probability=stats.get("v1_probability", 0.0),
-            batches_used=result.batches_used,
-        )
+    def _price_ko_reset_rqmc(
+        self,
+        product: KnockOutResetSnowballOption,
+        pricing_env: PricingEnvironment,
+        S: float,
+        T: float,
+        r: float,
+        q: float,
+        sigma: float,
+    ) -> SnowballMCResult:
+        """
+        Price KO-reset snowball using Randomized QMC with adaptive batching.
+        """
+        spec = self._ko_reset_rqmc_spec(product, pricing_env, S, T, r, q, sigma)
+        return spec.finalize(run_rqmc(
+            pricer_fn=spec.pricer_fn,
+            path_generator=spec.path_generator,
+            max_batches=spec.max_batches,
+            target_std=spec.target_std,
+            min_batches=spec.min_batches,
+        ))
 
     def get_last_result(self) -> Optional[SnowballMCResult]:
         """
