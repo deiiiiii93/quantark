@@ -130,8 +130,8 @@ def test_batch_capable_rows_resolve_to_batch_adapters():
 
 
 def test_heston_dcn_family_resolves_to_batch_adapters():
-    # Phase 3: Heston/QE get exact-registered batch adapters; CoupledCoarse
-    # keeps the legacy adapter until its pair-aware adapter lands.
+    # Phase 3: the whole Heston DCN family gets exact-registered batch
+    # adapters (CoupledCoarse via its pair-aware adapter).
     from quantark.asset.equity.engine.mc import (
         CoupledCoarseHestonDCNMCEngine,
         HestonDCNMCEngine,
@@ -140,9 +140,8 @@ def test_heston_dcn_family_resolves_to_batch_adapters():
 
     registry = build_default_registry()
     registry.freeze()
-    for cls in (HestonDCNMCEngine, QEDCNMCEngine):
+    for cls in (HestonDCNMCEngine, QEDCNMCEngine,
+                CoupledCoarseHestonDCNMCEngine):
         adapter = registry.resolve_class(cls)
         assert hasattr(adapter, "plan_batches"), cls.__name__
         assert adapter.capabilities().adapter_id == "dcn-batch-mc"
-    coupled = registry.resolve_class(CoupledCoarseHestonDCNMCEngine)
-    assert coupled.capabilities().adapter_id == "legacy-price"

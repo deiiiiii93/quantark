@@ -139,12 +139,10 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.QEDCNMCEngine",
         _dcn_qe_batch_adapter, exact=True,
     )
-    # CoupledCoarse derives its draws from a paired fine engine; it keeps
-    # the plain legacy adapter until its pair-aware adapter lands.
     registry.register(
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines."
         "CoupledCoarseHestonDCNMCEngine",
-        _legacy_product_env_adapter,
+        _dcn_coupled_batch_adapter, exact=True,
     )
     # Phase 3: adaptive RQMC compatibility plans. NON-exact by design: the
     # adapter drives the live engine through its own polymorphic hooks (no
@@ -185,12 +183,6 @@ def _dcn_batch_mc_adapter():
     return DCNBatchMCAdapter()
 
 
-def _legacy_product_env_adapter():
-    from quantark.execution.legacy_adapter import LegacyPriceAdapter
-
-    return LegacyPriceAdapter(call_shape="product_env")
-
-
 def _dcn_heston_batch_adapter():
     from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
         DCNHestonBatchMCAdapter,
@@ -205,6 +197,14 @@ def _dcn_qe_batch_adapter():
     )
 
     return DCNQEBatchMCAdapter()
+
+
+def _dcn_coupled_batch_adapter():
+    from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
+        DCNCoupledCoarseHestonBatchMCAdapter,
+    )
+
+    return DCNCoupledCoarseHestonBatchMCAdapter()
 
 
 def _autocallable_adaptive_adapter():

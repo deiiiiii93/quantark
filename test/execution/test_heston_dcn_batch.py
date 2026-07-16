@@ -259,3 +259,63 @@ def test_heston_plan_metadata():
     assert plan.scheme == "heston-quadexp-sub2/v1"
     assert plan.dimension == 3 * time_steps * 2
     assert plan.stream_layout == "batch-shifted-sobol-3stream/v1"
+
+
+# ---------------------------------------------------------------------------
+# Task 11: CoupledCoarse Heston DCN batch adapter (pair-aware clone)
+# ---------------------------------------------------------------------------
+
+def _coupled_pair(scheme, **kwargs):
+    from quantark.asset.equity.engine.mc.dcn_vol_mc_engines import (
+        coupled_heston_ladder_pair,
+    )
+
+    kwargs.setdefault("num_paths", 512)
+    kwargs.setdefault("seed", 7)
+    kwargs.setdefault("use_sobol", True)
+    kwargs.setdefault("num_batches", 2)
+    return coupled_heston_ladder_pair(
+        _heston_params(), 1, HestonMCScheme[scheme], **kwargs
+    )
+
+
+@pytest.mark.parametrize("scheme", ["FULL_TRUNCATION_EULER", "QUADEXP_M"])
+def test_coupled_coarse_session_bitwise_vs_direct(scheme):
+    from execution.test_dcn_batch_adapter import dispatch, make_batch_context
+
+    product, env = _dcn_product_env()
+    coarse, _ = _coupled_pair(scheme)
+    direct = coarse.price_detailed(product, env)
+
+    coarse2, _ = _coupled_pair(scheme)
+    outcome = dispatch(coarse2, product, env, make_batch_context())
+    _assert_results_bitwise_equal(outcome.value, direct)
+    assert outcome.manifest.adapter_id == "dcn-batch-mc"
+
+
+def test_coupled_pair_ladder_difference_preserved():
+    from execution.test_dcn_batch_adapter import dispatch, make_batch_context
+
+    product, env = _dcn_product_env()
+    coarse, fine = _coupled_pair("QUADEXP_M")
+    direct_diff = (
+        coarse.price_detailed(product, env).pv
+        - fine.price_detailed(product, env).pv
+    )
+
+    coarse2, fine2 = _coupled_pair("QUADEXP_M")
+    ctx = make_batch_context()
+    session_coarse = dispatch(coarse2, product, env, ctx).value.pv
+    session_fine = dispatch(fine2, product, env, ctx).value.pv
+    assert (session_coarse - session_fine) == direct_diff
+
+
+def test_coupled_coarse_resolves_to_batch_adapter():
+    from quantark.asset.equity.engine.mc import CoupledCoarseHestonDCNMCEngine
+    from quantark.execution.registry import build_default_registry
+
+    registry = build_default_registry()
+    registry.freeze()
+    adapter = registry.resolve_class(CoupledCoarseHestonDCNMCEngine)
+    assert hasattr(adapter, "plan_batches")
+    assert adapter.capabilities().adapter_id == "dcn-batch-mc"
