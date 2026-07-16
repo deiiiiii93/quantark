@@ -206,3 +206,29 @@ def test_single_task_exceeding_budget_fails_before_execution():
             lease_manager=mgr,
         ))
     assert executed == []
+
+
+def test_serial_backend_enforces_byte_admission():
+    # Code-gate finding 5: serial must use the same admission primitive.
+    mgr = ResourceLeaseManager(ResourceBudget(total_memory_bytes=50))
+    plan = FakePlan(2, est_task_peak_bytes=100)
+    executed = []
+    with pytest.raises(ResourceBudgetExceeded):
+        list(serial.iter_ordered(
+            plan, lambda t: executed.append(t), lease_manager=mgr
+        ))
+    assert executed == []
+    assert mgr.pool_bytes("task_scratch") == 0
+
+
+def test_serial_backend_releases_outcome_lease_after_consumption():
+    mgr = ResourceLeaseManager(ResourceBudget(total_memory_bytes=1000))
+    plan = FakePlan(3, est_task_peak_bytes=100, est_outcome_bytes=40)
+    seen = []
+    for index, _ in serial.iter_ordered(
+        plan, lambda t: t.batch_index, lease_manager=mgr
+    ):
+        seen.append((index, mgr.pool_bytes("task_scratch")))
+    assert [i for i, _ in seen] == [0, 1, 2]
+    assert all(b == 40 for _, b in seen)  # outcome charged while consumed
+    assert mgr.pool_bytes("task_scratch") == 0

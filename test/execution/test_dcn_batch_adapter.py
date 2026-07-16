@@ -134,10 +134,10 @@ def make_batch_context(workers=1, backend="serial", **budget_kw):
     )
 
     budget_kw.setdefault("max_in_flight", 8)  # batch tasks hold per-task slots
-    budget = ResourceBudget(
-        max_threads=8, artifact_cache_bytes=64 * 2**20,
-        draw_cache_bytes=64 * 2**20, **budget_kw,
-    )
+    budget_kw.setdefault("max_threads", 8)
+    budget_kw.setdefault("artifact_cache_bytes", 64 * 2**20)
+    budget_kw.setdefault("draw_cache_bytes", 64 * 2**20)
+    budget = ResourceBudget(**budget_kw)
     leases = ResourceLeaseManager(budget)
     context = default_context()
     return dataclasses.replace(
@@ -228,3 +228,111 @@ def test_draws_pinned_bytes_released_and_reused_across_dispatches():
     stats = ctx.draw_repository.stats()
     assert stats["misses"] == 4
     assert stats["hits"] == 4
+
+
+# ---------------------------------------------------------------------------
+# Code-gate regressions (Codex findings, 2026-07-16)
+# ---------------------------------------------------------------------------
+
+def test_unknown_dcn_subclass_falls_back_to_legacy_and_stays_exact():
+    # Finding 1: exact-match registration — a stateful subclass must NOT be
+    # cloned lossily by the batch adapter; it resolves to the legacy
+    # adapter and session == direct.
+    from quantark.asset.equity.engine.mc import DCNMCEngine
+    from quantark.execution import PricingSession
+    from quantark.execution.registry import build_default_registry
+
+    class ScaledDCN(DCNMCEngine):
+        def __init__(self, *, path_scale, **kwargs):
+            super().__init__(**kwargs)
+            self.path_scale = path_scale
+
+        def _simulate(self, *args, **kwargs):
+            return self.path_scale * super()._simulate(*args, **kwargs)
+
+    registry = build_default_registry()
+    registry.freeze()
+    adapter = registry.resolve_class(ScaledDCN)
+    assert not hasattr(adapter, "plan_batches")
+    assert adapter.capabilities().adapter_id == "legacy-price"
+
+    product, env = make_dcn_product_env()
+    engine = ScaledDCN(path_scale=1.02, num_paths=512, num_batches=2, seed=7)
+    direct = engine.price(product, env)
+    with PricingSession() as session:
+        assert session.price(engine, product, env) == direct
+
+
+def test_env_field_replacement_during_execution_fails_closed():
+    # Finding 2: replacing a market-data field between preparation and
+    # reduction must raise, never return a mixed-market result.
+    from quantark.execution.errors import DeterminismViolation
+    from quantark.param import FlatRateCurve
+
+    product, env = make_dcn_product_env()
+    engine = make_engine(num_paths=512, num_batches=2)
+    adapter = make_adapter()
+    request = PricingRequest(product=product, pricing_env=env)
+    context = default_context()
+    state = adapter.prepare(engine, request, context)
+    plan = adapter.plan_batches(engine, request, state, context)
+    outcomes = [
+        adapter.execute_batch(t, state, context) for t in plan.tasks
+    ]
+    object.__setattr__(env, "rate_curve", FlatRateCurve(rate=0.5))
+    with pytest.raises(DeterminismViolation):
+        adapter.reduce_batches(iter(outcomes), plan, state, context)
+
+
+def test_df_is_bound_to_captured_curve_not_live_env():
+    # Finding 2: path drift AND discounting both come from the captured
+    # curve, so a replacement cannot silently split them.
+    from quantark.param import FlatRateCurve
+
+    product, env = make_dcn_product_env()
+    engine = make_engine(num_paths=512, num_batches=2)
+    adapter = make_adapter()
+    request = PricingRequest(product=product, pricing_env=env)
+    context = default_context()
+    state = adapter.prepare(engine, request, context)
+    before = state.payload.df(1.0)
+    original = env.rate_curve
+    object.__setattr__(env, "rate_curve", FlatRateCurve(rate=0.5))
+    try:
+        assert state.payload.df(1.0) == before
+    finally:
+        object.__setattr__(env, "rate_curve", original)
+
+
+def test_draw_handles_scoped_per_batch_not_per_plan():
+    # Finding 4: with a zero draw budget the bypassed blocks must be
+    # released after each batch, never accumulated across the plan.
+    product, env = make_dcn_product_env()
+    engine = make_engine(num_paths=1024, num_batches=4, use_sobol=True)
+    adapter = make_adapter()
+    request = PricingRequest(product=product, pricing_env=env)
+    ctx = make_batch_context(draw_cache_bytes=0)
+    state = adapter.prepare(engine, request, ctx)
+    provider = state.payload.draw_provider
+    assert provider is not None
+    plan = adapter.plan_batches(engine, request, state, ctx)
+    for task in plan.tasks:
+        adapter.execute_batch(task, state, ctx)
+        assert provider.retained_handle_count() == 0
+    for handle in state.handles:
+        handle.close()
+
+
+def test_env_resolved_limits_of_one_are_preserved():
+    # Finding 3: an operator's env-resolved limit of 1 must never be
+    # silently upgraded by the owned auto-budget.
+    from quantark.execution import PricingSession
+
+    ctx = default_context(environ={
+        "QUANTARK_EXEC_MAX_THREADS": "1",
+        "QUANTARK_EXEC_MAX_IN_FLIGHT": "1",
+    })
+    with PricingSession(ctx) as session:
+        budget = session.context.resource_budget
+        assert budget.max_threads == 1
+        assert budget.max_in_flight == 1

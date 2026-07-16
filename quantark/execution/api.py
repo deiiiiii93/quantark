@@ -60,20 +60,24 @@ class PricingSession:
             from quantark.execution.leases import ResourceLeaseManager
 
             budget = context.resource_budget
-            # Safe auto budget (spec section 11.1), applied ONLY to the
-            # session-owned default: never upgrade env-resolved or explicit
-            # budgets. Batch tasks hold per-task slots (Phase 2), so the
-            # Phase-1 default max_in_flight=1 would serialize every
-            # threaded plan.
+            # Safe auto budget (spec section 11.1), applied ONLY to
+            # DEFAULT-sourced fields: an operator's env-resolved or
+            # explicit limit — including the valid value 1 — is never
+            # upgraded (code-gate finding 2026-07-16). The source map is
+            # the context's config_snapshot from budget resolution. Batch
+            # tasks hold per-task slots (Phase 2), so the resolution
+            # default max_in_flight=1 would serialize every threaded plan.
+            sources = dict(context.config_snapshot)
             upgrades = {}
             if budget.artifact_cache_bytes is None:
                 upgrades["artifact_cache_bytes"] = 512 * 2**20
             if budget.draw_cache_bytes is None:
                 upgrades["draw_cache_bytes"] = 512 * 2**20
             cpus = os.cpu_count() or 1
-            if budget.max_threads == 1:
+            if budget.max_threads == 1 and sources.get("max_threads") == "default":
                 upgrades["max_threads"] = cpus
-            if budget.max_in_flight == 1:
+            if (budget.max_in_flight == 1
+                    and sources.get("max_in_flight") == "default"):
                 upgrades["max_in_flight"] = cpus
             if upgrades:
                 budget = dataclasses.replace(budget, **upgrades)

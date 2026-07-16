@@ -23,7 +23,13 @@ class AdapterRegistry:
         self._factories: dict = {}
         self._frozen = False
 
-    def register(self, engine_class_path: str, adapter_factory) -> None:
+    def register(self, engine_class_path: str, adapter_factory,
+                 exact: bool = False) -> None:
+        """``exact=True`` matches ONLY the class itself, never subclasses
+        via MRO (code-gate finding 2026-07-16: adapters that reconstruct an
+        engine from a fixed constructor signature would silently discard
+        subclass state; unknown subclasses must fall through to a base
+        registration instead)."""
         if self._frozen:
             raise ValidationError(
                 "AdapterRegistry is frozen; register adapters before "
@@ -33,7 +39,7 @@ class AdapterRegistry:
             raise ValidationError(
                 f"duplicate adapter registration for {engine_class_path}"
             )
-        self._factories[engine_class_path] = adapter_factory
+        self._factories[engine_class_path] = (adapter_factory, exact)
 
     def freeze(self) -> None:
         self._frozen = True
@@ -47,8 +53,11 @@ class AdapterRegistry:
     def resolve_class(self, engine_class):
         for cls in engine_class.__mro__:
             key = f"{cls.__module__}.{cls.__qualname__}"
-            factory = self._factories.get(key)
-            if factory is not None:
+            entry = self._factories.get(key)
+            if entry is not None:
+                factory, exact = entry
+                if exact and cls is not engine_class:
+                    continue  # exact registrations never match subclasses
                 return factory()
         raise CapabilityError(
             f"no execution adapter registered for engine type "
@@ -97,18 +106,26 @@ def build_default_registry() -> AdapterRegistry:
         )
     # Specialized exact-class adapters (lazy factory import at resolve time —
     # this module keeps zero static asset-code dependencies).
+    # exact=True on both (code-gate finding 2026-07-16): these adapters
+    # clone the engine around a cached surface with a fixed constructor
+    # signature; subclasses (e.g. the frozen quant-mini-project
+    # SurfaceAwareLVDCNEngine) keep the plain legacy adapter and their
+    # direct-path hooks (spec section 17.1).
     registry.register(
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.LocalVolDCNMCEngine",
-        _dcn_mc_adapter,
+        _dcn_mc_adapter, exact=True,
     )
     registry.register(
         "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
-        _dcn_pde_adapter,
+        _dcn_pde_adapter, exact=True,
     )
     # Phase 2: fixed-batch capability for the plain GBM DCN MC engine.
+    # exact=True: the batch adapters reconstruct engines from the exact
+    # constructor signature, so unknown subclasses (with extra state) must
+    # fall through the MRO to the legacy adapter, never be cloned lossily.
     registry.register(
         "quantark.asset.equity.engine.mc.dcn_mc_engine.DCNMCEngine",
-        _dcn_batch_mc_adapter,
+        _dcn_batch_mc_adapter, exact=True,
     )
     # MRO containment: the Heston DCN family inherits DCNMCEngine but its
     # paired normal+uniform draw pipeline is not repository-routed yet

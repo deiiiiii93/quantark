@@ -51,7 +51,6 @@ from quantark.execution.contracts import (
 )
 from quantark.execution.errors import CapabilityError
 from quantark.execution.legacy_adapter import LegacyPriceAdapter
-from quantark.priceenv.term_sampling import make_df_fn
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.localvol import build_dupire_local_vol
 
@@ -124,7 +123,13 @@ class DCNBatchStats:
 class _DCNSimContext:
     """Immutable request-scoped simulation context (spec section 6.3):
     everything a batch task needs, hoisted once out of the batch loop —
-    the same work the direct path performs once per ``price_detailed``."""
+    the same work the direct path performs once per ``price_detailed``.
+
+    ``captured`` binds the market-data fields consumed during execution
+    (code-gate finding 2026-07-16): the discount function is built from the
+    CAPTURED rate curve, and ``reduce_batches`` verifies the environment
+    fields and product fingerprint after execution, so a mid-run field
+    replacement fails closed instead of silently mixing market states."""
 
     engine: object          # adapter-owned clone; num_workers=1 (nested off)
     product: object
@@ -138,33 +143,75 @@ class _DCNSimContext:
     n_obs: int
     stderr_mode: str
     t0: float
+    captured: tuple = ()
+    product_fp: str | None = None
+    draw_provider: object | None = None
+
+
+def _make_captured_df(rate_curve):
+    """Vectorized discount factors bound to the CAPTURED rate curve (same
+    values as ``make_df_fn(env)``, which delegates to
+    ``env.rate_curve.get_discount_factor``, but immune to a mid-run
+    ``env.rate_curve`` replacement)."""
+
+    def f(t):
+        arr = np.asarray(t, dtype=float)
+        if arr.ndim == 0:
+            return float(rate_curve.get_discount_factor(float(arr)))
+        return np.array(
+            [rate_curve.get_discount_factor(float(x)) for x in arr.ravel()]
+        ).reshape(arr.shape)
+
+    return f
 
 
 class _PinnedDrawProvider:
-    """Thread-safe draw fetcher; pins masters until the kernel closes it.
+    """Thread-safe draw fetcher with PER-BATCH handle scoping.
 
-    Rides in ``PreparedState.handles`` so the kernel's existing ``finally``
-    releases every pinned Sobol block after execution (spec section 8.3:
-    draw access uses the same lease-backed pinning contract as prepared
-    artifacts)."""
+    ``execute_batch`` brackets each simulation with ``begin_batch`` /
+    ``end_batch`` so a batch's blocks are unpinned (and, for cache-bypassed
+    blocks, released to the garbage collector) as soon as the simulation
+    has consumed them — retention never grows with the number of batches
+    (code-gate finding 2026-07-16). Scoping is thread-local, so concurrent
+    batch tasks never close each other's handles. The provider also rides
+    in ``PreparedState.handles`` as a backstop: the kernel's ``finally``
+    closes anything fetched outside a batch bracket."""
 
     def __init__(self, repository, seed):
         self._repo = repository
         self._seed = seed
         self._lock = threading.Lock()
-        self._handles = []
+        self._local = threading.local()
+        self._unscoped = []
 
     def __call__(self, n_dims, n_paths, batch_id):
         handle = self._repo.normals_handle(
             seed=self._seed, n_paths=n_paths, dim=n_dims, batch_id=batch_id
         )
-        with self._lock:
-            self._handles.append(handle)
+        scoped = getattr(self._local, "handles", None)
+        if scoped is not None:
+            scoped.append(handle)
+        else:
+            with self._lock:
+                self._unscoped.append(handle)
         return handle.value
+
+    def begin_batch(self):
+        self._local.handles = []
+
+    def end_batch(self):
+        handles = getattr(self._local, "handles", None) or ()
+        self._local.handles = None
+        for handle in handles:
+            handle.close()
+
+    def retained_handle_count(self) -> int:
+        with self._lock:
+            return len(self._unscoped)
 
     def close(self):
         with self._lock:
-            handles, self._handles = self._handles, []
+            handles, self._unscoped = self._unscoped, []
         for handle in handles:
             handle.close()
 
@@ -207,10 +254,16 @@ class _DCNBatchMixin:
             )
 
     # -- preparation helpers ------------------------------------------------
-    def _sim_context(self, clone, request, context) -> "_DCNSimContext":
+    def _sim_context(self, clone, request, context,
+                     draw_provider=None) -> "_DCNSimContext":
         t0 = time.perf_counter()
         product = request.product
         env = request.pricing_env
+        # CAPTURE the market-data fields once; everything a batch consumes
+        # is bound to these objects, and reduce_batches verifies them after
+        # execution (fail closed on mid-run replacement).
+        captured = (env.vol_surface, env.spot_quote, env.rate_curve,
+                    env.div_yield)
         ctx = build_dcn_grid_context(product)
         dt_array = np.diff(ctx.times)
         if dt_array.size == 0:
@@ -235,13 +288,16 @@ class _DCNBatchMixin:
             pricing_env=env,
             ctx=ctx,
             term=term,
-            df=make_df_fn(env),
-            spot0=float(env.spot),
+            df=_make_captured_df(captured[2]),
+            spot0=float(captured[1].spot),
             dt_array=dt_array,
             obs_times=ctx.times[ctx.obs_cols],
             n_obs=int(ctx.obs_cols.size),
             stderr_mode=stderr_mode,
             t0=t0,
+            captured=captured,
+            product_fp=try_fingerprint(product),
+            draw_provider=draw_provider,
         )
 
     def _attach_draw_provider(self, clone, context):
@@ -315,10 +371,19 @@ class _DCNBatchMixin:
     def execute_batch(self, task, state, context) -> BatchOutcome:
         sim = state.payload
         clone = sim.engine
-        paths = clone._simulate(
-            sim.spot0, sim.term, sim.dt_array, sim.pricing_env,
-            n_paths=task.n_paths, batch_id=task.batch_id,
-        )
+        provider = sim.draw_provider
+        if provider is not None:
+            provider.begin_batch()
+        try:
+            paths = clone._simulate(
+                sim.spot0, sim.term, sim.dt_array, sim.pricing_env,
+                n_paths=task.n_paths, batch_id=task.batch_id,
+            )
+        finally:
+            # unpin (and free, when cache-bypassed) this batch's draw
+            # blocks as soon as the simulation has consumed them
+            if provider is not None:
+                provider.end_batch()
         cf = compute_dcn_cashflows(paths, sim.product, sim.ctx, sim.df)
         # one-batch accumulator: EXACTLY the legacy per-batch arithmetic
         acc = _LegAccumulator(n_obs=sim.n_obs)
@@ -366,6 +431,7 @@ class _DCNBatchMixin:
             batch_means.append(s.batch_mean)
             if s.totals is not None:
                 acc.totals.append(s.totals)
+        self._verify_captured_inputs(sim)
         sign = sim.product.direction_sign
         if plan.stderr_mode == "scramble_means":
             means = np.array([float(sign * m) for m in batch_means])
@@ -381,6 +447,27 @@ class _DCNBatchMixin:
             ("std_error", float(result.std_error)),
         )
         return result, economics
+
+    def _verify_captured_inputs(self, sim) -> None:
+        """Post-execution snapshot verification (code-gate finding
+        2026-07-16): every batch consumed the CAPTURED objects, so a
+        replaced environment field or a mutated product means the produced
+        numbers mix market states — fail closed, never return them."""
+        env = sim.pricing_env
+        current = (env.vol_surface, env.spot_quote, env.rate_curve,
+                   env.div_yield)
+        replaced = any(a is not b for a, b in zip(current, sim.captured))
+        mutated = (
+            sim.product_fp is not None
+            and try_fingerprint(sim.product) != sim.product_fp
+        )
+        if replaced or mutated:
+            from quantark.execution.errors import DeterminismViolation
+
+            raise DeterminismViolation(
+                "pricing environment or product changed during batch "
+                "execution; refusing to return a mixed-market result"
+            )
 
     def project_operation(self, result, operation):
         if operation is PricingOperation.PRICE:
@@ -417,8 +504,9 @@ class DCNBatchMCAdapter(_DCNBatchMixin, LegacyPriceAdapter):
             num_batches=engine.num_batches,
             num_workers=1,  # framework owns threading; nested execution off
         )
-        sim = self._sim_context(clone, request, context)
         provider = self._attach_draw_provider(clone, context)
+        sim = self._sim_context(clone, request, context,
+                                draw_provider=provider)
         handles = (provider,) if provider is not None else ()
         return PreparedState(
             payload=sim, descriptors=(), fingerprint=None,
@@ -514,8 +602,9 @@ class DCNLocalVolMCAdapter(_DCNBatchMixin, _DCNLocalVolAdapterBase):
     def prepare(self, engine, request, context) -> PreparedState:
         surface_state = self._prepare_surface(engine, request, context)
         clone = self._clone_with_surface(engine, surface_state.payload)
-        sim = self._sim_context(clone, request, context)
         provider = self._attach_draw_provider(clone, context)
+        sim = self._sim_context(clone, request, context,
+                                draw_provider=provider)
         handles = surface_state.handles
         if provider is not None:
             handles = handles + (provider,)
