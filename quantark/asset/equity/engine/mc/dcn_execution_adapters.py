@@ -38,7 +38,6 @@ from quantark.asset.equity.engine.mc.dcn_mc_engine import (
 from quantark.asset.equity.engine.mc.dcn_payoff import compute_dcn_cashflows
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
-from quantark.execution.cache.artifacts import ArtifactDescriptor
 from quantark.execution.cache.fingerprint import try_fingerprint
 from quantark.execution.contracts import (
     BatchOutcome,
@@ -51,6 +50,7 @@ from quantark.execution.contracts import (
 )
 from quantark.execution.errors import CapabilityError
 from quantark.execution.legacy_adapter import LegacyPriceAdapter
+from quantark.execution.prep.dupire import dupire_surface_state
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.localvol import build_dupire_local_vol
 
@@ -63,8 +63,7 @@ __all__ = [
     "DCNQEBatchMCAdapter",
 ]
 
-_DUPIRE_TAGS = frozenset({"vol_surface", "spot", "rate_curve", "dividend_curve"})
-_BUILDER_VERSION = "1"
+
 
 _BATCH_ADAPTER_ID = "dcn-batch-mc"
 _BATCH_ADAPTER_VERSION = "1"
@@ -576,11 +575,6 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
         super().__init__(call_shape="product_env")
 
     def _prepare_surface(self, engine, request, context) -> PreparedState:
-        if engine._prebuilt is not None:
-            return PreparedState(
-                payload=engine._prebuilt, descriptors=(),
-                fingerprint=None, byte_estimate=None,
-            )
         env = request.pricing_env
         # CAPTURE every dependency once: the builder consumes ONLY the
         # captured objects (including the dividend callable, bound to the
@@ -595,43 +589,22 @@ class _DCNLocalVolAdapterBase(LegacyPriceAdapter):
                 return 0.0
         else:
             div_fn = div_obj.get_yield
-        fp = try_fingerprint(inputs)
-        cache = context.artifact_cache
 
         def builder():
             return build_dupire_local_vol(
                 inputs[0], spot=spot, rate_curve=inputs[2], div_yield=div_fn,
             )
 
-        if fp is None or cache is None:
-            surface = builder()  # uncacheable: fresh build, still correct
-            return PreparedState(
-                payload=surface, descriptors=(),
-                fingerprint=None, byte_estimate=_surface_nbytes(surface),
-            )
-        descriptor = ArtifactDescriptor(
-            kind="dupire-local-vol", fingerprint=fp,
-            dependency_tags=_DUPIRE_TAGS, builder_version=_BUILDER_VERSION,
-        )
-        handle = cache.get_or_build(
-            descriptor, builder,
-            size_bytes=_estimate_surface_bytes(inputs[0]),
+        return dupire_surface_state(
+            prebuilt=engine._prebuilt,
+            inputs=inputs,
+            recapture=lambda: (
+                env.vol_surface, env.spot_quote, env.rate_curve, env.div_yield
+            ),
+            builder=builder,
+            context=context,
+            estimate_bytes=_estimate_surface_bytes(inputs[0]),
             measure=_surface_nbytes,
-        )
-        current = (env.vol_surface, env.spot_quote, env.rate_curve, env.div_yield)
-        replaced = any(a is not b for a, b in zip(current, inputs))
-        if replaced or try_fingerprint(inputs) != fp:
-            handle.close()
-            cache.invalidate_tags(_DUPIRE_TAGS)
-            from quantark.execution.errors import DeterminismViolation
-
-            raise DeterminismViolation(
-                "pricing environment mutated or replaced during preparation; "
-                "the cached Dupire surface no longer matches its key"
-            )
-        return PreparedState(
-            payload=handle.value, descriptors=(descriptor,),
-            fingerprint=fp, byte_estimate=None, handles=(handle,),
         )
 
     # Phase-1 behavior (used by the PDE adapter): prepared payload IS the
