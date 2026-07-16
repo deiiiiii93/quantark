@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 __all__ = [
     "InventoryRecord",
+    "ADAPTIVE_STATES",
     "BATCH_STATES",
     "ENGINE_INVENTORY",
     "SUPPORTING_EXPORTS",
@@ -30,9 +31,23 @@ _MILESTONE = "phase-1+"
 # either advertises the batch capability or carries a specific rationale.
 BATCH_STATES = ("batch_capable", "temporary_legacy", "not_applicable")
 
+# Phase 3 exit gate (spec section 21): every adaptive plan has deterministic
+# checkpoint tests and a declared validation profile; rows without a session
+# adaptive plan carry a specific rationale.
+ADAPTIVE_STATES = ("adaptive_capable", "temporary_legacy", "not_applicable")
+
+_PROFILE_BITWISE = "bitwise-vs-direct/v1"
+_ADAPTIVE_NON_RQMC = "engine has no adaptive RQMC stopping mode"
+_ADAPTIVE_DEFERRED = (
+    "sequential run_rqmc mode exists but session adaptive planning is "
+    "deferred with the single-solve batch scope (spec 21 re-scope on "
+    "Phase 2 evidence)"
+)
+
 _BATCH_ADAPTIVE = (
     "adaptive RQMC compatibility stopping is sequential by contract "
-    "(spec 8.4); parallel-wave is a Phase 3 opt-in plan"
+    "(spec 8.4); parallel-wave deferred on Phase 2 benchmark evidence "
+    "(host-limited thread scaling)"
 )
 _BATCH_SINGLE_SOLVE = (
     "single-solve engine without a batch axis; introducing one is a changed "
@@ -75,11 +90,17 @@ class InventoryRecord:
     reason: str | None = None
     batch_state: str = "not_applicable"
     batch_rationale: str = _BATCH_NON_MC
+    adaptive_state: str = "not_applicable"
+    adaptive_rationale: str = _ADAPTIVE_NON_RQMC
+    validation_profile: str = ""
 
 
 def _eq_mc(name, model, product, planning="fixed",
            adoption_state="temporary_legacy",
-           batch_state="temporary_legacy", batch_rationale=_BATCH_SINGLE_SOLVE):
+           batch_state="temporary_legacy", batch_rationale=_BATCH_SINGLE_SOLVE,
+           adaptive_state="not_applicable",
+           adaptive_rationale=_ADAPTIVE_NON_RQMC,
+           validation_profile=""):
     return InventoryRecord(
         name=name,
         import_path=f"quantark.asset.equity.engine.mc.{name}",
@@ -87,6 +108,9 @@ def _eq_mc(name, model, product, planning="fixed",
         product_family=product, planning=planning, call_shape="product_env",
         adoption_state=adoption_state,
         batch_state=batch_state, batch_rationale=batch_rationale,
+        adaptive_state=adaptive_state,
+        adaptive_rationale=adaptive_rationale,
+        validation_profile=validation_profile,
     )
 
 
@@ -126,74 +150,134 @@ def _fx(name, engine_type, model, product):
 
 ENGINE_INVENTORY = (
     # --- Equity MC (33 engines) ---
-    _eq_mc("EuropeanMCEngine", "bsm", "vanilla"),
+    _eq_mc("EuropeanMCEngine", "bsm", "vanilla",
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
     _eq_mc("LocalVolMCEngine", "lv", "vanilla"),
     _eq_mc("HestonMCEngine", "heston", "vanilla"),
     _eq_mc("HestonSLVMCEngine", "slv", "vanilla"),
     _eq_mc("SABRMCEngine", "sabr", "vanilla"),
     _eq_mc("AmericanOptionMCEngine", "bsm", "american",
-           batch_state="not_applicable", batch_rationale=_BATCH_LSM),
-    _eq_mc("AsianOptionMCEngine", "bsm", "asian"),
-    _eq_mc("DigitalOptionMCEngine", "bsm", "digital"),
-    _eq_mc("BarrierOptionMCEngine", "bsm", "barrier"),
+           batch_state="not_applicable", batch_rationale=_BATCH_LSM,
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
+    _eq_mc("AsianOptionMCEngine", "bsm", "asian",
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
+    _eq_mc("DigitalOptionMCEngine", "bsm", "digital",
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
+    _eq_mc("BarrierOptionMCEngine", "bsm", "barrier",
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
     _eq_mc("LocalVolBarrierMCEngine", "lv", "barrier"),
     _eq_mc("HestonBarrierMCEngine", "heston", "barrier"),
     _eq_mc("HestonSLVBarrierMCEngine", "slv", "barrier"),
-    _eq_mc("SingleSharkfinOptionMCEngine", "bsm", "sharkfin"),
-    _eq_mc("DoubleSharkfinOptionMCEngine", "bsm", "sharkfin"),
-    _eq_mc("RangeAccrualMCEngine", "bsm", "range_accrual"),
+    _eq_mc("SingleSharkfinOptionMCEngine", "bsm", "sharkfin",
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
+    _eq_mc("DoubleSharkfinOptionMCEngine", "bsm", "sharkfin",
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
+    _eq_mc("RangeAccrualMCEngine", "bsm", "range_accrual",
+           adaptive_state="temporary_legacy",
+           adaptive_rationale=_ADAPTIVE_DEFERRED),
+
     _eq_mc("AccumulatorMCEngine", "bsm", "accumulator"),
     _eq_mc("SnowballMCEngine", "bsm", "snowball", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("LocalVolSnowballMCEngine", "lv", "snowball", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("HestonSnowballMCEngine", "heston", "snowball", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("QESnowballMCEngine", "heston", "snowball", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("HestonSLVSnowballMCEngine", "slv", "snowball", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("HestonSLVQESnowballMCEngine", "slv", "snowball", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("PhoenixMCEngine", "bsm", "phoenix", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("LocalVolPhoenixMCEngine", "lv", "phoenix", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("HestonPhoenixMCEngine", "heston", "phoenix", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("QEPhoenixMCEngine", "heston", "phoenix", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("HestonSLVPhoenixMCEngine", "slv", "phoenix", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("HestonSLVQEPhoenixMCEngine", "slv", "phoenix", planning="both",
            batch_state="temporary_legacy",
-           batch_rationale=_BATCH_ADAPTIVE),
+           batch_rationale=_BATCH_ADAPTIVE,
+           adoption_state="supported",
+           adaptive_state="adaptive_capable", adaptive_rationale="",
+           validation_profile=_PROFILE_BITWISE),
     _eq_mc("DCNMCEngine", "bsm", "dcn", planning="both",
            adoption_state="supported", batch_state="batch_capable",
-           batch_rationale=""),
+           batch_rationale="", validation_profile=_PROFILE_BITWISE),
     _eq_mc("LocalVolDCNMCEngine", "lv", "dcn", planning="both",
            adoption_state="supported", batch_state="batch_capable",
-           batch_rationale=""),
+           batch_rationale="", validation_profile=_PROFILE_BITWISE),
     _eq_mc("HestonDCNMCEngine", "heston", "dcn", planning="both",
-           batch_state="temporary_legacy",
-           batch_rationale=_BATCH_HESTON_DCN),
+           adoption_state="supported", batch_state="batch_capable",
+           batch_rationale="", validation_profile=_PROFILE_BITWISE),
     _eq_mc("QEDCNMCEngine", "heston", "dcn", planning="both",
-           batch_state="temporary_legacy",
-           batch_rationale=_BATCH_HESTON_DCN),
+           adoption_state="supported", batch_state="batch_capable",
+           batch_rationale="", validation_profile=_PROFILE_BITWISE),
     _eq_mc("CoupledCoarseHestonDCNMCEngine", "heston", "dcn", planning="both",
-           batch_state="temporary_legacy",
-           batch_rationale=_BATCH_HESTON_DCN),
+           adoption_state="supported", batch_state="batch_capable",
+           batch_rationale="", validation_profile=_PROFILE_BITWISE),
     # --- Equity PDE (24 concrete + abstract base) ---
     _eq_pde("BasePDESolver", "dispatch", "any", role="abstract"),
     _eq_pde("EuropeanPDESolver", "bsm", "vanilla"),

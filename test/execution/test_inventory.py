@@ -121,7 +121,12 @@ def test_batch_capable_rows_resolve_to_batch_adapters():
     capable = [
         r for r in ENGINE_INVENTORY if r.batch_state == "batch_capable"
     ]
-    assert {r.name for r in capable} == {"DCNMCEngine", "LocalVolDCNMCEngine"}
+    assert {r.name for r in capable} == {
+        "DCNMCEngine", "LocalVolDCNMCEngine",
+        # Phase 3: Heston DCN family
+        "HestonDCNMCEngine", "QEDCNMCEngine",
+        "CoupledCoarseHestonDCNMCEngine",
+    }
     for record in capable:
         module_path, _, cls_name = record.import_path.rpartition(".")
         engine_cls = getattr(importlib.import_module(module_path), cls_name)
@@ -145,3 +150,72 @@ def test_heston_dcn_family_resolves_to_batch_adapters():
         adapter = registry.resolve_class(cls)
         assert hasattr(adapter, "plan_batches"), cls.__name__
         assert adapter.capabilities().adapter_id == "dcn-batch-mc"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 exit gates: adaptive states + validation profiles
+# ---------------------------------------------------------------------------
+
+def test_adaptive_states_are_valid():
+    from quantark.execution.inventory import ADAPTIVE_STATES
+
+    for rec in ENGINE_INVENTORY:
+        assert rec.adaptive_state in ADAPTIVE_STATES, rec.name
+
+
+def test_adaptive_capable_rows_declare_profile_and_no_rationale():
+    for rec in ENGINE_INVENTORY:
+        if rec.adaptive_state == "adaptive_capable":
+            assert rec.validation_profile, rec.name
+            assert rec.adaptive_rationale == "", rec.name
+
+
+def test_adaptive_temporary_legacy_requires_rationale():
+    for rec in ENGINE_INVENTORY:
+        if rec.adaptive_state == "temporary_legacy":
+            assert rec.adaptive_rationale, rec.name
+
+
+def test_batch_capable_rows_declare_profile():
+    for rec in ENGINE_INVENTORY:
+        if rec.batch_state == "batch_capable":
+            assert rec.validation_profile, rec.name
+
+
+def test_autocallable_rows_are_adaptive_capable():
+    names = {r.name for r in ENGINE_INVENTORY
+             if r.adaptive_state == "adaptive_capable"}
+    assert names == {
+        "SnowballMCEngine", "LocalVolSnowballMCEngine",
+        "HestonSnowballMCEngine", "QESnowballMCEngine",
+        "HestonSLVSnowballMCEngine", "HestonSLVQESnowballMCEngine",
+        "PhoenixMCEngine", "LocalVolPhoenixMCEngine",
+        "HestonPhoenixMCEngine", "QEPhoenixMCEngine",
+        "HestonSLVPhoenixMCEngine", "HestonSLVQEPhoenixMCEngine",
+    }
+
+
+def test_heston_dcn_rows_are_batch_capable():
+    from quantark.execution.inventory import inventory_by_name
+
+    records = inventory_by_name()
+    for name in ("HestonDCNMCEngine", "QEDCNMCEngine",
+                 "CoupledCoarseHestonDCNMCEngine"):
+        rec = records[name]
+        assert rec.batch_state == "batch_capable", name
+        assert rec.batch_rationale == "", name
+        assert rec.validation_profile, name
+        assert rec.adoption_state == "supported", name
+
+
+def test_run_rqmc_single_solve_rows_carry_adaptive_deferral():
+    from quantark.execution.inventory import inventory_by_name
+
+    records = inventory_by_name()
+    for name in ("EuropeanMCEngine", "AsianOptionMCEngine",
+                 "DigitalOptionMCEngine", "BarrierOptionMCEngine",
+                 "AmericanOptionMCEngine", "SingleSharkfinOptionMCEngine",
+                 "DoubleSharkfinOptionMCEngine", "RangeAccrualMCEngine"):
+        rec = records[name]
+        assert rec.adaptive_state == "temporary_legacy", name
+        assert "run_rqmc" in rec.adaptive_rationale, name
