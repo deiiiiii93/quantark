@@ -127,17 +127,25 @@ def build_default_registry() -> AdapterRegistry:
         "quantark.asset.equity.engine.mc.dcn_mc_engine.DCNMCEngine",
         _dcn_batch_mc_adapter, exact=True,
     )
-    # MRO containment: the Heston DCN family inherits DCNMCEngine but its
-    # paired normal+uniform draw pipeline is not repository-routed yet
-    # (Phase 3), so exact pins keep it on the plain legacy adapter instead
-    # of inheriting the batch capability through the DCNMCEngine entry.
-    # QEDCNMCEngine resolves via the HestonDCNMCEngine pin (nearest base).
-    for heston_dcn in (
+    # Phase 3: Heston DCN fixed-batch adapters. exact=True (fixed
+    # constructor signatures); unknown stateful subclasses fall through the
+    # MRO to the legacy adapter (DCNMCEngine's exact entry never matches a
+    # subclass either).
+    registry.register(
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.HestonDCNMCEngine",
+        _dcn_heston_batch_adapter, exact=True,
+    )
+    registry.register(
+        "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.QEDCNMCEngine",
+        _dcn_qe_batch_adapter, exact=True,
+    )
+    # CoupledCoarse derives its draws from a paired fine engine; it keeps
+    # the plain legacy adapter until its pair-aware adapter lands.
+    registry.register(
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines."
         "CoupledCoarseHestonDCNMCEngine",
-    ):
-        registry.register(heston_dcn, _legacy_product_env_adapter)
+        _legacy_product_env_adapter,
+    )
     # Phase 3: adaptive RQMC compatibility plans. NON-exact by design: the
     # adapter drives the live engine through its own polymorphic hooks (no
     # cloning), so every Snowball/Phoenix vol-model subclass inherits it
@@ -181,6 +189,22 @@ def _legacy_product_env_adapter():
     from quantark.execution.legacy_adapter import LegacyPriceAdapter
 
     return LegacyPriceAdapter(call_shape="product_env")
+
+
+def _dcn_heston_batch_adapter():
+    from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
+        DCNHestonBatchMCAdapter,
+    )
+
+    return DCNHestonBatchMCAdapter()
+
+
+def _dcn_qe_batch_adapter():
+    from quantark.asset.equity.engine.mc.dcn_execution_adapters import (
+        DCNQEBatchMCAdapter,
+    )
+
+    return DCNQEBatchMCAdapter()
 
 
 def _autocallable_adaptive_adapter():

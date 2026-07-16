@@ -54,7 +54,13 @@ from quantark.execution.legacy_adapter import LegacyPriceAdapter
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.localvol import build_dupire_local_vol
 
-__all__ = ["DCNBatchMCAdapter", "DCNLocalVolMCAdapter", "DCNLocalVolPDEAdapter"]
+__all__ = [
+    "DCNBatchMCAdapter",
+    "DCNHestonBatchMCAdapter",
+    "DCNLocalVolMCAdapter",
+    "DCNLocalVolPDEAdapter",
+    "DCNQEBatchMCAdapter",
+]
 
 _DUPIRE_TAGS = frozenset({"vol_surface", "spot", "rate_curve", "dividend_curve"})
 _BUILDER_VERSION = "1"
@@ -146,6 +152,9 @@ class _DCNSimContext:
     captured: tuple = ()
     product_fp: str | None = None
     draw_provider: object | None = None
+    # Heston-family engines carry market state on model_params rather than
+    # the env vol surface; its fingerprint is verified after execution too.
+    model_fp: str | None = None
 
 
 def _make_captured_df(rate_curve):
@@ -282,6 +291,7 @@ class _DCNBatchMixin:
             if clone.use_sobol and clone.num_batches >= 2
             else "pathwise_iid"
         )
+        model_params = getattr(clone, "model_params", None)
         return _DCNSimContext(
             engine=clone,
             product=product,
@@ -298,6 +308,10 @@ class _DCNBatchMixin:
             captured=captured,
             product_fp=try_fingerprint(product),
             draw_provider=draw_provider,
+            model_fp=(
+                None if model_params is None
+                else try_fingerprint(model_params)
+            ),
         )
 
     def _attach_draw_provider(self, clone, context):
@@ -473,6 +487,11 @@ class _DCNBatchMixin:
             sim.product_fp is not None
             and try_fingerprint(sim.product) != sim.product_fp
         )
+        model_params = getattr(sim.engine, "model_params", None)
+        mutated = mutated or (
+            sim.model_fp is not None
+            and try_fingerprint(model_params) != sim.model_fp
+        )
         if replaced or mutated:
             from quantark.execution.errors import DeterminismViolation
 
@@ -499,12 +518,33 @@ class _DCNBatchMixin:
         )
 
 
+class _UniformDrawProvider:
+    """Uniform Sobol blocks from the session DrawRepository as WRITABLE
+    private copies (the QE draw path clips + ndtri-transforms in place).
+    The writable path never pins the master beyond the call, so no
+    per-batch scoping is needed."""
+
+    def __init__(self, repository, seed):
+        self._repo = repository
+        self._seed = seed
+
+    def __call__(self, n_dims, n_paths, batch_id):
+        handle = self._repo.uniforms_handle(
+            seed=self._seed, n_paths=n_paths, dim=n_dims,
+            batch_id=batch_id, writable=True,
+        )
+        try:
+            return handle.value
+        finally:
+            handle.close()
+
+
 class DCNBatchMCAdapter(_DCNBatchMixin, LegacyPriceAdapter):
     """Batch adapter for the plain GBM ``DCNMCEngine``.
 
-    NOT inherited by the Heston DCN subclasses: the registry pins those
-    back to the plain legacy adapter (their paired normal+uniform draw
-    pipeline is not yet repository-routed — Phase 3)."""
+    NOT inherited by the Heston DCN subclasses: the registry gives those
+    their own exact-registered pair-aware adapters (Phase 3) so unknown
+    stateful subclasses still fall through to the legacy adapter."""
 
     def __init__(self):
         super().__init__(call_shape="product_env")
@@ -646,4 +686,105 @@ class DCNLocalVolPDEAdapter(_DCNLocalVolAdapterBase):
             s_min_mult=engine.s_min_mult, s_max_mult=engine.s_max_mult,
             rannacher_steps=engine.rannacher_steps,
             concentration=engine.concentration,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Heston DCN fixed-batch adapters
+# ---------------------------------------------------------------------------
+
+class _HestonBatchBase(_DCNBatchMixin, LegacyPriceAdapter):
+    """Shared Heston DCN batch machinery: plan metadata reflecting the
+    scheme/substeps/stream layout, repository-routed normal AND uniform
+    draws, and fixed-signature cloning (exact registrations only)."""
+
+    def __init__(self):
+        super().__init__(call_shape="product_env")
+
+    @staticmethod
+    def _three_streams(clone) -> bool:
+        from quantark.util.enum.engine_enums import HestonMCScheme
+
+        return clone.scheme in (
+            HestonMCScheme.QUADEXP, HestonMCScheme.QUADEXP_M,
+        ) or clone.fixed_three_stream_sobol
+
+    def _plan_scheme(self, sim) -> str:
+        clone = sim.engine
+        return (
+            f"heston-{clone.scheme.name.lower()}"
+            f"-sub{clone.substeps_per_interval}/v1"
+        )
+
+    def _plan_dimension(self, sim, time_steps) -> int:
+        clone = sim.engine
+        n_fine = time_steps * clone.substeps_per_interval
+        return 3 * n_fine if self._three_streams(clone) else 2 * n_fine
+
+    def _plan_stream_layout(self, clone):
+        kind, layout = super()._plan_stream_layout(clone)
+        if kind == "sobol":
+            streams = "3stream" if self._three_streams(clone) else "2stream"
+            layout = f"batch-shifted-sobol-{streams}/v1"
+        return kind, layout
+
+    def _plan_est_bytes(self, sim, clone, batch_size, time_steps):
+        n_fine = time_steps * clone.substeps_per_interval
+        per_path = 3 * n_fine if self._three_streams(clone) else 2 * n_fine
+        # draw block + writable copy + variance/spot state + contractual
+        # nodes + cashflow work arrays, conservative slack
+        est_task = 8 * batch_size * (2 * per_path + 4 + 6 * sim.n_obs)
+        est_task += 1 << 20
+        est_outcome = 8 * (6 * sim.n_obs + 16)
+        if sim.stderr_mode == "pathwise_iid":
+            est_outcome += 8 * batch_size
+        return est_task, est_outcome
+
+    def _attach_draw_provider(self, clone, context):
+        provider = super()._attach_draw_provider(clone, context)
+        if provider is not None:
+            clone._uniform_provider = _UniformDrawProvider(
+                context.draw_repository, clone.seed
+            )
+        return provider
+
+    def prepare(self, engine, request, context) -> PreparedState:
+        clone = self._clone_engine(engine)
+        provider = self._attach_draw_provider(clone, context)
+        sim = self._sim_context(clone, request, context,
+                                draw_provider=provider)
+        handles = (provider,) if provider is not None else ()
+        return PreparedState(
+            payload=sim, descriptors=(), fingerprint=None,
+            byte_estimate=None, handles=handles,
+        )
+
+
+class DCNHestonBatchMCAdapter(_HestonBatchBase):
+    def _clone_engine(self, engine):
+        return type(engine)(
+            model_params=engine.model_params,
+            substeps_per_interval=engine.substeps_per_interval,
+            scheme=engine.scheme,
+            fixed_three_stream_sobol=engine.fixed_three_stream_sobol,
+            num_paths=engine.num_paths, seed=engine.seed,
+            use_sobol=engine.use_sobol,
+            use_antithetic=engine.use_antithetic,
+            num_batches=engine.num_batches,
+            num_workers=1,  # framework owns threading; nested execution off
+        )
+
+
+class DCNQEBatchMCAdapter(_HestonBatchBase):
+    def _clone_engine(self, engine):
+        return type(engine)(
+            model_params=engine.model_params,
+            martingale_correction=engine.martingale_correction,
+            substeps_per_interval=engine.substeps_per_interval,
+            fixed_three_stream_sobol=engine.fixed_three_stream_sobol,
+            num_paths=engine.num_paths, seed=engine.seed,
+            use_sobol=engine.use_sobol,
+            use_antithetic=engine.use_antithetic,
+            num_batches=engine.num_batches,
+            num_workers=1,  # framework owns threading; nested execution off
         )

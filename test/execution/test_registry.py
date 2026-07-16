@@ -82,9 +82,10 @@ def test_default_registry_covers_engine_family_roots():
         "convertible_bond_engine.ConvertibleBondEngine",
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.LocalVolDCNMCEngine",
         "quantark.asset.equity.engine.pde.dcn_vol_pde_solvers.LocalVolDCNPDEEngine",
-        # Phase 2: batch capability + Heston-family MRO containment pins
+        # Phase 2: batch capability; Phase 3: Heston-family batch adapters
         "quantark.asset.equity.engine.mc.dcn_mc_engine.DCNMCEngine",
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.HestonDCNMCEngine",
+        "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.QEDCNMCEngine",
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines."
         "CoupledCoarseHestonDCNMCEngine",
         # Phase 3: adaptive RQMC compatibility (non-exact: subclass-safe)

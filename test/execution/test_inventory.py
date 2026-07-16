@@ -129,9 +129,9 @@ def test_batch_capable_rows_resolve_to_batch_adapters():
         assert hasattr(adapter, "plan_batches"), record.name
 
 
-def test_heston_dcn_family_is_pinned_off_the_batch_adapter():
-    # MRO containment: subclasses of DCNMCEngine whose draw pipeline is not
-    # repository-routed must NOT inherit the batch capability.
+def test_heston_dcn_family_resolves_to_batch_adapters():
+    # Phase 3: Heston/QE get exact-registered batch adapters; CoupledCoarse
+    # keeps the legacy adapter until its pair-aware adapter lands.
     from quantark.asset.equity.engine.mc import (
         CoupledCoarseHestonDCNMCEngine,
         HestonDCNMCEngine,
@@ -140,7 +140,9 @@ def test_heston_dcn_family_is_pinned_off_the_batch_adapter():
 
     registry = build_default_registry()
     registry.freeze()
-    for cls in (HestonDCNMCEngine, QEDCNMCEngine, CoupledCoarseHestonDCNMCEngine):
+    for cls in (HestonDCNMCEngine, QEDCNMCEngine):
         adapter = registry.resolve_class(cls)
-        assert not hasattr(adapter, "plan_batches"), cls.__name__
-        assert adapter.capabilities().adapter_id == "legacy-price"
+        assert hasattr(adapter, "plan_batches"), cls.__name__
+        assert adapter.capabilities().adapter_id == "dcn-batch-mc"
+    coupled = registry.resolve_class(CoupledCoarseHestonDCNMCEngine)
+    assert coupled.capabilities().adapter_id == "legacy-price"
