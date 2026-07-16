@@ -86,21 +86,11 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
             ),
         )
 
-    def price_with_events(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        emit_distribution: bool = True,
-        streams: Optional[frozenset] = None,
-    ):
+    def _session_outputs(self, product, pricing_env, **kwargs):
         return self._with_surface(
             pricing_env,
-            lambda: SnowballPDESolver.price_with_events(
-                self,
-                product,
-                pricing_env,
-                emit_distribution=emit_distribution,
-                streams=streams,
+            lambda: SnowballPDESolver._session_outputs(
+                self, product, pricing_env, **kwargs
             ),
         )
 
@@ -353,34 +343,38 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             streams=streams,
         )
 
-    def price_with_events(
+    def _session_outputs(
         self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        emit_distribution: bool = True,
+        product,
+        pricing_env,
+        want_events: bool = False,
+        want_grid: bool = False,
         streams: Optional[frozenset] = None,
     ):
-        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        """One 2D value solve; never exposes a 1D grid solution.
+
+        Behavior note (deliberate, 2026-07-16): for an EXPIRED product the
+        shared ``price_with_events`` wrapper now clamps the trivial
+        distribution to maturity 0.0 (matching 1D semantics) where the old
+        2D override passed the negative tau through.
+        """
+        from quantark.cashleg.event_distribution import EventDistribution
+
+        from quantark.asset.equity.engine.pde.base_pde_solver import (
+            PDESessionOutputs,
+        )
 
         npv = float(self.price(product, pricing_env))
-        if not emit_distribution:
-            return PricingResult(
-                npv=npv,
-                event_distribution=EventDistribution.trivial(
-                    product.get_maturity(pricing_env)
-                ),
+        stats = None
+        dist = None
+        if want_events:
+            stats = self.calculate_event_stats(
+                product, pricing_env, npv=npv, streams=streams
             )
-        stats = self.calculate_event_stats(product, pricing_env, npv=npv, streams=streams)
-        if stats is None:
-            return PricingResult(
-                npv=npv,
-                event_distribution=EventDistribution.trivial(
-                    product.get_maturity(pricing_env)
-                ),
-            )
-        return PricingResult(
-            npv=npv,
-            event_distribution=EventDistribution.from_autocallable_stats(stats),
+            if stats is not None:
+                dist = EventDistribution.from_autocallable_stats(stats)
+        return PDESessionOutputs(
+            npv=npv, solution=None, event_stats=stats, event_distribution=dist
         )
 
     def calculate_greeks(

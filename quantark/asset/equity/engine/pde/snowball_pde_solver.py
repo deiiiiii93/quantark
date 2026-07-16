@@ -24,6 +24,7 @@ from scipy.linalg import solve_banded
 
 from quantark.asset.equity.engine.pde.base_pde_solver import (
     BasePDESolver,
+    PDESessionOutputs,
     PDESolutionResult,
     TimeGridSpec,
 )
@@ -321,6 +322,11 @@ class SnowballPDESolver(BasePDESolver):
             PricingError: If product is not a SnowballOption
             ValidationError: If product configuration is incompatible with PDE
         """
+        return self._price_with_solution(product, pricing_env)[0]
+
+    def _price_with_solution(self, product, pricing_env):
+        """price()'s preamble + one solve; None solution = short-circuit
+        (expired or knocked-out at valuation). Native session seam."""
         self._check_product_type(product)
 
         if pricing_env is None:
@@ -336,18 +342,54 @@ class SnowballPDESolver(BasePDESolver):
 
         if tau <= 0 or is_zero(tau):
             # Expired: return terminal payoff
-            return self._calculate_terminal_value(product, spot, pricing_env)
+            return self._calculate_terminal_value(product, spot, pricing_env), None
 
         # Check if knocked out at valuation
         knocked_out_at_valuation = self._is_knocked_out_at_valuation(
             product, spot, pricing_env
         )
         if knocked_out_at_valuation:
-            return self._get_immediate_ko_payoff(product, pricing_env)
+            return self._get_immediate_ko_payoff(product, pricing_env), None
 
         # Solve PDE and interpolate price
         result = self._solve(product, pricing_env)
-        return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+        return (
+            self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log),
+            result,
+        )
+
+    def _session_outputs(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        want_events: bool = False,
+        want_grid: bool = False,
+        streams: Optional[frozenset] = None,
+    ) -> PDESessionOutputs:
+        """One VALUE solve serving PV + event stats + grid projection.
+
+        The event-stat indicator sweep remains the engine's designed separate
+        pass (``calculate_event_stats`` with the npv supplied never re-runs
+        the value solve) — the session performs exactly as many backward
+        marches as the direct ``price_with_events`` path.
+        """
+        from quantark.cashleg.event_distribution import EventDistribution
+
+        npv, solution = self._price_with_solution(product, pricing_env)
+        stats = None
+        dist = None
+        if want_events and solution is not None:
+            stats = self.calculate_event_stats(
+                product, pricing_env, npv=float(npv), streams=streams
+            )
+            if stats is not None:
+                dist = EventDistribution.from_autocallable_stats(stats)
+        return PDESessionOutputs(
+            npv=float(npv),
+            solution=solution if want_grid else None,
+            event_stats=stats,
+            event_distribution=dist,
+        )
 
     def calculate_event_stats(
         self,
@@ -384,50 +426,20 @@ class SnowballPDESolver(BasePDESolver):
         """
         from quantark.cashleg.event_distribution import EventDistribution, PricingResult
 
-        self._check_product_type(product)
-        if pricing_env is None:
-            raise ValidationError(
-                f"PricingEnvironment is required for {self._solver_name}"
+        out = self._session_outputs(
+            product, pricing_env, want_events=emit_distribution, streams=streams
+        )
+        if out.event_distribution is not None:
+            return PricingResult(
+                npv=out.npv, event_distribution=out.event_distribution
             )
-        self._validate_product(product)
-
-        spot = pricing_env.spot
+        # [§11.3] degenerate (maturity-only) distribution: expired /
+        # immediate-KO short-circuits, emit_distribution=False, or a product
+        # type without event stats.
         tau = product.get_maturity(pricing_env)
-
-        # [§11.3] short-circuits: return the exact price() value with a degenerate
-        # (maturity-only) distribution, without running the indicator sweep.
-        if tau <= 0 or is_zero(tau):
-            npv = float(self._calculate_terminal_value(product, spot, pricing_env))
-            return PricingResult(
-                npv=npv,
-                event_distribution=EventDistribution.trivial(max(float(tau), 0.0)),
-            )
-        if self._is_knocked_out_at_valuation(product, spot, pricing_env):
-            npv = float(self._get_immediate_ko_payoff(product, pricing_env))
-            return PricingResult(
-                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
-            )
-        if not emit_distribution:
-            npv = float(self.price(product, pricing_env))
-            return PricingResult(
-                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
-            )
-
-        # Single value sweep -> npv, reused by the event-distribution residual.
-        result = self._solve(product, pricing_env)
-        npv = float(
-            self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
-        )
-        stats = self.calculate_event_stats(
-            product, pricing_env, npv=npv, streams=streams
-        )
-        if stats is None:
-            return PricingResult(
-                npv=npv, event_distribution=EventDistribution.trivial(float(tau))
-            )
         return PricingResult(
-            npv=npv,
-            event_distribution=EventDistribution.from_autocallable_stats(stats),
+            npv=out.npv,
+            event_distribution=EventDistribution.trivial(max(float(tau), 0.0)),
         )
 
     def _event_stats_product_type(self) -> type:

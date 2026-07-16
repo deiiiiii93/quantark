@@ -117,6 +117,20 @@ class PDESolutionResult(NamedTuple):
     spot_log: float
 
 
+class PDESessionOutputs(NamedTuple):
+    """One-solve session output bundle (spec sections 8/9.3 native seam).
+
+    ``solution`` is populated only when the caller asked for grid outputs and
+    the request did not short-circuit (expired / knocked-out). Event fields
+    are populated only by autocallable solvers.
+    """
+
+    npv: float
+    solution: Optional[PDESolutionResult]
+    event_stats: object
+    event_distribution: object
+
+
 class BasePDESolver(BaseEngine):
     """
     Abstract base class for PDE-based option pricing.
@@ -610,18 +624,50 @@ class BasePDESolver(BaseEngine):
             spot_log=np.log(spot),
         )
 
-    def price(
+    def _price_with_solution(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
-    ) -> float:
-        """Price the option using the PDE finite difference method."""
+    ) -> Tuple[float, Optional[PDESolutionResult]]:
+        """price()'s preamble + one solve; None solution = short-circuit.
+
+        Native session seam: valid only where ``price`` delegates to it (the
+        2D ADI autocallable solvers override ``price`` entirely and never use
+        this).
+        """
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
 
         if tau <= 0:
-            return self._calculate_intrinsic(product, spot)
+            return self._calculate_intrinsic(product, spot), None
 
         result = self._solve(product, pricing_env)
-        return self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+        return (
+            self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log),
+            result,
+        )
+
+    def price(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        """Price the option using the PDE finite difference method."""
+        return self._price_with_solution(product, pricing_env)[0]
+
+    def _session_outputs(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        want_events: bool = False,
+        want_grid: bool = False,
+        streams: Optional[frozenset] = None,
+    ) -> PDESessionOutputs:
+        """One value solve serving PV (+ grid projection). Event fields are
+        autocallable-only; the base family always returns them as None."""
+        npv, solution = self._price_with_solution(product, pricing_env)
+        return PDESessionOutputs(
+            npv=float(npv),
+            solution=solution if want_grid else None,
+            event_stats=None,
+            event_distribution=None,
+        )
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -661,9 +707,22 @@ class BasePDESolver(BaseEngine):
             return super().calculate_spot_greeks_curve(product, pricing_env, spots)
 
         result = self._solve(product, pricing_env)
+        return self._grid_projection_from_solution(result, spots)
+
+    def _grid_projection_from_solution(
+        self,
+        result: PDESolutionResult,
+        spot_levels: Optional[Sequence[float]] = None,
+    ) -> list[dict[str, float | str]]:
+        """Project price/delta/gamma from one solved surface (native session
+        seam shared with ``calculate_spot_greeks_curve``). ``spot_levels``
+        None projects at the grid nodes themselves."""
         prices = np.asarray(result.solution_vec, dtype=float)
         deltas = np.gradient(prices, result.s_vec, edge_order=2)
         gammas = np.gradient(deltas, result.s_vec, edge_order=2)
+        spots = np.asarray(
+            result.s_vec if spot_levels is None else spot_levels, dtype=float
+        )
         return [
             {
                 "spot": float(spot),
