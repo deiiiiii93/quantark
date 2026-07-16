@@ -138,5 +138,129 @@ def main() -> None:
     print(f"wrote {GOLDEN_PATH} with {len(values)} goldens")
 
 
+# ---------------------------------------------------------------------------
+# Phase 4 pre-refactor PDE goldens (independent oracle for the seam refactor;
+# plan-gate finding 2026-07-16). Run ONCE on the pristine tree:
+#     .venv/bin/python test/execution/freeze_goldens.py phase4
+# ---------------------------------------------------------------------------
+
+PHASE4_GOLDEN_PATH = (
+    pathlib.Path(__file__).parent / "goldens" / "pde_phase4_goldens.json"
+)
+
+_PHASE4_CASES = (
+    "EuropeanPDESolver",
+    "SnowballPDESolver",
+    "PhoenixPDESolver",
+    "KOResetSnowballPDESolver",
+    "LocalVolSnowballPDESolver",
+    "HestonSnowballPDESolver",
+)
+# Direct calculate_spot_greeks_curve needs a 1D BasePDESolver._solve that runs
+# standalone: 2D ADI solvers have no 1D grid, and the LV snowball's _solve
+# requires the _with_surface context the public curve method does not arm.
+_PHASE4_CURVE_CASES = (
+    "EuropeanPDESolver",
+    "SnowballPDESolver",
+    "PhoenixPDESolver",
+    "KOResetSnowballPDESolver",
+)
+_PHASE4_EVENT_CASES = (
+    "SnowballPDESolver",
+    "PhoenixPDESolver",
+    "KOResetSnowballPDESolver",
+    "LocalVolSnowballPDESolver",
+    "HestonSnowballPDESolver",
+)
+# Refined-resolution oracle (grid_size*2, time_steps*2) for the convergence
+# gate; 1D representatives only.
+_PHASE4_REFINED_CASES = ("EuropeanPDESolver", "SnowballPDESolver")
+
+
+def _phase4_fixtures():
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
+    from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep
+
+    return FIXTURE_BUILDERS, _pdep
+
+
+def _event_distribution_payload(dist) -> dict:
+    return {
+        "event_times": [float(t) for t in dist.event_times],
+        "survival_probability": [float(p) for p in dist.survival_probability],
+        "probabilities": {
+            event_type.name: (
+                [float(x) for x in probability]
+                if hasattr(probability, "__len__")
+                else float(probability)
+            )
+            for event_type, probability in sorted(
+                dist.probabilities.items(), key=lambda kv: kv[0].name
+            )
+        },
+    }
+
+
+def _phase4_case_payload(engine, product, env, with_curve, with_events) -> dict:
+    payload = {"price": float(engine.price(product, env))}
+    if with_events:
+        result = engine.price_with_events(product, env, emit_distribution=True)
+        payload["price_with_events"] = {
+            "npv": float(result.npv),
+            "event_distribution": _event_distribution_payload(
+                result.event_distribution
+            ),
+        }
+    if with_curve:
+        spot = float(env.spot)
+        levels = [0.9 * spot, 1.0 * spot, 1.1 * spot]
+        payload["spot_levels"] = levels
+        payload["spot_greeks_curve"] = engine.calculate_spot_greeks_curve(
+            product, env, levels
+        )
+    return payload
+
+
+def freeze_phase4() -> None:
+    import numpy
+    import scipy
+
+    builders, _pdep = _phase4_fixtures()
+    cases = {}
+    for name in _PHASE4_CASES:
+        engine, product, env, _shape = builders[name]()
+        cases[name] = _phase4_case_payload(
+            engine, product, env,
+            with_curve=name in _PHASE4_CURVE_CASES,
+            with_events=name in _PHASE4_EVENT_CASES,
+        )
+    for name in _PHASE4_REFINED_CASES:
+        engine, product, env, _shape = builders[name]()
+        refined = type(engine)(
+            params=_pdep(grid_size=180, time_steps=96, auto_grid=False)
+        )
+        cases[f"{name}::refined"] = _phase4_case_payload(
+            refined, product, env,
+            with_curve=name in _PHASE4_CURVE_CASES,
+            with_events=name in _PHASE4_EVENT_CASES,
+        )
+    payload = {
+        "cases": cases,
+        "versions": {"numpy": numpy.__version__, "scipy": scipy.__version__},
+    }
+    PHASE4_GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PHASE4_GOLDEN_PATH.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    )
+    print(f"wrote {PHASE4_GOLDEN_PATH} with {len(cases)} goldens")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "phase4":
+        freeze_phase4()
+    else:
+        main()
