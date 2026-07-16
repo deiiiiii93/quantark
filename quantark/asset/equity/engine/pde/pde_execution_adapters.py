@@ -39,6 +39,7 @@ from quantark.execution.contracts import (
 from quantark.execution.errors import CapabilityError
 from quantark.execution.legacy_adapter import LegacyPriceAdapter
 from quantark.execution.prep.dupire import dupire_surface_state
+from quantark.execution.prep.verify import capture_market, verify_market
 
 __all__ = [
     "PDESessionValue",
@@ -66,6 +67,7 @@ class PDESessionValue:
 @dataclass(frozen=True)
 class _PreparedPDE:
     clone: object
+    capture: object = None  # MarketCapture; verified after execution
 
 
 def _option(request, key):
@@ -152,6 +154,24 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
     def _clone_engine(self, engine):
         return type(engine)(params=engine.params)
 
+    def _market_fields(self, env) -> tuple:
+        return (env.rate_curve, env.div_yield, env.vol_surface, env.spot_quote)
+
+    def _capture(self, request):
+        return capture_market(
+            self._market_fields(request.pricing_env), request.product
+        )
+
+    def _verify_capture(self, prepared, request) -> None:
+        state = prepared.payload if prepared is not None else None
+        if state is None or state.capture is None:
+            return
+        verify_market(
+            state.capture,
+            self._market_fields(request.pricing_env),
+            request.product,
+        )
+
     def prepare(self, engine, request, context) -> PreparedState:
         clone = self._clone_engine(engine)
         product, env = request.product, request.pricing_env
@@ -175,7 +195,7 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
             try_fingerprint(tuple(fps)) if fps and all(fps) else None
         )
         return PreparedState(
-            payload=_PreparedPDE(clone=clone),
+            payload=_PreparedPDE(clone=clone, capture=self._capture(request)),
             descriptors=tuple(descriptors),
             fingerprint=fingerprint,
             byte_estimate=None,
@@ -219,6 +239,15 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
 
     # -- execution -----------------------------------------------------------
     def execute_native(self, engine, request, normalized, context, prepared=None):
+        result = self._execute(engine, request, normalized, context, prepared)
+        # End-to-end mutation guard (code-gate finding 2026-07-16): a market
+        # mutation between prepare and execute would price a MIXED state
+        # (stale injected artifacts + live boundary reads) — verify the
+        # captured market after execution and fail closed.
+        self._verify_capture(prepared, request)
+        return result
+
+    def _execute(self, engine, request, normalized, context, prepared=None):
         clone = prepared.payload.clone if prepared is not None else engine
         if request.operation is not PricingOperation.PRICE:
             return super().execute_native(clone, request, normalized, context)
@@ -322,7 +351,7 @@ class EquityLVPDESessionAdapter(_EquityPDESessionBase):
         surface_state = self._surface_state(engine, request.pricing_env, context)
         clone = self._clone_with_surface(engine, surface_state.payload)
         return PreparedState(
-            payload=_PreparedPDE(clone=clone),
+            payload=_PreparedPDE(clone=clone, capture=self._capture(request)),
             descriptors=surface_state.descriptors,
             fingerprint=surface_state.fingerprint,
             byte_estimate=surface_state.byte_estimate,
@@ -361,7 +390,7 @@ class EquityLVAutocallableSessionAdapter(EquityLVPDESessionAdapter):
             raise
         fingerprint = try_fingerprint(tuple(fps)) if all(fps) else None
         return PreparedState(
-            payload=_PreparedPDE(clone=clone),
+            payload=_PreparedPDE(clone=clone, capture=self._capture(request)),
             descriptors=tuple(descriptors),
             fingerprint=fingerprint,
             byte_estimate=None,
@@ -430,7 +459,10 @@ class Heston2DAutocallableSessionAdapter(_EquityPDESessionBase):
 
     def prepare(self, engine, request, context) -> PreparedState:
         return PreparedState(
-            payload=_PreparedPDE(clone=self._clone_engine(engine)),
+            payload=_PreparedPDE(
+                clone=self._clone_engine(engine),
+                capture=self._capture(request),
+            ),
             descriptors=(),
             fingerprint=None,
             byte_estimate=None,

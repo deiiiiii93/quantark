@@ -305,3 +305,188 @@ class TestSubclassFallback:
                 engine, PricingRequest(product=product, pricing_env=env)
             )
         assert outcome.manifest.adapter_id == ADAPTER_ID
+
+
+class TestCodeGateRegressions:
+    """Codex code-gate findings (2026-07-16), with reproductions."""
+
+    def test_mutation_between_prepare_and_execute_fails_closed(self):
+        # Finding 1: a rate replacement after prepare() must never price a
+        # MIXED market (stale injected artifacts + live boundary reads).
+        from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+            EquityPDEAutocallableSessionAdapter,
+        )
+        from quantark.execution.errors import DeterminismViolation
+        from quantark.param import FlatRateCurve
+
+        engine, product, env = _case("SnowballPDESolver")
+        adapter = EquityPDEAutocallableSessionAdapter()
+        request = PricingRequest(product=product, pricing_env=env)
+        with PricingSession() as session:
+            ctx = session.context
+            adapter.validate(engine, request)
+            normalized = adapter.normalize(engine, request)
+            prepared = adapter.prepare(engine, request, ctx)
+            try:
+                env.rate_curve = FlatRateCurve(rate=0.061)  # concurrent swap
+                with pytest.raises(DeterminismViolation):
+                    adapter.execute_native(
+                        engine, request, normalized, ctx, prepared=prepared
+                    )
+            finally:
+                for handle in prepared.handles:
+                    handle.close()
+
+    def test_inplace_mutation_during_factorization_build_fails_closed(self):
+        # Finding 2: an in-place market value change during the pack build
+        # keeps object identity, so only a LIVE market fingerprint recompute
+        # can catch it; the poisoned entry must be purged, never reused.
+        from quantark.asset.equity.engine.pde.pde_session_prep import (
+            factorization_state,
+            grid_state,
+            step_coefficients_state,
+        )
+        from quantark.execution.errors import DeterminismViolation
+
+        engine, product, env = _case("EuropeanPDESolver")
+        clone = type(engine)(params=engine.params)
+        clone._prepare_solve_state(product, env)
+        with PricingSession() as session:
+            ctx = session.context
+            grid = grid_state(clone, product, env, ctx)
+            from quantark.execution.cache.fingerprint import try_fingerprint
+
+            curves_fp = try_fingerprint(
+                (env.rate_curve, env.div_yield, env.vol_surface)
+            )
+            coeff = step_coefficients_state(
+                clone, product, env, grid.value, grid.fingerprint,
+                curves_fp, ctx,
+            )
+            clone._session_grids = grid.value
+            clone._session_step_coefficients = coeff.value
+
+            rate_obj = env.rate_curve
+            original_rate = rate_obj.rate
+
+            class MutatingCache:
+                def __init__(self, inner):
+                    self._inner = inner
+
+                def get_or_build(self, descriptor, builder, size_bytes,
+                                 measure=None):
+                    def mutating_builder():
+                        value = builder()
+                        # in-place: same object identity, new market values
+                        try:
+                            rate_obj.rate = original_rate + 0.003
+                        except Exception:
+                            object.__setattr__(
+                                rate_obj, "rate", original_rate + 0.003
+                            )
+                        return value
+
+                    return self._inner.get_or_build(
+                        descriptor, mutating_builder, size_bytes, measure
+                    )
+
+                def invalidate_tags(self, tags):
+                    self._inner.invalidate_tags(tags)
+
+            class Ctx:
+                artifact_cache = MutatingCache(ctx.artifact_cache)
+                resource_budget = ctx.resource_budget
+
+            try:
+                with pytest.raises(DeterminismViolation):
+                    factorization_state(
+                        clone, product, env, grid.value, coeff.fingerprint, Ctx()
+                    )
+                # the poisoned entry was invalidated: a clean rebuild after
+                # restoring the market must produce a working pack, and the
+                # session must price bitwise.
+                try:
+                    rate_obj.rate = original_rate
+                except Exception:
+                    object.__setattr__(rate_obj, "rate", original_rate)
+                fact = factorization_state(
+                    clone, product, env, grid.value, coeff.fingerprint, ctx
+                )
+                clone._session_matrix_pack = fact.value[0]
+                assert clone.price(product, env) == engine.price(product, env)
+                if fact.handle is not None:
+                    fact.handle.close()
+            finally:
+                for state in (grid, coeff):
+                    if state.handle is not None:
+                        state.handle.close()
+
+    def test_lv_pack_is_bounded_and_budget_prechecked(self):
+        # Finding 3: LV coefficients create one factorization key per step;
+        # the eager pack must stay within its charged bound, and a budget
+        # too small for even the bounded pack must skip eager packing
+        # BEFORE allocation — bitwise unchanged either way.
+        import dataclasses
+
+        from quantark.asset.equity.engine.pde import LocalVolSnowballPDESolver
+        from quantark.asset.equity.engine.pde.pde_session_prep import (
+            _PACK_MAX_ENTRIES,
+        )
+        from quantark.execution.cache.artifacts import PreparedArtifactCache
+        from quantark.execution.context import default_context
+        from quantark.execution.leases import ResourceLeaseManager
+        from execution.matrix_fixtures import _pdep, _snowball, _eq_grid_env
+
+        engine = LocalVolSnowballPDESolver(
+            _pdep(grid_size=90, time_steps=200, auto_grid=False)
+        )
+        product, env = _snowball(), _eq_grid_env()
+        direct = engine.price(product, env)
+
+        with PricingSession() as session:
+            outcome = session.execute(
+                engine, PricingRequest(product=product, pricing_env=env)
+            )
+            assert outcome.value == direct
+            # the published pack respects the entry bound
+            for record in outcome.diagnostics.records:
+                pass  # bound asserted structurally below
+
+        # structural bound check on the builder itself
+        clone = type(engine)(params=engine.params)
+        clone._prepare_solve_state(product, env)
+        surface = engine._build_surface(env)
+        clone._active_lv_surface = surface
+        spot, tau = env.spot, product.get_maturity(env)
+        strike = product.strike
+        r, q = env.get_rate(tau), env.get_div_yield(tau)
+        sigma = env.get_vol(strike, tau)
+        grids = clone._build_grids(product, env, spot, sigma, tau, r, q)
+        clone._active_s_vec = grids[1]
+        try:
+            packs = clone._session_factorization_packs(
+                product, env, grids, max_entries=_PACK_MAX_ENTRIES
+            )
+        finally:
+            clone._active_lv_surface = None
+            clone._active_s_vec = None
+        assert len(packs[0]) + len(packs[1]) <= _PACK_MAX_ENTRIES
+        assert len(grids[3]) - 1 > _PACK_MAX_ENTRIES  # the cap actually bound
+
+        # tiny budget: eager packing skipped pre-allocation, still bitwise
+        ctx = default_context()
+        budget = dataclasses.replace(
+            ctx.resource_budget, artifact_cache_bytes=1024,
+            draw_cache_bytes=1024,
+        )
+        leases = ResourceLeaseManager(budget)
+        cache = PreparedArtifactCache(leases)
+        ctx = dataclasses.replace(
+            ctx, resource_budget=budget, lease_manager=leases,
+            artifact_cache=cache,
+        )
+        with PricingSession(context=ctx) as session:
+            outcome = session.execute(
+                engine, PricingRequest(product=product, pricing_env=env)
+            )
+        assert outcome.value == direct

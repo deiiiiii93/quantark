@@ -17,6 +17,7 @@ from quantark.execution.contracts import (
 from quantark.execution.errors import CapabilityError
 from quantark.execution.legacy_adapter import LegacyPriceAdapter
 from quantark.execution.prep.dupire import dupire_surface_state
+from quantark.execution.prep.verify import capture_market, verify_market
 
 __all__ = ["FxLVPDESessionAdapter"]
 
@@ -27,6 +28,16 @@ ADAPTER_VERSION = "1"
 @dataclass(frozen=True)
 class _PreparedFxPDE:
     clone: object
+    capture: object = None  # MarketCapture; verified after execution
+
+
+def _fx_market_fields(fx_env) -> tuple:
+    return (
+        fx_env.vol_surface,
+        fx_env.spot_quote,
+        fx_env.domestic_curve,
+        fx_env.foreign_curve,
+    )
 
 
 def _surface_nbytes(surface) -> int:
@@ -128,7 +139,12 @@ class FxLVPDESessionAdapter(LegacyPriceAdapter):
             local_vol_surface=surface_state.payload,
         )
         return PreparedState(
-            payload=_PreparedFxPDE(clone=clone),
+            payload=_PreparedFxPDE(
+                clone=clone,
+                capture=capture_market(
+                    _fx_market_fields(fx_env), request.product
+                ),
+            ),
             descriptors=surface_state.descriptors,
             fingerprint=surface_state.fingerprint,
             byte_estimate=surface_state.byte_estimate,
@@ -137,4 +153,12 @@ class FxLVPDESessionAdapter(LegacyPriceAdapter):
 
     def execute_native(self, engine, request, normalized, context, prepared=None):
         clone = prepared.payload.clone if prepared is not None else engine
-        return super().execute_native(clone, request, normalized, context)
+        result = super().execute_native(clone, request, normalized, context)
+        # End-to-end mutation guard (code-gate finding 2026-07-16).
+        if prepared is not None and prepared.payload.capture is not None:
+            verify_market(
+                prepared.payload.capture,
+                _fx_market_fields(request.pricing_env),
+                request.product,
+            )
+        return result

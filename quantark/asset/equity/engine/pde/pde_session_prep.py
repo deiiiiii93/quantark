@@ -217,10 +217,20 @@ def step_coefficients_state(
     return ArtifactState(handle.value, descriptor, handle, fp)
 
 
+# Eager packs hold at most this many factorization entries; further keys
+# fall through to the engine's bounded lazy per-solve caches, bitwise
+# identically (code-gate finding 2026-07-16: LV coefficients create one key
+# per step, so an uncapped eager build could allocate far beyond the
+# reserved estimate).
+_PACK_MAX_ENTRIES = 64
+
+_EMPTY_PACKS = (types.MappingProxyType({}), types.MappingProxyType({}))
+
+
 def factorization_state(
     engine, product, pricing_env, grids, coeff_fp, context
 ) -> ArtifactState:
-    """Eager (matrix_pack, banded_pack) maps behind a descriptor.
+    """Eager, size-bounded (matrix_pack, banded_pack) maps behind a descriptor.
 
     Legality (spec section 9.2): the key derives from the coefficient
     fingerprint (which encodes grid + market + params identity) plus the
@@ -229,17 +239,32 @@ def factorization_state(
     coefficient artifact on ``engine`` BEFORE calling this (plan-gate
     ordering finding) so the builder consumes it via
     ``_step_coefficients_for_solve``.
+
+    Budget honesty (code-gate finding 2026-07-16): the eager build is
+    bounded to ``_PACK_MAX_ENTRIES`` entries — the same bound the admission
+    estimate charges — and when even the bounded estimate exceeds the
+    configured artifact budget the pack is skipped BEFORE any allocation
+    (empty packs; the solve builds its factorizations lazily, bitwise
+    identically).
     """
     x_vec = grids[0]
+    n_steps = max(1, len(grids[3]) - 1)
+    estimate = min(n_steps, _PACK_MAX_ENTRIES) * len(x_vec) * 8 * 12 + (1 << 20)
 
     def build():
         matrix_pack, banded_pack = engine._session_factorization_packs(
-            product, pricing_env, grids
+            product, pricing_env, grids, max_entries=_PACK_MAX_ENTRIES
         )
         return (
             types.MappingProxyType(matrix_pack),
             types.MappingProxyType(banded_pack),
         )
+
+    budget = getattr(
+        getattr(context, "resource_budget", None), "artifact_cache_bytes", None
+    )
+    if budget is not None and estimate > budget:
+        return ArtifactState(_EMPTY_PACKS, None, None, None)
 
     cache = getattr(context, "artifact_cache", None)
     if (
@@ -250,26 +275,37 @@ def factorization_state(
         return ArtifactState(build(), None, None, None)
 
     capture = _env_capture(pricing_env)
+    # The builder rereads live market values (r/q/sigma, theta schedule), so
+    # the post-build verification must recompute a LIVE market fingerprint —
+    # a static key recomputation cannot detect in-place mutation during the
+    # build (code-gate finding 2026-07-16).
+    market_fp = try_fingerprint(
+        (pricing_env.rate_curve, pricing_env.div_yield, pricing_env.vol_surface)
+    )
+    if market_fp is None:
+        return ArtifactState(build(), None, None, None)
     banded_policy = bool(getattr(engine.params, "use_banded_solver", False))
-
-    def key_fp():
-        return try_fingerprint(
-            ("pde-fact", _class_path(engine), coeff_fp, banded_policy)
-        )
-
-    fp = key_fp()
+    fp = try_fingerprint(
+        ("pde-fact", _class_path(engine), coeff_fp, banded_policy)
+    )
     if fp is None:
         return ArtifactState(build(), None, None, None)
+
+    def live_fp():
+        live_market = try_fingerprint(
+            (pricing_env.rate_curve, pricing_env.div_yield,
+             pricing_env.vol_surface)
+        )
+        return fp if live_market == market_fp else None
+
     descriptor = ArtifactDescriptor(
         kind="pde-factorization-pack",
         fingerprint=fp,
         dependency_tags=_FACT_TAGS,
         builder_version=_BUILDER_VERSION,
     )
-    n_steps = max(1, len(grids[3]) - 1)
-    estimate = min(n_steps, 64) * len(x_vec) * 8 * 12 + (1 << 20)
     handle = cache.get_or_build(
         descriptor, build, size_bytes=estimate, measure=_packs_nbytes
     )
-    _reverify(pricing_env, capture, key_fp, fp, handle, cache, _FACT_TAGS)
+    _reverify(pricing_env, capture, live_fp, fp, handle, cache, _FACT_TAGS)
     return ArtifactState(handle.value, descriptor, handle, fp)

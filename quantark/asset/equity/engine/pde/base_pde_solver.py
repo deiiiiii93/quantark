@@ -1591,7 +1591,8 @@ class BasePDESolver(BaseEngine):
         )
 
     def _session_factorization_packs(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, grids
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment,
+        grids, max_entries: Optional[int] = None,
     ) -> Tuple[dict, dict]:
         """Eagerly build the (coeff_key, dt, theta) -> matrices maps one solve
         would lazily build, through the SAME builders the solve uses.
@@ -1600,6 +1601,13 @@ class BasePDESolver(BaseEngine):
         step, theta schedule, and scheme parameters are identical (spec
         section 9.2); the caller keys the published pack by exactly those
         inputs. Returns (matrix_pack, banded_pack) as plain dicts.
+
+        ``max_entries`` bounds the eager build (code-gate finding
+        2026-07-16): once the packs hold that many entries, enumeration
+        stops and the remaining keys are built lazily per solve — bitwise
+        identically, since the march's own construction is the same code.
+        The enumeration runs in march order, so the bounded pack holds the
+        keys the march requests first.
         """
         x_vec, s_vec, dx_vec, t_vec, dt_vec = grids
         spot = pricing_env.spot
@@ -1632,6 +1640,11 @@ class BasePDESolver(BaseEngine):
         try:
             I_int = sp.eye(num_x - 2, format="csc")
             for j in range(len(t_vec) - 2, -1, -1):
+                if (
+                    max_entries is not None
+                    and len(self._matrix_cache) + len(banded) >= max_entries
+                ):
+                    break
                 dt = dt_vec[j]
                 theta = float(theta_by_step[j])
                 if step_coeffs is not None:
