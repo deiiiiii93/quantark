@@ -62,13 +62,14 @@ class DrawRepository:
         self._cache = PreparedArtifactCache(lease_manager, pool="draw_cache")
         self.lease_manager = lease_manager  # public: pairing identity check
 
-    def descriptor(self, *, seed, n_paths, dim, batch_id) -> DrawDescriptor:
+    def descriptor(self, *, seed, n_paths, dim, batch_id,
+                   distribution="normal") -> DrawDescriptor:
         versions = dict(build_versions())
         return DrawDescriptor(
             generator_family="sobol-scrambled",
             implementation_id=_IMPL_ID,
             implementation_version=_IMPL_VERSION,
-            distribution="normal",
+            distribution=distribution,
             stream_layout=_LAYOUT,
             seed=int(seed),
             batch_id=None if batch_id is None else int(batch_id),
@@ -78,19 +79,21 @@ class DrawRepository:
             memory_order="C",
             dtype="float64",
             antithetic=False,
-            transform_pipeline=("ndtri/v1",),
+            transform_pipeline=(
+                ("ndtri/v1",) if distribution == "normal" else ()
+            ),
             numpy_version=versions.get("numpy", "unknown"),
             scipy_version=versions.get("scipy", "unknown"),
         )
 
-    def normals_handle(
-        self, *, seed, n_paths, dim, batch_id, writable=False
-    ) -> ArtifactHandle:
+    def _block_handle(self, *, kind, distribution, draw_method, seed,
+                      n_paths, dim, batch_id, writable) -> ArtifactHandle:
         desc = self.descriptor(
-            seed=seed, n_paths=n_paths, dim=dim, batch_id=batch_id
+            seed=seed, n_paths=n_paths, dim=dim, batch_id=batch_id,
+            distribution=distribution,
         )
         art = ArtifactDescriptor(
-            kind="sobol-normal-block",
+            kind=kind,
             fingerprint=desc.fingerprint,
             dependency_tags=frozenset({"draws"}),
             builder_version=_IMPL_VERSION,
@@ -99,8 +102,9 @@ class DrawRepository:
         def builder():
             from quantark.montecarlo.qmc_sobol import SobolNormalGenerator
 
+            gen = SobolNormalGenerator(base_seed=int(seed))
             block = np.ascontiguousarray(
-                SobolNormalGenerator(base_seed=int(seed)).normal(
+                getattr(gen, draw_method)(
                     int(n_paths), int(dim), batch_id=batch_id
                 )
             )
@@ -117,6 +121,24 @@ class DrawRepository:
         copy = handle.value.copy()
         handle.close()  # writable scratch is task-owned, not pinned
         return ArtifactHandle(copy, lambda: None)
+
+    def normals_handle(
+        self, *, seed, n_paths, dim, batch_id, writable=False
+    ) -> ArtifactHandle:
+        return self._block_handle(
+            kind="sobol-normal-block", distribution="normal",
+            draw_method="normal", seed=seed, n_paths=n_paths, dim=dim,
+            batch_id=batch_id, writable=writable,
+        )
+
+    def uniforms_handle(
+        self, *, seed, n_paths, dim, batch_id, writable=False
+    ) -> ArtifactHandle:
+        return self._block_handle(
+            kind="sobol-uniform-block", distribution="uniform",
+            draw_method="uniform", seed=seed, n_paths=n_paths, dim=dim,
+            batch_id=batch_id, writable=writable,
+        )
 
     def stats(self) -> dict:
         return self._cache.stats()

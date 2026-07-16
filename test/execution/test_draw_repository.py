@@ -63,3 +63,49 @@ def test_budget_accounting_exact_bytes():
     repo, mgr = make_repo()
     with repo.normals_handle(seed=1, n_paths=64, dim=8, batch_id=0):
         assert mgr.pool_bytes("draw_cache") == 64 * 8 * 8
+
+
+def test_uniforms_bitwise_match_qmc_uniforms():
+    from quantark.asset.equity.engine.mc.qmc_draws import qmc_uniforms
+
+    repo, _ = make_repo()
+    with repo.uniforms_handle(seed=42, n_paths=64, dim=12, batch_id=3) as h:
+        expected = qmc_uniforms(42, 64, 12, batch_id=3)
+        np.testing.assert_array_equal(h.value, expected)
+        assert not h.value.flags.writeable
+
+
+def test_uniform_and_normal_blocks_have_distinct_keys():
+    repo, _ = make_repo()
+    with repo.uniforms_handle(seed=42, n_paths=32, dim=8, batch_id=None) as u:
+        with repo.normals_handle(seed=42, n_paths=32, dim=8, batch_id=None) as n:
+            assert not np.array_equal(u.value, n.value)
+    d_u = repo.descriptor(seed=42, n_paths=32, dim=8, batch_id=None,
+                          distribution="uniform")
+    d_n = repo.descriptor(seed=42, n_paths=32, dim=8, batch_id=None)
+    assert d_u.fingerprint != d_n.fingerprint
+    assert d_u.transform_pipeline == ()
+    assert d_n.transform_pipeline == ("ndtri/v1",)
+
+
+def test_uniforms_writable_private_copy():
+    repo, _ = make_repo()
+    with repo.uniforms_handle(seed=1, n_paths=16, dim=4, batch_id=0) as h:
+        master = h.value.copy()
+    with repo.uniforms_handle(
+        seed=1, n_paths=16, dim=4, batch_id=0, writable=True
+    ) as w:
+        assert w.value.flags.writeable
+        w.value[:] = 0.0
+    with repo.uniforms_handle(seed=1, n_paths=16, dim=4, batch_id=0) as h2:
+        np.testing.assert_array_equal(h2.value, master)
+
+
+def test_uniforms_cache_hit_on_reuse():
+    repo, _ = make_repo()
+    with repo.uniforms_handle(seed=9, n_paths=32, dim=6, batch_id=1):
+        pass
+    before = repo.stats()["hits"]
+    with repo.uniforms_handle(seed=9, n_paths=32, dim=6, batch_id=1):
+        pass
+    assert repo.stats()["hits"] == before + 1
