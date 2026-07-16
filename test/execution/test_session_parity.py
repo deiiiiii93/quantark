@@ -173,7 +173,12 @@ def test_manifest_records_resolved_policy_values(equity_env, european_option):
     resolved = dict(outcome.manifest.resolved_policy)
     assert resolved["batch.backend"] == "serial"
     assert resolved["batch.workers"] == "1"
-    assert resolved["budget.max_threads"] == "1"
+    # Phase 2: the session-OWNED auto budget upgrades thread/in-flight
+    # capacity to the machine (spec section 11.1); values are recorded.
+    import os
+
+    assert resolved["budget.max_threads"] == str(os.cpu_count() or 1)
+    assert resolved["budget.max_in_flight"] == str(os.cpu_count() or 1)
     assert resolved["determinism.require_manifest"] == "True"
     # Source labels live in diagnostics, not the manifest.
     assert dict(outcome.diagnostics.policy_sources)["batch.backend"] in (

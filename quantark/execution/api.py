@@ -36,6 +36,7 @@ class PricingSession:
         supplied_leases = context.lease_manager
         self._owned_cache = None
         self._owned_leases = None
+        self._owned_draw_repo = None
         if (supplied_cache is None) != (supplied_leases is None):
             from quantark.util.exceptions import ValidationError
 
@@ -53,15 +54,29 @@ class PricingSession:
                 )
         else:
             import dataclasses
+            import os
 
             from quantark.execution.cache.artifacts import PreparedArtifactCache
             from quantark.execution.leases import ResourceLeaseManager
 
             budget = context.resource_budget
+            # Safe auto budget (spec section 11.1), applied ONLY to the
+            # session-owned default: never upgrade env-resolved or explicit
+            # budgets. Batch tasks hold per-task slots (Phase 2), so the
+            # Phase-1 default max_in_flight=1 would serialize every
+            # threaded plan.
+            upgrades = {}
             if budget.artifact_cache_bytes is None:
-                budget = dataclasses.replace(
-                    budget, artifact_cache_bytes=512 * 2**20
-                )
+                upgrades["artifact_cache_bytes"] = 512 * 2**20
+            if budget.draw_cache_bytes is None:
+                upgrades["draw_cache_bytes"] = 512 * 2**20
+            cpus = os.cpu_count() or 1
+            if budget.max_threads == 1:
+                upgrades["max_threads"] = cpus
+            if budget.max_in_flight == 1:
+                upgrades["max_in_flight"] = cpus
+            if upgrades:
+                budget = dataclasses.replace(budget, **upgrades)
             leases = ResourceLeaseManager(budget)
             cache = PreparedArtifactCache(leases)
             self._owned_leases = leases
@@ -69,7 +84,27 @@ class PricingSession:
             context = dataclasses.replace(
                 context, resource_budget=budget,
                 lease_manager=leases, artifact_cache=cache,
+                draw_repository=None,  # rebuilt below on the owned leases
             )
+        # DrawRepository shares the SAME budget domain: a supplied one must
+        # be backed by the (possibly supplied) lease manager; if absent the
+        # session creates and owns one on that manager.
+        if context.draw_repository is not None:
+            if context.draw_repository.lease_manager is not context.lease_manager:
+                from quantark.util.exceptions import ValidationError
+
+                raise ValidationError(
+                    "supplied draw_repository is not backed by the session "
+                    "lease_manager; budget domains would split"
+                )
+        else:
+            import dataclasses
+
+            from quantark.execution.cache.draws import DrawRepository
+
+            repo = DrawRepository(context.lease_manager)
+            self._owned_draw_repo = repo
+            context = dataclasses.replace(context, draw_repository=repo)
         self._context = context
         self._closed = False
 
@@ -122,6 +157,8 @@ class PricingSession:
         )
 
     def close(self) -> None:
+        if not self._closed and self._owned_draw_repo is not None:
+            self._owned_draw_repo.close()
         if not self._closed and self._owned_cache is not None:
             self._owned_cache.close()
         if not self._closed and self._owned_leases is not None:

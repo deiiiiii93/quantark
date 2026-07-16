@@ -333,3 +333,71 @@ class TestDCNLocalVolAdapter:
             )
         assert outcome.value == direct
         assert outcome.manifest.preparation_fingerprint is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: session-owned DrawRepository
+# ---------------------------------------------------------------------------
+
+def test_session_owns_draw_repository_and_closes_it():
+    from quantark.execution.errors import PreparationError
+
+    session = PricingSession()
+    repo = session.context.draw_repository
+    assert repo is not None
+    assert repo.lease_manager is session.context.lease_manager
+    session.close()
+    with pytest.raises(PreparationError):
+        repo.normals_handle(seed=1, n_paths=8, dim=2, batch_id=0)
+
+
+def test_supplied_draw_repository_must_share_lease_manager():
+    from quantark.execution.cache.artifacts import PreparedArtifactCache
+    from quantark.execution.cache.draws import DrawRepository
+    from quantark.execution.context import default_context
+    from quantark.execution.leases import ResourceLeaseManager
+    from quantark.execution.policy import ResourceBudget
+    from quantark.util.exceptions import ValidationError
+
+    budget = ResourceBudget(artifact_cache_bytes=1024, draw_cache_bytes=1024)
+    leases = ResourceLeaseManager(budget)
+    other = ResourceLeaseManager(budget)
+    cache = PreparedArtifactCache(leases)
+    foreign_repo = DrawRepository(other)
+    context = dataclasses.replace(
+        default_context(), lease_manager=leases, artifact_cache=cache,
+        draw_repository=foreign_repo,
+    )
+    with pytest.raises(ValidationError):
+        PricingSession(context)
+
+
+def test_borrowed_draw_repository_survives_session_close():
+    from quantark.execution.cache.artifacts import PreparedArtifactCache
+    from quantark.execution.cache.draws import DrawRepository
+    from quantark.execution.context import default_context
+    from quantark.execution.leases import ResourceLeaseManager
+    from quantark.execution.policy import ResourceBudget
+
+    budget = ResourceBudget(artifact_cache_bytes=1024, draw_cache_bytes=2**20)
+    leases = ResourceLeaseManager(budget)
+    cache = PreparedArtifactCache(leases)
+    repo = DrawRepository(leases)
+    context = dataclasses.replace(
+        default_context(), lease_manager=leases, artifact_cache=cache,
+        draw_repository=repo,
+    )
+    session = PricingSession(context)
+    session.close()
+    with repo.normals_handle(seed=1, n_paths=8, dim=2, batch_id=0) as h:
+        assert h.value.shape == (8, 2)
+
+
+def test_owned_default_budget_has_cpu_threads_and_in_flight():
+    import os
+
+    session = PricingSession()
+    budget = session.context.resource_budget
+    assert budget.max_threads == (os.cpu_count() or 1)
+    assert budget.max_in_flight == (os.cpu_count() or 1)
+    session.close()
