@@ -79,7 +79,11 @@ def test_every_concrete_engine_is_session_reachable():
         cls = getattr(importlib.import_module(module_path), class_name)
         fake = cls.__new__(cls)  # resolution is type-based; no construction
         adapter = registry.resolve(fake)
-        assert adapter.capabilities().adapter_id == "legacy-price", record.name
+        # Phase 2: DCN MC rows resolve to the batch adapter; everything else
+        # remains on the serial compatibility adapter.
+        assert adapter.capabilities().adapter_id in (
+            "legacy-price", "dcn-batch-mc",
+        ), record.name
         assert adapter.call_shape == record.call_shape, record.name
         price = getattr(cls, "price", None)
         assert callable(price), f"{record.name} has no price method"
