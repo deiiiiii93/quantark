@@ -25,7 +25,13 @@ from .qmc_variance_reduction import (
     gbm_control_variate,
     apply_variance_reduction_to_normals,
 )
-from .qmc_rqmc_driver import RQMCResult, run_rqmc
+from .qmc_rqmc_driver import (
+    RQMCCheckpoint,
+    RQMCResult,
+    RQMCRunSpec,
+    run_rqmc,
+    run_rqmc_traced,
+)
 
 __all__ = [
     "RandomStream",
@@ -42,6 +48,9 @@ __all__ = [
     "importance_sampling_weights",
     "gbm_control_variate",
     "apply_variance_reduction_to_normals",
+    "RQMCCheckpoint",
     "RQMCResult",
+    "RQMCRunSpec",
     "run_rqmc",
+    "run_rqmc_traced",
 ]

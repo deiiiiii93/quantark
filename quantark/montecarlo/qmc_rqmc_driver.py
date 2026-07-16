@@ -46,6 +46,122 @@ class RQMCResult:
     batch_means: np.ndarray
 
 
+@dataclass(frozen=True)
+class RQMCCheckpoint:
+    """Post-batch stopping-criterion evaluation record (spec section 8.4).
+
+    ``std_error`` is None strictly before ``min_batches`` (the criterion is
+    not evaluated there); ``stopped`` marks the checkpoint at which the run
+    terminated (target reached or ``max_batches`` exhausted).
+    """
+
+    batch_index: int
+    batch_mean: float
+    running_mean: float
+    std_error: Optional[float]
+    stopped: bool
+
+
+@dataclass(frozen=True)
+class RQMCRunSpec:
+    """Engine-provided description of one adaptive RQMC run.
+
+    ``finalize`` assembles the engine-native result object from the
+    RQMCResult; it is the SAME callable on the direct and session paths, so
+    result assembly (including any extra statistics batch) is shared code.
+    """
+
+    pricer_fn: PricerFn
+    path_generator: object
+    max_batches: int
+    min_batches: int
+    target_std: float
+    paths_per_batch: int
+    time_steps: int
+    scheme: str
+    finalize: object  # Callable[[RQMCResult], engine-native result]
+    product: object = None  # the priced product (session postamble needs it)
+
+
+def run_rqmc_traced(
+    pricer_fn: PricerFn,
+    path_generator: PathGenerator,
+    max_batches: int,
+    target_std: float,
+    min_batches: int = 1,
+) -> Tuple[RQMCResult, Tuple[RQMCCheckpoint, ...]]:
+    """run_rqmc with a per-batch checkpoint trace (spec section 8.4).
+
+    This is THE stopping-loop implementation; ``run_rqmc`` delegates here,
+    so direct and session executions share one arithmetic path by
+    construction.
+    """
+    if max_batches <= 0:
+        raise ValueError("max_batches must be positive")
+    if min_batches <= 0:
+        raise ValueError("min_batches must be positive")
+    if min_batches > max_batches:
+        raise ValueError("min_batches cannot exceed max_batches")
+    if target_std <= 0.0:
+        raise ValueError("target_std must be positive")
+
+    batch_means = []
+    checkpoints = []
+    n_paths_per_batch = path_generator.num_paths
+
+    # Welford's algorithm over batch means
+    mean = 0.0
+    m2 = 0.0
+
+    for batch_id in range(max_batches):
+        paths, aux = path_generator.generate_paths(batch_id=batch_id, return_aux=True)
+        payoffs = pricer_fn(paths, aux)
+        payoffs = np.asarray(payoffs, dtype=float)
+        if payoffs.ndim != 1 or payoffs.shape[0] != n_paths_per_batch:
+            raise ValueError(
+                "pricer_fn must return a 1D array with one payoff per path "
+                f"(expected length {n_paths_per_batch}, got {payoffs.shape})."
+            )
+
+        batch_mean = float(payoffs.mean())
+        batch_means.append(batch_mean)
+
+        n = batch_id + 1
+        delta = batch_mean - mean
+        mean += delta / n
+        m2 += delta * (batch_mean - mean)
+
+        if n >= min_batches:
+            if n > 1:
+                variance = m2 / (n - 1)
+            else:
+                variance = 0.0
+            std_error = np.sqrt(variance / n)
+
+            stopped = bool(std_error <= target_std or n == max_batches)
+            checkpoints.append(RQMCCheckpoint(
+                batch_index=batch_id, batch_mean=batch_mean,
+                running_mean=mean, std_error=float(std_error),
+                stopped=stopped,
+            ))
+            if stopped:
+                result = RQMCResult(
+                    price=mean,
+                    std_error=std_error,
+                    total_paths=n * n_paths_per_batch,
+                    batches_used=n,
+                    batch_means=np.array(batch_means, dtype=float),
+                )
+                return result, tuple(checkpoints)
+        else:
+            checkpoints.append(RQMCCheckpoint(
+                batch_index=batch_id, batch_mean=batch_mean,
+                running_mean=mean, std_error=None, stopped=False,
+            ))
+
+    raise RuntimeError("No batches were run in RQMC driver.")
+
+
 def run_rqmc(
     pricer_fn: PricerFn,
     path_generator: PathGenerator,
@@ -83,81 +199,15 @@ def run_rqmc(
         Result object containing the estimated price, standard error,
         total number of paths used, and per-batch means.
     """
-    if max_batches <= 0:
-        raise ValueError("max_batches must be positive")
-    if min_batches <= 0:
-        raise ValueError("min_batches must be positive")
-    if min_batches > max_batches:
-        raise ValueError("min_batches cannot exceed max_batches")
-    if target_std <= 0.0:
-        raise ValueError("target_std must be positive")
-
-    batch_means = []
-    n_paths_per_batch = path_generator.num_paths
-
-    # Welford's algorithm over batch means
-    mean = 0.0
-    m2 = 0.0
-
-    for batch_id in range(max_batches):
-        paths, aux = path_generator.generate_paths(batch_id=batch_id, return_aux=True)
-        payoffs = pricer_fn(paths, aux)
-        payoffs = np.asarray(payoffs, dtype=float)
-        if payoffs.ndim != 1 or payoffs.shape[0] != n_paths_per_batch:
-            raise ValueError(
-                "pricer_fn must return a 1D array with one payoff per path "
-                f"(expected length {n_paths_per_batch}, got {payoffs.shape})."
-            )
-
-        batch_mean = float(payoffs.mean())
-        batch_means.append(batch_mean)
-
-        n = batch_id + 1
-        delta = batch_mean - mean
-        mean += delta / n
-        m2 += delta * (batch_mean - mean)
-
-        if n >= min_batches:
-            if n > 1:
-                variance = m2 / (n - 1)
-            else:
-                variance = 0.0
-            std_error = np.sqrt(variance / n)
-
-            if std_error <= target_std or n == max_batches:
-                return RQMCResult(
-                    price=mean,
-                    std_error=std_error,
-                    total_paths=n * n_paths_per_batch,
-                    batches_used=n,
-                    batch_means=np.array(batch_means, dtype=float),
-                )
-
-    # Fallback (should not normally reach here)
-    if len(batch_means) == 0:
-        raise RuntimeError("No batches were run in RQMC driver.")
-
-    n = len(batch_means)
-    batch_means_arr = np.array(batch_means, dtype=float)
-    mean = float(batch_means_arr.mean())
-    if n > 1:
-        variance = float(batch_means_arr.var(ddof=1))
-    else:
-        variance = 0.0
-    std_error = np.sqrt(variance / n)
-
-    return RQMCResult(
-        price=mean,
-        std_error=std_error,
-        total_paths=n * n_paths_per_batch,
-        batches_used=n,
-        batch_means=batch_means_arr,
-    )
+    return run_rqmc_traced(
+        pricer_fn, path_generator, max_batches, target_std, min_batches
+    )[0]
 
 
 __all__ = [
+    "RQMCCheckpoint",
     "RQMCResult",
+    "RQMCRunSpec",
     "run_rqmc",
+    "run_rqmc_traced",
 ]
-
-
