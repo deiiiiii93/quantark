@@ -210,3 +210,117 @@ class TestAutocallableAdaptiveAdapter:
         assert lock.locked()
         self._close(prepared)
         assert not lock.locked()
+
+
+def _ko_reset_product():
+    from quantark.asset.equity.product.option.ko_reset_snowball_option import (
+        KnockOutResetSnowballOption,
+        PostKOScheduleMode,
+    )
+    from quantark.asset.equity.product.option.snowball_config import BarrierConfig
+    from quantark.util.enum import ObservationType
+
+    pre = BarrierConfig(
+        ko_barrier=105.0, ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+        ki_barrier=85.0, ki_observation_type=ObservationType.CONTINUOUS,
+        ki_continuous=True,
+    )
+    post = BarrierConfig(
+        ko_barrier=98.0, ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+    )
+    return KnockOutResetSnowballOption(
+        initial_price=100.0, strike=100.0,
+        barrier_config=pre, post_barrier_config=post,
+        contract_multiplier=1.0, maturity=1.0, is_reverse=False,
+        post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+    )
+
+
+class TestKernelAdaptiveDispatch:
+    def _assert_session_bitwise(self, make_engine, product):
+        from quantark.execution import PricingSession
+
+        env = _eq_flat_env()
+        direct = make_engine()
+        expected = direct.price(product, env)
+        expected_result = direct.get_last_result()
+
+        from quantark.execution.contracts import PricingRequest
+        with PricingSession() as session:
+            outcome = session.execute(
+                make_engine(),
+                PricingRequest(product=product, pricing_env=env),
+            )
+        assert outcome.value == expected
+        econ = dict(outcome.normalized_economics)
+        assert econ["pv"] == expected
+        assert econ["std_error"] == float(expected_result.std_error)
+        assert outcome.manifest.adapter_id == "autocallable-adaptive-mc"
+        assert outcome.manifest.plan_fingerprint is not None
+        records = outcome.diagnostics.records
+        assert (
+            f"adaptive:batches_used={expected_result.batches_used}" in records
+        )
+        assert any(
+            r.startswith("adaptive:trace_fingerprint=") for r in records
+        )
+        return outcome
+
+    def test_session_price_bitwise_vs_direct_snowball(self):
+        self._assert_session_bitwise(_rqmc_snowball_engine, _snowball())
+
+    def test_session_price_bitwise_vs_direct_ko_reset(self):
+        self._assert_session_bitwise(_rqmc_snowball_engine, _ko_reset_product())
+
+    def test_session_price_bitwise_vs_direct_phoenix(self):
+        self._assert_session_bitwise(_rqmc_phoenix_engine, _phoenix())
+
+    def test_non_rqmc_method_falls_to_native(self):
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.execution import PricingSession
+        from quantark.execution.contracts import PricingRequest
+        from quantark.util.enum.engine_enums import MonteCarloMethod
+
+        product, env = _snowball(), _eq_flat_env()
+
+        def make_engine():
+            return SnowballMCEngine(
+                params=_rqmc_params(), method=MonteCarloMethod.QUASI,
+            )
+
+        expected = make_engine().price(product, env)
+        with PricingSession() as session:
+            outcome = session.execute(
+                make_engine(),
+                PricingRequest(product=product, pricing_env=env),
+            )
+        assert outcome.value == expected
+        assert outcome.manifest.adapter_id == "autocallable-adaptive-mc"
+        assert outcome.manifest.plan_fingerprint is None
+        assert not any(
+            r.startswith("adaptive:") for r in outcome.diagnostics.records
+        )
+
+    def test_event_stats_operation_unchanged(self):
+        from quantark.execution import PricingSession
+        from quantark.execution.contracts import PricingOperation, PricingRequest
+
+        product, env = _snowball(), _eq_flat_env()
+        direct = _rqmc_snowball_engine().calculate_event_stats(product, env)
+        with PricingSession() as session:
+            outcome = session.execute(
+                _rqmc_snowball_engine(),
+                PricingRequest(
+                    product=product, pricing_env=env,
+                    operation=PricingOperation.EVENT_STATS,
+                ),
+            )
+        import numpy as np
+        assert np.array_equal(
+            np.asarray(outcome.value.ko_probability),
+            np.asarray(direct.ko_probability),
+        )

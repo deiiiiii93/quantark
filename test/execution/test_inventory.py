@@ -79,10 +79,11 @@ def test_every_concrete_engine_is_session_reachable():
         cls = getattr(importlib.import_module(module_path), class_name)
         fake = cls.__new__(cls)  # resolution is type-based; no construction
         adapter = registry.resolve(fake)
-        # Phase 2: DCN MC rows resolve to the batch adapter; everything else
-        # remains on the serial compatibility adapter.
+        # Phase 2: DCN MC rows resolve to the batch adapter; Phase 3:
+        # Snowball/Phoenix rows resolve to the adaptive adapter; everything
+        # else remains on the serial compatibility adapter.
         assert adapter.capabilities().adapter_id in (
-            "legacy-price", "dcn-batch-mc",
+            "legacy-price", "dcn-batch-mc", "autocallable-adaptive-mc",
         ), record.name
         assert adapter.call_shape == record.call_shape, record.name
         price = getattr(cls, "price", None)

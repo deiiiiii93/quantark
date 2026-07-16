@@ -87,6 +87,9 @@ def test_default_registry_covers_engine_family_roots():
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines.HestonDCNMCEngine",
         "quantark.asset.equity.engine.mc.dcn_vol_mc_engines."
         "CoupledCoarseHestonDCNMCEngine",
+        # Phase 3: adaptive RQMC compatibility (non-exact: subclass-safe)
+        "quantark.asset.equity.engine.mc.snowball_mc_engine.SnowballMCEngine",
+        "quantark.asset.equity.engine.mc.phoenix_mc_engine.PhoenixMCEngine",
     }
     assert set(registry.registered_paths()) == expected
 

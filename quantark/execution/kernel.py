@@ -14,6 +14,13 @@ the backends acquire one task slot PER EXECUTING BATCH, so
 ``ResourceBudget.max_in_flight`` bounds concurrent batch execution; the
 kernel therefore does not also hold its dispatch-wide slot around a batch
 plan. Non-batch dispatches keep the Phase-1 dispatch-wide slot.
+
+Phase 3 adds the adaptive path: when the resolved adapter implements
+``plan_adaptive`` and returns a non-None ``AdaptivePlan``, the kernel runs
+``execute_adaptive`` (sequential compatibility mode, spec section 8.4)
+under the dispatch-wide slot, stamps the plan fingerprint into the
+manifest, and records the complete checkpoint-trace fingerprint in
+diagnostics; a None plan falls through to the native legacy call.
 """
 import time
 
@@ -123,7 +130,33 @@ class ExecutionKernel:
                 t_prep = time.perf_counter()
                 prepared = adapter.prepare(engine, request, context)
                 prep_seconds = time.perf_counter() - t_prep
-            if batch_capable:
+            executed = False
+            if hasattr(adapter, "plan_adaptive"):
+                adaptive_plan = adapter.plan_adaptive(
+                    engine, request, prepared, context
+                )
+                if adaptive_plan is not None:
+                    plan_fingerprint = try_fingerprint(adaptive_plan)
+                    value, economics, trace = adapter.execute_adaptive(
+                        engine, adaptive_plan, prepared, context
+                    )
+                    batch_count = len(trace)
+                    clamp_records.append(
+                        f"adaptive:batches_used={len(trace)}"
+                    )
+                    clamp_records.append(
+                        "adaptive:stopped_early="
+                        f"{len(trace) < adaptive_plan.max_batches}"
+                    )
+                    # Complete-trace evidence (plan-gate finding
+                    # 2026-07-16): a deterministic fingerprint of every
+                    # checkpoint value, so two runs with different batch
+                    # means can never produce identical records.
+                    clamp_records.append(
+                        f"adaptive:trace_fingerprint={try_fingerprint(trace)}"
+                    )
+                    executed = True
+            if not executed and batch_capable:
                 plan = adapter.plan_batches(engine, request, prepared, context)
                 plan_fingerprint = try_fingerprint(plan)
                 batch_count = plan.num_batches
@@ -132,7 +165,7 @@ class ExecutionKernel:
                 )
                 if hasattr(adapter, "project_operation"):
                     value = adapter.project_operation(value, request.operation)
-            else:
+            elif not executed:
                 value, economics = adapter.execute_native(
                     engine, request, normalized, context, prepared=prepared
                 )

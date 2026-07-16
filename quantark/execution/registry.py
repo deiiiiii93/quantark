@@ -138,6 +138,18 @@ def build_default_registry() -> AdapterRegistry:
         "CoupledCoarseHestonDCNMCEngine",
     ):
         registry.register(heston_dcn, _legacy_product_env_adapter)
+    # Phase 3: adaptive RQMC compatibility plans. NON-exact by design: the
+    # adapter drives the live engine through its own polymorphic hooks (no
+    # cloning), so every Snowball/Phoenix vol-model subclass inherits it
+    # safely.
+    registry.register(
+        "quantark.asset.equity.engine.mc.snowball_mc_engine.SnowballMCEngine",
+        _autocallable_adaptive_adapter,
+    )
+    registry.register(
+        "quantark.asset.equity.engine.mc.phoenix_mc_engine.PhoenixMCEngine",
+        _autocallable_adaptive_adapter,
+    )
     return registry
 
 
@@ -169,3 +181,11 @@ def _legacy_product_env_adapter():
     from quantark.execution.legacy_adapter import LegacyPriceAdapter
 
     return LegacyPriceAdapter(call_shape="product_env")
+
+
+def _autocallable_adaptive_adapter():
+    from quantark.asset.equity.engine.mc.autocallable_execution_adapters import (
+        AutocallableAdaptiveMCAdapter,
+    )
+
+    return AutocallableAdaptiveMCAdapter()
