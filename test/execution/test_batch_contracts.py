@@ -61,3 +61,41 @@ def test_budget_resolves_threads_and_draw_cache():
 def test_budget_default_threads_is_one_without_env():
     budget, _ = resolve_resource_budget(environ={})
     assert budget.max_threads == 1  # session upgrades to cpu_count for OWNED budgets
+
+
+def _adaptive_plan(**overrides):
+    from quantark.execution.contracts import AdaptivePlan
+
+    kw = dict(
+        plan_id="p", engine_class_path="m.C", max_batches=8, min_batches=2,
+        paths_per_batch=1024, target_std=1e-4, seed=42,
+        stream_kind="sobol-rqmc", stream_layout="batch-shifted-sobol/v1",
+        time_steps=64, dimension=64, dtype="float64",
+        scheme="SnowballMCEngine/rqmc-native/v1",
+        stopping_rule="welford-batch-means/v1",
+        checkpoint_policy="after-each-batch/v1",
+        reduction_order="batch-order-welford/v1",
+        est_task_peak_bytes=1 << 20, implementation_fingerprint="a/1",
+    )
+    kw.update(overrides)
+    return AdaptivePlan(**kw)
+
+
+class TestAdaptivePlan:
+    def test_frozen(self):
+        import dataclasses
+        plan = _adaptive_plan()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            plan.seed = 1
+
+    def test_fingerprintable(self):
+        assert try_fingerprint(_adaptive_plan()) is not None
+        assert try_fingerprint(_adaptive_plan()) == try_fingerprint(_adaptive_plan())
+        assert (
+            try_fingerprint(_adaptive_plan(seed=7))
+            != try_fingerprint(_adaptive_plan())
+        )
+
+    def test_exported(self):
+        import quantark.execution as ex
+        assert hasattr(ex, "AdaptivePlan")

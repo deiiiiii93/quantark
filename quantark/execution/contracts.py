@@ -22,6 +22,7 @@ __all__ = [
     "PricingFailure",
     "EngineCapabilities",
     "PreparedState",
+    "AdaptivePlan",
     "BatchTask",
     "BatchPlan",
     "BatchOutcome",
@@ -184,6 +185,35 @@ class BatchOutcome:
     batch_index: int
     n_paths: int
     payload: object
+
+
+@dataclass(frozen=True)
+class AdaptivePlan:
+    """Immutable adaptive RQMC plan (spec section 8.4).
+
+    Sequential COMPATIBILITY mode: the stopping criterion is evaluated
+    after the same batches in the same order as the direct path; the
+    checkpoint trace, not executor scheduling, is the reproducibility
+    record."""
+
+    plan_id: str
+    engine_class_path: str
+    max_batches: int
+    min_batches: int
+    paths_per_batch: int
+    target_std: float
+    seed: int
+    stream_kind: str        # "sobol-rqmc"
+    stream_layout: str
+    time_steps: int
+    dimension: int
+    dtype: str
+    scheme: str
+    stopping_rule: str      # "welford-batch-means/v1"
+    checkpoint_policy: str  # "after-each-batch/v1"
+    reduction_order: str    # "batch-order-welford/v1"
+    est_task_peak_bytes: int | None
+    implementation_fingerprint: str | None
 
 
 def economics_mapping(outcome) -> dict:

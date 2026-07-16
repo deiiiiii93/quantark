@@ -9,6 +9,7 @@ from quantark.execution.cache.draws import DrawRepository
 from quantark.execution.context import PricingRunContext, default_context
 from quantark.execution.contracts import (
     DEFAULT_OUTPUTS,
+    AdaptivePlan,
     BatchOutcome,
     BatchPlan,
     BatchTask,
@@ -40,6 +41,7 @@ from quantark.execution.policy import (
 
 __all__ = [
     "DEFAULT_OUTPUTS",
+    "AdaptivePlan",
     "BatchOutcome",
     "BatchPlan",
     "BatchTask",
