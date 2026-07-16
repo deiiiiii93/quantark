@@ -134,6 +134,62 @@ class _LegAccumulator:
         self.life_sum += float(life.sum())
 
 
+def _finalize_dcn_result(acc, product, seed, stderr, t0) -> "DCNMCResult":
+    """Assemble a DCNMCResult from a fully-populated accumulator.
+
+    Shared verbatim by the direct path and the execution-framework batch
+    reducer so the two can never drift arithmetically.
+    """
+    sign = product.direction_sign
+    n = acc.n
+    # legs first; pv is DEFINED as their sum (exact invariant)
+    pv_fixed = float(sign * acc.fixed_sum / n)
+    pv_ko = float(sign * acc.ko_sum / n)
+    pv_loss = float(sign * acc.loss_sum / n)
+    pv = pv_fixed + pv_ko + pv_loss
+
+    ko_probability = float(acc.ko_timing_count.sum() / n)
+    stats = DCNEventStats(
+        ki_probability=float(acc.ki_count / n),
+        ko_probability=ko_probability,
+        ko_timing_distribution=tuple(
+            float(x) for x in acc.ko_timing_count / n
+        ),
+        coupon_probability=tuple(
+            float(x) for x in acc.coupon_paid_sum / n
+        ),
+        expected_life_years=float(acc.life_sum / n),
+        prob_survive_no_ki=float(acc.survive_no_ki_count / n),
+        prob_survive_ki=float(acc.survive_ki_count / n),
+        expected_discounted_loss_leg=pv_loss,
+    )
+    return DCNMCResult(
+        pv=pv,
+        std_error=stderr,
+        num_paths=n,
+        seed=seed,
+        elapsed_seconds=time.perf_counter() - t0,
+        direction_sign=sign,
+        pv_fixed_coupons=pv_fixed,
+        pv_fixed_coupons_by_period=tuple(
+            float(sign * x) for x in acc.fixed_by_period_sum / n
+        ),
+        pv_ko_coupons=pv_ko,
+        pv_ko_coupons_by_period=tuple(
+            float(sign * x) for x in acc.ko_by_period_sum / n
+        ),
+        pv_loss_leg=pv_loss,
+        ki_probability=stats.ki_probability,
+        ko_probability=stats.ko_probability,
+        ko_timing_distribution=stats.ko_timing_distribution,
+        coupon_probability=stats.coupon_probability,
+        expected_life_years=stats.expected_life_years,
+        prob_survive_no_ki=stats.prob_survive_no_ki,
+        prob_survive_ki=stats.prob_survive_ki,
+        event_stats=stats,
+    )
+
+
 class DCNMCEngine(BaseEngine):
     """GBM MC engine for DCNOption; flat markets are just flat curves.
 
@@ -143,6 +199,10 @@ class DCNMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    # Session-path hook (execution-framework adapter clones only): a callable
+    # ``(n_dims, n_paths, batch_id) -> ndarray | None`` consulted before the
+    # engine's own generators; None on every direct-path engine.
+    _draw_provider = None
 
     def __init__(
         self,
@@ -251,52 +311,7 @@ class DCNMCEngine(BaseEngine):
             # — use num_batches >= 2 for a valid QMC error estimate.
             totals = sign * np.concatenate(acc.totals)
             stderr = float(totals.std(ddof=1) / np.sqrt(n))
-        # legs first; pv is DEFINED as their sum (exact invariant)
-        pv_fixed = float(sign * acc.fixed_sum / n)
-        pv_ko = float(sign * acc.ko_sum / n)
-        pv_loss = float(sign * acc.loss_sum / n)
-        pv = pv_fixed + pv_ko + pv_loss
-
-        ko_probability = float(acc.ko_timing_count.sum() / n)
-        stats = DCNEventStats(
-            ki_probability=float(acc.ki_count / n),
-            ko_probability=ko_probability,
-            ko_timing_distribution=tuple(
-                float(x) for x in acc.ko_timing_count / n
-            ),
-            coupon_probability=tuple(
-                float(x) for x in acc.coupon_paid_sum / n
-            ),
-            expected_life_years=float(acc.life_sum / n),
-            prob_survive_no_ki=float(acc.survive_no_ki_count / n),
-            prob_survive_ki=float(acc.survive_ki_count / n),
-            expected_discounted_loss_leg=pv_loss,
-        )
-        result = DCNMCResult(
-            pv=pv,
-            std_error=stderr,
-            num_paths=n,
-            seed=self.seed,
-            elapsed_seconds=time.perf_counter() - t0,
-            direction_sign=sign,
-            pv_fixed_coupons=pv_fixed,
-            pv_fixed_coupons_by_period=tuple(
-                float(sign * x) for x in acc.fixed_by_period_sum / n
-            ),
-            pv_ko_coupons=pv_ko,
-            pv_ko_coupons_by_period=tuple(
-                float(sign * x) for x in acc.ko_by_period_sum / n
-            ),
-            pv_loss_leg=pv_loss,
-            ki_probability=stats.ki_probability,
-            ko_probability=stats.ko_probability,
-            ko_timing_distribution=stats.ko_timing_distribution,
-            coupon_probability=stats.coupon_probability,
-            expected_life_years=stats.expected_life_years,
-            prob_survive_no_ki=stats.prob_survive_no_ki,
-            prob_survive_ki=stats.prob_survive_ki,
-            event_stats=stats,
-        )
+        result = _finalize_dcn_result(acc, product, self.seed, stderr, t0)
         self._last_result = result
         return result
 
@@ -313,6 +328,10 @@ class DCNMCEngine(BaseEngine):
     def _draws(
         self, n_dims: int, n_paths: int, batch_id: Optional[int]
     ) -> np.ndarray:
+        if self._draw_provider is not None:
+            block = self._draw_provider(n_dims, n_paths, batch_id)
+            if block is not None:
+                return block
         if self.use_sobol:
             return qmc_normals(self.seed, n_paths, n_dims, batch_id=batch_id)
         seed = self.seed + (
