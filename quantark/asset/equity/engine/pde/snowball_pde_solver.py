@@ -119,6 +119,9 @@ class SnowballPDESolver(BasePDESolver):
         self._total_tau: float = 0.0
         self._banded_cache: "OrderedDict[Tuple[float, float], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
         self._banded_cache_max_entries = self.params.banded_cache_max_entries
+        # Session-injected banded factorization pack (read-only; see
+        # BasePDESolver._session_matrix_pack for the contract).
+        self._session_banded_pack = None
         self._profile_enabled = enable_profiling
         self._profile_stats: Dict[str, float] = {}
         self._ko_records_cache: "OrderedDict[Tuple, List[ResolvedObservationRecord]]" = OrderedDict()
@@ -250,7 +253,9 @@ class SnowballPDESolver(BasePDESolver):
         A = self._build_operator_matrix(l, c, u, num_x)
 
         # Term-structure step coefficients (one set for flat inputs)
-        sc = self._build_step_coefficients(pricing_env, product.strike, t_vec, dx_vec, num_x)
+        sc = self._step_coefficients_for_solve(
+            pricing_env, product.strike, t_vec, dx_vec, num_x
+        )
         sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
         step_coeffs = None if sc.n_unique == 1 else sc
 
@@ -1715,6 +1720,11 @@ class SnowballPDESolver(BasePDESolver):
         theta: float,
         coeff_key: int = 0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        pack = self._session_banded_pack
+        if pack is not None:
+            hit = pack.get((coeff_key, round(dt, 12), round(theta, 12)))
+            if hit is not None:
+                return hit
         if not self._is_cache_enabled():
             lower = -theta * dt * l[2:-1]
             main = 1.0 - theta * dt * c[1:-1]
@@ -1754,6 +1764,23 @@ class SnowballPDESolver(BasePDESolver):
         if len(self._banded_cache) > self._banded_cache_max_entries:
             self._banded_cache.popitem(last=False)
         return banded, lower1, main1, upper1
+
+    def _pack_uses_banded(self, num_x: int) -> bool:
+        # Mirrors _time_stepping_two_surface: banded branch engages when the
+        # params request it and the interior system is non-trivial.
+        return bool(self.params.use_banded_solver) and (num_x - 2) > 2
+
+    def _pack_banded_entry(
+        self, banded: dict, step_coeffs, l, c, u, dt, theta, coeff_key
+    ) -> None:
+        # Route through _get_banded_system itself (single construction
+        # implementation) against a throwaway cache.
+        saved, self._banded_cache = self._banded_cache, OrderedDict()
+        try:
+            entry = self._get_banded_system(l, c, u, dt, theta, coeff_key=coeff_key)
+            banded[(coeff_key, round(dt, 12), round(theta, 12))] = entry
+        finally:
+            self._banded_cache = saved
 
     def _set_boundary_conditions_v0(
         self,

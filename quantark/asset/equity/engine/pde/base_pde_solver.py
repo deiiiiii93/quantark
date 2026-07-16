@@ -166,6 +166,14 @@ class BasePDESolver(BaseEngine):
         self._critical_points_cache: "OrderedDict[Tuple, Tuple[float, ...]]" = (
             OrderedDict()
         )
+        # Session-injected preparation (adapter-owned clones only; spec
+        # section 9.2). Grids/coefficients short-circuit their builders;
+        # the matrix pack is a READ-ONLY mapping consulted before the
+        # per-solve _matrix_cache — misses fall through and build locally,
+        # so correctness never depends on pack completeness.
+        self._session_grids = None
+        self._session_step_coefficients = None
+        self._session_matrix_pack = None
         # Discrete-monitoring state shared by the barrier-family solvers
         # (populated by _setup_observation_indices).
         self._observation_indices: set = set()
@@ -592,7 +600,7 @@ class BasePDESolver(BaseEngine):
         # Term-structure step coefficients: one set for flat inputs (exact
         # scalar substitution -> zero behavior change), one per unique
         # forward triple otherwise (designed per-step rebuild).
-        sc = self._build_step_coefficients(
+        sc = self._step_coefficients_for_solve(
             pricing_env, strike, t_vec, dx_vec, len(x_vec)
         )
         sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, len(x_vec))
@@ -745,6 +753,8 @@ class BasePDESolver(BaseEngine):
         q: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Construct the spatial and temporal grids for solving the PDE."""
+        if self._session_grids is not None:
+            return self._session_grids
         if not self._is_cache_enabled():
             return self._build_grids_uncached(
                 product, pricing_env, spot, sigma, tau, r, q
@@ -1029,6 +1039,23 @@ class BasePDESolver(BaseEngine):
             grade_exponent=params.grade_exponent,
         )
 
+    def _step_coefficients_for_solve(
+        self,
+        pricing_env: PricingEnvironment,
+        ref_strike: float,
+        t_vec: np.ndarray,
+        dx_vec: np.ndarray,
+        num_x: int,
+    ) -> StepCoefficients:
+        """Session-injection dispatch: an injected artifact (PRE-flat-exact;
+        the caller still applies _flat_exact_step_coefficients, which is
+        deterministic and value-identical) short-circuits the build."""
+        if self._session_step_coefficients is not None:
+            return self._session_step_coefficients
+        return self._build_step_coefficients(
+            pricing_env, ref_strike, t_vec, dx_vec, num_x
+        )
+
     def _build_step_coefficients(
         self,
         pricing_env: PricingEnvironment,
@@ -1281,6 +1308,12 @@ class BasePDESolver(BaseEngine):
         # Round dt to avoid floating point comparison issues
         key = (coeff_key, round(dt, 12), round(theta, 6))
 
+        pack = self._session_matrix_pack
+        if pack is not None:
+            hit = pack.get(key)
+            if hit is not None:
+                return hit
+
         if self._is_cache_enabled() and key in self._matrix_cache:
             return self._matrix_cache[key]
 
@@ -1530,6 +1563,87 @@ class BasePDESolver(BaseEngine):
                 if times:
                     return [t for t in times if 0 < t < tau]
         return None
+    # -- session factorization packs (spec section 9.2) --------------------
+
+    def _pack_uses_banded(self, num_x: int) -> bool:
+        """Whether the backward march for this configuration uses the banded
+        solver path (only the two-surface family does)."""
+        return False
+
+    def _pack_banded_entry(
+        self, banded: dict, step_coeffs, l, c, u, dt, theta, coeff_key
+    ) -> None:
+        raise NotImplementedError(
+            "banded packs exist only where _pack_uses_banded is True"
+        )
+
+    def _session_factorization_packs(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment, grids
+    ) -> Tuple[dict, dict]:
+        """Eagerly build the (coeff_key, dt, theta) -> matrices maps one solve
+        would lazily build, through the SAME builders the solve uses.
+
+        Numeric factorization reuse is legal only when coefficients, time
+        step, theta schedule, and scheme parameters are identical (spec
+        section 9.2); the caller keys the published pack by exactly those
+        inputs. Returns (matrix_pack, banded_pack) as plain dicts.
+        """
+        x_vec, s_vec, dx_vec, t_vec, dt_vec = grids
+        spot = pricing_env.spot
+        tau = product.get_maturity(pricing_env)
+        strike = getattr(product, "strike", spot)
+        r = pricing_env.get_rate(tau)
+        q = pricing_env.get_div_yield(tau)
+        sigma = pricing_env.get_vol(strike, tau)
+        num_x = len(x_vec)
+
+        sc = self._step_coefficients_for_solve(
+            pricing_env, strike, t_vec, dx_vec, num_x
+        )
+        sc = self._flat_exact_step_coefficients(sc, r, q, sigma, dx_vec, num_x)
+        step_coeffs = None if sc.n_unique == 1 else sc
+        l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
+        A = self._build_operator_matrix(l, c, u, num_x)
+
+        theta_by_step = BackwardOperator.theta_by_step(
+            np.asarray(t_vec),
+            np.asarray(dt_vec),
+            self.params,
+            self._get_event_times(product, tau),
+        )
+        use_banded = self._pack_uses_banded(num_x)
+        banded: dict = {}
+        saved_matrix, self._matrix_cache = self._matrix_cache, {}
+        saved_term_A = getattr(self, "_term_A_cache", {})
+        self._term_A_cache = {}
+        try:
+            I_int = sp.eye(num_x - 2, format="csc")
+            for j in range(len(t_vec) - 2, -1, -1):
+                dt = dt_vec[j]
+                theta = float(theta_by_step[j])
+                if step_coeffs is not None:
+                    k = int(step_coeffs.set_index[j])
+                    l_j, c_j, u_j = step_coeffs.lcu_sets[k]
+                else:
+                    k = 0
+                    l_j, c_j, u_j = l, c, u
+                if use_banded:
+                    self._pack_banded_entry(
+                        banded, step_coeffs, l_j, c_j, u_j, dt, theta, k
+                    )
+                else:
+                    A_j = (
+                        self._operator_matrix_for_set(step_coeffs, k, num_x)
+                        if step_coeffs is not None
+                        else A
+                    )
+                    self._get_matrices(I_int, A_j, dt, theta, coeff_key=k)
+            matrix_pack = dict(self._matrix_cache)
+        finally:
+            self._matrix_cache = saved_matrix
+            self._term_A_cache = saved_term_A
+        return matrix_pack, banded
+
     def _critical_points_cache_key(
         self,
         product: BaseEquityProduct,
