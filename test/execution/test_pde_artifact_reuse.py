@@ -132,3 +132,141 @@ class TestArtifactStates:
         assert tau == product.get_maturity(env)
         assert r == env.get_rate(tau) and q == env.get_div_yield(tau)
         assert sigma == env.get_vol(strike, tau)
+
+
+class TestBuildCountGates:
+    """Phase 4 exit-gate evidence: preparation is built once per session
+    across CRN repricings (spec section 21)."""
+
+    def test_dupire_built_once_across_crn_repricings(self, monkeypatch):
+        import quantark.asset.equity.engine.pde.pde_execution_adapters as adapters_mod
+        from quantark.volmodels import localvol
+
+        engine, product, env = _case("LocalVolSnowballPDESolver")
+        counts = {"n": 0}
+        original = localvol.build_dupire_local_vol
+
+        def counting(*args, **kwargs):
+            counts["n"] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(localvol, "build_dupire_local_vol", counting)
+        with PricingSession() as session:
+            values = [
+                session.execute(
+                    engine, PricingRequest(product=product, pricing_env=env)
+                ).value
+                for _ in range(3)
+            ]
+        assert counts["n"] == 1
+        assert values[0] == values[1] == values[2] == engine.price(product, env)
+
+    def test_grid_and_factorizations_built_once_across_crn_repricings(
+        self, monkeypatch
+    ):
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.engine.pde.spatial_grid import SpatialGrid
+
+        engine, product, env = _case("SnowballPDESolver")
+        direct = engine.price(product, env)
+        SnowballPDESolver.clear_grid_cache()  # cold class-level cache
+
+        grid_counts = {"n": 0}
+        original_build = SpatialGrid.build
+
+        def counting_build(*args, **kwargs):
+            grid_counts["n"] += 1
+            return original_build(*args, **kwargs)
+
+        monkeypatch.setattr(SpatialGrid, "build", staticmethod(counting_build))
+
+        banded_counts = {"n": 0}
+        original_banded = SnowballPDESolver._get_banded_system
+
+        def counting_banded(self, *args, **kwargs):
+            before = len(self._banded_cache)
+            out = original_banded(self, *args, **kwargs)
+            # count CONSTRUCTIONS (cache inserts), not lookups: pack hits
+            # and cache hits return without inserting.
+            banded_counts["n"] += len(self._banded_cache) - before
+            return out
+
+        monkeypatch.setattr(
+            SnowballPDESolver, "_get_banded_system", counting_banded
+        )
+
+        with PricingSession() as session:
+            values = [
+                session.execute(
+                    engine, PricingRequest(product=product, pricing_env=env)
+                ).value
+                for _ in range(3)
+            ]
+            stats = session.context.artifact_cache.stats()
+        assert values == [direct] * 3
+        assert grid_counts["n"] == 1  # one spatial-grid construction, ever
+        # Banded systems are constructed ONLY inside the single
+        # factorization-pack build (once per unique (dt, theta) key across
+        # the whole session); the three marches hit the injected pack.
+        assert 0 < banded_counts["n"] <= 4
+        assert stats["misses"] >= 3      # grid + coeffs + pack built once
+        assert stats["hits"] >= 6        # ...and reused by dispatches 2 and 3
+
+    def test_cold_cache_lv_autocallable_first_dispatch(self):
+        # Plan-gate finding: a fresh session's very FIRST LV dispatch (nothing
+        # cached anywhere) must succeed and match direct bitwise.
+        for name in ("LocalVolSnowballPDESolver", "LocalVolPhoenixPDESolver"):
+            engine, product, env = _case(name)
+            direct = engine.price(product, env)
+            with PricingSession() as session:
+                outcome = session.execute(
+                    engine, PricingRequest(product=product, pricing_env=env)
+                )
+            assert outcome.value == direct, name
+
+    def test_bumped_env_never_reuses_stale_artifacts(self):
+        from quantark.param import FlatRateCurve
+
+        engine, product, env = _case("SnowballPDESolver")
+        with PricingSession() as session:
+            base = session.execute(
+                engine, PricingRequest(product=product, pricing_env=env)
+            ).value
+            env.rate_curve = FlatRateCurve(rate=0.06)  # field REPLACEMENT
+            bumped_direct = engine.price(product, env)
+            bumped_session = session.execute(
+                engine, PricingRequest(product=product, pricing_env=env)
+            ).value
+        assert bumped_session == bumped_direct
+        assert bumped_session != base
+
+    def test_tiny_budget_bypass_stays_bitwise(self):
+        import dataclasses
+
+        from quantark.execution.cache.artifacts import PreparedArtifactCache
+        from quantark.execution.context import default_context
+        from quantark.execution.leases import ResourceLeaseManager
+
+        engine, product, env = _case("SnowballPDESolver")
+        direct = engine.price(product, env)
+        ctx = default_context()
+        budget = dataclasses.replace(
+            ctx.resource_budget,
+            artifact_cache_bytes=1024,   # too small to admit anything real
+            draw_cache_bytes=1024,
+        )
+        leases = ResourceLeaseManager(budget)
+        cache = PreparedArtifactCache(leases)
+        ctx = dataclasses.replace(
+            ctx, resource_budget=budget, lease_manager=leases,
+            artifact_cache=cache,
+        )
+        with PricingSession(context=ctx) as session:
+            values = [
+                session.execute(
+                    engine, PricingRequest(product=product, pricing_env=env)
+                ).value
+                for _ in range(2)
+            ]
+        assert values == [direct] * 2
+        assert cache.stats()["bytes_in_use"] == 0  # nothing retained
