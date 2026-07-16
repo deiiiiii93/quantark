@@ -169,3 +169,14 @@ def test_close_is_idempotent_and_releases_bytes():
     assert mgr.pool_bytes("artifact_cache") == 0
     with pytest.raises(PreparationError):
         cache.get_or_build(_desc("a"), lambda: "A", size_bytes=10)
+
+
+def test_cache_pool_is_parametrizable():
+    budget = ResourceBudget(draw_cache_bytes=1024, artifact_cache_bytes=0)
+    mgr = ResourceLeaseManager(budget)
+    cache = PreparedArtifactCache(mgr, pool="draw_cache")
+    desc = _desc()
+    handle = cache.get_or_build(desc, lambda: b"x" * 10, size_bytes=10)
+    assert mgr.pool_bytes("draw_cache") == 10
+    assert mgr.pool_bytes("artifact_cache") == 0
+    handle.close()

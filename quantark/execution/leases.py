@@ -19,7 +19,11 @@ class ResourceLeaseManager:
         self._lock = threading.Lock()
         self._in_flight = 0
         self._pools: dict = {}
-        self._capacities = {"artifact_cache": budget.artifact_cache_bytes}
+        self._capacities = {
+            "artifact_cache": budget.artifact_cache_bytes,
+            "draw_cache": budget.draw_cache_bytes,
+            "task_scratch": budget.total_memory_bytes,
+        }
         self._closed = False
 
     def task_slot(self):

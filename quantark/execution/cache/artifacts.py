@@ -67,11 +67,10 @@ class _InFlight:
 
 
 class PreparedArtifactCache:
-    _POOL = "artifact_cache"
-
-    def __init__(self, lease_manager):
+    def __init__(self, lease_manager, pool: str = "artifact_cache"):
         self._leases = lease_manager
         self.lease_manager = lease_manager  # public: pairing identity check
+        self._pool = pool
         self._lock = threading.Lock()
         self._entries: "OrderedDict[ArtifactDescriptor, _Entry]" = OrderedDict()
         self._in_flight: dict = {}
@@ -154,7 +153,7 @@ class PreparedArtifactCache:
         except BaseException as exc:
             with self._lock:
                 if reserved:
-                    self._leases.release_bytes(size_bytes, self._POOL)
+                    self._leases.release_bytes(size_bytes, self._pool)
                 flight = self._in_flight.pop(descriptor, None)
             if flight is not None:
                 flight.error = exc
@@ -166,7 +165,7 @@ class PreparedArtifactCache:
                 # close() raced the build: never publish or retain bytes
                 # past session lifetime.
                 if reserved:
-                    self._leases.release_bytes(size_bytes, self._POOL)
+                    self._leases.release_bytes(size_bytes, self._pool)
                 flight = self._in_flight.pop(descriptor, None)
                 error = PreparationError("cache closed during build")
                 if flight is not None:
@@ -180,7 +179,7 @@ class PreparedArtifactCache:
                 # must reflect real bytes, never the estimate (an oversize
                 # surface admitted under an understated charge would defeat
                 # the budget).
-                self._leases.release_bytes(size_bytes, self._POOL)
+                self._leases.release_bytes(size_bytes, self._pool)
                 reserved = self._reserve(actual_bytes)
             if reserved:
                 entry = _Entry(descriptor, value, actual_bytes)
@@ -199,7 +198,7 @@ class PreparedArtifactCache:
         as needed; False means bypass (build uncached)."""
         while True:
             try:
-                self._leases.lease_bytes(size_bytes, self._POOL)
+                self._leases.lease_bytes(size_bytes, self._pool)
                 return True
             except ResourceBudgetExceeded:
                 victim = next(
@@ -211,7 +210,7 @@ class PreparedArtifactCache:
 
     def _drop(self, descriptor, count_eviction=True):
         entry = self._entries.pop(descriptor)
-        self._leases.release_bytes(entry.size, self._POOL)
+        self._leases.release_bytes(entry.size, self._pool)
         if count_eviction:
             self._stats["evictions"] += 1
 

@@ -39,3 +39,21 @@ def test_lease_manager_rejects_after_close():
     with pytest.raises(ResourceBudgetExceeded):
         with mgr.task_slot():
             pass
+
+
+def test_draw_cache_and_task_scratch_pools_enforced():
+    budget = ResourceBudget(
+        draw_cache_bytes=100, total_memory_bytes=200, artifact_cache_bytes=50
+    )
+    mgr = ResourceLeaseManager(budget)
+    mgr.lease_bytes(90, "draw_cache")
+    with pytest.raises(ResourceBudgetExceeded):
+        mgr.lease_bytes(20, "draw_cache")
+    mgr.lease_bytes(200, "task_scratch")
+    with pytest.raises(ResourceBudgetExceeded):
+        mgr.lease_bytes(1, "task_scratch")
+
+
+def test_task_scratch_unlimited_when_total_memory_unset():
+    mgr = ResourceLeaseManager(ResourceBudget())
+    mgr.lease_bytes(10**12, "task_scratch")  # no capacity -> no limit
