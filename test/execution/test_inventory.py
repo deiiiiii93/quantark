@@ -97,3 +97,49 @@ def test_every_concrete_engine_is_session_reachable():
             f"{record.name}: price arity {len(params)} does not fit "
             f"declared call shape {record.call_shape}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 exit gate: batch-capability audit
+# ---------------------------------------------------------------------------
+
+def test_every_row_has_audited_batch_state():
+    from quantark.execution.inventory import BATCH_STATES
+
+    for record in ENGINE_INVENTORY:
+        assert record.batch_state in BATCH_STATES, record.name
+        if record.engine_type == "mc" and record.batch_state != "batch_capable":
+            assert record.batch_rationale.strip(), (
+                f"{record.name}: non-capable MC rows need a specific rationale"
+            )
+
+
+def test_batch_capable_rows_resolve_to_batch_adapters():
+    registry = build_default_registry()
+    registry.freeze()
+    capable = [
+        r for r in ENGINE_INVENTORY if r.batch_state == "batch_capable"
+    ]
+    assert {r.name for r in capable} == {"DCNMCEngine", "LocalVolDCNMCEngine"}
+    for record in capable:
+        module_path, _, cls_name = record.import_path.rpartition(".")
+        engine_cls = getattr(importlib.import_module(module_path), cls_name)
+        adapter = registry.resolve_class(engine_cls)
+        assert hasattr(adapter, "plan_batches"), record.name
+
+
+def test_heston_dcn_family_is_pinned_off_the_batch_adapter():
+    # MRO containment: subclasses of DCNMCEngine whose draw pipeline is not
+    # repository-routed must NOT inherit the batch capability.
+    from quantark.asset.equity.engine.mc import (
+        CoupledCoarseHestonDCNMCEngine,
+        HestonDCNMCEngine,
+        QEDCNMCEngine,
+    )
+
+    registry = build_default_registry()
+    registry.freeze()
+    for cls in (HestonDCNMCEngine, QEDCNMCEngine, CoupledCoarseHestonDCNMCEngine):
+        adapter = registry.resolve_class(cls)
+        assert not hasattr(adapter, "plan_batches"), cls.__name__
+        assert adapter.capabilities().adapter_id == "legacy-price"

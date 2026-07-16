@@ -42,14 +42,17 @@ class AdapterRegistry:
         return tuple(self._factories)
 
     def resolve(self, engine):
-        for cls in type(engine).__mro__:
+        return self.resolve_class(type(engine))
+
+    def resolve_class(self, engine_class):
+        for cls in engine_class.__mro__:
             key = f"{cls.__module__}.{cls.__qualname__}"
             factory = self._factories.get(key)
             if factory is not None:
                 return factory()
         raise CapabilityError(
             f"no execution adapter registered for engine type "
-            f"{type(engine).__module__}.{type(engine).__qualname__}"
+            f"{engine_class.__module__}.{engine_class.__qualname__}"
         )
 
 

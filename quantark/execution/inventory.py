@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 __all__ = [
     "InventoryRecord",
+    "BATCH_STATES",
     "ENGINE_INVENTORY",
     "SUPPORTING_EXPORTS",
     "DISCOVERY_SURFACES",
@@ -24,6 +25,36 @@ __all__ = [
 
 _OWNER = "execution-framework"
 _MILESTONE = "phase-1+"
+
+# Phase 2 exit gate (spec section 21): every fixed-batch exported MC engine
+# either advertises the batch capability or carries a specific rationale.
+BATCH_STATES = ("batch_capable", "temporary_legacy", "not_applicable")
+
+_BATCH_ADAPTIVE = (
+    "adaptive RQMC compatibility stopping is sequential by contract "
+    "(spec 8.4); parallel-wave is a Phase 3 opt-in plan"
+)
+_BATCH_SINGLE_SOLVE = (
+    "single-solve engine without a batch axis; introducing one is a changed "
+    "numerical plan - re-scope on Phase 2 benchmark evidence (spec 21)"
+)
+_BATCH_HESTON_DCN = (
+    "Heston draw pipeline (paired normal+uniform streams) not yet routed "
+    "through DrawRepository; Phase 3 model families"
+)
+_BATCH_LSM = (
+    "LSM regression couples all paths cross-sectionally; no independent "
+    "batch decomposition exists"
+)
+_BATCH_FX = (
+    "FX MC engines are single-solve on the shared montecarlo layer; batch "
+    "decomposition re-scoped on Phase 2 benchmark evidence"
+)
+_BATCH_PDE = (
+    "PDE solve has no batch axis; Phase 4 covers PDE preparation and rich "
+    "outcomes"
+)
+_BATCH_NON_MC = "not an MC engine; batch capability does not apply"
 
 
 @dataclass(frozen=True)
@@ -42,15 +73,20 @@ class InventoryRecord:
     owner: str | None = _OWNER
     milestone: str | None = _MILESTONE
     reason: str | None = None
+    batch_state: str = "not_applicable"
+    batch_rationale: str = _BATCH_NON_MC
 
 
-def _eq_mc(name, model, product, planning="fixed", adoption_state="temporary_legacy"):
+def _eq_mc(name, model, product, planning="fixed",
+           adoption_state="temporary_legacy",
+           batch_state="temporary_legacy", batch_rationale=_BATCH_SINGLE_SOLVE):
     return InventoryRecord(
         name=name,
         import_path=f"quantark.asset.equity.engine.mc.{name}",
         engine_type="mc", asset_family="equity", model_family=model,
         product_family=product, planning=planning, call_shape="product_env",
         adoption_state=adoption_state,
+        batch_state=batch_state, batch_rationale=batch_rationale,
     )
 
 
@@ -69,16 +105,22 @@ def _eq_pde(name, model, product, role="engine", adoption_state=None):
         owner=None if role == "abstract" else _OWNER,
         milestone=None if role == "abstract" else _MILESTONE,
         reason="abstract base class" if role == "abstract" else None,
+        batch_state="not_applicable", batch_rationale=_BATCH_PDE,
     )
 
 
 def _fx(name, engine_type, model, product):
     sub = "mc" if engine_type == "mc" else "pde"
+    if engine_type == "mc":
+        batch_state, batch_rationale = "temporary_legacy", _BATCH_FX
+    else:
+        batch_state, batch_rationale = "not_applicable", _BATCH_PDE
     return InventoryRecord(
         name=name,
         import_path=f"quantark.asset.fx.engine.{sub}.{name}",
         engine_type=engine_type, asset_family="fx", model_family=model,
         product_family=product, planning="fixed", call_shape="product_env",
+        batch_state=batch_state, batch_rationale=batch_rationale,
     )
 
 
@@ -89,7 +131,8 @@ ENGINE_INVENTORY = (
     _eq_mc("HestonMCEngine", "heston", "vanilla"),
     _eq_mc("HestonSLVMCEngine", "slv", "vanilla"),
     _eq_mc("SABRMCEngine", "sabr", "vanilla"),
-    _eq_mc("AmericanOptionMCEngine", "bsm", "american"),
+    _eq_mc("AmericanOptionMCEngine", "bsm", "american",
+           batch_state="not_applicable", batch_rationale=_BATCH_LSM),
     _eq_mc("AsianOptionMCEngine", "bsm", "asian"),
     _eq_mc("DigitalOptionMCEngine", "bsm", "digital"),
     _eq_mc("BarrierOptionMCEngine", "bsm", "barrier"),
@@ -100,24 +143,57 @@ ENGINE_INVENTORY = (
     _eq_mc("DoubleSharkfinOptionMCEngine", "bsm", "sharkfin"),
     _eq_mc("RangeAccrualMCEngine", "bsm", "range_accrual"),
     _eq_mc("AccumulatorMCEngine", "bsm", "accumulator"),
-    _eq_mc("SnowballMCEngine", "bsm", "snowball", planning="both"),
-    _eq_mc("LocalVolSnowballMCEngine", "lv", "snowball", planning="both"),
-    _eq_mc("HestonSnowballMCEngine", "heston", "snowball", planning="both"),
-    _eq_mc("QESnowballMCEngine", "heston", "snowball", planning="both"),
-    _eq_mc("HestonSLVSnowballMCEngine", "slv", "snowball", planning="both"),
-    _eq_mc("HestonSLVQESnowballMCEngine", "slv", "snowball", planning="both"),
-    _eq_mc("PhoenixMCEngine", "bsm", "phoenix", planning="both"),
-    _eq_mc("LocalVolPhoenixMCEngine", "lv", "phoenix", planning="both"),
-    _eq_mc("HestonPhoenixMCEngine", "heston", "phoenix", planning="both"),
-    _eq_mc("QEPhoenixMCEngine", "heston", "phoenix", planning="both"),
-    _eq_mc("HestonSLVPhoenixMCEngine", "slv", "phoenix", planning="both"),
-    _eq_mc("HestonSLVQEPhoenixMCEngine", "slv", "phoenix", planning="both"),
-    _eq_mc("DCNMCEngine", "bsm", "dcn", planning="both"),
+    _eq_mc("SnowballMCEngine", "bsm", "snowball", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("LocalVolSnowballMCEngine", "lv", "snowball", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("HestonSnowballMCEngine", "heston", "snowball", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("QESnowballMCEngine", "heston", "snowball", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("HestonSLVSnowballMCEngine", "slv", "snowball", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("HestonSLVQESnowballMCEngine", "slv", "snowball", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("PhoenixMCEngine", "bsm", "phoenix", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("LocalVolPhoenixMCEngine", "lv", "phoenix", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("HestonPhoenixMCEngine", "heston", "phoenix", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("QEPhoenixMCEngine", "heston", "phoenix", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("HestonSLVPhoenixMCEngine", "slv", "phoenix", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("HestonSLVQEPhoenixMCEngine", "slv", "phoenix", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_ADAPTIVE),
+    _eq_mc("DCNMCEngine", "bsm", "dcn", planning="both",
+           adoption_state="supported", batch_state="batch_capable",
+           batch_rationale=""),
     _eq_mc("LocalVolDCNMCEngine", "lv", "dcn", planning="both",
-           adoption_state="supported"),
-    _eq_mc("HestonDCNMCEngine", "heston", "dcn", planning="both"),
-    _eq_mc("QEDCNMCEngine", "heston", "dcn", planning="both"),
-    _eq_mc("CoupledCoarseHestonDCNMCEngine", "heston", "dcn", planning="both"),
+           adoption_state="supported", batch_state="batch_capable",
+           batch_rationale=""),
+    _eq_mc("HestonDCNMCEngine", "heston", "dcn", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_HESTON_DCN),
+    _eq_mc("QEDCNMCEngine", "heston", "dcn", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_HESTON_DCN),
+    _eq_mc("CoupledCoarseHestonDCNMCEngine", "heston", "dcn", planning="both",
+           batch_state="temporary_legacy",
+           batch_rationale=_BATCH_HESTON_DCN),
     # --- Equity PDE (24 concrete + abstract base) ---
     _eq_pde("BasePDESolver", "dispatch", "any", role="abstract"),
     _eq_pde("EuropeanPDESolver", "bsm", "vanilla"),
@@ -172,6 +248,7 @@ ENGINE_INVENTORY = (
         engine_type="mc", asset_family="credit", model_family="copula",
         product_family="basket_cds", planning="fixed",
         call_shape="product_env",
+        batch_state="temporary_legacy", batch_rationale=_BATCH_SINGLE_SOLVE,
     ),
     # --- Bond PDE (2 + facade) ---
     InventoryRecord(
