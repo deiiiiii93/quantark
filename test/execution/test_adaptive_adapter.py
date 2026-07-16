@@ -118,3 +118,95 @@ class TestPhoenixRQMCSpecSeam:
         assert result.batches_used == direct_result.batches_used
         assert result.ko_probability == direct_result.ko_probability
         assert session_like.get_last_result() is result
+
+
+class TestAutocallableAdaptiveAdapter:
+    def _adapter(self):
+        from quantark.asset.equity.engine.mc.autocallable_execution_adapters import (
+            AutocallableAdaptiveMCAdapter,
+        )
+
+        return AutocallableAdaptiveMCAdapter()
+
+    def _context(self):
+        from quantark.execution.context import default_context
+
+        return default_context()
+
+    def _close(self, prepared):
+        for handle in prepared.handles:
+            handle.close()
+
+    def test_plan_shape(self):
+        from quantark.execution.contracts import PricingRequest
+
+        adapter, engine = self._adapter(), _rqmc_snowball_engine()
+        request = PricingRequest(product=_snowball(), pricing_env=_eq_flat_env())
+        context = self._context()
+        prepared = adapter.prepare(engine, request, context)
+        try:
+            plan = adapter.plan_adaptive(engine, request, prepared, context)
+            assert plan is not None
+            assert plan.max_batches == 6 and plan.min_batches == 2
+            assert plan.paths_per_batch == prepared.payload.paths_per_batch
+            assert plan.stopping_rule == "welford-batch-means/v1"
+            assert plan.engine_class_path.endswith("SnowballMCEngine")
+        finally:
+            self._close(prepared)
+
+    def test_plan_none_for_non_rqmc(self):
+        from quantark.asset.equity.engine.mc import SnowballMCEngine
+        from quantark.execution.contracts import PricingRequest
+        from quantark.util.enum.engine_enums import MonteCarloMethod
+
+        adapter = self._adapter()
+        engine = SnowballMCEngine(
+            params=_rqmc_params(), method=MonteCarloMethod.QUASI,
+        )
+        request = PricingRequest(product=_snowball(), pricing_env=_eq_flat_env())
+        context = self._context()
+        prepared = adapter.prepare(engine, request, context)
+        try:
+            assert adapter.plan_adaptive(engine, request, prepared, context) is None
+        finally:
+            self._close(prepared)
+
+    def test_execute_bitwise_vs_direct(self):
+        from quantark.execution.contracts import PricingRequest
+
+        product, env = _snowball(), _eq_flat_env()
+        direct = _rqmc_snowball_engine()
+        expected = direct.price(product, env)
+        expected_result = direct.get_last_result()
+
+        adapter, engine = self._adapter(), _rqmc_snowball_engine()
+        request = PricingRequest(product=product, pricing_env=env)
+        context = self._context()
+        prepared = adapter.prepare(engine, request, context)
+        try:
+            plan = adapter.plan_adaptive(engine, request, prepared, context)
+            value, economics, trace = adapter.execute_adaptive(
+                engine, plan, prepared, context
+            )
+        finally:
+            self._close(prepared)
+        assert value == expected
+        econ = dict(economics)
+        assert econ["pv"] == expected
+        assert econ["std_error"] == float(expected_result.std_error)
+        assert len(trace) == expected_result.batches_used
+        assert trace[-1].stopped
+
+    def test_prepare_acquires_engine_lock_until_handles_closed(self):
+        from quantark.asset.equity.engine.mc.autocallable_execution_adapters import (
+            _engine_lock,
+        )
+        from quantark.execution.contracts import PricingRequest
+
+        adapter, engine = self._adapter(), _rqmc_snowball_engine()
+        request = PricingRequest(product=_snowball(), pricing_env=_eq_flat_env())
+        prepared = adapter.prepare(engine, request, self._context())
+        lock = _engine_lock(engine)
+        assert lock.locked()
+        self._close(prepared)
+        assert not lock.locked()
