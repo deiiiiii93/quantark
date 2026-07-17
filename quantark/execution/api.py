@@ -154,10 +154,25 @@ class PricingSession:
                 )
         return results
 
-    def run_scenarios(self, base_request, scenario_specs, engine_factory):
-        raise CapabilityError(
-            "scenario execution is not available in framework Phase 0; "
-            "it arrives with the scenario planner in Phase 5"
+    def run_scenarios(self, base_request, scenario_specs, engine_factory,
+                      *, collect_errors: bool = False) -> list:
+        """Ordered scenario execution (spec section 13).
+
+        ``base_request`` is a live ``PricingRequest`` (serial/threads
+        backends) or a ``BaseInputsRef`` naming a registered factory
+        (required for the processes/dask backends). ``engine_factory`` is
+        a callable ``parameters -> engine`` or a registered factory id.
+        Returns caller-ordered ``ScenarioOutcome`` items; with
+        ``collect_errors=True`` failed cells become ``PricingFailure``.
+        """
+        self._ensure_open()
+        from quantark.execution.scenario.planner import plan_scenarios
+        from quantark.execution.scenario.runner import run_plan
+
+        plan = plan_scenarios(base_request, scenario_specs, engine_factory)
+        return run_plan(
+            plan, base_request, engine_factory, self._context,
+            collect_errors=collect_errors,
         )
 
     def close(self) -> None:
