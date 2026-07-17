@@ -42,7 +42,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0", "pytest-xdist>=3.0.0"]
+dev = ["pytest>=7.0.0", "pytest-xdist>=3.0.0", "dask[distributed]>=2024.1.0"]
 
 [project.urls]
 Homepage = "https://github.com/deiiiiii93/quantark"

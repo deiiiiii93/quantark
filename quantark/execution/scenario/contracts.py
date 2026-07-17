@@ -93,3 +93,8 @@ class WorkerSpec:
     child_policy_values: tuple   # resolved (field, value) pairs
     child_budget_values: tuple   # resolved (field, value) pairs
     expected: tuple              # (name, value) environment fingerprints
+    import_paths: tuple = ()     # sys.path roots the CallableRef modules
+    #                              resolve from — needed by backends (Dask)
+    #                              whose workers do not inherit the parent's
+    #                              runtime sys.path; explicit and recorded,
+    #                              never an environment-variable side channel

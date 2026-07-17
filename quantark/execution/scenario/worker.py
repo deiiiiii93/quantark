@@ -89,6 +89,23 @@ def build_worker_spec(plan, base_ref, context, workers: int) -> WorkerSpec:
                 refs.append(registries.callable_ref(kind, ref_id))
                 seen.add((kind, ref_id))
 
+    # Minimal, explicit sys.path roots so backends whose workers do NOT
+    # inherit the parent's runtime sys.path (Dask) can import the refs.
+    import_paths: list = []
+    for ref in refs:
+        module = importlib.import_module(ref.module)
+        module_file = getattr(module, "__file__", None)
+        if module_file is None:
+            continue
+        import pathlib
+
+        root = pathlib.Path(module_file).resolve().parent
+        for _ in range(ref.module.count(".")):
+            root = root.parent
+        root_str = str(root)
+        if root_str not in import_paths:
+            import_paths.append(root_str)
+
     return WorkerSpec(
         schema_version=SCENARIO_SCHEMA_VERSION,
         base_ref=base_ref,
@@ -108,6 +125,7 @@ def build_worker_spec(plan, base_ref, context, workers: int) -> WorkerSpec:
             ("total_memory_bytes", _share(budget.total_memory_bytes)),
         ),
         expected=_expected_environment(),
+        import_paths=tuple(import_paths),
     )
 
 
@@ -139,6 +157,7 @@ def worker_spec_to_payload(spec: WorkerSpec) -> dict:
         "child_policy_values": _pairs_to_lists(spec.child_policy_values),
         "child_budget_values": _pairs_to_lists(spec.child_budget_values),
         "expected": _pairs_to_lists(spec.expected),
+        "import_paths": list(spec.import_paths),
     }
     registries.check_worker_payload(payload)
     return payload
@@ -157,6 +176,7 @@ def payload_to_worker_spec(payload: dict) -> WorkerSpec:
         child_policy_values=_lists_to_pairs(payload["child_policy_values"]),
         child_budget_values=_lists_to_pairs(payload["child_budget_values"]),
         expected=_lists_to_pairs(payload["expected"]),
+        import_paths=tuple(payload.get("import_paths", ())),
     )
 
 
@@ -181,6 +201,11 @@ def verify_worker_environment(spec: WorkerSpec) -> None:
 
 
 def _import_and_verify_refs(spec: WorkerSpec) -> None:
+    import sys
+
+    for path in spec.import_paths:
+        if path not in sys.path:
+            sys.path.append(path)
     for ref in spec.callable_refs:
         try:
             module = importlib.import_module(ref.module)
