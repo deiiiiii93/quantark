@@ -129,29 +129,39 @@ class PricingSession:
     def price_many(self, items, *, collect_errors: bool = False) -> list:
         """Serial, caller-ordered pricing of (engine, PricingRequest) pairs.
 
-        Fail-fast by default; ``collect_errors=True`` returns a
-        ``PricingFailure`` in place of each failed item (spec section 15).
+        Fail-fast by default with pure caller-order execution (zero
+        behavior change from Phase 0). ``collect_errors=True`` returns a
+        ``PricingFailure`` in place of each failed item (spec section 15)
+        and executes GROUPED by engine class via the scenario grouping
+        planner (spec section 13.3), so session caches see contiguous
+        compatible work; results still return in caller order.
         """
         self._ensure_open()
-        results: list = []
-        for index, (engine, request) in enumerate(items):
-            try:
-                results.append(self.execute(engine, request).value)
-            except Exception as exc:  # noqa: BLE001 - typed into the failure record
-                if not collect_errors:
-                    raise
-                item_id = request.request_id or str(index)
-                from quantark.execution.diagnostics import RunDiagnostics
+        items = list(items)
+        if not collect_errors:
+            return [
+                self.execute(engine, request).value
+                for engine, request in items
+            ]
+        from quantark.execution.scenario.planner import plan_price_groups
 
-                results.append(
-                    PricingFailure(
+        results: list = [None] * len(items)
+        for _group_key, indices in plan_price_groups(items):
+            for index in indices:
+                engine, request = items[index]
+                try:
+                    results[index] = self.execute(engine, request).value
+                except Exception as exc:  # noqa: BLE001 - typed into the failure record
+                    item_id = request.request_id or str(index)
+                    from quantark.execution.diagnostics import RunDiagnostics
+
+                    results[index] = PricingFailure(
                         item_id=item_id,
                         error=FrameworkErrorInfo(
                             error_type=type(exc).__name__, message=str(exc)
                         ),
                         diagnostics=RunDiagnostics(adapter_id="unresolved"),
                     )
-                )
         return results
 
     def run_scenarios(self, base_request, scenario_specs, engine_factory,

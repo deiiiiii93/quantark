@@ -29,7 +29,12 @@ from quantark.execution.scenario.contracts import (
 )
 from quantark.util.exceptions import ValidationError
 
-__all__ = ["DEFAULT_RUNNER_ID", "plan_scenarios", "resolve_base"]
+__all__ = [
+    "DEFAULT_RUNNER_ID",
+    "plan_price_groups",
+    "plan_scenarios",
+    "resolve_base",
+]
 
 DEFAULT_RUNNER_ID = "request/v1"
 _RUNNER_CAPABILITY_PREFIX = "runner:"
@@ -65,6 +70,22 @@ def _component_fingerprints(components, snapshot) -> tuple:
         (tag, try_fingerprint(extractor(snapshot)))
         for tag, extractor in components
     )
+
+
+def plan_price_groups(items) -> tuple:
+    """Group (engine, request) pairs by engine class path (spec 13.3).
+
+    Pure planning: returns ``((group_key, (original_indices, ...)), ...)``
+    in first-appearance group order with intra-group caller order, so
+    session artifact/draw caches see contiguous compatible work. The
+    caller reassembles results by original index.
+    """
+    groups: dict = {}
+    for index, (engine, _request) in enumerate(items):
+        cls = type(engine)
+        key = f"{cls.__module__}.{cls.__qualname__}"
+        groups.setdefault(key, []).append(index)
+    return tuple((key, tuple(indices)) for key, indices in groups.items())
 
 
 def _ensure_builtin_runners() -> None:

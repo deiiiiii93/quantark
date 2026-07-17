@@ -162,3 +162,114 @@ def test_run_scenarios_no_longer_raises_phase0_stub():
             _base_request(), [_spec("a", 1.0)], _engine_factory
         )
     assert len(outcomes) == 1
+
+
+# ------------------------------------------------------- Task 4: validator
+def _outcomes(session_specs):
+    with PricingSession() as session:
+        return session.run_scenarios(
+            _base_request(), session_specs, _engine_factory
+        )
+
+
+def test_validator_reports_full_match():
+    from quantark.execution.scenario.validate import compare_scenario_outcomes
+
+    specs = [_spec("a", 1.0), _spec("b", 2.0)]
+    left = _outcomes(specs)
+    right = _outcomes(specs)
+    report = compare_scenario_outcomes(left, right)
+    assert report.all_scenarios_match is True
+    assert report.scenarios_compared == 2
+    assert report.scenarios_matching == 2
+    assert report.fields_compared > report.scenarios_compared
+    assert report.fields_matching == report.fields_compared
+    assert report.first_mismatch_path is None
+
+
+def test_validator_flags_pv_perturbation_with_path():
+    import dataclasses as dc
+
+    from quantark.execution.scenario.validate import compare_scenario_outcomes
+
+    specs = [_spec("a", 1.0), _spec("b", 2.0)]
+    left = _outcomes(specs)
+    right = _outcomes(specs)
+    econ = dict(right[1].normalized_economics)
+    econ["pv"] = econ["pv"] + 1e-9
+    right[1] = dc.replace(
+        right[1], normalized_economics=tuple(sorted(econ.items()))
+    )
+    report = compare_scenario_outcomes(left, right)
+    assert report.all_scenarios_match is False
+    assert report.scenarios_matching == 1
+    assert report.first_mismatch_path == "b:pv"
+
+
+def test_validator_flags_numerical_tier_and_missing_fields():
+    import dataclasses as dc
+
+    from quantark.execution.scenario.validate import compare_scenario_outcomes
+
+    specs = [_spec("a", 1.0)]
+    left = _outcomes(specs)
+    right = _outcomes(specs)
+    # numerical.* tier perturbation must be reported (plan-gate finding 4)
+    left[0] = dc.replace(
+        left[0],
+        normalized_economics=left[0].normalized_economics
+        + (("numerical.rmse", 0.010),),
+    )
+    right[0] = dc.replace(
+        right[0],
+        normalized_economics=right[0].normalized_economics
+        + (("numerical.rmse", 0.011),),
+    )
+    report = compare_scenario_outcomes(left, right)
+    assert report.all_scenarios_match is False
+    assert report.first_mismatch_path == "a:numerical.rmse"
+
+    # a field present on one side only is missing, not silently skipped
+    right[0] = dc.replace(
+        right[0],
+        normalized_economics=tuple(
+            p for p in right[0].normalized_economics
+            if p[0] != "numerical.rmse"
+        ),
+    )
+    report = compare_scenario_outcomes(left, right)
+    assert report.all_scenarios_match is False
+    assert "a:numerical.rmse" in report.missing_fields
+
+
+def test_validator_value_contract_none_vs_float_mismatches():
+    import dataclasses as dc
+
+    from quantark.execution.scenario.validate import compare_scenario_outcomes
+
+    specs = [_spec("a", 1.0)]
+    left = _outcomes(specs)
+    right = [dc.replace(left[0], value=None)]
+    report = compare_scenario_outcomes(left, right)
+    assert report.all_scenarios_match is False
+    assert report.first_mismatch_path == "a:value.native"
+
+
+def test_validator_failure_on_one_side_is_a_scenario_mismatch():
+    from quantark.execution.contracts import FrameworkErrorInfo
+    from quantark.execution.diagnostics import RunDiagnostics
+    from quantark.execution.scenario.validate import compare_scenario_outcomes
+
+    specs = [_spec("a", 1.0)]
+    left = _outcomes(specs)
+    right = [
+        PricingFailure(
+            item_id="a",
+            error=FrameworkErrorInfo(error_type="X", message="boom"),
+            diagnostics=RunDiagnostics(adapter_id="scenario"),
+        )
+    ]
+    report = compare_scenario_outcomes(left, right)
+    assert report.scenarios_compared == 1
+    assert report.scenarios_matching == 0
+    assert report.all_scenarios_match is False

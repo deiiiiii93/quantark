@@ -284,3 +284,52 @@ class TestCrossFamilyParity:
             else:
                 value = float(engine.price(product, env))
             assert value == pytest.approx(goldens[name], abs=1e-10), name
+
+
+def test_price_many_grouping_preserves_caller_order(equity_env, european_option):
+    """Phase 5: collect_errors path executes grouped by engine class but
+    returns caller-ordered results identical to an ungrouped loop."""
+    from quantark.asset.equity.engine.analytical import BlackScholesEngine
+
+    put = EuropeanVanillaOption(
+        strike=95.0, option_type=OptionType.PUT, maturity=1.0
+    )
+    items = [
+        (_mc_engine(), PricingRequest(product=european_option, pricing_env=equity_env)),
+        (BlackScholesEngine(), PricingRequest(product=european_option, pricing_env=equity_env)),
+        (_mc_engine(), PricingRequest(product=put, pricing_env=equity_env)),
+        (BlackScholesEngine(), PricingRequest(product=put, pricing_env=equity_env)),
+    ]
+    with PricingSession() as session:
+        grouped = session.price_many(items, collect_errors=True)
+    direct = []
+    with PricingSession() as session:
+        for engine, request in items:
+            direct.append(session.execute(engine, request).value)
+    assert grouped == direct
+
+
+def test_price_many_fail_fast_is_pure_caller_order(equity_env, european_option):
+    """Fail-fast keeps the Phase 0 semantics: the failing item raises and
+    later items never execute."""
+    calls = []
+
+    class _Counting:
+        def price(self, product, env):
+            calls.append("priced")
+            return 1.0
+
+    class _Boom:
+        def price(self, product, env):
+            raise ValueError("boom")
+
+    request = PricingRequest(product=european_option, pricing_env=equity_env)
+    items = [
+        (_mc_engine(), request),
+        (_Boom(), request),      # unregistered family -> CapabilityError
+        (_Counting(), request),  # must never run
+    ]
+    with PricingSession() as session:
+        with pytest.raises(CapabilityError):
+            session.price_many(items)
+    assert calls == []
