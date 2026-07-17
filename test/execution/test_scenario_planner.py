@@ -44,6 +44,24 @@ def bump_hidden_label(base, parameters):
     return dataclasses.replace(base, label="mutated")
 
 
+def bump_spot_with_hidden_rider(base, parameters):
+    # changes the DECLARED spot component AND an undeclared field
+    return dataclasses.replace(
+        base, spot=base.spot + parameters["ds"], label="rider"
+    )
+
+
+@dataclasses.dataclass
+class MutableInputs:
+    spot: float
+    tags: list
+
+
+def mutate_hidden_field_in_place(base, parameters):
+    base.tags.append("poisoned")  # hidden in-place mutation of the base
+    return dataclasses.replace(base, spot=base.spot + parameters["ds"])
+
+
 def bump_opaque(base, parameters):
     return dataclasses.replace(base, spot=base.spot + parameters["ds"])
 
@@ -61,6 +79,7 @@ _COMPONENTS = (
 registries.register_transformer(
     "fake-bump-spot/v1", bump_spot,
     allowed_tags=frozenset({"spot"}), components=_COMPONENTS,
+    covered_fields=("spot",),
 )
 registries.register_transformer(
     "fake-bump-both/v1", bump_both,
@@ -79,6 +98,21 @@ registries.register_transformer(
     "fake-mutator/v1", mutate_in_place,
     allowed_tags=frozenset({"spot"}),
     components=(("spot", lambda b: b.spot),),
+)
+registries.register_transformer(
+    "fake-rider-covered/v1", bump_spot_with_hidden_rider,
+    allowed_tags=frozenset({"spot"}), components=_COMPONENTS,
+    covered_fields=("spot",),
+)
+registries.register_transformer(
+    "fake-rider-uncovered/v1", bump_spot_with_hidden_rider,
+    allowed_tags=frozenset({"spot"}), components=_COMPONENTS,
+)
+registries.register_transformer(
+    "fake-hidden-inplace/v1", mutate_hidden_field_in_place,
+    allowed_tags=frozenset({"spot"}),
+    components=(("spot", lambda b: b.spot),),
+    covered_fields=("spot",),
 )
 
 
@@ -184,3 +218,38 @@ def test_groups_by_runner_and_transformer_first_appearance():
     assert plan.groups == (
         (("request/v1", "fake-bump-spot/v1"), (0, 1, 2)),
     )
+
+
+# -------------------------------------- code-gate regressions (2026-07-17)
+def test_hidden_rider_with_covered_fields_raises():
+    """A transformer changing a declared component AND an undeclared field
+    is a hidden mutation, not a pass."""
+    with pytest.raises(ValidationGateError):
+        plan_scenarios(
+            BASE, [_spec("a", transformer_id="fake-rider-covered/v1")], None
+        )
+
+
+def test_hidden_rider_without_covered_fields_invalidates_all():
+    """Without a declared field cover, confinement is unprovable: the cell
+    plans but loses ALL artifact reuse (spec 10.2 conservative
+    invalidation)."""
+    plan = plan_scenarios(
+        BASE, [_spec("a", transformer_id="fake-rider-uncovered/v1")], None
+    )
+    assert plan.cells[0].invalidate_all is True
+
+
+def test_in_place_hidden_field_mutation_of_base_raises():
+    """Whole-base purity: mutating an UNDECLARED base field in place is
+    caught even though every declared component is unchanged."""
+    base = MutableInputs(spot=100.0, tags=[])
+    with pytest.raises(ValidationGateError):
+        plan_scenarios(
+            base, [_spec("a", transformer_id="fake-hidden-inplace/v1")], None
+        )
+
+
+def test_plan_records_resolved_base_fingerprint():
+    plan = plan_scenarios(BASE, [_spec("a")], None)
+    assert plan.resolved_base_fingerprint is not None

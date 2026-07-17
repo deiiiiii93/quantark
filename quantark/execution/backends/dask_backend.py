@@ -71,20 +71,26 @@ def iter_ordered(cells, spec_payload, workers, *, fail_fast=True,
         owned_client = distributed.Client(owned_cluster)
         client = owned_client
     try:
+        # No explicit key (code-gate finding 2026-07-17): dask treats an
+        # explicit key as TASK IDENTITY even with pure=False, so two
+        # concurrent runs on a shared client — same cells, different
+        # engine factory — would silently share one Future and return the
+        # other run's value. pure=False alone generates a unique key per
+        # submission.
         futures = [
             client.submit(
                 run_worker_cell, spec_payload, cell, engine_factory_id,
-                key=f"scenario-cell-{index}-{cell['cell_fingerprint']}",
                 pure=False,
             )
-            for index, cell in enumerate(cells)
+            for cell in cells
         ]
+        index_of = {future: index for index, future in enumerate(futures)}
         buffered: dict = {}
         next_index = 0
         for future, payload in distributed.as_completed(
             futures, with_results=True
         ):
-            index = futures.index(future)
+            index = index_of[future]
             error = payload.get("error")
             if error and fail_fast:
                 for other in futures:

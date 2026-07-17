@@ -308,6 +308,7 @@ registries.register_transformer(
         ("spot", lambda s: s.spot),
         ("model_params", lambda s: s.engine_settings),
     ),
+    covered_fields=("cleaned",),
 )
 registries.register_runner(
     SURFACE_SHOCK_RUNNER_ID, surface_shock_runner, value_kind="float",

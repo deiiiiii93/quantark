@@ -27,6 +27,44 @@ def toy_engine_factory(parameters):
     return None  # toy runners price without an engine
 
 
+def toy_engine_factory_scale_a(parameters):
+    return 2.0  # "engine" = a scale factor (dask key-collision fixture)
+
+
+def toy_engine_factory_scale_b(parameters):
+    return 3.0
+
+
+def toy_runner_scaled(cell, resolved, child_context):
+    t = resolved.transformed
+    pv = t.spot * t.vol * resolved.engine
+    return pv, (("pv", pv),), None
+
+
+def build_toy_inputs_from_file(payload):
+    """Deliberately NON-deterministic factory: reads a mutable file
+    (worker base-verification fixture, code-gate finding 2026-07-17)."""
+    spot = float(open(payload["path"]).read().strip())
+    return ToyInputs(spot=spot, vol=payload["vol"])
+
+
+def toy_runner_worker_exit(cell, resolved, child_context):
+    import os
+
+    os._exit(3)  # simulate a killed/OOM worker (infrastructure failure)
+
+
+def toy_runner_exit_once(cell, resolved, child_context):
+    """Dies on the FIRST attempt (marker file absent), succeeds on retry."""
+    import os
+
+    marker = dict(cell.parameters)["marker"]
+    if not os.path.exists(marker):
+        open(marker, "w").write("died-once")
+        os._exit(3)
+    return toy_runner(cell, resolved, child_context)
+
+
 def toy_runner(cell, resolved, child_context):
     t = resolved.transformed
     pv = t.spot * t.vol  # deterministic, cheap
@@ -72,6 +110,7 @@ registries.register_factory("toy-engine/v1", toy_engine_factory)
 registries.register_transformer(
     "toy-bump/v1", toy_bump,
     allowed_tags=frozenset({"spot"}), components=_COMPONENTS,
+    covered_fields=("spot",),
 )
 registries.register_runner("toy/v1", toy_runner, value_kind="float")
 registries.register_runner(
@@ -82,4 +121,14 @@ registries.register_runner(
 )
 registries.register_runner(
     "toy-budget/v1", toy_runner_budget_probe, value_kind="float"
+)
+registries.register_factory("toy-engine-a/v1", toy_engine_factory_scale_a)
+registries.register_factory("toy-engine-b/v1", toy_engine_factory_scale_b)
+registries.register_factory("toy-file-inputs/v1", build_toy_inputs_from_file)
+registries.register_runner("toy-scaled/v1", toy_runner_scaled, value_kind="float")
+registries.register_runner(
+    "toy-exit/v1", toy_runner_worker_exit, value_kind="float"
+)
+registries.register_runner(
+    "toy-exit-once/v1", toy_runner_exit_once, value_kind="float"
 )

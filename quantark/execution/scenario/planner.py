@@ -7,16 +7,26 @@ and transformed snapshots AND the whole snapshots. Enforcement:
 (a) changed component tags must be a subset of BOTH the spec's declared
     ``mutation_tags`` and the registration's ``allowed_tags``, else
     ``ValidationGateError``;
-(b) a whole-snapshot change that no declared component explains escaped
+(b) a whole-snapshot change that NO declared component explains escaped
     the component schema — that is under-declaration and raises
     ``ValidationGateError``;
+(b2, code-gate finding 2026-07-17 — hidden riders) a change to a declared
+    component does NOT excuse changes elsewhere. For dataclass snapshots
+    the planner fingerprints every FIELD: when the registration declares
+    ``covered_fields`` (the complete set of fields its transformer may
+    replace), any changed field outside that cover raises
+    ``ValidationGateError``. Without ``covered_fields`` (or for
+    non-dataclass snapshots) a whole-snapshot delta alongside component
+    changes cannot be proven confined, so the cell is conservatively
+    marked ``invalidate_all=True`` (spec 10.2 full invalidation).
 (c) any uncanonicalizable component or whole snapshot conservatively marks
     the cell ``invalidate_all=True`` (no artifact reuse) instead of
     failing — correctness never depends on cacheability.
 
-Transformer purity (spec 13.1): base-side component fingerprints are
-recomputed after every transform; a transformer that mutated the base
-raises ``ValidationGateError``.
+Transformer purity (spec 13.1): base-side component fingerprints AND the
+whole-base fingerprint are recomputed after every transform; a
+transformer that mutated the base — including a field outside the
+component schema — raises ``ValidationGateError``.
 """
 from quantark.execution.cache.fingerprint import try_fingerprint
 from quantark.execution.errors import ValidationGateError
@@ -40,18 +50,36 @@ DEFAULT_RUNNER_ID = "request/v1"
 _RUNNER_CAPABILITY_PREFIX = "runner:"
 
 
+def normalized_payload_dict(payload_pairs) -> dict:
+    """Canonical factory argument: the SAME normalization the JSON worker
+    path applies (lists become tuples), so parent-side and worker-side
+    factories see identical value types (code-gate finding 2026-07-17)."""
+    def _deep(value):
+        if isinstance(value, list):
+            return tuple(_deep(entry) for entry in value)
+        if isinstance(value, tuple):
+            return tuple(_deep(entry) for entry in value)
+        return value
+
+    return {key: _deep(value) for key, value in payload_pairs}
+
+
 def resolve_base(base):
     """Return (base_kind, resolved_base_inputs, base_fingerprint).
 
-    ``inputs_ref`` bases are rebuilt from their registered factory — once
-    here in the parent for planning; process/Dask workers call the same
-    factory again worker-side. Any other object is a LIVE base
+    ``inputs_ref`` bases are rebuilt from their registered factory —
+    exactly ONCE in the parent (the session plans and executes with the
+    same resolved instance); process/Dask workers call the same factory
+    again worker-side and VERIFY the rebuilt base against the parent's
+    resolved-base fingerprint. Any other object is a LIVE base
     (``base_kind == "request"``), usable on serial/threads only.
     """
     if isinstance(base, BaseInputsRef):
-        registries.check_worker_payload(dict(base.payload))
+        registries.check_worker_payload(
+            {key: value for key, value in base.payload}
+        )
         factory = registries.get_factory(base.factory_id)
-        resolved = factory.fn(dict(base.payload))
+        resolved = factory.fn(normalized_payload_dict(base.payload))
         return "inputs_ref", resolved, try_fingerprint(base)
     return "request", base, try_fingerprint(base)
 
@@ -70,6 +98,44 @@ def _component_fingerprints(components, snapshot) -> tuple:
         (tag, try_fingerprint(extractor(snapshot)))
         for tag, extractor in components
     )
+
+
+def _confine_or_invalidate(spec, registration, base_inputs, transformed,
+                           invalidate_all) -> bool:
+    """Hidden-rider attribution (code-gate finding 2026-07-17).
+
+    Called when a declared component changed AND the whole snapshot
+    changed. For same-type dataclass snapshots with a declared
+    ``covered_fields``, fingerprint every field: a changed field outside
+    the cover is a hidden mutation -> ``ValidationGateError``; an
+    unfingerprintable field cannot be proven unchanged -> conservative
+    invalidation. Otherwise confinement is unprovable -> conservative
+    invalidation (spec 10.2)."""
+    import dataclasses as _dc
+
+    covered = registration.covered_fields
+    if (
+        covered is not None
+        and _dc.is_dataclass(base_inputs)
+        and type(base_inputs) is type(transformed)
+    ):
+        hidden = []
+        unprovable = False
+        for field in _dc.fields(base_inputs):
+            before = try_fingerprint(getattr(base_inputs, field.name))
+            after = try_fingerprint(getattr(transformed, field.name))
+            if before is None or after is None:
+                unprovable = True
+            elif before != after and field.name not in covered:
+                hidden.append(field.name)
+        if hidden:
+            raise ValidationGateError(
+                f"transformer {spec.transformer_id!r} changed fields "
+                f"{sorted(hidden)} outside its declared covered_fields "
+                f"{sorted(covered)} (hidden mutation, spec 10.2)"
+            )
+        return invalidate_all or unprovable
+    return True
 
 
 def plan_price_groups(items) -> tuple:
@@ -95,8 +161,14 @@ def _ensure_builtin_runners() -> None:
     import quantark.execution.scenario.runner  # noqa: F401
 
 
-def plan_scenarios(base, scenario_specs, engine_factory) -> ScenarioPlan:
-    """Normalize ``ScenarioSpec``s into an immutable ``ScenarioPlan``."""
+def plan_scenarios(base, scenario_specs, engine_factory, *,
+                   resolved=None) -> ScenarioPlan:
+    """Normalize ``ScenarioSpec``s into an immutable ``ScenarioPlan``.
+
+    ``resolved`` lets the session pass an already-resolved base so the
+    registered factory runs exactly once per run (planning and serial
+    execution use the SAME instance; code-gate finding 2026-07-17).
+    """
     _ensure_builtin_runners()
     specs = tuple(scenario_specs)
     seen_ids = set()
@@ -108,7 +180,13 @@ def plan_scenarios(base, scenario_specs, engine_factory) -> ScenarioPlan:
             )
         seen_ids.add(spec.scenario_id)
 
-    base_kind, base_inputs, base_fingerprint = resolve_base(base)
+    if resolved is not None:
+        base_kind = "inputs_ref" if isinstance(base, BaseInputsRef) else "request"
+        base_inputs = resolved
+        base_fingerprint = try_fingerprint(base)
+    else:
+        base_kind, base_inputs, base_fingerprint = resolve_base(base)
+    resolved_base_fingerprint = try_fingerprint(base_inputs)
     engine_factory_id = engine_factory if isinstance(engine_factory, str) else None
     if engine_factory_id is not None:
         registries.get_factory(engine_factory_id)  # must be registered
@@ -126,11 +204,17 @@ def plan_scenarios(base, scenario_specs, engine_factory) -> ScenarioPlan:
         base_whole_fp = try_fingerprint(base_inputs)
         transformed = registration.fn(base_inputs, dict(spec.parameters))
 
-        # Transformer purity: the base must be untouched.
+        # Transformer purity: the base must be untouched — checked on the
+        # declared components AND the whole snapshot, so an in-place
+        # mutation of an UNDECLARED field is also caught (code-gate
+        # finding 2026-07-17).
         base_after_fps = _component_fingerprints(
             registration.components, base_inputs
         )
-        if base_after_fps != base_component_fps:
+        base_whole_after = try_fingerprint(base_inputs)
+        if base_after_fps != base_component_fps or (
+            base_whole_fp is not None and base_whole_after != base_whole_fp
+        ):
             raise ValidationGateError(
                 f"transformer {spec.transformer_id!r} mutated the base "
                 "inputs in place; transformers must be pure (spec 13.1)"
@@ -153,12 +237,16 @@ def plan_scenarios(base, scenario_specs, engine_factory) -> ScenarioPlan:
 
         if base_whole_fp is None or transformed_whole_fp is None:
             invalidate_all = True
-        elif base_whole_fp != transformed_whole_fp and not changed:
-            raise ValidationGateError(
-                f"transformer {spec.transformer_id!r} changed the snapshot "
-                "outside its declared component schema; the mutation cannot "
-                "be attributed to any tag (under-declared components, "
-                "spec 10.2)"
+        elif base_whole_fp != transformed_whole_fp:
+            if not changed:
+                raise ValidationGateError(
+                    f"transformer {spec.transformer_id!r} changed the "
+                    "snapshot outside its declared component schema; the "
+                    "mutation cannot be attributed to any tag "
+                    "(under-declared components, spec 10.2)"
+                )
+            invalidate_all = _confine_or_invalidate(
+                spec, registration, base_inputs, transformed, invalidate_all
             )
 
         undeclared = changed - set(spec.mutation_tags)
@@ -212,4 +300,5 @@ def plan_scenarios(base, scenario_specs, engine_factory) -> ScenarioPlan:
             (key, tuple(positions))
             for key, positions in group_positions.items()
         ),
+        resolved_base_fingerprint=resolved_base_fingerprint,
     )

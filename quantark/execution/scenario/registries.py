@@ -46,6 +46,11 @@ class TransformerRegistration:
     allowed_tags: frozenset
     components: tuple            # ((tag, extractor), ...)
     schema_version: str
+    covered_fields: tuple | None = None  # complete set of dataclass fields
+    #                                      the transformer may replace; the
+    #                                      planner uses it to REJECT hidden
+    #                                      field mutations (code-gate
+    #                                      finding 2026-07-17)
 
 
 @dataclass(frozen=True)
@@ -110,7 +115,8 @@ def _register(kind: str, key: str, registration) -> None:
 
 
 def register_transformer(transformer_id: str, fn, *, allowed_tags: frozenset,
-                         components: tuple, schema_version: str = "1") -> None:
+                         components: tuple, schema_version: str = "1",
+                         covered_fields: tuple | None = None) -> None:
     _require_importable(fn)
     _register(
         "transformer", transformer_id,
@@ -118,6 +124,9 @@ def register_transformer(transformer_id: str, fn, *, allowed_tags: frozenset,
             transformer_id=transformer_id, fn=fn,
             allowed_tags=frozenset(allowed_tags),
             components=tuple(components), schema_version=schema_version,
+            covered_fields=(
+                tuple(covered_fields) if covered_fields is not None else None
+            ),
         ),
     )
 

@@ -183,7 +183,10 @@ class PricingSession:
         """
         self._ensure_open()
         from quantark.execution.scenario.contracts import BaseInputsRef
-        from quantark.execution.scenario.planner import plan_scenarios
+        from quantark.execution.scenario.planner import (
+            plan_scenarios,
+            resolve_base,
+        )
         from quantark.execution.scenario.runner import run_plan
 
         backend = self._context.execution_policy.scenario.backend
@@ -196,10 +199,16 @@ class PricingSession:
                 "cross a process boundary and explicit requests never "
                 "silently fall back (spec section 3.3)"
             )
-        plan = plan_scenarios(base_request, scenario_specs, engine_factory)
+        # The base factory runs exactly ONCE in the parent: planning and
+        # serial execution share this instance (code-gate 2026-07-17).
+        _, resolved_inputs, _ = resolve_base(base_request)
+        plan = plan_scenarios(
+            base_request, scenario_specs, engine_factory,
+            resolved=resolved_inputs,
+        )
         return run_plan(
             plan, base_request, engine_factory, self._context,
-            collect_errors=collect_errors,
+            resolved_base=resolved_inputs, collect_errors=collect_errors,
         )
 
     def close(self) -> None:

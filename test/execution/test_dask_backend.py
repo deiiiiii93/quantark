@@ -147,3 +147,31 @@ def test_legacy_use_dask_engines_untouched_this_phase():
             capture_output=True, text=True, check=False,
         )
         assert diff.stdout == "", f"{path} was modified in Phase 5"
+
+
+def test_shared_client_concurrent_runs_do_not_collide(dask_client):
+    """Same cells, same base, DIFFERENT engine factory on one borrowed
+    client: dask must not deduplicate the tasks (code-gate finding
+    2026-07-17 — explicit keys were task identity, so the second run could
+    silently receive the first run's Futures)."""
+    from quantark.execution.backends.dask_backend import run_plan_dask
+    from quantark.execution.scenario.planner import plan_scenarios
+
+    specs = [_toy_spec(f"s{i}", float(i), runner="toy-scaled/v1")
+             for i in range(3)]
+    plan_a = plan_scenarios(_toy_base(), specs, "toy-engine-a/v1")
+    plan_b = plan_scenarios(_toy_base(), specs, "toy-engine-b/v1")
+    # identical cell fingerprints: the engine factory is NOT part of them
+    assert [c.cell_fingerprint for c in plan_a.cells] == [
+        c.cell_fingerprint for c in plan_b.cells
+    ]
+    outcomes_a = run_plan_dask(
+        plan_a, _toy_base(), "toy-engine-a/v1", _dask_context(),
+        client=dask_client,
+    )
+    outcomes_b = run_plan_dask(
+        plan_b, _toy_base(), "toy-engine-b/v1", _dask_context(),
+        client=dask_client,
+    )
+    for left, right in zip(outcomes_a, outcomes_b):
+        assert right.value == left.value * 1.5  # scale 3.0 vs 2.0

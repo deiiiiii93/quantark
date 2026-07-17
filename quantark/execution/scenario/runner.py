@@ -209,10 +209,17 @@ def _run_threads(plan, base_inputs, engine_factory, context, collect_errors):
 
 
 def run_plan(plan, base, engine_factory, context, *,
-             collect_errors: bool = False):
-    """Execute an immutable ScenarioPlan; outcomes in caller order."""
+             resolved_base=None, collect_errors: bool = False):
+    """Execute an immutable ScenarioPlan; outcomes in caller order.
+
+    ``resolved_base`` is the instance the session already resolved (and
+    planned with) — passing it keeps the registered factory at exactly
+    one parent-side call per run (code-gate finding 2026-07-17)."""
     backend = context.execution_policy.scenario.backend
-    _, base_inputs, _ = resolve_base(base)
+    if resolved_base is not None:
+        base_inputs = resolved_base
+    else:
+        _, base_inputs, _ = resolve_base(base)
     if backend == "serial":
         return _run_serial(
             plan, base_inputs, engine_factory, context, collect_errors

@@ -17,14 +17,35 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 
 from quantark.execution.errors import TaskExecutionError
 
-__all__ = ["iter_ordered"]
+__all__ = ["WorkerInfrastructureError", "iter_ordered"]
+
+
+class WorkerInfrastructureError(TaskExecutionError):
+    """A worker PROCESS died (killed/OOM/broken pool) — distinct from a
+    cell raising inside a healthy worker. Only these failures are
+    retry-eligible (spec section 15), using the identical serialized
+    payloads. Carries the positions already yielded so a retry driver can
+    resubmit exactly the remainder."""
+
+    def __init__(self, message, *, completed_positions=(),
+                 in_flight_positions=(), cancelled_positions=()):
+        super().__init__(message)
+        self.completed_positions = tuple(completed_positions)
+        self.in_flight_positions = tuple(in_flight_positions)
+        self.cancelled_positions = tuple(cancelled_positions)
 
 
 def iter_ordered(cells, spec_payload, workers, window, *, fail_fast=True,
-                 engine_factory_id=None, observer=None):
-    """Yield ``(position, outcome_payload)`` in caller order."""
+                 engine_factory_id=None, observer=None, positions=None):
+    """Yield ``(position, outcome_payload)`` in caller order.
+
+    ``positions`` maps local cell indices to caller positions (used by the
+    infrastructure-retry driver to resubmit a remainder); defaults to
+    identity.
+    """
     from quantark.execution.scenario.worker import run_worker_cell
 
+    positions = list(range(len(cells))) if positions is None else list(positions)
     mp_context = multiprocessing.get_context("spawn")
     buffered: dict = {}
     pending: dict = {}
@@ -54,7 +75,28 @@ def iter_ordered(cells, spec_payload, workers, window, *, fail_fast=True,
             done, _ = wait(pending, return_when=FIRST_COMPLETED)
             for future in done:
                 index = pending.pop(future)
-                payload = future.result()  # raises only on infra failure
+                try:
+                    payload = future.result()
+                except Exception as exc:  # infra: killed worker/broken pool
+                    for other in pending:
+                        other.cancel()
+                    raise WorkerInfrastructureError(
+                        f"worker process failure while executing scenario "
+                        f"cell at position {positions[index]}: "
+                        f"{type(exc).__name__}: {exc} (completed="
+                        f"{next_index}, in-flight cancelled="
+                        f"{len(pending)}, unsubmitted="
+                        f"{len(cells) - submitted})",
+                        completed_positions=[
+                            positions[i] for i in range(next_index)
+                        ],
+                        in_flight_positions=[positions[index]] + [
+                            positions[i] for i in pending.values()
+                        ],
+                        cancelled_positions=[
+                            positions[i] for i in range(submitted, len(cells))
+                        ],
+                    ) from exc
                 error = payload.get("error")
                 if error and fail_fast:
                     for other in pending:
@@ -68,6 +110,6 @@ def iter_ordered(cells, spec_payload, workers, window, *, fail_fast=True,
                     )
                 buffered[index] = payload
             while next_index in buffered:
-                yield next_index, buffered.pop(next_index)
+                yield positions[next_index], buffered.pop(next_index)
                 next_index += 1
             submit_up_to_window()

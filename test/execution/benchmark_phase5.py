@@ -77,7 +77,9 @@ def _context(backend, workers):
         execution_policy=ExecutionPolicy(
             scenario=ExecutorSelection(backend=backend, workers=workers),
         ),
-        resource_budget=ResourceBudget(max_processes=workers, max_threads=1),
+        resource_budget=ResourceBudget(
+            max_processes=workers, max_threads=1, max_in_flight=workers,
+        ),
     )
 
 

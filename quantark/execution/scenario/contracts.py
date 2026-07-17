@@ -75,6 +75,10 @@ class ScenarioPlan:
     engine_factory_id: str | None
     cells: tuple
     groups: tuple                # ((group_key, (positions...)), ...)
+    resolved_base_fingerprint: str | None = None
+    #   fingerprint of the RESOLVED base the parent planned with; workers
+    #   verify their factory rebuild against it (None: unverifiable,
+    #   recorded as such; code-gate finding 2026-07-17)
 
 
 @dataclass(frozen=True)

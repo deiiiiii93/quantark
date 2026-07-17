@@ -47,7 +47,9 @@ def _process_context(workers=2):
         execution_policy=ExecutionPolicy(
             scenario=ExecutorSelection(backend="processes", workers=workers),
         ),
-        resource_budget=ResourceBudget(max_processes=workers, max_threads=1),
+        resource_budget=ResourceBudget(
+            max_processes=workers, max_threads=1, max_in_flight=workers,
+        ),
     )
 
 
@@ -187,3 +189,127 @@ def test_worker_verification_mismatch_fails_before_numerical_work():
             )
     assert isinstance(outcomes[0], PricingFailure)
     assert outcomes[0].error.error_type == "DeterminismViolation"
+
+
+# -------------------------------------- code-gate regressions (2026-07-17)
+def test_drifting_factory_is_a_determinism_violation(tmp_path):
+    """A factory reading mutable local state rebuilds a DIFFERENT base in
+    the worker than the parent planned with; the worker verifies the
+    rebuilt base against the parent's resolved-base fingerprint and fails
+    closed."""
+    state = tmp_path / "spot.txt"
+    state.write_text("100.0")
+    base = BaseInputsRef(
+        factory_id="toy-file-inputs/v1",
+        payload=(("path", str(state)), ("vol", 0.25)),
+    )
+    specs = [_toy_spec("a", 1.0)]
+    with PricingSession(_process_context()) as session:
+        # drift AFTER the parent resolved/planned, BEFORE workers rebuild
+        plan_probe = session  # session resolves at run_scenarios time
+        state_written = False
+
+        import quantark.execution.scenario.worker as worker_mod
+
+        original = worker_mod.build_worker_spec
+
+        def drifting(plan, base_ref, context, workers):
+            nonlocal state_written
+            spec = original(plan, base_ref, context, workers)
+            if not state_written:
+                state.write_text("200.0")  # the drift
+                state_written = True
+            return spec
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(worker_mod, "build_worker_spec", drifting)
+            outcomes = plan_probe.run_scenarios(
+                base, specs, "toy-engine/v1", collect_errors=True
+            )
+    assert isinstance(outcomes[0], PricingFailure)
+    assert outcomes[0].error.error_type == "DeterminismViolation"
+
+
+def test_killed_worker_is_typed_infrastructure_error():
+    """A dead worker process (os._exit) is NOT a collectable cell failure:
+    it surfaces as a typed TaskExecutionError with identities even under
+    collect_errors=True (retries default to zero)."""
+    specs = [_toy_spec("a", 1.0, runner="toy-exit/v1")]
+    with PricingSession(_process_context()) as session:
+        with pytest.raises(TaskExecutionError) as excinfo:
+            session.run_scenarios(
+                _toy_base(), specs, "toy-engine/v1", collect_errors=True
+            )
+    message = str(excinfo.value)
+    assert "worker process failure" in message
+    assert "completed=" in message
+
+
+def test_infrastructure_retry_resubmits_identical_payloads(tmp_path):
+    """With retries=1, a worker death on the first attempt is retried with
+    the identical serialized payloads and the run completes."""
+    marker = tmp_path / "died.marker"
+    specs = [
+        ScenarioSpec(
+            scenario_id="phoenix",
+            transformer_id="toy-bump/v1",
+            parameters=(("ds", 1.0), ("marker", str(marker))),
+            mutation_tags=frozenset({"spot"}),
+            required_capabilities=frozenset({"runner:toy-exit-once/v1"}),
+        )
+    ]
+    ctx = _process_context()
+    ctx = dataclasses.replace(
+        ctx,
+        execution_policy=dataclasses.replace(
+            ctx.execution_policy, retries=1
+        ),
+    )
+    with PricingSession(ctx) as session:
+        outcomes = session.run_scenarios(_toy_base(), specs, "toy-engine/v1")
+    assert isinstance(outcomes[0], ScenarioOutcome)
+    assert marker.exists()  # first attempt really died
+    assert economics_mapping(outcomes[0])["pv"] == (100.0 + 1.0) * 0.25
+
+
+def test_window_is_clamped_by_max_in_flight_budget():
+    """max_in_flight is a hard admission bound on concurrent cells; the
+    clamp is recorded in diagnostics."""
+    ctx = dataclasses.replace(
+        default_context(),
+        execution_policy=ExecutionPolicy(
+            scenario=ExecutorSelection(backend="processes", workers=4),
+        ),
+        resource_budget=ResourceBudget(
+            max_processes=4, max_threads=1, max_in_flight=1,
+        ),
+        # mark the budget operator-explicit so the session auto-budget
+        # does not upgrade max_in_flight (spec 11.1)
+        config_snapshot=(("max_in_flight", "explicit"),
+                         ("max_processes", "explicit")),
+    )
+    specs = [_toy_spec(f"s{i}", float(i)) for i in range(3)]
+    with PricingSession(ctx) as session:
+        outcomes = session.run_scenarios(_toy_base(), specs, "toy-engine/v1")
+        sink = session.context.diagnostics_sink
+    assert all(isinstance(o, ScenarioOutcome) for o in outcomes)
+    records = [
+        r for d in sink.entries for r in getattr(d, "records", ())
+    ]
+    assert any(r.startswith("clamp:scenario.window=") for r in records)
+
+
+def test_nested_list_payload_prices_identically_serial_and_process():
+    """Payload normalization is applied on BOTH sides (code-gate finding):
+    a list-valued payload cannot produce backend-dependent behavior."""
+    base = BaseInputsRef(
+        factory_id="toy-inputs/v1",
+        payload=(("spot", 100.0), ("vol", 0.25), ("extra", [1.0, 2.0])),
+    )
+    specs = [_toy_spec("a", 1.0)]
+    with PricingSession() as session:
+        serial = session.run_scenarios(base, specs, "toy-engine/v1")
+    with PricingSession(_process_context()) as session:
+        via_processes = session.run_scenarios(base, specs, "toy-engine/v1")
+    assert economics_mapping(serial[0]) == economics_mapping(via_processes[0])
+    assert serial[0].value == via_processes[0].value

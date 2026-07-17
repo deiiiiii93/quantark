@@ -120,3 +120,43 @@ def test_dependency_mismatch_is_determinism_violation():
     bad = dataclasses.replace(spec, expected=expected)
     with pytest.raises(DeterminismViolation):
         verify_worker_environment(bad)
+
+
+def test_callable_ref_schema_version_mismatch_is_capability_error():
+    """A plan referencing schema N must not run against a worker
+    registration at schema M (code-gate finding 2026-07-17)."""
+    import dataclasses
+
+    from quantark.execution.scenario.worker import _import_and_verify_refs
+
+    spec = build_worker_spec(_plan(), _toy_base(), default_context(), workers=2)
+    refs = tuple(
+        dataclasses.replace(r, schema_version="999") for r in spec.callable_refs
+    )
+    bad = dataclasses.replace(spec, callable_refs=refs)
+    with pytest.raises(CapabilityError):
+        _import_and_verify_refs(bad)
+
+
+def test_worker_spec_round_trips_with_nested_list_payload():
+    """List payload values are normalized to tuples ONCE at spec build, so
+    the spec round-trips equal and parent/worker factories see identical
+    types (code-gate finding 2026-07-17)."""
+    from quantark.execution.scenario.contracts import BaseInputsRef
+
+    base = BaseInputsRef(
+        factory_id="toy-inputs/v1",
+        payload=(("spot", 100.0), ("vol", 0.2), ("curve", [1.0, [2.0, 3.0]])),
+    )
+    spec = build_worker_spec(_plan(), base, default_context(), workers=2)
+    payload = worker_spec_to_payload(spec)
+    assert payload_to_worker_spec(payload) == spec
+    assert dict(spec.base_ref.payload)["curve"] == (1.0, (2.0, 3.0))
+
+
+def test_expected_environment_covers_python_and_platform():
+    spec = build_worker_spec(_plan(), _toy_base(), default_context(), workers=2)
+    expected = dict(spec.expected)
+    assert "python" in expected
+    assert "platform" in expected
+    assert "base" in expected  # resolved-base fingerprint travels too

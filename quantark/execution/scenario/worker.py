@@ -58,12 +58,16 @@ _DTYPE_TAG = "float64"
 
 
 def _expected_environment() -> tuple:
+    from quantark.execution.manifest import platform_tag
+
     versions = dict(build_versions())
     return (
         ("schema", SCENARIO_SCHEMA_VERSION),
+        ("python", versions["python"]),
         ("quantark", versions["quantark"]),
         ("numpy", versions["numpy"]),
         ("scipy", versions["scipy"]),
+        ("platform", platform_tag()),
         ("dtype", _DTYPE_TAG),
     )
 
@@ -106,6 +110,14 @@ def build_worker_spec(plan, base_ref, context, workers: int) -> WorkerSpec:
         if root_str not in import_paths:
             import_paths.append(root_str)
 
+    # Canonical payload normalization (code-gate finding 2026-07-17): the
+    # spec carries the SAME list->tuple normalization the JSON path
+    # applies, so it round-trips equal and parent/worker factories see
+    # identical value types.
+    base_ref = BaseInputsRef(
+        factory_id=base_ref.factory_id,
+        payload=_lists_to_pairs(_pairs_to_lists(base_ref.payload)),
+    )
     return WorkerSpec(
         schema_version=SCENARIO_SCHEMA_VERSION,
         base_ref=base_ref,
@@ -124,7 +136,9 @@ def build_worker_spec(plan, base_ref, context, workers: int) -> WorkerSpec:
             ("draw_cache_bytes", _share(budget.draw_cache_bytes)),
             ("total_memory_bytes", _share(budget.total_memory_bytes)),
         ),
-        expected=_expected_environment(),
+        expected=_expected_environment() + (
+            ("base", plan.resolved_base_fingerprint or "unverifiable"),
+        ),
         import_paths=tuple(import_paths),
     )
 
@@ -190,7 +204,7 @@ def verify_worker_environment(spec: WorkerSpec) -> None:
         )
     local = dict(_expected_environment())
     for name, expected_value in spec.expected:
-        if name == "schema":
+        if name in ("schema", "base"):
             continue
         if local.get(name) != expected_value:
             raise DeterminismViolation(
@@ -230,6 +244,40 @@ def _import_and_verify_refs(spec: WorkerSpec) -> None:
                 f"object than {ref.module}:{ref.qualname}; refusing to "
                 "execute mismatched code"
             )
+        if registration.schema_version != ref.schema_version:
+            raise CapabilityError(
+                f"{ref.kind} {ref.ref_id!r} schema version mismatch: the "
+                f"plan references {ref.schema_version!r} but this worker "
+                f"registers {registration.schema_version!r} (code-gate "
+                "finding 2026-07-17)"
+            )
+
+
+def _normalized_payload(payload_pairs) -> dict:
+    from quantark.execution.scenario.planner import normalized_payload_dict
+
+    return normalized_payload_dict(payload_pairs)
+
+
+def _verify_rebuilt_base(spec: WorkerSpec, base_inputs) -> None:
+    """The rebuilt base must match the parent's resolved-base fingerprint
+    (code-gate finding 2026-07-17): a factory reading drifting local state
+    would otherwise price different cells against different bases while
+    the plan fingerprint stayed constant. ``unverifiable`` bases (no safe
+    canonicalizer) are allowed through by design and recorded as such at
+    planning time."""
+    from quantark.execution.cache.fingerprint import try_fingerprint
+
+    expected = dict(spec.expected).get("base")
+    if expected in (None, "unverifiable"):
+        return
+    rebuilt = try_fingerprint(base_inputs)
+    if rebuilt != expected:
+        raise DeterminismViolation(
+            f"worker factory {spec.base_ref.factory_id!r} rebuilt a base "
+            "that does not match the parent's resolved-base fingerprint; "
+            "the factory is not deterministic (fail closed, spec 12.3)"
+        )
 
 
 _CHILD_CONTEXTS: dict = {}
@@ -322,7 +370,10 @@ def run_worker_cell(spec_payload: dict, cell_payload: dict,
         _import_and_verify_refs(spec)
         verify_worker_environment(spec)
         factory = registries.get_factory(spec.base_ref.factory_id)
-        base_inputs = factory.fn(dict(spec.base_ref.payload))
+        base_inputs = factory.fn(
+            _normalized_payload(spec.base_ref.payload)
+        )
+        _verify_rebuilt_base(spec, base_inputs)
         cell = _cell_from_payload(cell_payload)
         context = _child_context(
             json.dumps(spec_payload, sort_keys=True), spec
@@ -381,21 +432,31 @@ def run_plan_processes(plan, base, engine_factory, context, *,
 
     policy = context.execution_policy.scenario
     budget = context.resource_budget
-    workers = max(1, min(policy.workers, budget.max_processes,
+    clamp_records: list = []
+    requested_workers = policy.workers
+    workers = max(1, min(requested_workers, budget.max_processes,
                          len(plan.cells)))
-    window = max(workers, policy.max_in_flight or workers)
+    if workers < requested_workers:
+        clamp_records.append(
+            f"clamp:scenario.workers={requested_workers}->{workers}"
+        )
+    # max_in_flight is a HARD admission bound on concurrent cells
+    # (code-gate finding 2026-07-17): the window never exceeds it.
+    requested_window = policy.max_in_flight or workers
+    window = max(1, min(requested_window, budget.max_in_flight))
+    if window < requested_window:
+        clamp_records.append(
+            f"clamp:scenario.window={requested_window}->{window}"
+        )
+    workers = min(workers, window)
 
     spec = build_worker_spec(plan, base, context, workers)
     spec_payload = worker_spec_to_payload(spec)
     cell_payloads = [_cell_payload(cell) for cell in plan.cells]
 
     results: list = [None] * len(plan.cells)
-    iterator = processes_iter_ordered(
-        cell_payloads, spec_payload, workers, window,
-        fail_fast=not collect_errors,
-        engine_factory_id=plan.engine_factory_id,
-    )
-    for position, payload in iterator:
+
+    def _consume(payload, position) -> None:
         cell = plan.cells[position]
         error = payload.get("error")
         if error:
@@ -408,7 +469,7 @@ def run_plan_processes(plan, base, engine_factory, context, *,
                     adapter_id=f"scenario:{cell.runner_id}"
                 ),
             )
-            continue
+            return
         results[position] = ScenarioOutcome(
             scenario_id=cell.scenario_id,
             value=payload["value"],
@@ -421,12 +482,49 @@ def run_plan_processes(plan, base, engine_factory, context, *,
             ),
             manifest_fingerprint=payload.get("manifest_fingerprint"),
         )
+
+    # Infrastructure retry (spec section 15; code-gate finding 2026-07-17):
+    # a KILLED worker (OOM, crash, broken pool) is not a cell failure —
+    # collect_errors does not swallow it. With retries configured, the
+    # remaining cells are resubmitted with IDENTICAL serialized payloads
+    # on a fresh pool; numerical/user-code failures are never retried.
+    from quantark.execution.backends.processes import (
+        WorkerInfrastructureError,
+    )
+
+    remaining = list(range(len(plan.cells)))
+    attempts_left = max(0, context.execution_policy.retries)
+    while True:
+        iterator = processes_iter_ordered(
+            [cell_payloads[i] for i in remaining], spec_payload,
+            min(workers, max(1, len(remaining))), window,
+            fail_fast=not collect_errors,
+            engine_factory_id=plan.engine_factory_id,
+            positions=remaining,
+        )
+        try:
+            for position, payload in iterator:
+                _consume(payload, position)
+            break
+        except WorkerInfrastructureError:
+            if attempts_left <= 0:
+                raise
+            attempts_left -= 1
+            # everything not yet reduced into results is resubmitted —
+            # including buffered-but-unyielded completions the dead pool
+            # dropped
+            remaining = [i for i in remaining if results[i] is None]
+            clamp_records.append(
+                f"retry:infrastructure={len(remaining)} cells resubmitted"
+            )
+            if not remaining:
+                break
     sink = context.diagnostics_sink
     if sink is not None:
         sink.emit(
             RunDiagnostics(
                 adapter_id="scenario-runner",
-                records=(
+                records=tuple(clamp_records) + (
                     f"scenario:cells={len(plan.cells)}",
                     "scenario:deduped=0",
                     f"scenario:backend=processes:{workers}",
