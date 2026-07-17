@@ -122,14 +122,16 @@ def test_non_serial_backend_raises_capability_error(equity_env, european_option)
             session.price(_mc_engine(), european_option, equity_env)
 
 
-def test_run_scenarios_is_phase5(equity_env, european_option):
+def test_run_scenarios_accepts_empty_specs(equity_env, european_option):
+    # Phase 5 replaced the Phase 0 CapabilityError stub with the scenario
+    # planner; an empty spec collection is a valid empty plan.
     with PricingSession() as session:
-        with pytest.raises(CapabilityError):
-            session.run_scenarios(
-                PricingRequest(product=european_option, pricing_env=equity_env),
-                scenario_specs=(),
-                engine_factory=_mc_engine,
-            )
+        outcomes = session.run_scenarios(
+            PricingRequest(product=european_option, pricing_env=equity_env),
+            scenario_specs=(),
+            engine_factory=_mc_engine,
+        )
+    assert outcomes == []
 
 
 def test_unsupported_output_raises(equity_env, european_option):
