@@ -151,7 +151,7 @@ def resolve_resource_budget(explicit=None, environ=None):
     if explicit is not None:
         fields = [
             "total_memory_bytes", "artifact_cache_bytes", "draw_cache_bytes",
-            "max_threads", "max_in_flight",
+            "max_threads", "max_in_flight", "max_processes",
         ]
         return explicit, tuple((f, "explicit") for f in fields)
 
@@ -167,8 +167,11 @@ def resolve_resource_budget(explicit=None, environ=None):
                            1, "max_threads", sources)
     max_in_flight = _env_int(environ, "QUANTARK_EXEC_MAX_IN_FLIGHT",
                              1, "max_in_flight", sources)
+    max_processes = _env_int(environ, "QUANTARK_EXEC_MAX_PROCESSES",
+                             1, "max_processes", sources)
     return (
         ResourceBudget(
+            max_processes=max_processes,
             max_threads=max_threads,
             total_memory_bytes=None if memory_mb is None else memory_mb * 2**20,
             draw_cache_bytes=None if draw_mb is None else draw_mb * 2**20,

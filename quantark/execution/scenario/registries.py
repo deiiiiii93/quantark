@@ -158,6 +158,11 @@ def _get(kind: str, key: str):
     return registration
 
 
+def get_registration(kind: str, ref_id: str):
+    """Kind-dispatched lookup used by worker CallableRef verification."""
+    return _get(kind, ref_id)
+
+
 def get_transformer(transformer_id: str) -> TransformerRegistration:
     return _get("transformer", transformer_id)
 

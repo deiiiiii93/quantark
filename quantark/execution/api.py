@@ -79,6 +79,12 @@ class PricingSession:
             if (budget.max_in_flight == 1
                     and sources.get("max_in_flight") == "default"):
                 upgrades["max_in_flight"] = cpus
+            # Phase 5: the processes scenario backend needs workers; a
+            # DEFAULT-sourced max_processes upgrades exactly like
+            # max_threads, and an operator's explicit/env value never does.
+            if (budget.max_processes == 1
+                    and sources.get("max_processes") == "default"):
+                upgrades["max_processes"] = cpus
             if upgrades:
                 budget = dataclasses.replace(budget, **upgrades)
             leases = ResourceLeaseManager(budget)
@@ -176,9 +182,20 @@ class PricingSession:
         ``collect_errors=True`` failed cells become ``PricingFailure``.
         """
         self._ensure_open()
+        from quantark.execution.scenario.contracts import BaseInputsRef
         from quantark.execution.scenario.planner import plan_scenarios
         from quantark.execution.scenario.runner import run_plan
 
+        backend = self._context.execution_policy.scenario.backend
+        if backend in ("processes", "dask") and not isinstance(
+            base_request, BaseInputsRef
+        ):
+            raise CapabilityError(
+                f"the {backend!r} scenario backend requires a BaseInputsRef "
+                "base (registered factory); live request objects cannot "
+                "cross a process boundary and explicit requests never "
+                "silently fall back (spec section 3.3)"
+            )
         plan = plan_scenarios(base_request, scenario_specs, engine_factory)
         return run_plan(
             plan, base_request, engine_factory, self._context,
