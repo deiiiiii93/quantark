@@ -8,6 +8,15 @@ Phase 0: every row is ``temporary_legacy`` (session-reachable through the
 serial LegacyPriceAdapter) except abstract bases, which are
 ``not_applicable``. Later phases upgrade rows to ``supported`` as native
 adapters land.
+
+Phase 5 note: scenario/process/Dask execution is a SESSION-level
+capability (``PricingSession.run_scenarios`` + registered
+transformer/runner/factory ids), not a per-engine one — any engine an
+adapter or runner can drive participates. The inventory therefore carries
+no per-engine scenario column; the scenario exit gates live in
+``test/execution/test_scenario_*``, ``test_worker_spec``,
+``test_processes_backend``, ``test_dask_backend``, and
+``test_surface_shock_scenarios``.
 """
 import importlib
 from dataclasses import dataclass

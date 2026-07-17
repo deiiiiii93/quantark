@@ -1,4 +1,4 @@
-"""QuantArk composable execution kernel (framework contract v1, Phases 0-4).
+"""QuantArk composable execution kernel (framework contract v1, Phases 0-5).
 
 Additive public surface (spec section 5). Direct legacy engine calls are
 unchanged; this package is reached only through explicit sessions or
@@ -38,14 +38,28 @@ from quantark.execution.policy import (
     ExecutorSelection,
     ResourceBudget,
 )
+from quantark.execution.scenario.contracts import (
+    BaseInputsRef,
+    CallableRef,
+    ScenarioCell,
+    ScenarioPlan,
+    WorkerSpec,
+)
+from quantark.execution.scenario.planner import plan_scenarios
+from quantark.execution.scenario.validate import (
+    ScenarioComparisonReport,
+    compare_scenario_outcomes,
+)
 
 __all__ = [
-    "DEFAULT_OUTPUTS",
     "AdaptivePlan",
+    "BaseInputsRef",
     "BatchOutcome",
     "BatchPlan",
     "BatchTask",
+    "CallableRef",
     "CapabilityError",
+    "DEFAULT_OUTPUTS",
     "DeterminismPolicy",
     "DeterminismViolation",
     "DrawRepository",
@@ -64,9 +78,15 @@ __all__ = [
     "PricingSession",
     "ResourceBudget",
     "ResourceBudgetExceeded",
+    "ScenarioCell",
+    "ScenarioComparisonReport",
     "ScenarioOutcome",
+    "ScenarioPlan",
     "ScenarioSpec",
     "TaskExecutionError",
     "ValidationGateError",
+    "WorkerSpec",
+    "compare_scenario_outcomes",
     "default_context",
+    "plan_scenarios",
 ]
