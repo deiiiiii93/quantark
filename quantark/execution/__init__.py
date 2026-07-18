@@ -6,6 +6,7 @@ unchanged; this package is reached only through explicit sessions or
 """
 from quantark.execution.api import PricingSession
 from quantark.execution.cache.draws import DrawRepository
+from quantark.execution.capability_matrix import render_capability_matrix
 from quantark.execution.context import PricingRunContext, default_context
 from quantark.execution.contracts import (
     DEFAULT_OUTPUTS,
@@ -89,4 +90,5 @@ __all__ = [
     "compare_scenario_outcomes",
     "default_context",
     "plan_scenarios",
+    "render_capability_matrix",
 ]
