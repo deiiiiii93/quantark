@@ -36,8 +36,7 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_zero, safe_log
 
 try:
-    from dask import delayed
-    from dask.compute import compute
+    from dask import compute, delayed
 
     DASK_AVAILABLE = True
 except ImportError:
