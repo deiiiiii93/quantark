@@ -1,0 +1,48 @@
+{
+  "cases": {
+    "ko-reset-dask": {
+      "avg_ko_time": "0.3358976702618163",
+      "batches_used": 3,
+      "ko_probability": "0.82055",
+      "num_paths": 20000,
+      "price": "97.73391564183689",
+      "std_error": "0.08409016627571057",
+      "v0_probability": "0.0787",
+      "v1_probability": "0.10075"
+    },
+    "lv-snowball-dask": {
+      "avg_ko_time": "0.4466874578556979",
+      "batches_used": 3,
+      "ko_probability": "0.5932",
+      "num_paths": 20000,
+      "price": "978096.8728830622",
+      "std_error": "776.6531508109545",
+      "v0_probability": "0.2696",
+      "v1_probability": "0.1372"
+    },
+    "phoenix-dask": {
+      "avg_ko_time": "0.4449173553719008",
+      "batches_used": 3,
+      "ko_probability": "0.605",
+      "num_paths": 20000,
+      "price": "97.74500856256225",
+      "std_error": "0.07705977292511765",
+      "v0_probability": "0.26345",
+      "v1_probability": "0.13155"
+    },
+    "snowball-dask": {
+      "avg_ko_time": "0.4449173553719008",
+      "batches_used": 3,
+      "ko_probability": "0.605",
+      "num_paths": 20000,
+      "price": "968518.7044925808",
+      "std_error": "758.521850602797",
+      "v0_probability": "0.26345",
+      "v1_probability": "0.13155"
+    }
+  },
+  "versions": {
+    "numpy": "2.4.6",
+    "scipy": "1.17.1"
+  }
+}

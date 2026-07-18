@@ -257,10 +257,117 @@ def freeze_phase4() -> None:
     print(f"wrote {PHASE4_GOLDEN_PATH} with {len(cases)} goldens")
 
 
+# ---------------------------------------------------------------------------
+# Phase 6 pre-refactor legacy-Dask goldens (bitwise gate for the shared batch
+# reducer extraction; spec §17.3). Run ONCE on the pristine tree:
+#     .venv/bin/python test/execution/freeze_goldens.py phase6_dask
+# ---------------------------------------------------------------------------
+
+PHASE6_DASK_GOLDEN_PATH = (
+    pathlib.Path(__file__).parent / "goldens" / "legacy_dask_phase6_goldens.json"
+)
+
+
+def build_phase6_dask_cases() -> dict:
+    """Engine/product/env triples exercising every legacy Dask loop variant."""
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
+    from execution.matrix_fixtures import (
+        _eq_flat_env,
+        _eq_grid_env,
+        _mcp,
+        _phoenix,
+        _snowball,
+    )
+
+    from quantark.asset.equity.engine.mc import PhoenixMCEngine, SnowballMCEngine
+    from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
+        LocalVolSnowballMCEngine,
+    )
+    from quantark.asset.equity.product.option import create_ko_reset_snowball
+    from quantark.util.enum import PostKOScheduleMode
+    from quantark.util.enum.engine_enums import MonteCarloMethod
+
+    params = _mcp(num_paths=20_000, seed=42)
+    ko_reset = create_ko_reset_snowball(
+        initial_price=100.0, strike=100.0, maturity_pre=1.0,
+        maturity_post=2.0, post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        ki_continuous=False,
+    )
+    return {
+        "snowball-dask": (
+            SnowballMCEngine(
+                params=params, method=MonteCarloMethod.PSEUDO,
+                use_dask=True, num_batches=3,
+            ),
+            _snowball(), _eq_flat_env(),
+        ),
+        "ko-reset-dask": (
+            SnowballMCEngine(
+                params=params, method=MonteCarloMethod.PSEUDO,
+                use_dask=True, num_batches=3,
+            ),
+            ko_reset, _eq_flat_env(),
+        ),
+        "phoenix-dask": (
+            PhoenixMCEngine(
+                params=params, method=MonteCarloMethod.PSEUDO,
+                use_dask=True, num_batches=3,
+            ),
+            _phoenix(), _eq_flat_env(),
+        ),
+        "lv-snowball-dask": (
+            LocalVolSnowballMCEngine(
+                params=params, use_dask=True, num_batches=3,
+            ),
+            _snowball(), _eq_grid_env(),
+        ),
+    }
+
+
+def _phase6_result_payload(engine, product, env) -> dict:
+    engine.price(product, env)
+    result = engine.get_last_result()
+    return {
+        "price": repr(float(result.price)),
+        "std_error": repr(float(result.std_error)),
+        "num_paths": int(result.num_paths),
+        "ko_probability": repr(float(result.ko_probability)),
+        "v0_probability": repr(float(result.v0_probability)),
+        "v1_probability": repr(float(result.v1_probability)),
+        "avg_ko_time": (
+            None if result.avg_ko_time is None else repr(float(result.avg_ko_time))
+        ),
+        "batches_used": int(result.batches_used),
+    }
+
+
+def freeze_phase6_dask() -> None:
+    import numpy
+    import scipy
+
+    cases = {
+        name: _phase6_result_payload(engine, product, env)
+        for name, (engine, product, env) in build_phase6_dask_cases().items()
+    }
+    payload = {
+        "cases": cases,
+        "versions": {"numpy": numpy.__version__, "scipy": scipy.__version__},
+    }
+    PHASE6_DASK_GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PHASE6_DASK_GOLDEN_PATH.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    )
+    print(f"wrote {PHASE6_DASK_GOLDEN_PATH} with {len(cases)} goldens")
+
+
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "phase4":
         freeze_phase4()
+    elif len(sys.argv) > 1 and sys.argv[1] == "phase6_dask":
+        freeze_phase6_dask()
     else:
         main()
