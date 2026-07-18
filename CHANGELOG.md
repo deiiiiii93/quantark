@@ -7,10 +7,11 @@ During 0.x the public API may still change between minor versions.
 
 ## [0.3.0] - 2026-07-18
 
-Release-preparation entry. Before tagging, the "Before tagging v0.3.0"
-checklist in `docs/execution/README.md` must be satisfied (controlled-host
-performance gates, full-suite resolution, wheel-artifact compatibility run) —
-pushing a tag triggers publication.
+Release-preparation entry; the package version is pinned at `0.3.0rc1`
+until the "Before tagging v0.3.0" checklist in `docs/execution/README.md`
+is satisfied (finalize version, controlled-host performance gates,
+full-suite resolution, wheel-artifact compatibility run) — pushing a tag
+triggers publication.
 
 ### Added
 - **`quantark.execution` — composable execution kernel** (framework contract

@@ -60,8 +60,13 @@ below).
 ## Before tagging v0.3.0
 
 This phase produces **release-preparation evidence only** — pushing a tag IS
-publishing (`.github/workflows/release.yml` is tag-triggered). Outstanding
-hard prerequisites before any `v0.3.0` tag:
+publishing (`.github/workflows/release.yml` is tag-triggered), so the
+version is pinned at `0.3.0rc1` until every prerequisite below is met
+(Codex code-gate 2026-07-18: a final version must not exist while gates are
+open). Outstanding hard prerequisites before any `v0.3.0` tag:
+
+0. **Finalize the version**: flip `0.3.0rc1` → `0.3.0` in `pyproject.toml`
+   and `quantark/__init__.py` only after items 1–3 pass.
 
 1. **Controlled-host performance gates** (spec §20): ≥2x fixed-batch MC at 4
    workers on >10s serial workloads, ≥2x PDE CRN-sweep production gate, and

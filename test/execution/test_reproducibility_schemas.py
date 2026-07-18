@@ -104,6 +104,37 @@ def test_worker_spec_version_pin_matches_reader_rejection():
         verify_worker_environment(payload_to_worker_spec(payload))
 
 
+def test_run_worker_cell_rejects_skew_before_any_import():
+    """Entry-point gate (code-gate 2026-07-18): an unknown schema version
+    must be rejected on the RAW payload — before parsing, sys.path
+    mutation, or payload-selected imports can contaminate a long-lived
+    worker."""
+    import sys
+
+    from quantark.execution.scenario.worker import run_worker_cell
+
+    spec = build_worker_spec(_toy_plan(), _toy_base(), default_context(), workers=2)
+    payload = _json_roundtrip(worker_spec_to_payload(spec))
+    payload["schema_version"] = "scenario/v999"
+    # Point a callable ref at a module that is definitely not imported yet:
+    # if the gate ran after imports, this would land in sys.modules.
+    sentinel = "fractions"
+    sys.modules.pop(sentinel, None)
+    payload["callable_refs"] = [
+        ["factory", "toy-inputs/v1", sentinel, "Fraction", "1"]
+    ]
+    cell = _json_roundtrip(_cell_payload(_toy_plan().cells[0]))
+
+    result = run_worker_cell(payload, cell, None)
+
+    assert result["error"] is not None
+    assert result["error"]["type"] == "CapabilityError"
+    assert "scenario/v999" in result["error"]["message"]
+    assert sentinel not in sys.modules, (
+        "worker imported a payload-selected module before the schema gate"
+    )
+
+
 # ------------------------------------------------------------ scenario-cell
 
 

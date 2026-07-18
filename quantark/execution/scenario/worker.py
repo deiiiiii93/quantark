@@ -366,6 +366,19 @@ def run_worker_cell(spec_payload: dict, cell_payload: dict,
     """Top-level spawn/Dask task: reconstruct, verify, execute one cell."""
     scenario_id = cell_payload.get("scenario_id", "<unknown>")
     try:
+        # Schema gate FIRST, on the raw payload: an unknown schema version
+        # must be rejected before any parsing, sys.path mutation, or
+        # payload-selected imports can run their side effects in this
+        # (possibly long-lived) worker (spec section 22; code-gate
+        # 2026-07-18).
+        raw_schema = spec_payload.get("schema_version")
+        if raw_schema != SCENARIO_SCHEMA_VERSION:
+            raise CapabilityError(
+                f"worker spec schema {raw_schema!r} does not match this "
+                f"worker's {SCENARIO_SCHEMA_VERSION!r}; readers reject "
+                "unknown schema versions rather than guessing (spec "
+                "section 22)"
+            )
         spec = payload_to_worker_spec(spec_payload)
         _import_and_verify_refs(spec)
         verify_worker_environment(spec)
