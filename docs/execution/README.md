@@ -35,7 +35,27 @@ Spec of record:
 
 ## Performance snapshots
 
-<!-- filled by Task 8 -->
+Dev-machine (Apple Silicon, macOS) measurements from the Phase 6 exit rerun,
+2026-07-18, via `test/execution/benchmark_phase{2,4,5}.py`. These are
+**documentation, not gate passes** — the spec §20 release gates run on the
+controlled host with production-sized workloads (see the pre-tag checklist
+below).
+
+- **Fixed-batch MC** (DCN, 2^17 paths, 16 batches, cold draws): session
+  threads 2.29x @4 workers (PASS vs the 1.5x dev floor); 2.13x @8 workers —
+  host-limited (the direct legacy `num_workers=8` path is no faster on this
+  machine; ≥2.5x@8 needs the controlled host). Framework adds no threading
+  overhead vs engine-internal threads (worst ratio 1.04). CRN draw reuse
+  2.04x (PASS vs 2x). Serial overhead −0.2%.
+- **PDE prepared artifacts** (CRN x10 LV-snowball, 58 ms solves): session
+  1.29x vs uncached direct — march-dominated small fixture; the ≥2x gate is
+  sized for production grids on the controlled host. Warm-session single
+  European dispatch overhead: −9.7% (session faster) at a 0.8 ms solve.
+- **Scenario processes** (9-cell surface-shock menu, 4096 paths, 4 spawn
+  workers): median 1.63x vs serial with **194/194 normalized fields
+  matching in every rep**; tiny cells put spawn+import fixed costs and the
+  heaviest cell on the critical path — the ≥2.5x gate runs on >10s serial
+  grids on the controlled host.
 
 ## Before tagging v0.3.0
 
