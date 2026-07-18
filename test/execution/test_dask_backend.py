@@ -133,20 +133,22 @@ def test_dask_rejects_native_value_runners(dask_client):
             session.run_scenarios(_toy_base(), specs, "toy-engine/v1")
 
 
-def test_legacy_use_dask_engines_untouched_this_phase():
-    """Spec 12.4: existing Snowball/Phoenix use_dask behavior is preserved;
-    Phase 5 must not have modified those modules."""
-    import subprocess
+def test_legacy_use_dask_surface_preserved():
+    """Spec 12.4/17.1: existing Snowball/Phoenix ``use_dask`` behavior is
+    preserved. Through Phase 5 this was guarded by a no-diff-vs-main proxy;
+    Phase 6 consolidated the triplicated batch loop into one legacy reducer,
+    so the guard is now the preserved constructor surface here plus the
+    bitwise behavioral gate in ``test_legacy_dask_goldens``."""
+    import inspect
 
-    for path in (
-        "quantark/asset/equity/engine/mc/snowball_mc_engine.py",
-        "quantark/asset/equity/engine/mc/phoenix_mc_engine.py",
-    ):
-        diff = subprocess.run(
-            ["git", "diff", "main...HEAD", "--", path],
-            capture_output=True, text=True, check=False,
-        )
-        assert diff.stdout == "", f"{path} was modified in Phase 5"
+    from quantark.asset.equity.engine.mc import PhoenixMCEngine, SnowballMCEngine
+
+    for cls in (SnowballMCEngine, PhoenixMCEngine):
+        params = inspect.signature(cls.__init__).parameters
+        assert "use_dask" in params, cls.__name__
+        assert params["use_dask"].default is False, cls.__name__
+        assert "num_batches" in params, cls.__name__
+        assert params["num_batches"].default == 4, cls.__name__
 
 
 def test_shared_client_concurrent_runs_do_not_collide(dask_client):
