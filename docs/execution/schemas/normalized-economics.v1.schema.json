@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/deiiiiii93/quantark/docs/execution/schemas/normalized-economics.v1.schema.json",
+  "title": "QuantArk execution normalized economics payload",
+  "description": "Flat dotted-path -> scalar-leaf mapping produced by quantark.execution.scenario.validate.normalized_cell_payload: the outcome's normalized_economics pairs plus the reserved 'value.native' leaf. Non-numeric native values normalize to canonical fingerprints or '<uncomparable:...>' strings, so every leaf — including value.native — is the full number/string/boolean/null union. Keys prefixed 'numerical.' are the plan-dependent tier. Versioned by the enclosing scenario/v1 protocol (the payload itself is a comparison artifact, not a wire envelope).",
+  "type": "object",
+  "required": ["value.native"],
+  "properties": {
+    "value.native": {"type": ["number", "string", "boolean", "null"]}
+  },
+  "patternProperties": {
+    "^.*$": {"type": ["number", "string", "boolean", "null"]}
+  },
+  "additionalProperties": false
+}

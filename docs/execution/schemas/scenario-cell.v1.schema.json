@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/deiiiiii93/quantark/docs/execution/schemas/scenario-cell.v1.schema.json",
+  "title": "QuantArk execution scenario-cell payload (scenario/v1 envelope)",
+  "description": "JSON cell payload produced by quantark.execution.scenario.worker._cell_payload. The cell payload deliberately carries NO embedded schema_version: it never travels alone — every run_worker_cell(spec_payload, cell_payload, ...) call pairs it with the WorkerSpec payload whose 'scenario/v1' schema_version gates execution before any cell is touched (spec section 22).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scenario_id",
+    "position",
+    "transformer_id",
+    "runner_id",
+    "parameters",
+    "invalidate_all",
+    "cell_fingerprint"
+  ],
+  "properties": {
+    "scenario_id": {"type": "string"},
+    "position": {"type": "integer", "minimum": 0},
+    "transformer_id": {"type": "string"},
+    "runner_id": {"type": "string"},
+    "parameters": {"$ref": "#/$defs/pairs"},
+    "invalidate_all": {"type": "boolean"},
+    "cell_fingerprint": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "value": {
+      "anyOf": [
+        {"type": ["string", "number", "boolean", "null"]},
+        {"type": "array", "items": {"$ref": "#/$defs/value"}}
+      ]
+    },
+    "pairs": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "prefixItems": [
+          {"type": "string"},
+          {"$ref": "#/$defs/value"}
+        ],
+        "items": false
+      }
+    }
+  }
+}

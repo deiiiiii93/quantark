@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/deiiiiii93/quantark/docs/execution/schemas/worker-spec.v1.schema.json",
+  "title": "QuantArk execution WorkerSpec payload (scenario/v1)",
+  "description": "JSON envelope produced by quantark.execution.scenario.worker.worker_spec_to_payload and consumed by run_worker_cell in spawn/Dask workers. Workers verify schema_version FIRST and reject unknown versions (spec section 22).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "base_ref",
+    "callable_refs",
+    "child_policy_values",
+    "child_budget_values",
+    "expected",
+    "import_paths"
+  ],
+  "properties": {
+    "schema_version": {"const": "scenario/v1"},
+    "base_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["factory_id", "payload"],
+      "properties": {
+        "factory_id": {"type": "string"},
+        "payload": {"$ref": "#/$defs/pairs"}
+      }
+    },
+    "callable_refs": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 5,
+        "maxItems": 5,
+        "prefixItems": [
+          {"enum": ["transformer", "runner", "factory"]},
+          {"type": "string"},
+          {"type": "string"},
+          {"type": "string"},
+          {"type": "string"}
+        ],
+        "items": false
+      }
+    },
+    "child_policy_values": {"$ref": "#/$defs/pairs"},
+    "child_budget_values": {"$ref": "#/$defs/pairs"},
+    "expected": {"$ref": "#/$defs/pairs"},
+    "import_paths": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "value": {
+      "anyOf": [
+        {"type": ["string", "number", "boolean", "null"]},
+        {"type": "array", "items": {"$ref": "#/$defs/value"}}
+      ]
+    },
+    "pairs": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "prefixItems": [
+          {"type": "string"},
+          {"$ref": "#/$defs/value"}
+        ],
+        "items": false
+      }
+    }
+  }
+}
