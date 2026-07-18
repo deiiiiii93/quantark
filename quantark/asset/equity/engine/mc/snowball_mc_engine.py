@@ -47,8 +47,12 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import safe_log
 
 # Optional Dask import
+from quantark.asset.equity.engine.mc.autocallable_dask_batch import (
+    run_autocallable_dask_batches,
+)
+
 try:
-    from dask import compute, delayed
+    from dask import compute, delayed  # noqa: F401 — availability probe
 
     DASK_AVAILABLE = True
 except ImportError:
@@ -1936,99 +1940,34 @@ class SnowballMCEngine(BaseEngine):
             product, pricing_env, T
         )
 
-        if self.num_batches <= 0:
-            raise ValidationError(
-                f"num_batches must be positive, got {self.num_batches}"
-            )
-
-        # Split total paths across batches so parallel mode matches serial mode
-        total_paths_target = int(self.params.num_paths)
-        base = total_paths_target // self.num_batches
-        remainder = total_paths_target % self.num_batches
-        batch_sizes = [
-            (base + 1 if i < remainder else base) for i in range(self.num_batches)
-        ]
-
-        # Create delayed tasks for non-empty batches
-        batch_results = []
-        batches_used = 0
-        for batch_id, batch_num_paths in enumerate(batch_sizes):
-            if batch_num_paths <= 0:
-                continue
-            batches_used += 1
-            batch_results.append(
-                delayed(self._price_single_batch)(
-                    batch_id=batch_id,
-                    batch_num_paths=batch_num_paths,
-                    product=product,
-                    pricing_env=pricing_env,
-                    S=S,
-                    T=T,
-                    r=r,
-                    q=q,
-                    sigma=sigma,
-                    all_times=all_times,
-                    dt_array=dt_array,
-                    ko_indices=ko_indices,
-                    ki_indices=ki_indices,
-                )
-            )
-
-        # Compute all batches in parallel
-        results = compute(*batch_results)
-
-        total_n = 0
-        total_sum_x = 0.0
-        total_sum_x2 = 0.0
-        total_ko_count = 0
-        total_v0_count = 0
-        total_v1_count = 0
-        total_ko_time_sum = 0.0
-        total_ko_time_count = 0
-
-        for res in results:
-            total_n += int(res["n"])
-            total_sum_x += float(res["sum_x"])
-            total_sum_x2 += float(res["sum_x2"])
-            total_ko_count += int(res.get("ko_count", 0))
-            total_v0_count += int(res.get("v0_count", 0))
-            total_v1_count += int(res.get("v1_count", 0))
-            total_ko_time_sum += float(res.get("ko_time_sum", 0.0))
-            total_ko_time_count += int(res.get("ko_time_count", 0))
-
-        if total_n <= 0:
-            raise PricingError("Dask parallel pricing produced zero simulated paths")
-
-        price = total_sum_x / total_n
-
-        if total_n > 1:
-            sample_var = (total_sum_x2 - (total_sum_x * total_sum_x) / total_n) / (
-                total_n - 1
-            )
-            sample_var = max(sample_var, 0.0)
-            std_error = math.sqrt(sample_var) / math.sqrt(total_n)
-        else:
-            std_error = 0.0
-
-        ko_probability = float(total_ko_count / total_n)
-        v0_probability = float(total_v0_count / total_n)
-        v1_probability = float(total_v1_count / total_n)
-
-        avg_ko_time: Optional[float]
-        if total_ko_time_count > 0:
-            avg_ko_time = float(total_ko_time_sum / total_ko_time_count)
-        else:
-            avg_ko_time = None
+        totals = run_autocallable_dask_batches(
+            num_batches=self.num_batches,
+            total_paths=int(self.params.num_paths),
+            batch_fn=self._price_single_batch,
+            batch_kwargs=dict(
+                product=product,
+                pricing_env=pricing_env,
+                S=S,
+                T=T,
+                r=r,
+                q=q,
+                sigma=sigma,
+                all_times=all_times,
+                dt_array=dt_array,
+                ko_indices=ko_indices,
+                ki_indices=ki_indices,
+            ),
+        )
 
         return SnowballMCResult(
-            price=float(price),
-            std_error=float(std_error),
-            num_paths=int(total_n),
-            ko_probability=ko_probability,
-            v0_probability=v0_probability,
-            v1_probability=v1_probability,
-            avg_ko_time=avg_ko_time,
-            batches_used=batches_used,
+            price=totals.price,
+            std_error=totals.std_error,
+            num_paths=totals.num_paths,
+            ko_probability=totals.ko_probability,
+            v0_probability=totals.v0_probability,
+            v1_probability=totals.v1_probability,
+            avg_ko_time=totals.avg_ko_time,
+            batches_used=totals.batches_used,
         )
 
     def _price_ko_reset_parallel(
@@ -2046,93 +1985,31 @@ class SnowballMCEngine(BaseEngine):
         """
         grid = self._build_time_grid_ko_reset(product, pricing_env, T)
 
-        if self.num_batches <= 0:
-            raise ValidationError(
-                f"num_batches must be positive, got {self.num_batches}"
-            )
-
-        total_paths_target = int(self.params.num_paths)
-        base = total_paths_target // self.num_batches
-        remainder = total_paths_target % self.num_batches
-        batch_sizes = [
-            (base + 1 if i < remainder else base) for i in range(self.num_batches)
-        ]
-
-        batch_results = []
-        batches_used = 0
-        for batch_id, batch_num_paths in enumerate(batch_sizes):
-            if batch_num_paths <= 0:
-                continue
-            batches_used += 1
-            batch_results.append(
-                delayed(self._price_single_batch_ko_reset)(
-                    batch_id=batch_id,
-                    batch_num_paths=batch_num_paths,
-                    product=product,
-                    pricing_env=pricing_env,
-                    S=S,
-                    T=T,
-                    r=r,
-                    q=q,
-                    sigma=sigma,
-                    grid=grid,
-                )
-            )
-
-        results = compute(*batch_results)
-
-        total_n = 0
-        total_sum_x = 0.0
-        total_sum_x2 = 0.0
-        total_ko_count = 0
-        total_v0_count = 0
-        total_v1_count = 0
-        total_ko_time_sum = 0.0
-        total_ko_time_count = 0
-
-        for res in results:
-            total_n += int(res["n"])
-            total_sum_x += float(res["sum_x"])
-            total_sum_x2 += float(res["sum_x2"])
-            total_ko_count += int(res.get("ko_count", 0))
-            total_v0_count += int(res.get("v0_count", 0))
-            total_v1_count += int(res.get("v1_count", 0))
-            total_ko_time_sum += float(res.get("ko_time_sum", 0.0))
-            total_ko_time_count += int(res.get("ko_time_count", 0))
-
-        if total_n <= 0:
-            raise PricingError("Dask parallel pricing produced zero simulated paths")
-
-        price = total_sum_x / total_n
-
-        if total_n > 1:
-            sample_var = (total_sum_x2 - (total_sum_x * total_sum_x) / total_n) / (
-                total_n - 1
-            )
-            sample_var = max(sample_var, 0.0)
-            std_error = math.sqrt(sample_var) / math.sqrt(total_n)
-        else:
-            std_error = 0.0
-
-        ko_probability = float(total_ko_count / total_n)
-        v0_probability = float(total_v0_count / total_n)
-        v1_probability = float(total_v1_count / total_n)
-
-        avg_ko_time: Optional[float]
-        if total_ko_time_count > 0:
-            avg_ko_time = float(total_ko_time_sum / total_ko_time_count)
-        else:
-            avg_ko_time = None
+        totals = run_autocallable_dask_batches(
+            num_batches=self.num_batches,
+            total_paths=int(self.params.num_paths),
+            batch_fn=self._price_single_batch_ko_reset,
+            batch_kwargs=dict(
+                product=product,
+                pricing_env=pricing_env,
+                S=S,
+                T=T,
+                r=r,
+                q=q,
+                sigma=sigma,
+                grid=grid,
+            ),
+        )
 
         return SnowballMCResult(
-            price=float(price),
-            std_error=float(std_error),
-            num_paths=int(total_n),
-            ko_probability=ko_probability,
-            v0_probability=v0_probability,
-            v1_probability=v1_probability,
-            avg_ko_time=avg_ko_time,
-            batches_used=batches_used,
+            price=totals.price,
+            std_error=totals.std_error,
+            num_paths=totals.num_paths,
+            ko_probability=totals.ko_probability,
+            v0_probability=totals.v0_probability,
+            v1_probability=totals.v1_probability,
+            avg_ko_time=totals.avg_ko_time,
+            batches_used=totals.batches_used,
         )
 
     def _rqmc_spec(
