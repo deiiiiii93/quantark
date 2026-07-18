@@ -5,6 +5,103 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.3.0] - 2026-07-18
+
+Release-preparation entry. Before tagging, the "Before tagging v0.3.0"
+checklist in `docs/execution/README.md` must be satisfied (controlled-host
+performance gates, full-suite resolution, wheel-artifact compatibility run) —
+pushing a tag triggers publication.
+
+### Added
+- **`quantark.execution` — composable execution kernel** (framework contract
+  v1; spec `docs/superpowers/specs/2026-07-15-mc-pde-performance-generalization-design.md`).
+  `PricingSession` wraps every exported MC/PDE engine without changing direct
+  legacy behavior: adapter registry, resource budgets/leases, prepared-artifact
+  and session draw caches, reproducibility manifests and immutable diagnostics.
+  Capabilities: fixed-batch MC backends (serial/threads, bit-identical
+  reductions in canonical order), adaptive RQMC session mode (bitwise vs
+  direct across the 12 autocallable vol engines), PDE preparation artifacts
+  (grids, step coefficients, factorization packs; one-solve PV/event/grid
+  outputs across 18 prepared engines + FX LV), typed scenario execution with
+  verified mutation footprints, spawn-safe `WorkerSpec` process workers, a
+  Dask backend over the same plans, `price_many` grouping, and a
+  complete-payload scenario validator. Published artifacts: generated
+  [capability matrix](docs/execution/capability-matrix.md) (CI-fresh), policy
+  guide, legacy-internals rationale, reproducibility JSON Schemas (validated
+  against live payloads), and runnable migration examples. Adoption is
+  inventory-driven and honest: `temporary_legacy` rows remain, and no
+  universal framework support is claimed until the controlled-host gates pass.
+- **DCN (Digital Coupon Note)**: product + observation-schedule generator,
+  curve-aware MC engine with leg decomposition and event stats, two-surface
+  PDE engine with MC↔PDE cross-validation gates, LocalVol/Heston/QE/SLV DCN
+  MC engines sharing one payoff kernel, MLMC-style coupled timestep-ladder
+  Heston pair, SVI/cleaned-quote calibration layers with no-arbitrage and
+  repricing-residual reports, node-bump vega buckets and carry-invariant rate
+  bumps.
+- **Implied futures carry**: `IndexFuturesCurve` implied q(T), futures-tenor
+  delta/rhoq buckets, delta-one futures rhoq, portfolio aggregation and hedge
+  integration.
+- **Engine term-structure upgrade**: MC, PDE, and quadrature autocallable
+  engines consume full r/q/vol term structures with a cross-family term
+  agreement gate.
+- **Vol-model barrier exotics**: LV/Heston/SLV barrier MC pricers on a shared
+  monitoring core, LV 1D barrier PDE, Heston/SLV 2D barrier ADI solvers.
+- **Vol-model numerics program (phases 2–5)**: vectorized Lewis Heston
+  calibration (~21x), unified Heston/SLV ADI core, opt-in Krylov and TR-BDF2
+  Fokker–Planck marches, opt-in QE-M martingale correction, concentrated
+  (x,v) grids, degenerate v=0 Feller boundary, LV Rannacher start-up
+  (default on), opt-in QMC sampling for Heston/SLV/LV kernels.
+- **PDE event-stats API** on Snowball/Phoenix vol solvers with event
+  distributions surfaced through session outputs.
+
+### Changed
+- DCN MC engine performance: draw cache, batched threads, LV build hoist.
+- The legacy autocallable Dask batch loop (Snowball vanilla/KO-reset,
+  Phoenix) is consolidated into one shared reducer
+  (`autocallable_dask_batch`) with byte-preserved behavior, gated by frozen
+  bitwise goldens. The legacy `use_dask` route itself is unchanged and
+  preserved (see `docs/execution/internals-and-legacy.md` for the §17.3
+  removal preconditions).
+- Dev extras now include `dask[distributed]` and `jsonschema`.
+
+### Fixed
+- `PhoenixMCEngine` silently disabled its Dask parallel path on modern dask
+  (`from dask.compute import compute` no longer resolves); availability now
+  matches `SnowballMCEngine`, with a regression test.
+- Craig–Sneyd ADI corrector order restored (base `Y0` + implicit `-rU`),
+  QE sampler sign bug, and the 2026-07 PDE/QUAD audit fixes (13 findings)
+  are included via the programs above.
+
+## [0.2.5] - 2026-07-03
+
+### Fixed
+- 2026-07 PDE/QUAD audit: 13 numerical findings fixed (discrete-monitoring
+  boundary handling, Rannacher terminal off-by-one, BGK state resolution,
+  smoothed KI for Phoenix/KO-reset, shared theta damping schedule) with
+  solver-family consolidation and regression tests.
+
+## [0.2.4] - 2026-07-02
+
+### Added
+- Opt-in BGK continuous-KI mode for Snowball and Phoenix PDE solvers
+  (direction-aware shifted barrier, per-product flag).
+- `EquityPosition.get_trade_risk` (product + total, frozen one-loop) and
+  `AutocallableCashLeg.time_shift`; event streams selected by leg
+  requirements.
+
+### Fixed
+- Portfolio vega/rho/dividend-rho aligned with the canonical greek
+  convention; bump contexts freeze PDE critical points for grid steadiness.
+
+## [0.2.3] - 2026-07-01
+
+### Added
+- Cross-engine-consistent `ki_ever` / `ki_survive` event-stat fields.
+
+### Fixed
+- Theta advances by business day; quadrature event-stats recursion uses
+  smoothed barrier indicators.
+
 ## [0.2.2] - 2026-07-01
 
 ### Fixed

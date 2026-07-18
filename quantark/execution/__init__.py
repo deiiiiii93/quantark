@@ -1,4 +1,4 @@
-"""QuantArk composable execution kernel (framework contract v1, Phases 0-5).
+"""QuantArk composable execution kernel (framework contract v1, Phases 0-6).
 
 Additive public surface (spec section 5). Direct legacy engine calls are
 unchanged; this package is reached only through explicit sessions or
