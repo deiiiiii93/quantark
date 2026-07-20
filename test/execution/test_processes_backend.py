@@ -1,6 +1,11 @@
 """Spawn process backend: clean-worker reconstruction, fault isolation,
 child budgets, and no silent fallback (spec sections 12.3, 12.5, 15)."""
 import dataclasses
+import os
+import subprocess
+import sys
+import types
+from pathlib import Path
 
 import pytest
 
@@ -297,6 +302,112 @@ def test_window_is_clamped_by_max_in_flight_budget():
         r for d in sink.entries for r in getattr(d, "records", ())
     ]
     assert any(r.startswith("clamp:scenario.window=") for r in records)
+
+
+# ---------------------------- spawn-safe __main__ preflight (2026-07-20)
+def test_pseudo_file_main_is_rejected_before_pool_creation(monkeypatch):
+    """A __main__ recorded as '<stdin>' (python - <<EOF heredoc) dooms
+    EVERY spawn child at bootstrap (FileNotFoundError re-running the
+    main), which the pool only surfaces as an opaque BrokenProcessPool
+    with completed=0. The preflight converts that into a typed
+    CapabilityError before any worker is spawned."""
+    import quantark.execution.scenario.worker as worker_mod
+
+    fake_main = types.ModuleType("__main__")
+    fake_main.__file__ = "<stdin>"
+    monkeypatch.setitem(sys.modules, "__main__", fake_main)
+    with pytest.raises(CapabilityError, match="spawn"):
+        worker_mod._verify_spawn_safe_main()
+
+
+def test_deleted_file_main_is_rejected_before_pool_creation(monkeypatch):
+    import quantark.execution.scenario.worker as worker_mod
+
+    fake_main = types.ModuleType("__main__")
+    fake_main.__file__ = "/nonexistent/deleted_script.py"
+    monkeypatch.setitem(sys.modules, "__main__", fake_main)
+    with pytest.raises(CapabilityError, match="spawn"):
+        worker_mod._verify_spawn_safe_main()
+
+
+@pytest.mark.parametrize("shape", ["script_file", "no_file", "module_spec"])
+def test_spawn_safe_mains_pass_preflight(monkeypatch, shape):
+    """Real script files, -c/REPL mains (no __file__), and -m/runpy mains
+    (__spec__ set) are all left alone."""
+    import importlib.machinery
+
+    import quantark.execution.scenario.worker as worker_mod
+
+    fake_main = types.ModuleType("__main__")
+    if shape == "script_file":
+        fake_main.__file__ = __file__
+    elif shape == "module_spec":
+        fake_main.__file__ = "<frozen imagined>"  # ignored: __spec__ wins
+        fake_main.__spec__ = importlib.machinery.ModuleSpec(
+            "pytest.__main__", loader=None
+        )
+    monkeypatch.setitem(sys.modules, "__main__", fake_main)
+    worker_mod._verify_spawn_safe_main()  # must not raise
+
+
+def test_stdin_heredoc_gets_typed_error_not_broken_pool():
+    """End-to-end: a stdin-heredoc parent asking for the processes
+    backend fails closed with CapabilityError BEFORE spawning workers
+    (root-caused 2026-07-20: previously every child died at bootstrap
+    and the parent reported BrokenProcessPool with completed=0)."""
+    repo = Path(__file__).parents[2]
+    script = """
+import dataclasses
+from quantark.execution.api import PricingSession
+from quantark.execution.context import default_context
+from quantark.execution.contracts import ScenarioSpec
+from quantark.execution.errors import CapabilityError
+from quantark.execution.policy import (
+    ExecutionPolicy, ExecutorSelection, ResourceBudget,
+)
+from quantark.execution.scenario.contracts import BaseInputsRef
+import execution.scenario_process_helpers  # registers toy fixtures
+
+context = dataclasses.replace(
+    default_context(),
+    execution_policy=ExecutionPolicy(
+        scenario=ExecutorSelection(backend="processes", workers=2),
+    ),
+    resource_budget=ResourceBudget(
+        max_processes=2, max_threads=1, max_in_flight=2,
+    ),
+)
+base = BaseInputsRef(
+    factory_id="toy-inputs/v1", payload=(("spot", 100.0), ("vol", 0.25)),
+)
+specs = [
+    ScenarioSpec(
+        scenario_id=f"s{i}", transformer_id="toy-bump/v1",
+        parameters=(("ds", float(i)),), mutation_tags=frozenset({"spot"}),
+        required_capabilities=frozenset({"runner:toy/v1"}),
+    )
+    for i in range(3)
+]
+try:
+    with PricingSession(context) as session:
+        session.run_scenarios(base, specs, "toy-engine/v1")
+except CapabilityError as exc:
+    print(f"TYPED: CapabilityError: {exc}")
+else:
+    print("NO ERROR RAISED")
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(repo), str(repo / "test")]
+        + [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p]
+    )
+    result = subprocess.run(
+        [sys.executable, "-"], input=script, capture_output=True,
+        text=True, timeout=300, cwd=repo, env=env,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert "TYPED: CapabilityError" in result.stdout
+    assert "BrokenProcessPool" not in result.stdout + result.stderr
 
 
 def test_nested_list_payload_prices_identically_serial_and_process():

@@ -416,6 +416,41 @@ def run_worker_cell(spec_payload: dict, cell_payload: dict,
         }
 
 
+def _verify_spawn_safe_main() -> None:
+    """Fail closed BEFORE creating a pool when spawn children cannot
+    re-import the parent's ``__main__``. Under the spawn start method,
+    multiprocessing records ``__main__.__file__`` (when ``__spec__`` is
+    unset) and every worker re-executes that file at bootstrap; a
+    pseudo-path main (``python - <<EOF`` heredocs record ``<stdin>``) or a
+    since-deleted file kills EVERY worker with a FileNotFoundError the
+    pool only surfaces as an opaque ``BrokenProcessPool``. Mains run via
+    ``-m``/runpy (``__spec__`` set), ``-c`` and REPLs (no ``__file__``),
+    and real script files are all left alone."""
+    import os
+    import sys
+
+    main_module = sys.modules.get("__main__")
+    if main_module is None:
+        return
+    if getattr(getattr(main_module, "__spec__", None), "name", None):
+        return
+    main_path = getattr(main_module, "__file__", None)
+    if main_path is None:
+        return
+    if (not os.path.basename(main_path).startswith("<")
+            and os.path.exists(main_path)):
+        return
+    raise CapabilityError(
+        "the processes scenario backend cannot start spawn workers from "
+        f"this __main__ module: {main_path!r} is not a re-importable "
+        "file, so every spawn child would die at bootstrap re-running it "
+        "(multiprocessing re-executes the parent's __main__ under the "
+        "spawn start method). Run from a real script file guarded by "
+        "`if __name__ == '__main__':`, or use the serial/threads backend "
+        "for stdin/heredoc sessions"
+    )
+
+
 def run_plan_processes(plan, base, engine_factory, context, *,
                        collect_errors: bool = False) -> list:
     """Execute a ScenarioPlan on spawn processes (spec 12.3)."""
@@ -442,6 +477,7 @@ def run_plan_processes(plan, base, engine_factory, context, *,
             )
     if not plan.cells:
         return []
+    _verify_spawn_safe_main()
 
     policy = context.execution_policy.scenario
     budget = context.resource_budget

@@ -69,6 +69,12 @@ triggers publication.
 - `PhoenixMCEngine` silently disabled its Dask parallel path on modern dask
   (`from dask.compute import compute` no longer resolves); availability now
   matches `SnowballMCEngine`, with a regression test.
+- Processes scenario backend: a parent whose `__main__` cannot be
+  re-imported by spawn children (stdin/heredoc scripts record
+  `__file__ = '<stdin>'`; deleted script files) now fails closed with a
+  typed `CapabilityError` before any worker is spawned, instead of every
+  child dying at bootstrap and surfacing as an opaque
+  `BrokenProcessPool` with zero completed cells.
 - Craig–Sneyd ADI corrector order restored (base `Y0` + implicit `-rU`),
   QE sampler sign bug, and the 2026-07 PDE/QUAD audit fixes (13 findings)
   are included via the programs above.
