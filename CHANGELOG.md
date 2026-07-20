@@ -5,13 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
-## [0.3.0] - 2026-07-18
+## [0.3.0] - 2026-07-20
 
-Release-preparation entry; the package version is pinned at `0.3.0rc2`
-until the "Before tagging v0.3.0" checklist in `docs/execution/README.md`
-is satisfied (finalize version, controlled-host performance gates,
-full-suite resolution, wheel-artifact compatibility run) — pushing a tag
-triggers publication.
+First release of the `quantark.execution` framework kernel and the
+`quantark.execution.greeks` scenario layer. The `test_snowball_quad_flat_identity_golden`
+failure predates this program and remains quarantined (reproduces on
+unmodified main). The spec §20 controlled-host performance gates in
+`docs/execution/README.md` are documented as release-preparation evidence
+and were not re-measured on the release host.
 
 ### Added
 - **`quantark.execution.greeks` — greek bumps as scenario cells** (spec
