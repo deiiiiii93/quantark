@@ -39,6 +39,10 @@ def iter_ordered(cells, spec_payload, workers, window, *, fail_fast=True,
                  engine_factory_id=None, observer=None, positions=None):
     """Yield ``(position, outcome_payload)`` in caller order.
 
+    ``spec_payload`` is either a single worker-spec payload dict shared by
+    every cell, or a LIST parallel to ``cells`` (multi-plan packing, spec
+    2026-07-20: each cell travels with its own base's worker spec).
+
     ``positions`` maps local cell indices to caller positions (used by the
     infrastructure-retry driver to resubmit a remainder); defaults to
     identity.
@@ -46,6 +50,12 @@ def iter_ordered(cells, spec_payload, workers, window, *, fail_fast=True,
     from quantark.execution.scenario.worker import run_worker_cell
 
     positions = list(range(len(cells))) if positions is None else list(positions)
+    per_cell_specs = isinstance(spec_payload, list)
+    if per_cell_specs and len(spec_payload) != len(cells):
+        raise TaskExecutionError(
+            "per-cell spec payload list must align with cells: "
+            f"{len(spec_payload)} != {len(cells)}"
+        )
     mp_context = multiprocessing.get_context("spawn")
     buffered: dict = {}
     pending: dict = {}
@@ -62,7 +72,10 @@ def iter_ordered(cells, spec_payload, workers, window, *, fail_fast=True,
             while (submitted < len(cells)
                    and len(pending) + len(buffered) < window):
                 future = pool.submit(
-                    run_worker_cell, spec_payload, cells[submitted],
+                    run_worker_cell,
+                    (spec_payload[submitted] if per_cell_specs
+                     else spec_payload),
+                    cells[submitted],
                     engine_factory_id,
                 )
                 pending[future] = submitted

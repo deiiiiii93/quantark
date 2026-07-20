@@ -211,6 +211,101 @@ class PricingSession:
             resolved_base=resolved_inputs, collect_errors=collect_errors,
         )
 
+    def run_scenario_plans(self, plan_inputs, engine_factory=None, *,
+                           collect_errors: bool = False) -> list:
+        """Plan and execute MANY ``(base, specs)`` scenario plans through
+        ONE bounded-window pool (spec 2026-07-20: the portfolio × bumps
+        shape). Returns per-plan outcome lists aligned with
+        ``plan_inputs`` order.
+
+        Per-plan error boundary: with ``collect_errors=True`` a
+        base-resolution or planning failure in one plan yields an aligned
+        list of ``PricingFailure`` (one per spec, carrying the original
+        exception type and message) while every other plan still executes;
+        with ``collect_errors=False`` the first failure raises. Serial and
+        processes backends only.
+        """
+        self._ensure_open()
+        from quantark.execution.contracts import (
+            FrameworkErrorInfo,
+            PricingFailure,
+        )
+        from quantark.execution.diagnostics import RunDiagnostics
+        from quantark.execution.scenario.contracts import BaseInputsRef
+        from quantark.execution.scenario.planner import (
+            plan_scenarios,
+            resolve_base,
+        )
+        from quantark.execution.scenario.runner import run_plan
+
+        backend = self._context.execution_policy.scenario.backend
+        if backend not in ("serial", "processes"):
+            raise CapabilityError(
+                "run_scenario_plans supports the serial and processes "
+                f"scenario backends only, got {backend!r}; explicit "
+                "requests never silently fall back (spec section 3.3)"
+            )
+        entries = [(base, list(specs)) for base, specs in plan_inputs]
+        if backend == "processes":
+            for base_request, _specs in entries:
+                if not isinstance(base_request, BaseInputsRef):
+                    raise CapabilityError(
+                        "the processes scenario backend requires "
+                        "BaseInputsRef bases (registered factories); live "
+                        "request objects cannot cross a process boundary"
+                    )
+
+        results: list = [None] * len(entries)
+        planned: list = []  # (entry_index, plan, base_request, resolved)
+        for index, (base_request, specs) in enumerate(entries):
+            try:
+                # The base factory runs exactly ONCE in the parent per
+                # plan: planning and serial execution share the instance.
+                _, resolved_inputs, _ = resolve_base(base_request)
+                plan = plan_scenarios(
+                    base_request, specs, engine_factory,
+                    resolved=resolved_inputs,
+                )
+            except Exception as exc:  # noqa: BLE001 - typed into failures
+                if not collect_errors:
+                    raise
+                results[index] = [
+                    PricingFailure(
+                        item_id=f"plan:{index}:{spec.scenario_id}",
+                        error=FrameworkErrorInfo(
+                            error_type=type(exc).__name__, message=str(exc)
+                        ),
+                        diagnostics=RunDiagnostics(
+                            adapter_id="scenario-plans"
+                        ),
+                    )
+                    for spec in specs
+                ]
+                continue
+            planned.append((index, plan, base_request, resolved_inputs))
+
+        if backend == "serial":
+            for index, plan, base_request, resolved_inputs in planned:
+                results[index] = run_plan(
+                    plan, base_request, engine_factory, self._context,
+                    resolved_base=resolved_inputs,
+                    collect_errors=collect_errors,
+                )
+            return results
+
+        from quantark.execution.scenario import worker as worker_mod
+
+        executed = worker_mod.run_plans_processes(
+            [(plan, base_request)
+             for _index, plan, base_request, _resolved in planned],
+            engine_factory, self._context, collect_errors=collect_errors,
+        )
+        for (index, _plan, _base, _resolved), plan_results in zip(
+            planned, executed
+        ):
+            results[index] = plan_results
+        return results
+
     def close(self) -> None:
         if not self._closed and self._owned_draw_repo is not None:
             self._owned_draw_repo.close()

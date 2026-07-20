@@ -454,29 +454,57 @@ def _verify_spawn_safe_main() -> None:
 def run_plan_processes(plan, base, engine_factory, context, *,
                        collect_errors: bool = False) -> list:
     """Execute a ScenarioPlan on spawn processes (spec 12.3)."""
-    if plan.base_kind != "inputs_ref" or not isinstance(base, BaseInputsRef):
-        raise CapabilityError(
-            "the processes scenario backend requires a BaseInputsRef base "
-            "(registered factory); live request objects cannot cross a "
-            "process boundary and explicit requests never silently fall "
-            "back (spec section 3.3)"
-        )
+    return run_plans_processes(
+        [(plan, base)], engine_factory, context,
+        collect_errors=collect_errors,
+    )[0]
+
+
+def run_plans_processes(entries, engine_factory, context, *,
+                        collect_errors: bool = False) -> list:
+    """Execute MANY ScenarioPlans through ONE bounded-window spawn pool
+    (spec 2026-07-20: the portfolio × bumps shape).
+
+    ``entries`` is ``[(plan, base_ref), ...]``; returns per-plan outcome
+    lists in entry order. Every cell travels with ITS OWN plan's
+    worker-spec payload (per-plan base), so heterogeneous bases pack into
+    a single ordered-reassembly window instead of one barrier per plan.
+    """
+    for plan, base in entries:
+        if plan.base_kind != "inputs_ref" or not isinstance(base, BaseInputsRef):
+            raise CapabilityError(
+                "the processes scenario backend requires a BaseInputsRef "
+                "base (registered factory); live request objects cannot "
+                "cross a process boundary and explicit requests never "
+                "silently fall back (spec section 3.3)"
+            )
     if engine_factory is not None and not isinstance(engine_factory, str):
         raise CapabilityError(
             "the processes scenario backend requires a REGISTERED engine "
             "factory id (string); live callables cannot cross a process "
             "boundary"
         )
-    for cell in plan.cells:
-        if registries.get_runner(cell.runner_id).value_kind != "float":
-            raise CapabilityError(
-                f"runner {cell.runner_id!r} is value_kind='native' and "
-                "cannot return its value across a process boundary; "
-                "process/dask cells require value_kind='float' runners "
-                "(plan-gate finding 4)"
-            )
-    if not plan.cells:
-        return []
+    for plan, _base in entries:
+        for cell in plan.cells:
+            if registries.get_runner(cell.runner_id).value_kind != "float":
+                raise CapabilityError(
+                    f"runner {cell.runner_id!r} is value_kind='native' and "
+                    "cannot return its value across a process boundary; "
+                    "process/dask cells require value_kind='float' runners "
+                    "(plan-gate finding 4)"
+                )
+    engine_factory_ids = {plan.engine_factory_id for plan, _base in entries}
+    if len(engine_factory_ids) > 1:
+        raise CapabilityError(
+            "all plans packed into one processes run must share one engine "
+            f"factory id, got {sorted(map(repr, engine_factory_ids))}"
+        )
+    engine_factory_id = next(iter(engine_factory_ids), None)
+
+    results: list = [[None] * len(plan.cells) for plan, _base in entries]
+    total_cells = sum(len(plan.cells) for plan, _base in entries)
+    if total_cells == 0:
+        return results
     _verify_spawn_safe_main()
 
     policy = context.execution_policy.scenario
@@ -484,7 +512,7 @@ def run_plan_processes(plan, base, engine_factory, context, *,
     clamp_records: list = []
     requested_workers = policy.workers
     workers = max(1, min(requested_workers, budget.max_processes,
-                         len(plan.cells)))
+                         total_cells))
     if workers < requested_workers:
         clamp_records.append(
             f"clamp:scenario.workers={requested_workers}->{workers}"
@@ -499,17 +527,23 @@ def run_plan_processes(plan, base, engine_factory, context, *,
         )
     workers = min(workers, window)
 
-    spec = build_worker_spec(plan, base, context, workers)
-    spec_payload = worker_spec_to_payload(spec)
-    cell_payloads = [_cell_payload(cell) for cell in plan.cells]
-
-    results: list = [None] * len(plan.cells)
+    owners: list = []  # global position -> (entry_index, cell_index)
+    cell_payloads: list = []
+    spec_payloads: list = []
+    for entry_index, (plan, base) in enumerate(entries):
+        spec = build_worker_spec(plan, base, context, workers)
+        payload = worker_spec_to_payload(spec)
+        for cell_index, cell in enumerate(plan.cells):
+            owners.append((entry_index, cell_index))
+            cell_payloads.append(_cell_payload(cell))
+            spec_payloads.append(payload)
 
     def _consume(payload, position) -> None:
-        cell = plan.cells[position]
+        entry_index, cell_index = owners[position]
+        cell = entries[entry_index][0].cells[cell_index]
         error = payload.get("error")
         if error:
-            results[position] = PricingFailure(
+            results[entry_index][cell_index] = PricingFailure(
                 item_id=cell.scenario_id,
                 error=FrameworkErrorInfo(
                     error_type=error["type"], message=error["message"]
@@ -519,7 +553,7 @@ def run_plan_processes(plan, base, engine_factory, context, *,
                 ),
             )
             return
-        results[position] = ScenarioOutcome(
+        results[entry_index][cell_index] = ScenarioOutcome(
             scenario_id=cell.scenario_id,
             value=payload["value"],
             normalized_economics=_lists_to_pairs(payload["economics"]),
@@ -532,6 +566,10 @@ def run_plan_processes(plan, base, engine_factory, context, *,
             manifest_fingerprint=payload.get("manifest_fingerprint"),
         )
 
+    def _unreduced(index) -> bool:
+        entry_index, cell_index = owners[index]
+        return results[entry_index][cell_index] is None
+
     # Infrastructure retry (spec section 15; code-gate finding 2026-07-17):
     # a KILLED worker (OOM, crash, broken pool) is not a cell failure —
     # collect_errors does not swallow it. With retries configured, the
@@ -541,14 +579,15 @@ def run_plan_processes(plan, base, engine_factory, context, *,
         WorkerInfrastructureError,
     )
 
-    remaining = list(range(len(plan.cells)))
+    remaining = list(range(total_cells))
     attempts_left = max(0, context.execution_policy.retries)
     while True:
         iterator = processes_iter_ordered(
-            [cell_payloads[i] for i in remaining], spec_payload,
+            [cell_payloads[i] for i in remaining],
+            [spec_payloads[i] for i in remaining],
             min(workers, max(1, len(remaining))), window,
             fail_fast=not collect_errors,
-            engine_factory_id=plan.engine_factory_id,
+            engine_factory_id=engine_factory_id,
             positions=remaining,
         )
         try:
@@ -562,7 +601,7 @@ def run_plan_processes(plan, base, engine_factory, context, *,
             # everything not yet reduced into results is resubmitted —
             # including buffered-but-unyielded completions the dead pool
             # dropped
-            remaining = [i for i in remaining if results[i] is None]
+            remaining = [i for i in remaining if _unreduced(i)]
             clamp_records.append(
                 f"retry:infrastructure={len(remaining)} cells resubmitted"
             )
@@ -570,14 +609,15 @@ def run_plan_processes(plan, base, engine_factory, context, *,
                 break
     sink = context.diagnostics_sink
     if sink is not None:
+        plan_ids = ",".join(str(plan.plan_id) for plan, _base in entries)
         sink.emit(
             RunDiagnostics(
                 adapter_id="scenario-runner",
                 records=tuple(clamp_records) + (
-                    f"scenario:cells={len(plan.cells)}",
+                    f"scenario:cells={total_cells}",
                     "scenario:deduped=0",
                     f"scenario:backend=processes:{workers}",
-                    f"scenario:plan={plan.plan_id}",
+                    f"scenario:plans={plan_ids}",
                 ),
             )
         )
