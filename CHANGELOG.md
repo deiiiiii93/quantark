@@ -7,13 +7,24 @@ During 0.x the public API may still change between minor versions.
 
 ## [0.3.0] - 2026-07-18
 
-Release-preparation entry; the package version is pinned at `0.3.0rc1`
+Release-preparation entry; the package version is pinned at `0.3.0rc2`
 until the "Before tagging v0.3.0" checklist in `docs/execution/README.md`
 is satisfied (finalize version, controlled-host performance gates,
 full-suite resolution, wheel-artifact compatibility run) — pushing a tag
 triggers publication.
 
 ### Added
+- **`quantark.execution.greeks` — greek bumps as scenario cells** (spec
+  2026-07-20): `TradeState` per-trade base, same-type `greek-bump/v1`
+  transformer with real spot/vol/rate/div/time mutation attribution,
+  `greek-value/v1` float runner, and assemblers mirroring
+  `EquityPosition.get_trade_risk` / `GreeksCalculator.
+  calculate_numerical_greeks` operation-for-operation (bitwise unit gate).
+- **`PricingSession.run_scenario_plans`** — many `(base, specs)` plans
+  packed through ONE bounded-window process pool (per-cell worker-spec
+  payloads; the portfolio × bumps shape), with a per-plan error boundary
+  under `collect_errors=True` (base-resolution/planning failures become
+  aligned typed `PricingFailure`s while other plans execute).
 - **`quantark.execution` — composable execution kernel** (framework contract
   v1; spec `docs/superpowers/specs/2026-07-15-mc-pde-performance-generalization-design.md`).
   `PricingSession` wraps every exported MC/PDE engine without changing direct
