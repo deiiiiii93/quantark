@@ -25,6 +25,16 @@ from quantark.execution.contracts import (
     ScenarioOutcome,
     ScenarioSpec,
 )
+from quantark.execution.greeks import (
+    GREEK_BUMP_TRANSFORMER_ID,
+    GREEK_VALUE_RUNNER_ID,
+    GreekBumpCell,
+    TradeState,
+    apply_greek_bump,
+    assemble_product_greeks,
+    assemble_trade_greeks,
+    greek_bump_cells,
+)
 from quantark.execution.errors import (
     CapabilityError,
     DeterminismViolation,
@@ -61,6 +71,14 @@ __all__ = [
     "CallableRef",
     "CapabilityError",
     "DEFAULT_OUTPUTS",
+    "GREEK_BUMP_TRANSFORMER_ID",
+    "GREEK_VALUE_RUNNER_ID",
+    "GreekBumpCell",
+    "TradeState",
+    "apply_greek_bump",
+    "assemble_product_greeks",
+    "assemble_trade_greeks",
+    "greek_bump_cells",
     "DeterminismPolicy",
     "DeterminismViolation",
     "DrawRepository",
