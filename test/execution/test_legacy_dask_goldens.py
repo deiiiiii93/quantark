@@ -9,6 +9,8 @@ import pathlib
 
 import pytest
 
+from golden_compare import GOLDEN_REL_TOL
+
 pytest.importorskip("dask")
 
 GOLDEN_PATH = (
@@ -39,6 +41,8 @@ def test_legacy_dask_path_matches_frozen_golden(name):
     observed = _phase6_result_payload(engine, product, env)
     golden = _golden_cases()[name]
 
+    # Integer counters are exact; float fields carry cross-arch ULP noise
+    # (goldens frozen same-machine on ARM64, CI is x86_64) -> tight rel tol.
     assert observed["num_paths"] == golden["num_paths"]
     assert observed["batches_used"] == golden["batches_used"]
     for field in (
@@ -48,8 +52,12 @@ def test_legacy_dask_path_matches_frozen_golden(name):
         "v0_probability",
         "v1_probability",
     ):
-        assert float(observed[field]) == float(golden[field]), field
+        assert float(observed[field]) == pytest.approx(
+            float(golden[field]), rel=GOLDEN_REL_TOL
+        ), field
     if golden["avg_ko_time"] is None:
         assert observed["avg_ko_time"] is None
     else:
-        assert float(observed["avg_ko_time"]) == float(golden["avg_ko_time"])
+        assert float(observed["avg_ko_time"]) == pytest.approx(
+            float(golden["avg_ko_time"]), rel=GOLDEN_REL_TOL
+        )

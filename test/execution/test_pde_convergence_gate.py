@@ -14,6 +14,7 @@ from quantark.execution import PricingRequest, PricingSession
 
 from execution.freeze_goldens import PHASE4_GOLDEN_PATH
 from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep
+from golden_compare import GOLDEN_REL_TOL
 
 GOLDENS = json.loads(pathlib.Path(PHASE4_GOLDEN_PATH).read_text())["cases"]
 
@@ -35,11 +36,16 @@ def test_convergence_gate_production_and_refined(name):
     direct_prod = engine.price(product, env)
     direct_ref = refined.price(product, env)
 
-    # Independent oracle: pre-refactor goldens pin the direct values.
-    assert direct_prod == GOLDENS[name]["price"]
-    assert direct_ref == GOLDENS[f"{name}::refined"]["price"]
+    # Independent oracle: pre-refactor goldens pin the direct values. The
+    # goldens are same-machine references; x86_64 CI differs from the ARM64
+    # freeze host by the last 1-2 ULP, so compare with cross-arch tolerance.
+    assert direct_prod == pytest.approx(GOLDENS[name]["price"], rel=GOLDEN_REL_TOL)
+    assert direct_ref == pytest.approx(
+        GOLDENS[f"{name}::refined"]["price"], rel=GOLDEN_REL_TOL
+    )
 
     # Session bitwise at both resolutions -> the refinement delta is the
-    # pre-refactor refinement delta exactly.
+    # pre-refactor refinement delta exactly. Same-machine (both computed here),
+    # so this stays an exact equality: the session path must not perturb a bit.
     assert _session_price(engine, product, env) == direct_prod
     assert _session_price(refined, product, env) == direct_ref

@@ -16,6 +16,7 @@ from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams
 
 from dcn_fixtures import DCN_A, FLAT, flat_env, make_dcn
+from golden_compare import GOLDEN_REL_TOL
 
 PATHS = 2 ** 14
 
@@ -69,8 +70,14 @@ def test_heston_default_preserves_legacy_fte_seeded_result():
         **common, scheme=HestonMCScheme.FULL_TRUNCATION_EULER
     ).price_detailed(p, env)
 
-    assert default.pv == explicit.pv == -68457.58049657497
-    assert default.std_error == explicit.std_error == 6916.175942931679
+    # Same-machine invariant: the default scheme IS FULL_TRUNCATION_EULER, so
+    # the two engines must be byte-identical when run on ONE machine -> exact.
+    assert default.pv == explicit.pv
+    assert default.std_error == explicit.std_error
+    # Frozen literals captured on ARM64; x86_64 CI drifts by the last ULP over
+    # the seeded path set -> compare within cross-arch tolerance.
+    assert default.pv == pytest.approx(-68457.58049657497, rel=GOLDEN_REL_TOL)
+    assert default.std_error == pytest.approx(6916.175942931679, rel=GOLDEN_REL_TOL)
 
 
 def test_leg_invariant_holds_for_vol_engines():

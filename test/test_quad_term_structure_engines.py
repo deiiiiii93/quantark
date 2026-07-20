@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from term_structure_benchmarks import make_term_env, reference_european_call_price
+from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL
 
 from quantark.asset.equity.param import QuadParams
 from quantark.param import (
@@ -172,7 +173,9 @@ def test_snowball_quad_flat_identity_golden():
 
     GOLDEN_QUAD_PRE = 102.97478568748562
     px = SnowballQuadEngine().price(_standard_snowball(), make_term_env("flat"))
-    assert px == GOLDEN_QUAD_PRE
+    # Same-machine golden; x86_64 CI drifts from the ARM64 freeze host by the
+    # last ULP, so compare with cross-arch tolerance (see golden_compare).
+    assert px == pytest.approx(GOLDEN_QUAD_PRE, rel=GOLDEN_REL_TOL)
 
 
 def _standard_phoenix():
@@ -363,5 +366,8 @@ def test_snowball_continuous_ki_bridge_uses_term_vol():
     # event-stats path: the fixed KI-ever bridge calls execute with the
     # per-step vol binding and produce bounded probabilities
     st = quad.calculate_event_stats(_product(), env_term)
-    assert 0.0 <= float(st.ki_ever_probability) <= 1.0
-    assert 0.0 <= float(st.ki_probability) <= 1.0
+    # Bounded probabilities. The KI-ever bridge subtracts near-equal survival
+    # terms, so on some architectures the result underflows to roundoff-scale
+    # negative noise (~-1e-46) rather than exactly 0 -> allow a tiny margin.
+    assert -GOLDEN_ABS_TOL <= float(st.ki_ever_probability) <= 1.0
+    assert -GOLDEN_ABS_TOL <= float(st.ki_probability) <= 1.0

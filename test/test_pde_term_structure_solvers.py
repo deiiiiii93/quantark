@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from term_structure_benchmarks import make_term_env, reference_european_call_price
+from golden_compare import GOLDEN_REL_TOL
 
 from quantark.asset.equity.engine.pde.european_pde_solver import EuropeanPDESolver
 from quantark.asset.equity.product.option import EuropeanVanillaOption
@@ -114,7 +115,9 @@ def test_snowball_pde_flat_identity_golden():
 
     GOLDEN_PDE_PRE = 102.97478573304076
     px = SnowballPDESolver().price(_standard_snowball(), make_term_env("flat"))
-    assert px == GOLDEN_PDE_PRE
+    # Same-machine golden; x86_64 CI drifts from the ARM64 freeze host by the
+    # last ULP, so compare with cross-arch tolerance (see golden_compare).
+    assert px == pytest.approx(GOLDEN_PDE_PRE, rel=GOLDEN_REL_TOL)
 
 
 def test_snowball_pde_sparse_fallback_sees_term_structure():

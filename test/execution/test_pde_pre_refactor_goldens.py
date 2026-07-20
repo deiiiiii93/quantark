@@ -20,6 +20,7 @@ from execution.freeze_goldens import (
     _phase4_case_payload,
 )
 from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep
+from golden_compare import assert_close
 
 GOLDENS = json.loads(pathlib.Path(PHASE4_GOLDEN_PATH).read_text())["cases"]
 
@@ -30,9 +31,9 @@ def _assert_case_matches(golden: dict, engine, product, env, name: str) -> None:
         with_curve=name in _PHASE4_CURVE_CASES,
         with_events=name in _PHASE4_EVENT_CASES,
     )
-    # Exact equality: the payloads are pure floats/lists/dicts, and json
-    # round-trips Python floats exactly (shortest-repr round trip).
-    assert live == golden
+    # Cross-arch tolerance: these goldens were frozen same-machine; x86_64 CI
+    # differs from the ARM64 freeze host by the last 1-2 ULP. See golden_compare.
+    assert_close(live, golden, msg=name)
 
 
 @pytest.mark.parametrize("name", _PHASE4_CASES)

@@ -2,6 +2,7 @@
 import numpy as np
 import pytest
 
+from golden_compare import GOLDEN_REL_TOL
 from quantark.util.enum.engine_enums import HestonMCScheme
 from quantark.volmodels.heston.params import HestonParams
 from quantark.volmodels.heston.mc_kernel import price_european_heston_mc
@@ -61,4 +62,7 @@ def test_quadexp_output_unchanged_by_qem_addition():
         s0, k, True, params, dt, rf, cf, df, scheme=HestonMCScheme.QUADEXP,
         num_paths=50_000, seed=42,
     )
-    assert price == pytest.approx(5.956183946331143, abs=0.0, rel=0.0)
+    # Guard captured same-machine; x86_64 CI drifts from the ARM64 freeze host
+    # by the last ULP. The guard (QUADEXP unperturbed by the QE-M addition)
+    # holds within a ~1e-9 rel window -> far below any real scheme change.
+    assert price == pytest.approx(5.956183946331143, rel=GOLDEN_REL_TOL)

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from golden_compare import GOLDEN_REL_TOL
 from quantark.util.enum.engine_enums import HestonMCScheme
 from quantark.util.exceptions import ValidationError
 from quantark.volmodels.heston import HestonParams, heston_call_price
@@ -180,4 +181,7 @@ def test_seed_stability_pinned_across_u_var_change(scheme, use_antithetic, pinne
                                  np.full(12, 0.03), np.full(12, 0.01),
                                  disc_factor=float(np.exp(-0.03)), scheme=scheme,
                                  num_paths=20_000, seed=42, use_antithetic=use_antithetic)
-    assert p == pinned
+    # Pinned same-machine; x86_64 CI drifts from the ARM64 freeze host by the
+    # last ULP over 20k paths, so compare within cross-arch tolerance. The
+    # invariant under test (z/u streams unmoved) survives a ~1e-9 rel window.
+    assert p == pytest.approx(pinned, rel=GOLDEN_REL_TOL)
