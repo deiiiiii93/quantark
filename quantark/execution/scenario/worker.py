@@ -388,8 +388,20 @@ def run_worker_cell(spec_payload: dict, cell_payload: dict,
         )
         _verify_rebuilt_base(spec, base_inputs)
         cell = _cell_from_payload(cell_payload)
+        # Keyed by budget+policy values ONLY (code-gate finding
+        # 2026-07-20): the child context (leases, caches, draw repo) is
+        # base-independent, and keying by the full spec payload would give
+        # a packed multi-base run one full per-worker cache budget PER
+        # BASE instead of one shared budget domain per worker.
         context = _child_context(
-            json.dumps(spec_payload, sort_keys=True), spec
+            json.dumps(
+                {
+                    "budget": spec_payload["child_budget_values"],
+                    "policy": spec_payload["child_policy_values"],
+                },
+                sort_keys=True,
+            ),
+            spec,
         )
         from quantark.execution.scenario.runner import execute_cell
 

@@ -72,8 +72,23 @@ _CELL_TABLE = {
 
 
 def greek_bump_cells(greeks: Sequence[str]) -> tuple:
-    """Minimal cell set serving the requested greeks; base always first."""
+    """Minimal cell set serving the requested greeks; base always first.
+
+    Unknown greek names fail closed (code-gate finding 2026-07-20) —
+    the calculator raises ValidationError for them, and a silently
+    dropped greek would be an incomplete risk report."""
     requested = set(greeks)
+    supported = {"price"}
+    for served, _tags in _CELL_TABLE.values():
+        supported |= served
+    unknown = requested - supported
+    if unknown:
+        from quantark.util.exceptions import ValidationError
+
+        raise ValidationError(
+            f"Unknown greek name(s) for bump cells: {sorted(unknown)}; "
+            f"supported: {sorted(supported)}"
+        )
     cells = [GreekBumpCell("base", frozenset({"price"}), frozenset())]
     for bump_id in _BUMP_IDS[1:]:
         served, tags = _CELL_TABLE[bump_id]
@@ -95,6 +110,11 @@ def apply_greek_bump(bump_id: str, state: TradeState, gc) -> TradeState:
     env = state.pricing_env
     product = state.product
     if bump_id == "base":
+        return state
+    # Linear products short-circuit BEFORE any bump logic in the
+    # calculator (including theta's date validation) — mirror that: no
+    # mutation is ever applied, the runner emits the linear marker.
+    if not state.cash_legs and getattr(product, "is_linear", False):
         return state
     if bump_id in ("spot_up", "spot_down"):
         direction = 1.0 if bump_id == "spot_up" else -1.0
@@ -281,6 +301,15 @@ def run_greek_bump(bump_id: str, base: TradeState, bumped: TradeState,
         if bump_id == "base":
             out["per_leg"] = tuple(per_leg)
         return out
+    # Linear (delta-one) products: mirror calculate_numerical_greeks'
+    # is_linear short circuit (code-gate finding 2026-07-20) — bump cells
+    # never solve, and assembly reproduces _greeks_for_linear.
+    if getattr(base.product, "is_linear", False):
+        if bump_id == "base":
+            price = float(base.engine.price(base.product, base.pricing_env))
+            return {"degenerate": 0.0, "npv": price, "leg_sum": 0.0,
+                    "linear": 1.0}
+        return {"degenerate": 0.0, "npv": 0.0, "leg_sum": 0.0, "linear": 1.0}
     if bump_id == "base":
         price = float(base.engine.price(base.product, base.pricing_env))
     else:
@@ -356,6 +385,25 @@ def assemble_product_greeks(*, base_price, bump_values, spot, bump_config,
     vega raw P&L, one-sided rho/dividend_rho with the single 0.01/bump
     rescale, theta as a difference with degenerate zero."""
     bc = bump_config
+    # Linear short circuit (code-gate finding 2026-07-20): verbatim
+    # _greeks_for_linear + the requested-set filtering of
+    # calculate_numerical_greeks (missing keys default to 0.0).
+    if any(v.get("linear") for v in bump_values.values()):
+        linear = {
+            "price": base_price,
+            "delta": 1.0,
+            "gamma": 0.0,
+            "vega": 0.0,
+            "theta": 0.0,
+            "convexity_theta": 0.0,
+            "r_theta": 0.0,
+            "q_theta": 0.0,
+            "rho": 0.0,
+            "dividend_rho": 0.0,
+        }
+        for extra in requested:
+            linear.setdefault(extra, 0.0)
+        return {key: linear[key] for key in linear if key in requested}
     out = {}
     if "price" in requested:
         out["price"] = base_price
@@ -393,6 +441,7 @@ def greek_value_runner(cell, resolved, child_context):
         ("npv", values["npv"]),
         ("leg_sum", values["leg_sum"]),
         ("degenerate", values["degenerate"]),
+        ("linear", values.get("linear", 0.0)),
         ("spot", float(base.pricing_env.spot)),
     ]
     for i, (name, direction, pv) in enumerate(values.get("per_leg", ())):

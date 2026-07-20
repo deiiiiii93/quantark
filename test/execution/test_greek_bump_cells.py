@@ -173,6 +173,82 @@ def test_transformer_and_runner_registered():
     assert runner.value_kind == "float"
 
 
+# ------------------------------------ code-gate regressions (2026-07-20)
+def test_linear_product_bitwise_vs_calculator_short_circuit():
+    """Delta-one products must reproduce _greeks_for_linear (delta=1,
+    rest 0) — never finite-difference bump arithmetic."""
+    from quantark.asset.equity.engine.analytical import DeltaOneEngine
+    from quantark.asset.equity.product.deltaone import Futures
+
+    product = Futures(underlying="TEST", maturity=1.0, basis=2.0)
+    engine = DeltaOneEngine()
+    env = _env()
+    gc = GreeksCalculator()
+    raw = float(engine.price(product, env))
+    expected = gc.calculate_numerical_greeks(
+        product, env, engine, base_price=raw, greeks=["price"] + GREEKS7
+    )
+
+    state = TradeState(
+        product=product, pricing_env=env, cash_legs=(), engine=engine,
+        streams=None, quantity=1.0, greeks_params=gc.params,
+    )
+    values = _cell_values(state, gc, GREEKS7)
+    assert all(v.get("linear") for v in values.values())
+    got = assemble_product_greeks(
+        base_price=raw, bump_values=values, spot=env.spot,
+        bump_config=gc._bump_config, requested=set(["price"] + GREEKS7),
+    )
+    assert got == expected
+
+
+def test_unknown_greek_names_fail_closed():
+    from quantark.util.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match="veag"):
+        greek_bump_cells(["delta", "veag"])
+
+
+def test_packed_bases_share_one_child_context():
+    """Different bases with identical child budgets must share ONE child
+    context (leases/caches) per worker — not one budget domain per base."""
+    import execution.scenario_process_helpers  # noqa: F401 - registers toys
+    from quantark.execution.context import default_context
+    from quantark.execution.contracts import ScenarioSpec
+    from quantark.execution.scenario import worker as worker_mod
+    from quantark.execution.scenario.contracts import BaseInputsRef
+    from quantark.execution.scenario.planner import plan_scenarios, resolve_base
+
+    def build(vol):
+        base = BaseInputsRef(
+            factory_id="toy-inputs/v1",
+            payload=(("spot", 100.0), ("vol", vol)),
+        )
+        spec = ScenarioSpec(
+            scenario_id="probe",
+            transformer_id="toy-bump/v1",
+            parameters=(("ds", 1.0),),
+            mutation_tags=frozenset({"spot"}),
+            required_capabilities=frozenset({"runner:toy/v1"}),
+        )
+        _, resolved, _ = resolve_base(base)
+        plan = plan_scenarios(base, [spec], "toy-engine/v1", resolved=resolved)
+        worker_spec = worker_mod.build_worker_spec(
+            plan, base, default_context(), workers=1
+        )
+        payload = worker_mod.worker_spec_to_payload(worker_spec)
+        cell_payload = worker_mod._cell_payload(plan.cells[0])
+        return payload, cell_payload
+
+    worker_mod._CHILD_CONTEXTS.clear()
+    for vol in (0.25, 0.30):
+        payload, cell_payload = build(vol)
+        result = worker_mod.run_worker_cell(payload, cell_payload,
+                                            "toy-engine/v1")
+        assert result["error"] is None, result["error"]
+    assert len(worker_mod._CHILD_CONTEXTS) == 1
+
+
 def _legless_state():
     product = EuropeanVanillaOption(
         strike=100.0, option_type=OptionType.CALL, maturity=1.0
