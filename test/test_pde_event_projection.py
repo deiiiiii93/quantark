@@ -29,7 +29,13 @@ from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
     KOResetSnowballPDESolver,
 )
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
+from quantark.asset.equity.engine.pde.phoenix_vol_pde_solvers import (
+    HestonPhoenixPDESolver,
+)
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
+    HestonSnowballPDESolver,
+)
 from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
     KOResetSnowballQuadEngine,
 )
@@ -53,8 +59,10 @@ from quantark.param import (
     ContinuousDividendYield,
     FlatRateCurve,
     FlatVolSurface,
+    GridVolSurface,
     SpotQuote,
 )
+from quantark.volmodels.heston import HestonParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import EventProjectionMode
@@ -454,6 +462,10 @@ class TestSnowballCellAverage:
         solver = SnowballPDESolver(
             params=PDEParams(event_projection="cell_average")
         )
+        self._run_discrete_ki_projection_check(solver)
+
+    @staticmethod
+    def _run_discrete_ki_projection_check(solver):
         solver._ki_continuous = False
         solver._bgk_active = False
         solver._ki_observation_indices = {1}
@@ -469,3 +481,187 @@ class TestSnowballCellAverage:
         assert 0.0 < grid_v0[j, 1] < 1.0, "straddle node must be fractionally blended"
         assert np.all(grid_v0[:j, 1] == 1.0)
         assert np.all(grid_v0[j + 1 :, 1] == 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Event-local damping policy (Patch 2): decoupled from auto_grid
+# ---------------------------------------------------------------------------
+
+
+class TestEventDampingPolicy:
+    def test_event_damping_decoupled_from_auto_grid(self):
+        """Damping depends on event regularity, not on the mesh-selection
+        mode: an event-aligned grid built with auto_grid=False must damp
+        after each discrete event exactly like the auto grid does."""
+        from quantark.asset.equity.engine.pde.backward_operator import (
+            BackwardOperator,
+        )
+
+        t_vec = np.linspace(0.0, 1.0, 11)  # event at t=0.5 sits on node 5
+        dt_vec = np.diff(t_vec)
+        params = PDEParams(
+            auto_grid=False,
+            use_rannacher=True,
+            rannacher_at_events=True,
+            rannacher_steps=1,
+            event_rannacher_steps=2,
+            event_theta=1.0,
+            theta=0.5,
+        )
+        th = BackwardOperator.theta_by_step(t_vec, dt_vec, params, [0.5])
+        # backward steps j=4 (0.5 -> 0.4) and j=3 (0.4 -> 0.3) follow the event
+        assert th[4] == 1.0
+        assert th[3] == 1.0
+        assert th[2] == 0.5
+
+    def test_event_damping_respects_rannacher_at_events_off(self):
+        from quantark.asset.equity.engine.pde.backward_operator import (
+            BackwardOperator,
+        )
+
+        t_vec = np.linspace(0.0, 1.0, 11)
+        dt_vec = np.diff(t_vec)
+        params = PDEParams(
+            auto_grid=False,
+            use_rannacher=True,
+            rannacher_at_events=False,
+            rannacher_steps=1,
+            event_rannacher_steps=2,
+            event_theta=1.0,
+            theta=0.5,
+        )
+        th = BackwardOperator.theta_by_step(t_vec, dt_vec, params, [0.5])
+        assert th[4] == 0.5
+        assert th[3] == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Integration: Heston 2D solvers (spot-dimension projection, slice-wise)
+# ---------------------------------------------------------------------------
+
+
+def _heston_env(vol=0.20, s0=100.0, r=0.03, q=0.01):
+    strikes = list(s0 * np.exp(np.linspace(-0.5, 0.5, 9)))
+    maturities = list(np.linspace(0.25, 1.0, 4))
+    surface = GridVolSurface(
+        strikes, maturities, np.full((len(maturities), len(strikes)), vol)
+    )
+    return PricingEnvironment(
+        rate_curve=FlatRateCurve(r),
+        valuation_date=datetime(2026, 1, 1),
+        spot_quote=SpotQuote(spot=s0),
+        vol_surface=surface,
+        div_yield=ContinuousDividendYield(q),
+    )
+
+
+def _hp():
+    return HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
+
+
+QUARTERS = [0.25, 0.5, 0.75, 1.0]
+
+
+class TestVolSolverCellAverage:
+    def test_heston_snowball_flag_engages(self):
+        env = _heston_env()
+        product = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            contract_multiplier=1.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=105.0,
+                ko_rate=0.12,
+                ko_observation_type=ObservationType.DISCRETE,
+                ko_observation_dates=QUARTERS,
+                ki_barrier=80.0,
+                ki_observation_type=ObservationType.DISCRETE,
+                ki_continuous=False,
+                ki_observation_dates=QUARTERS,
+            ),
+        )
+        nodal = float(
+            HestonSnowballPDESolver(
+                _hp(), params=PDEParams(), n_x=60, n_v=20, n_t=24
+            ).price(product, env)
+        )
+        proj = float(
+            HestonSnowballPDESolver(
+                _hp(),
+                params=PDEParams(event_projection="cell_average"),
+                n_x=60,
+                n_v=20,
+                n_t=24,
+            ).price(product, env)
+        )
+        assert np.isfinite(proj) and proj > 0
+        assert proj != nodal, "cell_average must engage in the 2D Heston solver"
+        assert abs(proj - nodal) / abs(nodal) < 2e-2
+
+    def test_heston_phoenix_flag_engages(self):
+        env = _heston_env()
+        ki_sched = ObservationSchedule(
+            records=[
+                ObservationRecord(observation_time=t, barrier=80.0) for t in QUARTERS
+            ]
+        )
+        product = create_standard_phoenix(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            contract_multiplier=1.0,
+            ko_barrier=105.0,
+            ko_rate=0.10,
+            ki_barrier=80.0,
+            coupon_barrier=90.0,
+            coupon_rate=0.02,
+            num_observations=4,
+            memory_coupon=False,
+            ki_continuous=False,
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_schedule=ki_sched,
+        )
+        nodal = float(
+            HestonPhoenixPDESolver(
+                _hp(), params=PDEParams(), n_x=60, n_v=20, n_t=24
+            ).price(product, env)
+        )
+        proj = float(
+            HestonPhoenixPDESolver(
+                _hp(),
+                params=PDEParams(event_projection="cell_average"),
+                n_x=60,
+                n_v=20,
+                n_t=24,
+            ).price(product, env)
+        )
+        assert np.isfinite(proj) and proj > 0
+        assert proj != nodal, "cell_average must engage in the 2D Heston phoenix"
+        # This phoenix has a small net premium (~1.9, no principal), so the
+        # half-cell trigger error the projection removes is a large fraction
+        # of it at n_x=60 (measured ~6%; the NODAL side is the biased one —
+        # its 120->240 refinement moves 0.185 vs 0.005 projected). Loose
+        # sanity bound only; accuracy gates live in the 1D suites.
+        assert abs(proj - nodal) / abs(nodal) < 0.10
+
+    def test_phoenix_vol_ki_dispatch(self):
+        """2D KI transfer: nodal when continuous, projected when discrete."""
+        solver = HestonPhoenixPDESolver(
+            _hp(), params=PDEParams(event_projection="cell_average")
+        )
+        core = types.SimpleNamespace(S_grid=np.linspace(60.0, 120.0, 61))
+        product = types.SimpleNamespace(is_reverse=False)
+        v1 = np.ones((61, 3))
+
+        solver._ki_continuous = True
+        solver._bgk_active = False
+        out = solver._apply_ki(np.zeros((61, 3)), core, product, 80.0, v1)
+        assert set(np.unique(out)) <= {0.0, 1.0}, "continuous KI must stay nodal"
+
+        solver._ki_continuous = False
+        out2 = solver._apply_ki(np.zeros((61, 3)), core, product, 80.0, v1)
+        j = int(np.argmin(np.abs(core.S_grid - 80.0)))
+        assert 0.0 < out2[j, 1] < 1.0, "discrete KI straddle node must blend"
+        assert np.all(out2[:j, 1] == 1.0)
+        assert np.all(out2[j + 1 :, 1] == 0.0)

@@ -534,6 +534,12 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                 current_time=current_time,
                 settlement_time=rec.settlement_time,
             )
+            if self._use_cell_average_events():
+                U = self._project_event_values(
+                    core.S_grid, float(rec.barrier), product.is_reverse, True,
+                    U, float(value),
+                )
+                continue
             mask = self._get_barrier_mask(
                 core.S_grid, float(rec.barrier), product.is_reverse, is_up_barrier=True
             )
@@ -569,10 +575,19 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                     v1 = snapshots.get(key)
                     if v1 is None:
                         raise PricingError("missing V1 snapshot for Heston/SLV Snowball KI jump")
-                    mask = self._get_barrier_mask(
-                        core.S_grid, barrier, product.is_reverse, is_up_barrier=False
-                    )
-                    U[mask, :] = v1[mask, :]
+                    # Continuous KI stays a nodal mask (continuous-barrier
+                    # treatment); only discretely observed KI events project.
+                    if self._use_cell_average_events() and not (
+                        self._ki_continuous or self._bgk_active
+                    ):
+                        U = self._project_event_values(
+                            core.S_grid, barrier, product.is_reverse, False, U, v1
+                        )
+                    else:
+                        mask = self._get_barrier_mask(
+                            core.S_grid, barrier, product.is_reverse, is_up_barrier=False
+                        )
+                        U[mask, :] = v1[mask, :]
             return U
 
         return hook

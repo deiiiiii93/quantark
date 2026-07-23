@@ -615,6 +615,16 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             else current_time
         )
         coupon_discount = self._df_between_times(env, current_time, settlement_time)
+        coupon_value = float(self._coupon_amounts[obs_idx]) * coupon_discount
+        if self._use_cell_average_events():
+            return self._project_event_values(
+                core.S_grid,
+                float(self._coupon_barriers[obs_idx]),
+                product.is_reverse,
+                True,
+                U,
+                U + coupon_value,
+            )
         pay_mask = self._get_barrier_mask(
             core.S_grid,
             float(self._coupon_barriers[obs_idx]),
@@ -622,7 +632,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             is_up_barrier=True,
         )
         if np.any(pay_mask):
-            U[pay_mask, :] += float(self._coupon_amounts[obs_idx]) * coupon_discount
+            U[pay_mask, :] += coupon_value
         return U
 
     def _apply_ko(
@@ -639,16 +649,38 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         if ko_record.barrier is None:
             return U
         current_time = max(T - float(tau), 0.0)
+
+        base_payoff = float(ko_record.payoff or 0.0)
+        df = 1.0
+        if ko_record.settlement_time is not None and ko_record.settlement_time > current_time:
+            df = self._df_between_times(env, current_time, ko_record.settlement_time)
+
+        if self._use_cell_average_events():
+            # The KO payoff itself jumps at the coupon barrier (coupon paid at
+            # a simultaneous KO), so project the inner coupon jump into the
+            # payoff profile first, then the KO transition slice-wise.
+            if obs_idx is not None and 0 <= obs_idx < self._coupon_amounts.shape[0]:
+                total = self._project_event_values(
+                    core.S_grid,
+                    float(self._coupon_barriers[obs_idx]),
+                    product.is_reverse,
+                    True,
+                    base_payoff * df,
+                    (base_payoff + float(self._coupon_amounts[obs_idx])) * df,
+                )
+            else:
+                total = np.full(core.S_grid.shape, base_payoff * df, dtype=float)
+            return self._project_event_values(
+                core.S_grid, float(ko_record.barrier), product.is_reverse, True,
+                U, total[:, None],
+            )
+
         ko_mask = self._get_barrier_mask(
             core.S_grid, float(ko_record.barrier), product.is_reverse, is_up_barrier=True
         )
         if not np.any(ko_mask):
             return U
 
-        base_payoff = float(ko_record.payoff or 0.0)
-        df = 1.0
-        if ko_record.settlement_time is not None and ko_record.settlement_time > current_time:
-            df = self._df_between_times(env, current_time, ko_record.settlement_time)
         total = np.full(core.S_grid.shape, base_payoff * df, dtype=float)
 
         if obs_idx is not None and 0 <= obs_idx < self._coupon_amounts.shape[0]:
@@ -679,6 +711,14 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         return True, float(barrier)
 
     def _apply_ki(self, U, core, product, barrier: float, v1):
+        # Continuous KI stays a nodal mask (continuous-barrier treatment);
+        # only discretely observed KI events project.
+        if self._use_cell_average_events() and not (
+            self._ki_continuous or self._bgk_active
+        ):
+            return self._project_event_values(
+                core.S_grid, barrier, product.is_reverse, False, U, v1
+            )
         mask = self._get_barrier_mask(
             core.S_grid, barrier, product.is_reverse, is_up_barrier=False
         )
