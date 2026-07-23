@@ -5,7 +5,7 @@ Engine configuration parameters.
 import math
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
-from quantark.util.enum.engine_enums import KnockInMonitoringMode
+from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode
 from quantark.util.exceptions import ValidationError
 
 
@@ -401,6 +401,10 @@ class PDEParams(EngineParams):
         log_dx_target: Target log-price spacing near critical points for adaptive grids (default: 0.003)
         max_grid_size: Upper bound for auto-generated spatial grid points (default: 2000)
         include_spot_in_critical_points: Include spot as a critical point when auto_grid is enabled (default: True)
+        event_projection: Spatial representation of discrete coupon/KO/KI event
+            jumps — "nodal" (legacy Boolean masks, default) or "cell_average"
+            (conservative dual-cell projection; removes the half-cell
+            trigger-phase bias, see pde_auto_grid_investigation.md)
         rannacher_at_events: Apply Rannacher smoothing after event times when auto_grid is enabled (default: True)
         event_theta: Theta value applied immediately before event times (default: 1.0)
         event_rannacher_steps: Number of event-adjacent steps using event_theta (default: 1)
@@ -462,6 +466,14 @@ class PDEParams(EngineParams):
     ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
         KnockInMonitoringMode.EXACT_DISCRETE
     )
+    # Spatial representation of discrete event operators (coupon/KO/KI jumps)
+    # in the 1D BSM autocallable solvers. NODAL (default) preserves the legacy
+    # Boolean-mask application; CELL_AVERAGE opts into the conservative
+    # dual-cell projection that removes the half-cell trigger-phase bias
+    # documented in pde_auto_grid_investigation.md. Continuously monitored
+    # barriers keep nodal treatment either way; volatility-model PDE solvers
+    # (Heston/SLV) do not consume this setting yet.
+    event_projection: Union[EventProjectionMode, str] = EventProjectionMode.NODAL
     rannacher_at_events: bool = True
     event_theta: float = 1.0
     event_rannacher_steps: int = 1
@@ -579,6 +591,23 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 "ki_monitoring_mode must be a KnockInMonitoringMode or its "
                 f"string value, got {type(self.ki_monitoring_mode).__name__}"
+            )
+        # Coerce event_projection to the enum (same contract as above).
+        if isinstance(self.event_projection, str):
+            try:
+                self.event_projection = EventProjectionMode(
+                    self.event_projection.lower()
+                )
+            except ValueError:
+                raise ValidationError(
+                    "event_projection must be one of "
+                    f"{[mode.value for mode in EventProjectionMode]}, "
+                    f"got {self.event_projection!r}"
+                )
+        elif not isinstance(self.event_projection, EventProjectionMode):
+            raise ValidationError(
+                "event_projection must be an EventProjectionMode or its "
+                f"string value, got {type(self.event_projection).__name__}"
             )
 
     @classmethod

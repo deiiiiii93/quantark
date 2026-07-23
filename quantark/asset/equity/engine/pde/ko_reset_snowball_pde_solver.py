@@ -488,6 +488,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        if self._use_cell_average_events():
+            grid[:, t_idx] = self._project_event_values(
+                s_vec, barrier, product.is_reverse, True,
+                grid[:, t_idx], cashflow_value,
+            )
+            return
         mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
         grid[mask, t_idx] = cashflow_value
 
@@ -508,6 +514,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        if self._use_cell_average_events():
+            grid[:, -1] = self._project_event_values(
+                s_vec, barrier, product.is_reverse, True,
+                grid[:, -1], cashflow_value,
+            )
+            return
         mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
         grid[mask, -1] = cashflow_value
 

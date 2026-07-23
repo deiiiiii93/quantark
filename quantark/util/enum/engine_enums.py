@@ -163,6 +163,29 @@ class KnockInMonitoringMode(Enum):
         return self.value
 
 
+class EventProjectionMode(Enum):
+    """Spatial representation of discrete event operators in PDE solvers.
+
+    Attributes:
+        NODAL: Legacy behavior — a discrete coupon/KO/KI transition selects
+            whole nodes with a Boolean barrier mask. When a threshold sits on
+            (or within roundoff of) a node, the entire trigger cell is
+            assigned to one branch, displacing the effective trigger by up to
+            half a cell (see pde_auto_grid_investigation.md).
+        CELL_AVERAGE: Conservative finite-volume projection — each node
+            receives the exact dual-cell average of the piecewise-linear
+            event jump, so the cell straddling the threshold is split by its
+            actual overlap. Applies to discretely monitored events only;
+            continuously monitored barriers keep their nodal treatment.
+    """
+
+    NODAL = "nodal"
+    CELL_AVERAGE = "cell_average"
+
+    def __str__(self):
+        return self.value
+
+
 class GreeksCalculationMode(Enum):
     """Mode for calculating delta/gamma in GreeksCalculator.
 

@@ -29,6 +29,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     TimeGridSpec,
 )
 from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
+from quantark.asset.equity.engine.pde.event_projection import project_breach_jump
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -36,7 +37,7 @@ from quantark.asset.equity.product.option.observation_schedule import ResolvedOb
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
-from quantark.util.enum.engine_enums import KnockInMonitoringMode
+from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
@@ -619,25 +620,38 @@ class SnowballPDESolver(BasePDESolver):
         if terminal_ko_idx is not None:
             rec = ko_records[terminal_ko_idx]
             barrier = float(rec.barrier) if rec.barrier is not None else 0.0
-            mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
-
-            # KI-ever is exempt from KO absorption (pure first-passage statistic).
-            if want_ki:
-                ever0 = v0_next[mask_ko, ki_ever_col].copy()
-                ever1 = v1_next[mask_ko, ki_ever_col].copy()
-            v0_next[mask_ko, :] = 0.0
-            v1_next[mask_ko, :] = 0.0
             df_delay = self._cashflow_value_at_time(
                 pricing_env=pricing_env,
                 cashflow=1.0,
                 current_time=float(t_vec[terminal_tidx]),
                 settlement_time=rec.settlement_time,
             )
-            v0_next[mask_ko, terminal_ko_idx] = df_delay
-            v1_next[mask_ko, terminal_ko_idx] = df_delay
-            if want_ki:
-                v0_next[mask_ko, ki_ever_col] = ever0
-                v1_next[mask_ko, ki_ever_col] = ever1
+            if self._use_cell_average_events():
+                # KO absorbs every surface to 0 (KO_i to df_delay); KI-ever is
+                # exempt (pure first-passage statistic) so its breach target
+                # is its own current value.
+                for v in (v0_next, v1_next):
+                    target = np.zeros_like(v)
+                    target[:, terminal_ko_idx] = df_delay
+                    if want_ki:
+                        target[:, ki_ever_col] = v[:, ki_ever_col]
+                    v[:] = self._project_event_values(
+                        s_vec, barrier, product.is_reverse, True, v, target
+                    )
+            else:
+                mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
+
+                # KI-ever is exempt from KO absorption (pure first-passage statistic).
+                if want_ki:
+                    ever0 = v0_next[mask_ko, ki_ever_col].copy()
+                    ever1 = v1_next[mask_ko, ki_ever_col].copy()
+                v0_next[mask_ko, :] = 0.0
+                v1_next[mask_ko, :] = 0.0
+                v0_next[mask_ko, terminal_ko_idx] = df_delay
+                v1_next[mask_ko, terminal_ko_idx] = df_delay
+                if want_ki:
+                    v0_next[mask_ko, ki_ever_col] = ever0
+                    v1_next[mask_ko, ki_ever_col] = ever1
             if want_coupon:
                 self._set_extra_event_indicators(
                     v0_next, v1_next, s_vec, n_ko, terminal_ko_idx, rec,
@@ -651,8 +665,15 @@ class SnowballPDESolver(BasePDESolver):
         )
         if is_terminal_ki:
             ki_barrier = self._resolve_ki_barrier_at_tidx(terminal_tidx)
-            mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
-            v0_next[mask_ki, :] = v1_next[mask_ki, :]
+            if self._use_cell_average_events() and not (
+                self._ki_continuous or self._bgk_active
+            ):
+                v0_next[:] = self._project_event_values(
+                    s_vec, ki_barrier, product.is_reverse, False, v0_next, v1_next
+                )
+            else:
+                mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
+                v0_next[mask_ki, :] = v1_next[mask_ki, :]
 
         # Operator coefficients and banded solver setup
         params: PDEParams = self.params
@@ -743,26 +764,38 @@ class SnowballPDESolver(BasePDESolver):
             if ko_idx is not None:
                 rec = ko_records[ko_idx]
                 barrier = float(rec.barrier) if rec.barrier is not None else 0.0
-                mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
-
-                # Zero all event surfaces in KO region, then set the KO_i indicator.
-                # KI-ever is exempt (pure first-passage statistic, no KO absorption).
-                if want_ki:
-                    ever0 = v0_cur[mask_ko, ki_ever_col].copy()
-                    ever1 = v1_cur[mask_ko, ki_ever_col].copy()
-                v0_cur[mask_ko, :] = 0.0
-                v1_cur[mask_ko, :] = 0.0
                 df_delay = self._cashflow_value_at_time(
                     pricing_env=pricing_env,
                     cashflow=1.0,
                     current_time=float(t_vec[j]),
                     settlement_time=rec.settlement_time,
                 )
-                v0_cur[mask_ko, ko_idx] = df_delay
-                v1_cur[mask_ko, ko_idx] = df_delay
-                if want_ki:
-                    v0_cur[mask_ko, ki_ever_col] = ever0
-                    v1_cur[mask_ko, ki_ever_col] = ever1
+                if self._use_cell_average_events():
+                    # Zero all event surfaces in the KO region (KO_i indicator
+                    # to df_delay); KI-ever is exempt (first-passage statistic).
+                    for v in (v0_cur, v1_cur):
+                        target = np.zeros_like(v)
+                        target[:, ko_idx] = df_delay
+                        if want_ki:
+                            target[:, ki_ever_col] = v[:, ki_ever_col]
+                        v[:] = self._project_event_values(
+                            s_vec, barrier, product.is_reverse, True, v, target
+                        )
+                else:
+                    mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
+
+                    # Zero all event surfaces in KO region, then set the KO_i indicator.
+                    # KI-ever is exempt (pure first-passage statistic, no KO absorption).
+                    if want_ki:
+                        ever0 = v0_cur[mask_ko, ki_ever_col].copy()
+                        ever1 = v1_cur[mask_ko, ki_ever_col].copy()
+                    v0_cur[mask_ko, :] = 0.0
+                    v1_cur[mask_ko, :] = 0.0
+                    v0_cur[mask_ko, ko_idx] = df_delay
+                    v1_cur[mask_ko, ko_idx] = df_delay
+                    if want_ki:
+                        v0_cur[mask_ko, ki_ever_col] = ever0
+                        v1_cur[mask_ko, ki_ever_col] = ever1
                 if want_coupon:
                     self._set_extra_event_indicators(
                         v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
@@ -778,8 +811,16 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 if should_apply_ki:
                     ki_barrier = self._resolve_ki_barrier_at_tidx(j)
-                    mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
-                    v0_cur[mask_ki, :] = v1_cur[mask_ki, :]
+                    if self._use_cell_average_events() and not (
+                        self._ki_continuous or self._bgk_active
+                    ):
+                        v0_cur[:] = self._project_event_values(
+                            s_vec, ki_barrier, product.is_reverse, False,
+                            v0_cur, v1_cur,
+                        )
+                    else:
+                        mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
+                        v0_cur[mask_ki, :] = v1_cur[mask_ki, :]
 
             # Enforce simple Neumann-like boundary (zero slope) for stability.
             v0_cur[0, :] = v0_cur[1, :]
@@ -1022,6 +1063,41 @@ class SnowballPDESolver(BasePDESolver):
                 return s_vec >= barrier  # UP for reverse
             else:
                 return s_vec <= barrier  # DOWN for standard
+
+    def _use_cell_average_events(self) -> bool:
+        """True when discrete event jumps use the dual-cell projection."""
+        return (
+            getattr(self.params, "event_projection", EventProjectionMode.NODAL)
+            is EventProjectionMode.CELL_AVERAGE
+        )
+
+    def _project_event_values(
+        self,
+        s_vec: np.ndarray,
+        barrier: Optional[float],
+        is_reverse: bool,
+        is_up_barrier: bool,
+        v_survive,
+        v_breach,
+    ) -> np.ndarray:
+        """Post-event nodal values for a discrete binary event.
+
+        Conservative dual-cell projection of ``1_breach * (v_breach -
+        v_survive)`` in log-price space; the breach direction matches
+        ``_get_barrier_mask`` exactly (including reverse products and the
+        barrier<=0 degenerate cases). ``v_survive``/``v_breach`` may be
+        scalars or arrays of shape (n,) or (n, k).
+        """
+        s_vec = np.asarray(s_vec, dtype=float)
+        x_vec = np.log(s_vec)
+        b = float(barrier) if barrier is not None else 0.0
+        b_x = np.log(b) if b > 0.0 else -np.inf
+        breach_up = bool(is_up_barrier) != bool(is_reverse)
+        v_survive = np.asarray(v_survive, dtype=float)
+        d = np.asarray(v_breach, dtype=float) - v_survive
+        if d.ndim == 0:
+            d = np.full(x_vec.shape, float(d))
+        return v_survive + project_breach_jump(x_vec, b_x, d, breach_up)
 
     @staticmethod
     def _record_is_non_negative_time(record: ResolvedObservationRecord) -> bool:
@@ -1561,6 +1637,14 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        if self._use_cell_average_events():
+            for grid in (grid_v0, grid_v1):
+                grid[:, -1] = self._project_event_values(
+                    s_vec, barrier, product.is_reverse, True,
+                    grid[:, -1], cashflow_value,
+                )
+            return
+
         # Apply to breached region (KO is an UP barrier)
         mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
@@ -2029,6 +2113,14 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        if self._use_cell_average_events():
+            for grid in (grid_v0, grid_v1):
+                grid[:, t_idx] = self._project_event_values(
+                    s_vec, barrier, product.is_reverse, True,
+                    grid[:, t_idx], cashflow_value,
+                )
+            return
+
         # Determine breached region (KO is an UP barrier)
         mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
@@ -2051,6 +2143,18 @@ class SnowballPDESolver(BasePDESolver):
         the "knocked-in" value at that spot.
         """
         ki_barrier = self._resolve_ki_barrier_at_tidx(t_idx)
+
+        # Continuous (or BGK-continuous) KI monitoring is a continuous-barrier
+        # treatment applied every step: it stays a nodal mask regardless of the
+        # event_projection setting. Only discretely observed KI events project.
+        if self._use_cell_average_events() and not (
+            self._ki_continuous or self._bgk_active
+        ):
+            grid_v0[:, t_idx] = self._project_event_values(
+                s_vec, ki_barrier, product.is_reverse, False,
+                grid_v0[:, t_idx], grid_v1[:, t_idx],
+            )
+            return
 
         # Determine breached region (KI is a DOWN barrier)
         mask = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
