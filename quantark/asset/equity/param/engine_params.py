@@ -402,14 +402,14 @@ class PDEParams(EngineParams):
         max_grid_size: Upper bound for auto-generated spatial grid points (default: 2000)
         include_spot_in_critical_points: Include spot as a critical point when auto_grid is enabled (default: True)
         event_projection: Spatial representation of discrete coupon/KO/KI event
-            jumps — "nodal" (legacy Boolean masks, default) or "cell_average"
-            (conservative dual-cell projection; removes the half-cell
-            trigger-phase bias, see pde_auto_grid_investigation.md)
+            jumps — "cell_average" (default; conservative dual-cell projection
+            that removes the half-cell trigger-phase bias, see
+            pde_auto_grid_investigation.md) or "nodal" (legacy Boolean masks)
         rannacher_at_events: Apply implicit (Rannacher-style) damping steps
             after each discrete event whose time lands on a grid node,
             regardless of auto_grid (default: True)
         event_theta: Theta value applied immediately before event times (default: 1.0)
-        event_rannacher_steps: Number of event-adjacent steps using event_theta (default: 1)
+        event_rannacher_steps: Number of event-adjacent steps using event_theta (default: 2)
         barrier_refine_log_width: Log-space refinement half-width around barriers (default: 0.0 = disabled)
         barrier_refine_levels: Number of refinement layers on each side of a barrier (default: 1)
         barrier_domain_expand: Extra relative domain expansion around barriers (default: 0.0 = disabled)
@@ -469,16 +469,22 @@ class PDEParams(EngineParams):
         KnockInMonitoringMode.EXACT_DISCRETE
     )
     # Spatial representation of discrete event operators (coupon/KO/KI jumps)
-    # in the 1D BSM autocallable solvers. NODAL (default) preserves the legacy
-    # Boolean-mask application; CELL_AVERAGE opts into the conservative
-    # dual-cell projection that removes the half-cell trigger-phase bias
-    # documented in pde_auto_grid_investigation.md. Continuously monitored
-    # barriers keep nodal treatment either way; volatility-model PDE solvers
-    # (Heston/SLV) do not consume this setting yet.
-    event_projection: Union[EventProjectionMode, str] = EventProjectionMode.NODAL
+    # in the autocallable solvers (1D BSM/LV and 2D Heston/SLV slice-wise).
+    # CELL_AVERAGE (default) applies the conservative dual-cell projection
+    # that removes the half-cell trigger-phase bias documented in
+    # pde_auto_grid_investigation.md; NODAL is the explicit legacy opt-out
+    # (Boolean-mask application). Continuously monitored barriers keep nodal
+    # treatment either way.
+    event_projection: Union[EventProjectionMode, str] = (
+        EventProjectionMode.CELL_AVERAGE
+    )
     rannacher_at_events: bool = True
     event_theta: float = 1.0
-    event_rannacher_steps: int = 1
+    # Two implicit solves after each event is the field-tested minimum for
+    # smooth convergence with projected event data (Pooley-Vetzal-Forsyth 2003
+    # SS2.5; d'Halluin-Forsyth-Vetzal 2005); a single full backward-Euler step
+    # has no literature support (Giles-Carter 2006 SS4.3).
+    event_rannacher_steps: int = 2
     barrier_refine_log_width: float = 0.0
     barrier_refine_levels: int = 1
     barrier_domain_expand: float = 0.0

@@ -47,8 +47,20 @@ def _rel(a: float, b: float) -> float:
 
 
 def _solver(spd: int) -> SnowballPDESolver:
+    # Pinned to the legacy nodal event representation and single-step event
+    # damping: oracle (b) characterizes the PRE-Phase-1 production value at
+    # the spatial/event discretization that value was captured with. The
+    # corrected default (event_projection="cell_average", 2 damping steps,
+    # 2026-07-23) intentionally reprices; its gates live in
+    # test_pde_event_projection.py.
     return SnowballPDESolver(
-        PDEParams(auto_grid=True, event_steps_per_day=spd, grid_size=300)
+        PDEParams(
+            auto_grid=True,
+            event_steps_per_day=spd,
+            grid_size=300,
+            event_projection="nodal",
+            event_rannacher_steps=1,
+        )
     )
 
 

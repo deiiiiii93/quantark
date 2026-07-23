@@ -121,9 +121,15 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     )
     from quantark.asset.equity.param import PDEParams
 
-    coarse = KOResetSnowballPDESolver(PDEParams(grid_size=120, time_steps=60))
+    # Pinned to the legacy event discretization: the 98.028 baseline was
+    # captured on main BEFORE the event-projection default flip (2026-07-23),
+    # and this gate certifies the Phase-1 TIME-grid decoupling at fixed event
+    # semantics. (Under the corrected default the converged value reprices to
+    # ~97.976 — covered by test_pde_event_projection.py.)
+    legacy = dict(event_projection="nodal", event_rannacher_steps=1)
+    coarse = KOResetSnowballPDESolver(PDEParams(grid_size=120, time_steps=60, **legacy))
     fine = KOResetSnowballPDESolver(
-        PDEParams(grid_size=240, time_steps=120, event_steps_per_day=8)
+        PDEParams(grid_size=240, time_steps=120, event_steps_per_day=8, **legacy)
     )
     pv_coarse = float(coarse.price(ko_reset_product, pricing_env))
     pv_fine = float(fine.price(ko_reset_product, pricing_env))
@@ -136,3 +142,10 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     # Reconciliation intact: reported pv == PDE price.
     stats = coarse.calculate_event_stats(ko_reset_product, pricing_env)
     assert abs(float(stats.pv) - pv_coarse) < 1e-6
+
+    # The reconciliation invariant must also hold under the corrected default
+    # event semantics (projection + 2 damping steps).
+    coarse_default = KOResetSnowballPDESolver(PDEParams(grid_size=120, time_steps=60))
+    pv_default = float(coarse_default.price(ko_reset_product, pricing_env))
+    stats_default = coarse_default.calculate_event_stats(ko_reset_product, pricing_env)
+    assert abs(float(stats_default.pv) - pv_default) < 1e-6

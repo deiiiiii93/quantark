@@ -81,6 +81,15 @@ def _mcp(**kw):
 def _pdep(**kw):
     from quantark.asset.equity.param import PDEParams
 
+    # Pinned to the legacy event discretization the phase0/phase4 frozen
+    # goldens were captured with (pre event-projection default flip,
+    # 2026-07-23): these fixtures feed exact-equality oracles whose purpose is
+    # characterizing the execution-seam refactor, not the event semantics.
+    # rannacher_at_events mirrors the pre-decouple gate (event damping only
+    # when auto_grid was on).
+    kw.setdefault("event_projection", "nodal")
+    kw.setdefault("event_rannacher_steps", 1)
+    kw.setdefault("rannacher_at_events", bool(kw.get("auto_grid", True)))
     return PDEParams(**kw)
 
 
@@ -704,15 +713,20 @@ def _build_equity_pde():
             )
 
             grid = dict(n_x=48, n_v=18, n_t=16)
+            # Autocallable 2D solvers consume event_projection: pin the legacy
+            # event discretization these frozen goldens were captured with
+            # (see _pdep note). Vanilla/barrier Heston engines have no
+            # discrete events (and take engine_params, not params).
+            acgrid = dict(grid, params=_pdep())
             table = {
                 "HestonPDESolver": lambda: (HestonPDESolver(_hp(), **grid), _euro(), _eq_flat_env()),
                 "HestonSLVPDESolver": lambda: (HestonSLVPDESolver(_hp(), _unit_leverage(), eta=1.0, **grid), _euro(), _eq_grid_env()),
                 "HestonBarrierPDESolver": lambda: (HestonBarrierPDESolver(_hp(), **grid), _barrier(), _eq_grid_env()),
                 "HestonSLVBarrierPDESolver": lambda: (HestonSLVBarrierPDESolver(_hp(), _unit_leverage(), **grid), _barrier(), _eq_grid_env()),
-                "HestonSnowballPDESolver": lambda: (HestonSnowballPDESolver(_hp(), **grid), _snowball(), _eq_grid_env()),
-                "HestonSLVSnowballPDESolver": lambda: (HestonSLVSnowballPDESolver(_hp(), _unit_leverage(), **grid), _snowball(), _eq_grid_env()),
-                "HestonPhoenixPDESolver": lambda: (HestonPhoenixPDESolver(_hp(), grid_style="uniform", **grid), _phoenix(), _eq_grid_env()),
-                "HestonSLVPhoenixPDESolver": lambda: (HestonSLVPhoenixPDESolver(_hp(), _unit_leverage(), grid_style="uniform", **grid), _phoenix(), _eq_grid_env()),
+                "HestonSnowballPDESolver": lambda: (HestonSnowballPDESolver(_hp(), **acgrid), _snowball(), _eq_grid_env()),
+                "HestonSLVSnowballPDESolver": lambda: (HestonSLVSnowballPDESolver(_hp(), _unit_leverage(), **acgrid), _snowball(), _eq_grid_env()),
+                "HestonPhoenixPDESolver": lambda: (HestonPhoenixPDESolver(_hp(), grid_style="uniform", **acgrid), _phoenix(), _eq_grid_env()),
+                "HestonSLVPhoenixPDESolver": lambda: (HestonSLVPhoenixPDESolver(_hp(), _unit_leverage(), grid_style="uniform", **acgrid), _phoenix(), _eq_grid_env()),
             }
             engine, product, env = table[name]()
             return engine, product, env, "product_env"

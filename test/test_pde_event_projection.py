@@ -6,8 +6,10 @@ displacing the effective trigger by ~half a cell (see
 quantark/asset/equity/engine/docs/pde_auto_grid_investigation.md).
 
 The fix projects the event jump onto the grid by exact dual-cell averaging of
-the piecewise-linear jump function, opt-in via
-``PDEParams(event_projection="cell_average")`` (default stays ``"nodal"``).
+the piecewise-linear jump function. ``event_projection="cell_average"`` is the
+default since the 2026-07-23 repricing review; ``"nodal"`` (with
+``event_rannacher_steps=1``) is the explicit legacy opt-out used below to
+characterize the bias the projection removes.
 
 Reference values in the integration gates come from the 2026-07-23
 investigation reproduction (protected 24-observation Phoenix): PDE nodal
@@ -213,12 +215,19 @@ class TestProjectBreachJump:
 
 
 class TestEventProjectionParam:
-    def test_default_is_nodal(self):
-        assert PDEParams().event_projection is EventProjectionMode.NODAL
+    def test_default_is_cell_average(self):
+        """Corrected event semantics are the default; "nodal" stays available
+        as the explicit legacy opt-out (repricing reviewed 2026-07-23)."""
+        assert PDEParams().event_projection is EventProjectionMode.CELL_AVERAGE
+
+    def test_default_event_rannacher_steps_is_two(self):
+        """Two implicit solves per event is the field-tested minimum
+        (Pooley/d'Halluin); one full BE step has no literature support."""
+        assert PDEParams().event_rannacher_steps == 2
 
     def test_string_coercion(self):
-        p = PDEParams(event_projection="cell_average")
-        assert p.event_projection is EventProjectionMode.CELL_AVERAGE
+        p = PDEParams(event_projection="nodal")
+        assert p.event_projection is EventProjectionMode.NODAL
 
     def test_invalid_value_raises(self):
         with pytest.raises(ValidationError):
@@ -293,16 +302,28 @@ def _pde_price(product, env, **params):
 
 
 class TestPhoenixCellAverage:
-    def test_default_price_bitwise_unchanged(self, phoenix_product, phoenix_env):
+    def test_default_is_projected_and_nodal_optout_differs(
+        self, phoenix_product, phoenix_env
+    ):
         px_default = _pde_price(phoenix_product, phoenix_env)
-        px_nodal = _pde_price(
-            phoenix_product, phoenix_env, event_projection=EventProjectionMode.NODAL
+        px_proj = _pde_price(
+            phoenix_product,
+            phoenix_env,
+            event_projection=EventProjectionMode.CELL_AVERAGE,
         )
-        assert px_default == px_nodal
+        px_nodal = _pde_price(
+            phoenix_product, phoenix_env, event_projection=EventProjectionMode.NODAL,
+            event_rannacher_steps=1,
+        )
+        assert px_default == px_proj
+        assert px_default != px_nodal
 
     def test_cell_average_matches_quad(self, phoenix_product, phoenix_env, quad_ref):
         px_proj = _pde_price(phoenix_product, phoenix_env, event_projection="cell_average")
-        px_nodal = _pde_price(phoenix_product, phoenix_env)
+        px_nodal = _pde_price(
+            phoenix_product, phoenix_env,
+            event_projection="nodal", event_rannacher_steps=1,
+        )
         err_proj = abs(px_proj - quad_ref) / quad_ref
         err_nodal = abs(px_nodal - quad_ref) / quad_ref
         assert err_proj < 3e-4, f"projected PDE {px_proj} vs quad {quad_ref}"
@@ -322,10 +343,15 @@ class TestPhoenixCellAverage:
             adaptive_grid=False,
             time_grid_type="event_aligned",
         )
-        nodal_auto = _pde_price(phoenix_product, phoenix_env)
+        nodal_auto = _pde_price(
+            phoenix_product, phoenix_env,
+            event_projection="nodal", event_rannacher_steps=1,
+        )
         nodal_unif = _pde_price(
             phoenix_product,
             phoenix_env,
+            event_projection="nodal",
+            event_rannacher_steps=1,
             auto_grid=False,
             adaptive_grid=False,
             time_grid_type="event_aligned",
@@ -444,7 +470,9 @@ class TestSnowballCellAverage:
             ki_continuous=False,
         )
         nodal = float(
-            KOResetSnowballPDESolver(PDEParams(grid_size=400)).price(product, env)
+            KOResetSnowballPDESolver(
+                PDEParams(grid_size=400, event_projection="nodal", event_rannacher_steps=1)
+            ).price(product, env)
         )
         proj = float(
             KOResetSnowballPDESolver(
@@ -583,7 +611,8 @@ class TestVolSolverCellAverage:
         )
         nodal = float(
             HestonSnowballPDESolver(
-                _hp(), params=PDEParams(), n_x=60, n_v=20, n_t=24
+                _hp(), params=PDEParams(event_projection="nodal", event_rannacher_steps=1),
+                n_x=60, n_v=20, n_t=24
             ).price(product, env)
         )
         proj = float(
@@ -624,7 +653,8 @@ class TestVolSolverCellAverage:
         )
         nodal = float(
             HestonPhoenixPDESolver(
-                _hp(), params=PDEParams(), n_x=60, n_v=20, n_t=24
+                _hp(), params=PDEParams(event_projection="nodal", event_rannacher_steps=1),
+                n_x=60, n_v=20, n_t=24
             ).price(product, env)
         )
         proj = float(

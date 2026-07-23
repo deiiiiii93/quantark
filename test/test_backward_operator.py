@@ -57,14 +57,16 @@ def test_theta_default_is_cn_away_from_events():
 
 def test_theta_event_step_uses_event_theta():
     t_vec = np.linspace(0.0, 1.0, 11)
-    params = PDEParams()  # event_theta=1.0
+    params = PDEParams()  # event_theta=1.0, event_rannacher_steps=2 (default)
     event = t_vec[6]  # aligned node
     theta = _theta(t_vec, params, discontinuity_times=[event])
-    # step j = idx-1 = 5 (the step immediately before the event node) is damped;
-    # the terminal step is the default rannacher_steps=1 implicit-Euler step.
+    # steps j = idx-1 = 5 and j = idx-2 = 4 (the two steps immediately before
+    # the event node) are damped; the terminal step is the default
+    # rannacher_steps=1 implicit-Euler step.
     assert theta[5] == params.event_theta == 1.0
+    assert theta[4] == params.event_theta == 1.0
     assert theta[-1] == 1.0
-    others = np.delete(theta, [5, len(theta) - 1])
+    others = np.delete(theta, [4, 5, len(theta) - 1])
     assert np.allclose(others, 0.5)
 
 

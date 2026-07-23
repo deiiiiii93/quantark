@@ -91,10 +91,14 @@ def _phoenix():
 # Golden values captured from the pre-2a code (commit before stream pruning),
 # regenerated 2026-07 after the Rannacher terminal-step off-by-one fix
 # (rannacher_steps=1 now applies one implicit-Euler step, shifting the
-# discretization by ~3e-6 relative).
-SNOWBALL_PV = 988337.2459390898
-SNOWBALL_KI = 0.11034618258849545
-SNOWBALL_KI_EVER = 0.1478552608852366
+# discretization by ~3e-6 relative), and regenerated 2026-07-23 for the
+# corrected default event semantics (event_projection="cell_average" +
+# event_rannacher_steps=2): PV moved -3.4e-4 relative, KI +1.5e-3 absolute —
+# the half-cell trigger-phase bias the projection removes (see
+# pde_auto_grid_investigation.md and test_pde_event_projection.py).
+SNOWBALL_PV = 987999.6980727295
+SNOWBALL_KI = 0.1118588495142286
+SNOWBALL_KI_EVER = 0.1478415983725159
 
 
 def test_snowball_full_stream_matches_golden():
