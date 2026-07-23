@@ -405,7 +405,9 @@ class PDEParams(EngineParams):
             jumps — "nodal" (legacy Boolean masks, default) or "cell_average"
             (conservative dual-cell projection; removes the half-cell
             trigger-phase bias, see pde_auto_grid_investigation.md)
-        rannacher_at_events: Apply Rannacher smoothing after event times when auto_grid is enabled (default: True)
+        rannacher_at_events: Apply implicit (Rannacher-style) damping steps
+            after each discrete event whose time lands on a grid node,
+            regardless of auto_grid (default: True)
         event_theta: Theta value applied immediately before event times (default: 1.0)
         event_rannacher_steps: Number of event-adjacent steps using event_theta (default: 1)
         barrier_refine_log_width: Log-space refinement half-width around barriers (default: 0.0 = disabled)

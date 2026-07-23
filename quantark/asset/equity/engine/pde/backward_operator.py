@@ -119,7 +119,11 @@ class BackwardOperator:
             return theta
 
         smooth_js: set = set()
-        if params.auto_grid and params.rannacher_at_events and discontinuity_times:
+        # Event damping depends on event regularity, not on the mesh-selection
+        # mode: any grid whose event times land on nodes gets the same
+        # post-event implicit treatment (the is_close guard below is what
+        # disables it when events are off-node).
+        if params.rannacher_at_events and discontinuity_times:
             for et in discontinuity_times:
                 idx = int(np.argmin(np.abs(t_vec - et)))
                 if 0 < idx < num_t - 1 and is_close(float(t_vec[idx]), float(et)):
