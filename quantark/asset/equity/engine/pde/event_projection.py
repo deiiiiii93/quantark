@@ -17,12 +17,23 @@ with the two branches read as the grid's piecewise-linear interpolants.
 Away from the threshold this reduces to the untouched branch values; only the
 cell straddling the threshold is split, by exact sub-cell integration.
 
+``project_event_values`` is the event operator used by the solvers: away
+from the threshold each node keeps the pointwise value of its own branch;
+the straddling node receives the exact cell average of the COMPLETE
+composite function (survive branch on one side of the threshold, breach
+branch on the other). Averaging only the jump and adding it to the
+pointwise survive value mixes two inconsistent discretizations in that one
+cell and can leave the branch envelope when the survive branch is steep
+there (2026-07-23 review, blocking finding 1).
+
 Properties (exercised by ``test/test_pde_event_projection.py``):
 
-- linear in the jump data, weights in [0, 1], no overshoot;
+- linear in the branch data, weights in [0, 1];
+- ``project_event_values`` stays inside the [min, max] envelope of the two
+  branches — non-negative branches project to non-negative values;
 - constant jumps are reproduced exactly and their total dual-cell mass equals
   the exact measure of the breach region;
-- affine jump functions are integrated exactly inside the straddling cell;
+- affine functions are integrated exactly inside the straddling cell;
 - a floating-point-scale perturbation of the threshold moves the result by
   the same infinitesimal amount (nodal masks flip a whole cell instead).
 """
@@ -78,6 +89,46 @@ def _interp_columns(
     return (1.0 - w) * values[k] + w * values[k + 1]
 
 
+def _straddle_cell(
+    x_vec: np.ndarray, edges: np.ndarray, b_x: float
+):
+    """Index and edges of the dual cell strictly containing ``b_x``.
+
+    Returns ``None`` when the threshold falls outside the domain or exactly
+    on a cell face (the breach fractions are already exact there).
+    """
+    if not (edges[0] < b_x < edges[-1]):
+        return None
+    i = int(np.searchsorted(edges, b_x, side="right")) - 1
+    i = min(max(i, 0), x_vec.shape[0] - 1)
+    e_lo, e_hi = float(edges[i]), float(edges[i + 1])
+    if not (e_lo < b_x < e_hi):
+        return None
+    return i, e_lo, e_hi
+
+
+def _pl_integral(
+    x_vec: np.ndarray, values: np.ndarray, a: float, b: float
+) -> np.ndarray:
+    """Exact integral of the piecewise-linear interpolant over ``[a, b]``.
+
+    Split at every grid node strictly inside the interval so each trapezoid
+    spans a single linear segment of the interpolant.
+    """
+    empty = np.zeros(values.shape[1:] if values.ndim > 1 else (), dtype=float)
+    if b <= a:
+        return empty
+    lo = int(np.searchsorted(x_vec, a, side="right"))
+    hi = int(np.searchsorted(x_vec, b, side="left"))
+    points = [a] + [float(t) for t in x_vec[lo:hi]] + [b]
+    integral = empty
+    for p, q in zip(points[:-1], points[1:]):
+        vp = _interp_columns(x_vec, values, p)
+        vq = _interp_columns(x_vec, values, q)
+        integral = integral + 0.5 * (q - p) * (vp + vq)
+    return integral
+
+
 def project_breach_jump(
     x_vec: np.ndarray,
     b_x: float,
@@ -106,31 +157,70 @@ def project_breach_jump(
         out = jump * frac[:, None]
 
     edges = _dual_cell_edges(x_vec)
-    # The straddling cell is the one containing b_x strictly inside.
-    if not (edges[0] < b_x < edges[-1]):
+    straddle = _straddle_cell(x_vec, edges, b_x)
+    if straddle is None:
         return out
-    i = int(np.searchsorted(edges, b_x, side="right")) - 1
-    i = min(max(i, 0), x_vec.shape[0] - 1)
-    e_lo, e_hi = float(edges[i]), float(edges[i + 1])
-    if not (e_lo < b_x < e_hi):
-        # threshold exactly on a cell face: fractions are already exact
-        return out
-
-    # Breach part of the straddling cell.
+    i, e_lo, e_hi = straddle
     lo, hi = (b_x, e_hi) if breach_up else (e_lo, b_x)
-    # Split at the node itself when it lies inside the sub-interval, so each
-    # trapezoid spans a single linear segment of the interpolant.
-    points = [lo]
-    xi = float(x_vec[i])
-    if lo < xi < hi:
-        points.append(xi)
-    points.append(hi)
+    out[i] = _pl_integral(x_vec, jump, lo, hi) / (e_hi - e_lo)
+    return out
 
-    integral = np.zeros(jump.shape[1:] if jump.ndim > 1 else (), dtype=float)
-    for a, b in zip(points[:-1], points[1:]):
-        va = _interp_columns(x_vec, jump, a)
-        vb = _interp_columns(x_vec, jump, b)
-        integral = integral + 0.5 * (b - a) * (va + vb)
 
-    out[i] = integral / (e_hi - e_lo)
+def project_event_values(
+    x_vec: np.ndarray,
+    b_x: float,
+    v_survive,
+    v_breach,
+    breach_up: bool,
+) -> np.ndarray:
+    """Post-event nodal values: dual-cell average of the complete event
+    function.
+
+    Away from the threshold each node keeps the pointwise value of its own
+    branch (breach fraction 0 or 1). The straddling node receives the exact
+    cell average of the composite piecewise-linear function — survive branch
+    on the survive side of the threshold, breach branch on the breach side —
+    which keeps the result inside the [min, max] envelope of the two
+    branches (non-negative branches project to non-negative values).
+
+    Args:
+        x_vec: Strictly increasing grid coordinates.
+        b_x: Threshold coordinate (``+-inf`` allowed).
+        v_survive: Survive-branch values — scalar, (n,) or (n, k).
+        v_breach: Breach-branch values — scalar, (n,) or (n, k).
+        breach_up: True when the breach region is ``{x >= b_x}``.
+
+    Returns:
+        Projected nodal values, shape (n,) or (n, k).
+    """
+    x_vec = np.asarray(x_vec, dtype=float)
+    n = x_vec.shape[0]
+    v_s = np.asarray(v_survive, dtype=float)
+    v_b = np.asarray(v_breach, dtype=float)
+    if v_s.ndim == 0 and v_b.ndim == 0:
+        v_s = np.full(n, float(v_s))
+        v_b = np.full(n, float(v_b))
+    else:
+        v_s, v_b = np.broadcast_arrays(v_s, v_b)
+        v_s = np.array(v_s, dtype=float)
+        v_b = np.array(v_b, dtype=float)
+
+    frac = breach_fractions(x_vec, b_x, breach_up)
+    f = frac if v_s.ndim == 1 else frac[:, None]
+    out = v_s + (v_b - v_s) * f
+
+    edges = _dual_cell_edges(x_vec)
+    straddle = _straddle_cell(x_vec, edges, b_x)
+    if straddle is None:
+        return out
+    i, e_lo, e_hi = straddle
+    if breach_up:
+        total = _pl_integral(x_vec, v_s, e_lo, b_x) + _pl_integral(
+            x_vec, v_b, b_x, e_hi
+        )
+    else:
+        total = _pl_integral(x_vec, v_b, e_lo, b_x) + _pl_integral(
+            x_vec, v_s, b_x, e_hi
+        )
+    out[i] = total / (e_hi - e_lo)
     return out

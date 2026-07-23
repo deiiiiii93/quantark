@@ -209,6 +209,116 @@ class TestProjectBreachJump:
             np.testing.assert_allclose(j2[:, k], jk, atol=1e-14)
 
 
+class TestProjectEventValues:
+    """Review 2026-07-23, blocking finding 1: the straddling node must carry
+    the dual-cell average of the COMPLETE post-event function (survive branch
+    on one side of the threshold, breach branch on the other). Adding a
+    cell-averaged jump to the POINTWISE survive value mixes two inconsistent
+    discretizations in that one cell and can leave the branch envelope
+    entirely (e.g. produce negative values from two non-negative branches)
+    when the survive branch is steep across the straddling cell."""
+
+    def test_reviewer_counterexample_stays_in_envelope(self):
+        # Grid x = [-1,-.5,0,.5,1], survive [1,1,1,100,100], breach 0, up
+        # threshold at x=0. Both branches are non-negative; the correct cell
+        # average over the straddling cell [-0.25, 0.25] is
+        # (0.25*1 + 0)/0.5 = 0.5 — the jump-only form gave -11.875.
+        x = np.array([-1.0, -0.5, 0.0, 0.5, 1.0])
+        v_survive = np.array([1.0, 1.0, 1.0, 100.0, 100.0])
+        solver = SnowballPDESolver(PDEParams())
+        out = solver._project_event_values(
+            np.exp(x), 1.0, False, True, v_survive, 0.0
+        )
+        assert np.all(out >= 0.0)
+        assert out[2] == pytest.approx(0.5, abs=1e-12)
+        np.testing.assert_allclose(out[:2], 1.0, atol=1e-14)
+        np.testing.assert_allclose(out[3:], 0.0, atol=1e-14)
+
+    def test_envelope_bound_random_branches(self):
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_event_values,
+        )
+
+        rng = np.random.default_rng(20260723)
+        incs = rng.uniform(0.02, 0.1, size=30)
+        x = np.concatenate(([0.0], np.cumsum(incs))) - 1.0
+        for _ in range(50):
+            v_s = rng.uniform(0.0, 10.0, size=x.size)
+            v_b = rng.uniform(0.0, 10.0, size=x.size)
+            b_x = float(rng.uniform(x[0], x[-1]))
+            up = bool(rng.integers(0, 2))
+            out = project_event_values(x, b_x, v_s, v_b, up)
+            lo = min(v_s.min(), v_b.min())
+            hi = max(v_s.max(), v_b.max())
+            assert np.all(out >= lo - 1e-12)
+            assert np.all(out <= hi + 1e-12)
+
+    def test_straddle_equals_numeric_cell_average(self):
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_event_values,
+        )
+
+        x = _nonuniform_x()
+        rng = np.random.default_rng(5)
+        v_s = rng.uniform(-2.0, 5.0, size=x.size)
+        v_b = rng.uniform(-2.0, 5.0, size=x.size)
+        i = 17
+        edges = np.concatenate(([x[0]], 0.5 * (x[1:] + x[:-1]), [x[-1]]))
+        e_lo, e_hi = edges[i], edges[i + 1]
+        b_x = e_lo + 0.63 * (e_hi - e_lo)
+        out = project_event_values(x, b_x, v_s, v_b, breach_up=True)
+
+        def _pl_int(vals, a, c):
+            pts = np.unique(
+                np.concatenate(([a, c], x[(x > a) & (x < c)]))
+            )
+            y = np.interp(pts, x, vals)
+            return float(np.trapezoid(y, pts))
+
+        expected = (_pl_int(v_s, e_lo, b_x) + _pl_int(v_b, b_x, e_hi)) / (
+            e_hi - e_lo
+        )
+        assert out[i] == pytest.approx(expected, rel=1e-12)
+        # away from the straddle: pointwise branch values, untouched
+        np.testing.assert_allclose(out[:i], v_s[:i], atol=1e-14)
+        np.testing.assert_allclose(out[i + 1 :], v_b[i + 1 :], atol=1e-14)
+
+    def test_affine_survive_uniform_grid_matches_jump_form(self):
+        # On a uniform grid the dual cell is symmetric, so the cell average
+        # of an affine survive branch equals its nodal value and the
+        # straddle correction vanishes: the validated jump-form results are
+        # unchanged in this regime.
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_event_values,
+        )
+
+        x = _uniform_x()
+        v_s = 1.4 - 0.8 * x
+        rng = np.random.default_rng(9)
+        v_b = rng.uniform(0.0, 3.0, size=x.size)
+        b_x = x[20] + 0.3 * (x[21] - x[20])
+        out = project_event_values(x, b_x, v_s, v_b, breach_up=True)
+        jump_form = v_s + project_breach_jump(x, b_x, v_b - v_s, breach_up=True)
+        np.testing.assert_allclose(out, jump_form, atol=1e-12)
+
+    def test_columns_match_per_column(self):
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_event_values,
+        )
+
+        x = _nonuniform_x()
+        rng = np.random.default_rng(13)
+        v_s = rng.normal(size=(x.size, 3))
+        v_b = rng.normal(size=(x.size, 3))
+        b_x = x[12] + 1e-3
+        out = project_event_values(x, b_x, v_s, v_b, breach_up=False)
+        for k in range(3):
+            col = project_event_values(
+                x, b_x, v_s[:, k], v_b[:, k], breach_up=False
+            )
+            np.testing.assert_allclose(out[:, k], col, atol=1e-14)
+
+
 # ---------------------------------------------------------------------------
 # Param plumbing
 # ---------------------------------------------------------------------------

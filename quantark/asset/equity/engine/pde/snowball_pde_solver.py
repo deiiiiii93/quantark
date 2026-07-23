@@ -29,7 +29,7 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     TimeGridSpec,
 )
 from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
-from quantark.asset.equity.engine.pde.event_projection import project_breach_jump
+from quantark.asset.equity.engine.pde.event_projection import project_event_values
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -1082,22 +1082,18 @@ class SnowballPDESolver(BasePDESolver):
     ) -> np.ndarray:
         """Post-event nodal values for a discrete binary event.
 
-        Conservative dual-cell projection of ``1_breach * (v_breach -
-        v_survive)`` in log-price space; the breach direction matches
-        ``_get_barrier_mask`` exactly (including reverse products and the
-        barrier<=0 degenerate cases). ``v_survive``/``v_breach`` may be
-        scalars or arrays of shape (n,) or (n, k).
+        Conservative dual-cell average of the complete event function in
+        log-price space; the breach direction matches ``_get_barrier_mask``
+        exactly (including reverse products and the barrier<=0 degenerate
+        cases). ``v_survive``/``v_breach`` may be scalars or arrays of shape
+        (n,) or (n, k).
         """
         s_vec = np.asarray(s_vec, dtype=float)
         x_vec = np.log(s_vec)
         b = float(barrier) if barrier is not None else 0.0
         b_x = np.log(b) if b > 0.0 else -np.inf
         breach_up = bool(is_up_barrier) != bool(is_reverse)
-        v_survive = np.asarray(v_survive, dtype=float)
-        d = np.asarray(v_breach, dtype=float) - v_survive
-        if d.ndim == 0:
-            d = np.full(x_vec.shape, float(d))
-        return v_survive + project_breach_jump(x_vec, b_x, d, breach_up)
+        return project_event_values(x_vec, b_x, v_survive, v_breach, breach_up)
 
     @staticmethod
     def _record_is_non_negative_time(record: ResolvedObservationRecord) -> bool:

@@ -95,10 +95,13 @@ def _phoenix():
 # corrected default event semantics (event_projection="cell_average" +
 # event_rannacher_steps=2): PV moved -3.4e-4 relative, KI +1.5e-3 absolute —
 # the half-cell trigger-phase bias the projection removes (see
-# pde_auto_grid_investigation.md and test_pde_event_projection.py).
-SNOWBALL_PV = 987999.6980727295
-SNOWBALL_KI = 0.1118588495142286
-SNOWBALL_KI_EVER = 0.1478415983725159
+# pde_auto_grid_investigation.md and test_pde_event_projection.py), and
+# nudged -1e-5 relative on 2026-07-23 when the straddling cell switched to
+# the full two-branch cell average (review finding 1: envelope-preserving
+# projection; moves further toward the QUAD reference).
+SNOWBALL_PV = 987989.4956157367
+SNOWBALL_KI = 0.11188438407206315
+SNOWBALL_KI_EVER = 0.14787848729233963
 
 
 def test_snowball_full_stream_matches_golden():
