@@ -74,15 +74,16 @@ class PhoenixPDESolver(SnowballPDESolver):
             settlement_time=rec.settlement_time,
         )
         coup_col = n_ko + ko_idx
-        if self._use_cell_average_events():
+        if self._event_uses_projection(t_idx):
             for v in (v0, v1):
                 v[:, coup_col] = self._project_event_values(
                     s_vec, coupon_barrier, product.is_reverse, True,
                     v[:, coup_col], df_delay,
                 )
             return
-        pay_mask = self._get_barrier_mask(
-            s_vec, coupon_barrier, product.is_reverse, is_up_barrier=True
+        pay_mask = self._event_nodal_mask(
+            s_vec, coupon_barrier, product.is_reverse, True,
+            at_valuation=(t_idx == 0),
         )
         v0[pay_mask, coup_col] = df_delay
         v1[pay_mask, coup_col] = df_delay
@@ -641,7 +642,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         diffused_v0_0 = grid_v0_list[0][:, t_idx].copy()
         diffused_v1_0 = grid_v1_list[0][:, t_idx].copy()
 
-        if self._use_cell_average_events():
+        if self._event_uses_projection(t_idx):
             for k in range(max_k + 1):
                 accumulated_pay = (
                     self._accumulated_coupon_amount(obs_idx, k) if use_memory else 0.0
@@ -662,7 +663,9 @@ class PhoenixPDESolver(SnowballPDESolver):
             return
 
         # Coupon barrier behaves like KO (UP barrier) - pay when above
-        pay_mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
+        pay_mask = self._event_nodal_mask(
+            s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
+        )
 
         for k in range(max_k + 1):
             accumulated_pay = (
@@ -707,11 +710,17 @@ class PhoenixPDESolver(SnowballPDESolver):
         use_memory = product.has_memory_coupon
         max_k = obs_idx if (obs_idx is not None and use_memory) else 0
 
-        if not self._use_cell_average_events():
-            ko_mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
+        if not self._event_uses_projection(t_idx):
+            at_val = t_idx == 0
+            ko_mask = self._event_nodal_mask(
+                s_vec, barrier, product.is_reverse, True, at_valuation=at_val
+            )
             if obs_idx is not None:
                 coupon_barrier = float(self._coupon_barriers[obs_idx])
-                pay_mask = self._get_barrier_mask(s_vec, coupon_barrier, product.is_reverse, is_up_barrier=True)
+                pay_mask = self._event_nodal_mask(
+                    s_vec, coupon_barrier, product.is_reverse, True,
+                    at_valuation=at_val,
+                )
             else:
                 pay_mask = np.zeros_like(s_vec, dtype=bool)
 
@@ -719,7 +728,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         if ko_record.settlement_time is not None and ko_record.settlement_time > current_time:
             df = self._df_between_times(pricing_env, current_time, ko_record.settlement_time)
 
-        if self._use_cell_average_events():
+        if self._event_uses_projection(t_idx):
             for k in range(len(grid_v0_list)):
                 effective_k = k if k <= max_k else max_k
                 accumulated_pay = (

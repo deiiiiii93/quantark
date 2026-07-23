@@ -626,6 +626,151 @@ class TestSnowballCellAverage:
 # ---------------------------------------------------------------------------
 
 
+class TestValuationDateEvents:
+    """Review 2026-07-23, blocking finding 2: an observation falling exactly
+    on the valuation date is deterministic — today's spot is known — so its
+    trigger must be applied with the product's exact inclusive comparison
+    (e.g. ``PhoenixOption.is_coupon_triggered``), never cell-averaged. The
+    nodal application at t=0 additionally owns nodes within ``is_close``
+    tolerance of the barrier inclusively: grid nodes are ``exp(log(.))``
+    round-trips, so a raw ``>=`` would let 1-ULP noise decide ownership."""
+
+    def test_event_uses_projection_guard(self):
+        solver = SnowballPDESolver(PDEParams())
+        assert not solver._event_uses_projection(0)
+        assert solver._event_uses_projection(5)
+        nodal = SnowballPDESolver(PDEParams(event_projection="nodal"))
+        assert not nodal._event_uses_projection(5)
+
+    @staticmethod
+    def _phoenix_t0(b0: float):
+        from quantark.asset.equity.product.option.phoenix_config import (
+            CouponBarrierConfig,
+        )
+        from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+        from quantark.asset.equity.product.option.snowball_config import PayoffConfig
+        from quantark.util.calendar.day_counter import DayCountConvention
+        from quantark.util.enum import CouponPayType
+
+        bc = BarrierConfig(
+            ko_barrier=200.0,
+            ko_rate=0.0,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.0, 0.5, 1.0],
+            ki_barrier=None,
+        )
+        cc = CouponBarrierConfig(
+            coupon_barrier=[b0, 85.0, 85.0],
+            coupon_rate=0.04,
+            coupon_pay_type=CouponPayType.INSTANT,
+            day_count_convention=DayCountConvention.ACT_365,
+            memory_coupon=False,
+            fixed_coupon_year_fraction=0.5,
+        )
+        pf = PayoffConfig(rebate_rate=0.0, include_principal=True)
+        return PhoenixOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=bc,
+            coupon_config=cc,
+            payoff_config=pf,
+            contract_multiplier=1.0,
+            maturity=1.0,
+        )
+
+    def test_valuation_coupon_at_spot_pays_in_full(self):
+        env = _env()
+
+        def _price(b0):
+            return float(
+                PhoenixPDESolver(params=PDEParams(grid_size=200)).price(
+                    self._phoenix_t0(b0), env
+                )
+            )
+
+        pv_at_barrier = _price(100.0)  # spot exactly on today's coupon barrier
+        pv_deep = _price(50.0)  # trivially triggered today
+        pv_missed = _price(180.0)  # trivially missed today
+        # Inclusive trigger at the known spot: on-barrier == deeply-triggered.
+        # Tolerance: auto_grid pins each coupon barrier onto a node, so
+        # changing b0 perturbs the MESH and the diffused values by ~1e-5 —
+        # far below the ~0.56-coupon (~1.1) gap the cell-averaged t=0 coupon
+        # produced, which is the regression this guards against.
+        assert pv_at_barrier == pytest.approx(pv_deep, abs=2e-4)
+        # ...and the trigger is worth one full (undiscounted, INSTANT) coupon
+        expected = float(self._phoenix_t0(50.0).get_coupon_payoff(0, year_fraction=0.5))
+        assert pv_deep - pv_missed == pytest.approx(expected, rel=1e-4)
+
+    def test_snowball_valuation_ko_jump_is_exact(self):
+        # (The price() path short-circuits a spot-at-or-above-barrier KO at
+        # valuation before the PDE runs, so this is exercised at the
+        # event-application seam: t_idx == 0 must apply the exact nodal
+        # trigger, interior observations must still project.)
+        solver = SnowballPDESolver(PDEParams())
+        s_vec = np.linspace(60.0, 120.0, 61)
+        rec = types.SimpleNamespace(barrier=100.0, payoff=100.0, settlement_time=None)
+        product = types.SimpleNamespace(is_reverse=False)
+        env = _env()
+        j = int(np.argmin(np.abs(s_vec - 100.0)))
+
+        grid_v0 = np.full((61, 3), 55.0)
+        grid_v1 = np.full((61, 3), 45.0)
+        solver._apply_ko_jump(grid_v0, grid_v1, s_vec, 0, 0.0, product, env, rec)
+        assert grid_v0[j, 0] == 100.0
+        assert np.all((grid_v0[:, 0] == 55.0) | (grid_v0[:, 0] == 100.0))
+        assert np.all((grid_v1[:, 0] == 45.0) | (grid_v1[:, 0] == 100.0))
+
+        grid_v0b = np.full((61, 3), 55.0)
+        grid_v1b = np.full((61, 3), 45.0)
+        solver._apply_ko_jump(grid_v0b, grid_v1b, s_vec, 1, 0.5, product, env, rec)
+        assert 55.0 < grid_v0b[j, 1] < 100.0
+
+    def test_vol_snowball_valuation_ko_is_exact(self):
+        solver = HestonSnowballPDESolver(_hp(), params=PDEParams())
+        core = types.SimpleNamespace(S_grid=np.linspace(60.0, 120.0, 61))
+        product = types.SimpleNamespace(is_reverse=False)
+        env = _heston_env()
+        rec = types.SimpleNamespace(barrier=100.0, payoff=100.0, settlement_time=None)
+        event_maps = {"ko": {4: [rec], 2: [rec]}, "ki": {}, "dt": 0.25}
+        U = np.full((61, 3), 55.0)
+
+        # tau == T: the event is at the valuation date -> exact nodal
+        # application, no blended node anywhere.
+        out = solver._apply_ko(U.copy(), core, product, env, 1.0, 1.0, event_maps)
+        j = int(np.argmin(np.abs(core.S_grid - 100.0)))
+        assert out[j, 0] == 100.0
+        assert np.all((out == 55.0) | (out == 100.0))
+
+        # interior observation (tau < T): the straddling node must still blend.
+        out2 = solver._apply_ko(U.copy(), core, product, env, 1.0, 0.5, event_maps)
+        assert 55.0 < out2[j, 0] < 100.0
+
+    def test_vol_phoenix_valuation_coupon_is_exact(self):
+        from quantark.util.enum import CouponPayType
+
+        solver = HestonPhoenixPDESolver(_hp(), params=PDEParams())
+        solver._coupon_barriers = np.array([100.0])
+        solver._coupon_amounts = np.array([2.0])
+        core = types.SimpleNamespace(S_grid=np.linspace(60.0, 120.0, 61))
+        product = types.SimpleNamespace(
+            is_reverse=False,
+            coupon_config=types.SimpleNamespace(coupon_pay_type=CouponPayType.INSTANT),
+        )
+        env = _heston_env()
+        U = np.full((61, 3), 55.0)
+
+        # tau == T: today's coupon condition is exact — the on-barrier node
+        # receives the full coupon, every node pays either 0 or the coupon.
+        out = solver._apply_coupon(U.copy(), core, product, env, 1.0, 1.0, 0)
+        j = int(np.argmin(np.abs(core.S_grid - 100.0)))
+        assert out[j, 0] == 57.0
+        assert np.all((out == 55.0) | (out == 57.0))
+
+        # interior observation: the straddling node must still blend.
+        out2 = solver._apply_coupon(U.copy(), core, product, env, 1.0, 0.5, 0)
+        assert 55.0 < out2[j, 0] < 57.0
+
+
 class TestEventDampingPolicy:
     def test_event_damping_decoupled_from_auto_grid(self):
         """Damping depends on event regularity, not on the mesh-selection

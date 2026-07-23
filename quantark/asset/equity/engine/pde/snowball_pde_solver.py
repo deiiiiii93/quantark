@@ -770,7 +770,7 @@ class SnowballPDESolver(BasePDESolver):
                     current_time=float(t_vec[j]),
                     settlement_time=rec.settlement_time,
                 )
-                if self._use_cell_average_events():
+                if self._event_uses_projection(j):
                     # Zero all event surfaces in the KO region (KO_i indicator
                     # to df_delay); KI-ever is exempt (first-passage statistic).
                     for v in (v0_cur, v1_cur):
@@ -782,7 +782,10 @@ class SnowballPDESolver(BasePDESolver):
                             s_vec, barrier, product.is_reverse, True, v, target
                         )
                 else:
-                    mask_ko = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
+                    mask_ko = self._event_nodal_mask(
+                        s_vec, barrier, product.is_reverse, True,
+                        at_valuation=(j == 0),
+                    )
 
                     # Zero all event surfaces in KO region, then set the KO_i indicator.
                     # KI-ever is exempt (pure first-passage statistic, no KO absorption).
@@ -811,15 +814,17 @@ class SnowballPDESolver(BasePDESolver):
                 )
                 if should_apply_ki:
                     ki_barrier = self._resolve_ki_barrier_at_tidx(j)
-                    if self._use_cell_average_events() and not (
-                        self._ki_continuous or self._bgk_active
-                    ):
+                    ki_discrete = not (self._ki_continuous or self._bgk_active)
+                    if self._event_uses_projection(j) and ki_discrete:
                         v0_cur[:] = self._project_event_values(
                             s_vec, ki_barrier, product.is_reverse, False,
                             v0_cur, v1_cur,
                         )
                     else:
-                        mask_ki = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
+                        mask_ki = self._event_nodal_mask(
+                            s_vec, ki_barrier, product.is_reverse, False,
+                            at_valuation=(j == 0 and ki_discrete),
+                        )
                         v0_cur[mask_ki, :] = v1_cur[mask_ki, :]
 
             # Enforce simple Neumann-like boundary (zero slope) for stability.
@@ -1070,6 +1075,45 @@ class SnowballPDESolver(BasePDESolver):
             getattr(self.params, "event_projection", EventProjectionMode.NODAL)
             is EventProjectionMode.CELL_AVERAGE
         )
+
+    def _event_uses_projection(self, t_idx: int) -> bool:
+        """True when the discrete event at ``t_idx`` uses the projection.
+
+        Observations falling exactly on the valuation date (``t_idx == 0``)
+        are deterministic — today's spot is known — so their trigger is
+        applied with the product's exact inclusive comparison instead of a
+        cell average [2026-07-23 review, finding 2].
+        """
+        return t_idx != 0 and self._use_cell_average_events()
+
+    def _event_nodal_mask(
+        self,
+        s_vec: np.ndarray,
+        barrier,
+        is_reverse: bool,
+        is_up_barrier: bool,
+        at_valuation: bool = False,
+    ) -> np.ndarray:
+        """Breach mask for a nodal event application.
+
+        For a valuation-date observation in cell-average mode the mask
+        additionally owns nodes within ``is_close`` tolerance of the barrier:
+        the observation is deterministic and inclusive, and grid nodes are
+        ``exp(log(.))`` round-trips, so a raw ``>=``/``<=`` would let 1-ULP
+        noise decide ownership. Legacy nodal mode keeps the raw comparison
+        (it is the pinned characterization discretization).
+        """
+        mask = self._get_barrier_mask(s_vec, barrier, is_reverse, is_up_barrier)
+        if at_valuation and self._use_cell_average_events():
+            b = float(barrier) if barrier is not None else 0.0
+            if b > 0.0:
+                mask = mask | np.isclose(
+                    np.asarray(s_vec, dtype=float),
+                    b,
+                    rtol=Tolerance.RELATIVE,
+                    atol=0.0,
+                )
+        return mask
 
     def _project_event_values(
         self,
@@ -2109,7 +2153,7 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
-        if self._use_cell_average_events():
+        if self._event_uses_projection(t_idx):
             for grid in (grid_v0, grid_v1):
                 grid[:, t_idx] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
@@ -2118,7 +2162,9 @@ class SnowballPDESolver(BasePDESolver):
             return
 
         # Determine breached region (KO is an UP barrier)
-        mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
+        mask = self._event_nodal_mask(
+            s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
+        )
 
         # Apply to both surfaces
         grid_v0[mask, t_idx] = cashflow_value
@@ -2143,9 +2189,8 @@ class SnowballPDESolver(BasePDESolver):
         # Continuous (or BGK-continuous) KI monitoring is a continuous-barrier
         # treatment applied every step: it stays a nodal mask regardless of the
         # event_projection setting. Only discretely observed KI events project.
-        if self._use_cell_average_events() and not (
-            self._ki_continuous or self._bgk_active
-        ):
+        ki_discrete = not (self._ki_continuous or self._bgk_active)
+        if self._event_uses_projection(t_idx) and ki_discrete:
             grid_v0[:, t_idx] = self._project_event_values(
                 s_vec, ki_barrier, product.is_reverse, False,
                 grid_v0[:, t_idx], grid_v1[:, t_idx],
@@ -2153,7 +2198,10 @@ class SnowballPDESolver(BasePDESolver):
             return
 
         # Determine breached region (KI is a DOWN barrier)
-        mask = self._get_barrier_mask(s_vec, ki_barrier, product.is_reverse, is_up_barrier=False)
+        mask = self._event_nodal_mask(
+            s_vec, ki_barrier, product.is_reverse, False,
+            at_valuation=(t_idx == 0 and ki_discrete),
+        )
 
         # V0 transitions to V1 in breached region
         grid_v0[mask, t_idx] = grid_v1[mask, t_idx]

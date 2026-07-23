@@ -534,14 +534,19 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                 current_time=current_time,
                 settlement_time=rec.settlement_time,
             )
-            if self._use_cell_average_events():
+            # An observation at the valuation date (current_time == 0) is
+            # deterministic — apply the exact inclusive trigger, not a cell
+            # average [2026-07-23 review, finding 2].
+            at_valuation = is_close(current_time, 0.0)
+            if self._use_cell_average_events() and not at_valuation:
                 U = self._project_event_values(
                     core.S_grid, float(rec.barrier), product.is_reverse, True,
                     U, float(value),
                 )
                 continue
-            mask = self._get_barrier_mask(
-                core.S_grid, float(rec.barrier), product.is_reverse, is_up_barrier=True
+            mask = self._event_nodal_mask(
+                core.S_grid, float(rec.barrier), product.is_reverse, True,
+                at_valuation=at_valuation,
             )
             U[mask, :] = float(value)
         return U
@@ -576,16 +581,23 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                     if v1 is None:
                         raise PricingError("missing V1 snapshot for Heston/SLV Snowball KI jump")
                     # Continuous KI stays a nodal mask (continuous-barrier
-                    # treatment); only discretely observed KI events project.
-                    if self._use_cell_average_events() and not (
-                        self._ki_continuous or self._bgk_active
+                    # treatment); only discretely observed KI events project —
+                    # and a valuation-date observation is deterministic, so it
+                    # is applied with the exact inclusive trigger.
+                    ki_discrete = not (self._ki_continuous or self._bgk_active)
+                    at_valuation = is_close(max(T - float(tau), 0.0), 0.0)
+                    if (
+                        self._use_cell_average_events()
+                        and ki_discrete
+                        and not at_valuation
                     ):
                         U = self._project_event_values(
                             core.S_grid, barrier, product.is_reverse, False, U, v1
                         )
                     else:
-                        mask = self._get_barrier_mask(
-                            core.S_grid, barrier, product.is_reverse, is_up_barrier=False
+                        mask = self._event_nodal_mask(
+                            core.S_grid, barrier, product.is_reverse, False,
+                            at_valuation=(at_valuation and ki_discrete),
                         )
                         U[mask, :] = v1[mask, :]
             return U

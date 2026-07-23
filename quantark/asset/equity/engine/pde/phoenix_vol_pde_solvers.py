@@ -616,7 +616,10 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         )
         coupon_discount = self._df_between_times(env, current_time, settlement_time)
         coupon_value = float(self._coupon_amounts[obs_idx]) * coupon_discount
-        if self._use_cell_average_events():
+        # A coupon observed at the valuation date is deterministic — apply
+        # the exact inclusive trigger [2026-07-23 review, finding 2].
+        at_valuation = is_close(current_time, 0.0)
+        if self._use_cell_average_events() and not at_valuation:
             return self._project_event_values(
                 core.S_grid,
                 float(self._coupon_barriers[obs_idx]),
@@ -625,11 +628,12 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                 U,
                 U + coupon_value,
             )
-        pay_mask = self._get_barrier_mask(
+        pay_mask = self._event_nodal_mask(
             core.S_grid,
             float(self._coupon_barriers[obs_idx]),
             product.is_reverse,
-            is_up_barrier=True,
+            True,
+            at_valuation=at_valuation,
         )
         if np.any(pay_mask):
             U[pay_mask, :] += coupon_value
@@ -655,7 +659,10 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         if ko_record.settlement_time is not None and ko_record.settlement_time > current_time:
             df = self._df_between_times(env, current_time, ko_record.settlement_time)
 
-        if self._use_cell_average_events():
+        # A KO observed at the valuation date is deterministic — apply the
+        # exact inclusive trigger [2026-07-23 review, finding 2].
+        at_valuation = is_close(current_time, 0.0)
+        if self._use_cell_average_events() and not at_valuation:
             # The KO payoff itself jumps at the coupon barrier (coupon paid at
             # a simultaneous KO), so project the inner coupon jump into the
             # payoff profile first, then the KO transition slice-wise.
@@ -675,8 +682,9 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                 U, total[:, None],
             )
 
-        ko_mask = self._get_barrier_mask(
-            core.S_grid, float(ko_record.barrier), product.is_reverse, is_up_barrier=True
+        ko_mask = self._event_nodal_mask(
+            core.S_grid, float(ko_record.barrier), product.is_reverse, True,
+            at_valuation=at_valuation,
         )
         if not np.any(ko_mask):
             return U
@@ -684,11 +692,12 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         total = np.full(core.S_grid.shape, base_payoff * df, dtype=float)
 
         if obs_idx is not None and 0 <= obs_idx < self._coupon_amounts.shape[0]:
-            pay_mask = self._get_barrier_mask(
+            pay_mask = self._event_nodal_mask(
                 core.S_grid,
                 float(self._coupon_barriers[obs_idx]),
                 product.is_reverse,
-                is_up_barrier=True,
+                True,
+                at_valuation=at_valuation,
             )
             total = np.where(
                 pay_mask,
@@ -710,17 +719,18 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             return False, None
         return True, float(barrier)
 
-    def _apply_ki(self, U, core, product, barrier: float, v1):
+    def _apply_ki(self, U, core, product, barrier: float, v1, at_valuation=False):
         # Continuous KI stays a nodal mask (continuous-barrier treatment);
-        # only discretely observed KI events project.
-        if self._use_cell_average_events() and not (
-            self._ki_continuous or self._bgk_active
-        ):
+        # only discretely observed KI events project — and a valuation-date
+        # observation is deterministic, so it uses the exact inclusive trigger.
+        ki_discrete = not (self._ki_continuous or self._bgk_active)
+        if self._use_cell_average_events() and ki_discrete and not at_valuation:
             return self._project_event_values(
                 core.S_grid, barrier, product.is_reverse, False, U, v1
             )
-        mask = self._get_barrier_mask(
-            core.S_grid, barrier, product.is_reverse, is_up_barrier=False
+        mask = self._event_nodal_mask(
+            core.S_grid, barrier, product.is_reverse, False,
+            at_valuation=(at_valuation and ki_discrete),
         )
         if np.any(mask):
             U[mask, :] = v1[mask, :]
@@ -753,7 +763,10 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                     v1 = snapshots.get(key)
                     if v1 is None:
                         raise PricingError("missing V1 snapshot for Heston/SLV Phoenix KI jump")
-                    U = self._apply_ki(U, core, product, barrier, v1)
+                    U = self._apply_ki(
+                        U, core, product, barrier, v1,
+                        at_valuation=is_close(max(T - float(tau), 0.0), 0.0),
+                    )
             if k is not None:
                 for rec in event_maps["ko"].get(k, []):
                     U = self._apply_ko(U, core, product, env, T, tau, rec, obs_idx)
