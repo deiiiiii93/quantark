@@ -18,6 +18,9 @@ from quantark.priceenv.term_sampling import TermCoefficients
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
+from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
+    event_damped_step_keys,
+)
 from quantark.util.numerical import is_close, is_zero
 from quantark.volmodels.adi_core import HestonSLVADICore
 from quantark.volmodels.heston import HestonParams
@@ -430,6 +433,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             raise ValidationError("spot falls outside the Heston/SLV Phoenix PDE grid")
 
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
+        damped_keys = event_damped_step_keys(self.params, event_maps, core.N_T)
         v1_snapshots: dict[float, np.ndarray] = {}
 
         terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
@@ -445,6 +449,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             step_hook=self._v1_hook(
                 core, product, pricing_env, T, event_maps, v1_snapshots
             ),
+            damped_step_keys=damped_keys,
         )
 
         if knocked_in:
@@ -465,6 +470,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                 step_hook=self._v0_hook(
                     core, product, pricing_env, T, event_maps, v1_snapshots
                 ),
+                damped_step_keys=damped_keys,
             )
 
         return float(core.interpolate(surface, np.log(spot), self.model_params.v0))

@@ -715,9 +715,12 @@ def _build_equity_pde():
             grid = dict(n_x=48, n_v=18, n_t=16)
             # Autocallable 2D solvers consume event_projection: pin the legacy
             # event discretization these frozen goldens were captured with
-            # (see _pdep note). Vanilla/barrier Heston engines have no
-            # discrete events (and take engine_params, not params).
-            acgrid = dict(grid, params=_pdep())
+            # (see _pdep note). 2D legacy additionally means NO per-event ADI
+            # damping (event_rannacher_steps was inert in the ADI loop until
+            # 2026-07-23), so pin ers=0 here — _pdep's ers=1 is the 1D legacy.
+            # Vanilla/barrier Heston engines have no discrete events (and
+            # take engine_params, not params).
+            acgrid = dict(grid, params=_pdep(event_rannacher_steps=0))
             table = {
                 "HestonPDESolver": lambda: (HestonPDESolver(_hp(), **grid), _euro(), _eq_flat_env()),
                 "HestonSLVPDESolver": lambda: (HestonSLVPDESolver(_hp(), _unit_leverage(), eta=1.0, **grid), _euro(), _eq_grid_env()),

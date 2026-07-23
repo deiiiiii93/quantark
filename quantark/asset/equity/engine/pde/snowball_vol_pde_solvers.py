@@ -25,6 +25,33 @@ from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
+def event_damped_step_keys(params, event_maps, n_t: int):
+    """Integer step keys that run as fully implicit ADI restarts.
+
+    After each discrete event key the next ``params.event_rannacher_steps``
+    steps are damped (Douglas theta=1) — the 2D counterpart of the 1D
+    ``BackwardOperator.theta_by_step`` event schedule. Continuous KI has no
+    discrete keys, so it never triggers damping (continuous-barrier
+    treatment). Returns ``None`` when damping is disabled.
+    """
+    if not bool(getattr(params, "rannacher_at_events", True)):
+        return None
+    ers = int(getattr(params, "event_rannacher_steps", 0) or 0)
+    if ers <= 0:
+        return None
+    event_keys: set[int] = set()
+    for stream in ("ko", "ki", "coupon"):
+        stream_map = event_maps.get(stream)
+        if stream_map:
+            event_keys |= set(stream_map.keys())
+    keys: set[int] = set()
+    for k in event_keys:
+        for step in range(1, ers + 1):
+            if k + step <= n_t:
+                keys.add(k + step)
+    return keys or None
+
+
 class LocalVolSnowballPDESolver(SnowballPDESolver):
     """Two-surface Snowball PDE with Dupire local volatility on the S grid."""
 
@@ -410,6 +437,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
 
         v1_snapshots: dict[float, np.ndarray] = {}
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
+        damped_keys = event_damped_step_keys(self.params, event_maps, core.N_T)
 
         terminal_v1 = self._terminal_surface(core, product, pricing_env, knocked_in=True)
         U1 = core.solve(
@@ -420,6 +448,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             terminal_override=terminal_v1,
             boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=True),
             step_hook=self._v1_hook(core, product, pricing_env, T, event_maps, v1_snapshots),
+            damped_step_keys=damped_keys,
         )
 
         if knocked_in:
@@ -436,6 +465,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                 step_hook=self._v0_hook(
                     core, product, pricing_env, T, event_maps, v1_snapshots
                 ),
+                damped_step_keys=damped_keys,
             )
 
         return float(core.interpolate(surface, np.log(spot), self.model_params.v0))

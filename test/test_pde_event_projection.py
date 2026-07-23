@@ -930,6 +930,55 @@ class TestVolSolverCellAverage:
         # sanity bound only; accuracy gates live in the 1D suites.
         assert abs(proj - nodal) / abs(nodal) < 0.10
 
+    def test_heston_snowball_consumes_event_rannacher_steps(self):
+        """Review 2026-07-23 finding 4: the 2D ADI path must consume
+        event_rannacher_steps — before this, Heston prices were bit-identical
+        for ers = 0/1/2/5 while the global default (ers=2) claimed otherwise."""
+        env = _heston_env()
+        product = SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            contract_multiplier=1.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=105.0,
+                ko_rate=0.12,
+                ko_observation_type=ObservationType.DISCRETE,
+                ko_observation_dates=QUARTERS,
+                ki_barrier=80.0,
+                ki_observation_type=ObservationType.DISCRETE,
+                ki_continuous=False,
+                ki_observation_dates=QUARTERS,
+            ),
+        )
+
+        def _p(ers):
+            return float(
+                HestonSnowballPDESolver(
+                    _hp(),
+                    params=PDEParams(event_rannacher_steps=ers),
+                    n_x=60,
+                    n_v=20,
+                    n_t=24,
+                ).price(product, env)
+            )
+
+        p0, p2 = _p(0), _p(2)
+        assert p0 != p2, "event_rannacher_steps must engage in the 2D ADI loop"
+        # damping is a small local perturbation, not a price change
+        assert abs(p2 - p0) / abs(p0) < 5e-3
+        # rannacher_at_events=False must disable it (decoupled damping gate)
+        p_off = float(
+            HestonSnowballPDESolver(
+                _hp(),
+                params=PDEParams(event_rannacher_steps=2, rannacher_at_events=False),
+                n_x=60,
+                n_v=20,
+                n_t=24,
+            ).price(product, env)
+        )
+        assert p_off == p0
+
     def test_phoenix_vol_ki_dispatch(self):
         """2D KI transfer: nodal when continuous, projected when discrete."""
         solver = HestonPhoenixPDESolver(

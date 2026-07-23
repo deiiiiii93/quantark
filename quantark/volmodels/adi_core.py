@@ -615,6 +615,7 @@ class HestonSLVADICore:
         step_hook=None,
         terminal_override=None,
         boundary_hook=None,
+        damped_step_keys=None,
     ):
         """Backward ADI solve.
 
@@ -625,6 +626,11 @@ class HestonSLVADICore:
         payoff (e.g. a constant 1 for a survival / no-touch leg).
         boundary_hook(U, tau) -> U (optional): overrides boundary rows for non-vanilla
         terminal-value problems while keeping the ADI core reusable.
+        damped_step_keys (optional set of int): integer step indices
+        (round(tau/dt) of the step's landing node) that run as fully implicit
+        Douglas steps — a per-event Rannacher restart damping the modes a
+        discrete event jump excites (Pooley-Vetzal-Forsyth; Giles-Carter).
+        Craig-Sneyd also restarts as damped Douglas on these steps.
         """
         previous_hook = self._boundary_hook
         self._boundary_hook = boundary_hook
@@ -651,7 +657,13 @@ class HestonSLVADICore:
             for _ in range(steps_remaining):
                 tau += self.dt
                 t_mid = self.T - tau + 0.5 * self.dt
-                if scheme == ADIScheme.DOUGLAS:
+                if (
+                    damped_step_keys is not None
+                    and int(round(tau / self.dt)) in damped_step_keys
+                ):
+                    # Per-event Rannacher restart: fully implicit Douglas step.
+                    U = self._douglas_step(U, self.dt, tau, 1.0, t_mid)
+                elif scheme == ADIScheme.DOUGLAS:
                     U = self._douglas_step(U, self.dt, tau, theta, t_mid)
                 else:  # CRAIG_SNEYD (MCS is rejected by the wrappers)
                     U = self._cs_step(U, self.dt, tau, theta, t_mid)
