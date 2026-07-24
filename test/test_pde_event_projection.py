@@ -1304,3 +1304,98 @@ class TestVolSolverCellAverage:
         assert 0.0 < out2[j, 1] < 1.0, "discrete KI straddle node must blend"
         assert np.all(out2[:j, 1] == 1.0)
         assert np.all(out2[j + 1 :, 1] == 0.0)
+
+
+class TestDefaultCertification:
+    """Review 2026-07-24 finding 4: certify PV/delta/gamma for the
+    cell_average default across grid regimes.
+
+    The gamma instability the review measured (auto-grid bump gamma
+    -1.19/-1.19/-0.62 at N=400/800/1600 vs uniform ~-0.007) reproduces
+    IDENTICALLY under legacy nodal projection: it is the deprecated
+    EngineParams.bump_size=1e-4 shim silently overriding BumpConfig's
+    documented 1% spot bump, so the default BUMP-mode gamma second-
+    differences the piecewise-LINEAR price readout over 1bp — far below
+    one grid cell — and measures the interpolation kink at the spot node
+    (auto grids pin spot onto a node; uniform grids leave it mid-cell,
+    where a line has zero curvature). It is an estimator artifact
+    orthogonal to event projection. The default public path (AUTO mode ->
+    engine grid-stencil greeks for PDE engines) and any bump spanning a
+    few cells are stable, and are pinned here.
+    """
+
+    @staticmethod
+    def _monthly_snowball():
+        obs = [i / 12.0 for i in range(1, 13)]
+        return SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            contract_multiplier=1.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=103.0,
+                ko_rate=0.12,
+                ko_observation_type=ObservationType.DISCRETE,
+                ko_observation_dates=obs,
+                ki_barrier=85.0,
+                ki_observation_type=ObservationType.DISCRETE,
+                ki_continuous=False,
+                ki_observation_dates=obs,
+            ),
+        )
+
+    def _greeks(self, projection, auto, n, mode, spot_bump=None):
+        from quantark.asset.equity.engine.pde_engine import PDEEngine
+        from quantark.asset.equity.param.engine_params import BumpConfig
+        from quantark.asset.equity.riskmeasures.greeks_calculator import (
+            GreeksCalculator,
+        )
+        from quantark.util.enum.engine_enums import GreeksCalculationMode
+
+        kw = {}
+        if spot_bump is not None:
+            kw["bump_config"] = BumpConfig(spot_bump=spot_bump)
+        params = PDEParams(
+            event_projection=projection,
+            auto_grid=auto,
+            grid_size=n,
+            time_steps=240,  # uniform time grids must land on monthly obs
+            **kw,
+        )
+        calc = GreeksCalculator(
+            params=params,
+            greeks_mode=(
+                GreeksCalculationMode.BUMP
+                if mode == "bump"
+                else GreeksCalculationMode.ENGINE
+            ),
+        )
+        return calc.calculate_numerical_greeks(
+            self._monthly_snowball(),
+            _env(),
+            PDEEngine(params=params),
+            greeks=["price", "delta", "gamma"],
+        )
+
+    def test_pv_delta_gamma_certified_across_grids(self):
+        eng_400 = self._greeks("cell_average", True, 400, "engine")
+        eng_800 = self._greeks("cell_average", True, 800, "engine")
+        # PV grid-convergence: the projected default is flat in N while
+        # legacy nodal drifts O(1/N) (the original auto-grid bias).
+        pv_drift = abs(eng_800["price"] - eng_400["price"])
+        assert pv_drift < 2e-3
+        nodal_400 = self._greeks("nodal", True, 400, "engine")
+        nodal_800 = self._greeks("nodal", True, 800, "engine")
+        assert abs(nodal_800["price"] - nodal_400["price"]) > 10.0 * pv_drift
+        # engine (grid-stencil) greeks — the AUTO-mode default for PDE
+        # engines — are N-stable.
+        assert abs(eng_800["gamma"] - eng_400["gamma"]) < 5e-4
+        assert abs(eng_800["delta"] - eng_400["delta"]) < 2e-3
+        # a bump spanning several cells agrees with the stencil; the
+        # uniform grid agrees with the auto grid.
+        bump_400 = self._greeks("cell_average", True, 400, "bump", spot_bump=0.01)
+        assert abs(bump_400["gamma"] - eng_400["gamma"]) < 2e-3
+        assert abs(bump_400["delta"] - eng_400["delta"]) < 5e-3
+        unif_400 = self._greeks("cell_average", False, 400, "engine")
+        assert abs(unif_400["gamma"] - eng_400["gamma"]) < 2e-3
+        assert abs(unif_400["price"] - eng_400["price"]) < 5e-3
