@@ -1,0 +1,695 @@
+<title>PDE events: why nodal failed</title>
+<style>
+  :root {
+    --paper: #F7F8F5;
+    --panel: #FDFDFB;
+    --ink: #1D2733;
+    --muted: #5A6675;
+    --faint: #8A94A1;
+    --line: #DCE0D8;
+    --survive: #2C7A67;
+    --breach: #B44E31;
+    --blue: #3D5FA8;
+    --shade: rgba(61, 95, 168, 0.07);
+    --code-bg: #EFF1EB;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131820;
+      --panel: #1A212B;
+      --ink: #E6E9E3;
+      --muted: #9AA5B1;
+      --faint: #6C7683;
+      --line: #2B3441;
+      --survive: #56B49E;
+      --breach: #E08A66;
+      --blue: #8FA9E8;
+      --shade: rgba(143, 169, 232, 0.09);
+      --code-bg: #212a36;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131820;
+    --panel: #1A212B;
+    --ink: #E6E9E3;
+    --muted: #9AA5B1;
+    --faint: #6C7683;
+    --line: #2B3441;
+    --survive: #56B49E;
+    --breach: #E08A66;
+    --blue: #8FA9E8;
+    --shade: rgba(143, 169, 232, 0.09);
+    --code-bg: #212a36;
+  }
+  :root[data-theme="light"] {
+    --paper: #F7F8F5;
+    --panel: #FDFDFB;
+    --ink: #1D2733;
+    --muted: #5A6675;
+    --faint: #8A94A1;
+    --line: #DCE0D8;
+    --survive: #2C7A67;
+    --breach: #B44E31;
+    --blue: #3D5FA8;
+    --shade: rgba(61, 95, 168, 0.07);
+    --code-bg: #EFF1EB;
+  }
+
+  html { background: var(--paper); }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sans { font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif; }
+  .mono, code, .math, table, .readout, .tick {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  .wide { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  header { padding: 72px 0 40px; border-bottom: 1px solid var(--line); }
+  .eyebrow {
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--blue); margin: 0 0 18px;
+  }
+  h1 {
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-weight: 700; font-size: clamp(30px, 5vw, 44px);
+    line-height: 1.12; letter-spacing: -0.015em; margin: 0 0 10px;
+    text-wrap: balance;
+  }
+  h1 .thin { color: var(--muted); font-weight: 500; }
+  .standfirst { font-size: 19px; line-height: 1.55; color: var(--muted); margin: 14px 0 22px; max-width: 62ch; }
+  .meta {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--faint); display: flex; flex-wrap: wrap; gap: 6px 18px;
+  }
+
+  section { padding: 44px 0 8px; }
+  h2 {
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 13px; font-weight: 600; letter-spacing: 0.15em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 20px;
+  }
+  h2::after { content: ""; display: block; width: 34px; height: 2px; background: var(--blue); margin-top: 8px; }
+  p { margin: 0 0 18px; max-width: 66ch; }
+  strong { font-weight: 700; }
+  em { font-style: italic; }
+  a { color: var(--blue); }
+
+  .math {
+    background: var(--code-bg); border-radius: 4px;
+    padding: 14px 18px; margin: 8px 0 22px;
+    font-size: 14.5px; line-height: 1.7; overflow-x: auto;
+    color: var(--ink);
+  }
+  .math .s { color: var(--survive); }
+  .math .b { color: var(--breach); }
+  code {
+    background: var(--code-bg); border-radius: 3px;
+    padding: 1px 5px; font-size: 0.85em;
+  }
+
+  /* failure / fix layers: tag + prose grid */
+  .layers { display: grid; grid-template-columns: 148px 1fr; gap: 26px 26px; margin: 26px 0 10px; }
+  .layers .tag {
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--breach);
+    padding-top: 4px; line-height: 1.5;
+  }
+  .layers.fix .tag { color: var(--survive); }
+  .layers .body p { margin-bottom: 10px; }
+  .layers .body p:last-child { margin-bottom: 0; }
+  @media (max-width: 620px) {
+    .layers { grid-template-columns: 1fr; gap: 6px; }
+    .layers .body { margin-bottom: 18px; }
+  }
+
+  figure { margin: 30px 0; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 22px 20px 18px; overflow-x: auto;
+  }
+  figcaption {
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 13.5px; line-height: 1.55; color: var(--muted);
+    margin-top: 12px; max-width: 74ch;
+  }
+  svg { display: block; }
+  .tick { font-size: 11px; fill: var(--faint); }
+  .axis-label { font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 11.5px; fill: var(--muted); letter-spacing: 0.06em; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0 0 14px;
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 13px; color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+  .dotswatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .sqswatch { width: 9px; height: 9px; display: inline-block; border: 1.6px solid var(--muted); background: transparent; }
+
+  .controls { display: flex; align-items: center; gap: 16px; margin: 18px 0 6px; flex-wrap: wrap; }
+  .controls label {
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap;
+  }
+  input[type="range"] {
+    flex: 1 1 220px; min-width: 180px; accent-color: var(--blue); height: 22px;
+  }
+  input[type="range"]:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 3px; }
+  .readout { font-size: 13px; color: var(--ink); margin-top: 10px; line-height: 1.8; }
+  .readout .rb { color: var(--breach); font-weight: 700; }
+  .readout .rp { color: var(--blue); font-weight: 700; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin: 6px 0 6px;
+    font-variant-numeric: tabular-nums; }
+  th {
+    font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); text-align: right; padding: 8px 14px; border-bottom: 1px solid var(--line);
+  }
+  th:first-child, td:first-child { text-align: left; padding-left: 4px; }
+  td { padding: 8px 14px; text-align: right; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: none; }
+  td.good { color: var(--survive); font-weight: 600; }
+  td.bad { color: var(--breach); }
+  .tablewrap { overflow-x: auto; }
+
+  .aside {
+    border-left: 2px solid var(--line); padding: 2px 0 2px 20px; margin: 24px 0;
+    color: var(--muted); font-size: 15.5px;
+  }
+  .aside .mono { font-size: 13px; color: var(--ink); }
+
+  footer {
+    margin-top: 56px; padding: 28px 0 72px; border-top: 1px solid var(--line);
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--faint); line-height: 2;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">quantark · PDE engine note</p>
+    <h1>Why nodal event masks failed<br><span class="thin">and how the cell-average projection fixes them</span></h1>
+    <p class="standfirst">
+      Autocallable PDE prices drifted by up to a few percent of premium, moved when the grid was refined,
+      and flipped sign with a one-ULP nudge of a barrier. The cause was one line of discretization
+      philosophy: applying discrete knock-out, knock-in, and coupon triggers as Boolean masks over grid nodes.
+    </p>
+    <p class="meta">
+      <span>branch&nbsp;worktree-pde-event-projection</span>
+      <span>engines&nbsp;1D&nbsp;BSM/LV&nbsp;+&nbsp;2D&nbsp;Heston/SLV</span>
+      <span>2026-07-24</span>
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>The operator in question</h2>
+    <p>
+      A snowball or phoenix is priced by backward induction. Between observation dates the solver diffuses the
+      value surface; <em>at</em> each discrete observation it applies an event operator — a hard switch between
+      two branches of the contract, decided by where spot sits relative to a barrier:
+    </p>
+    <div class="math">
+      V<sup>+</sup>(x) &nbsp;=&nbsp; 𝟙<sub>breach</sub>(x) · <span class="b">V<sub>breach</sub>(x)</span>
+      &nbsp;+&nbsp; (1 − 𝟙<sub>breach</sub>(x)) · <span class="s">V<sub>survive</sub>(x)</span>
+    </div>
+    <p>
+      <span style="color:var(--breach); font-weight:700;">V<sub>breach</sub></span> is the knocked-out payoff, the
+      knocked-in surface, or the continuation plus a coupon; <span style="color:var(--survive); font-weight:700;">V<sub>survive</sub></span>
+      is the untouched continuation. The operator is exact in the continuum. Everything that went wrong
+      happened when it met a finite grid.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Where nodal breaks</h2>
+    <p>
+      The legacy implementation evaluated the indicator <em>at the nodes</em>:
+      <code>mask = s_vec &gt;= barrier</code>, then overwrote masked nodes with the breach branch.
+      Four distinct failures follow from that single decision.
+    </p>
+    <div class="layers">
+      <div class="tag">Half-cell trigger shift</div>
+      <div class="body">
+        <p>
+          A node speaks for its whole dual cell — the interval reaching halfway to each neighbour. Assigning
+          the node to one branch assigns the <em>entire cell</em> to it, so the effective barrier the discrete
+          system sees is displaced from the contractual one by up to half a cell. That is an O(Δx),
+          <em>one-sided</em> error: on a mesh that always snaps the barrier the same way, refinement shrinks it
+          slowly (O(1/N)) and never averages it out. Measured on a protected 24-observation phoenix:
+          +0.140% / +0.092% / +0.048% of notional at N = 400 / 800 / 1600.
+        </p>
+      </div>
+      <div class="tag">FP roundoff picks the side</div>
+      <div class="body">
+        <p>
+          The auto-grid deliberately places a node <em>on</em> each barrier — in log space. The node
+          comes back as <code>exp(log(B))</code>, which is B&nbsp;±&nbsp;1&nbsp;ULP with arbitrary sign per barrier. Whether the
+          on-barrier cell counts as breached is then decided by floating-point roundoff, inconsistently across
+          the KO, KI, and coupon barriers of the same product. Switching the comparison between
+          <code>&gt;=</code> and <code>&gt;</code> changed nothing — bitwise. This is the grid-phase lottery: a
+          coarse grid can look accidentally accurate while the refined one converges to the wrong number.
+          The nodal 2D Heston solver plateaus 0.135 <em>below</em> a stride-corrected Monte&nbsp;Carlo reference —
+          about 7% of that product’s premium — while its coarse grids sit near the truth.
+        </p>
+      </div>
+      <div class="tag">Valuation-date blending</div>
+      <div class="body">
+        <p>
+          An observation falling on the valuation date is not random at all — today’s spot is known. But the
+          event was written onto the grid as a value jump, and <code>price()</code> then linearly interpolated
+          <em>across</em> that jump at an off-node spot. A two-unit coupon due today, spot exactly on the
+          barrier, paid 0.092 / 1.195 / 1.402 / 1.814 / 0.227 units as the uniform grid went
+          N&nbsp;=&nbsp;100&nbsp;→&nbsp;1200. The right answer is 2, at every N.
+        </p>
+      </div>
+      <div class="tag">Undamped jumps</div>
+      <div class="body">
+        <p>
+          Each event writes a discontinuity onto the surface mid-solve. Crank–Nicolson (and Craig–Sneyd in 2D)
+          are only neutrally stable for the high-frequency modes such a jump excites, so the error rings —
+          visible as gamma oscillating with N. Damping existed in the 1D solver but was accidentally coupled
+          to the <code>auto_grid</code> flag, and the 2D ADI loop ignored the setting entirely.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wide">
+    <div class="wrap" style="padding: 0;">
+      <h2>Watch the cell decide</h2>
+      <p>
+        One knock-out observation, seven grid nodes, the barrier sliding through the dual cell of node&nbsp;3.
+        The nodal rule flips the whole cell the instant the barrier crosses the node; the projection assigns
+        the node the <em>exact area-weighted average</em> of the two branches over its cell, so the assigned
+        value moves smoothly with the barrier.
+      </p>
+    </div>
+    <figure>
+      <div class="panel">
+        <div class="legend">
+          <span><span class="swatch" style="background: var(--survive);"></span> V<sub>survive</sub> (continuation)</span>
+          <span><span class="swatch" style="background: var(--breach);"></span> V<sub>breach</sub> (KO payoff)</span>
+          <span><span class="sqswatch"></span> nodal assignment</span>
+          <span><span class="dotswatch" style="background: var(--blue);"></span> cell-average projection</span>
+        </div>
+        <svg id="grid-svg" viewBox="0 0 860 300" width="100%" role="img"
+             aria-label="Grid diagram: survive and breach branches with a movable barrier; nodal versus projected post-event node values."></svg>
+        <div class="controls">
+          <label for="bslider">barrier&nbsp;B</label>
+          <input type="range" id="bslider" min="2.5" max="3.5" step="0.005" value="2.86"
+                 aria-describedby="readout">
+        </div>
+        <div class="readout" id="readout" aria-live="polite"></div>
+      </div>
+      <figcaption>
+        Node 3’s dual cell (shaded) spans the midpoints to its neighbours. Away from the barrier the two
+        rules agree; inside the straddled cell only the projection responds to <em>where</em> in the cell the
+        barrier actually sits.
+      </figcaption>
+    </figure>
+    <figure>
+      <div class="panel">
+        <svg id="step-svg" viewBox="0 0 860 230" width="100%" role="img"
+             aria-label="Value assigned to node 3 as a function of barrier position: nodal is a step function, projection is a smooth ramp."></svg>
+      </div>
+      <figcaption>
+        The value assigned to node 3 as the barrier moves through its cell. The nodal rule is a step —
+        a 30-point cliff at the node, where ±1&nbsp;ULP of <code>exp(log(B))</code> picks the side. The projection
+        is the smooth ramp the continuum operator actually implies; nudging the barrier by ε moves the
+        result by O(ε).
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The fix, in four layers</h2>
+    <div class="layers fix">
+      <div class="tag">Dual-cell projection</div>
+      <div class="body">
+        <p>
+          The event is represented in the finite-volume sense. Every node keeps the pointwise value of its own
+          branch; the one node whose dual cell Ω<sub>i</sub> straddles the barrier receives the exact cell
+          average of the <em>complete</em> composite function, with both branches read as the grid’s
+          piecewise-linear interpolants:
+        </p>
+        <div class="math">
+          V<sup>+</sup><sub>i</sub> = (1/|Ω<sub>i</sub>|) ∫<sub>Ω<sub>i</sub></sub>
+          [ 𝟙<sub>breach</sub> <span class="b">V<sub>b</sub></span> + (1−𝟙<sub>breach</sub>) <span class="s">V<sub>s</sub></span> ] dx
+        </div>
+        <p>
+          Weights live in [0,&nbsp;1], the result stays inside the min/max envelope of the two branches, and a
+          1-ULP barrier shift moves it infinitesimally instead of flipping a cell. Smooth convergence is
+          restored, which also makes Richardson extrapolation meaningful again. One subtlety mattered:
+          averaging only the <em>jump</em> and adding it to the pointwise survive value mixes two
+          discretizations — a review counterexample drove a node to −11.875 from entirely non-negative
+          branches. Averaging the complete function is envelope-preserving by construction.
+        </p>
+      </div>
+      <div class="tag">Valuation date is deterministic</div>
+      <div class="body">
+        <p>
+          At t&nbsp;=&nbsp;0 the event outcome at the actual spot is known, so nothing is averaged and nothing is
+          blended. The readout interpolates the smooth 0<sup>+</sup> branch surface captured <em>before</em>
+          today’s events land on the grid, then applies the transitions pointwise at spot with the product’s
+          own inclusive comparison — the two-unit coupon now pays exactly 2.000 at every N, 1D and 2D.
+          Fixing this exposed a latent 2D bug: the ADI hooks tested
+          <code>is_close(T − τ,&nbsp;0)</code>, but τ accumulates FP step increments, so T&nbsp;−&nbsp;τ lands at
+          ~1e−16 and a <em>relative</em> tolerance against zero can never fire — 2D valuation-date events had
+          been silently cell-averaged all along. All sites now compare τ against T.
+        </p>
+      </div>
+      <div class="tag">Per-event implicit restarts</div>
+      <div class="body">
+        <p>
+          After every discrete event the scheme restarts with damped (Rannacher-style) implicit steps before
+          returning to second order — the combination the literature shows is required, not optional
+          (Pooley–Vetzal–Forsyth 2003; d’Halluin–Forsyth–Vetzal 2005; Giles–Carter 2006). Damping is decoupled
+          from <code>auto_grid</code>, and the 2D ADI loop now mirrors the 1D schedule exactly:
+          <code>use_rannacher</code> is the master switch, restarts run at <code>event_theta</code>, and
+          maturity-date events are excluded because the terminal Rannacher start-up already owns the payoff
+          discontinuity.
+        </p>
+      </div>
+      <div class="tag">Composite triggers, one pass</div>
+      <div class="body">
+        <p>
+          A phoenix coupon and a knock-out observed on the same date are one piecewise contractual function
+          with two thresholds, not two events in a row. Projecting them sequentially double-averages any dual
+          cell the thresholds share; <code>project_piecewise_event</code> integrates the K-threshold composite
+          exactly in a single pass (equal thresholds collapse to an empty region and the correct ½ weight).
+          Well-separated barriers reproduce the sequential results.
+        </p>
+      </div>
+    </div>
+    <div class="aside">
+      <p style="margin-bottom: 6px;"><strong style="color: var(--ink);">What stays nodal on purpose.</strong>
+      Continuously monitored KI keeps the on-node treatment — for a continuous barrier the value function is
+      continuous there and node alignment is the correct discretization (Boyle–Tian). And
+      <span class="mono">event_projection="nodal"</span> survives as an explicit legacy mode, pinned bitwise
+      by the historical characterization oracles.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wide">
+    <div class="wrap" style="padding: 0;">
+      <h2>Evidence</h2>
+      <p>
+        The same protected 24-observation phoenix that exhibited the bias, priced against agreeing
+        QUAD and Monte&nbsp;Carlo references (within +0.01%):
+      </p>
+    </div>
+    <figure>
+      <div class="panel">
+        <div class="legend">
+          <span><span class="swatch" style="background: var(--breach);"></span> nodal, auto grid</span>
+          <span><span class="swatch" style="background: var(--blue);"></span> cell-average projection (auto and uniform)</span>
+        </div>
+        <svg id="conv-svg" viewBox="0 0 860 240" width="100%" role="img"
+             aria-label="PV error versus grid size: nodal decays like one over N from 0.14 percent; projection is flat at 0.01 percent."></svg>
+      </div>
+      <figcaption>
+        PV error vs grid size. Nodal decays O(1/N) from a one-sided offset; the projection sits at
+        +0.010% at every N, on both auto and uniform meshes — and delta converges to 5·10<sup>−6</sup>
+        already at N&nbsp;=&nbsp;400.
+      </figcaption>
+    </figure>
+    <div class="wrap" style="padding: 0;">
+      <figure>
+        <div class="panel tablewrap">
+          <table>
+            <thead>
+              <tr><th>grid&nbsp;N</th><th>PV · cell_average</th><th>PV · nodal</th><th>Γ · grid stencil</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>400</td><td class="good">95.5374</td><td class="bad">95.6221</td><td class="good">−0.04335</td></tr>
+              <tr><td>800</td><td class="good">95.5377</td><td class="bad">95.5768</td><td class="good">−0.04336</td></tr>
+              <tr><td>1600</td><td class="good">95.5366</td><td class="bad">95.5666</td><td class="good">−0.04337</td></tr>
+              <tr><td>dense reference</td><td>95.5367</td><td>—</td><td>−0.04336</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figcaption>
+          Default-certification gate, monthly synthetic snowball. The projected PV is flat in N (spread
+          8·10<sup>−4</sup>) while nodal drifts by 0.055; the grid-stencil gamma — the default public greeks
+          path — is stable to 10<sup>−5</sup>. A separately reviewed “bump gamma” instability turned out to be
+          an estimator artifact (a deprecated 1&nbsp;bp default bump second-differencing a piecewise-linear
+          readout inside one grid cell) and reproduces identically under nodal — orthogonal to the projection.
+        </figcaption>
+      </figure>
+      <p>
+        In 2D the projected solver was exonerated end-to-end: its Richardson limit sits +0.004&nbsp;±&nbsp;0.003
+        from a stride-corrected Monte&nbsp;Carlo consensus (the apparent −0.014 gap was the MC’s own
+        observation-stride bias), while nodal plateaus 0.135 below the same reference.
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>gates&nbsp;·&nbsp;test/test_pde_event_projection.py — 53 tests incl. TestDefaultCertification</div>
+    <div>report&nbsp;·&nbsp;quantark/asset/equity/engine/docs/pde_auto_grid_investigation.md</div>
+    <div>defaults&nbsp;·&nbsp;PDEParams(event_projection="cell_average", event_rannacher_steps=2)&nbsp;·&nbsp;legacy opt-out: "nodal"</div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var svgNS = "http://www.w3.org/2000/svg";
+
+  function css(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  function el(parent, tag, attrs, text) {
+    var e = document.createElementNS(svgNS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text !== undefined) e.textContent = text;
+    parent.appendChild(e);
+    return e;
+  }
+
+  /* ---- model: 7 uniform nodes, sloped survive branch, flat KO payoff ---- */
+  var NODES = [0, 1, 2, 3, 4, 5, 6];
+  function vs(x) { return 55 + 5 * x; }        /* survive branch */
+  var VB = 100;                                 /* breach (KO payoff) */
+
+  function faces(i) {                           /* dual-cell edges, clipped */
+    var lo = i === 0 ? 0 : i - 0.5;
+    var hi = i === 6 ? 6 : i + 0.5;
+    return [lo, hi];
+  }
+  function nodalValue(i, b) { return NODES[i] >= b ? VB : vs(NODES[i]); }
+  function projValue(i, b) {
+    var f = faces(i), lo = f[0], hi = f[1], w = hi - lo;
+    if (b <= lo) return VB;
+    if (b >= hi) return vs(NODES[i]);           /* affine on uniform cell -> nodal value */
+    var survInt = (b - lo) * vs(0.5 * (lo + b));   /* exact integral of affine branch */
+    var breachInt = (hi - b) * VB;
+    return (survInt + breachInt) / w;
+  }
+
+  /* ---- panel A: grid diagram ---- */
+  var gsvg = document.getElementById("grid-svg");
+  var A = { x0: 56, x1: 828, y0: 262, y1: 26, vmin: 48, vmax: 106 };
+  function ax(x) { return A.x0 + (x + 0.25) / 6.5 * (A.x1 - A.x0); }
+  function ay(v) { return A.y0 + (v - A.vmin) / (A.vmax - A.vmin) * (A.y1 - A.y0); }
+
+  function drawGrid(b) {
+    gsvg.innerHTML = "";
+    var ink = css("--ink"), muted = css("--muted"), faint = css("--faint"),
+        line = css("--line"), surv = css("--survive"), brch = css("--breach"),
+        blue = css("--blue"), shade = css("--shade");
+
+    /* node-3 dual cell shading */
+    el(gsvg, "rect", { x: ax(2.5), y: A.y1, width: ax(3.5) - ax(2.5),
+      height: A.y0 - A.y1, fill: shade });
+
+    /* cell faces */
+    for (var i = 0; i < 6; i++) {
+      var fx = ax(i + 0.5);
+      el(gsvg, "line", { x1: fx, y1: A.y1, x2: fx, y2: A.y0,
+        stroke: line, "stroke-dasharray": "3 4", "stroke-width": 1 });
+    }
+    /* baseline + node ticks */
+    el(gsvg, "line", { x1: ax(-0.25), y1: A.y0, x2: ax(6.25), y2: A.y0, stroke: muted, "stroke-width": 1 });
+    NODES.forEach(function (x, i) {
+      el(gsvg, "circle", { cx: ax(x), cy: A.y0, r: 3, fill: muted });
+      el(gsvg, "text", { x: ax(x), y: A.y0 + 18, "text-anchor": "middle",
+        "class": "tick" }, "x" + i);
+    });
+    el(gsvg, "text", { x: ax(3), y: A.y1 - 8, "text-anchor": "middle",
+      "class": "axis-label", fill: blue }, "dual cell of node 3");
+
+    /* branches */
+    el(gsvg, "line", { x1: ax(0), y1: ay(vs(0)), x2: ax(6), y2: ay(vs(6)),
+      stroke: surv, "stroke-width": 2.5 });
+    el(gsvg, "line", { x1: ax(0), y1: ay(VB), x2: ax(6), y2: ay(VB),
+      stroke: brch, "stroke-width": 2.5 });
+    el(gsvg, "text", { x: ax(6) + 6, y: ay(vs(6)) + 4, "class": "tick", fill: surv }, "Vs");
+    el(gsvg, "text", { x: ax(6) + 6, y: ay(VB) + 4, "class": "tick", fill: brch }, "Vb");
+
+    /* barrier */
+    el(gsvg, "line", { x1: ax(b), y1: A.y1 - 2, x2: ax(b), y2: A.y0,
+      stroke: brch, "stroke-width": 2 });
+    el(gsvg, "text", { x: ax(b), y: A.y1 - 8, "text-anchor": "middle",
+      "class": "tick", fill: brch }, "B = " + b.toFixed(2));
+
+    /* post-event values: nodal squares, projected dots */
+    NODES.forEach(function (x, i) {
+      var nv = nodalValue(i, b), pv = projValue(i, b);
+      el(gsvg, "rect", { x: ax(x) - 5, y: ay(nv) - 5, width: 10, height: 10,
+        fill: "none", stroke: muted, "stroke-width": 1.8 });
+      el(gsvg, "circle", { cx: ax(x), cy: ay(pv), r: 5, fill: blue });
+    });
+  }
+
+  /* ---- panel B: node-3 value vs barrier position ---- */
+  var ssvg = document.getElementById("step-svg");
+  var S = { x0: 56, x1: 828, y0: 192, y1: 22, bmin: 2.5, bmax: 3.5, vmin: 64, vmax: 106 };
+  function sx(b) { return S.x0 + (b - S.bmin) / (S.bmax - S.bmin) * (S.x1 - S.x0); }
+  function sy(v) { return S.y0 + (v - S.vmin) / (S.vmax - S.vmin) * (S.y1 - S.y0); }
+
+  function drawStep(b) {
+    ssvg.innerHTML = "";
+    var muted = css("--muted"), faint = css("--faint"), line = css("--line"),
+        brch = css("--breach"), blue = css("--blue");
+
+    /* frame + ticks */
+    el(ssvg, "line", { x1: S.x0, y1: S.y0, x2: S.x1, y2: S.y0, stroke: muted, "stroke-width": 1 });
+    [[2.5, "cell face"], [3.0, "node x3"], [3.5, "cell face"]].forEach(function (t) {
+      el(ssvg, "line", { x1: sx(t[0]), y1: S.y0, x2: sx(t[0]), y2: S.y0 + 5, stroke: muted });
+      el(ssvg, "text", { x: sx(t[0]), y: S.y0 + 20, "text-anchor": "middle", "class": "tick" }, t[1]);
+    });
+    [70, 85, 100].forEach(function (v) {
+      el(ssvg, "line", { x1: S.x0 - 4, y1: sy(v), x2: S.x1, y2: sy(v),
+        stroke: line, "stroke-width": 1 });
+      el(ssvg, "text", { x: S.x0 - 10, y: sy(v) + 4, "text-anchor": "end", "class": "tick" }, v);
+    });
+    el(ssvg, "text", { x: S.x0, y: S.y1 - 6, "class": "axis-label" },
+      "value assigned to node 3");
+
+    /* nodal step: 100 for B <= 3, 70 after */
+    el(ssvg, "line", { x1: sx(2.5), y1: sy(100), x2: sx(3.0), y2: sy(100),
+      stroke: brch, "stroke-width": 2, "stroke-dasharray": "6 4" });
+    el(ssvg, "line", { x1: sx(3.0), y1: sy(100), x2: sx(3.0), y2: sy(70),
+      stroke: brch, "stroke-width": 1.4, "stroke-dasharray": "2 4" });
+    el(ssvg, "line", { x1: sx(3.0), y1: sy(70), x2: sx(3.5), y2: sy(70),
+      stroke: brch, "stroke-width": 2, "stroke-dasharray": "6 4" });
+    el(ssvg, "text", { x: sx(3.03), y: sy(85) + 4, "class": "tick", fill: brch },
+      "±1 ULP picks the side");
+
+    /* projected ramp */
+    var pts = [];
+    for (var k = 0; k <= 120; k++) {
+      var bb = S.bmin + (S.bmax - S.bmin) * k / 120;
+      pts.push(sx(bb).toFixed(1) + "," + sy(projValue(3, bb)).toFixed(1));
+    }
+    el(ssvg, "polyline", { points: pts.join(" "), fill: "none",
+      stroke: blue, "stroke-width": 2.5 });
+
+    /* markers at current b */
+    el(ssvg, "circle", { cx: sx(b), cy: sy(projValue(3, b)), r: 5.5, fill: blue });
+    var nv = b <= 3.0 ? 100 : 70;
+    el(ssvg, "rect", { x: sx(b) - 5, y: sy(nv) - 5, width: 10, height: 10,
+      fill: "none", stroke: brch, "stroke-width": 1.8 });
+  }
+
+  /* ---- wiring ---- */
+  var slider = document.getElementById("bslider");
+  var readout = document.getElementById("readout");
+  function fmtCell(b) {
+    var f = Math.max(0, Math.min(1, (3.5 - b) / 1.0));
+    return Math.round(f * 100);
+  }
+  function render() {
+    var b = parseFloat(slider.value);
+    drawGrid(b);
+    drawStep(b);
+    var nv = nodalValue(3, b), pv = projValue(3, b);
+    readout.innerHTML =
+      "node 3 &nbsp;·&nbsp; nodal <span class=\"rb\">" + nv.toFixed(1) +
+      "</span> (whole cell on one side) &nbsp;·&nbsp; projected <span class=\"rp\">" +
+      pv.toFixed(1) + "</span> (" + fmtCell(b) + "% of its cell is beyond B)";
+  }
+  slider.addEventListener("input", render);
+
+  /* re-render on theme change so SVG colors follow the tokens */
+  var mq = window.matchMedia("(prefers-color-scheme: dark)");
+  if (mq.addEventListener) mq.addEventListener("change", render);
+  new MutationObserver(render).observe(document.documentElement,
+    { attributes: true, attributeFilter: ["data-theme"] });
+
+  /* ---- convergence chart ---- */
+  var csvg = document.getElementById("conv-svg");
+  function drawConv() {
+    csvg.innerHTML = "";
+    var muted = css("--muted"), line = css("--line"),
+        brch = css("--breach"), blue = css("--blue");
+    var C = { x0: 66, x1: 820, y0: 196, y1: 26, emax: 0.16 };
+    var xs = { 400: 0, 800: 0.5, 1600: 1 };
+    function cx(n) { return C.x0 + xs[n] * (C.x1 - C.x0); }
+    function cy(e) { return C.y0 + (e / C.emax) * (C.y1 - C.y0); }
+
+    [0, 0.05, 0.10, 0.15].forEach(function (e) {
+      el(csvg, "line", { x1: C.x0 - 4, y1: cy(e), x2: C.x1, y2: cy(e),
+        stroke: line, "stroke-width": 1 });
+      el(csvg, "text", { x: C.x0 - 10, y: cy(e) + 4, "text-anchor": "end",
+        "class": "tick" }, e === 0 ? "0" : "+" + e.toFixed(2) + "%");
+    });
+    [400, 800, 1600].forEach(function (n) {
+      el(csvg, "text", { x: cx(n), y: C.y0 + 22, "text-anchor": "middle",
+        "class": "tick" }, "N = " + n);
+    });
+    el(csvg, "text", { x: C.x0, y: C.y1 - 8, "class": "axis-label" },
+      "PV error vs QUAD / MC reference");
+
+    var nodal = [[400, 0.140], [800, 0.092], [1600, 0.048]];
+    var proj = [[400, 0.010], [800, 0.010], [1600, 0.010]];
+    function series(data, color) {
+      el(csvg, "polyline", {
+        points: data.map(function (d) { return cx(d[0]) + "," + cy(d[1]); }).join(" "),
+        fill: "none", stroke: color, "stroke-width": 2.5 });
+      data.forEach(function (d) {
+        el(csvg, "circle", { cx: cx(d[0]), cy: cy(d[1]), r: 4.5, fill: color });
+        el(csvg, "text", { x: cx(d[0]) + 10, y: cy(d[1]) - 8, "class": "tick",
+          fill: color }, "+" + d[1].toFixed(3) + "%");
+      });
+    }
+    series(nodal, brch);
+    series(proj, blue);
+  }
+  drawConv();
+  new MutationObserver(drawConv).observe(document.documentElement,
+    { attributes: true, attributeFilter: ["data-theme"] });
+  if (mq.addEventListener) mq.addEventListener("change", drawConv);
+
+  render();
+})();
+</script>
