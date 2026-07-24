@@ -276,6 +276,12 @@ class SnowballMCEngine(BaseEngine):
         plan metadata; model-family subclasses override)."""
         return 1
 
+    def _rqmc_substep_factor(self) -> int:
+        """SDE steps per contractual interval (session plan metadata; the
+        sub-observation refinement mixin overrides). Draw dimension scales
+        with this factor while path nodes stay contractual."""
+        return 1
+
     def _rqmc_scheme_label(self) -> str:
         """Session plan scheme identifier: class plus model scheme, so two
         configurations with different draw pipelines never share a plan
@@ -2115,7 +2121,11 @@ class SnowballMCEngine(BaseEngine):
             scheme=self._rqmc_scheme_label(),
             finalize=finalize,
             product=product,
-            dimension=self._rqmc_streams_per_step() * int(dt_array.size),
+            dimension=(
+                self._rqmc_streams_per_step()
+                * int(dt_array.size)
+                * self._rqmc_substep_factor()
+            ),
         )
 
     def _price_rqmc(
@@ -2230,7 +2240,9 @@ class SnowballMCEngine(BaseEngine):
             finalize=finalize,
             product=product,
             dimension=(
-                self._rqmc_streams_per_step() * int(grid["dt_array"].size)
+                self._rqmc_streams_per_step()
+                * int(grid["dt_array"].size)
+                * self._rqmc_substep_factor()
             ),
         )
 

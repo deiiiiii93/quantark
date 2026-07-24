@@ -11,12 +11,14 @@ from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
     _ArrayPathGenerator,
     _QE_KMIN,
     _QMC_METHODS,
+    _SubstepRefinementMixin,
     _VAR_FLOOR,
     _effective_path_count,
     _normal_draws,
     _qmc_normals,
     _qmc_uniforms,
     _resolve_heston_scheme,
+    _validate_substeps_per_interval,
 )
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.asset.equity.param import MCParams
@@ -39,7 +41,7 @@ from quantark.volmodels.slv.leverage import (
 )
 
 
-class _VolModelPhoenixMCBase(PhoenixMCEngine):
+class _VolModelPhoenixMCBase(_SubstepRefinementMixin, PhoenixMCEngine):
     engine_type = EngineType.MONTE_CARLO
 
     def __init__(
@@ -48,7 +50,11 @@ class _VolModelPhoenixMCBase(PhoenixMCEngine):
         method: MonteCarloMethod | str | tuple | None = None,
         use_dask: bool = False,
         num_batches: int = 4,
+        substeps_per_interval: int = 1,
     ):
+        self.substeps_per_interval = _validate_substeps_per_interval(
+            substeps_per_interval
+        )
         super().__init__(
             params=params,
             method=method,
@@ -123,6 +129,7 @@ class LocalVolPhoenixMCEngine(_VolModelPhoenixMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
         lv = self._build_surface(env)
@@ -162,7 +169,7 @@ class LocalVolPhoenixMCEngine(_VolModelPhoenixMCBase):
                 t += float(dt)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)
 
 
 class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
@@ -199,6 +206,7 @@ class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         n_paths = int(self.params.num_paths if num_paths is None else num_paths)
         use_antithetic = bool(getattr(self.params, "use_antithetic", False))
@@ -392,7 +400,7 @@ class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
                 nodes[:, i + 1] = np.exp(log_s)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)
 
 
 class QEPhoenixMCEngine(HestonPhoenixMCEngine):
@@ -484,6 +492,7 @@ class HestonSLVPhoenixMCEngine(_VolModelPhoenixMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
         lv = self._build_surface(env)
@@ -556,7 +565,7 @@ class HestonSLVPhoenixMCEngine(_VolModelPhoenixMCBase):
                 t += float(dt)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)
 
 
 class HestonSLVQEPhoenixMCEngine(HestonSLVPhoenixMCEngine):
@@ -586,6 +595,7 @@ class HestonSLVQEPhoenixMCEngine(HestonSLVPhoenixMCEngine):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
         lv = self._build_surface(env)
@@ -765,4 +775,4 @@ class HestonSLVQEPhoenixMCEngine(HestonSLVPhoenixMCEngine):
                 t += float(dt)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)

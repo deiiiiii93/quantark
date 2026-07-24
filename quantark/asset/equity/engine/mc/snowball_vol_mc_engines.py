@@ -33,6 +33,19 @@ _QE_KMIN = 1e-12
 _QMC_METHODS = (MonteCarloMethod.QUASI, MonteCarloMethod.RANDOMIZED_QUASI)
 
 
+def _validate_substeps_per_interval(substeps) -> int:
+    """Validate the sub-observation refinement factor (mirrors HestonDCNMCEngine)."""
+    if (
+        isinstance(substeps, bool)
+        or not isinstance(substeps, (int, np.integer))
+        or int(substeps) < 1
+    ):
+        raise ValidationError(
+            "substeps_per_interval must be a positive integer"
+        )
+    return int(substeps)
+
+
 def _effective_path_count(num_paths: int, use_antithetic: bool) -> int:
     if num_paths <= 0:
         raise ValidationError(f"num_paths must be positive, got {num_paths}")
@@ -92,7 +105,43 @@ class _ArrayPathGenerator:
         return paths, aux if return_aux else None
 
 
-class _VolModelSnowballMCBase(SnowballMCEngine):
+class _SubstepRefinementMixin:
+    """Opt-in sub-observation SDE refinement for schedule-based vol MC engines.
+
+    ``substeps_per_interval=n`` refines every contractual interval into n
+    equal SDE steps while the recorded path nodes (and therefore payoff
+    kernels, event stats, and RQMC batching) stay on the contractual grid —
+    the same contract as ``HestonDCNMCEngine.substeps_per_interval``. The
+    default factor 1 is bitwise-identical to unrefined stepping.
+    """
+
+    substeps_per_interval: int = 1
+
+    def _refined_dt_array(self, dt_array: np.ndarray) -> np.ndarray:
+        """Refine every contractual interval into ``substeps_per_interval``
+        equal SDE steps (identity, bitwise, at the default factor 1)."""
+        n = self.substeps_per_interval
+        if n <= 1:
+            return dt_array
+        return np.repeat(np.asarray(dt_array, dtype=float) / n, n)
+
+    def _make_path_generator(self, simulate, n_eff: int, batch_id):
+        """Wrap ``simulate`` so recorded nodes stay contractual: with
+        refinement active, every n-th fine column is a contractual node."""
+        n = self.substeps_per_interval
+        if n <= 1:
+            return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+
+        def simulate_contractual(batch_id=None, seed=None):
+            return simulate(batch_id=batch_id, seed=seed)[:, ::n]
+
+        return _ArrayPathGenerator(simulate_contractual, n_eff, batch_id=batch_id)
+
+    def _rqmc_substep_factor(self) -> int:
+        return self.substeps_per_interval
+
+
+class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
     engine_type = EngineType.MONTE_CARLO
 
     def __init__(
@@ -101,7 +150,11 @@ class _VolModelSnowballMCBase(SnowballMCEngine):
         method: MonteCarloMethod | str | tuple | None = None,
         use_dask: bool = False,
         num_batches: int = 4,
+        substeps_per_interval: int = 1,
     ):
+        self.substeps_per_interval = _validate_substeps_per_interval(
+            substeps_per_interval
+        )
         super().__init__(
             params=params,
             method=method,
@@ -176,6 +229,7 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
         lv = self._build_surface(env)
@@ -215,7 +269,7 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
                 t += float(dt)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)
 
 
 class HestonSnowballMCEngine(_VolModelSnowballMCBase):
@@ -252,6 +306,7 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         n_paths = int(self.params.num_paths if num_paths is None else num_paths)
         use_antithetic = bool(getattr(self.params, "use_antithetic", False))
@@ -444,7 +499,7 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                 nodes[:, i + 1] = np.exp(log_s)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)
 
 
 class QESnowballMCEngine(HestonSnowballMCEngine):
@@ -536,6 +591,7 @@ class HestonSLVSnowballMCEngine(_VolModelSnowballMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
         lv = self._build_surface(env)
@@ -608,7 +664,7 @@ class HestonSLVSnowballMCEngine(_VolModelSnowballMCBase):
                 t += float(dt)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)
 
 
 class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
@@ -638,6 +694,7 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
         lv = self._build_surface(env)
@@ -817,4 +874,4 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
                 t += float(dt)
             return nodes
 
-        return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
+        return self._make_path_generator(simulate, n_eff, batch_id)

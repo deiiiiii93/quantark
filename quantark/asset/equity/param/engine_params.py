@@ -259,7 +259,11 @@ class MCParams(EngineParams):
     Attributes:
         seed: Random seed for reproducibility
         num_paths: Number of simulation paths
-        time_steps: Number of time steps per path
+        time_steps: Number of time steps per path. Schedule-based engines
+                    (snowball/phoenix families) IGNORE this: their grid is the
+                    observation schedule (daily only under continuous KI). To
+                    refine SDE stepping between observations there, use the
+                    engine-level ``substeps_per_interval`` parameter.
         use_business_day_grid: Use daily business-day grid for schedule-based engines
         use_qmc: Use quasi-Monte Carlo (default: False)
         use_antithetic: Use antithetic variates (default: False)
