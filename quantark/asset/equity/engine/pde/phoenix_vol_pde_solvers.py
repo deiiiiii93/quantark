@@ -450,6 +450,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                 core, product, pricing_env, T, event_maps, v1_snapshots
             ),
             damped_step_keys=damped_keys,
+            damped_step_theta=float(self.params.event_theta),
         )
 
         if knocked_in:
@@ -471,6 +472,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                     core, product, pricing_env, T, event_maps, v1_snapshots
                 ),
                 damped_step_keys=damped_keys,
+                damped_step_theta=float(self.params.event_theta),
             )
 
         return float(core.interpolate(surface, np.log(spot), self.model_params.v0))

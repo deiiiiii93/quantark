@@ -981,6 +981,71 @@ class TestVolSolverCellAverage:
         )
         assert p_off == p0
 
+    @staticmethod
+    def _damping_snowball(obs_dates):
+        return SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            maturity=1.0,
+            contract_multiplier=1.0,
+            barrier_config=BarrierConfig(
+                ko_barrier=105.0,
+                ko_rate=0.12,
+                ko_observation_type=ObservationType.DISCRETE,
+                ko_observation_dates=obs_dates,
+                ki_barrier=80.0,
+                ki_observation_type=ObservationType.DISCRETE,
+                ki_continuous=False,
+                ki_observation_dates=obs_dates,
+            ),
+        )
+
+    @staticmethod
+    def _damping_price(product, env, **params_kw):
+        return float(
+            HestonSnowballPDESolver(
+                _hp(), params=PDEParams(**params_kw), n_x=60, n_v=20, n_t=24
+            ).price(product, env)
+        )
+
+    def test_vol_event_damping_respects_use_rannacher_master(self):
+        """Review 2026-07-24 finding 2: use_rannacher=False is the 1D master
+        switch (BackwardOperator.theta_by_step returns early before any event
+        damping) — the 2D ADI event damping must honor it identically."""
+        env = _heston_env()
+        product = self._damping_snowball(QUARTERS)
+        p0 = self._damping_price(
+            product, env, use_rannacher=False, event_rannacher_steps=0
+        )
+        p2 = self._damping_price(
+            product, env, use_rannacher=False, event_rannacher_steps=2
+        )
+        assert p2 == p0, "use_rannacher=False must disable 2D event damping"
+
+    def test_vol_event_damping_consumes_event_theta(self):
+        """The damped restart steps must run at params.event_theta (mirror of
+        the 1D theta_by_step schedule), not a hard-coded theta=1."""
+        env = _heston_env()
+        product = self._damping_snowball(QUARTERS)
+        p_full = self._damping_price(
+            product, env, event_rannacher_steps=2, event_theta=1.0
+        )
+        p_half = self._damping_price(
+            product, env, event_rannacher_steps=2, event_theta=0.5
+        )
+        assert p_half != p_full, "event_theta must reach the damped ADI steps"
+
+    def test_vol_maturity_event_not_event_damped(self):
+        """The 1D schedule excludes the maturity observation from event
+        damping (0 < idx < num_t - 1 in theta_by_step): terminal Rannacher
+        owns the payoff discontinuity. A product whose only discrete events
+        sit AT maturity must therefore be inert under event_rannacher_steps."""
+        env = _heston_env()
+        product = self._damping_snowball([1.0])
+        p0 = self._damping_price(product, env, event_rannacher_steps=0)
+        p2 = self._damping_price(product, env, event_rannacher_steps=2)
+        assert p2 == p0, "maturity-only events must not add event damping"
+
     def test_phoenix_vol_ki_dispatch(self):
         """2D KI transfer: nodal when continuous, projected when discrete."""
         solver = HestonPhoenixPDESolver(

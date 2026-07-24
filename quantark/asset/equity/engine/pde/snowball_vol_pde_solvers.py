@@ -26,14 +26,20 @@ from quantark.volmodels.slv.leverage import LeverageSurface
 
 
 def event_damped_step_keys(params, event_maps, n_t: int):
-    """Integer step keys that run as fully implicit ADI restarts.
+    """Integer step keys that run as damped Douglas ADI restarts.
 
     After each discrete event key the next ``params.event_rannacher_steps``
-    steps are damped (Douglas theta=1) — the 2D counterpart of the 1D
-    ``BackwardOperator.theta_by_step`` event schedule. Continuous KI has no
-    discrete keys, so it never triggers damping (continuous-barrier
-    treatment). Returns ``None`` when damping is disabled.
+    steps run at ``params.event_theta`` — the 2D counterpart of the 1D
+    ``BackwardOperator.theta_by_step`` event schedule, mirroring its gating
+    exactly: ``use_rannacher=False`` is the master off-switch, and events at
+    the maturity node (tau key 0) are excluded because the terminal Rannacher
+    start-up owns the payoff discontinuity (1D: ``0 < idx < num_t - 1``; the
+    valuation-date key ``n_t`` is excluded by the ``<= n_t`` clip below).
+    Continuous KI has no discrete keys, so it never triggers damping
+    (continuous-barrier treatment). Returns ``None`` when damping is disabled.
     """
+    if not bool(getattr(params, "use_rannacher", True)):
+        return None
     if not bool(getattr(params, "rannacher_at_events", True)):
         return None
     ers = int(getattr(params, "event_rannacher_steps", 0) or 0)
@@ -46,6 +52,8 @@ def event_damped_step_keys(params, event_maps, n_t: int):
             event_keys |= set(stream_map.keys())
     keys: set[int] = set()
     for k in event_keys:
+        if k == 0:
+            continue
         for step in range(1, ers + 1):
             if k + step <= n_t:
                 keys.add(k + step)
@@ -449,6 +457,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             boundary_hook=self._boundary_hook(core, product, pricing_env, knocked_in=True),
             step_hook=self._v1_hook(core, product, pricing_env, T, event_maps, v1_snapshots),
             damped_step_keys=damped_keys,
+            damped_step_theta=float(self.params.event_theta),
         )
 
         if knocked_in:
@@ -466,6 +475,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                     core, product, pricing_env, T, event_maps, v1_snapshots
                 ),
                 damped_step_keys=damped_keys,
+                damped_step_theta=float(self.params.event_theta),
             )
 
         return float(core.interpolate(surface, np.log(spot), self.model_params.v0))

@@ -616,6 +616,7 @@ class HestonSLVADICore:
         terminal_override=None,
         boundary_hook=None,
         damped_step_keys=None,
+        damped_step_theta=1.0,
     ):
         """Backward ADI solve.
 
@@ -627,10 +628,12 @@ class HestonSLVADICore:
         boundary_hook(U, tau) -> U (optional): overrides boundary rows for non-vanilla
         terminal-value problems while keeping the ADI core reusable.
         damped_step_keys (optional set of int): integer step indices
-        (round(tau/dt) of the step's landing node) that run as fully implicit
-        Douglas steps — a per-event Rannacher restart damping the modes a
-        discrete event jump excites (Pooley-Vetzal-Forsyth; Giles-Carter).
-        Craig-Sneyd also restarts as damped Douglas on these steps.
+        (round(tau/dt) of the step's landing node) that run as damped
+        Douglas steps at theta = damped_step_theta (the wrappers pass
+        params.event_theta; 1.0 = fully implicit) — a per-event Rannacher
+        restart damping the modes a discrete event jump excites
+        (Pooley-Vetzal-Forsyth; Giles-Carter). Craig-Sneyd also restarts as
+        damped Douglas on these steps.
         """
         previous_hook = self._boundary_hook
         self._boundary_hook = boundary_hook
@@ -661,8 +664,11 @@ class HestonSLVADICore:
                     damped_step_keys is not None
                     and int(round(tau / self.dt)) in damped_step_keys
                 ):
-                    # Per-event Rannacher restart: fully implicit Douglas step.
-                    U = self._douglas_step(U, self.dt, tau, 1.0, t_mid)
+                    # Per-event Rannacher restart: damped Douglas step at
+                    # the caller's event theta (params.event_theta).
+                    U = self._douglas_step(
+                        U, self.dt, tau, float(damped_step_theta), t_mid
+                    )
                 elif scheme == ADIScheme.DOUGLAS:
                     U = self._douglas_step(U, self.dt, tau, theta, t_mid)
                 else:  # CRAIG_SNEYD (MCS is rejected by the wrappers)
