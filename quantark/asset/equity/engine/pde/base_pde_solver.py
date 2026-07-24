@@ -105,16 +105,29 @@ class PDESolutionResult(NamedTuple):
     common solving logic via _solve(), eliminating code duplication.
 
     Attributes:
-        solution_vec: Solution values at t=0 (present time)
+        solution_vec: Solution values at t=0 (present time), AFTER any
+            valuation-date event application (per-node exact triggers) —
+            the right column for per-spot scenario curves.
         x_vec: Log-price grid points
         s_vec: Price grid points (for convenience)
         spot_log: Log of spot price for interpolation
+        readout_vec: Smooth 0+ branch column for the actual-spot readout.
+            A valuation-date event makes solution_vec discontinuous at its
+            barrier; interpolating across that jump blends the branches, so
+            price()/greeks read the pre-event branch and apply today's
+            (deterministic) transitions pointwise at spot. None = use
+            solution_vec (no valuation-date event).
+        readout_override: Fully-resolved pointwise price at the actual spot
+            (set when a valuation-date transition adds a cash amount at
+            spot, e.g. a triggered phoenix coupon). None = interpolate.
     """
 
     solution_vec: np.ndarray
     x_vec: np.ndarray
     s_vec: np.ndarray
     spot_log: float
+    readout_vec: Optional[np.ndarray] = None
+    readout_override: Optional[float] = None
 
 
 class PDESessionOutputs(NamedTuple):
@@ -705,9 +718,18 @@ class BasePDESolver(BaseEngine):
             }
 
         result = self._solve(product, pricing_env)
-        price = self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log)
+        # Valuation-date events: price from the pointwise-exact readout,
+        # delta/gamma from the smooth 0+ branch column (a cash transition at
+        # the known spot is a constant shift with zero delta/gamma).
+        readout_vec = (
+            result.readout_vec if result.readout_vec is not None else result.solution_vec
+        )
+        if result.readout_override is not None:
+            price = float(result.readout_override)
+        else:
+            price = self._interpolate_price(readout_vec, result.x_vec, result.spot_log)
         delta, gamma = self._calculate_delta_gamma(
-            result.solution_vec, result.x_vec, result.spot_log, spot
+            readout_vec, result.x_vec, result.spot_log, spot
         )
 
         return {"price": price, "delta": delta, "gamma": gamma}

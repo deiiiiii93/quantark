@@ -429,6 +429,10 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             return self._calculate_terminal_value(product, spot, pricing_env)
         if self._is_knocked_out_at_valuation(product, spot, pricing_env):
             return self._get_immediate_ko_payoff(product, pricing_env)
+        # Valuation-date readout state: events at t=0 are deterministic at
+        # the known spot, so the readout uses the smooth 0+ surface captured
+        # by the hooks instead of interpolating across the nodal t=0 jump.
+        self._t0_pre_U = None
 
         ki_continuous = (
             product.barrier_config.ki_continuous
@@ -478,7 +482,28 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                 damped_step_theta=float(self.params.event_theta),
             )
 
-        return float(core.interpolate(surface, np.log(spot), self.model_params.v0))
+        read_surface = self._t0_pre_U if self._t0_pre_U is not None else surface
+        return float(core.interpolate(read_surface, np.log(spot), self.model_params.v0))
+
+    def _capture_t0_pre_event_surface(self, U, tau, T, event_maps) -> None:
+        """Capture the smooth 0+ surface before valuation-date events land.
+
+        Continuous KI is excluded: its value function is continuous at the
+        barrier, so there is no t=0 jump to shield the readout from."""
+        if not self._use_cell_average_events():
+            return
+        # tau vs T, not current_time vs 0: tau accumulates FP step
+        # increments, so a relative is_close against zero can never fire.
+        if not is_close(float(tau), float(T)):
+            return
+        k = self._hook_tau_key(tau, event_maps["dt"])
+        if k is None:
+            return
+        has_events = bool(event_maps["ko"].get(k))
+        if not has_events and not self._ki_continuous:
+            has_events = event_maps["ki"].get(k) is not None
+        if has_events:
+            self._t0_pre_U = np.array(U, copy=True)
 
     def _prepare_state(self, product, pricing_env, T: float, ki_continuous: bool) -> None:
         self._total_tau = float(T)
@@ -576,8 +601,11 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             )
             # An observation at the valuation date (current_time == 0) is
             # deterministic — apply the exact inclusive trigger, not a cell
-            # average [2026-07-23 review, finding 2].
-            at_valuation = is_close(current_time, 0.0)
+            # average [2026-07-23 review, finding 2]. Compare tau against T
+            # (two O(1) numbers): tau accumulates FP step increments, so
+            # current_time lands at ~1e-16 rather than 0.0, and a relative
+            # is_close against zero can never fire.
+            at_valuation = is_close(float(tau), float(T))
             if self._use_cell_average_events() and not at_valuation:
                 U = self._project_event_values(
                     core.S_grid, float(rec.barrier), product.is_reverse, True,
@@ -604,6 +632,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
 
     def _v1_hook(self, core, product, env, T, event_maps, snapshots):
         def hook(U, tau):
+            self._capture_t0_pre_event_surface(U, tau, T, event_maps)
             U = self._apply_ko(U, core, product, env, T, tau, event_maps)
             snapshots[self._snapshot_key(tau)] = np.array(U, copy=True)
             return U
@@ -612,6 +641,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
 
     def _v0_hook(self, core, product, env, T, event_maps, snapshots):
         def hook(U, tau):
+            self._capture_t0_pre_event_surface(U, tau, T, event_maps)
             U = self._apply_ko(U, core, product, env, T, tau, event_maps)
             if product.has_ki_barrier:
                 should_apply, barrier = self._should_apply_ki(tau, event_maps)
@@ -625,7 +655,8 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                     # and a valuation-date observation is deterministic, so it
                     # is applied with the exact inclusive trigger.
                     ki_discrete = not (self._ki_continuous or self._bgk_active)
-                    at_valuation = is_close(max(T - float(tau), 0.0), 0.0)
+                    # tau vs T, not current_time vs 0: see _apply_ko.
+                    at_valuation = is_close(float(tau), float(T))
                     if (
                         self._use_cell_average_events()
                         and ki_discrete

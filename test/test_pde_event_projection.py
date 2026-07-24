@@ -703,6 +703,58 @@ class TestValuationDateEvents:
         expected = float(self._phoenix_t0(50.0).get_coupon_payoff(0, year_fraction=0.5))
         assert pv_deep - pv_missed == pytest.approx(expected, rel=1e-4)
 
+    def test_valuation_coupon_exact_on_uniform_grid(self):
+        """Review 2026-07-24 blocking finding 1: the exact t=0 nodal trigger
+        still left a discontinuous t=0 surface that price() interpolated
+        ACROSS at an off-node spot (uniform grids don't pin the barrier onto
+        a node). The readout must interpolate the smooth 0+ branch surface
+        and apply today's transitions pointwise at the actual spot — the
+        paid amount is then the full two-unit coupon at every N."""
+        env = _env()
+        expected = float(
+            self._phoenix_t0(50.0).get_coupon_payoff(0, year_fraction=0.5)
+        )
+
+        for n in (100, 200, 400):
+
+            def _price(b0):
+                return float(
+                    PhoenixPDESolver(
+                        params=PDEParams(grid_size=n, auto_grid=False)
+                    ).price(self._phoenix_t0(b0), env)
+                )
+
+            # b0 only enters the t=0 event, and with auto_grid off the mesh
+            # is b0-independent: on-barrier minus trivially-missed is exactly
+            # one full (undiscounted, INSTANT) coupon.
+            paid = _price(100.0) - _price(180.0)
+            assert paid == pytest.approx(expected, abs=1e-9), f"N={n}"
+
+    def test_vol_phoenix_valuation_coupon_exact_readout(self):
+        """The 2D readout has the same obligation: interpolate the smooth 0+
+        surface and add today's (deterministic) coupon pointwise at spot.
+        grid_focus='spot' keeps the mesh b0-independent (auto focus
+        concentrates on the max coupon barrier), so the identity is exact."""
+        env = _heston_env()
+        expected = float(
+            self._phoenix_t0(50.0).get_coupon_payoff(0, year_fraction=0.5)
+        )
+
+        def _price(b0):
+            return float(
+                HestonPhoenixPDESolver(
+                    _hp(),
+                    params=PDEParams(),
+                    n_x=64,
+                    n_v=20,
+                    n_t=24,
+                    grid_focus="spot",
+                ).price(self._phoenix_t0(b0), env)
+            )
+
+        paid = _price(100.0) - _price(180.0)
+        assert paid == pytest.approx(expected, abs=1e-9)
+
     def test_snowball_valuation_ko_jump_is_exact(self):
         # (The price() path short-circuits a spot-at-or-above-barrier KO at
         # valuation before the PDE runs, so this is exercised at the
@@ -753,7 +805,15 @@ class TestValuationDateEvents:
         solver = HestonPhoenixPDESolver(_hp(), params=PDEParams())
         solver._coupon_barriers = np.array([100.0])
         solver._coupon_amounts = np.array([2.0])
-        core = types.SimpleNamespace(S_grid=np.linspace(60.0, 120.0, 61))
+        s_grid = np.linspace(60.0, 120.0, 61)
+        core = types.SimpleNamespace(
+            S_grid=s_grid,
+            # the valuation-date pointwise readout interpolates the
+            # pre-coupon surface at (spot, v0)
+            interpolate=lambda U, x_val, v_val: float(
+                np.interp(np.exp(x_val), s_grid, U[:, 0])
+            ),
+        )
         product = types.SimpleNamespace(
             is_reverse=False,
             coupon_config=types.SimpleNamespace(coupon_pay_type=CouponPayType.INSTANT),

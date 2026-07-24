@@ -418,6 +418,12 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             return self._calculate_terminal_value(product, spot, pricing_env)
         if self._is_knocked_out_at_valuation(product, spot, pricing_env):
             return self._get_immediate_ko_payoff(product, pricing_env)
+        # Valuation-date readout state: events at t=0 are deterministic at the
+        # known spot, so the readout uses the smooth 0+ surface captured by
+        # the hooks (plus a pointwise coupon transition) instead of
+        # interpolating across the nodal t=0 jump.
+        self._t0_pre_U = None
+        self._t0_readout_override = None
 
         ki_continuous = (
             product.barrier_config.ki_continuous
@@ -475,7 +481,32 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                 damped_step_theta=float(self.params.event_theta),
             )
 
-        return float(core.interpolate(surface, np.log(spot), self.model_params.v0))
+        if self._t0_readout_override is not None:
+            return float(self._t0_readout_override)
+        read_surface = self._t0_pre_U if self._t0_pre_U is not None else surface
+        return float(core.interpolate(read_surface, np.log(spot), self.model_params.v0))
+
+    def _capture_t0_pre_event_surface(self, U, tau, T, event_maps) -> None:
+        """Capture the smooth 0+ surface before valuation-date events land.
+
+        Continuous KI is excluded: its value function is continuous at the
+        barrier, so there is no t=0 jump to shield the readout from."""
+        if not self._use_cell_average_events():
+            return
+        # tau vs T, not current_time vs 0: tau accumulates FP step
+        # increments, so a relative is_close against zero can never fire.
+        if not is_close(float(tau), float(T)):
+            return
+        k = self._hook_tau_key(tau, event_maps["dt"])
+        if k is None:
+            return
+        has_events = bool(event_maps["ko"].get(k)) or (
+            event_maps.get("coupon", {}).get(k) is not None
+        )
+        if not has_events and not self._ki_continuous:
+            has_events = event_maps["ki"].get(k) is not None
+        if has_events:
+            self._t0_pre_U = np.array(U, copy=True)
 
     def _prepare_state(
         self, product: PhoenixOption, pricing_env, T: float, ki_continuous: bool
@@ -626,7 +657,9 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         coupon_value = float(self._coupon_amounts[obs_idx]) * coupon_discount
         # A coupon observed at the valuation date is deterministic — apply
         # the exact inclusive trigger [2026-07-23 review, finding 2].
-        at_valuation = is_close(current_time, 0.0)
+        # tau vs T, not current_time vs 0: tau accumulates FP step
+        # increments, so a relative is_close against zero can never fire.
+        at_valuation = is_close(float(tau), float(T))
         if self._use_cell_average_events() and not at_valuation:
             return self._project_event_values(
                 core.S_grid,
@@ -636,6 +669,25 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                 U,
                 U + coupon_value,
             )
+        if at_valuation and self._use_cell_average_events():
+            # Pointwise-exact readout: resolve today's trigger at the known
+            # spot and add the coupon to the smooth pre-coupon surface value
+            # instead of letting price() interpolate across the t=0 jump
+            # [2026-07-24 review, finding 1].
+            spot = float(env.spot)
+            pay = bool(
+                self._event_nodal_mask(
+                    np.asarray([spot], dtype=float),
+                    float(self._coupon_barriers[obs_idx]),
+                    product.is_reverse,
+                    True,
+                    at_valuation=True,
+                )[0]
+            )
+            base_val = float(
+                core.interpolate(U, np.log(spot), self.model_params.v0)
+            )
+            self._t0_readout_override = base_val + (coupon_value if pay else 0.0)
         pay_mask = self._event_nodal_mask(
             core.S_grid,
             float(self._coupon_barriers[obs_idx]),
@@ -669,7 +721,8 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
 
         # A KO observed at the valuation date is deterministic — apply the
         # exact inclusive trigger [2026-07-23 review, finding 2].
-        at_valuation = is_close(current_time, 0.0)
+        # tau vs T, not current_time vs 0: see _apply_coupon.
+        at_valuation = is_close(float(tau), float(T))
         if self._use_cell_average_events() and not at_valuation:
             # The KO payoff itself jumps at the coupon barrier (coupon paid at
             # a simultaneous KO), so project the inner coupon jump into the
@@ -746,6 +799,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
 
     def _v1_hook(self, core, product, env, T, event_maps, snapshots):
         def hook(U, tau):
+            self._capture_t0_pre_event_surface(U, tau, T, event_maps)
             k = self._hook_tau_key(tau, event_maps["dt"])
             obs_idx = None if k is None else event_maps["coupon"].get(k)
             if obs_idx is not None:
@@ -760,6 +814,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
 
     def _v0_hook(self, core, product, env, T, event_maps, snapshots):
         def hook(U, tau):
+            self._capture_t0_pre_event_surface(U, tau, T, event_maps)
             k = self._hook_tau_key(tau, event_maps["dt"])
             obs_idx = None if k is None else event_maps["coupon"].get(k)
             if obs_idx is not None:
@@ -773,7 +828,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                         raise PricingError("missing V1 snapshot for Heston/SLV Phoenix KI jump")
                     U = self._apply_ki(
                         U, core, product, barrier, v1,
-                        at_valuation=is_close(max(T - float(tau), 0.0), 0.0),
+                        at_valuation=is_close(float(tau), float(T)),
                     )
             if k is not None:
                 for rec in event_maps["ko"].get(k, []):

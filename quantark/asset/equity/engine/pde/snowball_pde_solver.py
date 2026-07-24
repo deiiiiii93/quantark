@@ -174,6 +174,7 @@ class SnowballPDESolver(BasePDESolver):
         # State preamble (KI regime, valuation flags, barrier level) shared
         # with session preparation via the _prepare_solve_state seam.
         knocked_in_at_valuation = self._prepare_solve_state(product, pricing_env)
+        self._reset_t0_readout_state()
 
         # Extract market data
         strike = product.strike
@@ -270,11 +271,16 @@ class SnowballPDESolver(BasePDESolver):
         else:
             solution_vec = self._grid_v0[:, 0]
 
+        readout_vec, readout_override = self._compose_t0_readout(
+            1 if knocked_in_at_valuation else 0
+        )
         return PDESolutionResult(
             solution_vec=solution_vec,
             x_vec=x_vec,
             s_vec=s_vec,
             spot_log=spot_log,
+            readout_vec=readout_vec,
+            readout_override=readout_override,
         )
 
     def _prepare_solve_state(
@@ -366,10 +372,19 @@ class SnowballPDESolver(BasePDESolver):
         if knocked_out_at_valuation:
             return self._get_immediate_ko_payoff(product, pricing_env), None
 
-        # Solve PDE and interpolate price
+        # Solve PDE and interpolate price. Valuation-date events (an
+        # observation falling exactly on t=0) are deterministic at the known
+        # spot: the readout interpolates the smooth 0+ branch column
+        # (readout_vec) and applies today's transitions pointwise
+        # (readout_override), never blending across the t=0 jump.
         result = self._solve(product, pricing_env)
+        if result.readout_override is not None:
+            return float(result.readout_override), result
+        readout_vec = (
+            result.readout_vec if result.readout_vec is not None else result.solution_vec
+        )
         return (
-            self._interpolate_price(result.solution_vec, result.x_vec, result.spot_log),
+            self._interpolate_price(readout_vec, result.x_vec, result.spot_log),
             result,
         )
 
@@ -478,9 +493,33 @@ class SnowballPDESolver(BasePDESolver):
         return None
 
     def _extract_extra_event_stats(
-        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
+        self,
+        initial_grid,
+        x_vec,
+        spot_log,
+        n_ko,
+        ko_records,
+        pricing_env,
+        product,
+        col_overrides=None,
     ) -> dict:
         """Extra event-stats fields from the extra columns (none for Snowball)."""
+        return {}
+
+    def _t0_extra_indicator_overrides(
+        self,
+        product,
+        pricing_env,
+        spot,
+        n_ko,
+        rec0_pos,
+        rec0,
+        t_vec,
+        ko_triggered,
+        df_delay0,
+    ) -> dict:
+        """Exact valuation-date outcomes for extra indicator columns
+        (none for Snowball)."""
         return {}
 
     def _compute_event_stats(
@@ -700,6 +739,19 @@ class SnowballPDESolver(BasePDESolver):
         n_int = num_x - 2
         rhs = np.empty((n_int, 2 * n_cols), dtype=float)
 
+        # Valuation-date events are deterministic at the known spot: capture
+        # the smooth 0+ indicator columns before the j==0 events land, and
+        # overlay the exact t=0 outcomes on the spot readout below.
+        t0_pre_grids = None
+        t0_capture = self._use_cell_average_events() and (
+            0 in ko_index_by_tidx
+            or (
+                product.has_ki_barrier
+                and not (self._ki_continuous or self._bgk_active)
+                and 0 in self._ki_observation_indices
+            )
+        )
+
         for j in range(num_t - 2, -1, -1):
             dt = float(dt_vec[j])
             theta = float(theta_by_step[j])
@@ -758,6 +810,9 @@ class SnowballPDESolver(BasePDESolver):
             )
             v0_cur[1:-1, :] = sol[:, :n_cols]
             v1_cur[1:-1, :] = sol[:, n_cols:]
+
+            if j == 0 and t0_capture:
+                t0_pre_grids = (v0_cur.copy(), v1_cur.copy())
 
             # Apply KO jump (if observation time).
             ko_idx = ko_index_by_tidx.get(j)
@@ -836,14 +891,74 @@ class SnowballPDESolver(BasePDESolver):
             v0_next = v0_cur
             v1_next = v1_cur
 
-        # Select initial regime based on knocked-in at valuation.
-        initial_grid = v1_next if knocked_in_at_valuation else v0_next
+        # Select initial regime based on knocked-in at valuation. When the
+        # valuation date carries events, read the smooth 0+ branch columns
+        # (mirroring the loop's boundary enforcement on the captured copies)
+        # and overlay the exact t=0 outcomes at the known spot.
+        if t0_pre_grids is not None:
+            for g in t0_pre_grids:
+                g[0, :] = g[1, :]
+                g[-1, :] = g[-2, :]
+            initial_grid = (
+                t0_pre_grids[1] if knocked_in_at_valuation else t0_pre_grids[0]
+            )
+        else:
+            initial_grid = v1_next if knocked_in_at_valuation else v0_next
         spot_log = float(np.log(spot))
 
-        ed_unit = np.array(
-            [float(np.interp(spot_log, x_vec, initial_grid[:, i])) for i in range(n_ko)],
-            dtype=float,
-        )
+        # Exact valuation-date outcomes at the known spot. Untriggered t=0
+        # streams are exactly zero on the pre-event columns already; a
+        # triggered t=0 KO resolves every stream deterministically.
+        t0_overrides: Dict[int, float] = {}
+        rec0_pos = ko_index_by_tidx.get(0)
+        if t0_pre_grids is not None and rec0_pos is not None:
+            rec0 = ko_records[rec0_pos]
+            b0 = float(rec0.barrier) if rec0.barrier is not None else 0.0
+            t0_ko_triggered = bool(
+                self._event_nodal_mask(
+                    np.asarray([spot], dtype=float),
+                    b0,
+                    product.is_reverse,
+                    True,
+                    at_valuation=True,
+                )[0]
+            )
+            df_delay0 = self._cashflow_value_at_time(
+                pricing_env=pricing_env,
+                cashflow=1.0,
+                current_time=float(t_vec[0]),
+                settlement_time=rec0.settlement_time,
+            )
+            if t0_ko_triggered:
+                for i in range(n_ko):
+                    t0_overrides[i] = 0.0
+                t0_overrides[rec0_pos] = df_delay0
+                if want_ki:
+                    t0_overrides[ki_col] = 0.0
+                    t0_overrides[ki_ever_col] = 0.0
+            else:
+                t0_overrides[rec0_pos] = 0.0
+            if want_coupon:
+                t0_overrides.update(
+                    self._t0_extra_indicator_overrides(
+                        product,
+                        pricing_env,
+                        spot,
+                        n_ko,
+                        rec0_pos,
+                        rec0,
+                        t_vec,
+                        t0_ko_triggered,
+                        df_delay0,
+                    )
+                )
+
+        def _read_col(col: int) -> float:
+            if col in t0_overrides:
+                return t0_overrides[col]
+            return float(np.interp(spot_log, x_vec, initial_grid[:, col]))
+
+        ed_unit = np.array([_read_col(i) for i in range(n_ko)], dtype=float)
         ko_times = np.array([float(rec.observation_time) for rec in ko_records], dtype=float)
         ko_probability = np.zeros(n_ko, dtype=float)
         ed_ko_cf = np.zeros(n_ko, dtype=float)
@@ -875,9 +990,9 @@ class SnowballPDESolver(BasePDESolver):
             ki_survival_probability = np.array([0.0], dtype=float)
         elif want_ki:
             df_T = pricing_env.get_discount_factor(float(tau))
-            ed_ki = float(np.interp(spot_log, x_vec, initial_grid[:, ki_col]))
+            ed_ki = _read_col(ki_col)
             ki_probability = float(ed_ki / df_T) if df_T > 0.0 else 0.0
-            ed_ki_ever = float(np.interp(spot_log, x_vec, initial_grid[:, ki_ever_col]))
+            ed_ki_ever = _read_col(ki_ever_col)
             ki_ever_probability = float(ed_ki_ever / df_T) if df_T > 0.0 else 0.0
         else:
             # KI columns were pruned (no leg reads KI): report 0, KO/pv are intact.
@@ -891,7 +1006,14 @@ class SnowballPDESolver(BasePDESolver):
 
         if want_coupon:
             extra_fields = self._extract_extra_event_stats(
-                initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
+                initial_grid,
+                x_vec,
+                spot_log,
+                n_ko,
+                ko_records,
+                pricing_env,
+                product,
+                col_overrides=t0_overrides,
             )
         else:
             extra_fields = {}
@@ -1085,6 +1207,51 @@ class SnowballPDESolver(BasePDESolver):
         cell average [2026-07-23 review, finding 2].
         """
         return t_idx != 0 and self._use_cell_average_events()
+
+    def _reset_t0_readout_state(self) -> None:
+        """Per-solve valuation-date readout state (see PDESolutionResult).
+
+        ``_t0_pre_event_cols``: smooth 0+ branch columns (v0, v1) captured
+        before the t=0 events are written onto the grid. ``_t0_readout_cols``
+        / ``_t0_readout_values`` refine them when a t=0 cash transition
+        resolves at the actual spot (phoenix coupons).
+        """
+        self._t0_pre_event_cols = None
+        self._t0_readout_cols = None
+        self._t0_readout_values = None
+
+    def _t0_has_events(self, product) -> bool:
+        """Discrete events registered on the valuation date (t_idx == 0).
+
+        Continuous/BGK KI is a continuous-barrier treatment whose value
+        function is continuous at the barrier — there is no t=0 jump to
+        shield the readout from — so it does not count. Legacy nodal mode
+        is the pinned characterization discretization and keeps the raw
+        post-event interpolation bitwise.
+        """
+        if not self._use_cell_average_events():
+            return False
+        if 0 in self._ko_observation_indices:
+            return True
+        if (
+            product.has_ki_barrier
+            and not (self._ki_continuous or self._bgk_active)
+            and 0 in self._ki_observation_indices
+        ):
+            return True
+        return False
+
+    def _compose_t0_readout(self, sel: int):
+        """(readout_vec, readout_override) for the selected surface (0=v0, 1=v1)."""
+        readout_vec = None
+        readout_override = None
+        if self._t0_readout_cols is not None:
+            readout_vec = self._t0_readout_cols[sel]
+        elif self._t0_pre_event_cols is not None:
+            readout_vec = self._t0_pre_event_cols[sel]
+        if self._t0_readout_values is not None:
+            readout_override = float(self._t0_readout_values[sel])
+        return readout_vec, readout_override
 
     def _event_nodal_mask(
         self,
@@ -1835,9 +2002,18 @@ class SnowballPDESolver(BasePDESolver):
                 if profile:
                     timings["solve"] += perf_counter() - t0
 
-            # Apply barrier modifications
+            # Apply barrier modifications. The valuation-date column is
+            # captured BEFORE its events: t=0 events are deterministic at the
+            # known spot, so the readout interpolates this smooth 0+ branch
+            # and applies today's transitions pointwise instead of blending
+            # across the nodal jump the event application writes.
             if profile:
                 t0 = perf_counter()
+            if j == 0 and self._t0_has_events(product):
+                self._t0_pre_event_cols = (
+                    grid_v0[:, 0].copy(),
+                    grid_v1[:, 0].copy(),
+                )
             self._apply_step_modifications_two_surface(
                 grid_v0, grid_v1, x_vec, s_vec, j, tau_remaining, product, pricing_env
             )

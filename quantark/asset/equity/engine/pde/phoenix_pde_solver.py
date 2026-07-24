@@ -88,16 +88,61 @@ class PhoenixPDESolver(SnowballPDESolver):
         v0[pay_mask, coup_col] = df_delay
         v1[pay_mask, coup_col] = df_delay
 
-    def _extract_extra_event_stats(
-        self, initial_grid, x_vec, spot_log, n_ko, ko_records, pricing_env, product
+    def _t0_extra_indicator_overrides(
+        self,
+        product,
+        pricing_env,
+        spot,
+        n_ko,
+        rec0_pos,
+        rec0,
+        t_vec,
+        ko_triggered,
+        df_delay0,
     ) -> dict:
-        ed_coup = np.array(
-            [
-                float(np.interp(spot_log, x_vec, initial_grid[:, n_ko + i]))
-                for i in range(n_ko)
-            ],
-            dtype=float,
+        """Deterministic valuation-date coupon indicator at the known spot.
+
+        Mirrors _set_extra_event_indicators (a coupon at a simultaneous KO is
+        still counted); a triggered t=0 KO kills every later coupon stream."""
+        overrides: dict = {}
+        if rec0_pos is None or rec0_pos >= self._coupon_barriers.shape[0]:
+            return overrides
+        coupon_barrier = float(self._coupon_barriers[rec0_pos])
+        pay = bool(
+            self._event_nodal_mask(
+                np.asarray([float(spot)], dtype=float),
+                coupon_barrier,
+                product.is_reverse,
+                True,
+                at_valuation=True,
+            )[0]
         )
+        overrides[n_ko + rec0_pos] = df_delay0 if pay else 0.0
+        if ko_triggered:
+            for i in range(n_ko):
+                if i != rec0_pos:
+                    overrides[n_ko + i] = 0.0
+        return overrides
+
+    def _extract_extra_event_stats(
+        self,
+        initial_grid,
+        x_vec,
+        spot_log,
+        n_ko,
+        ko_records,
+        pricing_env,
+        product,
+        col_overrides=None,
+    ) -> dict:
+        overrides = col_overrides or {}
+
+        def _read(col: int) -> float:
+            if col in overrides:
+                return float(overrides[col])
+            return float(np.interp(spot_log, x_vec, initial_grid[:, col]))
+
+        ed_coup = np.array([_read(n_ko + i) for i in range(n_ko)], dtype=float)
         coupon_probability = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
             obs_time = float(rec.observation_time)
@@ -222,6 +267,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         # State preamble shared with session preparation (see
         # SnowballPDESolver._prepare_solve_state).
         knocked_in_at_valuation = self._prepare_solve_state(product, pricing_env)
+        self._reset_t0_readout_state()
 
         # Extract market data
         strike = product.strike
@@ -349,11 +395,16 @@ class PhoenixPDESolver(SnowballPDESolver):
         else:
             solution_vec = grid_v0_list[0][:, 0]
 
+        readout_vec, readout_override = self._compose_t0_readout(
+            1 if knocked_in_at_valuation else 0
+        )
         return PDESolutionResult(
             solution_vec=solution_vec,
             x_vec=x_vec,
             s_vec=s_vec,
             spot_log=spot_log,
+            readout_vec=readout_vec,
+            readout_override=readout_override,
         )
 
     def _set_terminal_condition_vector(
@@ -524,7 +575,16 @@ class PhoenixPDESolver(SnowballPDESolver):
             self._step_grids(grid_v1_list, j, dt, theta, x_vec, s_vec, tau_remaining, product, pricing_env,
                              use_banded, banded, lower1, main1, upper1, M1, M2_lu, rhs, l, u, is_v1=True)
 
-            # Apply modifications (Coupons, KO, KI)
+            # Apply modifications (Coupons, KO, KI). The valuation-date
+            # level-0 columns are captured BEFORE their events: t=0 events
+            # are deterministic at the known spot, so the readout uses this
+            # smooth 0+ branch plus pointwise transitions instead of
+            # interpolating across the nodal t=0 jump.
+            if j == 0 and self._t0_has_events(product):
+                self._t0_pre_event_cols = (
+                    grid_v0_list[0][:, 0].copy(),
+                    grid_v1_list[0][:, 0].copy(),
+                )
             self._apply_step_modifications_vector_surface(
                 grid_v0_list, grid_v1_list, x_vec, s_vec, j, tau_remaining, product, pricing_env
             )
@@ -667,6 +727,22 @@ class PhoenixPDESolver(SnowballPDESolver):
             s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
         )
 
+        if t_idx == 0 and self._use_cell_average_events():
+            self._capture_t0_coupon_readout(
+                s_vec,
+                barrier,
+                product,
+                pricing_env,
+                diffused_v0_0,
+                diffused_v1_0,
+                grid_v0_list,
+                grid_v1_list,
+                use_memory,
+                obs_idx,
+                coupon_amt,
+                coupon_discount,
+            )
+
         for k in range(max_k + 1):
             accumulated_pay = (
                 self._accumulated_coupon_amount(obs_idx, k) if use_memory else 0.0
@@ -687,6 +763,69 @@ class PhoenixPDESolver(SnowballPDESolver):
 
             grid_v1_list[k][pay_mask, t_idx] = val_pay_1[pay_mask]
             grid_v1_list[k][~pay_mask, t_idx] = val_miss_1[~pay_mask]
+
+    def _t0_has_events(self, product) -> bool:
+        if super()._t0_has_events(product):
+            return True
+        return (
+            self._use_cell_average_events()
+            and 0 in self._coupon_observation_indices
+        )
+
+    def _capture_t0_coupon_readout(
+        self,
+        s_vec: np.ndarray,
+        barrier: float,
+        product: PhoenixOption,
+        pricing_env: PricingEnvironment,
+        diffused_v0_0: np.ndarray,
+        diffused_v1_0: np.ndarray,
+        grid_v0_list: List[np.ndarray],
+        grid_v1_list: List[np.ndarray],
+        use_memory: bool,
+        obs_idx: int,
+        coupon_amt: float,
+        coupon_discount: float,
+    ) -> None:
+        """Pointwise-exact valuation-date coupon readout at the actual spot.
+
+        The nodal t=0 application leaves a value jump at the coupon barrier;
+        interpolating the post-event column across it blends the pay/miss
+        branches (a grid-dependent fraction of the coupon). Instead resolve
+        today's trigger at the known spot with the same inclusive ownership
+        the nodal mask uses, interpolate the smooth branch the spot actually
+        follows, and add the coupon cash [2026-07-24 review, finding 1].
+        """
+        spot = float(pricing_env.spot)
+        pay = bool(
+            self._event_nodal_mask(
+                np.asarray([spot], dtype=float),
+                barrier,
+                product.is_reverse,
+                True,
+                at_valuation=True,
+            )[0]
+        )
+        x_vec = np.log(np.asarray(s_vec, dtype=float))
+        spot_log = float(np.log(spot))
+        if pay:
+            accumulated = (
+                self._accumulated_coupon_amount(obs_idx, 0) if use_memory else 0.0
+            )
+            total_pay = (coupon_amt + accumulated) * coupon_discount
+            cols = (diffused_v0_0.copy(), diffused_v1_0.copy())
+            values = tuple(
+                float(np.interp(spot_log, x_vec, col)) + total_pay for col in cols
+            )
+        else:
+            next_k = 1 if use_memory else 0
+            cols = (
+                grid_v0_list[next_k][:, 0].copy(),
+                grid_v1_list[next_k][:, 0].copy(),
+            )
+            values = tuple(float(np.interp(spot_log, x_vec, col)) for col in cols)
+        self._t0_readout_cols = cols
+        self._t0_readout_values = values
 
     def _apply_ko_jump_vector(
         self,
