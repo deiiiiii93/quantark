@@ -273,7 +273,9 @@ class TestProjectEventValues:
                 np.concatenate(([a, c], x[(x > a) & (x < c)]))
             )
             y = np.interp(pts, x, vals)
-            return float(np.trapezoid(y, pts))
+            # np.trapezoid only exists on NumPy >= 2; the project supports >= 1.24
+            trapezoid = getattr(np, "trapezoid", None) or np.trapz
+            return float(trapezoid(y, pts))
 
         expected = (_pl_int(v_s, e_lo, b_x) + _pl_int(v_b, b_x, e_hi)) / (
             e_hi - e_lo
