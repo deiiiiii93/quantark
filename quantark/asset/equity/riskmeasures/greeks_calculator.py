@@ -1617,7 +1617,7 @@ class GreeksCalculator:
         bump: Optional[float] = None,
     ) -> float:
         """Numerical delta using central spot bump."""
-        bump = bump if bump is not None else self.params.bump_size
+        bump = bump if bump is not None else self._bump_config.spot_bump
         base_price, price_up_spot, price_down_spot = self._spot_bumped_prices(
             product,
             pricing_env,
@@ -1645,7 +1645,7 @@ class GreeksCalculator:
         bump: Optional[float] = None,
     ) -> float:
         """Numerical gamma using central spot bump."""
-        bump = bump if bump is not None else self.params.bump_size
+        bump = bump if bump is not None else self._bump_config.spot_bump
         base_price, price_up_spot, price_down_spot = self._spot_bumped_prices(
             product,
             pricing_env,

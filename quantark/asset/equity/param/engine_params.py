@@ -188,38 +188,57 @@ class EngineParams:
     Configuration parameters for pricing engines.
 
     Attributes:
-        bump_size: DEPRECATED - Use bump_config instead. Bump size for finite
-                   difference method (default: 1e-4). Only used for spot delta/gamma.
-        bump_config: Factor-specific bump configuration. If None, creates default
-                     from bump_size for backward compatibility.
+        bump_size: DEPRECATED - Use bump_config instead. When explicitly set,
+                   it seeds ``BumpConfig(spot_bump=bump_size)`` and emits a
+                   DeprecationWarning. Left unset (None), bump sizes come from
+                   ``BumpConfig``'s documented defaults (1% spot bump).
+        bump_config: Factor-specific bump configuration. If None, defaults to
+                     ``BumpConfig()`` (or the legacy bump_size when that is set).
         bus_days_in_year: Number of business days per year (default: 252)
     """
 
-    bump_size: float = 1e-4
+    bump_size: Optional[float] = None
     bump_config: Optional[BumpConfig] = None
     bus_days_in_year: int = 252
 
     def __post_init__(self):
         """Validate parameters and create bump_config if needed."""
-        # Legacy bump_size validation
-        if self.bump_size <= 0:
-            raise ValidationError(f"Bump size must be positive, got {self.bump_size}")
-        if self.bump_size > 0.01:  # 1% seems too large
-            raise ValidationError(f"Bump size seems too large: {self.bump_size}")
+        if self.bump_size is not None:
+            # Legacy bump_size validation (historic bounds kept as-is)
+            if self.bump_size <= 0:
+                raise ValidationError(
+                    f"Bump size must be positive, got {self.bump_size}"
+                )
+            if self.bump_size > 0.01:  # 1% seems too large
+                raise ValidationError(
+                    f"Bump size seems too large: {self.bump_size}"
+                )
+            import warnings
+
+            warnings.warn(
+                "EngineParams.bump_size is deprecated; pass "
+                "bump_config=BumpConfig(spot_bump=...) instead",
+                DeprecationWarning,
+                stacklevel=3,
+            )
         if self.bus_days_in_year <= 0:
             raise ValidationError(
                 f"Business days must be positive, got {self.bus_days_in_year}"
             )
 
-        # Create bump_config from bump_size for backward compatibility
         if self.bump_config is None:
-            self.bump_config = BumpConfig(spot_bump=self.bump_size)
+            self.bump_config = (
+                BumpConfig()
+                if self.bump_size is None
+                else BumpConfig(spot_bump=self.bump_size)
+            )
 
     def get_effective_bump_config(self) -> BumpConfig:
         """
         Get the effective bump configuration.
 
-        Returns bump_config if set, otherwise creates from legacy bump_size.
+        Returns bump_config if set, otherwise the documented defaults (with the
+        legacy bump_size honored when explicitly provided).
 
         Returns:
             Effective BumpConfig
@@ -227,7 +246,9 @@ class EngineParams:
         if self.bump_config is not None:
             return self.bump_config
         # Fallback for safety (should not reach here due to __post_init__)
-        return BumpConfig(spot_bump=self.bump_size)
+        if self.bump_size is not None:
+            return BumpConfig(spot_bump=self.bump_size)
+        return BumpConfig()
 
 
 @dataclass

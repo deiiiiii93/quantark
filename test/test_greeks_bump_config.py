@@ -2,16 +2,21 @@
 Integration tests for Greeks calculation with BumpConfig.
 """
 
+import math
+import warnings
+
 import pytest
 from datetime import datetime
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.param import EngineParams, BumpConfig
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
+from quantark.util.exceptions import ValidationError
 
 
 @pytest.fixture
@@ -337,3 +342,113 @@ class TestEdgeCases:
         greeks = calc.calculate_numerical_greeks(call_option, env_low_vol, bs_engine)
         assert "vega" in greeks
         assert greeks["vega"] > 0
+
+
+class _MarketRecordingEngine(BaseEngine):
+    """Smooth analytic stub that records every priced market state."""
+
+    def __init__(self, params=None):
+        super().__init__(params)
+        self.spots = []
+        self.vols = []
+        self.rates = []
+
+    def price(self, product, pricing_env):
+        s = float(pricing_env.spot)
+        self.spots.append(s)
+        self.vols.append(
+            float(getattr(pricing_env.vol_surface, "volatility", float("nan")))
+        )
+        self.rates.append(float(pricing_env.get_rate(1.0)))
+        return (s / 100.0) ** 3
+
+
+def _contains(values, target):
+    return any(math.isclose(v, target, rel_tol=1e-12) for v in values)
+
+
+class TestBumpSizeShimRetirement:
+    """The deprecated ``EngineParams.bump_size`` shim must not override
+    ``BumpConfig``'s documented defaults.
+
+    Root cause (auto-grid round-2 review, F4): ``bump_size=1e-4`` silently
+    fed ``BumpConfig(spot_bump=1e-4)``, making the documented 1% spot bump
+    unreachable and turning default BUMP-mode gamma into kink noise on any
+    piecewise-linear PDE readout.
+    """
+
+    def test_default_engine_params_uses_documented_spot_bump(self):
+        assert EngineParams().bump_config.spot_bump == pytest.approx(0.01)
+
+    def test_default_mc_and_pde_params_inherit_documented_spot_bump(self):
+        from quantark.asset.equity.param import MCParams, PDEParams
+
+        assert MCParams().bump_config.spot_bump == pytest.approx(0.01)
+        assert PDEParams().bump_config.spot_bump == pytest.approx(0.01)
+
+    def test_default_construction_emits_no_deprecation_warning(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            EngineParams()
+
+    def test_explicit_bump_size_warns_and_is_honored(self):
+        with pytest.warns(DeprecationWarning, match="bump_size"):
+            params = EngineParams(bump_size=0.001)
+        assert params.bump_config.spot_bump == pytest.approx(0.001)
+
+    def test_invalid_explicit_bump_size_still_rejected(self):
+        with pytest.raises(ValidationError):
+            EngineParams(bump_size=-1.0)
+        with pytest.raises(ValidationError):
+            EngineParams(bump_size=0.5)
+
+    def test_base_engine_bump_greeks_use_bump_config(
+        self, call_option, pricing_env
+    ):
+        engine = _MarketRecordingEngine()
+        engine.calculate_greeks(call_option, pricing_env)
+        assert _contains(engine.spots, 100.0 * 1.01)
+        assert _contains(engine.spots, 100.0 * 0.99)
+
+    def test_numerical_delta_default_bump_comes_from_bump_config(
+        self, call_option, pricing_env
+    ):
+        params = EngineParams(bump_config=BumpConfig(spot_bump=0.004))
+        calc = GreeksCalculator(params=params)
+        engine = _MarketRecordingEngine(params)
+        calc.calculate_numerical_delta(call_option, pricing_env, engine)
+        assert _contains(engine.spots, 100.0 * 1.004)
+        assert _contains(engine.spots, 100.0 * 0.996)
+
+    def test_numerical_gamma_default_bump_comes_from_bump_config(
+        self, call_option, pricing_env
+    ):
+        params = EngineParams(bump_config=BumpConfig(spot_bump=0.004))
+        calc = GreeksCalculator(params=params)
+        engine = _MarketRecordingEngine(params)
+        calc.calculate_numerical_gamma(call_option, pricing_env, engine)
+        assert _contains(engine.spots, 100.0 * 1.004)
+        assert _contains(engine.spots, 100.0 * 0.996)
+
+    def test_get_trade_greeks_uses_per_factor_bumps(
+        self, call_option, pricing_env
+    ):
+        from quantark.portfolio.equity.position import EquityPosition
+
+        config = BumpConfig(spot_bump=0.004, vol_bump=0.03, rate_bump=0.0007)
+        engine = _MarketRecordingEngine(EngineParams(bump_config=config))
+        pos = EquityPosition(
+            product=call_option,
+            quantity=1.0,
+            entry_price=0.0,
+            underlying="TEST",
+            engine=engine,
+            entry_timestamp=datetime(2026, 1, 1),
+        )
+        pos.get_trade_greeks(pricing_env, GreeksCalculator())
+        assert _contains(engine.spots, 100.0 * 1.004)
+        assert _contains(engine.spots, 100.0 * 0.996)
+        assert _contains(engine.vols, 0.20 + 0.03)
+        assert _contains(engine.vols, 0.20 - 0.03)
+        assert _contains(engine.rates, 0.05 + 0.0007)
+        assert _contains(engine.rates, 0.05 - 0.0007)

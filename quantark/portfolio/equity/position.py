@@ -181,36 +181,39 @@ class EquityPosition:
         from copy import deepcopy
         from quantark.param import FlatRateCurve
 
-        bump = self.engine.params.bump_size
+        bumps = self.engine.params.get_effective_bump_config()
         base_value = self.get_trade_value(pricing_env)
 
+        spot_bump = bumps.spot_bump
         env_up = deepcopy(pricing_env)
-        env_up.spot_quote.spot *= 1.0 + bump
+        env_up.spot_quote.spot *= 1.0 + spot_bump
         env_down = deepcopy(pricing_env)
-        env_down.spot_quote.spot *= 1.0 - bump
+        env_down.spot_quote.spot *= 1.0 - spot_bump
         value_up = self.get_trade_value(env_up)
         value_down = self.get_trade_value(env_down)
 
-        spot_bump_amount = pricing_env.spot * bump
+        spot_bump_amount = pricing_env.spot * spot_bump
         delta = (value_up - value_down) / (2.0 * spot_bump_amount)
         gamma = (value_up - 2.0 * base_value + value_down) / (spot_bump_amount**2)
 
+        vol_bump = bumps.vol_bump
         env_vol_up = deepcopy(pricing_env)
         env_vol_down = deepcopy(pricing_env)
-        self._bump_flat_or_term_vol(env_vol_up, bump)
-        self._bump_flat_or_term_vol(env_vol_down, -bump)
+        self._bump_flat_or_term_vol(env_vol_up, vol_bump)
+        self._bump_flat_or_term_vol(env_vol_down, -vol_bump)
         vega = (
             self.get_trade_value(env_vol_up) - self.get_trade_value(env_vol_down)
-        ) / (2.0 * bump)
+        ) / (2.0 * vol_bump)
 
+        rate_bump = bumps.rate_bump
         current_rate = pricing_env.get_rate(self.product.get_maturity(pricing_env))
         env_rate_up = deepcopy(pricing_env)
         env_rate_down = deepcopy(pricing_env)
-        env_rate_up.rate_curve = FlatRateCurve(current_rate + bump)
-        env_rate_down.rate_curve = FlatRateCurve(current_rate - bump)
+        env_rate_up.rate_curve = FlatRateCurve(current_rate + rate_bump)
+        env_rate_down.rate_curve = FlatRateCurve(current_rate - rate_bump)
         rho = (
             self.get_trade_value(env_rate_up) - self.get_trade_value(env_rate_down)
-        ) / (2.0 * bump)
+        ) / (2.0 * rate_bump)
 
         return {
             "price": base_value,

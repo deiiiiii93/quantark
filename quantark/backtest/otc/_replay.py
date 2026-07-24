@@ -154,9 +154,14 @@ class ProductReplay:
             isinstance(self.pricing_engine, BaseEngine)
             and type(self.pricing_engine).calculate_greeks is BaseEngine.calculate_greeks
         )
-        engine_bump = (
-            float(getattr(params, "bump_size", 1e-4)) if params is not None else 0.0
-        )
+        engine_bump = 0.0
+        if params is not None:
+            get_cfg = getattr(params, "get_effective_bump_config", None)
+            if callable(get_cfg):
+                engine_bump = float(get_cfg().spot_bump)
+            else:
+                legacy = getattr(params, "bump_size", None)
+                engine_bump = float(legacy) if legacy is not None else 0.0
         delta_bump = (
             float(self.delta_bump_size)
             if self.delta_bump_size is not None

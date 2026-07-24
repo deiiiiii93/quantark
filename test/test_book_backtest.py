@@ -69,10 +69,12 @@ def test_single_product_summary_is_stable(single_summary):
     # product_quantity=-350.0 ensures the rounded futures target is nonzero,
     # exercising the hedge/rebalance/roll path.
     # These are the characterization anchors for the Task 1.2 refactor.
+    # Re-pinned 2026-07-24: hedge deltas now use BumpConfig's documented 1%
+    # spot bump (deprecated EngineParams.bump_size=1e-4 shim retired).
     assert single_summary["num_days"] == 86
-    assert single_summary["num_trades"] == 7
+    assert single_summary["num_trades"] == 5
     assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
-    assert single_summary["total_pnl"] == pytest.approx(-9580.965682060465, rel=1e-9)
+    assert single_summary["total_pnl"] == pytest.approx(-3417.8369450558384, rel=1e-9)
 
 
 def test_book_config_rejects_empty_products():

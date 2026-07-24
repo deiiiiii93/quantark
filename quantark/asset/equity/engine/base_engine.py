@@ -130,24 +130,25 @@ class BaseEngine(ABC):
         """
         from copy import deepcopy
 
+        spot_bump = self.params.get_effective_bump_config().spot_bump
         base_price = self.price(product, pricing_env)
         greeks = {"price": base_price}
 
         # Delta: dV/dS
         env_up = deepcopy(pricing_env)
-        env_up.spot_quote.spot *= 1 + self.params.bump_size
+        env_up.spot_quote.spot *= 1 + spot_bump
         price_up = self.price(product, env_up)
 
         env_down = deepcopy(pricing_env)
-        env_down.spot_quote.spot *= 1 - self.params.bump_size
+        env_down.spot_quote.spot *= 1 - spot_bump
         price_down = self.price(product, env_down)
 
-        delta = (price_up - price_down) / (2 * pricing_env.spot * self.params.bump_size)
+        delta = (price_up - price_down) / (2 * pricing_env.spot * spot_bump)
         greeks["delta"] = delta
 
         # Gamma: d²V/dS²
         gamma = (price_up - 2 * base_price + price_down) / (
-            pricing_env.spot * self.params.bump_size
+            pricing_env.spot * spot_bump
         ) ** 2
         greeks["gamma"] = gamma
 
