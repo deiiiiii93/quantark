@@ -15,6 +15,9 @@ from time import perf_counter
 
 from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
+from quantark.asset.equity.engine.pde.event_projection import (
+    project_piecewise_event,
+)
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
@@ -633,9 +636,14 @@ class PhoenixPDESolver(SnowballPDESolver):
     ) -> None:
         current_time = self._total_tau - tau
 
-        # 1. Coupon Jump (Fan-In)
+        # 1. Coupon Jump (Fan-In). When a KO observation shares the date and
+        # events project, the KO site applies the coupon fan-in and the KO
+        # transition as ONE piecewise cell average — sequential projection
+        # double-averages a shared dual cell [2026-07-24 review, finding 3].
         coupon_obs_idx = self._coupon_observation_indices.get(t_idx)
-        if coupon_obs_idx is not None:
+        if coupon_obs_idx is not None and not self._joint_coupon_ko_projection_active(
+            t_idx
+        ):
             self._apply_coupon_jump_vector(
                 grid_v0_list,
                 grid_v1_list,
@@ -772,6 +780,122 @@ class PhoenixPDESolver(SnowballPDESolver):
             and 0 in self._coupon_observation_indices
         )
 
+    def _joint_coupon_ko_projection_active(self, t_idx: int) -> bool:
+        """Coincident coupon + KO date whose projection runs as ONE pass.
+
+        _apply_step_modifications_vector_surface skips the standalone coupon
+        exactly when this holds, and _apply_ko_jump_vector performs the joint
+        piecewise projection instead [2026-07-24 review, finding 3]."""
+        if not self._event_uses_projection(t_idx):
+            return False
+        obs_idx = self._coupon_observation_indices.get(t_idx)
+        rec = self._ko_observation_indices.get(t_idx)
+        if obs_idx is None or rec is None:
+            return False
+        if obs_idx < 0 or obs_idx >= self._coupon_barriers.shape[0]:
+            return False
+        b_ko = float(rec.barrier) if rec.barrier is not None else 0.0
+        return b_ko > 0.0 and float(self._coupon_barriers[obs_idx]) > 0.0
+
+    def _apply_joint_coupon_ko_projection(
+        self,
+        grid_v0_list: List[np.ndarray],
+        grid_v1_list: List[np.ndarray],
+        s_vec: np.ndarray,
+        t_idx: int,
+        current_time: float,
+        product: PhoenixOption,
+        pricing_env: PricingEnvironment,
+        obs_idx: int,
+        ko_barrier: float,
+        base_payoff: float,
+        df: float,
+        coupon_amt: float,
+        use_memory: bool,
+        max_k: int,
+    ) -> None:
+        """One-pass cell average of the coincident coupon + KO event.
+
+        The contractual post-event value is piecewise in spot with thresholds
+        at the coupon and KO barriers:
+
+            KO region:      (base + coupon_at_ko * 1_pay) * df
+            survive & pay:  level-0 diffused value + coupon
+            survive & miss: next memory level's value
+
+        Sequential projection double-averages any dual cell the two
+        thresholds share (equal/nearby barriers); for well-separated barriers
+        this one-pass average coincides with the sequential result
+        [2026-07-24 review, finding 3].
+        """
+        n = len(s_vec)
+        x_vec = np.log(np.asarray(s_vec, dtype=float))
+        coupon_barrier = float(self._coupon_barriers[obs_idx])
+        settlement_time = (
+            self._total_tau
+            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+            else current_time
+        )
+        coupon_discount = self._df_between_times(
+            pricing_env, current_time, settlement_time
+        )
+        trig_up = not bool(product.is_reverse)
+        breaks = sorted((np.log(coupon_barrier), np.log(float(ko_barrier))))
+        lows = [-np.inf] + breaks
+        his = breaks + [np.inf]
+        b_c_x, b_ko_x = np.log(coupon_barrier), np.log(float(ko_barrier))
+
+        diffused_cols = (
+            grid_v0_list[0][:, t_idx].copy(),
+            grid_v1_list[0][:, t_idx].copy(),
+        )
+        for k in range(len(grid_v0_list)):
+            effective_k = k if k <= max_k else max_k
+            accumulated_ko = (
+                self._accumulated_coupon_amount(obs_idx, effective_k)
+                if use_memory
+                else 0.0
+            )
+            coupon_at_ko = coupon_amt + accumulated_ko
+            in_coupon_fan = k <= max_k
+            if in_coupon_fan:
+                accumulated_k = (
+                    self._accumulated_coupon_amount(obs_idx, k)
+                    if use_memory
+                    else 0.0
+                )
+                total_pay = (coupon_amt + accumulated_k) * coupon_discount
+                next_k = k + 1 if use_memory else 0
+            for grids, diffused0 in (
+                (grid_v0_list, diffused_cols[0]),
+                (grid_v1_list, diffused_cols[1]),
+            ):
+                branches = []
+                for j in range(len(breaks) + 1):
+                    if trig_up:
+                        m_ko = b_ko_x <= lows[j]
+                        m_pay = b_c_x <= lows[j]
+                    else:
+                        m_ko = his[j] <= b_ko_x
+                        m_pay = his[j] <= b_c_x
+                    if m_ko:
+                        branches.append(
+                            np.full(
+                                n,
+                                (base_payoff + (coupon_at_ko if m_pay else 0.0))
+                                * df,
+                            )
+                        )
+                    elif in_coupon_fan and m_pay:
+                        branches.append(diffused0 + total_pay)
+                    elif in_coupon_fan:
+                        branches.append(grids[next_k][:, t_idx])
+                    else:
+                        branches.append(grids[k][:, t_idx])
+                grids[k][:, t_idx] = project_piecewise_event(
+                    x_vec, breaks, branches
+                )
+
     def _capture_t0_coupon_readout(
         self,
         s_vec: np.ndarray,
@@ -868,6 +992,28 @@ class PhoenixPDESolver(SnowballPDESolver):
             df = self._df_between_times(pricing_env, current_time, ko_record.settlement_time)
 
         if self._event_uses_projection(t_idx):
+            if self._joint_coupon_ko_projection_active(t_idx):
+                # Coincident coupon + KO: fan-in and KO transition are ONE
+                # piecewise contractual function of spot — project its exact
+                # cell average in a single pass (the standalone coupon
+                # application was skipped) [2026-07-24 review, finding 3].
+                self._apply_joint_coupon_ko_projection(
+                    grid_v0_list,
+                    grid_v1_list,
+                    s_vec,
+                    t_idx,
+                    current_time,
+                    product,
+                    pricing_env,
+                    obs_idx,
+                    float(barrier),
+                    base_payoff,
+                    df,
+                    coupon_amt,
+                    use_memory,
+                    max_k,
+                )
+                return
             for k in range(len(grid_v0_list)):
                 effective_k = k if k <= max_k else max_k
                 accumulated_pay = (
@@ -875,12 +1021,9 @@ class PhoenixPDESolver(SnowballPDESolver):
                     if (use_memory and obs_idx is not None)
                     else 0.0
                 )
-                # Memory semantics (matching the Phoenix Monte-Carlo engine's
-                # convention): accrued coupons are released ONLY when the
-                # current observation's coupon condition is met. The KO payoff
-                # is itself a jump function of spot (coupon-at-KO above the
-                # coupon barrier), so project the inner coupon jump first,
-                # then the KO transition against the resulting payoff profile.
+                # Degenerate fallback (no coupon obs, or non-positive
+                # barriers where the log-space breaks are undefined):
+                # sequential inner projection as before.
                 coupon_at_ko = coupon_amt + accumulated_pay
                 if coupon_at_ko > 0.0 and obs_idx is not None:
                     coupon_barrier = float(self._coupon_barriers[obs_idx])

@@ -8,6 +8,9 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
+from quantark.asset.equity.engine.pde.event_projection import (
+    project_piecewise_event,
+)
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -724,9 +727,16 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         # tau vs T, not current_time vs 0: see _apply_coupon.
         at_valuation = is_close(float(tau), float(T))
         if self._use_cell_average_events() and not at_valuation:
-            # The KO payoff itself jumps at the coupon barrier (coupon paid at
-            # a simultaneous KO), so project the inner coupon jump into the
-            # payoff profile first, then the KO transition slice-wise.
+            if self._joint_coupon_ko_active_2d(ko_record, obs_idx):
+                # Coincident coupon + KO: ONE piecewise cell average of the
+                # complete contractual event (the hook skipped the standalone
+                # coupon application) [2026-07-24 review, finding 3].
+                return self._apply_joint_coupon_ko_projection_2d(
+                    U, core, product, env, T, tau, ko_record, obs_idx,
+                    base_payoff, df,
+                )
+            # Degenerate fallback (non-positive barriers): project the inner
+            # coupon jump into the payoff profile, then the KO transition.
             if obs_idx is not None and 0 <= obs_idx < self._coupon_amounts.shape[0]:
                 total = self._project_event_values(
                     core.S_grid,
@@ -769,6 +779,66 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         U[ko_mask, :] = total[ko_mask, None]
         return U
 
+    def _joint_coupon_ko_active_2d(self, ko_record, obs_idx) -> bool:
+        """Coincident coupon + KO handled as ONE piecewise projection."""
+        if obs_idx is None or ko_record is None or ko_record.barrier is None:
+            return False
+        if not (0 <= obs_idx < self._coupon_barriers.shape[0]):
+            return False
+        return (
+            float(ko_record.barrier) > 0.0
+            and float(self._coupon_barriers[obs_idx]) > 0.0
+        )
+
+    def _apply_joint_coupon_ko_projection_2d(
+        self, U, core, product, env, T, tau, ko_record, obs_idx, base_payoff, df
+    ):
+        """One-pass cell average of the coincident coupon + KO event,
+        slice-wise over the variance dimension [2026-07-24 review, finding 3].
+
+        Regions of the contractual post-event value:
+            KO:             (base + coupon_amt * 1_pay) * df
+            survive & pay:  U + coupon (coupon settlement discount)
+            survive & miss: U
+        """
+        current_time = max(T - float(tau), 0.0)
+        settlement_time = (
+            T
+            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+            else current_time
+        )
+        coupon_discount = self._df_between_times(env, current_time, settlement_time)
+        coupon_amt = float(self._coupon_amounts[obs_idx])
+        coupon_value = coupon_amt * coupon_discount
+        n = core.S_grid.shape[0]
+        x_vec = np.log(np.asarray(core.S_grid, dtype=float))
+        trig_up = not bool(product.is_reverse)
+        b_c_x = np.log(float(self._coupon_barriers[obs_idx]))
+        b_ko_x = np.log(float(ko_record.barrier))
+        breaks = sorted((b_c_x, b_ko_x))
+        lows = [-np.inf] + breaks
+        his = breaks + [np.inf]
+        branches = []
+        for j in range(len(breaks) + 1):
+            if trig_up:
+                m_ko = b_ko_x <= lows[j]
+                m_pay = b_c_x <= lows[j]
+            else:
+                m_ko = his[j] <= b_ko_x
+                m_pay = his[j] <= b_c_x
+            if m_ko:
+                branches.append(
+                    np.full(
+                        (n, 1),
+                        (base_payoff + (coupon_amt if m_pay else 0.0)) * df,
+                    )
+                )
+            elif m_pay:
+                branches.append(U + coupon_value)
+            else:
+                branches.append(U)
+        return project_piecewise_event(x_vec, breaks, branches)
+
     def _should_apply_ki(self, tau: float, event_maps) -> tuple[bool, Optional[float]]:
         if self._ki_continuous:
             return True, float(self._ki_barrier)
@@ -797,12 +867,28 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             U[mask, :] = v1[mask, :]
         return U
 
+    def _hook_coupon_is_joint(self, tau, T, event_maps, k, obs_idx) -> bool:
+        """True when the KO site will apply the coincident coupon fan-in as
+        part of ONE piecewise projection (skip the standalone coupon)."""
+        if obs_idx is None or k is None:
+            return False
+        if not self._use_cell_average_events():
+            return False
+        if is_close(float(tau), float(T)):
+            return False
+        recs = event_maps["ko"].get(k, [])
+        if len(recs) != 1:
+            return False
+        return self._joint_coupon_ko_active_2d(recs[0], obs_idx)
+
     def _v1_hook(self, core, product, env, T, event_maps, snapshots):
         def hook(U, tau):
             self._capture_t0_pre_event_surface(U, tau, T, event_maps)
             k = self._hook_tau_key(tau, event_maps["dt"])
             obs_idx = None if k is None else event_maps["coupon"].get(k)
-            if obs_idx is not None:
+            if obs_idx is not None and not self._hook_coupon_is_joint(
+                tau, T, event_maps, k, obs_idx
+            ):
                 U = self._apply_coupon(U, core, product, env, T, tau, obs_idx)
             if k is not None:
                 for rec in event_maps["ko"].get(k, []):
@@ -817,7 +903,9 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             self._capture_t0_pre_event_surface(U, tau, T, event_maps)
             k = self._hook_tau_key(tau, event_maps["dt"])
             obs_idx = None if k is None else event_maps["coupon"].get(k)
-            if obs_idx is not None:
+            if obs_idx is not None and not self._hook_coupon_is_joint(
+                tau, T, event_maps, k, obs_idx
+            ):
                 U = self._apply_coupon(U, core, product, env, T, tau, obs_idx)
             if product.has_ki_barrier:
                 should_apply, barrier = self._should_apply_ki(tau, event_maps)

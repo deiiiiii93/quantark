@@ -166,6 +166,68 @@ def project_breach_jump(
     return out
 
 
+def project_piecewise_event(
+    x_vec: np.ndarray,
+    breaks,
+    branches,
+) -> np.ndarray:
+    """Dual-cell average of a piecewise event function with K thresholds.
+
+    ``breaks`` are sorted ascending thresholds b_1 <= ... <= b_K; region j
+    (0-based) is ``{b_j <= x < b_(j+1)}`` with b_0 = -inf and b_(K+1) = +inf,
+    and ``branches[j]`` (scalar, (n,) or (n, k)) is the function active on
+    region j. Away from the thresholds each node keeps the pointwise value of
+    the region containing it; a dual cell crossed by one or more thresholds
+    receives the exact cell average of the complete composite piecewise-linear
+    function — the one-pass generalization of ``project_event_values`` that
+    composite triggers (e.g. a phoenix coupon and KO sharing a dual cell)
+    require: projecting sequentially double-averages the shared cell
+    [2026-07-24 review, finding 3]. Equal thresholds simply produce an empty
+    region. For K=1 this matches ``project_event_values`` with
+    ``breach_up=True`` up to FP arithmetic (branch values are assigned
+    directly instead of via ``v_s + (v_b - v_s) * frac``).
+    """
+    x_vec = np.asarray(x_vec, dtype=float)
+    n = x_vec.shape[0]
+    breaks = [float(b) for b in breaks]
+    if any(b2 < b1 for b1, b2 in zip(breaks, breaks[1:])):
+        raise ValueError("breaks must be sorted ascending")
+    if len(branches) != len(breaks) + 1:
+        raise ValueError("need exactly len(breaks) + 1 branches")
+
+    arrs = [np.asarray(v, dtype=float) for v in branches]
+    if all(a.ndim == 0 for a in arrs):
+        arrs = [np.full(n, float(a)) for a in arrs]
+    else:
+        arrs = [np.array(a, dtype=float) for a in np.broadcast_arrays(*arrs)]
+
+    region_of_node = np.searchsorted(breaks, x_vec, side="right")
+    stacked = np.stack(arrs)
+    out = np.array(stacked[region_of_node, np.arange(n)], dtype=float)
+
+    edges = _dual_cell_edges(x_vec)
+    for i in sorted(
+        {
+            s[0]
+            for s in (_straddle_cell(x_vec, edges, b) for b in breaks)
+            if s is not None
+        }
+    ):
+        e_lo, e_hi = float(edges[i]), float(edges[i + 1])
+        cuts = (
+            [e_lo]
+            + sorted({b for b in breaks if e_lo < b < e_hi})
+            + [e_hi]
+        )
+        total = np.zeros(arrs[0].shape[1:], dtype=float)
+        for a, c in zip(cuts[:-1], cuts[1:]):
+            mid = 0.5 * (a + c)
+            r = int(np.searchsorted(breaks, mid, side="right"))
+            total = total + _pl_integral(x_vec, arrs[r], a, c)
+        out[i] = total / (e_hi - e_lo)
+    return out
+
+
 def project_event_values(
     x_vec: np.ndarray,
     b_x: float,

@@ -326,6 +326,184 @@ class TestProjectEventValues:
 # ---------------------------------------------------------------------------
 
 
+class TestProjectPiecewiseEvent:
+    """Review 2026-07-24 finding 3: adjacent composite triggers (phoenix
+    coupon + KO sharing a dual cell) must be projected in ONE pass — the
+    exact cell average of the complete piecewise contractual function —
+    not by projecting the coupon jump and then projecting that smoothed
+    profile through the KO threshold."""
+
+    def test_reduces_to_two_branch_projector(self):
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_event_values,
+            project_piecewise_event,
+        )
+
+        x = _nonuniform_x()
+        rng = np.random.default_rng(11)
+        v_s = rng.uniform(-2.0, 5.0, size=x.size)
+        v_b = rng.uniform(-2.0, 5.0, size=x.size)
+        edges = np.concatenate(([x[0]], 0.5 * (x[1:] + x[:-1]), [x[-1]]))
+        b = float(edges[17] + 0.4 * (edges[18] - edges[17]))
+        out = project_piecewise_event(x, [b], [v_s, v_b])
+        ref = project_event_values(x, b, v_s, v_b, breach_up=True)
+        # 1-ULP tolerance: the two-branch form computes v_s + (v_b - v_s)*1
+        # in fully-breached cells, the piecewise form assigns v_b directly.
+        np.testing.assert_allclose(out, ref, rtol=1e-15, atol=1e-15)
+
+    def test_equal_thresholds_barrier_node_weight_is_half(self):
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_piecewise_event,
+        )
+
+        # coupon threshold == KO threshold on a node: the middle region is
+        # empty and the straddle node must average the two outer branches
+        # with weight exactly 1/2 (the sequential composition distorts it).
+        x = np.array([-1.0, -0.5, 0.0, 0.5, 1.0])
+        low = np.zeros(5)
+        mid = np.full(5, 123.0)  # empty region: must not leak into the result
+        high = np.ones(5)
+        out = project_piecewise_event(x, [0.0, 0.0], [low, mid, high])
+        assert out[2] == pytest.approx(0.5, abs=1e-14)
+        np.testing.assert_allclose(out[:2], 0.0, atol=1e-14)
+        np.testing.assert_allclose(out[3:], 1.0, atol=1e-14)
+
+    def test_two_breaks_in_one_cell_numeric_average(self):
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_piecewise_event,
+        )
+
+        x = _nonuniform_x()
+        rng = np.random.default_rng(12)
+        branches = [rng.uniform(-1.0, 4.0, size=x.size) for _ in range(3)]
+        edges = np.concatenate(([x[0]], 0.5 * (x[1:] + x[:-1]), [x[-1]]))
+        i = 17
+        e_lo, e_hi = float(edges[i]), float(edges[i + 1])
+        b1 = e_lo + 0.3 * (e_hi - e_lo)
+        b2 = e_lo + 0.7 * (e_hi - e_lo)
+        out = project_piecewise_event(x, [b1, b2], branches)
+
+        trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
+        def _pl_int(vals, a, c):
+            pts = np.unique(np.concatenate(([a, c], x[(x > a) & (x < c)])))
+            return float(trapezoid(np.interp(pts, x, vals), pts))
+
+        expected = (
+            _pl_int(branches[0], e_lo, b1)
+            + _pl_int(branches[1], b1, b2)
+            + _pl_int(branches[2], b2, e_hi)
+        ) / (e_hi - e_lo)
+        assert out[i] == pytest.approx(expected, rel=1e-12)
+        # away from the straddle cell: pointwise region values
+        np.testing.assert_allclose(out[:i], branches[0][:i], atol=1e-14)
+        np.testing.assert_allclose(out[i + 1 :], branches[2][i + 1 :], atol=1e-14)
+
+    def test_columns_2d(self):
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_piecewise_event,
+        )
+
+        x = _nonuniform_x()
+        rng = np.random.default_rng(13)
+        branches = [rng.uniform(-1.0, 4.0, size=(x.size, 3)) for _ in range(3)]
+        edges = np.concatenate(([x[0]], 0.5 * (x[1:] + x[:-1]), [x[-1]]))
+        b1 = float(edges[10] + 0.4 * (edges[11] - edges[10]))
+        b2 = float(edges[20] + 0.6 * (edges[21] - edges[20]))
+        out = project_piecewise_event(x, [b1, b2], branches)
+        for c in range(3):
+            col = project_piecewise_event(x, [b1, b2], [b[:, c] for b in branches])
+            np.testing.assert_array_equal(out[:, c], col)
+
+    @staticmethod
+    def _joint_phoenix_state(solver):
+        solver._coupon_barriers = np.array([100.0])
+        solver._coupon_amounts = np.array([2.0])
+        solver._total_tau = 1.0
+
+    def test_phoenix_joint_coupon_ko_one_pass(self):
+        """Equal coupon/KO thresholds on a node: the composite event has an
+        empty middle region and the on-threshold node must be the exact cell
+        average of the two outer branches — miss (0) and KO-with-coupon (12)
+        — i.e. 12 * breach_fraction. The sequential coupon-then-KO
+        projection double-averaged the shared cell."""
+        from quantark.asset.equity.engine.pde.event_projection import (
+            breach_fractions,
+        )
+        from quantark.util.enum import CouponPayType
+
+        solver = PhoenixPDESolver(PDEParams())
+        self._joint_phoenix_state(solver)
+        s_vec = np.linspace(60.0, 140.0, 81)
+        x_vec = np.log(s_vec)
+        rec = types.SimpleNamespace(
+            barrier=100.0, payoff=10.0, settlement_time=None, observation_time=0.5
+        )
+        solver._coupon_observation_indices = {5: 0}
+        solver._ko_observation_indices = {5: rec}
+        product = types.SimpleNamespace(
+            is_reverse=False,
+            has_memory_coupon=False,
+            has_ki_barrier=False,
+            coupon_config=types.SimpleNamespace(
+                coupon_pay_type=CouponPayType.INSTANT
+            ),
+        )
+        env = _env()
+        # sloped continuation: for constant branches the sequential
+        # double-average is coincidentally mean-preserving — the defect
+        # only shows against a sloped survive branch.
+        cont = 0.25 * (s_vec - 60.0)
+        grid_v0 = [np.tile(cont[:, None], (1, 8))]
+        grid_v1 = [np.tile(cont[:, None], (1, 8))]
+        solver._apply_step_modifications_vector_surface(
+            grid_v0, grid_v1, x_vec, s_vec, 5, 0.5, product, env
+        )
+        j = 40  # s == 100.0 exactly
+        from quantark.asset.equity.engine.pde.event_projection import (
+            project_piecewise_event,
+        )
+
+        b = np.log(100.0)
+        # one-pass composite: miss keeps the continuation, the (empty)
+        # middle region would pay the coupon, the KO region pays 12.
+        expected = project_piecewise_event(
+            x_vec, [b, b], [cont, cont + 2.0, np.full(81, 12.0)]
+        )
+        np.testing.assert_allclose(grid_v0[0][:, 5], expected, rtol=1e-12)
+        f = float(breach_fractions(x_vec, b, True)[j])
+        assert 0.0 < f < 1.0
+        assert grid_v0[0][j - 2, 5] == cont[j - 2]
+        assert grid_v0[0][j + 2, 5] == 12.0
+
+    def test_vol_phoenix_joint_coupon_ko_one_pass(self):
+        """Same one-pass obligation in the 2D slice-wise application."""
+        from quantark.asset.equity.engine.pde.event_projection import (
+            breach_fractions,
+        )
+        from quantark.util.enum import CouponPayType
+
+        solver = HestonPhoenixPDESolver(_hp(), params=PDEParams())
+        self._joint_phoenix_state(solver)
+        s_grid = np.linspace(60.0, 140.0, 81)
+        core = types.SimpleNamespace(S_grid=s_grid)
+        rec = types.SimpleNamespace(barrier=100.0, payoff=10.0, settlement_time=None)
+        product = types.SimpleNamespace(
+            is_reverse=False,
+            coupon_config=types.SimpleNamespace(
+                coupon_pay_type=CouponPayType.INSTANT
+            ),
+        )
+        env = _heston_env()
+        U = np.zeros((81, 3))
+        out = solver._apply_ko(U, core, product, env, 1.0, 0.5, rec, 0)
+        j = 40
+        f = float(breach_fractions(np.log(s_grid), np.log(100.0), True)[j])
+        assert out[j, 0] == pytest.approx(12.0 * f, rel=1e-12)
+        assert np.all(out[j + 2, :] == 12.0)
+        assert np.all(out[j - 2, :] == 0.0)
+
+
 class TestEventProjectionParam:
     def test_default_is_cell_average(self):
         """Corrected event semantics are the default; "nodal" stays available
