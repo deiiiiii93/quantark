@@ -19,6 +19,8 @@ import numpy as np
 from scipy.linalg import solve_banded
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest
+from quantark.asset.equity.engine.pde.grid.binder import GridLayerMixin
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
 from quantark.asset.equity.product.option.dcn_option import DCNOption
 from quantark.priceenv.term_sampling import TermCoefficients, make_df_fn
@@ -123,8 +125,17 @@ def apply_dcn_events(
     return v0, v1
 
 
-class DCNPDEEngine(BaseEngine):
-    """Two-surface Crank-Nicolson (Rannacher-restarted) DCN engine."""
+class DCNPDEEngine(GridLayerMixin, BaseEngine):
+    """Two-surface Crank-Nicolson (Rannacher-restarted) DCN engine.
+
+    Grid geometry (spatial nodes + daily time nodes) comes from the
+    declarative grid layer; the certified stepping loop and the nodal event
+    semantics validated against the DCN MC engine are unchanged. The
+    engine's daily cadence is expressed as an explicit
+    ``GridConfig(steps_per_day=1.0)`` default: every interior observation /
+    monitoring date is an event node and each daily interval carries exactly
+    one step, reproducing the legacy time grid bit-for-bit.
+    """
 
     engine_type = EngineType.PDE
 
@@ -144,6 +155,45 @@ class DCNPDEEngine(BaseEngine):
         self.s_max_mult = float(s_max_mult)
         self.rannacher_steps = int(rannacher_steps)
         self.concentration = float(concentration)
+        self._grid_binder = None
+
+    def _default_grid_config(self) -> GridConfig:
+        # One step per monitoring interval: DCN's daily observation schedule
+        # IS the time resolution (its certified scheme has no sub-stepping).
+        # steps_per_day=0.1 makes every realistic calendar gap (incl. long
+        # holiday weekends) round to a single fill step under the layer's
+        # max(1, round(interval_days x spd)) rule. Spatial density follows
+        # the engine's legacy knob; max_points tracks it so legacy explicit
+        # densities (e.g. 2401 in the MC gate tests) stay constructible.
+        return GridConfig(
+            points=self.n,
+            steps_per_day=0.1,
+            max_points=max(2000, self.n),
+        )
+
+    def grid_request(self, product, market, tau) -> GridRequest:
+        # The DCN PDE horizon is the final observation date from the grid
+        # context, not the product's nominal maturity; the passed tau is
+        # superseded so external validation compares on equal footing.
+        ctx = build_dcn_grid_context(product)
+        tau = float(ctx.times[-1])
+        interior = tuple(
+            float(t) for t in ctx.times[1:-1] if 0.0 < float(t) < tau
+        )
+        criticals = [
+            market.spot,
+            float(product.ki_barrier),
+            float(product.ko_barrier),
+            float(product.coupon_barrier),
+        ]
+        return GridRequest(
+            tau=tau,
+            bound_anchors=(market.spot, float(product.initial_price)),
+            critical_prices=tuple(p for p in criticals if p and p > 0),
+            hard_lower=None,
+            hard_upper=None,
+            event_times=interior,
+        )
 
     def price(self, product, pricing_env) -> float:
         return self.price_detailed(product, pricing_env).pv
@@ -153,24 +203,33 @@ class DCNPDEEngine(BaseEngine):
         subclasses may return a per-node array (state-dependent local vol)."""
         return float(tc.step_vols[i])
 
-    def price_detailed(self, product, pricing_env) -> DCNPDEResult:
+    def price_detailed(self, product, pricing_env, layout=None) -> DCNPDEResult:
         if not isinstance(product, DCNOption):
             raise PricingError("DCNPDEEngine only supports DCNOption")
         ctx = build_dcn_grid_context(product)
         times = ctx.times
+
+        market = self.market_snapshot(product, pricing_env)
+        tau_h = float(times[-1])
+        if layout is None:
+            layout = self._grid_layer_binder().bind(
+                self.grid_request(product, market, tau_h), market
+            )
+        else:
+            self._external_layout_check(product, pricing_env, layout)
+        if not np.array_equal(layout.time.t, times):
+            raise PricingError(
+                "grid layer time nodes diverge from the DCN observation grid "
+                "(daily cadence must reproduce ctx.times exactly)"
+            )
+        x = layout.spatial.x
+        s_grid = layout.spatial.s
+
         df = make_df_fn(pricing_env)
         tc = TermCoefficients.from_env(
             pricing_env, times, ref_strike=product.initial_price
         )
         s0 = product.initial_price
-        x = _sinh_grid(
-            np.log(self.s_min_mult * s0),
-            np.log(self.s_max_mult * s0),
-            np.log(product.ki_barrier),
-            self.n,
-            self.concentration,
-        )
-        s_grid = np.exp(x)
         notional, part = product.notional, product.participation
 
         obs_at_col = {int(c): j for j, c in enumerate(ctx.obs_cols)}

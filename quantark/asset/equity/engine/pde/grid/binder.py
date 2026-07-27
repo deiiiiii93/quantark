@@ -70,6 +70,64 @@ def validate_external_layout(
         _covered(p, "critical price")
 
 
+class GridLayerMixin:
+    """Grid-layer seam for engines NOT derived from BasePDESolver.
+
+    ``DCNPDEEngine`` and the Phase-3 LV/Heston/SLV engines derive from
+    ``BaseEngine`` and inherit none of the BasePDESolver seam; this mixin
+    supplies the same contract: binder ownership, market snapshot, external
+    -layout validation, and a frozen-layout bump context. Adopters implement
+    ``grid_request(product, market, tau)`` / ``representative_vol`` and may
+    override ``_default_grid_config`` for engine-specific geometry defaults.
+    """
+
+    def _default_grid_accuracy(self) -> str:
+        return "standard"
+
+    def _default_grid_config(self):
+        return None
+
+    def _grid_layer_binder(self, params=None) -> "GridBinder":
+        binder = getattr(self, "_grid_binder", None)
+        if binder is None:
+            accuracy = getattr(params, "accuracy", None) or self._default_grid_accuracy()
+            override = getattr(params, "grid", None) or self._default_grid_config()
+            cache_enabled = bool(getattr(params, "cache_enabled", True)) and (
+                getattr(params, "cache_strategy", "standard") != "disable"
+            )
+            binder = GridBinder(
+                accuracy,
+                override,
+                cache_enabled=cache_enabled,
+                cache_max_entries=int(
+                    getattr(params, "grid_cache_max_entries", 128) or 128
+                ),
+            )
+            self._grid_binder = binder
+        return binder
+
+    def representative_vol(self, product, pricing_env) -> float:
+        tau = product.get_maturity(pricing_env)
+        strike = getattr(product, "strike", pricing_env.spot)
+        return float(pricing_env.get_vol(strike, tau))
+
+    def market_snapshot(self, product, pricing_env) -> MarketSnapshot:
+        tau = product.get_maturity(pricing_env)
+        return MarketSnapshot(
+            spot=float(pricing_env.spot),
+            sigma_ref=self.representative_vol(product, pricing_env),
+            r_ref=float(pricing_env.get_rate(tau)),
+            q_ref=float(pricing_env.get_div_yield(tau)),
+        )
+
+    def _external_layout_check(self, product, pricing_env, layout) -> None:
+        market = self.market_snapshot(product, pricing_env)
+        tau = product.get_maturity(pricing_env)
+        validate_external_layout(
+            layout, self.grid_request(product, market, tau), market
+        )
+
+
 class GridBinder:
     """Engine-owned constructor + LRU cache for grid layouts."""
 
