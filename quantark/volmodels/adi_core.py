@@ -92,7 +92,7 @@ class HestonSLVADICore:
                  use_sparse=False, grid_spot=None, v0_boundary="neumann",
                  grid_style="uniform", barrier=0.0, barrier_is_up=True,
                  rebate=0.0, pay_at_hit=False, barrier_concentrate=0.0,
-                 critical_spots=None, v_grid_power=0.0):
+                 critical_spots=None, v_grid_power=0.0, x_nodes=None):
         self.S0, self.K, self.T, self.r, self.q = s0, strike, T, r, carry
         self.kappa, self.theta, self.sigma, self.rho, self.v0 = (
             params.kappa, params.theta, params.sigma, params.rho, params.v0,
@@ -168,7 +168,45 @@ class HestonSLVADICore:
             else:
                 self.x_min = x_b
 
-        if self._uniform:
+        # Externally supplied S-axis nodes (declarative grid layer, spec
+        # §4.6): the log-spot mesh comes from the SAME builder every 1D
+        # solver uses — spot/strike/barrier concentration, bump-frozen —
+        # replacing the internal var_eff width heuristic for adopters. The
+        # nodes are generally non-uniform, so they route through the
+        # concentrated-stencil code path; the variance axis stays internal
+        # (model-specific by design).
+        self._external_x = x_nodes is not None
+        if self._external_x:
+            x_arr = np.asarray(x_nodes, dtype=float)
+            if x_arr.ndim != 1 or x_arr.shape[0] != n_x:
+                raise ValidationError(
+                    f"x_nodes must be a 1-D array of length n_x={n_x}"
+                )
+            if np.any(np.diff(x_arr) <= 0.0):
+                raise ValidationError("x_nodes must be strictly increasing")
+            if self._barrier_active and not (
+                abs(float(x_arr[-1]) - self.x_max) < 1e-12
+                or abs(float(x_arr[0]) - self.x_min) < 1e-12
+            ):
+                raise ValidationError(
+                    "x_nodes must terminate at the active barrier boundary"
+                )
+            self.x_min, self.x_max = float(x_arr[0]), float(x_arr[-1])
+            self.X_grid = x_arr
+            self.use_sparse = False  # injected meshes use batched-Thomas
+
+        if self._uniform and self._external_x:
+            # Injected S nodes + uniform variance request: general stencils
+            # on the (non-uniform) injected mesh, plain linspace variance.
+            self.V_grid = np.linspace(0.0, self.V_max, n_v)
+            self._xx = fd2_interior_coeffs(self.X_grid)
+            self._x1 = fd1_interior_coeffs(self.X_grid)
+            self._vv = fd2_interior_coeffs(self.V_grid)
+            self._v1 = fd1_interior_coeffs(self.V_grid)
+            self.dx = None  # scalar spacing undefined on an injected mesh
+            self.dV = None
+            self._uniform = False  # march takes the general-stencil path
+        elif self._uniform:
             self.X_grid = np.linspace(self.x_min, self.x_max, n_x)
             self.V_grid = np.linspace(0.0, self.V_max, n_v)
             self.dx = float(self.X_grid[1] - self.X_grid[0])
@@ -183,20 +221,21 @@ class HestonSLVADICore:
             critical_levels = _positive_spot_levels(critical_spots)
             # Concentration center: caller-supplied critical level when provided
             # (for barriers/exotics), else ln K (the vanilla payoff kink).
-            if concentration_levels:
-                xk = float(np.log(concentration_levels[0]))
-                conc = max(0.06 * x_width, 1e-6)   # tight cluster around the selected critical level
-            else:
-                xk = float(np.log(max(self.K, 1e-12)))
-                conc = max(0.25 * x_width, 1e-6)
-            xk = min(max(xk, self.x_min), self.x_max)
-            self.X_grid = concentrated_grid(self.x_min, self.x_max, xk, n_x, concentration=conc)
-            pin_targets = [
-                float(np.log(level))
-                for level in concentration_levels + critical_levels
-                if level > 0.0 and self.x_min < float(np.log(level)) < self.x_max
-            ]
-            self.X_grid = _pin_grid_targets(self.X_grid, pin_targets)
+            if not self._external_x:
+                if concentration_levels:
+                    xk = float(np.log(concentration_levels[0]))
+                    conc = max(0.06 * x_width, 1e-6)   # tight cluster around the selected critical level
+                else:
+                    xk = float(np.log(max(self.K, 1e-12)))
+                    conc = max(0.25 * x_width, 1e-6)
+                xk = min(max(xk, self.x_min), self.x_max)
+                self.X_grid = concentrated_grid(self.x_min, self.x_max, xk, n_x, concentration=conc)
+                pin_targets = [
+                    float(np.log(level))
+                    for level in concentration_levels + critical_levels
+                    if level > 0.0 and self.x_min < float(np.log(level)) < self.x_max
+                ]
+                self.X_grid = _pin_grid_targets(self.X_grid, pin_targets)
             if self.sig_eff > 0.0:
                 t_probe = np.array([0.25 * T, 0.5 * T, T])
                 try:

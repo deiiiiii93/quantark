@@ -362,7 +362,10 @@ def test_snowball_heston_pde_auto_grid_focuses_ki():
     assert solver._grid_concentration_spot(product, env) == pytest.approx(80.0)
 
     core = solver._make_core(product, env, product.get_maturity(env))
-    assert float(np.min(np.abs(core.S_grid - 80.0))) == pytest.approx(0.0, abs=1e-10)
+    # Grid-redesign §4.4: barriers are CONCENTRATION targets, not pinned
+    # nodes (cell-average projection is placement-independent); the
+    # invariant is eps_crit-tight local spacing at the barrier.
+    assert float(np.min(np.abs(core.S_grid - 80.0))) / 80.0 < 0.003
 
 
 def test_snowball_heston_pde_can_pin_critical_spots_for_diagnostics():
@@ -373,8 +376,11 @@ def test_snowball_heston_pde_can_pin_critical_spots_for_diagnostics():
     )
 
     core = solver._make_core(product, env, product.get_maturity(env))
+    # Grid-redesign §4.4: every critical level gets eps_crit-tight LOCAL
+    # spacing from the shared spatial builder (exact pinning retired with
+    # the placement-independent cell-average projection).
     for level in [80.0, 100.0, 103.0]:
-        assert float(np.min(np.abs(core.S_grid - level))) == pytest.approx(0.0, abs=1e-10)
+        assert float(np.min(np.abs(core.S_grid - level))) / level < 0.003
 
 
 def test_snowball_heston_pde_grid_focus_override_keeps_legacy_ko_focus():

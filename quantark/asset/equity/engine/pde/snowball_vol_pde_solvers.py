@@ -62,10 +62,6 @@ def event_damped_step_keys(params, event_maps, n_t: int):
 
 class LocalVolSnowballPDESolver(SnowballPDESolver):
 
-    def _uses_grid_layer(self) -> bool:
-        # Phase-3 consumer: keeps the legacy grid path until the
-        # LV/2D migration (plan Tasks 20b/21) wires the layer in.
-        return False
     """Two-surface Snowball PDE with Dupire local volatility on the S grid."""
 
     engine_type = EngineType.PDE
@@ -254,6 +250,32 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         self.grid_focus = grid_focus
         self.pin_critical_spots = bool(pin_critical_spots)
 
+    def representative_vol(self, product, pricing_env) -> float:
+        # sqrt(var_eff) with var_eff ported VERBATIM from the adi_core x-width
+        # computation (max of theta, v0, 0.25*sig_eff^2, 0.04; eta=1 here).
+        p = self.model_params
+        var_eff = max(p.theta, p.v0, 0.25 * (p.sigma * p.sigma), 0.04)
+        return float(np.sqrt(var_eff))
+
+    def _layer_x_nodes(self, product: SnowballOption, env: PricingEnvironment, T: float):
+        """S-axis nodes from the declarative grid layer (spec 4.6, Phase 3).
+
+        One spatial builder for 1D and 2D: spot/strike/barrier concentration,
+        bump-stable, shareable. num_std=8 preserves the certified adi_core
+        domain width (8*sqrt(var_eff*T)); the time axis stays the solver's
+        uniform ADI grid (event-aligned 2D time is a recorded deferral).
+        """
+        from quantark.asset.equity.engine.pde.grid import GridBinder, GridConfig
+
+        market = self.market_snapshot(product, env)
+        request = self.grid_request(product, market, float(T))
+        binder = GridBinder(
+            "standard",
+            GridConfig(points=int(self.n_x), num_std=8.0),
+            cache_enabled=self._is_cache_enabled(),
+        )
+        return binder.bind(request, market).spatial.x
+
     def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
         t_grid = np.linspace(0.0, float(T), self.n_t + 1)
         market = TermMarketContext.from_env(
@@ -261,6 +283,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             t_grid,
             ref_strike=None,
         )
+        x_nodes = self._layer_x_nodes(product, env, T)
         return HestonSLVADICore(
             float(env.spot),
             float(product.strike),
@@ -281,6 +304,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                 if self.pin_critical_spots
                 else None
             ),
+            x_nodes=x_nodes,
         )
 
     def _primary_barrier(self, product: SnowballOption) -> float:
@@ -719,6 +743,7 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
             t_grid,
             ref_strike=None,
         )
+        x_nodes = self._layer_x_nodes(product, env, T)
         return HestonSLVADICore(
             float(env.spot),
             float(product.strike),
@@ -739,4 +764,5 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
                 if self.pin_critical_spots
                 else None
             ),
+            x_nodes=x_nodes,
         )
