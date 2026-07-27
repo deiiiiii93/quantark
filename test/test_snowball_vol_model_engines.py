@@ -388,6 +388,31 @@ def test_structured_model_pde_bump_contexts_clone_full_state():
         assert float(ctx.price(product, env)) == pytest.approx(base, rel=1e-12)
 
 
+def test_heston_2d_bump_context_freezes_s_axis():
+    """The 2D bump context must freeze the ADI S-axis at the SOLVE
+    configuration (n_x, num_std=8) and reuse it by identity under market
+    bumps — otherwise 2D greeks mix market sensitivity with grid movement."""
+    product = _snowball()
+    env = _env()
+    engine = HestonSnowballPDESolver(_heston(), n_x=48, n_v=18, n_t=16)
+
+    ctx = engine.create_bump_context(product, env)
+    frozen = ctx._frozen_x_layout
+    assert frozen is not None
+    assert frozen.spatial.x.size == 48  # bound at the ADI configuration
+    tau = product.get_maturity(env)
+    for bumped in (
+        _env(s0=101.0),
+        _env(vol=0.22),
+        _env(r=0.04),
+        _env(q=0.02),
+    ):
+        x = ctx._layer_x_nodes(product, bumped, tau)
+        assert x is frozen.spatial.x  # SAME array — no per-bump rebuild
+    # end-to-end: bumped repricing through the frozen clone works
+    assert np.isfinite(float(ctx.price(product, _env(s0=101.0))))
+
+
 def test_snowball_heston_pde_auto_grid_focuses_ki():
     product = _principal_excluded_snowball()
     env = _env()

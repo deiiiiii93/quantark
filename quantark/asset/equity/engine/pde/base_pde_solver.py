@@ -26,6 +26,7 @@ from quantark.asset.equity.engine.pde.grid import (
     MarketSnapshot,
     reject_legacy_resolution_knobs,
     resolve_bound_layout,
+    scheme_config_overlay,
     validate_external_layout,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -387,16 +388,7 @@ class BasePDESolver(BaseEngine):
         full configuration. Transient per-solve state (caches, session packs,
         the active/frozen layouts) is excluded and reset on the clone.
         """
-        transient = (
-            "_grid_binder",
-            "_frozen_base_layout",
-            "_active_layout",
-            "_session_grids",
-            "_session_step_coefficients",
-            "_session_matrix_pack",
-            "_matrix_cache",
-            "_critical_points_cache",
-        )
+        transient = self._bump_transient_attrs()
         saved = {name: getattr(self, name) for name in transient}
         for name in transient:
             setattr(self, name, None)
@@ -408,6 +400,22 @@ class BasePDESolver(BaseEngine):
         clone._matrix_cache = {}
         clone._critical_points_cache = OrderedDict()
         return clone
+
+    def _bump_transient_attrs(self) -> tuple:
+        """Per-solve state excluded from the bump-clone deepcopy (layouts and
+        binder caches hold mappingproxies deepcopy cannot handle; sessions
+        and caches must not leak into clones). Subclasses with extra grid
+        state extend this tuple."""
+        return (
+            "_grid_binder",
+            "_frozen_base_layout",
+            "_active_layout",
+            "_session_grids",
+            "_session_step_coefficients",
+            "_session_matrix_pack",
+            "_matrix_cache",
+            "_critical_points_cache",
+        )
 
     # ------------------------------------------------------------------
     # Declarative grid layer seam (grid redesign spec §4.6)
@@ -473,7 +481,7 @@ class BasePDESolver(BaseEngine):
             reject_legacy_resolution_knobs(self.params)
             self._grid_binder = GridBinder(
                 getattr(self.params, "accuracy", "standard"),
-                getattr(self.params, "grid", None),
+                scheme_config_overlay(self.params),
                 cache_enabled=self._is_cache_enabled(),
                 cache_max_entries=int(
                     getattr(self.params, "grid_cache_max_entries", 128) or 128

@@ -554,6 +554,20 @@ banded solve over this layer) and any book-partitioning helpers.
   request's, and the calendar-roll `rebind_time` path coverage-validates the
   rebound layout (`resolve_bound_layout` is the single shared semantics for
   BasePDESolver and GridLayerMixin).
+- **§4.8 amendment (iteration 2) — 2D S-axis freeze:** the 2D bases hold a
+  SEPARATE frozen slot (`_frozen_x_layout`, bound by a binder at the ADI
+  solve configuration `points=n_x, num_std=8`) consumed by
+  `_layer_x_nodes` via `resolve_bound_layout`; the base `_frozen_base_layout`
+  stays intact for inherited 1D sub-paths (event-stats machinery).
+- **§4.5/§4.7 amendment (iteration 2) — live scheme knobs:** the binder
+  derives `GridConfig.terminal_damping_steps` from
+  `use_rannacher`/`rannacher_steps` and `event_damping_steps` from
+  `rannacher_at_events`/`event_rannacher_steps`
+  (`scheme_config_overlay`); explicit GridConfig fields win. This makes the
+  §6b "surviving characterization knobs" genuinely live on the layer path.
+- **§9.2 amendment (iteration 2):** session-prep grid fingerprints call
+  `_prepare_for_request` first so BGK-resolved geometry is fingerprinted
+  consistently with what `_grids_via_layer` builds.
 
 ## 7. Risks & mitigations
 

@@ -490,3 +490,33 @@ class TestCodeGateRegressions:
                 engine, PricingRequest(product=product, pricing_env=env)
             )
         assert outcome.value == direct
+
+
+class TestBGKPreparedSession:
+    """Stage-6 iteration-2 finding: grid_state fingerprinted the PRE-BGK
+    request (251 discrete-KI event nodes), the build activated BGK (11
+    nodes), and capture-and-reverify raised DeterminismViolation against
+    the solver's own preparation. The fingerprint must resolve solve state
+    (_prepare_for_request) first, exactly like _grids_via_layer."""
+
+    def test_bgk_prepared_session_matches_direct(self):
+        import sys
+
+        sys.path.insert(0, "test")
+        from test_bgk_continuous_ki import _daily_ki_snowball, _env
+
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.param import PDEParams
+        from quantark.util.enum import KnockInMonitoringMode
+
+        engine = SnowballPDESolver(
+            PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        )
+        product = _daily_ki_snowball()
+        env = _env()
+        direct = float(engine.price(product, env))
+        with PricingSession() as session:
+            session_px = session.execute(
+                engine, PricingRequest(product=product, pricing_env=env)
+            ).value
+        assert float(session_px) == direct

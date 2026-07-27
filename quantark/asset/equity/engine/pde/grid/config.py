@@ -85,6 +85,39 @@ _LEGACY_KNOB_REPLACEMENTS = {
 }
 
 
+def scheme_config_overlay(params) -> Optional[GridConfig]:
+    """Compose the expert GridConfig with the LIVE scheme knobs (spec §6b).
+
+    ``use_rannacher``/``rannacher_steps`` own terminal damping and
+    ``rannacher_at_events``/``event_rannacher_steps`` own event damping —
+    they are the documented surviving characterization controls, so the
+    binder derives the damping schedule from them. Explicit GridConfig
+    fields still win (expert overlay beats scheme knobs); at default knob
+    values the result is identical to the accuracy profile.
+    """
+    from dataclasses import fields as dc_fields
+
+    base = getattr(params, "grid", None)
+    merged = {
+        "terminal_damping_steps": (
+            int(getattr(params, "rannacher_steps", 1))
+            if getattr(params, "use_rannacher", True)
+            else 0
+        ),
+        "event_damping_steps": (
+            int(getattr(params, "event_rannacher_steps", 2))
+            if getattr(params, "rannacher_at_events", True)
+            else 0
+        ),
+    }
+    if base is not None:
+        for f in dc_fields(GridConfig):
+            v = getattr(base, f.name)
+            if v is not None:
+                merged[f.name] = v
+    return GridConfig(**merged)
+
+
 def reject_legacy_resolution_knobs(params) -> None:
     """Raise if a grid-layer solver received non-default legacy knobs.
 

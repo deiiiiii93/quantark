@@ -118,3 +118,46 @@ def test_external_layout_check_accepts_and_rejects():
 
     with pytest.raises(ValidationError):
         _Shifted()._external_layout_check(OPTION, env, layout)
+
+
+def test_scheme_knobs_drive_layout_damping():
+    """spec §6b: use_rannacher/rannacher_steps own terminal damping and
+    rannacher_at_events/event_rannacher_steps own event damping — the binder
+    derives the damping schedule from the LIVE PDEParams controls, with an
+    explicit GridConfig field still winning (expert overlay)."""
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+
+    def cfg(**kw):
+        return _MigratedProbe(params=PDEParams(**kw)).grid_binder.config
+
+    # defaults mirror the profile exactly (no repricing at default knobs)
+    assert (cfg().terminal_damping_steps, cfg().event_damping_steps) == (1, 2)
+    # disabled -> zero damping steps
+    off = cfg(use_rannacher=False, rannacher_at_events=False)
+    assert (off.terminal_damping_steps, off.event_damping_steps) == (0, 0)
+    # explicit step counts flow through
+    multi = cfg(rannacher_steps=3, event_rannacher_steps=1)
+    assert (multi.terminal_damping_steps, multi.event_damping_steps) == (3, 1)
+    # explicit GridConfig beats the scheme knobs
+    expert = cfg(use_rannacher=False, grid=GridConfig(terminal_damping_steps=2))
+    assert expert.terminal_damping_steps == 2
+
+
+def test_scheme_knobs_reach_the_time_layout():
+    """End-to-end: disabled damping produces empty frozensets on the bound
+    layout; multi-step terminal damping produces that many steps."""
+    env = create_pricing_env()
+
+    off = _MigratedProbe(
+        params=PDEParams(use_rannacher=False, rannacher_at_events=False)
+    )
+    m = off.market_snapshot(OPTION, env)
+    layout = off.grid_binder.bind(off.grid_request(OPTION, m, 1.0), m)
+    assert layout.time.terminal_damping_steps == frozenset()
+    assert layout.time.event_damping_steps == frozenset()
+
+    multi = _MigratedProbe(params=PDEParams(rannacher_steps=3))
+    layout3 = multi.grid_binder.bind(multi.grid_request(OPTION, m, 1.0), m)
+    assert len(layout3.time.terminal_damping_steps) == 3
+    theta = multi._theta_schedule_from_layout(layout3)
+    assert (theta == 1.0).sum() >= 3  # damped steps are backward Euler

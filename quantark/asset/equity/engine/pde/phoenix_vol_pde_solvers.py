@@ -228,19 +228,55 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         var_eff = max(p.theta, p.v0, 0.25 * (p.sigma * p.sigma), 0.04)
         return float(np.sqrt(var_eff))
 
+    # 2D S-axis binder + frozen layout, SEPARATE from the base 1D slots (see
+    # _Heston2DSnowballPDEBase — same contract).
+    _layer_binder_2d = None
+    _frozen_x_layout = None
+
+    def _layer_binder(self):
+        binder = self._layer_binder_2d
+        if binder is None:
+            from quantark.asset.equity.engine.pde.grid import GridBinder, GridConfig
+
+            binder = GridBinder(
+                "standard",
+                GridConfig(points=int(self.n_x), num_std=8.0),
+                cache_enabled=self._is_cache_enabled(),
+            )
+            self._layer_binder_2d = binder
+        return binder
+
     def _layer_x_nodes(self, product: PhoenixOption, env: PricingEnvironment, T: float):
         """S-axis nodes from the declarative grid layer (spec §4.6, Phase 3);
-        num_std=8 preserves the certified adi_core domain width."""
-        from quantark.asset.equity.engine.pde.grid import GridBinder, GridConfig
+        num_std=8 preserves the certified adi_core domain width. Bump clones
+        route through ``resolve_bound_layout`` so the frozen S-axis is reused
+        by identity (and misuse fails closed) exactly like the 1D path."""
+        from quantark.asset.equity.engine.pde.grid import resolve_bound_layout
 
         market = self.market_snapshot(product, env)
         request = self.grid_request(product, market, float(T))
-        binder = GridBinder(
-            "standard",
-            GridConfig(points=int(self.n_x), num_std=8.0),
-            cache_enabled=self._is_cache_enabled(),
+        layout = resolve_bound_layout(
+            self._layer_binder(), self._frozen_x_layout, request, market
         )
-        return binder.bind(request, market).spatial.x
+        return layout.spatial.x
+
+    def _bump_transient_attrs(self) -> tuple:
+        return super()._bump_transient_attrs() + (
+            "_layer_binder_2d",
+            "_frozen_x_layout",
+        )
+
+    def create_bump_context(self, product, pricing_env):
+        """Freeze BOTH grid slots: the base 1D layout (inherited machinery)
+        and the 2D S-axis layout at the ADI solve configuration."""
+        clone = super().create_bump_context(product, pricing_env)
+        if clone is self:
+            return clone
+        tau = product.get_maturity(pricing_env)
+        market = clone.market_snapshot(product, pricing_env)
+        request = clone.grid_request(product, market, tau)
+        clone._frozen_x_layout = clone._layer_binder().bind(request, market)
+        return clone
 
     def _make_core(self, product: PhoenixOption, env: PricingEnvironment, T: float):
         t_grid = np.linspace(0.0, float(T), self.n_t + 1)

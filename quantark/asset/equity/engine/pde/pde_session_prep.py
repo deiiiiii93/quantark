@@ -131,6 +131,14 @@ def grid_state(engine, product, pricing_env, context) -> ArtifactState:
     capture = _env_capture(pricing_env)
 
     def key_fp():
+        # grid_request depends on resolved solve state (BGK drops the
+        # discrete-KI interior nodes): prepare BEFORE fingerprinting, exactly
+        # as _grids_via_layer does before binding — otherwise the initial
+        # fingerprint captures pre-BGK geometry and reverify (post-build)
+        # sees a different request, a self-inflicted DeterminismViolation.
+        prep = getattr(engine, "_prepare_for_request", None)
+        if prep is not None:
+            prep(product, pricing_env)
         return try_fingerprint(
             (
                 "pde-grid",

@@ -61,6 +61,20 @@ Clean rewrite of the PDE grid construction and event application layer
   dimensions); `PDEEngine.create_bump_context` carries the frozen solver
   instance. Frozen layouts fail closed when reused across different hard
   (absorbing-barrier) bounds, and calendar-roll rebinds coverage-validate.
+- 2D Heston/SLV snowball/phoenix bump contexts freeze the ADI S-axis at the
+  solve configuration (`n_x`, `num_std=8`) and reuse it by identity under
+  market bumps (`_layer_x_nodes` routes through `resolve_bound_layout`);
+  previously the S-axis was rebuilt per bump, mixing grid movement into 2D
+  numerical greeks.
+- The scheme knobs are LIVE on the grid layer: `use_rannacher`/
+  `rannacher_steps` drive terminal damping and `rannacher_at_events`/
+  `event_rannacher_steps` drive event damping (the binder derives the
+  damping schedule from them; explicit `GridConfig` fields still win). At
+  default knob values the schedule is unchanged.
+- Prepared/session PDE pricing resolves solve state
+  (`_prepare_for_request`) before fingerprinting grid geometry — BGK
+  products no longer trip `DeterminismViolation` against their own
+  preparation when an artifact cache is active.
 
 ### Deferred (recorded follow-ups)
 - Event-aligned 2D ADI time axis (uniform march retained).
