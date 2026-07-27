@@ -37,6 +37,12 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         - Terminal condition: rebate inside corridor
     """
 
+    def _uses_grid_layer(self) -> bool:
+        return True
+
+    def grid_request(self, product, market, tau):
+        return self._generic_grid_request(product, market, tau)
+
     def __init__(self, params: Optional[PDEParams] = None):
         """
         Initialize double one-touch option PDE solver.

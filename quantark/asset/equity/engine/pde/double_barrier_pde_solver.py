@@ -33,6 +33,12 @@ class DoubleBarrierPDESolver(BasePDESolver):
         Knock-in = Vanilla - Knock-out
     """
 
+    def _uses_grid_layer(self) -> bool:
+        return True
+
+    def grid_request(self, product, market, tau):
+        return self._generic_grid_request(product, market, tau)
+
     def __init__(self, params: Optional[PDEParams] = None):
         """
         Initialize double barrier option PDE solver.

@@ -200,6 +200,8 @@ class BasePDESolver(BaseEngine):
         # Frozen base-market layout set by create_bump_context clones: every
         # bumped re-solve reuses it (theta rolls rebind time only, §4.8).
         self._frozen_base_layout = None
+        # Layout bound for the CURRENT solve (None on the legacy path).
+        self._active_layout = None
         # Discrete-monitoring state shared by the barrier-family solvers
         # (populated by _setup_observation_indices).
         self._observation_indices: set = set()
@@ -499,6 +501,55 @@ class BasePDESolver(BaseEngine):
         """Layer-path observation bookkeeping hook (no-op in the base;
         autocallable solvers derive their index maps from layout.step_of)."""
 
+    def _generic_grid_request(
+        self, product: BaseEquityProduct, market: MarketSnapshot, tau: float
+    ) -> GridRequest:
+        """Shared declaration for the simple 1D solvers (spec §4.6 notes).
+
+        - anchors: spot + strike;
+        - criticals: spot, strike, and any product barriers;
+        - hard bounds: CONTINUOUS knock-out barriers are absorbing domain
+          edges (single barriers set exactly one side) — ported verbatim
+          from the legacy `_resolve_spatial_bounds` clamping;
+        - event times: the generic observation schedule (discretely observed
+          barrier/touch variants), interior only.
+        """
+        spot = market.spot
+        strike = float(getattr(product, "strike", spot) or spot)
+        barriers = [b for b in self._get_barriers(product) if b and b > 0]
+
+        hard_lower = hard_upper = None
+        obs_type = getattr(product, "observation_type", None)
+        is_ko = getattr(product, "is_knock_out", False)
+        if obs_type == ObservationType.CONTINUOUS and is_ko:
+            if hasattr(product, "lower_barrier") and hasattr(product, "upper_barrier"):
+                lb = getattr(product, "lower_barrier", 0) or 0
+                ub = getattr(product, "upper_barrier", 0) or 0
+                hard_lower = float(lb) if lb > 0 else None
+                hard_upper = float(ub) if ub > 0 else None
+            elif hasattr(product, "barrier"):
+                b = getattr(product, "barrier", 0) or 0
+                if b > 0:
+                    if getattr(product, "is_up_barrier", False):
+                        hard_upper = float(b)
+                    else:
+                        hard_lower = float(b)
+
+        events = [
+            float(t)
+            for t in (self._get_event_times(product, tau) or [])
+            if 0.0 < float(t) < tau
+        ]
+        criticals = [spot, strike] + barriers
+        return GridRequest(
+            tau=tau,
+            bound_anchors=(spot, strike),
+            critical_prices=tuple(p for p in criticals if p and p > 0),
+            hard_lower=hard_lower,
+            hard_upper=hard_upper,
+            event_times=tuple(sorted(set(events))),
+        )
+
     def _grids_via_layer(
         self,
         product: BaseEquityProduct,
@@ -561,6 +612,22 @@ class BasePDESolver(BaseEngine):
             request=request,
             config_key=self.grid_binder.config.key,
         )
+
+    def _theta_schedule_from_layout(self, layout: Layout) -> np.ndarray:
+        """Per-step theta from the layout's damping frozensets (spec §4.5).
+
+        theta = 1.0 on terminal-damped steps (wins on overlap),
+        event_theta on event-damped steps, params.theta elsewhere.
+        """
+        params = self.params
+        n = layout.time.actual_steps
+        theta = np.full(n, float(params.theta))
+        for k in layout.time.event_damping_steps:
+            theta[k] = float(getattr(params, "event_theta", 1.0))
+        for k in layout.time.terminal_damping_steps:
+            theta[k] = 1.0
+        return theta
+
 
     def _bound_layout_for_solve(
         self, request: GridRequest, market: MarketSnapshot
@@ -1482,12 +1549,15 @@ class BasePDESolver(BaseEngine):
 
         # Canonical damping schedule (terminal Rannacher + event smoothing),
         # shared with all other sweeps via BackwardOperator.theta_by_step.
-        theta_by_step = BackwardOperator.theta_by_step(
-            np.asarray(t_vec),
-            np.asarray(dt_vec),
-            params,
-            self._get_event_times(product, tau),
-        )
+        if getattr(self, "_active_layout", None) is not None:
+            theta_by_step = self._theta_schedule_from_layout(self._active_layout)
+        else:
+            theta_by_step = BackwardOperator.theta_by_step(
+                np.asarray(t_vec),
+                np.asarray(dt_vec),
+                params,
+                self._get_event_times(product, tau),
+            )
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
@@ -1864,12 +1934,15 @@ class BasePDESolver(BaseEngine):
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)
 
-        theta_by_step = BackwardOperator.theta_by_step(
-            np.asarray(t_vec),
-            np.asarray(dt_vec),
-            self.params,
-            self._get_event_times(product, tau),
-        )
+        if getattr(self, "_active_layout", None) is not None:
+            theta_by_step = self._theta_schedule_from_layout(self._active_layout)
+        else:
+            theta_by_step = BackwardOperator.theta_by_step(
+                np.asarray(t_vec),
+                np.asarray(dt_vec),
+                self.params,
+                self._get_event_times(product, tau),
+            )
         use_banded = self._pack_uses_banded(num_x)
         banded: dict = {}
         saved_matrix, self._matrix_cache = self._matrix_cache, {}

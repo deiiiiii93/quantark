@@ -2029,21 +2029,6 @@ class SnowballPDESolver(BasePDESolver):
 
         return EventSchedule(interior=interior, continuous=continuous)
 
-    def _theta_schedule_from_layout(self, layout: Layout) -> np.ndarray:
-        """Per-step theta from the layout's damping frozensets (spec §4.5).
-
-        theta = 1.0 on terminal-damped steps (wins on overlap),
-        event_theta on event-damped steps, params.theta elsewhere.
-        """
-        params: PDEParams = self.params
-        n = layout.time.actual_steps
-        theta = np.full(n, float(params.theta))
-        for k in layout.time.event_damping_steps:
-            theta[k] = float(getattr(params, "event_theta", 1.0))
-        for k in layout.time.terminal_damping_steps:
-            theta[k] = 1.0
-        return theta
-
     def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
         """Decoupled time-grid concerns for autocallables (spec §4 Component 1).
 

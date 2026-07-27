@@ -38,6 +38,12 @@ class BarrierPDESolver(BasePDESolver):
     the barrier at specified observation times.
     """
 
+    def _uses_grid_layer(self) -> bool:
+        return True
+
+    def grid_request(self, product, market, tau):
+        return self._generic_grid_request(product, market, tau)
+
     # Discrete-monitoring state (_observation_indices, _schedule_records,
     # _terminal_schedule_records, ...) is initialized by BasePDESolver and
     # populated by the shared _setup_observation_indices.

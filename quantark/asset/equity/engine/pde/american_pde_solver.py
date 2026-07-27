@@ -36,6 +36,12 @@ class AmericanPDESolver(BasePDESolver):
     Early exercise constraint:
         At each time step, option value is set to max(intrinsic, continuation)
     """
+
+    def _uses_grid_layer(self) -> bool:
+        return True
+
+    def grid_request(self, product, market, tau):
+        return self._generic_grid_request(product, market, tau)
     
     def __init__(self, params: Optional[PDEParams] = None):
         """

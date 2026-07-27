@@ -32,6 +32,12 @@ class EuropeanPDESolver(BasePDESolver):
         Call: V(0) = 0, V(Smax) ≈ Smax - K*exp(-r*tau)
         Put:  V(0) ≈ K*exp(-r*tau), V(Smax) = 0
     """
+
+    def _uses_grid_layer(self) -> bool:
+        return True
+
+    def grid_request(self, product, market, tau):
+        return self._generic_grid_request(product, market, tau)
     
     def __init__(self, params: Optional[PDEParams] = None):
         """
