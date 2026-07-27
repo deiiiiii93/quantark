@@ -38,23 +38,6 @@ from quantark.util.enum.engine_enums import EngineType
 from .backward_operator import BackwardOperator
 
 
-class TimeGridSpec:
-    """The three orthogonal time-grid concerns (spec §4 Component 1).
-
-    * ``align_times``  — times that MUST be grid nodes exactly: KO/coupon
-      observation dates.  They drive both node alignment and the
-      event-distribution resets, so a misalignment here is a correctness bug.
-    * ``monitor_times`` — extra nodes that improve resolution of a monitored
-      feature (daily-discrete KI) but are not alignment-critical for the
-      value/cashflow.  Empty for European/continuous/no-KI regimes.
-    * ``steps_per_day`` — resolution: fill density between mandatory nodes.
-    """
-
-    align_times: list
-    monitor_times: list = field(default_factory=list)
-    steps_per_day: float = 1.0
-
-
 # Per-market-object memoization for curve lookups and step coefficients.
 # Keyed on the CURVE OBJECTS (rate curve / dividend yield), not the mutable
 # PricingEnvironment: the established market-data update pattern is attribute
@@ -715,35 +698,26 @@ class BasePDESolver(BaseEngine):
 
     def _params_cache_key(self) -> Tuple:
         params: PDEParams = self.params
+        # Post-0.4.0: grid geometry is fingerprinted by the resolved
+        # GridConfig key; surviving scheme/engine knobs listed explicitly.
         return (
+            self.grid_binder.config.key,
             params.grid_size,
             params.time_steps,
-            params.adaptive_grid,
-            params.grid_cache_max_entries,
-            params.auto_grid,
-            params.s_min,
-            params.s_max,
-            params.time_grid_type,
-            params.grade_exponent,
-            params.bus_days_in_year,
-            params.event_steps_per_day,
-            params.event_min_steps_per_interval,
-            params.max_time_steps,
-            params.log_dx_target,
-            params.max_grid_size,
-            params.include_spot_in_critical_points,
-            params.rannacher_at_events,
-            params.event_theta,
-            params.event_rannacher_steps,
-            params.barrier_refine_log_width,
-            params.barrier_refine_levels,
-            params.barrier_domain_expand,
-            params.boundary_mode,
+            params.cache_strategy,
+            params.use_banded_solver,
+            params.event_projection,
             params.theta,
+            params.event_theta,
             params.use_rannacher,
             params.rannacher_steps,
-            params.frozen_critical_points,
-            getattr(params, "ki_monitoring_mode", None),
+            params.rannacher_at_events,
+            params.event_rannacher_steps,
+            params.event_steps_per_day,
+            params.boundary_mode,
+            params.bus_days_in_year,
+            getattr(params, "s_min", 0.0),
+            getattr(params, "s_max", 0.0),
         )
 
     def set_terminal_condition(

@@ -629,9 +629,6 @@ class TestPhoenixCellAverage:
             phoenix_product,
             phoenix_env,
             event_projection="cell_average",
-            auto_grid=False,
-            adaptive_grid=False,
-            time_grid_type="event_aligned",
         )
         nodal_auto = _pde_price(
             phoenix_product, phoenix_env,
@@ -642,9 +639,6 @@ class TestPhoenixCellAverage:
             phoenix_env,
             event_projection="nodal",
             event_rannacher_steps=1,
-            auto_grid=False,
-            adaptive_grid=False,
-            time_grid_type="event_aligned",
         )
         assert abs(proj_auto - proj_unif) / quad_ref < 2e-4
         # (nodal auto-vs-uniform phase sensitivity dropped: auto_grid is
@@ -927,17 +921,24 @@ class TestValuationDateEvents:
             self._phoenix_t0(50.0).get_coupon_payoff(0, year_fraction=0.5)
         )
 
+        # The layer S-mesh sees the coupon barrier as a critical price, so a
+        # b0 change would move nodes; freeze the b0=100 mesh for both prices
+        # (the identity being tested is about the t=0 readout, not the mesh).
+        solver = HestonPhoenixPDESolver(
+            _hp(), params=PDEParams(), n_x=64, n_v=20, n_t=24, grid_focus="spot"
+        )
+        frozen = {}
+        orig_nodes = solver._layer_x_nodes
+
+        def fixed_nodes(product, e, T):
+            if "x" not in frozen:
+                frozen["x"] = orig_nodes(product, e, T)
+            return frozen["x"]
+
+        solver._layer_x_nodes = fixed_nodes
+
         def _price(b0):
-            return float(
-                HestonPhoenixPDESolver(
-                    _hp(),
-                    params=PDEParams(),
-                    n_x=64,
-                    n_v=20,
-                    n_t=24,
-                    grid_focus="spot",
-                ).price(self._phoenix_t0(b0), env)
-            )
+            return float(solver.price(self._phoenix_t0(b0), env))
 
         paid = _price(100.0) - _price(180.0)
         assert paid == pytest.approx(expected, abs=1e-9)
@@ -1023,7 +1024,7 @@ class TestValuationDateEvents:
 class TestEventDampingPolicy:
     def test_event_damping_decoupled_from_auto_grid(self):
         """Damping depends on event regularity, not on the mesh-selection
-        mode: an event-aligned grid built with auto_grid=False must damp
+        mode: an event-aligned grid built with  must damp
         after each discrete event exactly like the auto grid does."""
         from quantark.asset.equity.engine.pde.backward_operator import (
             BackwardOperator,
@@ -1032,7 +1033,6 @@ class TestEventDampingPolicy:
         t_vec = np.linspace(0.0, 1.0, 11)  # event at t=0.5 sits on node 5
         dt_vec = np.diff(t_vec)
         params = PDEParams(
-            auto_grid=False,
             use_rannacher=True,
             rannacher_at_events=True,
             rannacher_steps=1,
@@ -1054,7 +1054,6 @@ class TestEventDampingPolicy:
         t_vec = np.linspace(0.0, 1.0, 11)
         dt_vec = np.diff(t_vec)
         params = PDEParams(
-            auto_grid=False,
             use_rannacher=True,
             rannacher_at_events=False,
             rannacher_steps=1,
@@ -1368,7 +1367,6 @@ class TestDefaultCertification:
             kw["bump_config"] = BumpConfig(spot_bump=spot_bump)
         params = PDEParams(
             event_projection=projection,
-            auto_grid=auto,
             grid_size=n,
             grid=GridConfig(points=max(int(n), 201)),  # layer-path N control
             time_steps=240,  # uniform time grids must land on monthly obs

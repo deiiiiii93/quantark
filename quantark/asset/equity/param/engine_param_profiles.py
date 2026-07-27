@@ -69,32 +69,20 @@ PDE_PARAM_PRESETS: ProfileMap = {
     "fast": {
         "grid_size": 200,
         "time_steps": 100,
-        "auto_grid": True,
     },
     "balanced": {},
     "accurate": {
         "grid_size": 800,
         "time_steps": 400,
-        "auto_grid": True,
     },
     "barrier_sensitive": {
         "grid_size": 600,
         "time_steps": 300,
-        "auto_grid": True,
-        "log_dx_target": 0.002,
-        "barrier_refine_log_width": 0.02,
-        "barrier_refine_levels": 2,
-        "barrier_domain_expand": 0.1,
         "event_steps_per_day": 6,
     },
     "reverse_sensitive": {
         "grid_size": 600,
         "time_steps": 300,
-        "auto_grid": True,
-        "log_dx_target": 0.002,
-        "barrier_refine_log_width": 0.03,
-        "barrier_refine_levels": 2,
-        "barrier_domain_expand": 0.15,
         "event_steps_per_day": 6,
     },
 }

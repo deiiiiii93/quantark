@@ -102,7 +102,7 @@ def _unit_leverage(s0=100.0):
 def test_local_vol_snowball_pde_matches_flat_bsm_pde():
     product = _snowball()
     env = _env()
-    params = PDEParams(grid_size=90, time_steps=48, auto_grid=False)
+    params = PDEParams(grid_size=90, time_steps=48)
 
     bsm = SnowballPDESolver(params).price(product, env)
     lv = LocalVolSnowballPDESolver(params).price(product, env)
@@ -319,7 +319,7 @@ def test_snowball_vol_model_pde_engines_calculate_event_stats():
     product = _snowball()
     env = _env()
     hp = _heston()
-    params = PDEParams(grid_size=90, time_steps=48, auto_grid=False)
+    params = PDEParams(grid_size=90, time_steps=48)
 
     engines = [
         LocalVolSnowballPDESolver(params),

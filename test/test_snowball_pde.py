@@ -374,7 +374,7 @@ class TestSnowballPDEConvergence:
         for grid_size in [100, 200, 400]:
             solver = SnowballPDESolver(
                 PDEParams(
-                    grid_size=grid_size, time_steps=grid_size // 2, auto_grid=True
+                    grid_size=grid_size, time_steps=grid_size // 2
                 )
             )
             prices.append(solver.price(snowball, env))
@@ -399,7 +399,7 @@ class TestSnowballPDEConvergence:
         prices = []
         for time_steps in [100, 200, 400]:
             solver = SnowballPDESolver(
-                PDEParams(grid_size=200, time_steps=time_steps, auto_grid=False)
+                PDEParams(grid_size=200, time_steps=time_steps)
             )
             prices.append(solver.price(snowball, env))
 
@@ -426,7 +426,7 @@ class TestSnowballPDEKOScheduleCaching:
             )
 
         env = create_pricing_env()
-        params = PDEParams(grid_size=90, time_steps=48, auto_grid=False)
+        params = PDEParams(grid_size=90, time_steps=48)
         SnowballPDESolver.clear_grid_cache()
 
         product = make_product()
@@ -447,8 +447,7 @@ class TestSnowballPDEKOScheduleCaching:
             PDEParams(
                 grid_size=params.grid_size,
                 time_steps=params.time_steps,
-                auto_grid=params.auto_grid,
-                cache_enabled=False,
+                                cache_enabled=False,
             )
         )
         uncached_price = uncached_solver.price(make_product(), env)

@@ -160,16 +160,14 @@ def create_pricing_env(
 def create_pde_params(auto_grid: bool = True) -> PDEParams:
     """Create PDE parameters for testing."""
     if auto_grid:
-        return PDEParams(auto_grid=True)
+        return PDEParams()
     else:
         return PDEParams(
             grid_size=252 * 2,
             time_steps=252 * 4,
-            adaptive_grid=False,
-            theta=0.5,
+                        theta=0.5,
             use_rannacher=True,
-            auto_grid=False,
-        )
+                    )
 
 
 def create_mc_params() -> MCParams:

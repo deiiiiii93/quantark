@@ -239,7 +239,7 @@ def freeze_phase4() -> None:
     for name in _PHASE4_REFINED_CASES:
         engine, product, env, _shape = builders[name]()
         refined = type(engine)(
-            params=_pdep(grid_size=180, time_steps=96, auto_grid=False)
+            params=_pdep(grid_size=180, time_steps=96)
         )
         cases[f"{name}::refined"] = _phase4_case_payload(
             refined, product, env,

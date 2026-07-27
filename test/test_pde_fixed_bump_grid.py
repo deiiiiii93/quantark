@@ -85,15 +85,18 @@ def _phoenix() -> PhoenixOption:
 
 
 def _base_spatial_bounds(solver, product, pricing_env):
-    tau = product.get_maturity(pricing_env)
-    spot = pricing_env.spot
-    strike = getattr(product, "strike", spot)
-    rate = pricing_env.get_rate(tau)
-    div = pricing_env.get_div_yield(tau)
-    vol = pricing_env.get_vol(strike, tau)
-    return solver._resolve_spatial_bounds(
-        product, spot, vol, tau, rate, div, solver._get_barriers(product)
+    # Layer-native: bounds come from binding the declarative request.
+    prep = getattr(solver, "_prepare_for_request", None)
+    tau = (
+        prep(product, pricing_env)
+        if prep is not None
+        else product.get_maturity(pricing_env)
     )
+    market = solver.market_snapshot(product, pricing_env)
+    layout = solver.grid_binder.bind(
+        solver.grid_request(product, market, tau), market
+    )
+    return layout.spatial.bounds
 
 
 def _effective_spatial_bounds(solver, product, pricing_env):

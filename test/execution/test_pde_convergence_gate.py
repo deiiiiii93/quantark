@@ -30,7 +30,7 @@ def _session_price(engine, product, env) -> float:
 def test_convergence_gate_production_and_refined(name):
     engine, product, env, _shape = FIXTURE_BUILDERS[name]()
     refined = type(engine)(
-        params=_pdep(grid_size=180, time_steps=96, auto_grid=False)
+        params=_pdep(grid_size=180, time_steps=96)
     )
 
     direct_prod = engine.price(product, env)

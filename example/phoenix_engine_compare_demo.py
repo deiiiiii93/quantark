@@ -212,8 +212,6 @@ def main() -> None:
     pde_params = PDEParams(
         grid_size=args.pde_grid,
         time_steps=args.pde_steps,
-        auto_grid=True,
-        log_dx_target=args.pde_log_dx,
         max_grid_size=args.pde_max_grid,
     )
     mc_params = MCParams(num_paths=args.paths, time_steps=252, seed=42)

@@ -344,8 +344,6 @@ def main():
         PDEParams(
             grid_size=1000,
             time_steps=1000,
-            auto_grid=False,
-            time_grid_type="event_aligned",
         ),
     )
 

@@ -46,6 +46,6 @@ def test_direct_outputs_match_pre_refactor_goldens(name):
 def test_refined_direct_outputs_match_pre_refactor_goldens(name):
     engine, product, env, _shape = FIXTURE_BUILDERS[name]()
     refined = type(engine)(
-        params=_pdep(grid_size=180, time_steps=96, auto_grid=False)
+        params=_pdep(grid_size=180, time_steps=96)
     )
     _assert_case_matches(GOLDENS[f"{name}::refined"], refined, product, env, name)

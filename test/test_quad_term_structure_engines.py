@@ -292,7 +292,7 @@ def test_phoenix_mc_pde_quad_agree_on_term_structure():
         product, env
     )
     px_pde = PhoenixPDESolver(
-        params=PDEParams(grid_size=500, time_steps=500, auto_grid=True)
+        params=PDEParams(grid_size=500, time_steps=500)
     ).price(product, env)
     px_mc = PhoenixMCEngine(
         params=MCParams(num_paths=300_000, time_steps=252, use_qmc=True, seed=7)

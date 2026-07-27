@@ -149,7 +149,7 @@ class TestInjectionSeams:
         from execution.matrix_fixtures import _pdep, _snowball, _eq_flat_env
 
         engine = SnowballPDESolver(
-            _pdep(grid_size=90, time_steps=48, auto_grid=False,
+            _pdep(grid_size=90, time_steps=48,
                   use_banded_solver=True)
         )
         product, env = _snowball(), _eq_flat_env()

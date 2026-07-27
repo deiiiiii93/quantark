@@ -98,7 +98,6 @@ def create_pde_params() -> PDEParams:
     return PDEParams(
         grid_size=300,
         time_steps=100,
-        adaptive_grid=False,
         theta=0.5,  # Crank-Nicolson
         use_rannacher=True
     )

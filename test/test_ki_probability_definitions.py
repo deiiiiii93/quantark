@@ -159,7 +159,7 @@ def test_pde_quad_mc_agree_on_both_ki_definitions_discrete():
     ph = _discrete_ki_phoenix(ki_barrier=75.0)
     q = PhoenixQuadEngine(params=QuadParams(grid_points=801)).calculate_event_stats(ph, env)
     p = PhoenixPDESolver(
-        params=PDEParams(grid_size=500, time_steps=500, auto_grid=True)
+        params=PDEParams(grid_size=500, time_steps=500)
     ).calculate_event_stats(ph, env)
     m = PhoenixMCEngine(
         params=MCParams(num_paths=300_000, time_steps=252, use_qmc=True, seed=7)

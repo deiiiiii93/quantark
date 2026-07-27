@@ -157,7 +157,7 @@ def test_local_vol_snowball_pde_sees_non_flat_rate_and_carry():
     env_term = _term_env()
     product = _snowball()
     solver = LocalVolSnowballPDESolver(
-        PDEParams(grid_size=70, time_steps=36, auto_grid=False)
+        PDEParams(grid_size=70, time_steps=36)
     )
 
     px_term = solver.price(product, env_term)
@@ -171,7 +171,7 @@ def test_local_vol_phoenix_pde_sees_non_flat_rate_and_carry():
     env_term = _term_env()
     product = _phoenix()
     solver = LocalVolPhoenixPDESolver(
-        PDEParams(grid_size=70, time_steps=36, auto_grid=False)
+        PDEParams(grid_size=70, time_steps=36)
     )
 
     px_term = solver.price(product, env_term)

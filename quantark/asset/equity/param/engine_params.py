@@ -408,7 +408,6 @@ class PDEParams(EngineParams):
     Attributes:
         grid_size: Number of spatial grid points (default: 400)
         time_steps: Number of time steps (default: 200)
-        adaptive_grid: Use adaptive grid spacing with Tavella-Randall (default: False)
         cache_enabled: Enable PDE cache usage (default: True)
         cache_strategy: Cache strategy: disable, strict, standard, aggressive (default: standard)
         grid_cache_max_entries: Max cached grids for PDE solvers (default: 128)
@@ -416,16 +415,10 @@ class PDEParams(EngineParams):
         banded_cache_max_entries: Max cached banded systems per solve (default: 512)
         s_min: Lower bound for spatial grid (0 = auto-calculate)
         s_max: Upper bound for spatial grid (0 = auto-calculate)
-        auto_grid: Enable feature-aware default grids (default: True)
-        time_grid_type: Type of time grid - "uniform", "graded", "event_clustered", or "event_aligned"
-        grade_exponent: Exponent for graded time grid (higher = more clustering near maturity)
         bus_days_in_year: Days per year for day-based grid heuristics (from EngineParams, default: 252)
         event_steps_per_day: Steps per day between observation events (default: 4)
-        event_min_steps_per_interval: Minimum steps between consecutive events (default: 10)
         max_time_steps: Upper bound for auto-generated time steps (default: 5000)
-        log_dx_target: Target log-price spacing near critical points for adaptive grids (default: 0.003)
         max_grid_size: Upper bound for auto-generated spatial grid points (default: 2000)
-        include_spot_in_critical_points: Include spot as a critical point when auto_grid is enabled (default: True)
         event_projection: Spatial representation of discrete coupon/KO/KI event
             jumps — "cell_average" (default; conservative dual-cell projection
             that removes the half-cell trigger-phase bias, see
@@ -435,9 +428,6 @@ class PDEParams(EngineParams):
             regardless of auto_grid (default: True)
         event_theta: Theta value applied immediately before event times (default: 1.0)
         event_rannacher_steps: Number of event-adjacent steps using event_theta (default: 2)
-        barrier_refine_log_width: Log-space refinement half-width around barriers (default: 0.0 = disabled)
-        barrier_refine_levels: Number of refinement layers on each side of a barrier (default: 1)
-        barrier_domain_expand: Extra relative domain expansion around barriers (default: 0.0 = disabled)
         boundary_mode: Boundary condition mode (asymptotic, default)
         theta: Finite difference scheme parameter (0.5 = Crank-Nicolson, 1.0 = Backward Euler)
         use_rannacher: Apply Rannacher smoothing for first steps (default: True)
@@ -453,7 +443,6 @@ class PDEParams(EngineParams):
 
     grid_size: int = 400
     time_steps: int = 200
-    adaptive_grid: bool = False
     cache_enabled: bool = True
     cache_strategy: str = "standard"
     grid_cache_max_entries: int = 128
@@ -461,15 +450,12 @@ class PDEParams(EngineParams):
     banded_cache_max_entries: int = 512
 
     # Feature-aware default grids
-    auto_grid: bool = True
 
     # Spatial grid configuration
     s_min: float = 0.0  # Auto-calculate if 0
     s_max: float = 0.0  # Auto-calculate if 0
 
     # Time grid configuration
-    time_grid_type: str = "uniform"  # "uniform", "graded", "event_clustered", "event_aligned"
-    grade_exponent: float = 2.0
 
     # Auto-grid tuning parameters
     # event_steps_per_day: resolution (fill steps per business day) for the
@@ -480,15 +466,11 @@ class PDEParams(EngineParams):
     # because continuously-monitored KI needs the resolution (slow O(1/N)
     # barrier convergence).
     event_steps_per_day: int = 4
-    event_min_steps_per_interval: int = 10
     max_time_steps: int = 5000
-    log_dx_target: float = 0.003
     max_grid_size: int = 2000
-    include_spot_in_critical_points: bool = True
     # When set (by create_bump_context), the spatial grid concentrates on exactly
     # these frozen critical points instead of recomputing them per bump — so a
     # spot bump does not snap the grid to a moved spot [§11.4].
-    frozen_critical_points: Optional[tuple] = None
     # Treatment of discretely-monitored knock-in schedules [§11.6]. EXACT_DISCRETE
     # (default) applies the KI regime jump on every observation date exactly, with
     # an event-aligned grid. BGK_APPROXIMATION is an opt-in performance/robustness
@@ -517,9 +499,6 @@ class PDEParams(EngineParams):
     # SS2.5; d'Halluin-Forsyth-Vetzal 2005); a single full backward-Euler step
     # has no literature support (Giles-Carter 2006 SS4.3).
     event_rannacher_steps: int = 2
-    barrier_refine_log_width: float = 0.0
-    barrier_refine_levels: int = 1
-    barrier_domain_expand: float = 0.0
     boundary_mode: str = "asymptotic"
 
     # Numerical scheme configuration
@@ -573,30 +552,13 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 f"s_min ({self.s_min}) must be less than s_max ({self.s_max})"
             )
-        if self.time_grid_type not in ("uniform", "graded", "event_clustered", "event_aligned"):
-            raise ValidationError(
-                f"time_grid_type must be 'uniform', 'graded', 'event_clustered', or 'event_aligned', "
-                f"got '{self.time_grid_type}'"
-            )
-        if self.grade_exponent <= 0:
-            raise ValidationError(
-                f"grade_exponent must be positive, got {self.grade_exponent}"
-            )
         if self.event_steps_per_day <= 0:
             raise ValidationError(
                 f"event_steps_per_day must be positive, got {self.event_steps_per_day}"
             )
-        if self.event_min_steps_per_interval <= 0:
-            raise ValidationError(
-                f"event_min_steps_per_interval must be positive, got {self.event_min_steps_per_interval}"
-            )
         if self.max_time_steps <= 0:
             raise ValidationError(
                 f"max_time_steps must be positive, got {self.max_time_steps}"
-            )
-        if self.log_dx_target <= 0:
-            raise ValidationError(
-                f"log_dx_target must be positive, got {self.log_dx_target}"
             )
         if self.max_grid_size <= 0:
             raise ValidationError(
@@ -615,18 +577,6 @@ class PDEParams(EngineParams):
         if self.event_rannacher_steps < 0:
             raise ValidationError(
                 f"event_rannacher_steps must be non-negative, got {self.event_rannacher_steps}"
-            )
-        if self.barrier_refine_log_width < 0.0:
-            raise ValidationError(
-                f"barrier_refine_log_width must be non-negative, got {self.barrier_refine_log_width}"
-            )
-        if self.barrier_refine_levels < 0:
-            raise ValidationError(
-                f"barrier_refine_levels must be non-negative, got {self.barrier_refine_levels}"
-            )
-        if self.barrier_domain_expand < 0.0:
-            raise ValidationError(
-                f"barrier_domain_expand must be non-negative, got {self.barrier_domain_expand}"
             )
         if self.boundary_mode not in ("default", "asymptotic"):
             raise ValidationError(

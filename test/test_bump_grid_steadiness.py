@@ -56,7 +56,7 @@ def _snowball():
 
 
 def test_frozen_context_holds_grid_under_spot_bump():
-    solver = SnowballPDESolver(PDEParams(grid_size=200, include_spot_in_critical_points=True))
+    solver = SnowballPDESolver(PDEParams(grid_size=200))
     env = _env()
     product = _snowball()
     bump_engine = solver.create_bump_context(product, env)
@@ -76,7 +76,7 @@ def test_frozen_context_holds_grid_under_spot_bump():
 
 def test_unfrozen_context_grid_moves_under_spot_bump():
     # Contrast: without the bump context, the spot critical point moves the grid.
-    solver = SnowballPDESolver(PDEParams(grid_size=200, include_spot_in_critical_points=True))
+    solver = SnowballPDESolver(PDEParams(grid_size=200))
     env = _env()
     product = _snowball()
     base = solver._solve(product, env)
@@ -87,7 +87,7 @@ def test_unfrozen_context_grid_moves_under_spot_bump():
 
 
 def test_frozen_context_holds_grid_under_rate_and_vol_bumps():
-    solver = SnowballPDESolver(PDEParams(grid_size=200, include_spot_in_critical_points=True))
+    solver = SnowballPDESolver(PDEParams(grid_size=200))
     env = _env()
     product = _snowball()
     bump_engine = solver.create_bump_context(product, env)

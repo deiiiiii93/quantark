@@ -417,11 +417,7 @@ def run_case(
         params=PDEParams(
             grid_size=args.pde_grid,
             time_steps=args.pde_steps,
-            auto_grid=True,
-            time_grid_type="event_aligned",
-            event_min_steps_per_interval=1,
             max_time_steps=args.pde_max_steps,
-            log_dx_target=args.pde_log_dx,
         )
     )
     quad_engine = PhoenixQuadEngine(

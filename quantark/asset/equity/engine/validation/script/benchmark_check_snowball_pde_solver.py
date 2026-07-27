@@ -583,8 +583,8 @@ def create_pde_solver_nonuniform(
         theta=0.5,
         use_rannacher=True,
         rannacher_steps=2,
-        adaptive_grid=True,  # Enable Tavella-Randall non-uniform grid
-        log_dx_target=log_dx_target,  # Target spacing near critical points
+        # Enable Tavella-Randall non-uniform grid
+        # Target spacing near critical points
     )
     return SnowballPDESolver(params=params)
 
@@ -610,7 +610,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
 
     # Fine grid with non-uniform (tighter epsilon)
     pde_solver_nu_fine = create_pde_solver_nonuniform(
-        grid_size=200, time_steps=200, log_dx_target=0.002
+        grid_size=200, time_steps=200
     )
     run_comparison("NonUniform Grid eps=0.2%", snowball, env, pde_solver_nu_fine, mc_engine, results)
 
@@ -738,7 +738,7 @@ def run_nonuniform_grid_tests(results: BenchmarkResults):
 
     mc_engine_fine = create_mc_engine(num_paths=500000)
     pde_solver_nu_fine = create_pde_solver_nonuniform(
-        grid_size=300, time_steps=300, log_dx_target=0.002
+        grid_size=300, time_steps=300
     )
 
     # Spot near KO barrier

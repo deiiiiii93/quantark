@@ -102,16 +102,12 @@ class TestPDEParams:
 
         assert params.grid_size == 400
         assert params.time_steps == 200
-        assert params.adaptive_grid == False
-        assert params.auto_grid == True
-        assert params.time_grid_type == "uniform"
+        assert params.accuracy == "standard"
+        assert params.grid is None
         assert params.bus_days_in_year == 252
         assert params.event_steps_per_day == 4
-        assert params.event_min_steps_per_interval == 10
         assert params.max_time_steps == 5000
-        assert params.log_dx_target == 0.003
         assert params.max_grid_size == 2000
-        assert params.include_spot_in_critical_points == True
         assert params.rannacher_at_events == True
         assert params.theta == 0.5
         assert params.use_rannacher == True
@@ -147,15 +143,9 @@ class TestPDEParams:
         with pytest.raises(ValidationError):
             PDEParams(theta=1.5)
 
-    def test_invalid_time_grid_type(self):
-        """Test that invalid time grid type raises error."""
-        with pytest.raises(ValidationError):
-            PDEParams(time_grid_type="invalid")
-
-    def test_event_aligned_time_grid_type_is_valid(self):
-        """Test that event_aligned time grid type is accepted."""
-        params = PDEParams(time_grid_type="event_aligned")
-        assert params.time_grid_type == "event_aligned"
+    # time_grid_type tests retired with the knob (0.4.0): the grid layer
+    # has ONE time algorithm; accuracy/GridConfig validation is covered in
+    # test/pde_grid/test_grid_config.py.
 
 
 # ============================================================================

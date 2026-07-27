@@ -62,7 +62,6 @@ def _solver(spd: int) -> SnowballPDESolver:
 
     return SnowballPDESolver(
         PDEParams(
-            auto_grid=True,
             event_steps_per_day=spd,
             grid_size=300,
             # declarative layer routing (event_steps_per_day is inert there):

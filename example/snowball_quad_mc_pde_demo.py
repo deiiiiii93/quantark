@@ -462,8 +462,6 @@ def main() -> None:
         elif label == "Standard (spot near KO)":
             pde_params = make_pde_params(
                 profile="barrier_sensitive",
-                barrier_refine_levels=3,
-                log_dx_target=0.0015,
             )
         elif label == "Reverse (cont KI, monthly KO)":
             quad_params = make_quad_params(
@@ -472,7 +470,6 @@ def main() -> None:
             )
             pde_params = make_pde_params(
                 profile="reverse_sensitive",
-                barrier_domain_expand=0.2,
             )
         elif label == "Standard (2Y maturity, monthly KO)":
             quad_params = make_quad_params(
