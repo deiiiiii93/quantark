@@ -34,10 +34,15 @@ FIRST_ORDER = ["delta", "vega", "rho", "dividend_rho"]
 # Pre-change production prices, grid_size=300, captured on main (7d82465) before
 # the Phase 1 grid decoupling. Oracle (b) golden.  daily_ki used ~2520 floor-
 # pinned steps then; euro_ki / monthly_ko grids are unchanged by the redesign.
+# Re-frozen 2026-07-27 on the declarative grid layer (anchor-certified in
+# test/pde_grid/test_anchor_certification.py): the layer's bounds formula and
+# unsnapped concentration intentionally reprice vs the 7d82465 capture
+# (euro_ki 1.1e-4, monthly_ko 2.2e-4 rel). Ongoing value: pins spd=4
+# production prices against accidental drift.
 MAIN_GOLDEN_PRICE = {
     "daily_ki": 988829.544454,
-    "euro_ki": 997451.506968,
-    "monthly_ko": 988294.827274,
+    "euro_ki": 997465.482236,
+    "monthly_ko": 988235.887668,
 }
 
 
@@ -53,11 +58,15 @@ def _solver(spd: int) -> SnowballPDESolver:
     # corrected default (event_projection="cell_average", 2 damping steps,
     # 2026-07-23) intentionally reprices; its gates live in
     # test_pde_event_projection.py.
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+
     return SnowballPDESolver(
         PDEParams(
             auto_grid=True,
             event_steps_per_day=spd,
             grid_size=300,
+            # declarative layer routing (event_steps_per_day is inert there):
+            grid=GridConfig(points=300, steps_per_day=float(spd)),
             event_projection="nodal",
             event_rannacher_steps=1,
         )

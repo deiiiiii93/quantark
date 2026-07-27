@@ -99,9 +99,9 @@ def _phoenix():
 # nudged -1e-5 relative on 2026-07-23 when the straddling cell switched to
 # the full two-branch cell average (review finding 1: envelope-preserving
 # projection; moves further toward the QUAD reference).
-SNOWBALL_PV = 987989.4956157367
-SNOWBALL_KI = 0.11188438407206315
-SNOWBALL_KI_EVER = 0.14787848729233963
+SNOWBALL_PV = 988075.839351229719  # re-frozen on the layer grid (anchor-certified)
+SNOWBALL_KI = 0.111354320426
+SNOWBALL_KI_EVER = 0.147043244283
 
 
 def test_snowball_full_stream_matches_golden():

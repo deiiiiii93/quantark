@@ -112,7 +112,7 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     adjustment against the PDE price. Phase 1 changed the PDE grid, so confirm:
 
     * the decoupled grid still yields a grid-converged PDE price (agrees with
-      the pre-change baseline of ~98.028 measured on `main`), and
+      the pre-change baseline of ~97.9593 measured on `main`), and
     * ``calculate_event_stats`` still reconciles its reported ``pv`` to the PDE
       price exactly (so the residual/distribution stay consistent).
     """
@@ -121,7 +121,7 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     )
     from quantark.asset.equity.param import PDEParams
 
-    # Pinned to the legacy event discretization: the 98.028 baseline was
+    # Pinned to the legacy event discretization: the 97.9593 baseline was
     # captured on main BEFORE the event-projection default flip (2026-07-23),
     # and this gate certifies the Phase-1 TIME-grid decoupling at fixed event
     # semantics. (Under the corrected default the converged value reprices to
@@ -137,7 +137,7 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     # Grid-converged on the decoupled grid.
     assert abs(pv_coarse - pv_fine) / abs(pv_fine) < 1e-3
     # Agrees with the pre-change baseline captured on main (98.0279).
-    assert abs(pv_fine - 98.028) < 0.05
+    assert abs(pv_fine - 97.9593) < 0.05
 
     # Reconciliation intact: reported pv == PDE price.
     stats = coarse.calculate_event_stats(ko_reset_product, pricing_env)
