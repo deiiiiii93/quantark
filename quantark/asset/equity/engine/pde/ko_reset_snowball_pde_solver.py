@@ -207,7 +207,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     def _populate_observation_maps(self, product, pricing_env, layout, tau):
         super()._populate_observation_maps(product, pricing_env, layout, tau)
         self._register_post_ko_observations(
-            product, pricing_env, tau, step_of=layout.time.step_of
+            product, pricing_env, tau, step_of=layout.time.step_at
         )
 
     def _register_post_ko_observations(
@@ -243,7 +243,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 self._has_post_terminal_ko = True
             elif 0.0 < obs_time < tau:
                 if step_of is not None:
-                    idx = step_of[obs_time]
+                    idx = step_of(obs_time)
                 else:
                     idx = self._aligned_time_index(
                         t_vec, obs_time, "Post-KO observation"

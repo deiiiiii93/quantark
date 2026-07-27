@@ -514,7 +514,7 @@ class PhoenixPDESolver(SnowballPDESolver):
                 self._coupon_observation_indices[len(t_vec) - 1] = obs_idx
             elif 0.0 < obs_time < tau:
                 if step_of is not None:
-                    idx = step_of[obs_time]
+                    idx = step_of(obs_time)
                 else:
                     idx = self._aligned_time_index(
                         t_vec, obs_time, "Coupon observation"
@@ -529,7 +529,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         # KO/KI maps (_solve AND the event-stats sweep) — single site.
         super()._populate_observation_maps(product, pricing_env, layout, tau)
         self._register_coupon_observations(
-            product, pricing_env, layout.time.t, tau, step_of=layout.time.step_of
+            product, pricing_env, layout.time.t, tau, step_of=layout.time.step_at
         )
 
     def _accumulated_coupon_amount(self, obs_idx: int, missed_count: int) -> float:

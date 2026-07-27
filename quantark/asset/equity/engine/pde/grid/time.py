@@ -35,6 +35,25 @@ class TimeLayout:
     actual_steps: int
     cap_exceeded: bool
 
+    def step_at(self, obs_time: float) -> int:
+        """Node index for an event-bearing time.
+
+        Exact float hit first (the common case: the verbatim request float).
+        Falls back to an ``is_close`` scan for times that came from a
+        DIFFERENT schedule resolution of the same date (e.g. KO 1/12 vs KI
+        4/48 rounded) — well-defined because construction deduplicates
+        event nodes within the same tolerance, so at most one key matches.
+        """
+        hit = self.step_of.get(obs_time)
+        if hit is not None:
+            return hit
+        from quantark.util.numerical import is_close
+
+        for key, idx in self.step_of.items():
+            if is_close(key, obs_time):
+                return idx
+        raise KeyError(obs_time)
+
 
 def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
     """Build the event-aligned time grid for one product.

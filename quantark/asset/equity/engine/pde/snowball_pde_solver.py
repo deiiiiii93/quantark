@@ -1879,7 +1879,7 @@ class SnowballPDESolver(BasePDESolver):
         self._ki_barrier_by_tidx.clear()
         self._ko_terminal_record = None
         self._has_terminal_ko = False
-        step_of = layout.time.step_of
+        step_of = layout.time.step_at  # tolerance-aware lookup (bound method)
 
         for rec in self._get_cached_ko_records(pricing_env, product):
             obs_time = rec.observation_time
@@ -1891,7 +1891,7 @@ class SnowballPDESolver(BasePDESolver):
                 self._ko_terminal_record = rec
                 self._has_terminal_ko = True
             elif 0.0 < obs_time < tau:
-                self._ko_observation_indices[step_of[obs_time]] = rec
+                self._ko_observation_indices[step_of(obs_time)] = rec
 
         if (
             product.has_ki_barrier
@@ -1917,7 +1917,7 @@ class SnowballPDESolver(BasePDESolver):
                     self._ki_observation_indices.add(idx)
                     self._ki_barrier_by_tidx[idx] = float(barrier)
                 elif 0.0 < obs_time < tau:
-                    idx = step_of[obs_time]
+                    idx = step_of(obs_time)
                     self._ki_observation_indices.add(idx)
                     self._ki_barrier_by_tidx[idx] = float(barrier)
 
@@ -1955,7 +1955,7 @@ class SnowballPDESolver(BasePDESolver):
                 or not (0.0 < t_obs < tau)
             ):
                 continue
-            step = layout.time.step_of[t_obs]
+            step = layout.time.step_at(t_obs)
             cash = self._cashflow_value_at_time(
                 pricing_env=pricing_env,
                 cashflow=rec.payoff if rec.payoff is not None else 0.0,
@@ -1998,7 +1998,7 @@ class SnowballPDESolver(BasePDESolver):
                     barrier = ki_barriers[obs_idx]
                 if barrier is None:
                     barrier = self._ki_barrier
-                step = layout.time.step_of[t_obs]
+                step = layout.time.step_at(t_obs)
                 breach_up = is_reverse  # KI is a down barrier (up if reverse)
 
                 def _ki(states, _b=float(barrier), _up=breach_up):
