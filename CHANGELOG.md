@@ -5,6 +5,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.4.0] - 2026-07-27
+
+Clean rewrite of the PDE grid construction and event application layer
+(spec: `docs/superpowers/specs/2026-07-27-pde-grid-redesign-design.md`).
+
+### Added
+- `quantark.asset.equity.engine.pde.grid`: declarative grid layer —
+  `GridRequest` (frozen geometry), `GridConfig` + accuracy profiles
+  (`fast`/`standard`/`high`), ONE time builder (event-aligned, extras-scaled
+  cap, damping schedules), ONE spatial builder (multi-point sinh, pinned
+  auto-bounds, no barrier snapping), four-stage `EventSchedule`
+  (terminal/interior/continuous/valuation-readout, pure block transforms),
+  engine-owned `GridBinder` (LRU, `bind_shared` for same-underlying books,
+  `rebind_time` for calendar rolls) and `GridLayerMixin` for
+  BaseEngine-derived adopters.
+- `PDEParams(accuracy=..., grid=GridConfig(...))` tiered front door.
+- Frozen-`Layout` bump contexts: spot/vol/rate/div bumps reuse the base
+  layout by object identity; calendar rolls rebind time on the same spatial
+  object.
+- `HestonSLVADICore(x_nodes=...)`: 2D solvers take their S-axis from the
+  shared spatial builder.
+- Tier-2 anchor certification (`test/pde_grid/test_anchor_certification.py`):
+  MC/QUAD/closed-form/smoothness anchors gate every accuracy profile.
+
+### Removed (breaking)
+- Legacy grid modules `time_grid.py`, `spatial_grid.py`,
+  `event_projection.py` (projection math moved verbatim to `grid/events.py`).
+- `PDEParams` knobs: `auto_grid`, `time_grid_type`, `grade_exponent`,
+  `event_min_steps_per_interval`, `log_dx_target`,
+  `include_spot_in_critical_points`, `frozen_critical_points`,
+  `barrier_refine_log_width`, `barrier_refine_levels`,
+  `barrier_domain_expand`, `adaptive_grid`.
+- The class-level shared grid cache (`clear_grid_cache` is now a no-op).
+
+### Changed
+- All PDE prices reprice slightly (re-certified against MC/QUAD/closed-form
+  anchors, goldens re-frozen): the layer builds concentration-based grids
+  without barrier snapping — cell-average event projection is placement-
+  independent — and event-aligned time grids emit one exact dt per interval
+  (operator caches are arithmetic-neutral: cache-on == cache-off bitwise).
+
+### Deferred (recorded follow-ups)
+- Event-aligned 2D ADI time axis (uniform march retained).
+- Standalone vol engines (`LocalVolPDESolver`, `HestonPDESolver`,
+  `HestonSLVPDESolver`, LV/Heston/SLV barrier engines, `HestonDCNPDESolver`)
+  keep bespoke kernels and their `grid_size`/`time_steps`/`s_min`/`s_max`
+  inputs; `event_projection` + Rannacher scheme knobs survive for the live
+  characterization paths.
+- Stencil-delta accuracy on concentrated grids (~2e-3 absolute) —
+  provisional 5e-3 anchor band.
+
 ## [0.3.0] - 2026-07-20
 
 First release of the `quantark.execution` framework kernel and the

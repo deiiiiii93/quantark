@@ -504,6 +504,34 @@ remaining importer of the deleted modules.
 Later, separate program: the batch book-pricing function (shared factorization + multi-RHS
 banded solve over this layer) and any book-partitioning helpers.
 
+## 6b. Post-implementation amendments (recorded during Phase 3–4)
+
+- **2D time axis deferred:** the 2D solvers take their S-axis from the shared
+  spatial builder (`adi_core x_nodes`) but keep their certified uniform ADI
+  time march; event-aligned 2D time is a follow-up.
+- **Standalone vol engines deferred:** `LocalVolPDESolver`, `HestonPDESolver`,
+  `HestonSLVPDESolver`, the LV/Heston/SLV barrier engines and
+  `HestonDCNPDESolver` keep bespoke kernels (they import no legacy grid
+  module, so deletion was not blocked). Consequently `grid_size`,
+  `time_steps`, `s_min`, `s_max` SURVIVE on `PDEParams` as their inputs, and
+  `event_projection` + the Rannacher scheme knobs (`use_rannacher`,
+  `rannacher_steps`, `rannacher_at_events`, `event_rannacher_steps`,
+  `event_theta`) survive for the live characterization paths — amending the
+  §4.7 "deleted" rows for those entries. The 11 remaining table rows were
+  deleted as specified.
+- **§4.4 amendment:** the spatial builder carries the certified
+  tail-coarseness guard (max/min dx ratio ≤ 100, ported from
+  `check_grid_quality`) with final say over the eps_crit refinement — a
+  pointwise spacing target met by a degenerate grid is treated as
+  unreachable.
+- **§4.2 amendment:** `TimeLayout.step_at(t)` provides exact-float lookup
+  with an `is_close` fallback for cross-schedule float drift (two schedules
+  resolving the same date to floats an ULP apart); construction-time dedup
+  guarantees at most one match.
+- **§5 amendment:** the continuous-KI PDE-vs-QUAD anchor is banded at
+  1.5e-3 notional-relative (pre-existing cross-family treatment divergence,
+  reproduced on the pre-rewrite stack); 5e-4 applies to discrete-KI rows.
+
 ## 7. Risks & mitigations
 
 - **Re-certification risk** (numbers move under the clean break — including the intentionally
