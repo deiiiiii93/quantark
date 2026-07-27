@@ -50,6 +50,17 @@ def test_per_side_bounds_kept():
         resolve_config("standard", GridConfig(bounds=(120.0, 80.0)))
 
 
+def test_pdeparams_front_door():
+    from quantark.asset.equity.param import PDEParams
+
+    p = PDEParams(accuracy="high", grid=GridConfig(points=600))
+    assert p.accuracy == "high" and p.grid.points == 600
+    with pytest.raises(ValidationError):
+        PDEParams(accuracy="ultra")
+    with pytest.raises(ValidationError):
+        PDEParams(grid="not-a-config")
+
+
 def test_key_fingerprint():
     assert resolve_config("fast", None).key == resolve_config("fast", None).key
     assert resolve_config("fast", None).key != resolve_config("high", None).key

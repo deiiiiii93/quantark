@@ -444,6 +444,13 @@ class PDEParams(EngineParams):
         rannacher_steps: Number of backward Euler steps for smoothing (default: 1)
     """
 
+    # Declarative grid layer (grid redesign spec §4.7): the tiered front door.
+    # accuracy selects a GridConfig preset (fast/standard/high); grid is the
+    # optional expert overlay (field-by-field override). Typed loosely to
+    # avoid a param -> engine.pde import cycle; validated in __post_init__.
+    accuracy: str = "standard"
+    grid: Optional[object] = None
+
     grid_size: int = 400
     time_steps: int = 200
     adaptive_grid: bool = False
@@ -523,6 +530,23 @@ class PDEParams(EngineParams):
     def __post_init__(self):
         """Validate PDE parameters."""
         super().__post_init__()
+        # Declarative grid layer (lazy import: param must not pull engine.pde
+        # at module load — the solvers import param back).
+        from quantark.asset.equity.engine.pde.grid.config import (
+            ACCURACY_PROFILES,
+            GridConfig,
+        )
+
+        if self.accuracy not in ACCURACY_PROFILES:
+            raise ValidationError(
+                f"accuracy must be one of {sorted(ACCURACY_PROFILES)}, "
+                f"got {self.accuracy!r}"
+            )
+        if self.grid is not None and not isinstance(self.grid, GridConfig):
+            raise ValidationError(
+                f"grid must be a GridConfig, got {type(self.grid).__name__}"
+            )
+
         if self.grid_size <= 0:
             raise ValidationError(f"Grid size must be positive, got {self.grid_size}")
         if self.time_steps <= 0:
