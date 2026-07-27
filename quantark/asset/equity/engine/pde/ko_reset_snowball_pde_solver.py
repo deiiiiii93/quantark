@@ -202,9 +202,47 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         return self._get_cached_pre_ko_records(pricing_env, product)
 
     def _uses_grid_layer(self) -> bool:
-        # Not yet migrated: this solver owns its _solve and would otherwise
-        # inherit the migrated snowball flag (plan Task 13 flips this).
-        return False
+        return True
+
+    def _register_post_ko_observations(
+        self,
+        product: KnockOutResetSnowballOption,
+        pricing_env: PricingEnvironment,
+        tau: float,
+        step_of=None,
+        t_vec=None,
+    ) -> None:
+        """Post-KI (reset) KO index map — exact lookup on the migrated path.
+
+        Also snapshots the pre-KO maps the parent just built (the V0 surface
+        fires the pre schedule; V1 fires the post/reset schedule [§11.7]).
+        """
+        self._pre_ko_observation_indices = dict(self._ko_observation_indices)
+        self._pre_ko_terminal_record = self._ko_terminal_record
+        self._has_pre_terminal_ko = self._has_terminal_ko
+
+        self._post_ko_observation_indices.clear()
+        self._post_ko_terminal_record = None
+        self._has_post_terminal_ko = False
+
+        post_records = self._filter_observations_by_tau(
+            self._get_cached_post_ko_records(pricing_env, product), tau
+        )
+        for rec in post_records:
+            obs_time = rec.observation_time
+            if is_close(obs_time, 0.0):
+                self._post_ko_observation_indices[0] = rec
+            elif is_close(obs_time, tau):
+                self._post_ko_terminal_record = rec
+                self._has_post_terminal_ko = True
+            elif 0.0 < obs_time < tau:
+                if step_of is not None:
+                    idx = step_of[obs_time]
+                else:
+                    idx = self._aligned_time_index(
+                        t_vec, obs_time, "Post-KO observation"
+                    )
+                self._post_ko_observation_indices[idx] = rec
 
     def _build_grids(
         self,
@@ -217,33 +255,10 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         q: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = result
-
-        # Copy pre-KO indices built by parent.
-        self._pre_ko_observation_indices = dict(self._ko_observation_indices)
-        self._pre_ko_terminal_record = self._ko_terminal_record
-        self._has_pre_terminal_ko = self._has_terminal_ko
-
-        # Build post-KO indices.
-        self._post_ko_observation_indices.clear()
-        self._post_ko_terminal_record = None
-        self._has_post_terminal_ko = False
-
-        post_records = self._filter_observations_by_tau(
-            self._get_cached_post_ko_records(pricing_env, product), tau
+        _, _, _, t_vec, _ = result
+        self._register_post_ko_observations(
+            product, pricing_env, tau, t_vec=t_vec
         )
-
-        for rec in post_records:
-            obs_time = rec.observation_time
-            if is_close(obs_time, 0.0):
-                self._post_ko_observation_indices[0] = rec
-            elif is_close(obs_time, tau):
-                self._post_ko_terminal_record = rec
-                self._has_post_terminal_ko = True
-            elif 0.0 < obs_time < tau:
-                idx = self._aligned_time_index(t_vec, obs_time, "Post-KO observation")
-                self._post_ko_observation_indices[idx] = rec
-
         return result
 
     def _post_ki_ko_times(
@@ -337,9 +352,24 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
 
         if self._profile_enabled:
             t0 = perf_counter()
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
+        self._active_layout = None
+        self._active_schedule = None  # certified pre/post dispatch stays inline
+        if self._uses_grid_layer() and self._session_grids is None:
+            self._configure_bgk(product, pricing_env, sigma, tau)
+            market = self.market_snapshot(product, pricing_env)
+            request = self.grid_request(product, market, tau)
+            layout = self.grid_binder.bind(request, market)
+            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
+            t_vec, dt_vec = layout.time.t, layout.time.dt
+            self._populate_observation_maps(product, pricing_env, layout, tau)
+            self._register_post_ko_observations(
+                product, pricing_env, tau, step_of=layout.time.step_of
+            )
+            self._active_layout = layout
+        else:
+            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+                product, pricing_env, spot, sigma, tau, r, q
+            )
         if self._profile_enabled:
             self._profile_stats["grid_build"] += perf_counter() - t0
 
