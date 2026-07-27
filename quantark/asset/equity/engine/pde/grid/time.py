@@ -74,11 +74,21 @@ def build_time(request: GridRequest, config: GridConfig) -> TimeLayout:
                 extras.astype(float) * (budget / total_extras)
             ).astype(int)
 
+    # Nodes via linspace (exact endpoints); dt as the CONSTRUCTED constant
+    # per interval, not np.diff(t): interior linspace spacings wobble by an
+    # ULP, and downstream operator caches key on the dt float — one exact
+    # value per interval keeps cache-on and cache-off arithmetic identical.
+    # (diff(t) and dt may disagree by an ULP at interval ends; t is the
+    # authority for calendar times, dt for step sizes — same convention as
+    # the certified ADI _advance_tau endpoint pin.)
     points = [np.array([0.0])]
+    dts = []
     for start, end, n in zip(boundaries[:-1], boundaries[1:], fill):
-        points.append(np.linspace(start, end, int(n) + 1)[1:])
+        n = int(n)
+        points.append(np.linspace(start, end, n + 1)[1:])
+        dts.append(np.full(n, (end - start) / n))
     t = np.concatenate(points)
-    dt = np.diff(t)
+    dt = np.concatenate(dts)
 
     step_of = {}
     for e in events:

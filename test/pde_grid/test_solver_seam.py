@@ -43,9 +43,9 @@ class _MigratedProbe(_SeamProbe):
     def _uses_grid_layer(self):
         return True
 
-    def grid_request(self, product, market):
+    def grid_request(self, product, market, tau):
         return GridRequest(
-            tau=1.0,
+            tau=tau,
             bound_anchors=(market.spot, product.strike),
             critical_prices=(market.spot, product.strike),
             hard_lower=None,
@@ -63,7 +63,7 @@ def test_defaults_unmigrated():
     s = _SeamProbe()
     assert s._uses_grid_layer() is False
     with pytest.raises(NotImplementedError):
-        s.grid_request(OPTION, MarketSnapshot(100.0, 0.2, 0.05, 0.02))
+        s.grid_request(OPTION, MarketSnapshot(100.0, 0.2, 0.05, 0.02), 1.0)
 
 
 def test_representative_vol_is_strike_selected():
@@ -84,7 +84,7 @@ def test_binder_cache_follows_cache_strategy():
     env = create_pricing_env()
     on = _MigratedProbe(params=PDEParams())
     m = on.market_snapshot(OPTION, env)
-    r = on.grid_request(OPTION, m)
+    r = on.grid_request(OPTION, m, 1.0)
     assert on.grid_binder.bind(r, m) is on.grid_binder.bind(r, m)
 
     off = _MigratedProbe(params=PDEParams(cache_strategy="disable"))
@@ -95,7 +95,7 @@ def test_external_layout_check_accepts_and_rejects():
     env = create_pricing_env()
     s = _MigratedProbe()
     m = s.market_snapshot(OPTION, env)
-    layout = s.grid_binder.bind(s.grid_request(OPTION, m), m)
+    layout = s.grid_binder.bind(s.grid_request(OPTION, m, 1.0), m)
 
     s._external_layout_check(OPTION, env, layout)  # exact match passes
     # spot drift within domain still passes (concentration drift allowed)
@@ -105,8 +105,8 @@ def test_external_layout_check_accepts_and_rejects():
         s._external_layout_check(OPTION, create_pricing_env(spot=500.0), layout)
 
     class _Shifted(_MigratedProbe):
-        def grid_request(self, product, market):
-            base = super().grid_request(product, market)
+        def grid_request(self, product, market, tau):
+            base = super().grid_request(product, market, tau)
             return GridRequest(
                 tau=base.tau,
                 bound_anchors=base.bound_anchors,

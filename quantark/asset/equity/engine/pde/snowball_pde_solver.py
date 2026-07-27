@@ -30,6 +30,13 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
 )
 from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.pde.event_projection import project_event_values
+from quantark.asset.equity.engine.pde.grid import (
+    EventSchedule,
+    GridRequest,
+    Layout,
+    MarketSnapshot,
+    project_between,
+)
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -115,6 +122,10 @@ class SnowballPDESolver(BasePDESolver):
         # the interior daily-KI nodes are dropped from the time grid.
         self._bgk_active: bool = False
         self._bgk_ki_barrier: float = 0.0
+        # Declarative grid layer state for the current solve (None when the
+        # legacy path runs — subclasses not yet migrated, session grids).
+        self._active_layout: Optional[Layout] = None
+        self._active_schedule: Optional[EventSchedule] = None
 
         # Time tracking
         self._total_tau: float = 0.0
@@ -188,12 +199,31 @@ class SnowballPDESolver(BasePDESolver):
         if self._profile_enabled:
             self._reset_profile_stats()
 
-        # Build grids
+        # Build grids. The declarative layer serves migrated solvers unless
+        # a prepared session injected grids (adapter clones keep the legacy
+        # path until the execution seams re-point at Phase 4). Phoenix/KO-
+        # reset inherit this _solve and take the legacy branch until their
+        # own migration flips _uses_grid_layer.
         if self._profile_enabled:
             t0 = perf_counter()
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
+        self._active_layout = None
+        self._active_schedule = None
+        if self._uses_grid_layer() and self._session_grids is None:
+            self._configure_bgk(product, pricing_env, sigma, tau)
+            market = self.market_snapshot(product, pricing_env)
+            request = self.grid_request(product, market, tau)
+            layout = self.grid_binder.bind(request, market)
+            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
+            t_vec, dt_vec = layout.time.t, layout.time.dt
+            self._populate_observation_maps(product, pricing_env, layout, tau)
+            self._active_layout = layout
+            self._active_schedule = self.event_schedule(
+                product, pricing_env, layout
+            )
+        else:
+            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+                product, pricing_env, spot, sigma, tau, r, q
+            )
         if self._profile_enabled:
             self._profile_stats["grid_build"] += perf_counter() - t0
 
@@ -1783,6 +1813,240 @@ class SnowballPDESolver(BasePDESolver):
         # Interior only: European KI (obs at maturity only) => empty (correct).
         return sorted({float(t) for t in out if t is not None and 0.0 < float(t) < tau})
 
+    # ------------------------------------------------------------------
+    # Declarative grid layer (grid redesign spec §4.6) — migrated solver
+    # ------------------------------------------------------------------
+
+    def _uses_grid_layer(self) -> bool:
+        return True
+
+    def grid_request(
+        self, product: BaseEquityProduct, market: MarketSnapshot, tau: float
+    ) -> GridRequest:
+        """Consolidated geometry declaration — ALL regime gating in one place.
+
+        Reuses the certified helpers verbatim: KO/coupon dates from
+        ``_ko_coupon_align_times`` (must-be-nodes), daily-KI dates from
+        ``_ki_monitor_times`` gated by ``_ki_nodes_in_grid`` (dropped under
+        active BGK and for already-knocked-in products). Requires BGK state
+        to be resolved first (``_configure_bgk``) — ``_solve`` guarantees the
+        order; external callers go through ``_prepare_for_request``.
+        """
+        strike = float(product.strike)
+        align = self._ko_coupon_align_times(product, tau)
+        monitor = (
+            self._ki_monitor_times(product, tau)
+            if self._ki_nodes_in_grid(product)
+            else []
+        )
+        criticals = [market.spot, strike]
+        criticals += [b for b in self._get_barriers(product) if b and b > 0]
+        if self._bgk_active:
+            criticals.append(float(self._bgk_ki_barrier))
+        return GridRequest(
+            tau=tau,
+            bound_anchors=(market.spot, strike),
+            critical_prices=tuple(p for p in criticals if p and p > 0),
+            hard_lower=None,
+            hard_upper=None,
+            event_times=tuple(sorted(set(align) | set(monitor))),
+        )
+
+    def _prepare_for_request(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        """Resolve the solve state grid_request depends on; returns tau."""
+        tau = product.get_maturity(pricing_env)
+        self._prepare_solve_state(product, pricing_env)
+        sigma = pricing_env.get_vol(product.strike, tau)
+        self._configure_bgk(product, pricing_env, sigma, tau)
+        return tau
+
+    def _populate_observation_maps(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        layout: Layout,
+        tau: float,
+    ) -> None:
+        """Derive the observation-index maps FROM the layout (no searching).
+
+        These maps remain the read model for boundary payoffs, terminal KO
+        handling and event stats; they are a view of ``layout.time.step_of``
+        — one authoritative construction, so grid geometry and event indices
+        cannot disagree. Fully retired when those consumers migrate (Phase 4).
+        """
+        self._total_tau = tau
+        self._ko_observation_indices.clear()
+        self._ki_observation_indices.clear()
+        self._ki_barrier_by_tidx.clear()
+        self._ko_terminal_record = None
+        self._has_terminal_ko = False
+        step_of = layout.time.step_of
+
+        for rec in self._get_cached_ko_records(pricing_env, product):
+            obs_time = rec.observation_time
+            if obs_time is None:
+                continue
+            if is_close(obs_time, 0.0):
+                self._ko_observation_indices[0] = rec
+            elif is_close(obs_time, tau):
+                self._ko_terminal_record = rec
+                self._has_terminal_ko = True
+            elif 0.0 < obs_time < tau:
+                self._ko_observation_indices[step_of[obs_time]] = rec
+
+        if (
+            product.has_ki_barrier
+            and not self._ki_continuous
+            and self._ki_nodes_in_grid(product)
+        ):
+            ki_profile = self._get_cached_ki_profile(pricing_env, product)
+            ki_times = ki_profile["observation_times"]
+            ki_barriers = ki_profile.get("barriers") or []
+            for obs_idx, obs_time in enumerate(ki_times):
+                if obs_time is None:
+                    continue
+                barrier = None
+                if obs_idx < len(ki_barriers):
+                    barrier = ki_barriers[obs_idx]
+                if barrier is None:
+                    barrier = self._ki_barrier
+                if is_close(obs_time, 0.0):
+                    self._ki_observation_indices.add(0)
+                    self._ki_barrier_by_tidx[0] = float(barrier)
+                elif is_close(obs_time, tau):
+                    idx = layout.time.actual_steps
+                    self._ki_observation_indices.add(idx)
+                    self._ki_barrier_by_tidx[idx] = float(barrier)
+                elif 0.0 < obs_time < tau:
+                    idx = step_of[obs_time]
+                    self._ki_observation_indices.add(idx)
+                    self._ki_barrier_by_tidx[idx] = float(barrier)
+
+    def event_schedule(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        layout: Layout,
+    ) -> EventSchedule:
+        """Interior + continuous stages for the two-surface solve.
+
+        Terminal (t = tau) and valuation-date (t = 0) events keep their
+        certified inline handling in ``_solve`` / the t0 readout; interior
+        discrete events and the continuous KI coupling live here as pure
+        transforms over ``{"alive": V0_col, "ki": V1_col}``.
+        """
+        spatial = layout.spatial
+        tau = layout.request.tau
+        is_reverse = bool(getattr(product, "is_reverse", False))
+        interior: dict = {}
+
+        def _chain(prev, fn):
+            if prev is None:
+                return fn
+            return lambda states: fn(prev(states))
+
+        # KO: both surfaces projected against the discounted redemption
+        # (breach_up = up-barrier XOR reverse — certified direction rule).
+        for rec in self._get_cached_ko_records(pricing_env, product):
+            t_obs = rec.observation_time
+            if (
+                t_obs is None
+                or is_close(t_obs, 0.0)
+                or is_close(t_obs, tau)
+                or not (0.0 < t_obs < tau)
+            ):
+                continue
+            step = layout.time.step_of[t_obs]
+            cash = self._cashflow_value_at_time(
+                pricing_env=pricing_env,
+                cashflow=rec.payoff if rec.payoff is not None else 0.0,
+                current_time=t_obs,
+                settlement_time=rec.settlement_time,
+            )
+            barrier = float(rec.barrier)
+            breach_up = not is_reverse
+
+            def _ko(states, _b=barrier, _c=cash, _up=breach_up):
+                cash_col = np.full_like(states["alive"], _c)
+                return {
+                    "alive": project_between(
+                        spatial, _b, _up, cash_col, states["alive"]
+                    ),
+                    "ki": project_between(
+                        spatial, _b, _up, cash_col, states["ki"]
+                    ),
+                }
+
+            interior[step] = _chain(interior.get(step), _ko)
+
+        # Discrete KI: alive <- ki below the (possibly per-date) barrier.
+        # Applied AFTER any coincident KO (certified order: KO first).
+        if (
+            product.has_ki_barrier
+            and not self._ki_continuous
+            and self._ki_nodes_in_grid(product)
+        ):
+            ki_profile = self._get_cached_ki_profile(pricing_env, product)
+            ki_times = ki_profile["observation_times"]
+            ki_barriers = ki_profile.get("barriers") or []
+            for obs_idx, t_obs in enumerate(ki_times):
+                if t_obs is None or not (0.0 < t_obs < tau):
+                    continue
+                if is_close(t_obs, 0.0) or is_close(t_obs, tau):
+                    continue
+                barrier = None
+                if obs_idx < len(ki_barriers):
+                    barrier = ki_barriers[obs_idx]
+                if barrier is None:
+                    barrier = self._ki_barrier
+                step = layout.time.step_of[t_obs]
+                breach_up = is_reverse  # KI is a down barrier (up if reverse)
+
+                def _ki(states, _b=float(barrier), _up=breach_up):
+                    return {
+                        "alive": project_between(
+                            spatial, _b, _up, states["ki"], states["alive"]
+                        ),
+                        "ki": states["ki"],
+                    }
+
+                interior[step] = _chain(interior.get(step), _ki)
+
+        # Continuous (or BGK-shifted continuous) KI: nodal coupling per step.
+        continuous = None
+        if product.has_ki_barrier and (self._ki_continuous or self._bgk_active):
+            kib = (
+                float(self._bgk_ki_barrier)
+                if self._bgk_active
+                else float(self._ki_barrier)
+            )
+            s = spatial.s
+
+            def continuous(step, states, _b=kib, _rev=is_reverse):
+                mask = (s >= _b) if _rev else (s <= _b)
+                alive = states["alive"].copy()
+                alive[mask] = states["ki"][mask]
+                return {"alive": alive, "ki": states["ki"]}
+
+        return EventSchedule(interior=interior, continuous=continuous)
+
+    def _theta_schedule_from_layout(self, layout: Layout) -> np.ndarray:
+        """Per-step theta from the layout's damping frozensets (spec §4.5).
+
+        theta = 1.0 on terminal-damped steps (wins on overlap),
+        event_theta on event-damped steps, params.theta elsewhere.
+        """
+        params: PDEParams = self.params
+        n = layout.time.actual_steps
+        theta = np.full(n, float(params.theta))
+        for k in layout.time.event_damping_steps:
+            theta[k] = float(getattr(params, "event_theta", 1.0))
+        for k in layout.time.terminal_damping_steps:
+            theta[k] = 1.0
+        return theta
+
     def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
         """Decoupled time-grid concerns for autocallables (spec §4 Component 1).
 
@@ -1932,13 +2196,17 @@ class SnowballPDESolver(BasePDESolver):
         self._banded_cache.clear()
         self._term_A_cache = {}
 
-        # Canonical damping schedule (terminal Rannacher + event smoothing).
-        theta_schedule = BackwardOperator.theta_by_step(
-            np.asarray(t_vec),
-            np.asarray(dt_vec),
-            params,
-            self._get_event_times(product, tau),
-        )
+        # Canonical damping schedule (terminal Rannacher + event smoothing):
+        # from the layout's frozensets on the migrated path, else legacy.
+        if self._active_layout is not None:
+            theta_schedule = self._theta_schedule_from_layout(self._active_layout)
+        else:
+            theta_schedule = BackwardOperator.theta_by_step(
+                np.asarray(t_vec),
+                np.asarray(dt_vec),
+                params,
+                self._get_event_times(product, tau),
+            )
 
         rhs = None
         rhs_v0 = None
@@ -2048,9 +2316,21 @@ class SnowballPDESolver(BasePDESolver):
                     grid_v0[:, 0].copy(),
                     grid_v1[:, 0].copy(),
                 )
-            self._apply_step_modifications_two_surface(
-                grid_v0, grid_v1, x_vec, s_vec, j, tau_remaining, product, pricing_env
-            )
+            schedule = self._active_schedule
+            if schedule is not None and j > 0:
+                # Migrated path: pure stage transforms on the named blocks.
+                # (j == 0 keeps the certified valuation-date handling below —
+                # inclusive t0 masks + readout are endpoint stages.)
+                states = {"alive": grid_v0[:, j], "ki": grid_v1[:, j]}
+                states = schedule.apply(j, states)
+                states = schedule.continuous(j, states)
+                grid_v0[:, j] = states["alive"]
+                grid_v1[:, j] = states["ki"]
+            else:
+                self._apply_step_modifications_two_surface(
+                    grid_v0, grid_v1, x_vec, s_vec, j, tau_remaining,
+                    product, pricing_env,
+                )
             if profile:
                 timings["barrier"] += perf_counter() - t0
 

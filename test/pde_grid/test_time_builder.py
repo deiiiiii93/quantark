@@ -45,6 +45,15 @@ def test_no_events_degenerates_to_uniform():
     assert np.allclose(tl.dt, tl.dt[0])
 
 
+def test_one_exact_dt_float_per_interval():
+    # operator caches key on the dt float: each interval must contribute
+    # exactly one distinct value (no linspace ULP wobble)
+    tl = build_time(req(), CFG())
+    assert len({float(d) for d in tl.dt}) <= 4  # at most one distinct dt per interval
+    tl2 = build_time(req(events=(0.1, 0.5)), CFG())
+    assert len({float(d) for d in tl2.dt}) <= 3
+
+
 def test_single_interior_event():
     tl = build_time(req(events=(0.5,)), CFG())
     k = tl.step_of[0.5]

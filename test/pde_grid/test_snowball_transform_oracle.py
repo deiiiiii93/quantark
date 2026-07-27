@@ -198,6 +198,9 @@ def test_migrated_event_schedule_reproduces_oracle():
     product = _product(ki_continuous=False)
     solver = SnowballPDESolver(params=PDEParams())
     market = solver.market_snapshot(product, env)
-    layout = solver.grid_binder.bind(solver.grid_request(product, market), market)
+    tau = product.get_maturity(env)
+    layout = solver.grid_binder.bind(
+        solver.grid_request(product, market, tau), market
+    )
     schedule = solver.event_schedule(product, env, layout)
     assert schedule.interior_steps  # KO + discrete KI steps present

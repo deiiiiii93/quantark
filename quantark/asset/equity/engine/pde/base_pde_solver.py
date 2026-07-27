@@ -417,9 +417,13 @@ class BasePDESolver(BaseEngine):
         return False
 
     def grid_request(
-        self, product: BaseEquityProduct, market: MarketSnapshot
+        self, product: BaseEquityProduct, market: MarketSnapshot, tau: float
     ) -> GridRequest:
-        """Declare this product's grid geometry (migrated solvers only)."""
+        """Declare this product's grid geometry (migrated solvers only).
+
+        ``tau`` is passed explicitly (product maturity against the pricing
+        env's valuation date) — MarketSnapshot stays a pure market object.
+        """
         raise NotImplementedError(
             f"{type(self).__name__} has not migrated to the grid layer"
         )
@@ -476,8 +480,9 @@ class BasePDESolver(BaseEngine):
     ) -> None:
         """Validate an externally supplied layout before solving on it."""
         market = self.market_snapshot(product, pricing_env)
+        tau = product.get_maturity(pricing_env)
         validate_external_layout(
-            layout, self.grid_request(product, market), market
+            layout, self.grid_request(product, market, tau), market
         )
 
     def _freeze_cache_value(self, value):
