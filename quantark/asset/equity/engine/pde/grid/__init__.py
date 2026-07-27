@@ -6,8 +6,16 @@ event semantics. One spatial builder, one time builder, no modes.
 """
 
 from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSnapshot
+from quantark.asset.equity.engine.pde.grid.config import (
+    ACCURACY_PROFILES,
+    GridConfig,
+    resolve_config,
+)
 
 __all__ = [
     "GridRequest",
     "MarketSnapshot",
+    "GridConfig",
+    "ACCURACY_PROFILES",
+    "resolve_config",
 ]
