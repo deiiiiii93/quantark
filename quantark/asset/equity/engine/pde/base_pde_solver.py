@@ -197,6 +197,9 @@ class BasePDESolver(BaseEngine):
         self._session_matrix_pack = None
         # Declarative grid layer (grid redesign spec §4.6) — built lazily.
         self._grid_binder = None
+        # Frozen base-market layout set by create_bump_context clones: every
+        # bumped re-solve reuses it (theta rolls rebind time only, §4.8).
+        self._frozen_base_layout = None
         # Discrete-monitoring state shared by the barrier-family solvers
         # (populated by _setup_observation_indices).
         self._observation_indices: set = set()
@@ -373,10 +376,24 @@ class BasePDESolver(BaseEngine):
         """
         Return a PDE solver clone with the base spatial domain frozen.
 
-        Auto spatial bounds depend on market drift/volatility. Freezing the
-        base valuation bounds keeps rate, dividend, volatility, and theta bumps
-        from mixing true market sensitivity with domain movement noise.
+        Migrated solvers freeze the whole base-market ``Layout`` (spec §4.8):
+        spot/vol/rate/div bumps reuse it by identity; calendar (theta) bumps
+        rebuild only the time layout via ``rebind_time``. Legacy solvers keep
+        the historical params-freeze.
         """
+        if self._uses_grid_layer():
+            tau = product.get_maturity(pricing_env)
+            if tau <= 0:
+                return self
+            clone = type(self)(params=deepcopy(self.params))
+            prep = getattr(clone, "_prepare_for_request", None)
+            if prep is not None:
+                prep(product, pricing_env)
+            market = clone.market_snapshot(product, pricing_env)
+            request = clone.grid_request(product, market, tau)
+            clone._frozen_base_layout = clone.grid_binder.bind(request, market)
+            return clone
+
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
         if tau <= 0:
@@ -471,6 +488,29 @@ class BasePDESolver(BaseEngine):
                 ),
             )
         return self._grid_binder
+
+    def _bound_layout_for_solve(
+        self, request: GridRequest, market: MarketSnapshot
+    ) -> Layout:
+        """The layout for this solve: frozen (bump clone) > rebind > bind.
+
+        Alignment-identical requests reuse the frozen layout by identity
+        (coverage validated); a changed schedule/tau (calendar roll) rebinds
+        the time layout on the SAME spatial object; otherwise a plain bind.
+        """
+        frozen = self._frozen_base_layout
+        if frozen is None:
+            return self.grid_binder.bind(request, market)
+        fr = frozen.request
+        if (
+            request.tau == fr.tau
+            and request.event_times == fr.event_times
+            and request.hard_lower == fr.hard_lower
+            and request.hard_upper == fr.hard_upper
+        ):
+            validate_external_layout(frozen, request, market)
+            return frozen
+        return self.grid_binder.rebind_time(frozen, request)
 
     def _external_layout_check(
         self,

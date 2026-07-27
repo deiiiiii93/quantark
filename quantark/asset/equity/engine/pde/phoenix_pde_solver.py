@@ -296,7 +296,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             self._configure_bgk(product, pricing_env, sigma, tau)
             market = self.market_snapshot(product, pricing_env)
             request = self.grid_request(product, market, tau)
-            layout = self.grid_binder.bind(request, market)
+            layout = self._bound_layout_for_solve(request, market)
             x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
             t_vec, dt_vec = layout.time.t, layout.time.dt
             self._populate_observation_maps(product, pricing_env, layout, tau)

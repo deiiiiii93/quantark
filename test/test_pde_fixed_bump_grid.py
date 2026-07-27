@@ -159,14 +159,27 @@ def test_pde_bump_context_freezes_effective_spatial_bounds(
     fixed_solver = solver.create_bump_context(product, env)
 
     assert fixed_solver is not solver
-    assert fixed_solver.params.s_min == pytest.approx(base_bounds[0])
-    assert fixed_solver.params.s_max == pytest.approx(base_bounds[1])
-    assert _effective_spatial_bounds(
-        fixed_solver, product, _rate_bumped_env(env, bump)
-    ) == pytest.approx(base_bounds)
-    assert _effective_spatial_bounds(
-        fixed_solver, product, _div_bumped_env(env, bump)
-    ) == pytest.approx(base_bounds)
+    if fixed_solver._uses_grid_layer():
+        # Migrated solvers freeze the whole base Layout (grid redesign
+        # spec §4.8) — a strictly stronger guarantee than frozen params:
+        # every bumped re-solve reuses the SAME object.
+        frozen = fixed_solver._frozen_base_layout
+        assert frozen is not None
+        for bumped_env in (
+            _rate_bumped_env(env, bump),
+            _div_bumped_env(env, bump),
+        ):
+            fixed_solver.price(product, bumped_env)
+            assert fixed_solver._active_layout is frozen
+    else:
+        assert fixed_solver.params.s_min == pytest.approx(base_bounds[0])
+        assert fixed_solver.params.s_max == pytest.approx(base_bounds[1])
+        assert _effective_spatial_bounds(
+            fixed_solver, product, _rate_bumped_env(env, bump)
+        ) == pytest.approx(base_bounds)
+        assert _effective_spatial_bounds(
+            fixed_solver, product, _div_bumped_env(env, bump)
+        ) == pytest.approx(base_bounds)
 
 
 @pytest.mark.parametrize("product_factory", [_snowball, _phoenix])

@@ -212,7 +212,7 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
         market = self.market_snapshot(product, pricing_env)
         tau_h = float(times[-1])
         if layout is None:
-            layout = self._grid_layer_binder().bind(
+            layout = self._bound_layout_for_solve(
                 self.grid_request(product, market, tau_h), market
             )
         else:

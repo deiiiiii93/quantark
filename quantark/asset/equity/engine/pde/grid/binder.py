@@ -81,6 +81,8 @@ class GridLayerMixin:
     override ``_default_grid_config`` for engine-specific geometry defaults.
     """
 
+    _frozen_base_layout = None  # set on create_bump_context clones
+
     def _default_grid_accuracy(self) -> str:
         return "standard"
 
@@ -126,6 +128,39 @@ class GridLayerMixin:
         validate_external_layout(
             layout, self.grid_request(product, market, tau), market
         )
+
+    def create_bump_context(self, product, pricing_env):
+        """Clone with the base-market layout frozen (spec §4.8)."""
+        import copy
+
+        tau = product.get_maturity(pricing_env)
+        if tau <= 0:
+            return self
+        clone = copy.deepcopy(self)
+        clone._grid_binder = None
+        market = clone.market_snapshot(product, pricing_env)
+        request = clone.grid_request(product, market, tau)
+        clone._frozen_base_layout = clone._grid_layer_binder(
+            getattr(clone, "params", None)
+        ).bind(request, market)
+        return clone
+
+    def _bound_layout_for_solve(self, request, market):
+        """Frozen (bump clone) > time-rebind (calendar roll) > plain bind."""
+        frozen = getattr(self, "_frozen_base_layout", None)
+        binder = self._grid_layer_binder(getattr(self, "params", None))
+        if frozen is None:
+            return binder.bind(request, market)
+        fr = frozen.request
+        if (
+            request.tau == fr.tau
+            and request.event_times == fr.event_times
+            and request.hard_lower == fr.hard_lower
+            and request.hard_upper == fr.hard_upper
+        ):
+            validate_external_layout(frozen, request, market)
+            return frozen
+        return binder.rebind_time(frozen, request)
 
 
 class GridBinder:
