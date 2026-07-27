@@ -18,6 +18,14 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.pde.grid import (
+    EventSchedule,
+    GridBinder,
+    GridRequest,
+    Layout,
+    MarketSnapshot,
+    validate_external_layout,
+)
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import PDEParams
 from quantark.priceenv import PricingEnvironment
@@ -187,6 +195,8 @@ class BasePDESolver(BaseEngine):
         self._session_grids = None
         self._session_step_coefficients = None
         self._session_matrix_pack = None
+        # Declarative grid layer (grid redesign spec §4.6) — built lazily.
+        self._grid_binder = None
         # Discrete-monitoring state shared by the barrier-family solvers
         # (populated by _setup_observation_indices).
         self._observation_indices: set = set()
@@ -392,6 +402,83 @@ class BasePDESolver(BaseEngine):
         fixed_params.s_max = float(s_max)
         fixed_params.frozen_critical_points = frozen_critical
         return type(self)(params=fixed_params)
+
+    # ------------------------------------------------------------------
+    # Declarative grid layer seam (grid redesign spec §4.6)
+    # ------------------------------------------------------------------
+
+    def _uses_grid_layer(self) -> bool:
+        """Whether this solver has migrated to the declarative grid layer.
+
+        Migrated solvers return True and implement ``grid_request`` /
+        ``event_schedule``; the legacy ``_build_grids`` path serves the rest
+        until their phase lands (the flag disappears at Phase 4).
+        """
+        return False
+
+    def grid_request(
+        self, product: BaseEquityProduct, market: MarketSnapshot
+    ) -> GridRequest:
+        """Declare this product's grid geometry (migrated solvers only)."""
+        raise NotImplementedError(
+            f"{type(self).__name__} has not migrated to the grid layer"
+        )
+
+    def representative_vol(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        """sigma_ref for MarketSnapshot — strike-selected vol by default."""
+        tau = product.get_maturity(pricing_env)
+        strike = getattr(product, "strike", pricing_env.spot)
+        return float(pricing_env.get_vol(strike, tau))
+
+    def event_schedule(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        layout: Layout,
+    ) -> EventSchedule:
+        """Per-solve event semantics (migrated solvers override)."""
+        return EventSchedule()
+
+    def market_snapshot(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> MarketSnapshot:
+        """The market inputs the grid builders consume (spec §4.2)."""
+        tau = product.get_maturity(pricing_env)
+        return MarketSnapshot(
+            spot=float(pricing_env.spot),
+            sigma_ref=self.representative_vol(product, pricing_env),
+            r_ref=float(pricing_env.get_rate(tau)),
+            q_ref=float(pricing_env.get_div_yield(tau)),
+        )
+
+    @property
+    def grid_binder(self) -> GridBinder:
+        """Engine-owned binder; cache behavior follows the engine's cache
+        strategy (``disable`` -> no layout cache)."""
+        if self._grid_binder is None:
+            self._grid_binder = GridBinder(
+                getattr(self.params, "accuracy", "standard"),
+                getattr(self.params, "grid", None),
+                cache_enabled=self._is_cache_enabled(),
+                cache_max_entries=int(
+                    getattr(self.params, "grid_cache_max_entries", 128) or 128
+                ),
+            )
+        return self._grid_binder
+
+    def _external_layout_check(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        layout: Layout,
+    ) -> None:
+        """Validate an externally supplied layout before solving on it."""
+        market = self.market_snapshot(product, pricing_env)
+        validate_external_layout(
+            layout, self.grid_request(product, market), market
+        )
 
     def _freeze_cache_value(self, value):
         if value is None or isinstance(value, (str, int, float, bool)):
