@@ -72,6 +72,48 @@ def resolve_config(accuracy: str, override: Optional[GridConfig]) -> GridConfig:
     return cfg
 
 
+#: Legacy PDEParams resolution knobs the grid layer does not read, with the
+#: replacement to name in the error. They survive on PDEParams solely for the
+#: standalone vol-model solvers (bespoke kernels, deferred migration) — on a
+#: grid-layer solver a non-default value would be silently inert, so it is
+#: rejected loudly instead.
+_LEGACY_KNOB_REPLACEMENTS = {
+    "grid_size": "grid=GridConfig(points=...)",
+    "time_steps": "grid=GridConfig(steps_per_day=...)",
+    "s_min": "grid=GridConfig(bounds=(lo, hi))",
+    "s_max": "grid=GridConfig(bounds=(lo, hi))",
+}
+
+
+def reject_legacy_resolution_knobs(params) -> None:
+    """Raise if a grid-layer solver received non-default legacy knobs.
+
+    Defaults are introspected from the params dataclass so the check cannot
+    drift from the field definitions. ``params`` objects without dataclass
+    fields (or without the knob) are skipped.
+    """
+    import dataclasses
+
+    if params is None or not dataclasses.is_dataclass(params):
+        return
+    defaults = {
+        f.name: f.default
+        for f in dataclasses.fields(params)
+        if f.name in _LEGACY_KNOB_REPLACEMENTS
+        and f.default is not dataclasses.MISSING
+    }
+    for name, default in defaults.items():
+        value = getattr(params, name)
+        if value != default:
+            raise ValidationError(
+                f"PDEParams.{name}={value!r} is a legacy resolution control "
+                "that solvers on the declarative grid layer (0.4.0) do not "
+                f"read; use PDEParams(accuracy=...) or "
+                f"{_LEGACY_KNOB_REPLACEMENTS[name]}. "
+                f"({name} still applies to the standalone vol-model solvers.)"
+            )
+
+
 def _validate_resolved(cfg: GridConfig) -> None:
     for name in ("points", "max_points", "max_steps", "day_count"):
         if getattr(cfg, name) <= 0:

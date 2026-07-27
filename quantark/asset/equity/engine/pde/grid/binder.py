@@ -15,7 +15,11 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-from quantark.asset.equity.engine.pde.grid.config import GridConfig, resolve_config
+from quantark.asset.equity.engine.pde.grid.config import (
+    GridConfig,
+    reject_legacy_resolution_knobs,
+    resolve_config,
+)
 from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSnapshot
 from quantark.asset.equity.engine.pde.grid.space import SpatialLayout, build_space
 from quantark.asset.equity.engine.pde.grid.time import TimeLayout, build_time
@@ -70,6 +74,40 @@ def validate_external_layout(
         _covered(p, "critical price")
 
 
+def resolve_bound_layout(
+    binder: "GridBinder",
+    frozen: Optional[Layout],
+    request: GridRequest,
+    market: MarketSnapshot,
+) -> Layout:
+    """The layout for a solve: frozen (bump clone) > time-rebind > bind (§4.8).
+
+    An alignment-identical request reuses the frozen layout by identity
+    (coverage validated). A changed schedule/tau (calendar roll) rebinds the
+    time layout on the SAME spatial object — but only when the hard bounds
+    are unchanged: hard bounds ARE the absorbing domain edges, so a frozen
+    spatial layout built for different barriers would silently apply the
+    wrong boundary. That case fails closed instead.
+    """
+    if frozen is None:
+        return binder.bind(request, market)
+    fr = frozen.request
+    if request.hard_lower != fr.hard_lower or request.hard_upper != fr.hard_upper:
+        raise PricingError(
+            "frozen bump layout was built for hard bounds "
+            f"({fr.hard_lower}, {fr.hard_upper}) but this solve requires "
+            f"({request.hard_lower}, {request.hard_upper}); a bump context "
+            "cannot be reused across products with different absorbing "
+            "barriers — create a new bump context for this product"
+        )
+    if request.tau == fr.tau and request.event_times == fr.event_times:
+        validate_external_layout(frozen, request, market)
+        return frozen
+    rebound = binder.rebind_time(frozen, request)
+    validate_external_layout(rebound, request, market)
+    return rebound
+
+
 class GridLayerMixin:
     """Grid-layer seam for engines NOT derived from BasePDESolver.
 
@@ -92,6 +130,7 @@ class GridLayerMixin:
     def _grid_layer_binder(self, params=None) -> "GridBinder":
         binder = getattr(self, "_grid_binder", None)
         if binder is None:
+            reject_legacy_resolution_knobs(params)
             accuracy = getattr(params, "accuracy", None) or self._default_grid_accuracy()
             override = getattr(params, "grid", None) or self._default_grid_config()
             cache_enabled = bool(getattr(params, "cache_enabled", True)) and (
@@ -147,20 +186,12 @@ class GridLayerMixin:
 
     def _bound_layout_for_solve(self, request, market):
         """Frozen (bump clone) > time-rebind (calendar roll) > plain bind."""
-        frozen = getattr(self, "_frozen_base_layout", None)
-        binder = self._grid_layer_binder(getattr(self, "params", None))
-        if frozen is None:
-            return binder.bind(request, market)
-        fr = frozen.request
-        if (
-            request.tau == fr.tau
-            and request.event_times == fr.event_times
-            and request.hard_lower == fr.hard_lower
-            and request.hard_upper == fr.hard_upper
-        ):
-            validate_external_layout(frozen, request, market)
-            return frozen
-        return binder.rebind_time(frozen, request)
+        return resolve_bound_layout(
+            self._grid_layer_binder(getattr(self, "params", None)),
+            getattr(self, "_frozen_base_layout", None),
+            request,
+            market,
+        )
 
 
 class GridBinder:

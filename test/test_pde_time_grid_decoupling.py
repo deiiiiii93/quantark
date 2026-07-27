@@ -71,6 +71,7 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
     * ``calculate_event_stats`` still reconciles its reported ``pv`` to the PDE
       price exactly (so the residual/distribution stay consistent).
     """
+    from quantark.asset.equity.engine.pde.grid import GridConfig
     from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
         KOResetSnowballPDESolver,
     )
@@ -78,13 +79,15 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
 
     # Pinned to the legacy event discretization: the 97.9593 baseline was
     # captured on main BEFORE the event-projection default flip (2026-07-23),
-    # and this gate certifies the Phase-1 TIME-grid decoupling at fixed event
-    # semantics. (Under the corrected default the converged value reprices to
-    # ~97.976 — covered by test_pde_event_projection.py.)
+    # and this gate certifies the decoupled grid at fixed event semantics.
+    # (Under the corrected default the converged value reprices to ~97.976 —
+    # covered by test_pde_event_projection.py.)
     legacy = dict(event_projection="nodal", event_rannacher_steps=1)
-    coarse = KOResetSnowballPDESolver(PDEParams(grid_size=120, time_steps=60, **legacy))
+    coarse = KOResetSnowballPDESolver(
+        PDEParams(grid=GridConfig(points=120), **legacy)
+    )
     fine = KOResetSnowballPDESolver(
-        PDEParams(grid_size=240, time_steps=120, event_steps_per_day=8, **legacy)
+        PDEParams(grid=GridConfig(points=240, steps_per_day=8.0), **legacy)
     )
     pv_coarse = float(coarse.price(ko_reset_product, pricing_env))
     pv_fine = float(fine.price(ko_reset_product, pricing_env))
@@ -100,7 +103,9 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
 
     # The reconciliation invariant must also hold under the corrected default
     # event semantics (projection + 2 damping steps).
-    coarse_default = KOResetSnowballPDESolver(PDEParams(grid_size=120, time_steps=60))
+    coarse_default = KOResetSnowballPDESolver(
+        PDEParams(grid=GridConfig(points=120))
+    )
     pv_default = float(coarse_default.price(ko_reset_product, pricing_env))
     stats_default = coarse_default.calculate_event_stats(ko_reset_product, pricing_env)
     assert abs(float(stats_default.pv) - pv_default) < 1e-6

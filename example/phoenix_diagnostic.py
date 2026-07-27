@@ -28,6 +28,7 @@ from quantark.asset.equity.product.option.observation_schedule import (
 from quantark.param import ContinuousDividendYield, FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType
+from quantark.asset.equity.engine.pde import GridConfig
 
 
 def create_env(spot=100.0, vol=0.20, rate=0.03):
@@ -48,7 +49,7 @@ def build_schedule(times, barrier):
 
 def price_with_all_three(product, env, label=""):
     quad = PhoenixQuadEngine(params=QuadParams(grid_points=401))
-    pde = PhoenixPDESolver(params=PDEParams(grid_size=200, time_steps=100))
+    pde = PhoenixPDESolver(params=PDEParams(grid=GridConfig(points=200)))
     mc = PhoenixMCEngine(params=MCParams(num_paths=50000, seed=42))
 
     q = quad.price(product, env)
@@ -303,7 +304,7 @@ def main():
 
     print("\n  PDE Grid Convergence:")
     for grid_size in [100, 150, 200, 300, 400]:
-        pde = PhoenixPDESolver(params=PDEParams(grid_size=grid_size, time_steps=grid_size // 2))
+        pde = PhoenixPDESolver(params=PDEParams(grid=GridConfig(points=grid_size)))
         price = pde.price(phoenix, env)
         print(f"    {grid_size:4d} grid: {price:>12,.2f}")
 

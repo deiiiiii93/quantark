@@ -37,6 +37,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import CalendarType, DayCountConvention, create_calendar
 from quantark.util.enum import ObservationType, PostKOScheduleMode
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
+from quantark.asset.equity.engine.pde import GridConfig
 
 
 def business_day_time(calendar, start_date, end_date, bus_days_in_year):
@@ -338,12 +339,12 @@ def main():
         delta_cash, vega_1pct = compute_greeks(solver)
         add_row(label, seller_pv, diff, diff_pct, delta_cash, vega_1pct)
 
-    run_pde("PDE", PDEParams(grid_size=180, time_steps=120))
+    run_pde("PDE", PDEParams(grid=GridConfig(points=180)))
     run_pde(
         "PDE-Fixed1000",
         PDEParams(
-            grid_size=1000,
-            time_steps=1000,
+            grid=GridConfig(points=1000),
+            
         ),
     )
 

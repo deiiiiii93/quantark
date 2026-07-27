@@ -21,6 +21,7 @@ from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousD
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType
 from quantark.util.enum.engine_enums import AmericanAnalyticalMethod
+from quantark.asset.equity.engine.pde import GridConfig
 
 
 def print_section(title: str):
@@ -80,7 +81,7 @@ def compare_american_call():
     print(f"{'Analytical (BAW)':<30} ${price_baw:>10.6f} {time_baw:>11.3f}")
     
     t0 = time.time()
-    pde_params = PDEParams(grid_size=500, time_steps=500)
+    pde_params = PDEParams(grid=GridConfig(points=500))
     pde_solver = AmericanPDESolver(params=pde_params)
     price_pde = pde_solver.price(call, pricing_env)
     time_pde = (time.time() - t0) * 1000
@@ -143,7 +144,7 @@ def compare_american_put():
     print(f"{'Analytical (BAW)':<30} ${price_baw:>10.6f} {time_baw:>11.3f}")
     
     t0 = time.time()
-    pde_params = PDEParams(grid_size=500, time_steps=500)
+    pde_params = PDEParams(grid=GridConfig(points=500))
     pde_solver = AmericanPDESolver(params=pde_params)
     price_pde = pde_solver.price(put, pricing_env)
     time_pde = (time.time() - t0) * 1000
@@ -188,7 +189,7 @@ def compare_across_scenarios():
         p_bs02 = AmericanOptionAnalyticalEngine(method=AmericanAnalyticalMethod.BS02).price(call, pricing_env)
         p_baw = AmericanOptionAnalyticalEngine(method=AmericanAnalyticalMethod.BAW).price(call, pricing_env)
         
-        pde_params = PDEParams(grid_size=500, time_steps=500)
+        pde_params = PDEParams(grid=GridConfig(points=500))
         p_pde = AmericanPDESolver(params=pde_params).price(call, pricing_env)
         
         max_diff = max(abs(p_bs93 - p_pde), abs(p_bs02 - p_pde), abs(p_baw - p_pde))
@@ -215,7 +216,7 @@ def compare_across_scenarios():
         p_bs02 = AmericanOptionAnalyticalEngine(method=AmericanAnalyticalMethod.BS02).price(put, pricing_env)
         p_baw = AmericanOptionAnalyticalEngine(method=AmericanAnalyticalMethod.BAW).price(put, pricing_env)
         
-        pde_params = PDEParams(grid_size=500, time_steps=500)
+        pde_params = PDEParams(grid=GridConfig(points=500))
         p_pde = AmericanPDESolver(params=pde_params).price(put, pricing_env)
         
         max_diff = max(abs(p_bs93 - p_pde), abs(p_bs02 - p_pde), abs(p_baw - p_pde))
@@ -248,7 +249,7 @@ def pde_grid_convergence():
     
     for grid_size in grids:
         t0 = time.time()
-        pde_params = PDEParams(grid_size=grid_size, time_steps=grid_size)
+        pde_params = PDEParams(grid=GridConfig(points=grid_size))
         pde_solver = AmericanPDESolver(params=pde_params)
         price_pde = pde_solver.price(call, pricing_env)
         elapsed_ms = (time.time() - t0) * 1000

@@ -239,7 +239,7 @@ class TestDiscreteDoubleBarrierPDE:
             observation_dates=list(self.DATES),
         )
 
-        params = PDEParams(grid_size=400, time_steps=200)
+        params = PDEParams()
         double_price = DoubleBarrierPDESolver(params).price(double, env)
         single_price = BarrierPDESolver(params).price(single, env)
 
@@ -276,7 +276,7 @@ class TestDiscreteDoubleBarrierPDE:
             observation_dates=[0.5],
         )
 
-        params = PDEParams(grid_size=400, time_steps=200)
+        params = PDEParams()
         double_price = DoubleBarrierPDESolver(params).price(double, env)
         single_price = BarrierPDESolver(params).price(single, env)
 
@@ -304,7 +304,7 @@ class TestDiscreteOneTouchPDE:
             observation_dates=[0.25, 0.5, 0.75],  # no maturity observation
         )
 
-        pde_price = OneTouchPDESolver(PDEParams(grid_size=400, time_steps=200)).price(
+        pde_price = OneTouchPDESolver(PDEParams()).price(
             option, env
         )
         quad_price = OneTouchQuadEngine(params=QuadParams(grid_points=801)).price(
@@ -326,7 +326,7 @@ class TestDiscreteOneTouchPDE:
             observation_dates=[0.25, 0.5, 0.75],
         )
 
-        pde_price = OneTouchPDESolver(PDEParams(grid_size=400, time_steps=200)).price(
+        pde_price = OneTouchPDESolver(PDEParams()).price(
             option, env
         )
         quad_price = OneTouchQuadEngine(params=QuadParams(grid_points=801)).price(
@@ -372,8 +372,8 @@ class TestEventStatsThetaConsistency:
         def ko_prob(event_theta: float, event_steps: int) -> np.ndarray:
             solver = SnowballPDESolver(
                 PDEParams(
-                    grid_size=200,
-                    time_steps=100,
+                    
+                    
                     event_theta=event_theta,
                     event_rannacher_steps=event_steps,
                 )
@@ -524,8 +524,8 @@ class TestBGKMonitoringSpacing:
 
         solver = SnowballPDESolver(
             PDEParams(
-                grid_size=200,
-                time_steps=100,
+                
+                
                 ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION,
             )
         )
@@ -586,15 +586,15 @@ class TestKOResetBGKMode:
         )
 
         exact_solver = KOResetSnowballPDESolver(
-            PDEParams(grid_size=200, time_steps=100)
+            PDEParams()
         )
         exact_price = exact_solver.price(product, env)
         assert exact_solver._bgk_active is False
 
         bgk_solver = KOResetSnowballPDESolver(
             PDEParams(
-                grid_size=200,
-                time_steps=100,
+                
+                
                 ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION,
             )
         )
@@ -660,7 +660,7 @@ class TestPhoenixMemoryCouponAtKO:
         )
 
         pde_price = PhoenixPDESolver(
-            params=PDEParams(grid_size=200, time_steps=100)
+            params=PDEParams()
         ).price(phoenix, env)
         mc_price = PhoenixMCEngine(
             params=MCParams(num_paths=65536, seed=42),

@@ -65,25 +65,18 @@ QUAD_PARAM_PRESETS: ProfileMap = {
     },
 }
 
+# PDE presets target the declarative grid layer (0.4.0): "accuracy" selects a
+# GridConfig profile; "grid_config" holds GridConfig kwargs (materialized in
+# make_pde_params — GridConfig cannot be imported at param module load).
 PDE_PARAM_PRESETS: ProfileMap = {
-    "fast": {
-        "grid_size": 200,
-        "time_steps": 100,
-    },
+    "fast": {"accuracy": "fast"},
     "balanced": {},
-    "accurate": {
-        "grid_size": 800,
-        "time_steps": 400,
-    },
+    "accurate": {"accuracy": "high"},
     "barrier_sensitive": {
-        "grid_size": 600,
-        "time_steps": 300,
-        "event_steps_per_day": 6,
+        "grid_config": {"points": 600, "steps_per_day": 6.0},
     },
     "reverse_sensitive": {
-        "grid_size": 600,
-        "time_steps": 300,
-        "event_steps_per_day": 6,
+        "grid_config": {"points": 600, "steps_per_day": 6.0},
     },
 }
 
@@ -117,9 +110,18 @@ def make_pde_params(
     reverse: bool = False,
     **overrides: Any,
 ) -> PDEParams:
+    # product/reverse are accepted for signature parity with make_quad_params;
+    # the declarative grid layer concentrates on every product barrier by
+    # construction, so no product-conditional knob hints remain.
+    del product, reverse
     profile_name = _normalize_profile("pde", profile)
     preset = dict(PDE_PARAM_PRESETS[profile_name])
-    preset = _apply_pde_product_hints(preset, product, reverse)
+    grid_kwargs = preset.pop("grid_config", None)
+    if grid_kwargs is not None:
+        # Lazy import: param cannot pull engine.pde at module load (cycle).
+        from quantark.asset.equity.engine.pde.grid.config import GridConfig
+
+        preset["grid"] = GridConfig(**grid_kwargs)
     merged = _merge_overrides(preset, overrides, PDEParams)
     return PDEParams(**merged)
 
@@ -265,49 +267,4 @@ def _apply_quad_product_hints(
     return preset
 
 
-def _apply_pde_product_hints(
-    preset: Dict[str, Any],
-    product: Optional[Any],
-    reverse: bool,
-) -> Dict[str, Any]:
-    reverse_flag = reverse or bool(getattr(product, "is_reverse", False))
-    has_barrier = _product_has_barrier(product)
-
-    if has_barrier:
-        preset.setdefault("barrier_refine_log_width", 0.02)
-        preset.setdefault("barrier_refine_levels", 1)
-    if reverse_flag:
-        preset.setdefault("barrier_domain_expand", 0.1)
-        preset.setdefault("barrier_refine_log_width", 0.03)
-
-    return preset
-
-
-def _product_has_barrier(product: Optional[Any]) -> bool:
-    if product is None:
-        return False
-    barrier_fields = (
-        "barrier",
-        "upper_barrier",
-        "lower_barrier",
-        "barrier_low",
-        "barrier_high",
-        "ko_barrier",
-        "ki_barrier",
-        "coupon_barrier",
-    )
-    for name in barrier_fields:
-        if hasattr(product, name):
-            value = getattr(product, name)
-            if value is None:
-                continue
-            if isinstance(value, (int, float)):
-                if value > 0:
-                    return True
-            elif isinstance(value, (list, tuple)):
-                if any(isinstance(v, (int, float)) and v > 0 for v in value):
-                    return True
-            else:
-                return True
-    return False
 

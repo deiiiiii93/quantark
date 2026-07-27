@@ -14,8 +14,14 @@ def test_make_quad_params_profile_fast():
 
 def test_make_pde_params_profile_accurate():
     params = make_pde_params(profile="accurate")
-    assert params.grid_size == 800
-    assert params.time_steps == 400
+    assert params.accuracy == "high"
+    assert params.grid is None
+
+
+def test_make_pde_params_profile_barrier_sensitive():
+    params = make_pde_params(profile="barrier_sensitive")
+    assert params.grid.points == 600
+    assert params.grid.steps_per_day == 6.0
 
 
 def test_override_wins():

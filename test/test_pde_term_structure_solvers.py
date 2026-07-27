@@ -205,7 +205,7 @@ def test_ko_reset_pde_sees_term_structure():
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
         ki_continuous=False,
     )
-    solver_params = PDEParams(grid_size=80, time_steps=40)
+    solver_params = PDEParams()
     env_term = make_term_env("kinked")
     px_term = KOResetSnowballPDESolver(solver_params).price(product, env_term)
     px_collapsed = KOResetSnowballPDESolver(solver_params).price(

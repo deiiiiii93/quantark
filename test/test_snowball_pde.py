@@ -179,17 +179,19 @@ class TestSnowballPDESolverBasic:
         assert solver is not None
 
     def test_solver_with_custom_params(self):
-        """Test solver instantiation with custom PDE parameters."""
-        params = PDEParams(grid_size=300, time_steps=150)
+        """Test solver instantiation with custom grid configuration."""
+        from quantark.asset.equity.engine.pde import GridConfig
+
+        params = PDEParams(grid=GridConfig(points=300, steps_per_day=6.0))
         solver = SnowballPDESolver(params=params)
-        assert solver.params.grid_size == 300
-        assert solver.params.time_steps == 150
+        assert solver.grid_binder.config.points == 300
+        assert solver.grid_binder.config.steps_per_day == 6.0
 
     def test_standard_snowball_pricing(self):
         """Test basic standard snowball pricing returns a positive value."""
         snowball = create_standard_snowball()
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
 
@@ -202,7 +204,7 @@ class TestSnowballPDESolverBasic:
         """Test basic reverse snowball pricing returns a positive value."""
         snowball = create_reverse_snowball()
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
 
@@ -236,7 +238,7 @@ class TestSnowballPDEEdgeCases:
             maturity=0.01, barrier_config=barrier_config
         )
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=100, time_steps=50))
+        solver = SnowballPDESolver(PDEParams())
 
         # Should not raise and return a finite value
         price = solver.price(snowball, env)
@@ -246,7 +248,7 @@ class TestSnowballPDEEdgeCases:
         """Test pricing with high volatility."""
         snowball = create_standard_snowball()
         env = create_pricing_env(vol=0.50)  # 50% vol
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -256,7 +258,7 @@ class TestSnowballPDEEdgeCases:
         """Test pricing with low volatility."""
         snowball = create_standard_snowball()
         env = create_pricing_env(vol=0.05)  # 5% vol
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -267,7 +269,7 @@ class TestSnowballPDEEdgeCases:
         barrier_config = create_basic_barrier_config(ko_barrier=103.0)
         snowball = create_standard_snowball(barrier_config=barrier_config)
         env = create_pricing_env(spot=103.0)  # At KO barrier
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -277,7 +279,7 @@ class TestSnowballPDEEdgeCases:
         barrier_config = create_basic_barrier_config(ki_barrier=75.0)
         snowball = create_standard_snowball(barrier_config=barrier_config)
         env = create_pricing_env(spot=75.0)  # At KI barrier
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -289,7 +291,7 @@ class TestSnowballPDEEdgeCases:
         )
         snowball = create_standard_snowball(barrier_config=barrier_config)
         env = create_pricing_env(spot=70.0)  # Below KI barrier
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -303,7 +305,7 @@ class TestSnowballPDEEdgeCases:
         )
         snowball = create_standard_snowball(barrier_config=barrier_config)
         env = create_pricing_env(spot=150.0)  # Above KO barrier but no t=0 observation
-        solver = SnowballPDESolver(PDEParams(grid_size=150, time_steps=75))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -351,7 +353,7 @@ class TestSnowballPDEEdgeCases:
             accrual_config=AccrualConfig(is_annualized=False),
         )
 
-        solver = SnowballPDESolver(PDEParams(grid_size=150, time_steps=75))
+        solver = SnowballPDESolver(PDEParams())
         price = solver.price(snowball, env)
 
         ko_records = snowball.resolve_ko_observations(env)
@@ -374,7 +376,7 @@ class TestSnowballPDEConvergence:
         for grid_size in [100, 200, 400]:
             solver = SnowballPDESolver(
                 PDEParams(
-                    grid_size=grid_size, time_steps=grid_size // 2
+                    
                 )
             )
             prices.append(solver.price(snowball, env))
@@ -399,7 +401,7 @@ class TestSnowballPDEConvergence:
         prices = []
         for time_steps in [100, 200, 400]:
             solver = SnowballPDESolver(
-                PDEParams(grid_size=200, time_steps=time_steps)
+                PDEParams()
             )
             prices.append(solver.price(snowball, env))
 
@@ -426,7 +428,7 @@ class TestSnowballPDEKOScheduleCaching:
             )
 
         env = create_pricing_env()
-        params = PDEParams(grid_size=90, time_steps=48)
+        params = PDEParams()
         SnowballPDESolver.clear_grid_cache()
 
         product = make_product()
@@ -445,8 +447,8 @@ class TestSnowballPDEKOScheduleCaching:
 
         uncached_solver = SnowballPDESolver(
             PDEParams(
-                grid_size=params.grid_size,
-                time_steps=params.time_steps,
+                
+                
                                 cache_enabled=False,
             )
         )
@@ -467,7 +469,7 @@ class TestSnowballPDEVsMC:
         env = create_pricing_env()
 
         # PDE price with fine grid
-        pde_solver = SnowballPDESolver(PDEParams(grid_size=400, time_steps=200))
+        pde_solver = SnowballPDESolver(PDEParams())
         pde_price = pde_solver.price(snowball, env)
 
         # MC price with many paths
@@ -486,7 +488,7 @@ class TestSnowballPDEVsMC:
         snowball = create_reverse_snowball()
         env = create_pricing_env()
 
-        pde_solver = SnowballPDESolver(PDEParams(grid_size=400, time_steps=200))
+        pde_solver = SnowballPDESolver(PDEParams())
         pde_price = pde_solver.price(snowball, env)
 
         mc_engine = SnowballMCEngine(MCParams(num_paths=100000, time_steps=252))
@@ -506,7 +508,7 @@ class TestSnowballPDEBarrierTypes:
         barrier_config = create_basic_barrier_config(ki_continuous=True)
         snowball = create_standard_snowball(barrier_config=barrier_config)
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -526,7 +528,7 @@ class TestSnowballPDEBarrierTypes:
         )
         snowball = create_standard_snowball(barrier_config=barrier_config)
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -554,7 +556,7 @@ class TestSnowballPDEBarrierTypes:
             barrier_config=barrier_config_discrete
         )
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=300, time_steps=150))
+        solver = SnowballPDESolver(PDEParams())
 
         price_continuous = solver.price(snowball_continuous, env)
         price_discrete = solver.price(snowball_discrete, env)
@@ -580,7 +582,7 @@ class TestSnowballPDEStepDown:
         )
         snowball = create_standard_snowball(barrier_config=barrier_config)
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -605,7 +607,7 @@ class TestSnowballPDEStepDown:
             barrier_config=barrier_config_stepdown
         )
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=300, time_steps=150))
+        solver = SnowballPDESolver(PDEParams())
 
         price_flat = solver.price(snowball_flat, env)
         price_stepdown = solver.price(snowball_stepdown, env)
@@ -622,7 +624,7 @@ class TestSnowballPDEKOPayoffTiming:
         accrual_config = AccrualConfig(coupon_pay_type=CouponPayType.INSTANT)
         snowball = create_standard_snowball(accrual_config=accrual_config)
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -633,7 +635,7 @@ class TestSnowballPDEKOPayoffTiming:
         accrual_config = AccrualConfig(coupon_pay_type=CouponPayType.EXPIRY)
         snowball = create_standard_snowball(accrual_config=accrual_config)
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=200, time_steps=100))
+        solver = SnowballPDESolver(PDEParams())
 
         price = solver.price(snowball, env)
         assert np.isfinite(price)
@@ -650,7 +652,7 @@ class TestSnowballPDEKOPayoffTiming:
         )
         snowball_expiry = create_standard_snowball(accrual_config=accrual_config_expiry)
         env = create_pricing_env(rate=0.10)  # Higher rate to amplify effect
-        solver = SnowballPDESolver(PDEParams(grid_size=300, time_steps=150))
+        solver = SnowballPDESolver(PDEParams())
 
         price_instant = solver.price(snowball_instant, env)
         price_expiry = solver.price(snowball_expiry, env)
@@ -667,7 +669,7 @@ class TestSnowballPDEEngineIntegration:
         snowball = create_standard_snowball()
         env = create_pricing_env()
 
-        engine = PDEEngine(PDEParams(grid_size=200, time_steps=100))
+        engine = PDEEngine(PDEParams())
         price = engine.price(snowball, env)
 
         assert np.isfinite(price)
@@ -677,7 +679,7 @@ class TestSnowballPDEEngineIntegration:
         """Test that PDEEngine gives same result as direct solver."""
         snowball = create_standard_snowball()
         env = create_pricing_env()
-        params = PDEParams(grid_size=200, time_steps=100)
+        params = PDEParams()
 
         engine = PDEEngine(params)
         solver = SnowballPDESolver(params)
@@ -694,7 +696,7 @@ class TestSnowballPDEGreeks:
     def test_delta_calculation(self):
         """Test delta calculation via spot bumping."""
         snowball = create_standard_snowball()
-        solver = SnowballPDESolver(PDEParams(grid_size=300, time_steps=150))
+        solver = SnowballPDESolver(PDEParams())
 
         spot = 100.0
         bump = 0.01  # 1% bump
@@ -717,7 +719,7 @@ class TestSnowballPDEGreeks:
     def test_vega_calculation(self):
         """Test vega calculation via volatility bumping."""
         snowball = create_standard_snowball()
-        solver = SnowballPDESolver(PDEParams(grid_size=300, time_steps=150))
+        solver = SnowballPDESolver(PDEParams())
 
         vol = 0.20
         bump = 0.01  # 1 vol point
@@ -750,7 +752,7 @@ class TestSnowballPDEGreeks:
         )
 
         env = create_pricing_env()
-        solver = SnowballPDESolver(PDEParams(grid_size=300, time_steps=150))
+        solver = SnowballPDESolver(PDEParams())
 
         price_long = solver.price(snowball_long, env)
         price_short = solver.price(snowball_short, env)

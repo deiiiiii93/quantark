@@ -6,8 +6,7 @@ configurations and market scenarios.
 
 Usage:
     python example/phoenix_engine_compare_demo.py
-    python example/phoenix_engine_compare_demo.py --paths 30000 --quad-grid 601 --pde-grid 240 --pde-steps 120 --method quasi
-    python example/phoenix_engine_compare_demo.py --pde-log-dx 0.002 --pde-max-grid 1200
+    python example/phoenix_engine_compare_demo.py --paths 30000 --quad-grid 601 --pde-grid 240 --method quasi
 """
 
 import argparse
@@ -18,6 +17,7 @@ from pathlib import Path
 
 
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+from quantark.asset.equity.engine.pde import GridConfig
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
@@ -166,7 +166,7 @@ def run_case(
     print(
         f"Quad Time: {quad_elapsed:.4f}s (grid={quad_engine.params.grid_points}) | "
         f"PDE Time: {pde_elapsed:.4f}s "
-        f"(grid={pde_engine.params.grid_size}, steps={pde_engine.params.time_steps}) | "
+        f"(grid={pde_engine.grid_binder.config.points}) | "
         f"MC Time: {mc_elapsed:.4f}s ({mc_engine.params.num_paths:,} paths)"
     )
 
@@ -183,19 +183,11 @@ def main() -> None:
         default=10.0,
         help="Quad log-domain width in std devs",
     )
-    parser.add_argument("--pde-grid", type=int, default=1000, help="PDE grid size")
-    parser.add_argument("--pde-steps", type=int, default=400, help="PDE time steps")
     parser.add_argument(
-        "--pde-log-dx",
-        type=float,
-        default=0.002,
-        help="PDE log(dx) target for auto grid",
-    )
-    parser.add_argument(
-        "--pde-max-grid",
+        "--pde-grid",
         type=int,
-        default=1200,
-        help="PDE max grid size for auto grid",
+        default=1000,
+        help="PDE spatial points (GridConfig.points)",
     )
     parser.add_argument(
         "--method",
@@ -210,9 +202,10 @@ def main() -> None:
         num_std_devs=args.quad_std_devs,
     )
     pde_params = PDEParams(
-        grid_size=args.pde_grid,
-        time_steps=args.pde_steps,
-        max_grid_size=args.pde_max_grid,
+        grid=GridConfig(
+            points=args.pde_grid,
+            max_points=max(2000, args.pde_grid),
+        ),
     )
     mc_params = MCParams(num_paths=args.paths, time_steps=252, seed=42)
     mc_method = parse_mc_method(args.method)

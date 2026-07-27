@@ -36,7 +36,10 @@ Clean rewrite of the PDE grid construction and event application layer
   `event_min_steps_per_interval`, `log_dx_target`,
   `include_spot_in_critical_points`, `frozen_critical_points`,
   `barrier_refine_log_width`, `barrier_refine_levels`,
-  `barrier_domain_expand`, `adaptive_grid`.
+  `barrier_domain_expand`, `adaptive_grid`, `event_steps_per_day`,
+  `max_time_steps`, `max_grid_size` (the last three had no remaining
+  consumers — `GridConfig.steps_per_day` / `max_steps` / `max_points` own
+  those roles).
 - The class-level shared grid cache (`clear_grid_cache` is now a no-op).
 
 ### Changed
@@ -45,6 +48,19 @@ Clean rewrite of the PDE grid construction and event application layer
   without barrier snapping — cell-average event projection is placement-
   independent — and event-aligned time grids emit one exact dt per interval
   (operator caches are arithmetic-neutral: cache-on == cache-off bitwise).
+- Grid-layer solvers REJECT non-default `grid_size`/`time_steps`/`s_min`/
+  `s_max` with a `ValidationError` naming the `accuracy`/`GridConfig`
+  replacement (previously the values would have been silently inert); the
+  knobs remain live inputs for the standalone vol-model solvers only.
+- `make_pde_params` profiles (`fast`/`accurate`/`barrier_sensitive`/
+  `reverse_sensitive`) now emit `accuracy`/`grid=GridConfig(...)` instead of
+  the legacy knobs (which also fixes a crash: the product-hint path injected
+  deleted `barrier_refine_*` keys).
+- Bump contexts (`create_bump_context`) clone via `deepcopy`, preserving
+  full constructor state (Heston `model_params`, SLV leverage surfaces, ADI
+  dimensions); `PDEEngine.create_bump_context` carries the frozen solver
+  instance. Frozen layouts fail closed when reused across different hard
+  (absorbing-barrier) bounds, and calendar-roll rebinds coverage-validate.
 
 ### Deferred (recorded follow-ups)
 - Event-aligned 2D ADI time axis (uniform march retained).

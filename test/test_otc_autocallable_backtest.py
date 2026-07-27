@@ -9,6 +9,7 @@ import pytest
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde import GridConfig
 from quantark.asset.equity.engine.pde_engine import PDEEngine
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
@@ -167,7 +168,7 @@ def test_engine_factory_selects_snowball_and_phoenix_engines():
     pde_config = AutocallableEngineConfig(
         pricing_engine_type=EngineType.PDE,
         method=EngineType.PDE(PDEMethod.CRANK_NICOLSON),
-        pde_params=PDEParams(grid_size=80, time_steps=40, max_time_steps=100),
+        pde_params=PDEParams(grid=GridConfig(points=80)),
     )
     mc_config = AutocallableEngineConfig(
         pricing_engine_type=EngineType.MONTE_CARLO,

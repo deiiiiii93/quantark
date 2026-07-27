@@ -22,6 +22,7 @@ import _mo_common as mc  # noqa: E402
 from quantark.param import GridVolSurface, FlatRateCurve, SpotQuote
 from quantark.param.div import ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
+from quantark.asset.equity.engine.pde import GridConfig
 from quantark.asset.equity.param import MCParams, PDEParams
 from quantark.asset.equity.product.option import BarrierOption
 from quantark.asset.equity.engine.analytical import BarrierAnalyticalEngine
@@ -120,12 +121,13 @@ def main():
         results[name] = {"mc": mc_px, "mc_stderr": mc_se, "pde": pde_px,
                          "gap": gap, "gap_pct": gap_pct, "cross_check": bool(gap < tol)}
 
-    # BSM (flat ATM vol): MC + PDE on a flat-vol env. Grid converged (grid_size=2000) and time
-    # steps SHARED with MC so the residual gap is pure MC noise, not grid/monitoring mismatch.
+    # BSM (flat ATM vol): MC + PDE on a flat-vol env. Grid converged (2000 spatial
+    # points); the event-aligned time grid hits every discrete monitoring date, so
+    # the residual gap is pure MC noise, not grid/monitoring mismatch.
     atm = _atm_vol(surface, T)
     fenv = _flat_env(s0, r_T, q_T, atm, env.valuation_date)
     record("BSM (flat ATM)", BarrierOptionMCEngine(mcp),
-           BarrierPDESolver(PDEParams(grid_size=2000, time_steps=N_STEPS)), prod, fenv)
+           BarrierPDESolver(PDEParams(grid=GridConfig(points=2000))), prod, fenv)
     # Local Vol: MC + PDE on the same SABR-smoothed Dupire target. This is now a real
     # cross-check rather than the old floored-raw-surface diagnostic.
     record("Local Vol", LocalVolBarrierMCEngine(mcp, local_vol_surface=lv),

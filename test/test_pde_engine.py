@@ -85,7 +85,7 @@ def bs_engine():
 @pytest.fixture
 def pde_params():
     """Standard PDE parameters for tests."""
-    return PDEParams(grid_size=200, time_steps=100)
+    return PDEParams()
 
 
 # ============================================================================
@@ -105,9 +105,6 @@ class TestPDEParams:
         assert params.accuracy == "standard"
         assert params.grid is None
         assert params.bus_days_in_year == 252
-        assert params.event_steps_per_day == 4
-        assert params.max_time_steps == 5000
-        assert params.max_grid_size == 2000
         assert params.rannacher_at_events == True
         assert params.theta == 0.5
         assert params.use_rannacher == True
@@ -212,7 +209,7 @@ class TestEuropeanPDESolver:
         analytical = bs_engine.price(call, pricing_env)
 
         # Test with higher resolution
-        params = PDEParams(grid_size=400, time_steps=400)
+        params = PDEParams(accuracy="high")
         solver = EuropeanPDESolver(params)
         pde_price = solver.price(call, pricing_env)
         error = abs(pde_price - analytical)
@@ -303,9 +300,7 @@ class TestBarrierPDESolver:
         )
 
         analytical = BarrierAnalyticalEngine().price(option, pricing_env)
-        pde = BarrierPDESolver(PDEParams(grid_size=400, time_steps=1008)).price(
-            option, pricing_env
-        )
+        pde = BarrierPDESolver(PDEParams()).price(option, pricing_env)
 
         assert pde == pytest.approx(analytical, rel=5e-3, abs=1e-4)
 
@@ -323,9 +318,7 @@ class TestBarrierPDESolver:
         )
 
         analytical = BarrierAnalyticalEngine().price(option, pricing_env)
-        pde = BarrierPDESolver(PDEParams(grid_size=400, time_steps=1008)).price(
-            option, pricing_env
-        )
+        pde = BarrierPDESolver(PDEParams()).price(option, pricing_env)
 
         assert pde == pytest.approx(analytical, rel=1e-2, abs=2e-3)
 

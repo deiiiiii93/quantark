@@ -73,7 +73,7 @@ def _engine_factories():
             QuadParams(grid_points=301, event_smoothing_cells=0)
         ),
         "pde": lambda: SnowballPDESolver(
-            PDEParams(grid_size=121, time_steps=80)
+            PDEParams()
         ),
         "mc": lambda: SnowballMCEngine(
             MCParams(num_paths=20_000, time_steps=64, seed=123)

@@ -21,7 +21,7 @@ from typing import Any
 
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
-from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.pde import GridConfig, SnowballPDESolver
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from example.snowball_rfq_ko_rate_demo_workflow import (
@@ -67,7 +67,7 @@ def build_engines(
     return {
         "quad": SnowballQuadEngine(params=QuadParams(grid_points=quad_grid)),
         "pde": SnowballPDESolver(
-            params=PDEParams(grid_size=pde_grid, time_steps=pde_steps)
+            params=PDEParams(grid=GridConfig(points=pde_grid))
         ),
         "mc": SnowballMCEngine(
             params=MCParams(

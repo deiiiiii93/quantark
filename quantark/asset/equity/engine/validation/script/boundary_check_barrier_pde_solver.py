@@ -96,8 +96,6 @@ def create_pricing_env(
 def create_pde_params() -> PDEParams:
     """Create PDE parameters for testing."""
     return PDEParams(
-        grid_size=300,
-        time_steps=100,
         theta=0.5,  # Crank-Nicolson
         use_rannacher=True
     )
@@ -650,12 +648,14 @@ def test_grid_refinement_convergence(results: BoundaryCheckResults):
     )
 
     # Coarse grid
-    params_coarse = PDEParams(grid_size=100, time_steps=50)
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+
+    params_coarse = PDEParams(grid=GridConfig(points=100))
     solver_coarse = BarrierPDESolver(params_coarse)
     price_coarse = solver_coarse.price(option, env)
 
     # Fine grid
-    params_fine = PDEParams(grid_size=400, time_steps=200)
+    params_fine = PDEParams(grid=GridConfig(points=400, steps_per_day=8.0))
     solver_fine = BarrierPDESolver(params_fine)
     price_fine = solver_fine.price(option, env)
 

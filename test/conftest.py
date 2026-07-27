@@ -176,7 +176,7 @@ def ko_reset_product():
 
 @pytest.fixture
 def ko_reset_solver() -> KOResetSnowballPDESolver:
-    return KOResetSnowballPDESolver(PDEParams(grid_size=80, time_steps=40))
+    return KOResetSnowballPDESolver(PDEParams())
 
 
 @pytest.fixture

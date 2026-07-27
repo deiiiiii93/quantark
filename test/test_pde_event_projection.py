@@ -588,7 +588,7 @@ def quad_ref(phoenix_product, phoenix_env):
 
 
 def _pde_price(product, env, **params):
-    return float(PhoenixPDESolver(params=PDEParams(grid_size=400, **params)).price(product, env))
+    return float(PhoenixPDESolver(params=PDEParams(**params)).price(product, env))
 
 
 class TestPhoenixCellAverage:
@@ -661,7 +661,7 @@ class TestPhoenixCellAverage:
             params=QuadParams(grid_points=801)
         ).calculate_event_stats(phoenix_product, phoenix_env)
         pde_stats = PhoenixPDESolver(
-            params=PDEParams(grid_size=400, event_projection="cell_average")
+            params=PDEParams(event_projection="cell_average")
         ).calculate_event_stats(phoenix_product, phoenix_env)
         ko_diff = np.max(
             np.abs(np.asarray(pde_stats.ko_probability) - np.asarray(quad_stats.ko_probability))
@@ -714,7 +714,7 @@ class TestSnowballCellAverage:
         )
         px_proj = float(
             SnowballPDESolver(
-                params=PDEParams(grid_size=400, event_projection="cell_average")
+                params=PDEParams(event_projection="cell_average")
             ).price(product, phoenix_env)
         )
         assert abs(px_proj - quad) / abs(quad) < 6e-4
@@ -757,12 +757,12 @@ class TestSnowballCellAverage:
         )
         nodal = float(
             KOResetSnowballPDESolver(
-                PDEParams(grid_size=400, event_projection="nodal", event_rannacher_steps=1)
+                PDEParams(event_projection="nodal", event_rannacher_steps=1)
             ).price(product, env)
         )
         proj = float(
             KOResetSnowballPDESolver(
-                PDEParams(grid_size=400, event_projection="cell_average")
+                PDEParams(event_projection="cell_average")
             ).price(product, env)
         )
         quad = float(
@@ -861,7 +861,7 @@ class TestValuationDateEvents:
 
         def _price(b0):
             return float(
-                PhoenixPDESolver(params=PDEParams(grid_size=200)).price(
+                PhoenixPDESolver(params=PDEParams()).price(
                     self._phoenix_t0(b0), env
                 )
             )
@@ -1367,9 +1367,7 @@ class TestDefaultCertification:
             kw["bump_config"] = BumpConfig(spot_bump=spot_bump)
         params = PDEParams(
             event_projection=projection,
-            grid_size=n,
             grid=GridConfig(points=max(int(n), 201)),  # layer-path N control
-            time_steps=240,  # uniform time grids must land on monthly obs
             **kw,
         )
         calc = GreeksCalculator(

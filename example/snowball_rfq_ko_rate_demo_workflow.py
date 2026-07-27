@@ -25,8 +25,18 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
-from quantark.asset.equity.engine.pde import SnowballPDESolver
+from quantark.asset.equity.engine.pde import GridConfig, SnowballPDESolver
 from quantark.asset.equity.param import PDEParams
+
+
+def _params_grid_points(params: PDEParams) -> int:
+    grid = getattr(params, "grid", None)
+    points = getattr(grid, "points", None)
+    return int(points) if points else 400
+
+
+def _engine_grid_points(engine) -> int:
+    return int(engine.grid_binder.config.points)
 from quantark.asset.equity.product.option import (
     SnowballOption,
     create_european_ki_snowball,
@@ -706,8 +716,7 @@ def serialize_engine(engine: Any) -> dict[str, Any]:
         return {
             "engine_type": "pde",
             "params": {
-                "grid_size": engine.params.grid_size,
-                "time_steps": engine.params.time_steps,
+                "grid_points": _engine_grid_points(engine),
             },
         }
     if type(engine).__name__ == "SnowballQuadEngine":
@@ -726,10 +735,7 @@ def build_engine_from_config(engine_config: dict[str, Any]) -> Any:
     params = engine_config["params"]
     if engine_type == "pde":
         return SnowballPDESolver(
-            params=PDEParams(
-                grid_size=params["grid_size"],
-                time_steps=params["time_steps"],
-            )
+            params=PDEParams(grid=GridConfig(points=params["grid_points"]))
         )
     if engine_type == "quad":
         from asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
@@ -1503,8 +1509,7 @@ def build_cube(
 ) -> tuple[dict[str, dict[str, list[list[list[list[float | None]]]]]], list[dict[str, Any]]]:
     """Build the demo cube with the legacy PDE engine configuration."""
     bump_params = PDEParams(
-        grid_size=max(50, pde_params.grid_size // 2),
-        time_steps=max(80, pde_params.time_steps // 2),
+        grid=GridConfig(points=max(50, _params_grid_points(pde_params) // 2))
     )
     return build_cube_with_engines(
         engine=SnowballPDESolver(params=pde_params),
@@ -1749,17 +1754,15 @@ def calculate_pde_demo_data(
     time_steps: int = PDE_TIME_STEPS,
     parallel_workers: int | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    pde_params = PDEParams(grid_size=grid_size, time_steps=time_steps)
-    bump_params = PDEParams(
-        grid_size=max(50, pde_params.grid_size // 2),
-        time_steps=max(80, pde_params.time_steps // 2),
-    )
+    del time_steps  # time density comes from the event-aligned builder
+    pde_params = PDEParams(grid=GridConfig(points=grid_size))
+    bump_params = PDEParams(grid=GridConfig(points=max(50, grid_size // 2)))
     return calculate_demo_data(
         engine=SnowballPDESolver(params=pde_params),
         bump_engine=SnowballPDESolver(params=bump_params),
         engine_name="SnowballPDESolver",
-        solver_grid_size=pde_params.grid_size,
-        solver_time_steps=pde_params.time_steps,
+        solver_grid_size=_params_grid_points(pde_params),
+        solver_time_steps=None,
         exact_barrier_grid=True,
         parallel_workers=parallel_workers or max(1, os.cpu_count() or 1),
         progress_label="SnowballPDESolver",

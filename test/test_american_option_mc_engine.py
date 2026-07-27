@@ -104,7 +104,7 @@ def test_mc_put_matches_pde() -> None:
     mc_result = mc_engine.get_last_result()
     assert mc_result is not None
 
-    pde_params = PDEParams(grid_size=200, time_steps=200)
+    pde_params = PDEParams()
     pde_engine = AmericanPDESolver(params=pde_params)
     pde_price = pde_engine.price(option, pricing_env)
 

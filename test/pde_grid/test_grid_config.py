@@ -68,3 +68,45 @@ def test_key_fingerprint():
         resolve_config("standard", GridConfig(points=444)).key
         != resolve_config("standard", None).key
     )
+
+
+def test_legacy_resolution_knobs_rejected_on_grid_layer():
+    """Non-default legacy knobs must fail LOUDLY on grid-layer solvers
+    (silently-inert resolution controls are a mispricing hazard), while the
+    standalone vol-model solvers keep consuming them."""
+    from quantark.asset.equity.engine.pde import EuropeanPDESolver, SnowballPDESolver
+    from quantark.asset.equity.param import PDEParams
+
+    for kwargs in (
+        {"grid_size": 120},
+        {"time_steps": 60},
+        {"s_min": 50.0},
+        {"s_max": 200.0},
+    ):
+        solver = EuropeanPDESolver(params=PDEParams(**kwargs))
+        with pytest.raises(ValidationError, match="legacy resolution control"):
+            _ = solver.grid_binder
+
+    # default values pass, and the replacement path works
+    assert SnowballPDESolver(params=PDEParams()).grid_binder.config.points == 400
+    assert (
+        EuropeanPDESolver(
+            params=PDEParams(grid=GridConfig(points=120))
+        ).grid_binder.config.points
+        == 120
+    )
+
+
+def test_pde_param_profiles_target_grid_layer():
+    """make_pde_params presets must configure accuracy/grid (the declarative
+    layer), not the legacy inert knobs."""
+    from quantark.asset.equity.param import make_pde_params
+
+    assert make_pde_params("fast").accuracy == "fast"
+    assert make_pde_params("accurate").accuracy == "high"
+    bs = make_pde_params("barrier_sensitive")
+    assert bs.grid.points == 600 and bs.grid.steps_per_day == 6.0
+    # presets compose with the grid layer without rejection
+    from quantark.asset.equity.engine.pde import EuropeanPDESolver
+
+    assert EuropeanPDESolver(params=bs).grid_binder.config.points == 600

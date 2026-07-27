@@ -13,7 +13,7 @@ import pytest
 from quantark.execution import PricingRequest, PricingSession
 
 from execution.freeze_goldens import PHASE4_GOLDEN_PATH
-from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep
+from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep_refined
 from golden_compare import GOLDEN_REL_TOL
 
 GOLDENS = json.loads(pathlib.Path(PHASE4_GOLDEN_PATH).read_text())["cases"]
@@ -29,9 +29,7 @@ def _session_price(engine, product, env) -> float:
 @pytest.mark.parametrize("name", ["EuropeanPDESolver", "SnowballPDESolver"])
 def test_convergence_gate_production_and_refined(name):
     engine, product, env, _shape = FIXTURE_BUILDERS[name]()
-    refined = type(engine)(
-        params=_pdep(grid_size=180, time_steps=96)
-    )
+    refined = type(engine)(params=_pdep_refined())
 
     direct_prod = engine.price(product, env)
     direct_ref = refined.price(product, env)

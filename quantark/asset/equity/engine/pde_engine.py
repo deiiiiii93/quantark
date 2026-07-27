@@ -62,9 +62,12 @@ class PDEEngine(BaseEngine):
         - PhoenixOption → PhoenixPDESolver
 
     Usage:
-        # Basic usage
-        engine = PDEEngine(PDEParams(grid_size=500))
+        # Basic usage — grid resolution via the accuracy profile
+        engine = PDEEngine(PDEParams(accuracy="high"))
         price = engine.price(european_option, pricing_env)
+
+        # Expert grid control (field-by-field GridConfig overlay)
+        engine = PDEEngine(PDEParams(grid=GridConfig(points=500)))
 
         # With method selection (two-level enum pattern)
         engine = PDEEngine(
@@ -217,13 +220,21 @@ class PDEEngine(BaseEngine):
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> "PDEEngine":
         """
-        Return a facade engine whose dispatched solver uses fixed bump bounds.
+        Return a facade engine whose dispatched solver has the base-market
+        grid layout frozen.
+
+        The frozen layout lives on the SOLVER INSTANCE (``_frozen_base_layout``,
+        spec §4.8), so the facade clone must carry that exact instance in its
+        dispatch cache — rebuilding a solver from params would silently drop
+        the freeze.
         """
         solver = self._get_solver(product)
         fixed_solver = solver.create_bump_context(product, pricing_env)
         if fixed_solver is solver:
             return self
-        return type(self)(params=fixed_solver.params, method=self.method)
+        clone = type(self)(params=self.params, method=self.method)
+        clone._solver_cache[type(product)] = fixed_solver
+        return clone
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

@@ -62,7 +62,7 @@ def test_snowball_pde_event_stats_delegates_to_quad():
         ko_rate=0.10,
     )
     env = _make_env()
-    pde = SnowballPDESolver(params=PDEParams(grid_size=80, time_steps=50))
+    pde = SnowballPDESolver(params=PDEParams())
     stats = pde.calculate_event_stats(product, env)
     assert stats is not None
     assert stats.ko_times.shape == (4,)

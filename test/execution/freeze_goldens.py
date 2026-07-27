@@ -96,7 +96,7 @@ def build_representative_cases() -> dict:
             eq_option, eq_env, "product_env",
         ),
         "equity_pde_european": (
-            EuropeanPDESolver(PDEParams(grid_size=200, time_steps=100)),
+            EuropeanPDESolver(PDEParams()),
             eq_option, eq_env, "product_env",
         ),
         "fx_mc_barrier": (
@@ -172,8 +172,8 @@ _PHASE4_EVENT_CASES = (
     "LocalVolSnowballPDESolver",
     "HestonSnowballPDESolver",
 )
-# Refined-resolution oracle (grid_size*2, time_steps*2) for the convergence
-# gate; 1D representatives only.
+# Refined-resolution oracle (2x the standard profile on both axes, via
+# _pdep_refined) for the convergence gate; 1D representatives only.
 _PHASE4_REFINED_CASES = ("EuropeanPDESolver", "SnowballPDESolver")
 
 
@@ -238,9 +238,9 @@ def freeze_phase4() -> None:
         )
     for name in _PHASE4_REFINED_CASES:
         engine, product, env, _shape = builders[name]()
-        refined = type(engine)(
-            params=_pdep(grid_size=180, time_steps=96)
-        )
+        from execution.matrix_fixtures import _pdep_refined
+
+        refined = type(engine)(params=_pdep_refined())
         cases[f"{name}::refined"] = _phase4_case_payload(
             refined, product, env,
             with_curve=name in _PHASE4_CURVE_CASES,

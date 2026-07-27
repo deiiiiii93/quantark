@@ -406,19 +406,24 @@ class PDEParams(EngineParams):
     PDE engine configuration.
 
     Attributes:
-        grid_size: Number of spatial grid points (default: 400)
-        time_steps: Number of time steps (default: 200)
+        accuracy: Grid accuracy profile: fast, standard, high (default: standard)
+        grid: Optional GridConfig expert overlay (field-by-field override of
+            the accuracy profile: points, steps_per_day, bounds, ...)
+        grid_size: LEGACY - spatial grid points for the standalone vol-model
+            solvers only (LocalVolPDESolver, LV/Heston/SLV barrier solvers);
+            solvers on the declarative grid layer reject non-default values
+        time_steps: LEGACY - time steps for the standalone vol-model solvers
+            only; solvers on the declarative grid layer reject non-default values
         cache_enabled: Enable PDE cache usage (default: True)
         cache_strategy: Cache strategy: disable, strict, standard, aggressive (default: standard)
         grid_cache_max_entries: Max cached grids for PDE solvers (default: 128)
         use_banded_solver: Use banded solve for tridiagonal systems (default: True)
         banded_cache_max_entries: Max cached banded systems per solve (default: 512)
-        s_min: Lower bound for spatial grid (0 = auto-calculate)
-        s_max: Upper bound for spatial grid (0 = auto-calculate)
+        s_min: LEGACY - lower spatial bound for the standalone vol-model
+            solvers (0 = auto); grid-layer solvers use GridConfig.bounds
+        s_max: LEGACY - upper spatial bound for the standalone vol-model
+            solvers (0 = auto); grid-layer solvers use GridConfig.bounds
         bus_days_in_year: Days per year for day-based grid heuristics (from EngineParams, default: 252)
-        event_steps_per_day: Steps per day between observation events (default: 4)
-        max_time_steps: Upper bound for auto-generated time steps (default: 5000)
-        max_grid_size: Upper bound for auto-generated spatial grid points (default: 2000)
         event_projection: Spatial representation of discrete coupon/KO/KI event
             jumps — "cell_average" (default; conservative dual-cell projection
             that removes the half-cell trigger-phase bias, see
@@ -441,6 +446,10 @@ class PDEParams(EngineParams):
     accuracy: str = "standard"
     grid: Optional[object] = None
 
+    # LEGACY resolution knobs — consumed ONLY by the standalone vol-model
+    # solvers (bespoke kernels, deferred migration). Solvers on the
+    # declarative grid layer REJECT non-default values (loud, with the
+    # GridConfig replacement named) instead of silently ignoring them.
     grid_size: int = 400
     time_steps: int = 200
     cache_enabled: bool = True
@@ -455,22 +464,6 @@ class PDEParams(EngineParams):
     s_min: float = 0.0  # Auto-calculate if 0
     s_max: float = 0.0  # Auto-calculate if 0
 
-    # Time grid configuration
-
-    # Auto-grid tuning parameters
-    # event_steps_per_day: resolution (fill steps per business day) for the
-    # decoupled event-aligned grid (TimeGrid.build_mandatory). Validated by
-    # test_pde_grid_convergence_gate: at spd=4 the autocallable price is
-    # grid-converged for discrete-KI rows (<=1e-4 vs spd=8) and matches the
-    # pre-change production grid within 1.2e-5 (oracle b). Not lowered below 4
-    # because continuously-monitored KI needs the resolution (slow O(1/N)
-    # barrier convergence).
-    event_steps_per_day: int = 4
-    max_time_steps: int = 5000
-    max_grid_size: int = 2000
-    # When set (by create_bump_context), the spatial grid concentrates on exactly
-    # these frozen critical points instead of recomputing them per bump — so a
-    # spot bump does not snap the grid to a moved spot [§11.4].
     # Treatment of discretely-monitored knock-in schedules [§11.6]. EXACT_DISCRETE
     # (default) applies the KI regime jump on every observation date exactly, with
     # an event-aligned grid. BGK_APPROXIMATION is an opt-in performance/robustness
@@ -551,18 +544,6 @@ class PDEParams(EngineParams):
         if self.s_min > 0 and self.s_max > 0 and self.s_min >= self.s_max:
             raise ValidationError(
                 f"s_min ({self.s_min}) must be less than s_max ({self.s_max})"
-            )
-        if self.event_steps_per_day <= 0:
-            raise ValidationError(
-                f"event_steps_per_day must be positive, got {self.event_steps_per_day}"
-            )
-        if self.max_time_steps <= 0:
-            raise ValidationError(
-                f"max_time_steps must be positive, got {self.max_time_steps}"
-            )
-        if self.max_grid_size <= 0:
-            raise ValidationError(
-                f"max_grid_size must be positive, got {self.max_grid_size}"
             )
         if not 0.0 <= self.theta <= 1.0:
             raise ValidationError(f"theta must be in [0, 1], got {self.theta}")

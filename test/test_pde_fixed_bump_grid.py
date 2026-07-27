@@ -141,8 +141,8 @@ def test_pde_bump_context_freezes_effective_spatial_bounds(
     product = product_factory()
     env = _pricing_env()
     params = PDEParams(
-        grid_size=90,
-        time_steps=45,
+        
+        
         cache_strategy="disable",
     )
     solver = solver_cls(params=params)
@@ -191,7 +191,7 @@ def test_greeks_calculator_pde_rho_matches_manual_fixed_domain_repricing(
 ):
     product = product_factory()
     env = _pricing_env()
-    params = PDEParams(grid_size=90, time_steps=45, cache_strategy="disable")
+    params = PDEParams(cache_strategy="disable")
     engine = PDEEngine(params=params)
     bump = 0.0001
     calc = GreeksCalculator(

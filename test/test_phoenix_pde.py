@@ -117,7 +117,7 @@ def test_phoenix_pde_price_positive():
         coupon_pay_type=CouponPayType.INSTANT,
         memory_coupon=False,
     )
-    engine = PhoenixPDESolver(params=PDEParams(grid_size=120, time_steps=80))
+    engine = PhoenixPDESolver(params=PDEParams())
     price = engine.price(phoenix, env)
     assert np.isfinite(price)
     assert price > 0.0
@@ -130,8 +130,8 @@ def test_phoenix_pde_dispatcher():
         coupon_pay_type=CouponPayType.INSTANT,
         memory_coupon=False,
     )
-    direct = PhoenixPDESolver(params=PDEParams(grid_size=120, time_steps=80))
-    dispatcher = PDEEngine(params=PDEParams(grid_size=120, time_steps=80))
+    direct = PhoenixPDESolver(params=PDEParams())
+    dispatcher = PDEEngine(params=PDEParams())
     direct_price = direct.price(phoenix, env)
     dispatcher_price = dispatcher.price(phoenix, env)
     assert np.isfinite(dispatcher_price)
@@ -150,7 +150,7 @@ def test_phoenix_pde_memory_coupon_effect():
         coupon_pay_type=CouponPayType.EXPIRY,
         memory_coupon=False,
     )
-    engine = PhoenixPDESolver(params=PDEParams(grid_size=120, time_steps=80))
+    engine = PhoenixPDESolver(params=PDEParams())
     memory_price = engine.price(memory_phoenix, env)
     non_memory_price = engine.price(non_memory_phoenix, env)
     assert memory_price >= non_memory_price - 1e-6
@@ -179,7 +179,7 @@ def test_phoenix_pde_memory_variable_coupon_amounts():
         include_principal=False,
         maturity=1.0,
     )
-    engine = PhoenixPDESolver(params=PDEParams(grid_size=160, time_steps=120))
+    engine = PhoenixPDESolver(params=PDEParams())
     memory_price = engine.price(memory_phoenix, env)
     non_memory_price = engine.price(non_memory_phoenix, env)
     df = math.exp(-0.03 * 0.75)
@@ -201,7 +201,7 @@ def test_phoenix_pde_ko_without_coupon():
         include_principal=False,
         maturity=1.0,
     )
-    engine = PhoenixPDESolver(params=PDEParams(grid_size=160, time_steps=120))
+    engine = PhoenixPDESolver(params=PDEParams())
     price = engine.price(phoenix, env)
     assert abs(price) <= 1e-2
 
@@ -238,7 +238,7 @@ def test_phoenix_pde_reverse_boundary_unbounded():
         maturity=1.0,
         is_reverse=True,
     )
-    engine = PhoenixPDESolver(params=PDEParams(grid_size=120, time_steps=80))
+    engine = PhoenixPDESolver(params=PDEParams())
     spot = env.spot
     tau = phoenix.get_maturity(env)
     r = env.get_rate(tau)
@@ -308,7 +308,7 @@ def test_phoenix_pde_variable_discrete_ki_barrier_uses_time_varying_levels():
     high_participation = build_product(participation_rate=1.0)
     low_participation = build_product(participation_rate=0.2)
 
-    engine = PhoenixPDESolver(params=PDEParams(grid_size=180, time_steps=120))
+    engine = PhoenixPDESolver(params=PDEParams())
     price_high = engine.price(high_participation, env)
     price_low = engine.price(low_participation, env)
 
@@ -363,7 +363,7 @@ def test_phoenix_pde_terminal_ko_no_coupon_matches_quad():
     env = create_pricing_env(vol=0.25)
     phoenix = _terminal_ko_phoenix(coupon_barrier=1.0e9, coupon_rate=0.0)
 
-    pde = PhoenixPDESolver(params=PDEParams(grid_size=300, time_steps=150))
+    pde = PhoenixPDESolver(params=PDEParams())
     quad = PhoenixQuadEngine(params=QuadParams(grid_points=601))
 
     pde_price = pde.price(phoenix, env)
@@ -387,7 +387,7 @@ def test_phoenix_pde_terminal_ko_with_coupon_matches_quad():
     env = create_pricing_env(vol=0.25)
     phoenix = _terminal_ko_phoenix(coupon_barrier=85.0, coupon_rate=0.02)
 
-    pde = PhoenixPDESolver(params=PDEParams(grid_size=300, time_steps=150))
+    pde = PhoenixPDESolver(params=PDEParams())
     quad = PhoenixQuadEngine(params=QuadParams(grid_points=601))
 
     pde_price = pde.price(phoenix, env)

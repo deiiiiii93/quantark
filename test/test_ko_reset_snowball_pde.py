@@ -49,7 +49,7 @@ def test_ko_reset_pde_price_absolute():
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
         ki_continuous=True,
     )
-    solver = KOResetSnowballPDESolver(PDEParams(grid_size=80, time_steps=40))
+    solver = KOResetSnowballPDESolver(PDEParams())
     price = solver.price(product, pricing_env)
     assert np.isfinite(price)
 
@@ -64,7 +64,7 @@ def test_ko_reset_pde_engine_dispatch():
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
         ki_continuous=False,
     )
-    engine = PDEEngine(PDEParams(grid_size=80, time_steps=40))
+    engine = PDEEngine(PDEParams())
     price = engine.price(product, pricing_env)
     assert np.isfinite(price)
 
@@ -79,7 +79,7 @@ def test_ko_reset_pde_reject_rebased():
         post_ko_mode=PostKOScheduleMode.REBASED,
         ki_continuous=False,
     )
-    solver = KOResetSnowballPDESolver(PDEParams(grid_size=60, time_steps=30))
+    solver = KOResetSnowballPDESolver(PDEParams())
     with pytest.raises(ValidationError):
         solver.price(product, pricing_env)
 
@@ -124,7 +124,7 @@ def test_ko_reset_pde_event_stats_absolute():
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
         ki_continuous=False,
     )
-    solver = KOResetSnowballPDESolver(PDEParams(grid_size=120, time_steps=60))
+    solver = KOResetSnowballPDESolver(PDEParams())
 
     stats = solver.calculate_event_stats(product, pricing_env)
 

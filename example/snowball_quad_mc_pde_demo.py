@@ -42,6 +42,7 @@ from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousD
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
+from quantark.asset.equity.engine.pde import GridConfig
 
 
 def parse_mc_method(name: str) -> MonteCarloMethod:
@@ -449,7 +450,7 @@ def main() -> None:
 
     def resolve_case_params(label: str) -> tuple[QuadParams, PDEParams]:
         quad_params = QuadParams(grid_points=args.grid)
-        pde_params = PDEParams(grid_size=args.pde_grid, time_steps=args.pde_steps)
+        pde_params = PDEParams(grid=GridConfig(points=args.pde_grid))
 
         if label == "Standard (daily KI, monthly KO)":
             pde_params = make_pde_params(

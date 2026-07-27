@@ -31,6 +31,7 @@ from typing import List, Optional
 
 
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+from quantark.asset.equity.engine.pde import GridConfig
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
@@ -415,9 +416,10 @@ def run_case(
 
     pde_engine = PhoenixPDESolver(
         params=PDEParams(
-            grid_size=args.pde_grid,
-            time_steps=args.pde_steps,
-            max_time_steps=args.pde_max_steps,
+            grid=GridConfig(
+                points=args.pde_grid,
+                max_points=max(2000, args.pde_grid),
+            ),
         )
     )
     quad_engine = PhoenixQuadEngine(
@@ -517,7 +519,7 @@ def build_report(args: argparse.Namespace, rows: List[EngineRunResult]) -> str:
             f"{args.rqmc_total_paths:,} total "
             f"({args.rqmc_batches} batches x {max(1, args.rqmc_total_paths // max(1, args.rqmc_batches)):,} paths)"
         ),
-        f"- PDE params: grid={args.pde_grid}, steps={args.pde_steps}, max_time_steps={args.pde_max_steps}",
+        f"- PDE params: grid points={args.pde_grid} (event-aligned time grid)",
         f"- QUAD params: grid_points={args.quad_grid}, num_std_devs={args.quad_std_devs}",
         "",
         "## Comparison Table",
@@ -561,19 +563,11 @@ def parse_args() -> argparse.Namespace:
         help="RQMC batch count used to realize total paths.",
     )
 
-    parser.add_argument("--pde-grid", type=int, default=700, help="PDE spatial grid size.")
-    parser.add_argument("--pde-steps", type=int, default=360, help="PDE time steps.")
     parser.add_argument(
-        "--pde-max-steps",
+        "--pde-grid",
         type=int,
-        default=5000,
-        help="PDE max time steps when auto grid is enabled.",
-    )
-    parser.add_argument(
-        "--pde-log-dx",
-        type=float,
-        default=0.0025,
-        help="PDE log-dx target for auto grid.",
+        default=700,
+        help="PDE spatial points (GridConfig.points).",
     )
     parser.add_argument("--quad-grid", type=int, default=1001, help="QUAD grid points.")
     parser.add_argument(

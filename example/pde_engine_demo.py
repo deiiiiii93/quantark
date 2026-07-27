@@ -27,6 +27,7 @@ from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousD
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType, BarrierType
 from quantark.util.enum.engine_enums import PDEMethod, EngineType, AmericanAnalyticalMethod
+from quantark.asset.equity.engine.pde import GridConfig
 
 
 def print_section(title: str):
@@ -63,12 +64,10 @@ def demo_pde_engine_basics():
     # Initialize PDEEngine with default method (Crank-Nicolson)
     print("\n2. Initialize Unified PDEEngine")
     print("-" * 40)
-    pde_engine = PDEEngine(params=PDEParams(grid_size=400, time_steps=200))
+    pde_engine = PDEEngine(params=PDEParams(grid=GridConfig(points=400)))
     print(f"Engine: {pde_engine}")
     print(f"Method: {pde_engine.method.value}")
-    print(
-        f"Grid: {pde_engine.params.grid_size} space steps, {pde_engine.params.time_steps} time steps"
-    )
+    print(f"Grid: {pde_engine.params.grid.points} spatial points (event-aligned time)")
 
     # Price European Option
     print("\n3. European Call Option (Auto-dispatch to EuropeanPDESolver)")
@@ -119,7 +118,7 @@ def demo_method_selection():
     euro_option = EuropeanVanillaOption(
         strike=100.0, option_type=OptionType.CALL, maturity=1.0
     )
-    params = PDEParams(grid_size=300, time_steps=150)
+    params = PDEParams(grid=GridConfig(points=300))
 
     print("\n1. Two-Level Enum Pattern (Recommended)")
     print("-" * 40)
@@ -159,7 +158,7 @@ def demo_greeks_calculation():
     )
 
     calculator = GreeksCalculator()
-    pde_engine = PDEEngine(params=PDEParams(grid_size=400, time_steps=200))
+    pde_engine = PDEEngine(params=PDEParams(grid=GridConfig(points=400)))
 
     print("\n1. American Put Option Greeks (PDE Numerical Greeks)")
     print("-" * 40)
@@ -217,7 +216,7 @@ def demo_pde_vs_analytical():
     )
 
     bs_engine = BlackScholesEngine()
-    pde_engine = PDEEngine(params=PDEParams(grid_size=500, time_steps=250))
+    pde_engine = PDEEngine(params=PDEParams(grid=GridConfig(points=500)))
 
     price_bs = bs_engine.price(euro_call, pricing_env)
     price_pde = pde_engine.price(euro_call, pricing_env)
@@ -262,7 +261,7 @@ def demo_solver_caching():
         valuation_date=datetime(2024, 1, 1),
     )
 
-    pde_engine = PDEEngine(params=PDEParams(grid_size=300, time_steps=150))
+    pde_engine = PDEEngine(params=PDEParams(grid=GridConfig(points=300)))
 
     print("\nPricing multiple European options with same engine:")
     print("-" * 40)
@@ -313,7 +312,7 @@ PDEEngine Key Features:
 ✓ Consistent API: Follows same pattern as BlackScholesEngine, AmericanOptionAnalyticalEngine
 
 Usage Pattern:
-    engine = PDEEngine(params=PDEParams(grid_size=400, time_steps=200))
+    engine = PDEEngine(params=PDEParams(accuracy="standard"))
     price = engine.price(any_option_product, pricing_env)
     greeks = calculator.calculate_numerical_greeks(product, pricing_env, engine)
     """

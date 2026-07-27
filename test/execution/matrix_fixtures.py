@@ -93,6 +93,15 @@ def _pdep(**kw):
     return PDEParams(**kw)
 
 
+def _pdep_refined(**kw):
+    """Refined-resolution variant for the convergence-gate oracle (double the
+    standard profile on both axes)."""
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+
+    kw.setdefault("grid", GridConfig(points=800, steps_per_day=8.0))
+    return _pdep(**kw)
+
+
 # ------------------------------------------------------------ family products
 def _snowball():
     from quantark.asset.equity.product.option.snowball_config import BarrierConfig
@@ -603,7 +612,7 @@ def _build_equity_pde():
             import quantark.asset.equity.engine.pde as pde_mod
 
             cls = getattr(pde_mod, cls_name)
-            engine = cls(_pdep(grid_size=90, time_steps=48))
+            engine = cls(_pdep())
             env = _eq_grid_env() if grid_env else _eq_flat_env()
             return engine, product_fn(), env, "product_env"
 
@@ -628,7 +637,7 @@ def _build_equity_pde():
         from quantark.util.enum import OptionType
 
         return (
-            AmericanPDESolver(_pdep(grid_size=90, time_steps=48)),
+            AmericanPDESolver(_pdep()),
             AmericanOption(strike=100.0, option_type=OptionType.PUT, maturity=1.0),
             _eq_flat_env(), "product_env",
         )
@@ -641,7 +650,7 @@ def _build_equity_pde():
         from quantark.util.enum import DoubleBarrierType, OptionType
 
         return (
-            DoubleBarrierPDESolver(_pdep(grid_size=90, time_steps=48)),
+            DoubleBarrierPDESolver(_pdep()),
             DoubleBarrierOption(
                 strike=100.0, option_type=OptionType.CALL, upper_barrier=120.0,
                 lower_barrier=80.0, barrier_type=DoubleBarrierType.KNOCK_OUT,
@@ -658,7 +667,7 @@ def _build_equity_pde():
         from quantark.util.enum import BarrierDirection, TouchType
 
         return (
-            OneTouchPDESolver(_pdep(grid_size=90, time_steps=48)),
+            OneTouchPDESolver(_pdep()),
             OneTouchOption(
                 barrier=110.0, barrier_direction=BarrierDirection.UP,
                 maturity=1.0, rebate=100.0, payment_at_hit=True,
@@ -675,7 +684,7 @@ def _build_equity_pde():
         from quantark.util.enum import TouchType
 
         return (
-            DoubleOneTouchPDESolver(_pdep(grid_size=90, time_steps=48)),
+            DoubleOneTouchPDESolver(_pdep()),
             DoubleOneTouchOption(
                 upper_barrier=110.0, lower_barrier=90.0, maturity=1.0,
                 rebate=100.0, payment_at_hit=True,
@@ -692,7 +701,7 @@ def _build_equity_pde():
         from quantark.util.enum import PostKOScheduleMode
 
         return (
-            KOResetSnowballPDESolver(_pdep(grid_size=80, time_steps=40)),
+            KOResetSnowballPDESolver(_pdep()),
             create_ko_reset_snowball(
                 initial_price=100.0, strike=100.0, maturity_pre=1.0,
                 maturity_post=2.0, post_ko_mode=PostKOScheduleMode.ABSOLUTE,
@@ -772,7 +781,7 @@ def _build_equity_pde():
         from quantark.asset.equity.engine.pde_engine import PDEEngine
 
         return (
-            PDEEngine(_pdep(grid_size=80, time_steps=40)),
+            PDEEngine(_pdep()),
             _euro(), _eq_flat_env(), "product_env",
         )
 

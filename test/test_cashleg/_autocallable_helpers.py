@@ -84,10 +84,10 @@ def make_phoenix(ko_dates=(0.5, 1.0), ko_barrier=105.0,
 
 _ENGINES = {
     ("snowball", "mc"): lambda: SnowballMCEngine(params=MCParams(num_paths=60_000, seed=7)),
-    ("snowball", "pde"): lambda: SnowballPDESolver(params=PDEParams(grid_size=400, time_steps=400)),
+    ("snowball", "pde"): lambda: SnowballPDESolver(params=PDEParams()),
     ("snowball", "quad"): lambda: SnowballQuadEngine(params=QuadParams(grid_points=1001)),
     ("phoenix", "mc"): lambda: PhoenixMCEngine(params=MCParams(num_paths=60_000, seed=7)),
-    ("phoenix", "pde"): lambda: PhoenixPDESolver(params=PDEParams(grid_size=400, time_steps=400)),
+    ("phoenix", "pde"): lambda: PhoenixPDESolver(params=PDEParams()),
     ("phoenix", "quad"): lambda: PhoenixQuadEngine(params=QuadParams(grid_points=1001)),
 }
 

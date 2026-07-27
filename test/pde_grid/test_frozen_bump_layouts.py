@@ -122,6 +122,75 @@ def test_out_of_domain_bump_raises():
         ctx.price(product, env(spot=500.0))
 
 
+def test_changed_hard_bounds_fail_closed():
+    """A frozen context built for one absorbing barrier must NOT be reused
+    for a product with a different one (silent wrong-boundary hazard)."""
+    from quantark.asset.equity.engine.pde import BarrierPDESolver
+    from quantark.asset.equity.product.option import BarrierOption
+    from quantark.util.enum import BarrierType, OptionType
+    from quantark.util.exceptions import PricingError
+
+    def up_out(barrier):
+        return BarrierOption(
+            strike=100.0,
+            option_type=OptionType.CALL,
+            barrier=barrier,
+            barrier_type=BarrierType.UP_OUT,
+            maturity=1.0,
+            observation_type=ObservationType.CONTINUOUS,
+        )
+
+    base_env = env()
+    ctx = BarrierPDESolver(params=PDEParams()).create_bump_context(
+        up_out(130.0), base_env
+    )
+    with pytest.raises(PricingError, match="hard bounds"):
+        ctx.price(up_out(120.0), base_env)
+
+
+def test_cross_product_rebind_validates_coverage():
+    """Same hard bounds but a foreign schedule: the calendar-roll rebind path
+    must still coverage-validate instead of silently reusing the domain."""
+    base_env = env()
+    ctx = SnowballPDESolver(params=PDEParams()).create_bump_context(
+        snowball(), base_env
+    )
+    foreign_cfg = BarrierConfig(
+        ko_barrier=320.0,
+        ko_rate=0.15,
+        ko_observation_type=ObservationType.DISCRETE,
+        ko_observation_dates=[0.3, 0.6, 0.9],  # different schedule -> rebind
+        ki_barrier=240.0,
+        ki_continuous=True,
+    )
+    foreign = SnowballOption(
+        initial_price=300.0,
+        strike=300.0,
+        barrier_config=foreign_cfg,
+        contract_multiplier=1.0,
+        maturity=1.0,
+    )
+    with pytest.raises(NumericalError, match="does not cover"):
+        ctx.price(foreign, base_env)
+
+
+def test_pde_engine_facade_preserves_frozen_layout():
+    """PDEEngine.create_bump_context must carry the fixed SOLVER INSTANCE:
+    the freeze lives on the solver object, not in params."""
+    from quantark.asset.equity.engine.pde_engine import PDEEngine
+
+    base_env = env()
+    product = snowball()
+    eng = PDEEngine()
+    fixed_eng = eng.create_bump_context(product, base_env)
+    assert fixed_eng is not eng
+    fixed_solver = fixed_eng._get_solver(product)
+    frozen = fixed_solver._frozen_base_layout
+    assert frozen is not None
+    fixed_eng.price(product, env(spot=101.0))
+    assert fixed_solver._active_layout is frozen
+
+
 def test_dcn_bump_context_identity_matrix():
     import sys
 

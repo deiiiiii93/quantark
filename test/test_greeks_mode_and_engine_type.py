@@ -71,7 +71,7 @@ class TestEngineTypeAttribute:
 
     def test_pde_engine_type(self):
         """Test that PDEEngine has type PDE."""
-        engine = PDEEngine(params=PDEParams(grid_size=100, time_steps=50))
+        engine = PDEEngine(params=PDEParams())
         assert engine.engine_type == EngineType.PDE
 
     def test_base_pde_solver_type(self):
@@ -113,7 +113,7 @@ class TestGreeksCalculatorMode:
 
     def test_should_use_engine_greeks_bump_mode(self, pricing_env):
         """Test _should_use_engine_greeks returns False for BUMP mode."""
-        pde_engine = PDEEngine(params=PDEParams(grid_size=100, time_steps=50))
+        pde_engine = PDEEngine(params=PDEParams())
         calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.BUMP)
         assert not calc._should_use_engine_greeks(pde_engine)
 
@@ -124,12 +124,12 @@ class TestGreeksCalculatorMode:
         # BlackScholesEngine inherits BaseEngine.calculate_greeks; do not use it.
         assert not calc._should_use_engine_greeks(bs_engine)
 
-        pde_engine = PDEEngine(params=PDEParams(grid_size=100, time_steps=50))
+        pde_engine = PDEEngine(params=PDEParams())
         assert calc._should_use_engine_greeks(pde_engine)
 
     def test_should_use_engine_greeks_auto_with_pde(self, pricing_env):
         """Test _should_use_engine_greeks with AUTO mode and PDE engine."""
-        pde_engine = PDEEngine(params=PDEParams(grid_size=100, time_steps=50))
+        pde_engine = PDEEngine(params=PDEParams())
         calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.AUTO)
         # AUTO mode should use engine Greeks for PDE
         assert calc._should_use_engine_greeks(pde_engine)
@@ -154,7 +154,7 @@ class TestGreeksCalculatorPDEIntegration:
 
     def test_bump_mode_uses_bump_method(self, euro_call, pricing_env):
         """Test that BUMP mode always uses bump method even for PDE."""
-        pde_engine = PDEEngine(params=PDEParams(grid_size=100, time_steps=50))
+        pde_engine = PDEEngine(params=PDEParams())
         calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.BUMP)
 
         greeks = calc.calculate_numerical_greeks(euro_call, pricing_env, pde_engine)
@@ -169,7 +169,7 @@ class TestGreeksCalculatorPDEIntegration:
 
     def test_auto_mode_uses_pde_greeks(self, euro_call, pricing_env):
         """Test that AUTO mode uses PDE engine's calculate_greeks()."""
-        pde_engine = PDEEngine(params=PDEParams(grid_size=300, time_steps=150))
+        pde_engine = PDEEngine(params=PDEParams())
         calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.AUTO)
 
         greeks = calc.calculate_numerical_greeks(euro_call, pricing_env, pde_engine)
@@ -185,7 +185,7 @@ class TestGreeksCalculatorPDEIntegration:
 
     def test_engine_mode_uses_pde_greeks(self, euro_call, pricing_env):
         """Test that ENGINE mode uses PDE engine's calculate_greeks()."""
-        pde_engine = PDEEngine(params=PDEParams(grid_size=100, time_steps=50))
+        pde_engine = PDEEngine(params=PDEParams())
         calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.ENGINE)
 
         greeks = calc.calculate_numerical_greeks(euro_call, pricing_env, pde_engine)
@@ -272,7 +272,7 @@ class TestGreeksComparison:
 
     def test_pde_greeks_vs_bump_method(self, euro_call, pricing_env):
         """Compare PDE grid-based Greeks with bump method."""
-        pde_engine = PDEEngine(params=PDEParams(grid_size=300, time_steps=150))
+        pde_engine = PDEEngine(params=PDEParams())
 
         # Get PDE grid-based Greeks
         calc_pde = GreeksCalculator(greeks_mode=GreeksCalculationMode.AUTO)
@@ -298,7 +298,7 @@ class TestGreeksComparison:
 
     def test_american_option_pde_greeks(self, american_put, pricing_env):
         """Test PDE Greeks for American option."""
-        pde_engine = PDEEngine(params=PDEParams(grid_size=300, time_steps=150))
+        pde_engine = PDEEngine(params=PDEParams())
         calc = GreeksCalculator(greeks_mode=GreeksCalculationMode.AUTO)
 
         greeks = calc.calculate_numerical_greeks(american_put, pricing_env, pde_engine)

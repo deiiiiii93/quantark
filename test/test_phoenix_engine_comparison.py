@@ -50,7 +50,7 @@ def base_env():
 def engines():
     return {
         "quad": PhoenixQuadEngine(params=QuadParams(grid_points=401)),
-        "pde": PhoenixPDESolver(params=PDEParams(grid_size=200, time_steps=100)),
+        "pde": PhoenixPDESolver(params=PDEParams()),
         "mc": PhoenixMCEngine(
             params=MCParams(num_paths=65536, seed=42),
             method=MonteCarloMethod.QUASI,
@@ -167,7 +167,7 @@ class TestPhoenixEngineComparison:
     def test_quarterly_vs_monthly_observations(self, base_env):
         """Test that fewer observations (quarterly) increases value due to lower KO probability."""
         mc_engine = PhoenixMCEngine(params=MCParams(num_paths=50000, seed=42))
-        pde_engine = PhoenixPDESolver(params=PDEParams(grid_size=200, time_steps=100))
+        pde_engine = PhoenixPDESolver(params=PDEParams())
 
         monthly_obs = build_observation_schedule(
             [i / 12 for i in range(1, 13)], barrier=75.0
@@ -281,7 +281,7 @@ class TestPhoenixEngineComparison:
     def test_coupon_pay_type_instant_vs_expiry(self, base_env):
         """Test that INSTANT coupon payment gives higher value than EXPIRY."""
         mc_engine = PhoenixMCEngine(params=MCParams(num_paths=30000, seed=42))
-        pde_engine = PhoenixPDESolver(params=PDEParams(grid_size=150, time_steps=80))
+        pde_engine = PhoenixPDESolver(params=PDEParams())
 
         monthly_obs = build_observation_schedule(
             [i / 12 for i in range(1, 13)], barrier=75.0
@@ -451,12 +451,15 @@ class TestPhoenixEngineConvergence:
             ki_observation_schedule=monthly_obs,
         )
 
+        from quantark.asset.equity.engine.pde import GridConfig
+
         grid_sizes = [100, 200, 300]
-        time_steps = [50, 100, 150]
         prices = []
 
-        for grid, steps in zip(grid_sizes, time_steps):
-            engine = PhoenixPDESolver(params=PDEParams(grid_size=grid, time_steps=steps))
+        for grid in grid_sizes:
+            engine = PhoenixPDESolver(
+                params=PDEParams(grid=GridConfig(points=grid))
+            )
             price = engine.price(phoenix, base_env)
             prices.append(price)
 

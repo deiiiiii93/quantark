@@ -532,6 +532,29 @@ banded solve over this layer) and any book-partitioning helpers.
   1.5e-3 notional-relative (pre-existing cross-family treatment divergence,
   reproduced on the pre-rewrite stack); 5e-4 applies to discrete-KI rows.
 
+### Stage-6 review amendments (Codex code gate, 2026-07-27)
+
+- **§4.7 amendment — surviving-knob semantics:** grid-layer solvers REJECT
+  non-default `grid_size`/`time_steps`/`s_min`/`s_max` (ValidationError
+  naming the `accuracy`/`GridConfig` replacement) instead of silently
+  ignoring them; the knobs remain live for the standalone vol-model solvers
+  only. `event_steps_per_day`, `max_time_steps`, `max_grid_size` are deleted
+  outright (no remaining consumers — `GridConfig.steps_per_day`/`max_steps`/
+  `max_points` own those roles). `make_pde_params` profiles now emit
+  `accuracy`/`grid=GridConfig(...)`.
+- **§4.8 amendment — bump-clone construction:** `create_bump_context` clones
+  the live engine via `deepcopy` (transient solve state stripped), so
+  subclasses with richer constructors (Heston `model_params`, SLV leverage
+  surfaces, ADI dimensions, prebuilt LV surfaces) keep full configuration;
+  `PDEEngine.create_bump_context` seeds its facade clone's dispatch cache
+  with the fixed solver instance (the freeze lives on the instance, not in
+  params).
+- **§4.8 amendment — frozen-layout reuse guards:** reuse fails closed when
+  the fresh request's hard (absorbing-barrier) bounds differ from the frozen
+  request's, and the calendar-roll `rebind_time` path coverage-validates the
+  rebound layout (`resolve_bound_layout` is the single shared semantics for
+  BasePDESolver and GridLayerMixin).
+
 ## 7. Risks & mitigations
 
 - **Re-certification risk** (numbers move under the clean break — including the intentionally

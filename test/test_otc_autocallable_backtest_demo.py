@@ -116,9 +116,7 @@ def test_cache_only_missing_cache_raises_clear_error(tmp_path: Path):
 
 def test_cli_engine_config_selection():
     quad_args = demo.parse_args(["--engine", "quad", "--quad-grid", "101"])
-    pde_args = demo.parse_args(
-        ["--engine", "pde", "--pde-grid", "80", "--pde-steps", "40"]
-    )
+    pde_args = demo.parse_args(["--engine", "pde", "--pde-grid", "80"])
     mc_args = demo.parse_args(
         ["--engine", "mc", "--mc-paths", "64", "--mc-steps", "8"]
     )

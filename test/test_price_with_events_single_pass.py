@@ -91,7 +91,7 @@ def _phoenix():
 
 
 def test_npv_matches_price_normal():
-    solver = SnowballPDESolver(PDEParams(grid_size=200))
+    solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
     assert abs(solver.price_with_events(product, env).npv - solver.price(product, env)) < 1e-8
@@ -99,7 +99,7 @@ def test_npv_matches_price_normal():
 
 def test_npv_matches_price_immediate_ko():
     # spot already above the KO barrier => immediate-KO short-circuit [§11.3]
-    solver = SnowballPDESolver(PDEParams(grid_size=200))
+    solver = SnowballPDESolver(PDEParams())
     env = _env(spot=130.0)
     product = _snowball()
     res = solver.price_with_events(product, env)
@@ -108,7 +108,7 @@ def test_npv_matches_price_immediate_ko():
 
 
 def test_phoenix_npv_matches_price():
-    solver = PhoenixPDESolver(PDEParams(grid_size=150))
+    solver = PhoenixPDESolver(PDEParams())
     env = _env()
     product = _phoenix()
     assert abs(solver.price_with_events(product, env).npv - solver.price(product, env)) < 1e-8
@@ -117,7 +117,7 @@ def test_phoenix_npv_matches_price():
 def test_lean_streams_preserve_npv_and_ko():
     # A KO-only stream request prunes KI columns but must not move NPV, and the
     # KO probabilities in the distribution stay identical to the full run.
-    solver = SnowballPDESolver(PDEParams(grid_size=200))
+    solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
     full = solver.price_with_events(product, env, streams=None)
@@ -129,7 +129,7 @@ def test_lean_streams_preserve_npv_and_ko():
 
 
 def test_emit_distribution_false_is_trivial():
-    solver = SnowballPDESolver(PDEParams(grid_size=120))
+    solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
     res = solver.price_with_events(product, env, emit_distribution=False)

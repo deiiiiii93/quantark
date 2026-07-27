@@ -511,6 +511,13 @@ SUPPORTING_EXPORTS = {
     ),
     "quantark.asset.equity.engine.pde": (
         "DCNPDEResult",
+        # Declarative grid layer (0.4.0): configuration/value types, not
+        # priceable engines.
+        "GridBinder",
+        "GridConfig",
+        "GridRequest",
+        "Layout",
+        "MarketSnapshot",
     ),
     "quantark.asset.fx.engine.mc": (
         "FxRangeAccrualMCResult", "FxBarrierMCResult", "FxSharkfinMCResult",

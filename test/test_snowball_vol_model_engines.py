@@ -102,7 +102,7 @@ def _unit_leverage(s0=100.0):
 def test_local_vol_snowball_pde_matches_flat_bsm_pde():
     product = _snowball()
     env = _env()
-    params = PDEParams(grid_size=90, time_steps=48)
+    params = PDEParams()
 
     bsm = SnowballPDESolver(params).price(product, env)
     lv = LocalVolSnowballPDESolver(params).price(product, env)
@@ -319,7 +319,7 @@ def test_snowball_vol_model_pde_engines_calculate_event_stats():
     product = _snowball()
     env = _env()
     hp = _heston()
-    params = PDEParams(grid_size=90, time_steps=48)
+    params = PDEParams()
 
     engines = [
         LocalVolSnowballPDESolver(params),
@@ -352,6 +352,40 @@ def test_snowball_heston_and_slv_pde_engines_run():
     assert np.isfinite(slv)
     assert 0.0 < heston < product.initial_price * product.contract_multiplier * 1.2
     assert slv == pytest.approx(heston, rel=0.02)
+
+
+def test_structured_model_pde_bump_contexts_clone_full_state():
+    """``create_bump_context`` must clone LV/Heston/SLV solvers with their
+    full constructor state (model params, leverage surface, ADI dimensions).
+
+    Regression: the base hook used ``type(self)(params=...)``, which raised
+    ``TypeError`` for every solver whose constructor requires more than
+    ``params`` — killing numerical greeks for structured-model engines.
+    """
+    product = _snowball()
+    env = _env()
+    hp = _heston()
+
+    engines = [
+        LocalVolSnowballPDESolver(),
+        HestonSnowballPDESolver(hp, n_x=48, n_v=18, n_t=16),
+        HestonSLVSnowballPDESolver(hp, _unit_leverage(), n_x=48, n_v=18, n_t=16),
+    ]
+    for engine in engines:
+        base = float(engine.price(product, env))
+        ctx = engine.create_bump_context(product, env)
+        assert ctx is not engine
+        if hasattr(engine, "model_params"):
+            assert ctx.model_params == engine.model_params
+            assert (ctx.n_x, ctx.n_v, ctx.n_t) == (
+                engine.n_x,
+                engine.n_v,
+                engine.n_t,
+            )
+        # the GreeksCalculator path: bumped repricing through the clone
+        assert np.isfinite(float(ctx.price(product, _env(s0=101.0))))
+        # base-market repricing through the clone reproduces the base price
+        assert float(ctx.price(product, env)) == pytest.approx(base, rel=1e-12)
 
 
 def test_snowball_heston_pde_auto_grid_focuses_ki():
@@ -410,6 +444,6 @@ def test_snowball_vol_model_engines_reject_non_snowball_products():
     with pytest.raises(PricingError):
         LocalVolSnowballMCEngine(MCParams(num_paths=100)).price(vanilla, env)
     with pytest.raises(PricingError):
-        LocalVolSnowballPDESolver(PDEParams(grid_size=50, time_steps=20)).price(vanilla, env)
+        LocalVolSnowballPDESolver(PDEParams()).price(vanilla, env)
     with pytest.raises(PricingError):
         HestonSnowballPDESolver(hp, n_x=30, n_v=12, n_t=10).price(vanilla, env)

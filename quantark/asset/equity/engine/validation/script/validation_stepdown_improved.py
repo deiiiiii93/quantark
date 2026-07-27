@@ -63,7 +63,7 @@ def validate_stepdown_pricing():
     print("\n[2/2] Running PDE with Auto Grid (Improved SpatialGrid)...")
     # Using default grid_size=400, auto_grid=True
     pde_solver = SnowballPDESolver(
-        params=PDEParams(grid_size=400, time_steps=300)
+        params=PDEParams()
     )
     pde_price = pde_solver.price(product, env)
     print(f"      PDE Price: {pde_price:,.2f}")

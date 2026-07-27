@@ -21,6 +21,7 @@ from quantark.asset.equity.product.option.snowball_helpers import create_standar
 from quantark.param import SpotQuote, FlatVolSurface, FlatRateCurve, ContinuousDividendYield
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum.engine_enums import MonteCarloMethod, EngineType
+from quantark.asset.equity.engine.pde import GridConfig
 
 
 def create_pricing_env(
@@ -108,7 +109,7 @@ def main() -> None:
     profile_rows = []
     for grid_size, time_steps in grids:
         solver = SnowballPDESolver(
-            params=PDEParams(grid_size=grid_size, time_steps=time_steps),
+            params=PDEParams(grid=GridConfig(points=grid_size)),
             enable_profiling=True,
         )
         start = time.perf_counter()
@@ -196,7 +197,7 @@ def main() -> None:
     for grid_size, time_steps in grids:
         SnowballPDESolver.clear_grid_cache()
         solver = SnowballPDESolver(
-            params=PDEParams(grid_size=grid_size, time_steps=time_steps)
+            params=PDEParams(grid=GridConfig(points=grid_size))
         )
         start = time.perf_counter()
         _ = solver.price(snowball, env)

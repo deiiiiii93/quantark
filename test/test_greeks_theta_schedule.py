@@ -458,7 +458,7 @@ def _assert_business_day_theta_reprices_engine(product, engine):
 def test_snowball_pde_theta_reprices_after_business_day_shift():
     _assert_business_day_theta_reprices_engine(
         _engine_snowball_product(),
-        PDEEngine(params=PDEParams(grid_size=80, time_steps=60)),
+        PDEEngine(params=PDEParams()),
     )
 
 
@@ -472,7 +472,7 @@ def test_snowball_quad_theta_reprices_after_business_day_shift():
 def test_phoenix_pde_theta_reprices_after_business_day_shift():
     _assert_business_day_theta_reprices_engine(
         _engine_phoenix_pde_product(),
-        PDEEngine(params=PDEParams(grid_size=80, time_steps=60)),
+        PDEEngine(params=PDEParams()),
     )
 
 

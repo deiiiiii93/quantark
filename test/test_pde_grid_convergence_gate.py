@@ -27,7 +27,7 @@ from quantark.asset.equity.engine.pde import SnowballPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.riskmeasures import GreeksCalculator
 
-DEFAULT_SPD = 4  # validated default (PDEParams.event_steps_per_day)
+DEFAULT_SPD = 4  # validated default (GridConfig.steps_per_day, all profiles)
 GREEKS = ["delta", "gamma", "vega", "theta", "rho", "dividend_rho"]
 FIRST_ORDER = ["delta", "vega", "rho", "dividend_rho"]
 
@@ -62,9 +62,6 @@ def _solver(spd: int) -> SnowballPDESolver:
 
     return SnowballPDESolver(
         PDEParams(
-            event_steps_per_day=spd,
-            grid_size=300,
-            # declarative layer routing (event_steps_per_day is inert there):
             grid=GridConfig(points=300, steps_per_day=float(spd)),
             event_projection="nodal",
             event_rannacher_steps=1,

@@ -103,7 +103,7 @@ def test_snowball_quad_price_with_events_uses_existing_stats_adapter():
 
 
 def test_snowball_pde_price_with_events_uses_existing_stats_adapter():
-    engine = SnowballPDESolver(params=PDEParams(grid_size=60, time_steps=40))
+    engine = SnowballPDESolver(params=PDEParams())
     result = engine.price_with_events(_snowball(num_observations=3), _env())
     assert result.event_distribution is not None
     assert result.event_distribution.probabilities[EventType.KO].shape == (3,)

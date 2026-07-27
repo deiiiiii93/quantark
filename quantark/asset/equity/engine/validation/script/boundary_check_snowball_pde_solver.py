@@ -126,10 +126,12 @@ def create_standard_snowball(
 
 
 def create_solver(grid_size: int = 200, time_steps: int = 200) -> SnowballPDESolver:
-    """Create a PDE solver with specified grid size."""
+    """Create a PDE solver with the specified spatial resolution."""
+    from quantark.asset.equity.engine.pde.grid import GridConfig
+
+    del time_steps  # time density comes from the event-aligned builder
     params = PDEParams(
-        grid_size=grid_size,
-        time_steps=time_steps,
+        grid=GridConfig(points=grid_size),
         theta=0.5,  # Crank-Nicolson
         use_rannacher=True,
         rannacher_steps=2,

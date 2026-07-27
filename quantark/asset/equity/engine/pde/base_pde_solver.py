@@ -24,6 +24,8 @@ from quantark.asset.equity.engine.pde.grid import (
     GridRequest,
     Layout,
     MarketSnapshot,
+    reject_legacy_resolution_knobs,
+    resolve_bound_layout,
     validate_external_layout,
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
@@ -362,7 +364,7 @@ class BasePDESolver(BaseEngine):
             tau = product.get_maturity(pricing_env)
             if tau <= 0:
                 return self
-            clone = type(self)(params=deepcopy(self.params))
+            clone = self._bump_clone()
             prep = getattr(clone, "_prepare_for_request", None)
             if prep is not None:
                 prep(product, pricing_env)
@@ -375,6 +377,37 @@ class BasePDESolver(BaseEngine):
             "legacy params-freeze bump contexts were removed with the "
             "declarative grid layer (0.4.0)"
         )
+
+    def _bump_clone(self) -> "BasePDESolver":
+        """A fully configured engine clone for bump contexts.
+
+        ``deepcopy`` of the live instance — not ``type(self)(params=...)`` —
+        so subclasses with richer constructors (Heston ``model_params``, SLV
+        ``leverage_surface``, ADI dimensions, prebuilt LV surfaces) keep their
+        full configuration. Transient per-solve state (caches, session packs,
+        the active/frozen layouts) is excluded and reset on the clone.
+        """
+        transient = (
+            "_grid_binder",
+            "_frozen_base_layout",
+            "_active_layout",
+            "_session_grids",
+            "_session_step_coefficients",
+            "_session_matrix_pack",
+            "_matrix_cache",
+            "_critical_points_cache",
+        )
+        saved = {name: getattr(self, name) for name in transient}
+        for name in transient:
+            setattr(self, name, None)
+        try:
+            clone = deepcopy(self)
+        finally:
+            for name, value in saved.items():
+                setattr(self, name, value)
+        clone._matrix_cache = {}
+        clone._critical_points_cache = OrderedDict()
+        return clone
 
     # ------------------------------------------------------------------
     # Declarative grid layer seam (grid redesign spec §4.6)
@@ -435,6 +468,9 @@ class BasePDESolver(BaseEngine):
         """Engine-owned binder; cache behavior follows the engine's cache
         strategy (``disable`` -> no layout cache)."""
         if self._grid_binder is None:
+            # Every BasePDESolver rides the grid layer (0.4.0): legacy
+            # resolution knobs would be silently inert here — reject loudly.
+            reject_legacy_resolution_knobs(self.params)
             self._grid_binder = GridBinder(
                 getattr(self.params, "accuracy", "standard"),
                 getattr(self.params, "grid", None),
@@ -603,23 +639,14 @@ class BasePDESolver(BaseEngine):
     ) -> Layout:
         """The layout for this solve: frozen (bump clone) > rebind > bind.
 
-        Alignment-identical requests reuse the frozen layout by identity
-        (coverage validated); a changed schedule/tau (calendar roll) rebinds
-        the time layout on the SAME spatial object; otherwise a plain bind.
+        Alignment-identical requests reuse the frozen layout by identity;
+        a changed schedule/tau (calendar roll) rebinds the time layout on
+        the SAME spatial object. Both reuse paths are coverage-validated,
+        and changed hard bounds fail closed (``resolve_bound_layout``).
         """
-        frozen = self._frozen_base_layout
-        if frozen is None:
-            return self.grid_binder.bind(request, market)
-        fr = frozen.request
-        if (
-            request.tau == fr.tau
-            and request.event_times == fr.event_times
-            and request.hard_lower == fr.hard_lower
-            and request.hard_upper == fr.hard_upper
-        ):
-            validate_external_layout(frozen, request, market)
-            return frozen
-        return self.grid_binder.rebind_time(frozen, request)
+        return resolve_bound_layout(
+            self.grid_binder, self._frozen_base_layout, request, market
+        )
 
     def _external_layout_check(
         self,
@@ -700,10 +727,10 @@ class BasePDESolver(BaseEngine):
         params: PDEParams = self.params
         # Post-0.4.0: grid geometry is fingerprinted by the resolved
         # GridConfig key; surviving scheme/engine knobs listed explicitly.
+        # (Legacy resolution knobs are excluded — grid-layer solvers reject
+        # non-default values, so they are constant on this hierarchy.)
         return (
             self.grid_binder.config.key,
-            params.grid_size,
-            params.time_steps,
             params.cache_strategy,
             params.use_banded_solver,
             params.event_projection,
@@ -713,11 +740,8 @@ class BasePDESolver(BaseEngine):
             params.rannacher_steps,
             params.rannacher_at_events,
             params.event_rannacher_steps,
-            params.event_steps_per_day,
             params.boundary_mode,
             params.bus_days_in_year,
-            getattr(params, "s_min", 0.0),
-            getattr(params, "s_max", 0.0),
         )
 
     def set_terminal_condition(

@@ -57,10 +57,12 @@ class TestPDEEngineBasics:
 
     def test_initialization_with_params(self):
         """Test PDEEngine with custom PDEParams."""
-        params = PDEParams(grid_size=500, time_steps=200)
+        from quantark.asset.equity.engine.pde import GridConfig
+
+        params = PDEParams(accuracy="high", grid=GridConfig(points=500))
         engine = PDEEngine(params=params)
-        assert engine.params.grid_size == 500
-        assert engine.params.time_steps == 200
+        assert engine.params.accuracy == "high"
+        assert engine.params.grid.points == 500
 
     def test_method_selection_enum(self):
         """Test method selection via PDEMethod enum."""
@@ -112,7 +114,7 @@ class TestPDEEngineDispatch:
     @pytest.fixture
     def pde_engine(self):
         """Create PDEEngine with reasonable parameters."""
-        return PDEEngine(params=PDEParams(grid_size=200, time_steps=100))
+        return PDEEngine(params=PDEParams())
 
     def test_european_option_dispatch(self, pde_engine, pricing_env):
         """Test dispatch to EuropeanPDESolver."""
@@ -291,7 +293,7 @@ class TestPDENumericalConsistency:
     @pytest.fixture
     def pde_params(self):
         """Create consistent PDE parameters."""
-        return PDEParams(grid_size=200, time_steps=100)
+        return PDEParams()
 
     def test_european_option_consistency(self, pricing_env, pde_params):
         """Test European option price consistency."""
@@ -355,7 +357,7 @@ class TestGreeksCalculatorIntegration:
     @pytest.fixture
     def pde_engine(self):
         """Create PDEEngine with reasonable parameters."""
-        return PDEEngine(params=PDEParams(grid_size=200, time_steps=100))
+        return PDEEngine(params=PDEParams())
 
     @pytest.fixture
     def calculator(self):

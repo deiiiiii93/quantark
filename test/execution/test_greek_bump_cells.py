@@ -95,7 +95,7 @@ def _cell_values(state, gc, greeks):
 @pytest.mark.parametrize("quantity", [1.0, -1.0])
 def test_trade_greeks_bitwise_vs_get_trade_risk(quantity):
     product = _snowball()
-    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    engine = SnowballPDESolver(PDEParams())
     env = _env()
     gc = GreeksCalculator()
     pos = EquityPosition(
@@ -113,7 +113,7 @@ def test_trade_greeks_bitwise_vs_get_trade_risk(quantity):
         product=_snowball(),
         pricing_env=_env(),
         cash_legs=(_terminal_leg(),),
-        engine=SnowballPDESolver(PDEParams(grid_size=150)),
+        engine=SnowballPDESolver(PDEParams()),
         streams=pos._required_streams(),
         quantity=quantity,
         greeks_params=gc.params,

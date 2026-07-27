@@ -438,7 +438,7 @@ class TestCodeGateRegressions:
         from execution.matrix_fixtures import _pdep, _snowball, _eq_grid_env
 
         engine = LocalVolSnowballPDESolver(
-            _pdep(grid_size=90, time_steps=200)
+            _pdep()
         )
         product, env = _snowball(), _eq_grid_env()
         direct = engine.price(product, env)

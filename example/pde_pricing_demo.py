@@ -54,6 +54,7 @@ from quantark.util.enum import (
     TouchType,
     ObservationType,
 )
+from quantark.asset.equity.engine.pde import GridConfig
 
 
 def create_pricing_environment(spot=100.0, vol=0.20, rate=0.05, div=0.02):
@@ -96,7 +97,7 @@ def demo_european_option():
 
     # Price with PDE engine (different resolutions)
     for grid_size in [100, 200, 400]:
-        pde_params = PDEParams(grid_size=grid_size, time_steps=grid_size // 2)
+        pde_params = PDEParams(grid=GridConfig(points=grid_size))
         pde_engine = EuropeanPDESolver(pde_params)
 
         bs_call = bs_engine.price(call, pricing_env)
@@ -115,7 +116,7 @@ def demo_european_option():
 
     # Greeks comparison
     print("\nGreeks comparison (grid_size=400):")
-    pde_params = PDEParams(grid_size=400, time_steps=200)
+    pde_params = PDEParams(grid=GridConfig(points=400))
     pde_engine = EuropeanPDESolver(pde_params)
 
     pde_greeks = pde_engine.calculate_greeks(call, pricing_env)
@@ -149,7 +150,7 @@ def demo_american_option():
     )
 
     # Price
-    pde_params = PDEParams(grid_size=400, time_steps=200)
+    pde_params = PDEParams(grid=GridConfig(points=400))
     euro_solver = EuropeanPDESolver(pde_params)
     amer_solver = AmericanPDESolver(pde_params)
 
@@ -193,7 +194,7 @@ def demo_barrier_option():
     div = 0.0
 
     pricing_env = create_pricing_environment(spot, vol, rate, div)
-    pde_params = PDEParams(grid_size=400, time_steps=200)
+    pde_params = PDEParams(grid=GridConfig(points=400))
 
     # Up-and-out call
     barrier = 120.0
@@ -258,7 +259,7 @@ def demo_double_barrier_option():
     div = 0.0
 
     pricing_env = create_pricing_environment(spot, vol, rate, div)
-    pde_params = PDEParams(grid_size=400, time_steps=200)
+    pde_params = PDEParams(grid=GridConfig(points=400))
 
     # Double knock-out call
     upper_barrier = 120.0
@@ -305,7 +306,7 @@ def demo_one_touch_option():
     div = 0.0
 
     pricing_env = create_pricing_environment(spot, vol, rate, div)
-    pde_params = PDEParams(grid_size=400, time_steps=200)
+    pde_params = PDEParams(grid=GridConfig(points=400))
 
     # Up one-touch
     barrier = 120.0
@@ -360,7 +361,7 @@ def demo_double_one_touch_option():
     div = 0.0
 
     pricing_env = create_pricing_environment(spot, vol, rate, div)
-    pde_params = PDEParams(grid_size=400, time_steps=200)
+    pde_params = PDEParams(grid=GridConfig(points=400))
 
     # Double one-touch
     upper_barrier = 120.0
@@ -439,7 +440,7 @@ def demo_grid_convergence():
 
     for grid_size in grid_sizes:
         time_steps = grid_size // 2
-        pde_params = PDEParams(grid_size=grid_size, time_steps=time_steps)
+        pde_params = PDEParams(grid=GridConfig(points=grid_size))
         pde_engine = EuropeanPDESolver(pde_params)
 
         pde_price = pde_engine.price(euro_call, pricing_env)

@@ -93,7 +93,7 @@ def _unit_leverage(s0=100.0, maturity=1.0):
 def test_local_vol_phoenix_pde_matches_flat_bsm_pde():
     product = _phoenix(memory_coupon=False)
     env = _env()
-    params = PDEParams(grid_size=90, time_steps=48)
+    params = PDEParams()
 
     bsm = PhoenixPDESolver(params).price(product, env)
     lv = LocalVolPhoenixPDESolver(params).price(product, env)
@@ -314,7 +314,7 @@ def test_phoenix_vol_model_pde_engines_calculate_event_stats():
     product = _phoenix(memory_coupon=False)
     env = _env()
     hp = _heston()
-    params = PDEParams(grid_size=90, time_steps=48)
+    params = PDEParams()
 
     engines = [
         LocalVolPhoenixPDESolver(params),
@@ -402,7 +402,7 @@ def test_phoenix_vol_model_engines_reject_non_phoenix_products():
     with pytest.raises(PricingError):
         LocalVolPhoenixMCEngine(MCParams(num_paths=100)).price(vanilla, env)
     with pytest.raises(PricingError):
-        LocalVolPhoenixPDESolver(PDEParams(grid_size=50, time_steps=20)).price(
+        LocalVolPhoenixPDESolver(PDEParams()).price(
             vanilla, env
         )
     with pytest.raises(PricingError):

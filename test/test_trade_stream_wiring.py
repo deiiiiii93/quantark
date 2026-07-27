@@ -94,7 +94,7 @@ def _spy_streams(engine):
 
 
 def test_ko_only_leg_prunes_ki_columns():
-    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    engine = SnowballPDESolver(PDEParams())
     seen = _spy_streams(engine)
     pos = _position(engine, _leg({EventType.MATURITY_NO_KO}))
     value = pos.get_trade_value(_env())
@@ -105,7 +105,7 @@ def test_ko_only_leg_prunes_ki_columns():
 
 
 def test_with_ki_leg_forces_ki_columns():
-    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    engine = SnowballPDESolver(PDEParams())
     seen = _spy_streams(engine)
     pos = _position(engine, _leg({EventType.MATURITY_WITH_KI}))
     pos.get_trade_value(_env())
@@ -113,7 +113,7 @@ def test_with_ki_leg_forces_ki_columns():
 
 
 def test_trade_value_breakdown_also_wires_streams():
-    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    engine = SnowballPDESolver(PDEParams())
     seen = _spy_streams(engine)
     pos = _position(engine, _leg({EventType.MATURITY_NO_KO}))
     pos.get_trade_value_breakdown(_env())

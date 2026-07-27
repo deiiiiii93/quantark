@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 
+from quantark.asset.equity.engine.pde import GridConfig
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option import (
     AccrualConfig,
@@ -182,7 +183,6 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Relative spot bump for delta and hedging; default matches --gamma-bump-size.",
     )
     parser.add_argument("--pde-grid", type=int, default=140)
-    parser.add_argument("--pde-steps", type=int, default=140)
     parser.add_argument("--mc-paths", type=int, default=2000)
     parser.add_argument("--mc-steps", type=int, default=252)
     parser.add_argument("--mc-seed", type=int, default=42)
@@ -696,9 +696,10 @@ def create_engine_config(args: argparse.Namespace) -> AutocallableEngineConfig:
             pricing_engine_type=EngineType.PDE,
             method=EngineType.PDE(PDEMethod.CRANK_NICOLSON),
             pde_params=PDEParams(
-                grid_size=int(args.pde_grid),
-                time_steps=int(args.pde_steps),
-                max_time_steps=max(int(args.pde_steps), 200),
+                grid=GridConfig(
+                    points=int(args.pde_grid),
+                    max_points=max(2000, int(args.pde_grid)),
+                ),
             ),
             quad_params=quad_params,
             surface_engine_type=EngineType.QUADRATURE,

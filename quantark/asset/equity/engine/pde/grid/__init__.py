@@ -9,6 +9,7 @@ from quantark.asset.equity.engine.pde.grid.request import GridRequest, MarketSna
 from quantark.asset.equity.engine.pde.grid.config import (
     ACCURACY_PROFILES,
     GridConfig,
+    reject_legacy_resolution_knobs,
     resolve_config,
 )
 from quantark.asset.equity.engine.pde.grid.time import TimeLayout, build_time
@@ -21,18 +22,23 @@ from quantark.asset.equity.engine.pde.grid.events import (
 )
 from quantark.asset.equity.engine.pde.grid.binder import (
     GridBinder,
+    GridLayerMixin,
     Layout,
+    resolve_bound_layout,
     validate_external_layout,
 )
 
 __all__ = [
     "GridBinder",
+    "GridLayerMixin",
     "Layout",
+    "resolve_bound_layout",
     "validate_external_layout",
     "GridRequest",
     "MarketSnapshot",
     "GridConfig",
     "ACCURACY_PROFILES",
+    "reject_legacy_resolution_knobs",
     "resolve_config",
     "TimeLayout",
     "build_time",

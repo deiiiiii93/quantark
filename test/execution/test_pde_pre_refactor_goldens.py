@@ -19,7 +19,7 @@ from execution.freeze_goldens import (
     _PHASE4_REFINED_CASES,
     _phase4_case_payload,
 )
-from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep
+from execution.matrix_fixtures import FIXTURE_BUILDERS, _pdep_refined
 from golden_compare import assert_close
 
 GOLDENS = json.loads(pathlib.Path(PHASE4_GOLDEN_PATH).read_text())["cases"]
@@ -45,7 +45,5 @@ def test_direct_outputs_match_pre_refactor_goldens(name):
 @pytest.mark.parametrize("name", _PHASE4_REFINED_CASES)
 def test_refined_direct_outputs_match_pre_refactor_goldens(name):
     engine, product, env, _shape = FIXTURE_BUILDERS[name]()
-    refined = type(engine)(
-        params=_pdep(grid_size=180, time_steps=96)
-    )
+    refined = type(engine)(params=_pdep_refined())
     _assert_case_matches(GOLDENS[f"{name}::refined"], refined, product, env, name)

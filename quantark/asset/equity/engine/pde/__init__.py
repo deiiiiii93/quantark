@@ -5,6 +5,13 @@ This module provides finite difference solvers for pricing various
 option types using the Black-Scholes PDE framework.
 """
 
+from .grid import (
+    GridBinder,
+    GridConfig,
+    GridRequest,
+    Layout,
+    MarketSnapshot,
+)
 from .base_pde_solver import BasePDESolver
 from .european_pde_solver import EuropeanPDESolver
 from .american_pde_solver import AmericanPDESolver
@@ -35,6 +42,11 @@ from .phoenix_vol_pde_solvers import (
 )
 
 __all__ = [
+    "GridBinder",
+    "GridConfig",
+    "GridRequest",
+    "Layout",
+    "MarketSnapshot",
     "LocalVolPDESolver",
     "HestonPDESolver",
     "HestonSLVPDESolver",

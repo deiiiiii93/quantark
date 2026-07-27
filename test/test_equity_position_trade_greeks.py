@@ -111,7 +111,7 @@ def _spy(engine):
 
 
 def test_one_loop_product_and_total_with_expected_solves():
-    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    engine = SnowballPDESolver(PDEParams())
     calls = _spy(engine)
     pos = _position(engine)
     gc = GreeksCalculator()
@@ -131,8 +131,8 @@ def test_one_loop_product_and_total_with_expected_solves():
 def test_quantity_contract_product_scales_legs_absolute():
     env = _env()
     gc = GreeksCalculator()
-    long = _position(SnowballPDESolver(PDEParams(grid_size=150)), quantity=1.0)
-    short = _position(SnowballPDESolver(PDEParams(grid_size=150)), quantity=-1.0)
+    long = _position(SnowballPDESolver(PDEParams()), quantity=1.0)
+    short = _position(SnowballPDESolver(PDEParams()), quantity=-1.0)
     rl = long.get_trade_risk(env, gc, ["delta"])
     rs = short.get_trade_risk(env, gc, ["delta"])
 
@@ -157,7 +157,7 @@ def test_trade_risk_matches_calculate_numerical_greeks_convention():
     legs, product == total, so both must equal the numerical greeks exactly.
     """
     env = _env()
-    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    engine = SnowballPDESolver(PDEParams())
     gc = GreeksCalculator(greeks_mode=GreeksCalculationMode.BUMP)
     greeks = ["delta", "gamma", "vega", "theta", "rho", "dividend_rho"]
 
@@ -182,7 +182,7 @@ def test_trade_risk_matches_calculate_numerical_greeks_convention():
 
 
 def test_total_price_matches_trade_value_breakdown():
-    engine = SnowballPDESolver(PDEParams(grid_size=150))
+    engine = SnowballPDESolver(PDEParams())
     env = _env()
     pos = _position(engine)
     gc = GreeksCalculator()

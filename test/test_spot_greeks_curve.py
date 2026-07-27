@@ -64,7 +64,7 @@ def test_base_engine_spot_curve_falls_back_to_repricing(monkeypatch):
 
 
 def test_pde_spot_curve_uses_one_solve_and_matches_point_greeks(monkeypatch):
-    engine = EuropeanPDESolver(params=PDEParams(grid_size=201, time_steps=100))
+    engine = EuropeanPDESolver(params=PDEParams())
     calls = 0
     original = engine._solve
 

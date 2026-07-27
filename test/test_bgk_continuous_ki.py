@@ -156,7 +156,7 @@ def test_bgk_shift_standard_down_ki_shifts_down():
     env = _env(vol=0.25)
     product = _daily_ki_snowball(ki_barrier=75.0)
     engine = SnowballPDESolver(
-        PDEParams(grid_size=100, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     sigma = env.get_vol(product.strike, product.get_maturity(env))
     shifted = engine._bgk_shifted_ki_barrier(
@@ -171,7 +171,7 @@ def test_bgk_shift_reverse_up_ki_shifts_up():
     env = _env(vol=0.25)
     product = _reverse_daily_ki_snowball(ki_barrier=125.0)
     engine = SnowballPDESolver(
-        PDEParams(grid_size=100, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     sigma = env.get_vol(product.strike, product.get_maturity(env))
     shifted = engine._bgk_shifted_ki_barrier(
@@ -191,7 +191,7 @@ def test_bgk_shifted_barrier_is_a_critical_point():
     env = _env(vol=0.25)
     product = _daily_ki_snowball(ki_barrier=75.0)
     engine = SnowballPDESolver(
-        PDEParams(grid_size=100, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     sigma = env.get_vol(product.strike, product.get_maturity(env))
     shifted = engine._bgk_shifted_ki_barrier(
@@ -201,7 +201,7 @@ def test_bgk_shifted_barrier_is_a_critical_point():
     assert any(abs(p - shifted) < 1e-9 for p in points)
 
     # In EXACT_DISCRETE the shifted barrier is NOT injected.
-    exact_engine = SnowballPDESolver(PDEParams(grid_size=100))
+    exact_engine = SnowballPDESolver(PDEParams())
     exact_points = exact_engine.get_critical_points(product, env)
     assert not any(abs(p - shifted) < 1e-9 for p in exact_points)
 
@@ -214,9 +214,9 @@ def test_bgk_shifted_barrier_is_a_critical_point():
 def test_bgk_inert_for_continuous_ki_price_unchanged_and_logs(caplog):
     env = _env(vol=0.25)
     product = _continuous_ki_snowball()
-    exact = SnowballPDESolver(PDEParams(grid_size=150)).price(product, env)
+    exact = SnowballPDESolver(PDEParams()).price(product, env)
     bgk_engine = SnowballPDESolver(
-        PDEParams(grid_size=150, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     with caplog.at_level(logging.WARNING):
         bgk = bgk_engine.price(product, env)
@@ -227,9 +227,9 @@ def test_bgk_inert_for_continuous_ki_price_unchanged_and_logs(caplog):
 def test_bgk_inert_for_no_ki_price_unchanged(caplog):
     env = _env(vol=0.25)
     product = _no_ki_snowball()
-    exact = SnowballPDESolver(PDEParams(grid_size=150)).price(product, env)
+    exact = SnowballPDESolver(PDEParams()).price(product, env)
     bgk_engine = SnowballPDESolver(
-        PDEParams(grid_size=150, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     with caplog.at_level(logging.WARNING):
         bgk = bgk_engine.price(product, env)
@@ -245,9 +245,9 @@ def test_bgk_inert_for_no_ki_price_unchanged(caplog):
 def test_bgk_price_within_band_of_exact_discrete():
     env = _env(vol=0.25)
     product = _daily_ki_snowball(ki_barrier=75.0)
-    exact = SnowballPDESolver(PDEParams(grid_size=200)).price(product, env)
+    exact = SnowballPDESolver(PDEParams()).price(product, env)
     bgk = SnowballPDESolver(
-        PDEParams(grid_size=200, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     ).price(product, env)
     rel = abs(bgk - exact) / max(abs(exact), 1.0)
     assert rel <= 0.015, f"BGK {bgk} vs exact {exact} rel={rel}"
@@ -261,11 +261,11 @@ def test_bgk_price_within_band_of_exact_discrete():
 def test_ko_probabilities_identical_between_modes():
     env = _env(vol=0.25)
     product = _daily_ki_snowball(ki_barrier=75.0)
-    exact_stats = SnowballPDESolver(PDEParams(grid_size=200)).calculate_event_stats(
+    exact_stats = SnowballPDESolver(PDEParams()).calculate_event_stats(
         product, env
     )
     bgk_stats = SnowballPDESolver(
-        PDEParams(grid_size=200, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     ).calculate_event_stats(product, env)
     assert np.allclose(
         exact_stats.ko_probability, bgk_stats.ko_probability, atol=5e-3, rtol=0.0
@@ -329,9 +329,9 @@ def test_phoenix_bgk_far_ki_in_accurate_band():
     env = _env(vol=0.25)
     far = _daily_ki_phoenix(ki_barrier=75.0, coupon_barrier=85.0)
 
-    far_exact = PhoenixPDESolver(PDEParams(grid_size=200)).price(far, env)
+    far_exact = PhoenixPDESolver(PDEParams()).price(far, env)
     bgk_engine = PhoenixPDESolver(
-        PDEParams(grid_size=200, ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
+        PDEParams(ki_monitoring_mode=KnockInMonitoringMode.BGK_APPROXIMATION)
     )
     far_bgk = bgk_engine.price(far, env)
     far_rel = abs(far_bgk - far_exact) / max(abs(far_exact), 1.0)

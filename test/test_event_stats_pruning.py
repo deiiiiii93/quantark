@@ -105,7 +105,7 @@ SNOWBALL_KI_EVER = 0.147043244283
 
 
 def test_snowball_full_stream_matches_golden():
-    stats = SnowballPDESolver(PDEParams(grid_size=200)).calculate_event_stats(
+    stats = SnowballPDESolver(PDEParams()).calculate_event_stats(
         _snowball(), _env()
     )
     assert abs(float(stats.pv) - SNOWBALL_PV) < 1e-6
@@ -114,7 +114,7 @@ def test_snowball_full_stream_matches_golden():
 
 
 def test_snowball_ki_pruning_preserves_ko_and_pv():
-    solver = SnowballPDESolver(PDEParams(grid_size=200))
+    solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
     full = solver._compute_event_stats(product, env, streams=None)
@@ -138,7 +138,7 @@ def test_snowball_ki_pruning_preserves_ko_and_pv():
 
 
 def test_npv_passthrough_skips_internal_price():
-    solver = SnowballPDESolver(PDEParams(grid_size=200))
+    solver = SnowballPDESolver(PDEParams())
     env = _env()
     product = _snowball()
     internal = solver._compute_event_stats(product, env)
@@ -158,7 +158,7 @@ def test_npv_passthrough_skips_internal_price():
 
 
 def test_phoenix_coupon_pruning_preserves_ko_and_pv():
-    solver = PhoenixPDESolver(PDEParams(grid_size=150))
+    solver = PhoenixPDESolver(PDEParams())
     env = _env()
     product = _phoenix()
     full = solver._compute_event_stats(product, env, streams=None)

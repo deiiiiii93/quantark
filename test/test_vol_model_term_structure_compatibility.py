@@ -144,7 +144,7 @@ def _unit_leverage(s0=100.0, maturity=1.0):
 def test_local_vol_barrier_pde_sees_non_flat_rate_and_carry():
     env_term = _term_env()
     product = _up_out_call()
-    solver = LocalVolBarrierPDESolver(PDEParams(grid_size=160, time_steps=64))
+    solver = LocalVolBarrierPDESolver(PDEParams())
 
     px_term = solver.price(product, env_term)
     px_collapsed = solver.price(product, _collapsed_flat_env(env_term, 1.0))
@@ -157,7 +157,7 @@ def test_local_vol_snowball_pde_sees_non_flat_rate_and_carry():
     env_term = _term_env()
     product = _snowball()
     solver = LocalVolSnowballPDESolver(
-        PDEParams(grid_size=70, time_steps=36)
+        PDEParams()
     )
 
     px_term = solver.price(product, env_term)
@@ -171,7 +171,7 @@ def test_local_vol_phoenix_pde_sees_non_flat_rate_and_carry():
     env_term = _term_env()
     product = _phoenix()
     solver = LocalVolPhoenixPDESolver(
-        PDEParams(grid_size=70, time_steps=36)
+        PDEParams()
     )
 
     px_term = solver.price(product, env_term)

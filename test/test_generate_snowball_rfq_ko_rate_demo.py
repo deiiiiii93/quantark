@@ -89,7 +89,7 @@ def test_build_cube_includes_tenor_axis_and_tenor_rows(monkeypatch) -> None:
         fake_solve_fair_ko_rate_with_engine,
     )
 
-    cubes, rows = demo.build_cube(pde_params=demo.PDEParams(grid_size=10, time_steps=20))
+    cubes, rows = demo.build_cube(pde_params=demo.PDEParams())
 
     assert len(cubes["standard"]["quote"]) == len(demo.TENOR_GRID)
     assert len(cubes["standard"]["quote"][0]) == len(demo.R_GRID)
