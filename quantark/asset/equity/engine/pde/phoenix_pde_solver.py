@@ -284,12 +284,30 @@ class PhoenixPDESolver(SnowballPDESolver):
         if self._profile_enabled:
             self._reset_profile_stats()
 
-        # Build grids
+        # Build grids: declarative layer on the migrated path (grid geometry
+        # + damping data); the certified vector-surface event application
+        # below stays inline — it already flows through the moved projection
+        # primitives, and its coupon-memory dispatch is solver-owned state.
         if self._profile_enabled:
             t0 = perf_counter()
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
+        self._active_layout = None
+        self._active_schedule = None
+        if self._uses_grid_layer() and self._session_grids is None:
+            self._configure_bgk(product, pricing_env, sigma, tau)
+            market = self.market_snapshot(product, pricing_env)
+            request = self.grid_request(product, market, tau)
+            layout = self.grid_binder.bind(request, market)
+            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
+            t_vec, dt_vec = layout.time.t, layout.time.dt
+            self._populate_observation_maps(product, pricing_env, layout, tau)
+            self._register_coupon_observations(
+                product, pricing_env, t_vec, tau, step_of=layout.time.step_of
+            )
+            self._active_layout = layout
+        else:
+            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+                product, pricing_env, spot, sigma, tau, r, q
+            )
         if self._profile_enabled:
             self._profile_stats["grid_build"] += perf_counter() - t0
 
@@ -451,11 +469,26 @@ class PhoenixPDESolver(SnowballPDESolver):
     ):
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
         _, _, _, t_vec, _ = result
+        self._register_coupon_observations(product, pricing_env, t_vec, tau)
+        return result
 
+    def _register_coupon_observations(
+        self,
+        product: PhoenixOption,
+        pricing_env: PricingEnvironment,
+        t_vec: np.ndarray,
+        tau: float,
+        step_of=None,
+    ) -> None:
+        """Coupon barrier/amount arrays + observation-index map.
+
+        ``step_of`` (the layout's exact-float map) resolves indices on the
+        migrated path; the legacy path keeps ``_aligned_time_index``.
+        """
         self._coupon_observation_indices.clear()
         ko_records = self._get_cached_ko_records(pricing_env, product)
         if not ko_records:
-            return result
+            return
 
         ko_times = [rec.observation_time for rec in ko_records]
         num_obs = len(ko_times)
@@ -490,10 +523,16 @@ class PhoenixPDESolver(SnowballPDESolver):
             elif is_close(obs_time, tau):
                 self._coupon_observation_indices[len(t_vec) - 1] = obs_idx
             elif 0.0 < obs_time < tau:
-                idx = self._aligned_time_index(t_vec, obs_time, "Coupon observation")
+                if step_of is not None:
+                    idx = step_of[obs_time]
+                else:
+                    idx = self._aligned_time_index(
+                        t_vec, obs_time, "Coupon observation"
+                    )
                 self._coupon_observation_indices[idx] = obs_idx
 
-        return result
+    def _uses_grid_layer(self) -> bool:
+        return True
 
     def _accumulated_coupon_amount(self, obs_idx: int, missed_count: int) -> float:
         if missed_count <= 0 or obs_idx <= 0:
@@ -538,13 +577,17 @@ class PhoenixPDESolver(SnowballPDESolver):
         if use_banded and n_int > 2:
             rhs = np.empty(n_int, dtype=float)
 
-        # Canonical damping schedule (terminal Rannacher + event smoothing).
-        theta_schedule = BackwardOperator.theta_by_step(
-            np.asarray(t_vec),
-            np.asarray(dt_vec),
-            params,
-            self._get_event_times(product, tau),
-        )
+        # Canonical damping schedule (terminal Rannacher + event smoothing):
+        # from the layout's frozensets on the migrated path, else legacy.
+        if self._active_layout is not None:
+            theta_schedule = self._theta_schedule_from_layout(self._active_layout)
+        else:
+            theta_schedule = BackwardOperator.theta_by_step(
+                np.asarray(t_vec),
+                np.asarray(dt_vec),
+                params,
+                self._get_event_times(product, tau),
+            )
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]

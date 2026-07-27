@@ -61,6 +61,11 @@ def event_damped_step_keys(params, event_maps, n_t: int):
 
 
 class LocalVolSnowballPDESolver(SnowballPDESolver):
+
+    def _uses_grid_layer(self) -> bool:
+        # Phase-3 consumer: keeps the legacy grid path until the
+        # LV/2D migration (plan Tasks 20b/21) wires the layer in.
+        return False
     """Two-surface Snowball PDE with Dupire local volatility on the S grid."""
 
     engine_type = EngineType.PDE
@@ -207,6 +212,11 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
 
 
 class _Heston2DSnowballPDEBase(SnowballPDESolver):
+
+    def _uses_grid_layer(self) -> bool:
+        # Phase-3 consumer: keeps the legacy grid path until the
+        # LV/2D migration (plan Tasks 20b/21) wires the layer in.
+        return False
     engine_type = EngineType.PDE
     _solver_name = "Heston2DSnowballPDESolver"
 

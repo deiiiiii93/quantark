@@ -201,6 +201,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     ) -> List[ResolvedObservationRecord]:
         return self._get_cached_pre_ko_records(pricing_env, product)
 
+    def _uses_grid_layer(self) -> bool:
+        # Not yet migrated: this solver owns its _solve and would otherwise
+        # inherit the migrated snowball flag (plan Task 13 flips this).
+        return False
+
     def _build_grids(
         self,
         product: KnockOutResetSnowballOption,
