@@ -12,6 +12,13 @@ from quantark.asset.equity.engine.pde.grid.config import (
     resolve_config,
 )
 from quantark.asset.equity.engine.pde.grid.time import TimeLayout, build_time
+from quantark.asset.equity.engine.pde.grid.space import SpatialLayout, build_space
+from quantark.asset.equity.engine.pde.grid.events import (
+    EventSchedule,
+    breach_weights,
+    project_between,
+    project_piecewise,
+)
 
 __all__ = [
     "GridRequest",
@@ -21,4 +28,10 @@ __all__ = [
     "resolve_config",
     "TimeLayout",
     "build_time",
+    "SpatialLayout",
+    "build_space",
+    "EventSchedule",
+    "breach_weights",
+    "project_between",
+    "project_piecewise",
 ]
