@@ -3,7 +3,7 @@
 Spec section 9.2: grids (with event-aligned time grids), term-structure step
 coefficients (the materialized term context), and eager factorization packs
 go behind ``PreparedArtifactCache`` descriptors. Keys derive from the
-engine's own sanctioned reuse contract — the polymorphic ``_grid_cache_key``
+engine's own sanctioned reuse contract — the declarative ``GridRequest``
 tuple — plus curve/surface value fingerprints; anything uncanonicalizable
 builds fresh (spec section 10.1: correctness never depends on cacheability).
 
@@ -135,7 +135,13 @@ def grid_state(engine, product, pricing_env, context) -> ArtifactState:
             (
                 "pde-grid",
                 _class_path(engine),
-                engine._grid_cache_key(product, pricing_env, spot, sigma, tau, r, q),
+                engine.grid_request(
+                    product,
+                    engine.market_snapshot(product, pricing_env),
+                    tau,
+                ),
+                engine.market_snapshot(product, pricing_env),
+                engine.grid_binder.config.key,
             )
         )
 

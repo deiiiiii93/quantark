@@ -26,10 +26,9 @@ from quantark.asset.equity.engine.pde.base_pde_solver import (
     BasePDESolver,
     PDESessionOutputs,
     PDESolutionResult,
-    TimeGridSpec,
 )
 from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
-from quantark.asset.equity.engine.pde.event_projection import project_event_values
+from quantark.asset.equity.engine.pde.grid.events import project_event_values
 from quantark.asset.equity.engine.pde.grid import (
     EventSchedule,
     GridRequest,
@@ -753,15 +752,7 @@ class SnowballPDESolver(BasePDESolver):
         # Canonical damping schedule shared with the pricing sweep — the
         # event-distribution pass MUST run the identical discretization for
         # the KO-probability / NPV decomposition to reconcile.
-        if self._stats_layout is not None:
-            theta_by_step = self._theta_schedule_from_layout(self._stats_layout)
-        else:
-            theta_by_step = BackwardOperator.theta_by_step(
-                np.asarray(t_vec),
-                np.asarray(dt_vec),
-                params,
-                self._get_event_times(product, tau),
-            )
+        theta_by_step = self._theta_schedule_from_layout(self._stats_layout)
 
         n_int = num_x - 2
         rhs = np.empty((n_int, 2 * n_cols), dtype=float)
@@ -2029,43 +2020,6 @@ class SnowballPDESolver(BasePDESolver):
 
         return EventSchedule(interior=interior, continuous=continuous)
 
-    def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
-        """Decoupled time-grid concerns for autocallables (spec §4 Component 1).
-
-        align = KO/coupon dates (must be nodes); monitor = daily-discrete KI
-        dates (resolution only); steps_per_day from params. ``_ki_nodes_in_grid``
-        decides whether the interior daily-KI nodes belong in the grid at all
-        (dropped under active BGK and once the product is already knocked in);
-        ``_build_grids`` reads the SAME predicate before demanding alignment,
-        so the two can never disagree.
-        """
-        monitor = (
-            self._ki_monitor_times(product, tau)
-            if self._ki_nodes_in_grid(product)
-            else []
-        )
-        return TimeGridSpec(
-            align_times=self._ko_coupon_align_times(product, tau),
-            monitor_times=monitor,
-            steps_per_day=float(self.params.event_steps_per_day),
-        )
-
-    def _get_event_times(
-        self, product: BaseEquityProduct, tau: float
-    ) -> Optional[List[float]]:
-        """Back-compat union used by Rannacher damping and the grid cache key.
-
-        Returns ``sorted(align ∪ monitor)`` so damping still fires at KO **and**
-        discrete-KI dates independent of any downstream stream selection
-        [§11.2].  Correctness-critical alignment lives in
-        ``_ko_coupon_align_times``; ``_ki_monitor_times`` adds resolution.
-        """
-        monitor = [] if self._bgk_active else self._ki_monitor_times(product, tau)
-        union = sorted(
-            set(self._ko_coupon_align_times(product, tau)) | set(monitor)
-        )
-        return union or None
-
     def _set_terminal_condition_v0(
         self,
         grid: np.ndarray,
@@ -2180,15 +2134,7 @@ class SnowballPDESolver(BasePDESolver):
 
         # Canonical damping schedule (terminal Rannacher + event smoothing):
         # from the layout's frozensets on the migrated path, else legacy.
-        if self._active_layout is not None:
-            theta_schedule = self._theta_schedule_from_layout(self._active_layout)
-        else:
-            theta_schedule = BackwardOperator.theta_by_step(
-                np.asarray(t_vec),
-                np.asarray(dt_vec),
-                params,
-                self._get_event_times(product, tau),
-            )
+        theta_schedule = self._theta_schedule_from_layout(self._active_layout)
 
         rhs = None
         rhs_v0 = None
@@ -2778,65 +2724,6 @@ class SnowballPDESolver(BasePDESolver):
 
     def __repr__(self) -> str:
         return "SnowballPDESolver()"
-
-    def _grid_cache_key(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple:
-        base_key = super()._grid_cache_key(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
-        if not hasattr(product, "barrier_config"):
-            return base_key
-
-        ko_records = self._get_cached_ko_records(pricing_env, product)
-        ko_key = tuple(
-            sorted(
-                (
-                    round(rec.observation_time, 12),
-                    round(rec.barrier if rec.barrier is not None else 0.0, 12),
-                )
-                for rec in ko_records
-            )
-        )
-
-        ki_key = ()
-        ki_continuous = (
-            product.barrier_config.ki_continuous
-            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
-        )
-        if product.has_ki_barrier:
-            if ki_continuous:
-                raw_barrier = product.barrier_config.ki_barrier
-                if isinstance(raw_barrier, (list, tuple, np.ndarray)):
-                    raw_barriers = raw_barrier
-                else:
-                    raw_barriers = [raw_barrier]
-                ki_barriers = tuple(
-                    round(float(b), 12)
-                    for b in raw_barriers
-                    if b is not None and float(b) > 0.0
-                )
-                ki_times = ()
-            else:
-                ki_profile = self._get_cached_ki_profile(pricing_env, product)
-                ki_barriers = tuple(
-                    round(float(b), 12) for b in (ki_profile.get("barriers") or [])
-                )
-                ki_times = tuple(
-                    round(float(t), 12)
-                    for t in (ki_profile.get("observation_times") or [])
-                    if 0.0 <= float(t) <= tau
-                )
-            ki_key = (ki_continuous, ki_barriers, ki_times)
-
-        return base_key + (ko_key, ki_key)
 
     def _observation_cache_key(
         self, pricing_env: PricingEnvironment, product: SnowballOption, kind: str

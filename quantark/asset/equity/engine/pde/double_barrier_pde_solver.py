@@ -439,87 +439,15 @@ class DoubleBarrierPDESolver(BasePDESolver):
                     barriers.append(rec.upper_barrier)
         return barriers
 
-    def _build_grids(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ):
-        """
-        Build grids with barriers as spatial boundaries.
-
-        For double barrier options, the spatial grid is constrained
-        to the corridor between the barriers.
-        """
-        params: PDEParams = self.params
-
-        lower = product.lower_barrier
-        upper = product.upper_barrier
-
-        from .spatial_grid import SpatialGrid
-
-        if product.observation_type == ObservationType.DISCRETE:
-            # Discrete monitoring: the spot may leave the corridor and return
-            # between observation dates, so the domain must extend beyond the
-            # barriers. Clamping the edges at the barriers would impose
-            # continuous-monitoring dynamics on every time step.
-            s_min, s_max = SpatialGrid.calculate_auto_bounds(
-                spot,
-                sigma,
-                tau,
-                r,
-                q,
-                barriers=self._get_barriers(product),
-                num_std=5.0,
-            )
-            s_min = min(s_min, lower * 0.99)
-            s_max = max(s_max, upper * 1.01)
-            if params.s_min > 0:
-                s_min = params.s_min
-            if params.s_max > 0:
-                s_max = params.s_max
-        else:
-            # Continuous monitoring: barriers are absorbing boundaries, so the
-            # domain edges sit at the barriers (small buffer to include them).
-            buffer = 0.001
-            s_min = lower * (1 - buffer)
-            s_max = upper * (1 + buffer)
-
-        # Get critical points
-        critical_points = self.get_critical_points(product, pricing_env)
-
-        # Build spatial grid
-        x_vec, s_vec, dx_vec = SpatialGrid.build(
-            s_min,
-            s_max,
-            params.grid_size,
-            critical_points=critical_points,
-            use_adaptive=params.adaptive_grid,
-        )
-
-        # Get event times
-        event_times = self._get_event_times(product, tau)
-
-        # Build time grid
-        from .time_grid import TimeGrid
-
-        t_vec, dt_vec = TimeGrid.build(
-            tau,
-            params.time_steps,
-            method=params.time_grid_type,
-            event_times=event_times,
-            grade_exponent=params.grade_exponent,
-        )
-
+    def _populate_observation_maps(self, product, pricing_env, layout, tau):
+        # Discrete-monitoring bookkeeping (search-based; works on layer
+        # grids). The bespoke legacy grid construction this solver carried
+        # was removed with the declarative layer (0.4.0).
         self._setup_observation_indices(
             product,
             pricing_env,
             tau,
-            t_vec,
+            layout.time.t,
             resolve_kwargs={
                 "default_upper": product.upper_barrier,
                 "default_lower": product.lower_barrier,
@@ -527,8 +455,6 @@ class DoubleBarrierPDESolver(BasePDESolver):
                 "require_double": True,
             },
         )
-
-        return x_vec, s_vec, dx_vec, t_vec, dt_vec
 
     def get_critical_points(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

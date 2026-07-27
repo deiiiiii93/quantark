@@ -8,7 +8,7 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
-from quantark.asset.equity.engine.pde.event_projection import (
+from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
 from quantark.asset.equity.engine.pde.phoenix_pde_solver import PhoenixPDESolver

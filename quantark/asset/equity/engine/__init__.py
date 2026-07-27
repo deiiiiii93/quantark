@@ -65,8 +65,6 @@ from .pde import (
     LocalVolPhoenixPDESolver,
     HestonPhoenixPDESolver,
     HestonSLVPhoenixPDESolver,
-    TimeGrid,
-    SpatialGrid,
 )
 from .quad import (
     EuropeanQuadEngine,
@@ -140,8 +138,6 @@ __all__ = [
     "HestonPhoenixPDESolver",
     "HestonSLVPhoenixPDESolver",
     # Grid utilities
-    "TimeGrid",
-    "SpatialGrid",
     # Quadrature
     "EuropeanQuadEngine",
     "BarrierQuadEngine",

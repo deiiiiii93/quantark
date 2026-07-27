@@ -5,8 +5,6 @@ This module provides finite difference solvers for pricing various
 option types using the Black-Scholes PDE framework.
 """
 
-from .time_grid import TimeGrid
-from .spatial_grid import SpatialGrid
 from .base_pde_solver import BasePDESolver
 from .european_pde_solver import EuropeanPDESolver
 from .american_pde_solver import AmericanPDESolver
@@ -50,8 +48,6 @@ __all__ = [
     "HestonPhoenixPDESolver",
     "HestonSLVPhoenixPDESolver",
     # Grid utilities
-    'TimeGrid',
-    'SpatialGrid',
     # Solvers
     'BasePDESolver',
     'EuropeanPDESolver',

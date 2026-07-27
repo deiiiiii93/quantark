@@ -35,12 +35,9 @@ from quantark.util.enum.option_enums import ExerciseType, ObservationType
 from quantark.util.enum import ObservationAggregation
 from quantark.util.enum.engine_enums import EngineType
 
-from .time_grid import TimeGrid
-from .spatial_grid import SpatialGrid
 from .backward_operator import BackwardOperator
 
 
-@dataclass(frozen=True)
 class TimeGridSpec:
     """The three orthogonal time-grid concerns (spec §4 Component 1).
 
@@ -168,7 +165,6 @@ class BasePDESolver(BaseEngine):
 
     engine_type = EngineType.PDE
 
-    _shared_grid_cache: "OrderedDict[Tuple, Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
     _grid_cache_max_entries: int = 128
     _global_cache_enabled: bool = True
     _global_cache_strategy: Optional[str] = None
@@ -178,7 +174,6 @@ class BasePDESolver(BaseEngine):
         """Initialize the PDE solver with configuration parameters."""
         super().__init__(params if params is not None else PDEParams())
         self._matrix_cache: Dict[Tuple[float, float], Tuple] = {}
-        self._grid_cache = self.__class__._shared_grid_cache
         self._cache_enabled = bool(getattr(self.params, "cache_enabled", True))
         self._cache_strategy = getattr(self.params, "cache_strategy", "standard")
         cache_size = getattr(self.params, "grid_cache_max_entries", None)
@@ -326,9 +321,8 @@ class BasePDESolver(BaseEngine):
 
     @classmethod
     def clear_grid_cache(cls) -> None:
-        """Clear the shared grid cache for this solver class."""
-        with cls._cache_lock:
-            cls._shared_grid_cache.clear()
+        """No-op since 0.4.0: layouts are cached per engine instance by the
+        GridBinder (kept for source compatibility with older call sites)."""
 
     @classmethod
     def set_cache_enabled(cls, enabled: bool, clear: bool = False) -> None:
@@ -358,8 +352,6 @@ class BasePDESolver(BaseEngine):
             )
         with cls._cache_lock:
             cls._grid_cache_max_entries = max_entries
-            while len(cls._shared_grid_cache) > cls._grid_cache_max_entries:
-                cls._shared_grid_cache.popitem(last=False)
 
     def _is_cache_enabled(self) -> bool:
         return self._resolve_cache_strategy() != "disable"
@@ -396,31 +388,10 @@ class BasePDESolver(BaseEngine):
             clone._frozen_base_layout = clone.grid_binder.bind(request, market)
             return clone
 
-        spot = pricing_env.spot
-        tau = product.get_maturity(pricing_env)
-        if tau <= 0:
-            return self
-
-        strike = getattr(product, "strike", spot)
-        r = pricing_env.get_rate(tau)
-        q = pricing_env.get_div_yield(tau)
-        sigma = pricing_env.get_vol(strike, tau)
-        barriers = self._get_barriers(product)
-        s_min, s_max = self._resolve_spatial_bounds(
-            product, spot, sigma, tau, r, q, barriers
+        raise NotImplementedError(
+            "legacy params-freeze bump contexts were removed with the "
+            "declarative grid layer (0.4.0)"
         )
-        # Freeze the critical points at the base spot too [§11.4]: otherwise
-        # include_spot_in_critical_points re-snaps the grid to a bumped spot,
-        # so a spot bump mixes true delta/gamma with grid-movement noise.
-        frozen_critical = tuple(
-            self._resolve_critical_points(product, pricing_env, spot, barriers)
-        )
-
-        fixed_params = deepcopy(self.params)
-        fixed_params.s_min = float(s_min)
-        fixed_params.s_max = float(s_max)
-        fixed_params.frozen_critical_points = frozen_critical
-        return type(self)(params=fixed_params)
 
     # ------------------------------------------------------------------
     # Declarative grid layer seam (grid redesign spec §4.6)
@@ -500,6 +471,21 @@ class BasePDESolver(BaseEngine):
     ) -> None:
         """Layer-path observation bookkeeping hook (no-op in the base;
         autocallable solvers derive their index maps from layout.step_of)."""
+
+    def _get_event_times(
+        self, product: BaseEquityProduct, tau: float
+    ) -> Optional[List[float]]:
+        """Helper to collect observation/event times."""
+        schedule = getattr(product, "observation_schedule", None)
+        if schedule is not None and getattr(schedule, "times", None):
+            return [t for t in schedule.times if 0 < t < tau]
+        for attr in ("observation_dates", "obs_times", "event_times"):
+            if hasattr(product, attr):
+                times = getattr(product, attr)
+                if times:
+                    return [t for t in times if 0 < t < tau]
+        return None
+    # -- session factorization packs (spec section 9.2) --------------------
 
     def _generic_grid_request(
         self, product: BaseEquityProduct, market: MarketSnapshot, tau: float
@@ -760,45 +746,6 @@ class BasePDESolver(BaseEngine):
             getattr(params, "ki_monitoring_mode", None),
         )
 
-    def _grid_cache_key(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple:
-        barriers = tuple(
-            sorted(
-                [
-                    round(b, 12)
-                    for b in self._get_barriers(product)
-                    if b is not None
-                ]
-            )
-        )
-        event_times = tuple(
-            sorted(
-                [round(t, 12) for t in (self._get_event_times(product, tau) or [])]
-            )
-        )
-        critical_points = self._get_cached_critical_points(product, pricing_env, spot)
-        return (
-            f"{product.__class__.__module__}.{product.__class__.__qualname__}",
-            round(spot, 12),
-            round(sigma, 12),
-            round(tau, 12),
-            round(r, 12),
-            round(q, 12),
-            barriers,
-            event_times,
-            critical_points,
-            self._params_cache_key(),
-        )
-
-    @abstractmethod
     def set_terminal_condition(
         self,
         grid: np.ndarray,
@@ -1071,290 +1018,9 @@ class BasePDESolver(BaseEngine):
             return self._grids_via_layer(
                 product, pricing_env, spot, sigma, tau, r, q
             )
-        if self._session_grids is not None:
-            return self._session_grids
-        if not self._is_cache_enabled():
-            return self._build_grids_uncached(
-                product, pricing_env, spot, sigma, tau, r, q
-            )
-
-        cache_key = self._grid_cache_key(product, pricing_env, spot, sigma, tau, r, q)
-        with self.__class__._cache_lock:
-            cached = self._grid_cache.get(cache_key)
-            if cached is not None:
-                self._grid_cache.move_to_end(cache_key)
-                return cached
-
-        barriers = self._get_barriers(product)
-        s_min, s_max = self._resolve_spatial_bounds(
-            product, spot, sigma, tau, r, q, barriers
-        )
-        critical_points = self._resolve_critical_points(
-            product, pricing_env, spot, barriers
-        )
-
-        grid_size, use_adaptive = self._resolve_spatial_config(
-            barriers, critical_points, s_min, s_max
-        )
-
-        x_vec, s_vec, dx_vec = SpatialGrid.build(
-            s_min,
-            s_max,
-            grid_size,
-            critical_points=critical_points,
-            use_adaptive=use_adaptive,
-        )
-
-        t_vec, dt_vec = self._resolve_time_grid(product, tau, barriers)
-
-        result = (x_vec, s_vec, dx_vec, t_vec, dt_vec)
-        with self.__class__._cache_lock:
-            self._grid_cache[cache_key] = result
-            self._grid_cache.move_to_end(cache_key)
-            if len(self._grid_cache) > self._grid_cache_max_entries:
-                self._grid_cache.popitem(last=False)
-        return result
-
-    def _build_grids_uncached(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        barriers = self._get_barriers(product)
-        s_min, s_max = self._resolve_spatial_bounds(
-            product, spot, sigma, tau, r, q, barriers
-        )
-        critical_points = self._resolve_critical_points(
-            product, pricing_env, spot, barriers
-        )
-        grid_size, use_adaptive = self._resolve_spatial_config(
-            barriers, critical_points, s_min, s_max
-        )
-        x_vec, s_vec, dx_vec = SpatialGrid.build(
-            s_min,
-            s_max,
-            grid_size,
-            critical_points=critical_points,
-            use_adaptive=use_adaptive,
-        )
-        t_vec, dt_vec = self._resolve_time_grid(product, tau, barriers)
-        return x_vec, s_vec, dx_vec, t_vec, dt_vec
-
-    def _resolve_spatial_bounds(
-        self, product, spot, sigma, tau, r, q, barriers
-    ) -> Tuple[float, float]:
-        """Determine domain boundaries, optionally clamping to knock-out barriers."""
-        params: PDEParams = self.params
-
-        # Base bounds calculation
-        if params.s_min > 0 and params.s_max > 0:
-            s_min, s_max = params.s_min, params.s_max
-        else:
-            strike = getattr(product, "strike", spot)
-            s_min, s_max = SpatialGrid.calculate_auto_bounds(
-                spot, sigma, tau, r, q, strike=strike, barriers=barriers
-            )
-            s_min = params.s_min if params.s_min > 0 else s_min
-            s_max = params.s_max if params.s_max > 0 else s_max
-
-        # Continuous knock-out barriers define the survival domain boundaries
-        obs_type = getattr(product, "observation_type", None)
-        is_ko = getattr(product, "is_knock_out", False)
-
-        if obs_type == ObservationType.CONTINUOUS and is_ko:
-            if hasattr(product, "lower_barrier") and hasattr(product, "upper_barrier"):
-                lb, ub = getattr(product, "lower_barrier", 0), getattr(
-                    product, "upper_barrier", 0
-                )
-                if lb > 0 and params.s_min <= 0:
-                    s_min = float(lb)
-                if ub > 0 and params.s_max <= 0:
-                    s_max = float(ub)
-            elif hasattr(product, "barrier"):
-                b = getattr(product, "barrier", 0)
-                if b > 0:
-                    if getattr(product, "is_up_barrier", False):
-                        if params.s_max <= 0:
-                            s_max = float(b)
-                    elif params.s_min <= 0:
-                        s_min = float(b)
-
-        if s_min >= s_max:
-            raise PricingError(f"Invalid spatial bounds: [{s_min}, {s_max}]")
-
-        if params.barrier_domain_expand > 0.0 and barriers:
-            expand = params.barrier_domain_expand
-            for barrier in barriers:
-                if barrier is None or barrier <= 0:
-                    continue
-                if barrier >= spot:
-                    s_max = max(s_max, barrier * (1.0 + expand))
-                else:
-                    s_min = min(s_min, barrier * max(1.0 - expand, 1e-6))
-            if s_min >= s_max:
-                raise PricingError(
-                    f"Invalid spatial bounds after expansion: [{s_min}, {s_max}]"
-                )
-
-        return s_min, s_max
-
-    def _resolve_critical_points(
-        self, product, pricing_env, spot, barriers
-    ) -> List[float]:
-        """Aggregate all key price levels for grid concentration."""
-        raw_points = self._get_cached_critical_points(product, pricing_env, spot)
-        return self._merge_critical_points(raw_points, spot, barriers)
-
-    def _merge_critical_points(
-        self, raw_points: Tuple[float, ...], spot: float, barriers: List[float]
-    ) -> List[float]:
-        """Merge raw critical points with dynamic points (spot/barriers)."""
-        params: PDEParams = self.params
-
-        # Frozen (bump-context) critical points are used verbatim so the grid is
-        # invariant to spot/vol/rate/div bumps [§11.4].
-        if params.frozen_critical_points is not None:
-            return sorted(
-                {float(p) for p in params.frozen_critical_points if p is not None and p > 0}
-            )
-
-        points = list(raw_points)
-
-        if params.auto_grid:
-            if params.include_spot_in_critical_points and spot > 0:
-                points.append(spot)
-            points.extend([b for b in barriers if b is not None and b > 0])
-            if params.barrier_refine_log_width > 0.0 and params.barrier_refine_levels > 0:
-                for barrier in [b for b in barriers if b is not None and b > 0]:
-                    for level in range(1, params.barrier_refine_levels + 1):
-                        width = params.barrier_refine_log_width * level
-                        points.append(barrier * math.exp(width))
-                        points.append(barrier * math.exp(-width))
-
-        return sorted(list(set([p for p in points if p is not None and p > 0])))
-
-    def _resolve_spatial_config(
-        self, barriers, critical_points, s_min, s_max
-    ) -> Tuple[int, bool]:
-        """Determine required grid size and whether to use adaptive spacing."""
-        params: PDEParams = self.params
-        size = params.grid_size
-        adaptive = params.adaptive_grid
-
-        if not params.auto_grid:
-            return size, adaptive
-
-        if len(barriers) > 0 or len(critical_points) > 1:
-            adaptive = True
-
-        if adaptive and critical_points:
-            active = [p for p in critical_points if s_min < p < s_max]
-            if active:
-                x_points = np.log(np.array([s_min] + sorted(active) + [s_max]))
-                total_range = x_points[-1] - x_points[0]
-                # Heuristic: ensure we have at least capacity to resolve sensitive regions
-                suggested = int(total_range / (params.log_dx_target * 2.0))
-                size = min(max(size, suggested), params.max_grid_size)
-
-        return size, adaptive
-
-    def _time_grid_spec(self, product, tau) -> "TimeGridSpec":
-        """Decoupled time-grid concerns for this product (spec §4 Component 1).
-
-        Base default: align to the generic observation schedule; no KI-monitor
-        concept (that belongs to autocallable solvers, which override this);
-        resolution from params.  Returns interior times only (0 < t < tau).
-        """
-        align = [
-            t for t in (self._get_event_times(product, tau) or []) if 0.0 < t < tau
-        ]
-        return TimeGridSpec(
-            align_times=sorted(set(align)),
-            monitor_times=[],
-            steps_per_day=float(self.params.event_steps_per_day),
-        )
-
-    def _resolve_time_grid(
-        self, product, tau, barriers
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Build the time grid from the decoupled ``_time_grid_spec`` seam.
-
-        When the product has mandatory event nodes (KO/coupon alignment plus any
-        KI-monitor times), the grid is built by ``TimeGrid.build_mandatory``:
-        every event time lands on a node exactly, and resolution between nodes is
-        set solely by ``steps_per_day`` (no per-interval floor).  This path is
-        market-independent — it depends only on ``tau``, the schedule,
-        ``steps_per_day`` and params — so spot/vol/rate/div bumps reprice on an
-        identical grid [§4.5], and it always feeds the day-based resolution
-        params, fixing the historical ``auto_grid=False`` param drop (root cause
-        2) that inflated daily-KI grids ~10x.
-
-        When there are no discrete event nodes (continuous barriers, American,
-        European), the base resolution heuristics are preserved unchanged.
-        """
-        params: PDEParams = self.params
-        spec = self._time_grid_spec(product, tau)
-        mandatory = sorted(
-            {
-                t
-                for t in (list(spec.align_times) + list(spec.monitor_times))
-                if 0.0 < t < tau
-            }
-        )
-
-        # Event alignment engages when the config wants an event-aligned grid:
-        # auto_grid (auto-selects alignment when events exist, as before) or an
-        # explicit event grid type. An explicit auto_grid=False + uniform/graded
-        # request is honored literally (plain grid), matching prior behavior.
-        want_event_aligned = params.auto_grid or params.time_grid_type in (
-            "event_aligned",
-            "event_clustered",
-        )
-        if mandatory and want_event_aligned:
-            return TimeGrid.build_mandatory(
-                tau,
-                mandatory,
-                steps_per_day=spec.steps_per_day,
-                day_count=int(params.bus_days_in_year),
-                max_steps_total=params.max_time_steps,
-            )
-
-        # No event alignment requested: preserve the base resolution heuristics.
-        obs_type = getattr(product, "observation_type", None)
-        has_barriers = len(barriers) > 0
-
-        if not params.auto_grid:
-            return TimeGrid.build(
-                tau,
-                params.time_steps,
-                method=params.time_grid_type,
-                event_times=None,
-                grade_exponent=params.grade_exponent,
-            )
-
-        days = max(1, int(round(tau * float(params.bus_days_in_year))))
-        suggested = days
-        if has_barriers:
-            if obs_type == ObservationType.CONTINUOUS:
-                suggested = int(round(params.event_steps_per_day * float(days)))
-            else:
-                suggested = int(round(2.0 * float(days)))
-        elif getattr(product, "exercise_type", None) == ExerciseType.AMERICAN:
-            suggested = int(round(1.5 * float(days)))
-
-        steps = min(max(params.time_steps, suggested), params.max_time_steps)
-        method = params.time_grid_type if params.time_grid_type != "uniform" else "uniform"
-        return TimeGrid.build(
-            tau,
-            steps,
-            method=method,
-            event_times=None,
-            grade_exponent=params.grade_exponent,
+        raise PricingError(
+            "the legacy grid path was removed with the declarative grid "
+            "layer (0.4.0); every PDE solver now binds through GridBinder"
         )
 
     def _step_coefficients_for_solve(
@@ -1549,15 +1215,7 @@ class BasePDESolver(BaseEngine):
 
         # Canonical damping schedule (terminal Rannacher + event smoothing),
         # shared with all other sweeps via BackwardOperator.theta_by_step.
-        if getattr(self, "_active_layout", None) is not None:
-            theta_by_step = self._theta_schedule_from_layout(self._active_layout)
-        else:
-            theta_by_step = BackwardOperator.theta_by_step(
-                np.asarray(t_vec),
-                np.asarray(dt_vec),
-                params,
-                self._get_event_times(product, tau),
-            )
+        theta_by_step = self._theta_schedule_from_layout(self._active_layout)
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]
@@ -1871,21 +1529,6 @@ class BasePDESolver(BaseEngine):
                     barriers.append(val)
         return barriers
 
-    def _get_event_times(
-        self, product: BaseEquityProduct, tau: float
-    ) -> Optional[List[float]]:
-        """Helper to collect observation/event times."""
-        schedule = getattr(product, "observation_schedule", None)
-        if schedule is not None and getattr(schedule, "times", None):
-            return [t for t in schedule.times if 0 < t < tau]
-        for attr in ("observation_dates", "obs_times", "event_times"):
-            if hasattr(product, attr):
-                times = getattr(product, attr)
-                if times:
-                    return [t for t in times if 0 < t < tau]
-        return None
-    # -- session factorization packs (spec section 9.2) --------------------
-
     def _pack_uses_banded(self, num_x: int) -> bool:
         """Whether the backward march for this configuration uses the banded
         solver path (only the two-surface family does)."""
@@ -1934,15 +1577,7 @@ class BasePDESolver(BaseEngine):
         l, c, u = self._calculate_coefficients(r, q, sigma, dx_vec, num_x)
         A = self._build_operator_matrix(l, c, u, num_x)
 
-        if getattr(self, "_active_layout", None) is not None:
-            theta_by_step = self._theta_schedule_from_layout(self._active_layout)
-        else:
-            theta_by_step = BackwardOperator.theta_by_step(
-                np.asarray(t_vec),
-                np.asarray(dt_vec),
-                self.params,
-                self._get_event_times(product, tau),
-            )
+        theta_by_step = self._theta_schedule_from_layout(self._active_layout)
         use_banded = self._pack_uses_banded(num_x)
         banded: dict = {}
         saved_matrix, self._matrix_cache = self._matrix_cache, {}

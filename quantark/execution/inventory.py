@@ -510,7 +510,7 @@ SUPPORTING_EXPORTS = {
         "RangeAccrualMCResult", "coupled_heston_ladder_pair",
     ),
     "quantark.asset.equity.engine.pde": (
-        "TimeGrid", "SpatialGrid", "DCNPDEResult",
+        "DCNPDEResult",
     ),
     "quantark.asset.fx.engine.mc": (
         "FxRangeAccrualMCResult", "FxBarrierMCResult", "FxSharkfinMCResult",

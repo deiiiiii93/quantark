@@ -16,8 +16,6 @@ from quantark.util.enum import ObservationType, ObservationAggregation
 from quantark.util.exceptions import PricingError
 
 from .base_pde_solver import BasePDESolver
-from .spatial_grid import SpatialGrid
-from .time_grid import TimeGrid
 
 
 class OneTouchPDESolver(BasePDESolver):
@@ -333,82 +331,21 @@ class OneTouchPDESolver(BasePDESolver):
         else:
             grid[s_vec <= barrier, t_idx] = barrier_value
 
-    def _build_grids(
-        self,
-        product: BaseEquityProduct,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ):
-        """Build grids for one-touch option."""
-        params: PDEParams = self.params
-        barrier = product.barrier
-
-        # Use volatility-based bounds with wider range for barrier options
-        # This ensures proper probability capture for touch/no-touch dynamics
-        s_min, s_max = SpatialGrid.calculate_auto_bounds(
-            spot,
-            sigma,
-            tau,
-            r,
-            q,
-            barriers=[barrier],
-            num_std=5.0,  # Wider range for barrier options
-        )
-
-        # Ensure barrier is at the appropriate boundary edge
-        if product.is_up_barrier:
-            # Up barrier: upper boundary should be at/beyond barrier
-            s_max = max(s_max, barrier * 1.01)
-        else:
-            # Down barrier: lower boundary should be at/beyond barrier
-            s_min = min(s_min, barrier * 0.99)
-
-        # Override with user bounds if specified
-        if params.s_min > 0:
-            s_min = params.s_min
-        if params.s_max > 0:
-            s_max = params.s_max
-
-        # Build spatial grid with concentration at barrier
-        critical_points = [barrier]
-
-        x_vec, s_vec, dx_vec = SpatialGrid.build(
-            s_min,
-            s_max,
-            params.grid_size,
-            critical_points=critical_points,
-            use_adaptive=params.adaptive_grid,
-        )
-
-        # Get event times
-        event_times = self._get_event_times(product, tau)
-
-        # Build time grid
-        t_vec, dt_vec = TimeGrid.build(
-            tau,
-            params.time_steps,
-            method=params.time_grid_type,
-            event_times=event_times,
-            grade_exponent=params.grade_exponent,
-        )
-
+    def _populate_observation_maps(self, product, pricing_env, layout, tau):
+        # Discrete-monitoring bookkeeping (search-based; works on layer
+        # grids). The bespoke legacy grid construction this solver carried
+        # was removed with the declarative layer (0.4.0).
         self._setup_observation_indices(
             product,
             pricing_env,
             tau,
-            t_vec,
+            layout.time.t,
             resolve_kwargs={
                 "default_barrier": product.barrier,
                 "default_payoff": product.rebate,
                 "require_single": True,
             },
         )
-
-        return x_vec, s_vec, dx_vec, t_vec, dt_vec
 
     def get_critical_points(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment

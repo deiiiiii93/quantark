@@ -23,7 +23,7 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from quantark.asset.equity.engine.pde.event_projection import (
+from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
     project_breach_jump,
 )
@@ -235,7 +235,7 @@ class TestProjectEventValues:
         np.testing.assert_allclose(out[3:], 0.0, atol=1e-14)
 
     def test_envelope_bound_random_branches(self):
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_event_values,
         )
 
@@ -254,7 +254,7 @@ class TestProjectEventValues:
             assert np.all(out <= hi + 1e-12)
 
     def test_straddle_equals_numeric_cell_average(self):
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_event_values,
         )
 
@@ -290,7 +290,7 @@ class TestProjectEventValues:
         # of an affine survive branch equals its nodal value and the
         # straddle correction vanishes: the validated jump-form results are
         # unchanged in this regime.
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_event_values,
         )
 
@@ -304,7 +304,7 @@ class TestProjectEventValues:
         np.testing.assert_allclose(out, jump_form, atol=1e-12)
 
     def test_columns_match_per_column(self):
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_event_values,
         )
 
@@ -334,7 +334,7 @@ class TestProjectPiecewiseEvent:
     profile through the KO threshold."""
 
     def test_reduces_to_two_branch_projector(self):
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_event_values,
             project_piecewise_event,
         )
@@ -352,7 +352,7 @@ class TestProjectPiecewiseEvent:
         np.testing.assert_allclose(out, ref, rtol=1e-15, atol=1e-15)
 
     def test_equal_thresholds_barrier_node_weight_is_half(self):
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_piecewise_event,
         )
 
@@ -369,7 +369,7 @@ class TestProjectPiecewiseEvent:
         np.testing.assert_allclose(out[3:], 1.0, atol=1e-14)
 
     def test_two_breaks_in_one_cell_numeric_average(self):
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_piecewise_event,
         )
 
@@ -400,7 +400,7 @@ class TestProjectPiecewiseEvent:
         np.testing.assert_allclose(out[i + 1 :], branches[2][i + 1 :], atol=1e-14)
 
     def test_columns_2d(self):
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_piecewise_event,
         )
 
@@ -427,7 +427,7 @@ class TestProjectPiecewiseEvent:
         average of the two outer branches — miss (0) and KO-with-coupon (12)
         — i.e. 12 * breach_fraction. The sequential coupon-then-KO
         projection double-averaged the shared cell."""
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             breach_fractions,
         )
         from quantark.util.enum import CouponPayType
@@ -460,7 +460,7 @@ class TestProjectPiecewiseEvent:
             grid_v0, grid_v1, x_vec, s_vec, 5, 0.5, product, env
         )
         j = 40  # s == 100.0 exactly
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             project_piecewise_event,
         )
 
@@ -478,7 +478,7 @@ class TestProjectPiecewiseEvent:
 
     def test_vol_phoenix_joint_coupon_ko_one_pass(self):
         """Same one-pass obligation in the 2D slice-wise application."""
-        from quantark.asset.equity.engine.pde.event_projection import (
+        from quantark.asset.equity.engine.pde.grid.events import (
             breach_fractions,
         )
         from quantark.util.enum import CouponPayType

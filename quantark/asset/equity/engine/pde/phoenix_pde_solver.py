@@ -15,7 +15,7 @@ from time import perf_counter
 
 from quantark.asset.equity.engine.pde.backward_operator import BackwardOperator
 from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
-from quantark.asset.equity.engine.pde.event_projection import (
+from quantark.asset.equity.engine.pde.grid.events import (
     project_piecewise_event,
 )
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
@@ -577,15 +577,7 @@ class PhoenixPDESolver(SnowballPDESolver):
 
         # Canonical damping schedule (terminal Rannacher + event smoothing):
         # from the layout's frozensets on the migrated path, else legacy.
-        if self._active_layout is not None:
-            theta_schedule = self._theta_schedule_from_layout(self._active_layout)
-        else:
-            theta_schedule = BackwardOperator.theta_by_step(
-                np.asarray(t_vec),
-                np.asarray(dt_vec),
-                params,
-                self._get_event_times(product, tau),
-            )
+        theta_schedule = self._theta_schedule_from_layout(self._active_layout)
 
         for j in range(num_t - 2, -1, -1):
             dt = dt_vec[j]

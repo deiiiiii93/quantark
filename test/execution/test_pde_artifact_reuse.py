@@ -165,7 +165,6 @@ class TestBuildCountGates:
         self, monkeypatch
     ):
         from quantark.asset.equity.engine.pde import SnowballPDESolver
-        from quantark.asset.equity.engine.pde.spatial_grid import SpatialGrid
 
         engine, product, env = _case("SnowballPDESolver")
         direct = engine.price(product, env)
@@ -174,19 +173,12 @@ class TestBuildCountGates:
         import quantark.asset.equity.engine.pde.grid.space as grid_space
 
         grid_counts = {"n": 0}
-        original_build = SpatialGrid.build
         original_build_space = grid_space.build_space
 
-        def counting_build(*args, **kwargs):
-            grid_counts["n"] += 1
-            return original_build(*args, **kwargs)
-
         def counting_build_space(*args, **kwargs):
-            # migrated solvers construct spatial nodes here instead
             grid_counts["n"] += 1
             return original_build_space(*args, **kwargs)
 
-        monkeypatch.setattr(SpatialGrid, "build", staticmethod(counting_build))
         monkeypatch.setattr(grid_space, "build_space", counting_build_space)
         monkeypatch.setattr(
             "quantark.asset.equity.engine.pde.grid.binder.build_space",

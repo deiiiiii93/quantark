@@ -316,29 +316,6 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             barriers.append(post_barrier)
         return barriers
 
-    def _grid_cache_key(
-        self,
-        product: KnockOutResetSnowballOption,
-        pricing_env: PricingEnvironment,
-        spot: float,
-        sigma: float,
-        tau: float,
-        r: float,
-        q: float,
-    ) -> Tuple:
-        base_key = super()._grid_cache_key(product, pricing_env, spot, sigma, tau, r, q)
-        post_records = self._get_cached_post_ko_records(pricing_env, product)
-        post_key = tuple(
-            sorted(
-                (
-                    round(rec.observation_time, 12),
-                    round(rec.barrier if rec.barrier is not None else 0.0, 12),
-                )
-                for rec in post_records
-            )
-        )
-        return base_key + (post_key,)
-
     def _solve(
         self, product: KnockOutResetSnowballOption, pricing_env: PricingEnvironment
     ) -> PDESolutionResult:
