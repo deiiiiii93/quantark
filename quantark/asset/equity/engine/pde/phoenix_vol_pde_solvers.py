@@ -185,10 +185,6 @@ class LocalVolPhoenixPDESolver(PhoenixPDESolver):
 
 class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
 
-    def _uses_grid_layer(self) -> bool:
-        # Phase-3 consumer: keeps the legacy grid path until the
-        # LV/2D migration (plan Tasks 20b/21) wires the layer in.
-        return False
     engine_type = EngineType.PDE
     _solver_name = "Heston2DPhoenixPDESolver"
 
