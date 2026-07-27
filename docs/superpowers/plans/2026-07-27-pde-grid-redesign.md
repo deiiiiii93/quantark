@@ -543,7 +543,9 @@ def test_achieved_eps_meets_target():
   bitwise-identical `spatial.s`/`time.t` to `bind(r, m)`;
   multi-request sharing: `len({id(l.spatial) for l in layouts}) == 1`; value-identical
   requests share one `TimeLayout` object; request with any hard bound in `bind_shared` →
-  `ValidationError`; shared spatial uses max-tau bounds and unioned critical prices;
+  `ValidationError`; **same-side expert/hard conflict** (spec §4.2): `GridConfig.bounds`
+  setting the lower side while the request has `hard_lower` → `ValidationError` in `bind`,
+  and symmetrically for the upper side (check lives in `bind` before `build_space`); shared spatial uses max-tau bounds and unioned critical prices;
   `rebind_time(layout, rolled_request)` keeps `spatial` by identity, rebuilds time;
   infeasible domain (hard bounds exclude every anchor) → `PricingError`.
 - [ ] **Step 2–5:** implement (space built from a synthetic union-request in `bind_shared`),
@@ -705,11 +707,16 @@ Verify `test_ko_reset_snowball_pde.py` non-golden subset. Commit.
 ### Task 14: Migrate `DCNPDEEngine`
 
 **`DCNPDEEngine` extends `BaseEngine`, NOT `BasePDESolver`** (`dcn_pde_solver.py:126`), so it
-inherits none of the Task-8 seam. Explicit work:
+inherits none of the Task-8 seam. This task therefore builds the reusable seam for ALL
+non-`BasePDESolver` consumers (the Phase-3 LV/Heston/SLV engines reuse it — Tasks 20b/21a/21b):
 
-- [ ] Give it its own binder: `self._binder = GridBinder(params.accuracy, params.grid,
-  cache_enabled=(params.cache_enabled and params.cache_strategy != "disable"),
-  cache_max_entries=params.grid_cache_max_entries)` in `__init__`.
+- [ ] Create `GridLayerMixin` in `grid/binder.py`: binder ownership (from a `PDEParams`-like
+  object: `accuracy`/`grid`/`cache_enabled`/`cache_strategy`/`grid_cache_max_entries`),
+  `MarketSnapshot` construction from `(spot, representative_vol, r_ref, q_ref)`,
+  `validate_external_layout` invocation, and a `create_bump_context` implementation that
+  binds once at base market, injects the frozen `Layout` into every bumped `price` call, and
+  routes theta bumps through `rebind_time` — mirroring Task 15a's `BasePDESolver` behavior.
+- [ ] `DCNPDEEngine` adopts the mixin.
 - [ ] Implement `grid_request` (coupon schedule → `event_times`; anchors (spot, strike);
   criticals incl. coupon barrier), `representative_vol` (its current strike-selected vol
   resolution), `event_schedule` (coupon decision transforms; states `{"alive": ...}` — no KI
@@ -735,14 +742,18 @@ inherits none of the Task-8 seam. Explicit work:
   `build_space` call counts + object identity): spot/vol/rate/div bumps reuse the SAME
   `Layout` object (`is`); theta bump keeps `layout.spatial is base.spatial` while
   `layout.time is not base.time`; `event_schedule` is invoked once per solve (rebuilt every
-  time); out-of-bounds bumped spot raises `NumericalError`. Commit.
+  time); out-of-bounds bumped spot raises `NumericalError`. Run the same identity-test matrix
+  against `DCNPDEEngine` (via its `GridLayerMixin` bump context, Task 14) — DCN is a
+  first-class row, not an afterthought. Commit.
 
 ### Task 15b: Tier-2 anchor certification file
 
 **Files:** Create: `test/pde_grid/test_anchor_certification.py`
 
 - [ ] Snowball/phoenix/KO-reset/DCN vs their MC engines (QMC, seed=42, 2^18 paths, agreement
-  within 3× MC stderr) and vs their Quad engines (rel < 5e-4); greek smoothness ladder
+  within 3× MC stderr); snowball/phoenix/KO-reset additionally vs their Quad engines
+  (rel < 5e-4) — **DCN has no Quad engine and is certified vs MC only** (adding one is a spec
+  non-goal); greek smoothness ladder
   (±2 % spot, 9 points: delta monotone where the payoff implies, gamma no sign-flip) on the
   frozen layout. Structure rows so Phase-2/3 tasks append (European/BS, barrier, LV/2D).
   Run `-n0`; green. Commit.
@@ -756,6 +767,12 @@ inherits none of the Task-8 seam. Explicit work:
 
 ### Task 15d: Phase-1 gate — goldens + full suite
 
+- [ ] **Retire/regenerate the pre-refactor execution goldens FIRST**:
+  `test/execution/test_pde_pre_refactor_goldens.py` asserts snowball/phoenix/KO-reset
+  against `test/execution/goldens/pde_phase4_goldens.json` — old-stack numbers that the
+  intentional changes fail by design. After 15b is green, regenerate through
+  `test/execution/freeze_goldens.py` as anchor-approved tier-3 goldens (or retire the file
+  with a commit-message note if the execution program supersedes it).
 - [ ] Re-baseline autocallable goldens (locate: `git grep -l golden test/ | grep -iE
   "snowball|phoenix|dcn|ko_reset"`); regenerate via each test's frozen-generation path,
   verify against the Task-15b anchors FIRST, then freeze.
@@ -810,19 +827,33 @@ Full suite `-n 4` + anchors green; re-baseline any 1D goldens; commit
   same event nodes, frozenset-driven damping selects exactly the steps the current
   `event_damped_step_keys` selects — fixture-compare before any solver migrates)
 
-- [ ] **`representative_vol` pinning step (blocks 20b/21a/21b):** for each of the three model
-  families, locate the exact expression currently feeding that family's `s_min`/`s_max`
-  bounds computation (grep `sigma|s_min|s_max|bounds` in `local_vol_pde_solver.py`,
-  `heston_pde_solver.py`, `heston_slv_pde_solver.py` and the exotic vol-solver files), copy
-  it verbatim into each solver's `representative_vol`, and paste the three ported
-  expressions into this task's commit message for gate review. Do NOT invent
-  `sqrt(max(v0, theta))` or any other formula — port what exists.
+- [ ] **`representative_vol` pinning step (blocks 20b/21a/21b).** The current code has no
+  scalar representative vol: LV uses an `s_max` heuristic in its own solver; Heston/SLV
+  compute domain width centrally in `adi_core` from an effective variance (`var_eff` →
+  `x_width`). Pin per family:
+  - *Heston/SLV*: `sigma_ref = sqrt(var_eff)` where `var_eff` is ported verbatim from the
+    `adi_core` `x_width` computation (locate the expression; paste it in the commit message);
+  - *LV*: `sigma_ref` = the vol level its current `s_max` heuristic implies — port the
+    heuristic's vol input, not the width formula.
+  - **Acceptance test (all three families):** on 3 standard fixtures per family, the new
+    auto-bounds domain (spec §4.4 with the pinned `sigma_ref`) CONTAINS the current engine's
+    domain. If containment fails, widen via `num_std` reasoning in the test comment — never
+    by inventing a different `sigma_ref` formula.
+- [ ] **`adi_core` layout-consuming API** (blocks 21a/21b): `HestonSLVADICore` currently
+  self-builds its S grid and a uniform time grid from `n_x`/`n_t` with scalar `self.dt`.
+  Add a constructor path accepting `(spatial: SpatialLayout, time: TimeLayout,
+  variance: VarianceLayout)`: S nodes from `spatial.x`, **per-step `dt` from
+  `time.dt`** (replacing every scalar `self.dt` use — audit `_advance_tau` and the
+  Rannacher half-steps), damping from the two frozensets. Keep the legacy `n_x`/`n_t`
+  constructor path functional until Task 24b. Equivalence test: uniform `TimeLayout` +
+  matching `n_x` reproduces the legacy path bitwise on a European fixture.
 - [ ] Commit.
 
 ### Task 20b: LV 1D family
 
 `LocalVolPDESolver`, `LocalVolBarrierPDESolver`, `LocalVolSnowballPDESolver`,
-`LocalVolPhoenixPDESolver`, `LocalVolDCNPDEEngine`: S-axis + time via the binder; stepping
+`LocalVolPhoenixPDESolver`, `LocalVolDCNPDEEngine` — **all `BaseEngine`-derived: each adopts
+`GridLayerMixin` (Task 14) first**, then: S-axis + time via the binder; stepping
 loops read the damping frozensets; constructor kwargs `n_x`/`n_t`/`grid_style`/`grid_focus`/
 `pin_critical_spots` stay functional (removed in Task 24b) but the engines also accept
 `PDEParams(accuracy, grid)` as the primary path. Anchor rows: LV European vs its MC engine
@@ -831,8 +862,9 @@ not "if diffs get large".
 
 ### Task 21a: 2D European + Barrier (`Heston*/HestonSLV*` PDESolver, BarrierPDESolver)
 
-S-axis `SpatialLayout` + `TimeLayout` from the binder; variance axis via `VarianceConfig`;
-ADI damping via 20a's input; 2D KO stays per-step injection expressed through
+All `BaseEngine`-derived — each adopts `GridLayerMixin` first. S-axis `SpatialLayout` +
+`TimeLayout` fed to `adi_core` via 20a's layout-consuming API; variance axis via
+`VarianceConfig`; ADI damping via 20a's input; 2D KO stays per-step injection expressed through
 `continuous()` on `(n_s, n_v)` blocks. Verify `test_heston_pde_engines.py`,
 `test_heston_slv_pde_engines.py`, `test_barrier_vol_pde_engines.py` non-golden subsets +
 re-baseline `test_heston_pde_convergence.py`. Commit.
@@ -871,8 +903,12 @@ Full suite `-n 4` + anchors green. Commit `feat(pde-grid): phase 3 complete — 
 
 - [ ] Remove `n_x`, `n_t`, `grid_style`, `grid_focus`, `pin_critical_spots` (S-axis/time
   controls) from every LV/Heston/SLV engine constructor
-  (`snowball_vol_pde_solvers.py:217-222` and siblings); variance-axis args route through
-  `VarianceConfig` only. Per-engine test: constructing with a retired kwarg raises
+  (`snowball_vol_pde_solvers.py:217-222` and siblings); variance-axis args (`n_v`,
+  `v_grid_power`, `v0_boundary`) route through `VarianceConfig` only.
+  `HestonDCNPDESolver` additionally sheds its direct `substeps_per_interval` /
+  `rannacher_steps` / `theta` kwargs (→ `GridConfig.steps_per_day`, damping counts, and
+  `PDEParams.theta` respectively). Remove the `adi_core` legacy `n_x`/`n_t` constructor
+  path (Task 20a kept it alive). Per-engine test: constructing with a retired kwarg raises
   `TypeError`. Full suite green. Commit.
 
 ### Task 24: Delete legacy params + finalize surface
