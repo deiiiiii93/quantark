@@ -255,6 +255,28 @@ class HestonSLVADICore:
         idx = self._forward_step_index(t)
         return float(self.r_fwd[idx]), float(self.q_fwd[idx])
 
+    def _advance_tau(self, tau: float, step: float, final: bool) -> float:
+        """Advance the backward time-to-maturity by one (half-)step.
+
+        ``tau`` is the node's time-to-maturity, so the loop's last landing
+        node IS the valuation date and its exact value is ``T``.  Summing
+        ``dt = T / n_t`` cannot reproduce that: ``T / n_t`` is not a binary
+        fraction for most ``n_t``, so the accumulated sum misses ``T`` by an
+        ULP either way (``T=1.0, n_t=20`` overshoots by 2.2e-16).  Callers
+        read calendar time back out as ``T - tau`` and hand it to the
+        environment's rate curve, which fails closed on negative times, so an
+        overshoot of one ULP raised ``ValidationError`` from the
+        boundary-condition path of the 2D snowball/phoenix wrappers.
+
+        The final node is therefore set to ``T`` exactly rather than
+        accumulated, and every earlier node is clamped below ``T`` (a no-op
+        in exact arithmetic — intermediate nodes sit a whole step short of
+        maturity — kept as a guard so no consumer can ever see ``tau > T``).
+        """
+        if final:
+            return float(self.T)
+        return min(tau + step, float(self.T))
+
     def _forward_time_from_tau(self, tau: float) -> float:
         return min(max(float(self.T) - float(tau), 0.0), float(self.T))
 
@@ -649,16 +671,20 @@ class HestonSLVADICore:
                 U = step_hook(U, tau)
             if rannacher and self.N_T >= 1:
                 dt_half = 0.5 * self.dt
-                for _ in range(2):
-                    tau += dt_half
+                steps_remaining = self.N_T - 1
+                for half in range(2):
+                    tau = self._advance_tau(
+                        tau, dt_half, final=(steps_remaining == 0 and half == 1)
+                    )
                     U = self._douglas_step(U, dt_half, tau, 1.0, self.T - tau + 0.5 * dt_half)
                     if step_hook is not None:
                         U = step_hook(U, tau)
-                steps_remaining = self.N_T - 1
             else:
                 steps_remaining = self.N_T
-            for _ in range(steps_remaining):
-                tau += self.dt
+            for step in range(steps_remaining):
+                tau = self._advance_tau(
+                    tau, self.dt, final=(step == steps_remaining - 1)
+                )
                 t_mid = self.T - tau + 0.5 * self.dt
                 if (
                     damped_step_keys is not None
