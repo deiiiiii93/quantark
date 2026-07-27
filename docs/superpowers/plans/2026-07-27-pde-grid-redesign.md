@@ -29,7 +29,9 @@ autocallables → simple 1D → LV/2D → legacy deletion.
   `PYTHONPATH=$PWD <main>/.venv/bin/python -m pytest …` from the worktree root.
 - A long-running backtest fleet shares this machine: cap pytest parallelism at `-n 4` for
   full-suite runs (targeted files can use default).
-- Phase gates: full suite green + the tier-2 anchor file green before the next phase starts.
+- Phase gates: full suite green before the next phase starts; from Phase 1 onward (once
+  `test_anchor_certification.py` exists) the tier-2 anchor file must also be green. Phase 0's
+  gate is tier-1 only — no migrated consumer exists yet.
 - Commit per task (conventional commits, `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`).
 - Frozen dataclasses: layout classes `eq=False`; arrays `writeable=False`; never mutate a
   layout after construction.
@@ -379,8 +381,25 @@ def build_time(request, config):
     n_steps = len(dt)
     term_damp = frozenset(
         n_steps - j for j in range(1, config.terminal_damping_steps + 1) if n_steps - j >= 0)
-    ...  # freeze arrays (writeable=False), wrap MappingProxyType(dict(step_of)), return TimeLayout
+    t.setflags(write=False); dt.setflags(write=False)
+    return TimeLayout(
+        t=t, dt=dt,
+        step_of=MappingProxyType(dict(step_of)),     # private copy — caller can't alias
+        event_damping_steps=event_damp,
+        terminal_damping_steps=term_damp,
+        requested_steps=requested,
+        actual_steps=n_steps,
+        cap_exceeded=cap_exceeded,
+    )
 ```
+
+  Additional tier-1 cases to include in Step 1 (spec §5): **damping overlap rule** — an event
+  node within `terminal_damping_steps` of maturity: the overlapping step appears in BOTH
+  frozensets (the θ=1.0-wins rule is the consumer's job, both memberships must be visible);
+  **single interior event** fixture (`events=(0.5,)`) — two intervals, correct fill both
+  sides; **`step_of` privacy** — mutating the dict the builder used must not be possible via
+  the proxy (`pytest.raises(TypeError)` on `tl.step_of[0.5] = 1`); **`eq=False`** — two
+  identical `build_time` calls compare unequal (`tl_a != tl_b`) but each equals itself.
 
   `TimeLayout` dataclass (`frozen=True, eq=False`) lives in this file.
 - [ ] **Step 4: Verify pass.**  - [ ] **Step 5: Commit.**
@@ -389,6 +408,7 @@ def build_time(request, config):
 
 **Files:**
 - Create: `quantark/asset/equity/engine/pde/grid/space.py`
+- Modify: `quantark/asset/equity/engine/pde/grid/__init__.py` (export `SpatialLayout`, `build_space`)
 - Test: `test/pde_grid/test_space_builder.py`
 
 **Interfaces:**
@@ -410,7 +430,10 @@ def build_time(request, config):
   zero interior criticals → exactly uniform; critical price outside hard bounds → excluded +
   grid still builds; **no node sits exactly on a barrier-critical** unless coincidentally
   (assert not required — instead assert monotone strictly-increasing `x`, `s == exp(x)`);
-  immutability.
+  immutability; **unreachable target** — 3 criticals, `points=31`, tight `eps_crit=1e-4`:
+  builder returns best-achievable (`beta_lo` branch), `achieved_eps > eps_crit`, no raise;
+  **degradation warning** — assert via `caplog` that `achieved_eps > 2×eps_crit` logs a
+  warning naming the achieved and target values.
 
 ```python
 # test/pde_grid/test_space_builder.py (representative — write all cases above)
@@ -449,6 +472,8 @@ def test_achieved_eps_meets_target():
 
 **Files:**
 - Create: `quantark/asset/equity/engine/pde/grid/events.py`
+- Modify: `quantark/asset/equity/engine/pde/grid/__init__.py` (export `EventSchedule`,
+  `breach_weights`, `project_between`, `project_piecewise`)
 - Test: `test/pde_grid/test_event_schedule.py`
 
 **Interfaces:**
@@ -491,6 +516,9 @@ def test_achieved_eps_meets_target():
 
 **Files:**
 - Create: `quantark/asset/equity/engine/pde/grid/binder.py`
+- Modify: `quantark/asset/equity/engine/pde/grid/__init__.py` (export `GridBinder`, `Layout`,
+  `validate_external_layout`; add an import-surface test asserting every spec-§4.1 name is
+  importable from `quantark.asset.equity.engine.pde.grid`)
 - Test: `test/pde_grid/test_grid_binder.py`
 
 **Interfaces:**
@@ -509,8 +537,10 @@ def test_achieved_eps_meets_target():
   observable (`bind(r, m) is bind(r, m)`).
 
 - [ ] **Step 1: Failing tests** — identity reuse with cache on; distinct objects with
-  `cache_enabled=False`; LRU eviction at `cache_max_entries`; `bind_shared([])` →
-  `ValidationError`; `bind_shared([r]) == [bind(r)]`-equivalent (same spatial bounds/points);
+  `cache_enabled=False`; LRU eviction at `cache_max_entries`; layout `eq=False` (two binds
+  with cache off are `!=` yet each `is` itself); `bind_shared([])` →
+  `ValidationError`; **exact single-request equivalence** — `bind_shared([r], m)[0]` has
+  bitwise-identical `spatial.s`/`time.t` to `bind(r, m)`;
   multi-request sharing: `len({id(l.spatial) for l in layouts}) == 1`; value-identical
   requests share one `TimeLayout` object; request with any hard bound in `bind_shared` →
   `ValidationError`; shared spatial uses max-tau bounds and unioned critical prices;
@@ -546,8 +576,13 @@ def test_achieved_eps_meets_target():
     strike-selected constant-vol resolution already used by `_solve` (reuse that code path);
   - `event_schedule(product, pricing_env, layout) -> EventSchedule` (default: empty schedule);
   - `_binder` lazy property: `GridBinder(params.accuracy, params.grid,
-    cache_enabled=params.cache_enabled, cache_max_entries=params.grid_cache_max_entries)` —
-    for this phase, `accuracy`/`grid` read via `getattr(params, ..., "standard"/None)` so old
+    cache_enabled=(params.cache_enabled and params.cache_strategy != "disable"),
+    cache_max_entries=params.grid_cache_max_entries)` — the four `cache_strategy` values
+    (`disable`/`strict`/`standard`/`aggressive`) map to the binder as: `disable` → no cache;
+    all others → the plain LRU (layouts are deterministic pure data, so the strict/aggressive
+    distinction — which governs solver-side artifact caches — has no meaning here; note this
+    in the binder docstring). Test: `cache_strategy="disable"` yields distinct objects. For
+    this phase, `accuracy`/`grid` read via `getattr(params, ..., "standard"/None)` so old
     `PDEParams` still works (fields added for real in Task 9);
   - `solve(..., layout: Layout | None = None)` plumbed through `_solve`; when a layout is
     supplied AND `_uses_grid_layer()`: validate per spec §4.6 (alignment fields exact match on
@@ -556,8 +591,11 @@ def test_achieved_eps_meets_target():
   - When `_uses_grid_layer()` is False, everything behaves exactly as today (legacy path
     untouched until Phase 4).
 - [ ] Tests: a minimal fake solver subclass exercising validation acceptance/rejection paths
-  (5 cases: match, tau mismatch, event_times mismatch, spot outside bounds, barrier-on-edge
-  exempt). Implement, verify, commit.
+  (8 cases: match, tau mismatch, event_times mismatch, `hard_lower` mismatch, `hard_upper`
+  mismatch, spot outside bounds, an interior critical price outside bounds, barrier-on-edge
+  `is_close` exempt). The external-layout validator is implemented as
+  `grid.binder.validate_external_layout(layout, fresh_request, market)` so non-`BasePDESolver`
+  consumers (DCN, Task 14) call the same function. Implement, verify, commit.
 
 ### Task 9: `PDEParams.accuracy` + `grid` fields
 
@@ -573,11 +611,13 @@ def test_achieved_eps_meets_target():
 
 **Files:**
 - Create: `test/pde_grid/test_snowball_transform_oracle.py`
+- Create: `test/pde_grid/data/oracle_snowball.npz` (committed fixture)
 
 The KO/KI/coupon block transforms that Task 11 writes must reproduce the CURRENT certified
 code before the old code goes. Build fixtures by calling today's private methods directly:
 
-- [ ] Construct a standard daily-KI snowball (from `test_pde_engine.py` fixtures: initial=100,
+- [ ] Construct a standard daily-KI snowball (fixtures from `test/test_snowball_pde.py`:
+  initial=100,
   KO 103 monthly, KI 75 daily, coupon 15 %, tau=1) and a `SnowballPDESolver` with default
   params; run `_build_grids`, capture `(x_vec, s_vec)`.
 - [ ] For synthetic surfaces `V0 = linspace ramp`, `V1 = payoff-shaped`, call today's
@@ -641,9 +681,9 @@ def grid_request(self, product, market):
   `_observation_cache_key`, `_time_grid_spec`, `_get_event_times`, `_ki_nodes_in_grid`
   (absorbed into `grid_request`).
 - [ ] **Step 4:** un-skip the Task-10 oracle test → green; run
-  `python -m pytest test/test_pde_engine.py test/pde_grid -n0 -q` → snowball cases green
-  (PV moves are expected vs old goldens — those goldens are re-baselined in Task 15, so run
-  only the non-golden subset here: `-k "snowball and not golden"`).
+  `python -m pytest test/test_snowball_pde.py test/pde_grid -n0 -q` → snowball cases green
+  (PV moves are expected vs old goldens — those goldens are re-baselined in Task 15d, so run
+  only the non-golden subset here: `-k "not golden"`).
 - [ ] **Step 5: Commit.**
 
 ### Task 12: Migrate `PhoenixPDESolver`
@@ -653,7 +693,8 @@ migration is inherited). Phoenix specifics: coupon-barrier decisions at coupon d
 interior transforms on the phoenix state blocks (today's phoenix step-modification override);
 coupon dates == KO dates → single `event_times` set; coincident coupon+KO uses
 `project_piecewise` (today's one-pass `project_piecewise_event` call). Un-skip/extend oracle
-with a phoenix fixture. Run `-k "phoenix and not golden"`. Commit.
+with a phoenix fixture. Run `python -m pytest test/test_phoenix_pde.py -n0 -q -k "not golden"`.
+Commit.
 
 ### Task 13: Migrate `KOResetSnowballPDESolver`
 
@@ -663,32 +704,63 @@ Verify `test_ko_reset_snowball_pde.py` non-golden subset. Commit.
 
 ### Task 14: Migrate `DCNPDEEngine`
 
-`dcn_pde_solver.py`: coupon schedule → `event_times`; coupon decision transforms; no KI
-blocks (states: `{"alive": ...}`). Verify `test_dcn_pde_solver.py` non-golden subset. Commit.
+**`DCNPDEEngine` extends `BaseEngine`, NOT `BasePDESolver`** (`dcn_pde_solver.py:126`), so it
+inherits none of the Task-8 seam. Explicit work:
 
-### Task 15: Phase-1 gate — anchors, presets, goldens, greeks
+- [ ] Give it its own binder: `self._binder = GridBinder(params.accuracy, params.grid,
+  cache_enabled=(params.cache_enabled and params.cache_strategy != "disable"),
+  cache_max_entries=params.grid_cache_max_entries)` in `__init__`.
+- [ ] Implement `grid_request` (coupon schedule → `event_times`; anchors (spot, strike);
+  criticals incl. coupon barrier), `representative_vol` (its current strike-selected vol
+  resolution), `event_schedule` (coupon decision transforms; states `{"alive": ...}` — no KI
+  block), and a `MarketSnapshot` construction mirroring Task 8's.
+- [ ] `price(..., layout=None)` validates external layouts via the shared
+  `validate_external_layout` helper (Task 8) — same 8 rejection/acceptance behaviors.
+- [ ] Stepping loop consumes `layout.time.*damping_steps` + schedule stages; delete its
+  bespoke grid/observation-index code.
+- [ ] Verify: `python -m pytest test/test_dcn_pde_solver.py -n0 -q -k "not golden"` +
+  a new layout-injection test in that file. Commit.
+
+### Task 15a: Frozen-bump greeks integration
 
 **Files:**
-- Create: `test/pde_grid/test_anchor_certification.py`
-- Modify: `quantark/asset/equity/riskmeasures/greeks_calculator.py` +
-  `quantark/asset/equity/engine/pde/base_pde_solver.py` (`create_bump_context` →
-  frozen-`Layout`; theta bumps via `binder.rebind_time`)
-- Modify: golden fixtures for autocallable PDE tests
+- Modify: `quantark/asset/equity/engine/pde/base_pde_solver.py` (`create_bump_context`,
+  line 360) + `quantark/asset/equity/riskmeasures/greeks_calculator.py` (consumer at
+  line 1234)
+- Test: `test/pde_grid/test_frozen_bump_layouts.py`
 
-- [ ] Write the tier-2 anchor tests exactly per spec §5 provisional tolerances (European vs
-  BS is Phase 2 — here: snowball/phoenix/KO-reset/DCN vs `SnowballMCEngine`-family QMC
-  (seed=42, 2^18 paths, within 3× stderr) and vs the Quad engines (rel < 5e-4); greek
-  smoothness ladder (±2 % spot, 9 points: delta monotone where payoff implies, gamma no
-  sign-flip)).
-- [ ] Calibrate presets: run the anchor set under fast/standard/high; adjust `points` /
-  `steps_per_day` upward only if an anchor fails; record final presets in `config.py` +
-  spec-deviation note if changed.
-- [ ] Replace `create_bump_context` (`base_pde_solver.py:360`) — bump context now carries the
-  frozen `Layout` (drop `frozen_critical_points` plumbing); `greeks_calculator.py:1234`
-  consumes it; theta bump path calls `rebind_time`. Greek-smoothness anchor is the test.
-- [ ] Re-baseline autocallable goldens (`git grep -l golden test/ | grep -i "snowball\|phoenix\|dcn\|ko_reset"`);
-  regenerate via each test's frozen-generation path, verify vs anchors FIRST, then freeze.
-- [ ] Full suite `-n 4` green. Commit: `feat(pde-grid): phase 1 complete — autocallables on the grid layer`.
+- [ ] Bump context now carries the frozen base `Layout` (drop `frozen_critical_points`
+  plumbing end-to-end); theta bump path calls `binder.rebind_time(layout, rolled_request)`.
+- [ ] **Direct identity tests per bump family** (spy on `GridBinder.bind` /
+  `build_space` call counts + object identity): spot/vol/rate/div bumps reuse the SAME
+  `Layout` object (`is`); theta bump keeps `layout.spatial is base.spatial` while
+  `layout.time is not base.time`; `event_schedule` is invoked once per solve (rebuilt every
+  time); out-of-bounds bumped spot raises `NumericalError`. Commit.
+
+### Task 15b: Tier-2 anchor certification file
+
+**Files:** Create: `test/pde_grid/test_anchor_certification.py`
+
+- [ ] Snowball/phoenix/KO-reset/DCN vs their MC engines (QMC, seed=42, 2^18 paths, agreement
+  within 3× MC stderr) and vs their Quad engines (rel < 5e-4); greek smoothness ladder
+  (±2 % spot, 9 points: delta monotone where the payoff implies, gamma no sign-flip) on the
+  frozen layout. Structure rows so Phase-2/3 tasks append (European/BS, barrier, LV/2D).
+  Run `-n0`; green. Commit.
+
+### Task 15c: Profile calibration
+
+- [ ] Run the anchor set under fast/standard/high; adjust `points`/`steps_per_day` upward
+  only where an anchor fails; record final presets in `config.py`; if any preset changes
+  from the spec's indicative values, note the deviation in the spec file (one-line edit,
+  committed with this task). Commit.
+
+### Task 15d: Phase-1 gate — goldens + full suite
+
+- [ ] Re-baseline autocallable goldens (locate: `git grep -l golden test/ | grep -iE
+  "snowball|phoenix|dcn|ko_reset"`); regenerate via each test's frozen-generation path,
+  verify against the Task-15b anchors FIRST, then freeze.
+- [ ] Full suite `-n 4` green. Commit:
+  `feat(pde-grid): phase 1 complete — autocallables on the grid layer`.
 
 ---
 
@@ -724,32 +796,53 @@ Full suite `-n 4` + anchors green; re-baseline any 1D goldens; commit
 
 # Phase 3 — LV + 2D vol solvers
 
-### Task 20: LV 1D family (`LocalVolPDESolver`, `LocalVolBarrier/Snowball/Phoenix/DCN`)
+### Task 20a: Phase-3 foundations — `representative_vol` pinning + `VarianceConfig` + `adi_core` damping
 
-`representative_vol` override: the representative measure each engine uses for bounds today
-(read each solver's current bounds code and port that exact expression). S-axis + time via
-the binder; solver-level `n_x`/`n_t`/`grid_style`/`grid_focus`/`pin_critical_spots` args
-retired → constructor accepts `PDEParams` accuracy/grid (keep old kwargs as hard
-`ValidationError` mentions in Phase 4, functional here). LV stepping loops read damping
-frozensets. Anchor: LV European vs its own MC engine. Commit per sub-family if diffs get
-large (LV European+Barrier, then LV autocallables).
+**Files:**
+- Modify: `quantark/volmodels/` (new `VarianceConfig` frozen dataclass: `n_v`,
+  `v_grid_power`, concentration controls — consumed by the EXISTING variance-grid builders;
+  builders' math untouched, arrays renamed under the `VarianceLayout` idiom)
+- Modify: `quantark/volmodels/adi_core.py` — `HestonSLVADICore` gains a
+  `damping_steps: tuple[frozenset, frozenset] | None` constructor input; when provided it
+  REPLACES the internal Rannacher bookkeeping and the `event_damped_step_keys` mirroring
+  (`snowball_vol_pde_solvers.py:28-58`)
+- Create: `test/pde_grid/test_variance_config.py` + adi-damping equivalence test (given the
+  same event nodes, frozenset-driven damping selects exactly the steps the current
+  `event_damped_step_keys` selects — fixture-compare before any solver migrates)
 
-### Task 21: 2D Heston/SLV family + `adi_core` consumption
+- [ ] **`representative_vol` pinning step (blocks 20b/21a/21b):** for each of the three model
+  families, locate the exact expression currently feeding that family's `s_min`/`s_max`
+  bounds computation (grep `sigma|s_min|s_max|bounds` in `local_vol_pde_solver.py`,
+  `heston_pde_solver.py`, `heston_slv_pde_solver.py` and the exotic vol-solver files), copy
+  it verbatim into each solver's `representative_vol`, and paste the three ported
+  expressions into this task's commit message for gate review. Do NOT invent
+  `sqrt(max(v0, theta))` or any other formula — port what exists.
+- [ ] Commit.
 
-- `VarianceConfig` (in `quantark/volmodels/`): `n_v`, `v_grid_power`, concentration controls —
-  frozen dataclass consumed by the existing variance-grid builders (`VarianceLayout` naming
-  over current arrays; builders' math untouched).
-- 2D solvers (`Heston*/HestonSLV*` European, Barrier, Snowball, Phoenix, DCN): S-axis
-  layout + `TimeLayout` from the binder; `adi_core` gains
-  `damping_steps: tuple[frozenset, frozenset]` input replacing its internal
-  Rannacher/`rannacher` bookkeeping and the mirrored `theta_by_step` gating
-  (`snowball_vol_pde_solvers.py` / `phoenix_vol_pde_solvers.py` pass it through);
-  slice-wise event application replaced by the same `EventSchedule` stages on
-  `(n_s, n_v)` blocks (2D KO stays per-step injection via `continuous`).
-- 2D `representative_vol` protocol pinned here: Heston `sigma_ref = sqrt(max(v0, theta))`
-  unless the current bounds code says otherwise — **port the existing expression**.
-- Anchors: existing `test_heston_pde_convergence.py` re-baselined + MC agreement rows.
-Commit per sub-family (European 2D, then barrier, then autocallables).
+### Task 20b: LV 1D family
+
+`LocalVolPDESolver`, `LocalVolBarrierPDESolver`, `LocalVolSnowballPDESolver`,
+`LocalVolPhoenixPDESolver`, `LocalVolDCNPDEEngine`: S-axis + time via the binder; stepping
+loops read the damping frozensets; constructor kwargs `n_x`/`n_t`/`grid_style`/`grid_focus`/
+`pin_critical_spots` stay functional (removed in Task 24b) but the engines also accept
+`PDEParams(accuracy, grid)` as the primary path. Anchor rows: LV European vs its MC engine
+(3× stderr). Two commits: (1) LV European+Barrier, (2) LV autocallables + DCN — always split,
+not "if diffs get large".
+
+### Task 21a: 2D European + Barrier (`Heston*/HestonSLV*` PDESolver, BarrierPDESolver)
+
+S-axis `SpatialLayout` + `TimeLayout` from the binder; variance axis via `VarianceConfig`;
+ADI damping via 20a's input; 2D KO stays per-step injection expressed through
+`continuous()` on `(n_s, n_v)` blocks. Verify `test_heston_pde_engines.py`,
+`test_heston_slv_pde_engines.py`, `test_barrier_vol_pde_engines.py` non-golden subsets +
+re-baseline `test_heston_pde_convergence.py`. Commit.
+
+### Task 21b: 2D autocallables (`Heston*/HestonSLV*` Snowball/Phoenix + `HestonDCNPDESolver`)
+
+Same pattern; `EventSchedule` stages on `(n_s, n_v)` blocks replace the slice-wise event
+plumbing in `snowball_vol_pde_solvers.py` / `phoenix_vol_pde_solvers.py` /
+`dcn_vol_pde_solvers.py`; MC-agreement anchor rows appended. Verify those modules' tests
+non-golden. Commit.
 
 ### Task 22: Phase-3 gate
 
@@ -761,13 +854,26 @@ Full suite `-n 4` + anchors green. Commit `feat(pde-grid): phase 3 complete — 
 
 ### Task 23: Delete legacy grid modules
 
-- [ ] `git grep -l "time_grid\|spatial_grid\|event_projection" quantark/` → migrate/delete
-  every remaining importer (expected: only `base_pde_solver.py` legacy path + `__init__`).
+- [ ] **Repo-wide** consumer inventory FIRST:
+  `git grep -ln "time_grid\|spatial_grid\|event_projection\|TimeGrid\|SpatialGrid" -- quantark test docs`
+  — known consumers to port/retire BEFORE deletion: `test/test_pde_engine.py`,
+  `test/test_pde_time_grid_mandatory.py`, `test/test_pde_time_grid_decoupling.py`,
+  `test/execution/test_pde_artifact_reuse.py`, `quantark/asset/equity/engine/pde/__init__.py`
+  exports, and any execution-framework capability inventory that names the modules. Each gets
+  a `test/pde_grid` successor or a deliberate retirement note in the commit message.
 - [ ] Delete `time_grid.py`, `spatial_grid.py`, `event_projection.py`, the base legacy
   `_resolve_*`/`_build_grids_uncached` path and `_uses_grid_layer` (now always true →
   remove the flag entirely).
 - [ ] `backward_operator.py` consumes `SpatialLayout`.
 - [ ] Full suite green. Commit.
+
+### Task 24b: Remove Phase-3 constructor kwargs
+
+- [ ] Remove `n_x`, `n_t`, `grid_style`, `grid_focus`, `pin_critical_spots` (S-axis/time
+  controls) from every LV/Heston/SLV engine constructor
+  (`snowball_vol_pde_solvers.py:217-222` and siblings); variance-axis args route through
+  `VarianceConfig` only. Per-engine test: constructing with a retired kwarg raises
+  `TypeError`. Full suite green. Commit.
 
 ### Task 24: Delete legacy params + finalize surface
 
@@ -787,6 +893,10 @@ Full suite `-n 4` + anchors green. Commit `feat(pde-grid): phase 3 complete — 
   `Layout` objects; run `test/` files covering execution adapters + session prep.
 - [ ] Update `quantark/asset/equity/CLAUDE.md` (grid section + params example),
   `docs/` release notes for 0.4.0 (param removals table copied from spec §4.7).
+- [ ] Version sources: `pyproject.toml:7` → `version = "0.4.0"`; bump
+  `quantark/__init__.py` `__version__` if present (grep first); add `CHANGELOG.md` entry;
+  verify `python -c "import quantark, importlib.metadata as m; print(quantark.__version__ if
+  hasattr(quantark, '__version__') else m.version('quantark'))"` reports 0.4.0.
 - [ ] Tier-3: regenerate remaining goldens, verify with `test/golden_compare.py` tolerances.
 - [ ] Full suite `-n 4` green twice consecutively. Commit
   `feat(pde-grid): phase 4 complete — legacy layer deleted, 0.4.0 surface final`.
