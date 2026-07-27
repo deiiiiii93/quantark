@@ -209,21 +209,12 @@ class SnowballPDESolver(BasePDESolver):
             t0 = perf_counter()
         self._active_layout = None
         self._active_schedule = None
-        if self._uses_grid_layer() and self._session_grids is None:
-            self._configure_bgk(product, pricing_env, sigma, tau)
-            market = self.market_snapshot(product, pricing_env)
-            request = self.grid_request(product, market, tau)
-            layout = self._bound_layout_for_solve(request, market)
-            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
-            t_vec, dt_vec = layout.time.t, layout.time.dt
-            self._populate_observation_maps(product, pricing_env, layout, tau)
-            self._active_layout = layout
+        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+            product, pricing_env, spot, sigma, tau, r, q
+        )
+        if self._active_layout is not None:
             self._active_schedule = self.event_schedule(
-                product, pricing_env, layout
-            )
-        else:
-            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-                product, pricing_env, spot, sigma, tau, r, q
+                product, pricing_env, self._active_layout
             )
         if self._profile_enabled:
             self._profile_stats["grid_build"] += perf_counter() - t0
@@ -612,23 +603,14 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # SAME geometry as the value solve: layer grid on the migrated path
-        # (otherwise stats and price run on different grids and single-pass
-        # reconciliation residuals lie), legacy _build_grids elsewhere.
+        # SAME geometry as the value solve (single construction site:
+        # _build_grids layer-routes for migrated solvers).
         self._stats_layout = None
-        if self._uses_grid_layer() and self._session_grids is None:
-            self._configure_bgk(product, pricing_env, sigma, tau)
-            market = self.market_snapshot(product, pricing_env)
-            request = self.grid_request(product, market, tau)
-            layout = self._bound_layout_for_solve(request, market)
-            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
-            t_vec, dt_vec = layout.time.t, layout.time.dt
-            self._populate_observation_maps(product, pricing_env, layout, tau)
-            self._stats_layout = layout
-        else:
-            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-                product, pricing_env, spot, sigma, tau, r, q
-            )
+        self._active_layout = None
+        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+            product, pricing_env, spot, sigma, tau, r, q
+        )
+        self._stats_layout = self._active_layout
         num_x, num_t = len(x_vec), len(t_vec)
 
         ko_records = self._filter_observations_by_tau(

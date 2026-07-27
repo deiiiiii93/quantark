@@ -204,6 +204,12 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     def _uses_grid_layer(self) -> bool:
         return True
 
+    def _populate_observation_maps(self, product, pricing_env, layout, tau):
+        super()._populate_observation_maps(product, pricing_env, layout, tau)
+        self._register_post_ko_observations(
+            product, pricing_env, tau, step_of=layout.time.step_of
+        )
+
     def _register_post_ko_observations(
         self,
         product: KnockOutResetSnowballOption,
@@ -255,10 +261,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         q: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
-        _, _, _, t_vec, _ = result
-        self._register_post_ko_observations(
-            product, pricing_env, tau, t_vec=t_vec
-        )
+        if self._active_layout is None:
+            _, _, _, t_vec, _ = result
+            self._register_post_ko_observations(
+                product, pricing_env, tau, t_vec=t_vec
+            )
         return result
 
     def _post_ki_ko_times(
@@ -354,22 +361,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             t0 = perf_counter()
         self._active_layout = None
         self._active_schedule = None  # certified pre/post dispatch stays inline
-        if self._uses_grid_layer() and self._session_grids is None:
-            self._configure_bgk(product, pricing_env, sigma, tau)
-            market = self.market_snapshot(product, pricing_env)
-            request = self.grid_request(product, market, tau)
-            layout = self._bound_layout_for_solve(request, market)
-            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
-            t_vec, dt_vec = layout.time.t, layout.time.dt
-            self._populate_observation_maps(product, pricing_env, layout, tau)
-            self._register_post_ko_observations(
-                product, pricing_env, tau, step_of=layout.time.step_of
-            )
-            self._active_layout = layout
-        else:
-            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-                product, pricing_env, spot, sigma, tau, r, q
-            )
+        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+            product, pricing_env, spot, sigma, tau, r, q
+        )
         if self._profile_enabled:
             self._profile_stats["grid_build"] += perf_counter() - t0
 

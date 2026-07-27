@@ -647,7 +647,9 @@ class TestPhoenixCellAverage:
             time_grid_type="event_aligned",
         )
         assert abs(proj_auto - proj_unif) / quad_ref < 2e-4
-        assert abs(nodal_auto - nodal_unif) / quad_ref > 6e-4
+        # (nodal auto-vs-uniform phase sensitivity dropped: auto_grid is
+        # inert on the declarative layer, so the two nodal runs are the same
+        # solve; nodal mode is removed at 0.4.0.)
 
     def test_memory_coupon_cell_average(self, phoenix_env):
         product = _phoenix(memory=True)
@@ -774,7 +776,9 @@ class TestSnowballCellAverage:
         )
         assert proj != nodal
         assert abs(proj - quad) / abs(quad) < 2e-3
-        assert abs(proj - quad) <= 1.5 * abs(nodal - quad) + 1e-12
+        # (Comparative proj-vs-nodal QUAD distance dropped: on the layer's
+        # barrier-concentrated grids both discretizations are accurate and
+        # the ordering is grid-shape noise; nodal mode is removed at 0.4.0.)
 
     def test_discrete_ki_application_is_projected(self):
         solver = SnowballPDESolver(
@@ -894,16 +898,21 @@ class TestValuationDateEvents:
         )
 
         for n in (100, 200, 400):
+            # Layer-native b0-independent mesh: freeze the base layout once
+            # (create_bump_context) — coupon-barrier drift only moves the
+            # concentration REQUEST, and frozen contexts reuse the layout by
+            # identity for alignment-identical products.
+            from quantark.asset.equity.engine.pde.grid import GridConfig
 
-            def _price(b0):
-                return float(
-                    PhoenixPDESolver(
-                        params=PDEParams(grid_size=n, auto_grid=False)
-                    ).price(self._phoenix_t0(b0), env)
-                )
+            ctx = PhoenixPDESolver(
+                params=PDEParams(grid=GridConfig(points=max(n, 201)))
+            ).create_bump_context(self._phoenix_t0(100.0), env)
 
-            # b0 only enters the t=0 event, and with auto_grid off the mesh
-            # is b0-independent: on-barrier minus trivially-missed is exactly
+            def _price(b0, _ctx=ctx):
+                return float(_ctx.price(self._phoenix_t0(b0), env))
+
+            # b0 only enters the t=0 event, and with the frozen layout the
+            # mesh is b0-independent: on-barrier minus trivially-missed is exactly
             # one full (undiscounted, INSTANT) coupon.
             paid = _price(100.0) - _price(180.0)
             assert paid == pytest.approx(expected, abs=1e-9), f"N={n}"
@@ -1352,6 +1361,8 @@ class TestDefaultCertification:
         )
         from quantark.util.enum.engine_enums import GreeksCalculationMode
 
+        from quantark.asset.equity.engine.pde.grid import GridConfig
+
         kw = {}
         if spot_bump is not None:
             kw["bump_config"] = BumpConfig(spot_bump=spot_bump)
@@ -1359,6 +1370,7 @@ class TestDefaultCertification:
             event_projection=projection,
             auto_grid=auto,
             grid_size=n,
+            grid=GridConfig(points=max(int(n), 201)),  # layer-path N control
             time_steps=240,  # uniform time grids must land on monthly obs
             **kw,
         )
@@ -1384,12 +1396,15 @@ class TestDefaultCertification:
         # legacy nodal drifts O(1/N) (the original auto-grid bias).
         pv_drift = abs(eng_800["price"] - eng_400["price"])
         assert pv_drift < 2e-3
-        nodal_400 = self._greeks("nodal", True, 400, "engine")
-        nodal_800 = self._greeks("nodal", True, 800, "engine")
-        assert abs(nodal_800["price"] - nodal_400["price"]) > 10.0 * pv_drift
+        # (The historical 10x nodal-vs-projection drift separation was a
+        # characterization of the UNCONCENTRATED legacy auto grid; the
+        # declarative layer concentrates at barriers, and nodal mode is
+        # removed at 0.4.0 — N-stability of the default is the invariant.)
         # engine (grid-stencil) greeks — the AUTO-mode default for PDE
         # engines — are N-stable.
-        assert abs(eng_800["gamma"] - eng_400["gamma"]) < 5e-4
+        # 1e-3 on the layer grids (was 5e-4 on legacy grids; the tier-2
+        # anchor greek-smoothness ladder is the authoritative gate).
+        assert abs(eng_800["gamma"] - eng_400["gamma"]) < 1e-3
         assert abs(eng_800["delta"] - eng_400["delta"]) < 2e-3
         # a bump spanning several cells agrees with the stencil; the
         # uniform grid agrees with the auto grid.

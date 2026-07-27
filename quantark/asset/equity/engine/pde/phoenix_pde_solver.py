@@ -292,19 +292,9 @@ class PhoenixPDESolver(SnowballPDESolver):
             t0 = perf_counter()
         self._active_layout = None
         self._active_schedule = None
-        if self._uses_grid_layer() and self._session_grids is None:
-            self._configure_bgk(product, pricing_env, sigma, tau)
-            market = self.market_snapshot(product, pricing_env)
-            request = self.grid_request(product, market, tau)
-            layout = self._bound_layout_for_solve(request, market)
-            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
-            t_vec, dt_vec = layout.time.t, layout.time.dt
-            self._populate_observation_maps(product, pricing_env, layout, tau)
-            self._active_layout = layout
-        else:
-            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-                product, pricing_env, spot, sigma, tau, r, q
-            )
+        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+            product, pricing_env, spot, sigma, tau, r, q
+        )
         if self._profile_enabled:
             self._profile_stats["grid_build"] += perf_counter() - t0
 
@@ -465,8 +455,11 @@ class PhoenixPDESolver(SnowballPDESolver):
         q: float,
     ):
         result = super()._build_grids(product, pricing_env, spot, sigma, tau, r, q)
-        _, _, _, t_vec, _ = result
-        self._register_coupon_observations(product, pricing_env, t_vec, tau)
+        if self._active_layout is None:
+            # Legacy path only: the layer path registers coupons inside
+            # _populate_observation_maps (single site).
+            _, _, _, t_vec, _ = result
+            self._register_coupon_observations(product, pricing_env, t_vec, tau)
         return result
 
     def _register_coupon_observations(

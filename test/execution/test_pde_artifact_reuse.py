@@ -171,14 +171,27 @@ class TestBuildCountGates:
         direct = engine.price(product, env)
         SnowballPDESolver.clear_grid_cache()  # cold class-level cache
 
+        import quantark.asset.equity.engine.pde.grid.space as grid_space
+
         grid_counts = {"n": 0}
         original_build = SpatialGrid.build
+        original_build_space = grid_space.build_space
 
         def counting_build(*args, **kwargs):
             grid_counts["n"] += 1
             return original_build(*args, **kwargs)
 
+        def counting_build_space(*args, **kwargs):
+            # migrated solvers construct spatial nodes here instead
+            grid_counts["n"] += 1
+            return original_build_space(*args, **kwargs)
+
         monkeypatch.setattr(SpatialGrid, "build", staticmethod(counting_build))
+        monkeypatch.setattr(grid_space, "build_space", counting_build_space)
+        monkeypatch.setattr(
+            "quantark.asset.equity.engine.pde.grid.binder.build_space",
+            counting_build_space,
+        )
 
         banded_counts = {"n": 0}
         original_banded = SnowballPDESolver._get_banded_system

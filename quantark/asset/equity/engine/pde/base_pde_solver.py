@@ -489,6 +489,79 @@ class BasePDESolver(BaseEngine):
             )
         return self._grid_binder
 
+    def _populate_observation_maps(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        layout: Layout,
+        tau: float,
+    ) -> None:
+        """Layer-path observation bookkeeping hook (no-op in the base;
+        autocallable solvers derive their index maps from layout.step_of)."""
+
+    def _grids_via_layer(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        spot: float,
+        sigma: float,
+        tau: float,
+        r: float,
+        q: float,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Bind (or reuse the frozen) layout and expose it as the 5-tuple."""
+        configure_bgk = getattr(self, "_configure_bgk", None)
+        if configure_bgk is not None:
+            configure_bgk(product, pricing_env, sigma, tau)
+        market = self.market_snapshot(product, pricing_env)
+        request = self.grid_request(product, market, tau)
+        if self._session_grids is not None:
+            layout = self._layout_from_session_grids(request)
+        else:
+            layout = self._bound_layout_for_solve(request, market)
+        self._populate_observation_maps(product, pricing_env, layout, tau)
+        self._active_layout = layout
+        return (
+            layout.spatial.x,
+            layout.spatial.s,
+            layout.spatial.dx,
+            layout.time.t,
+            layout.time.dt,
+        )
+
+    def _layout_from_session_grids(self, request: GridRequest) -> Layout:
+        """Assemble the layout AROUND injected session grids (no spatial
+        rebuild — the expensive node placement was done at preparation).
+
+        The cheap TimeLayout is rebuilt from the request (damping schedules,
+        step_of) and verified node-for-node against the injected time grid —
+        a stale pack raises instead of silently changing the discretization.
+        """
+        from quantark.asset.equity.engine.pde.grid.config import resolve_config
+        from quantark.asset.equity.engine.pde.grid.space import SpatialLayout
+        from quantark.asset.equity.engine.pde.grid.time import build_time
+
+        x_vec, s_vec, dx_vec, t_vec, _ = self._session_grids
+        time_layout = build_time(request, self.grid_binder.config)
+        if not np.array_equal(time_layout.t, t_vec):
+            raise PricingError(
+                "injected session grids diverge from the declarative layer "
+                "time geometry; re-prepare the session"
+            )
+        spatial = SpatialLayout(
+            s=s_vec,
+            x=x_vec,
+            dx=dx_vec,
+            bounds=(float(s_vec[0]), float(s_vec[-1])),
+            achieved_eps=float("nan"),
+        )
+        return Layout(
+            spatial=spatial,
+            time=time_layout,
+            request=request,
+            config_key=self.grid_binder.config.key,
+        )
+
     def _bound_layout_for_solve(
         self, request: GridRequest, market: MarketSnapshot
     ) -> Layout:
@@ -919,7 +992,18 @@ class BasePDESolver(BaseEngine):
         r: float,
         q: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Construct the spatial and temporal grids for solving the PDE."""
+        """Construct the spatial and temporal grids for solving the PDE.
+
+        ONE construction site for every path (value solve, event-stats sweep,
+        session preparation and injection): migrated solvers route through the
+        declarative layer; injected session grids are verified against the
+        layer geometry rather than trusted (a stale pack cannot silently
+        change the discretization).
+        """
+        if self._uses_grid_layer():
+            return self._grids_via_layer(
+                product, pricing_env, spot, sigma, tau, r, q
+            )
         if self._session_grids is not None:
             return self._session_grids
         if not self._is_cache_enabled():
