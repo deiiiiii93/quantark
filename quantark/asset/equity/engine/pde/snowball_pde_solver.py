@@ -1472,11 +1472,16 @@ class SnowballPDESolver(BasePDESolver):
                 idx = self._aligned_time_index(t_vec, obs_time, "KO observation")
                 self._ko_observation_indices[idx] = rec
 
-        # Setup KI observation indices (if discrete). Under BGK the interior
-        # KI dates are intentionally dropped from the time grid (continuous
-        # monitoring at the shifted barrier replaces them), so alignment is
-        # neither possible nor needed.
-        if product.has_ki_barrier and not self._ki_continuous and not self._bgk_active:
+        # Setup KI observation indices (if discrete).  ``_ki_nodes_in_grid``
+        # gates this: when the grid was deliberately built WITHOUT interior KI
+        # nodes (active BGK, or an already-knocked-in product) alignment is
+        # neither possible nor needed, and demanding it would raise on a grid
+        # that is correct by construction.
+        if (
+            product.has_ki_barrier
+            and not self._ki_continuous
+            and self._ki_nodes_in_grid(product)
+        ):
             ki_profile = self._get_cached_ki_profile(pricing_env, product)
             ki_times = ki_profile["observation_times"]
             ki_barriers = ki_profile.get("barriers") or []
@@ -1603,6 +1608,29 @@ class SnowballPDESolver(BasePDESolver):
         self._bgk_ki_barrier = self._bgk_shifted_ki_barrier(
             product, pricing_env, sigma, tau
         )
+
+    def _ki_nodes_in_grid(self, product: BaseEquityProduct) -> bool:
+        """Whether the time grid carries the interior daily-KI nodes.
+
+        SINGLE source of truth for a decision two places must agree on:
+        ``_time_grid_spec`` builds the grid, and ``_build_grids`` demands that
+        every KI observation land on a node.  A regime that drops the nodes
+        but still demands them raises ``ValidationError`` at pricing time, so
+        both read this predicate rather than re-deriving the condition.
+
+        The nodes are dropped in two regimes:
+
+        - active BGK — continuous monitoring at a shifted barrier replaces the
+          discrete dates entirely [§11.6];
+        - already knocked in — monitoring is moot. The readout comes off the
+          V1 surface, and V1 never sees a KI jump (the jump writes V1 values
+          INTO V0), so the KI indices cannot affect the answer.
+        """
+        if self._bgk_active:
+            return False
+        if getattr(product, "_otc_lifecycle_knocked_in", False):
+            return False
+        return True
 
     def _aligned_time_index(
         self, t_vec: np.ndarray, obs_time: float, label: str
@@ -1759,11 +1787,17 @@ class SnowballPDESolver(BasePDESolver):
         """Decoupled time-grid concerns for autocallables (spec §4 Component 1).
 
         align = KO/coupon dates (must be nodes); monitor = daily-discrete KI
-        dates (resolution only); steps_per_day from params. Under active BGK the
-        KI is monitored continuously against a shifted barrier, so the interior
-        daily-KI nodes are dropped and the grid aligns to KO/coupon only [§11.6].
+        dates (resolution only); steps_per_day from params. ``_ki_nodes_in_grid``
+        decides whether the interior daily-KI nodes belong in the grid at all
+        (dropped under active BGK and once the product is already knocked in);
+        ``_build_grids`` reads the SAME predicate before demanding alignment,
+        so the two can never disagree.
         """
-        monitor = [] if self._bgk_active else self._ki_monitor_times(product, tau)
+        monitor = (
+            self._ki_monitor_times(product, tau)
+            if self._ki_nodes_in_grid(product)
+            else []
+        )
         return TimeGridSpec(
             align_times=self._ko_coupon_align_times(product, tau),
             monitor_times=monitor,
