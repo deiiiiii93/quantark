@@ -126,6 +126,7 @@ class SnowballPDESolver(BasePDESolver):
         # legacy path runs — subclasses not yet migrated, session grids).
         self._active_layout: Optional[Layout] = None
         self._active_schedule: Optional[EventSchedule] = None
+        self._stats_layout: Optional[Layout] = None
 
         # Time tracking
         self._total_tau: float = 0.0
@@ -611,12 +612,23 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
 
-        # BGK state is resolved at the top of _build_grids (see
-        # SnowballPDESolver._build_grids) so no path can skip it.
-
-        x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
-            product, pricing_env, spot, sigma, tau, r, q
-        )
+        # SAME geometry as the value solve: layer grid on the migrated path
+        # (otherwise stats and price run on different grids and single-pass
+        # reconciliation residuals lie), legacy _build_grids elsewhere.
+        self._stats_layout = None
+        if self._uses_grid_layer() and self._session_grids is None:
+            self._configure_bgk(product, pricing_env, sigma, tau)
+            market = self.market_snapshot(product, pricing_env)
+            request = self.grid_request(product, market, tau)
+            layout = self._bound_layout_for_solve(request, market)
+            x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
+            t_vec, dt_vec = layout.time.t, layout.time.dt
+            self._populate_observation_maps(product, pricing_env, layout, tau)
+            self._stats_layout = layout
+        else:
+            x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
+                product, pricing_env, spot, sigma, tau, r, q
+            )
         num_x, num_t = len(x_vec), len(t_vec)
 
         ko_records = self._filter_observations_by_tau(
@@ -759,12 +771,15 @@ class SnowballPDESolver(BasePDESolver):
         # Canonical damping schedule shared with the pricing sweep — the
         # event-distribution pass MUST run the identical discretization for
         # the KO-probability / NPV decomposition to reconcile.
-        theta_by_step = BackwardOperator.theta_by_step(
-            np.asarray(t_vec),
-            np.asarray(dt_vec),
-            params,
-            self._get_event_times(product, tau),
-        )
+        if self._stats_layout is not None:
+            theta_by_step = self._theta_schedule_from_layout(self._stats_layout)
+        else:
+            theta_by_step = BackwardOperator.theta_by_step(
+                np.asarray(t_vec),
+                np.asarray(dt_vec),
+                params,
+                self._get_event_times(product, tau),
+            )
 
         n_int = num_x - 2
         rhs = np.empty((n_int, 2 * n_cols), dtype=float)

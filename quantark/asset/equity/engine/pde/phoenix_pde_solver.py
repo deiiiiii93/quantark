@@ -300,9 +300,6 @@ class PhoenixPDESolver(SnowballPDESolver):
             x_vec, s_vec, dx_vec = layout.spatial.x, layout.spatial.s, layout.spatial.dx
             t_vec, dt_vec = layout.time.t, layout.time.dt
             self._populate_observation_maps(product, pricing_env, layout, tau)
-            self._register_coupon_observations(
-                product, pricing_env, t_vec, tau, step_of=layout.time.step_of
-            )
             self._active_layout = layout
         else:
             x_vec, s_vec, dx_vec, t_vec, dt_vec = self._build_grids(
@@ -533,6 +530,14 @@ class PhoenixPDESolver(SnowballPDESolver):
 
     def _uses_grid_layer(self) -> bool:
         return True
+
+    def _populate_observation_maps(self, product, pricing_env, layout, tau):
+        # Coupon registration rides along wherever the layer populates the
+        # KO/KI maps (_solve AND the event-stats sweep) — single site.
+        super()._populate_observation_maps(product, pricing_env, layout, tau)
+        self._register_coupon_observations(
+            product, pricing_env, layout.time.t, tau, step_of=layout.time.step_of
+        )
 
     def _accumulated_coupon_amount(self, obs_idx: int, missed_count: int) -> float:
         if missed_count <= 0 or obs_idx <= 0:
