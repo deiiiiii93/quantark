@@ -164,19 +164,19 @@ class KnockInMonitoringMode(Enum):
 
 
 class EventProjectionMode(Enum):
-    """Spatial representation of discrete event operators in PDE solvers.
+    """Spatial representation of discrete autocallable event operators.
 
     Attributes:
-        NODAL: Legacy behavior — a discrete coupon/KO/KI transition selects
-            whole nodes with a Boolean barrier mask. When a threshold sits on
-            (or within roundoff of) a node, the entire trigger cell is
-            assigned to one branch, displacing the effective trigger by up to
-            half a cell (see pde_auto_grid_investigation.md).
+        NODAL: Legacy behavior — a discrete coupon/KO/KI transition uses
+            whole-node masks or the engine's configured nodal smoothing.
+            Assigning an entire trigger cell to one branch can displace the
+            effective trigger by up to half a cell.
         CELL_AVERAGE: Conservative finite-volume projection — each node
             receives the exact dual-cell average of the piecewise-linear
             event jump, so the cell straddling the threshold is split by its
-            actual overlap. Applies to discretely monitored events only;
-            continuously monitored barriers keep their nodal treatment.
+            actual overlap. Applies to discretely monitored PDE and QUAD
+            events; continuously monitored barriers keep their native
+            treatment.
     """
 
     NODAL = "nodal"

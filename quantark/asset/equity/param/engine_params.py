@@ -641,10 +641,24 @@ class QuadParams(EngineParams):
     Quadrature engine configuration.
 
     Attributes:
-        grid_points: Number of integration points (default: 1000).
-                     Must be odd for Simpson's rule.
+        grid_points: Number of integration points (default: 1001).
+                     Odd counts preserve nested refinement grids.
         num_std_devs: Number of standard deviations for integration bounds (default: 10).
                       Larger values capture more of the distribution tail.
+        integration_rule: Composite integration rule used by FFT convolution.
+            "trapezoid" (default) is phase-stable after discontinuous
+            autocallable events; "simpson" preserves the legacy alternating
+            weights.
+        auto_converge: Refine nested odd grids until successive prices meet
+            the configured absolute-plus-relative tolerance.
+        convergence_rel_tol: Relative component of the convergence tolerance.
+        convergence_abs_tol: Absolute component of the convergence tolerance.
+        max_convergence_grid_points: Fail-closed refinement cap.
+        filter_unreachable_barriers: Treat KO levels outside the configured
+            observation-time Gaussian envelope as disabled sentinels while
+            retaining their event/coupon dates.
+        barrier_reach_stddevs: Optional reachability envelope override. None
+            uses num_std_devs.
         fft_padding_factor: Zero-padding factor for FFT-based convolution (default: 2).
         fft_filter_alpha: Spectral filter strength (0 disables filtering).
         fft_filter_power: Spectral filter power/exponent (higher = sharper cutoff).
@@ -655,6 +669,10 @@ class QuadParams(EngineParams):
         event_smoothing_mode: Smoothing mode (fixed, auto, reverse_aware).
         event_smoothing_kernel: Smoothing kernel (cosine, tanh).
         event_smoothing_log_width: Target log-space width for auto smoothing.
+        event_projection: Spatial representation of discrete KO/coupon/KI events.
+            CELL_AVERAGE (default) integrates the piecewise event over the
+            threshold-straddling dual cell; NODAL preserves the legacy
+            smoothing/hard-mask path.
         min_diffusion_stddev_cells: Minimum spatial-grid cells per discrete-KI
             interval diffusion standard deviation. The engine increases its
             internal odd grid size when dense KI intervals would otherwise be
@@ -681,8 +699,15 @@ class QuadParams(EngineParams):
             the performance motivation only exists for dense schedules.
     """
 
-    grid_points: int = 1001  # Odd number for Simpson's rule
+    grid_points: int = 1001  # Odd count keeps nested refinements node-compatible
     num_std_devs: float = 10.0
+    integration_rule: str = "trapezoid"
+    auto_converge: bool = False
+    convergence_rel_tol: float = 1.0e-4
+    convergence_abs_tol: float = 1.0e-8
+    max_convergence_grid_points: int = 64001
+    filter_unreachable_barriers: bool = True
+    barrier_reach_stddevs: Optional[float] = None
     fft_padding_factor: int = 2
     fft_filter_alpha: float = 12.0
     fft_filter_power: int = 8
@@ -692,6 +717,9 @@ class QuadParams(EngineParams):
     event_smoothing_mode: str = "fixed"
     event_smoothing_kernel: str = "cosine"
     event_smoothing_log_width: float = 0.002
+    event_projection: Union[EventProjectionMode, str] = (
+        EventProjectionMode.CELL_AVERAGE
+    )
     min_diffusion_stddev_cells: float = 2.5
     max_adaptive_grid_points: int = 5001
     ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
@@ -739,6 +767,57 @@ class QuadParams(EngineParams):
             raise ValidationError(
                 f"num_std_devs should be at least 3 for accuracy, got {self.num_std_devs}"
             )
+        self.integration_rule = str(self.integration_rule).lower()
+        if self.integration_rule not in ("trapezoid", "simpson"):
+            raise ValidationError(
+                "integration_rule must be one of trapezoid, simpson, got "
+                f"{self.integration_rule}"
+            )
+        if (
+            not math.isfinite(self.convergence_rel_tol)
+            or self.convergence_rel_tol < 0.0
+        ):
+            raise ValidationError(
+                "convergence_rel_tol must be non-negative, got "
+                f"{self.convergence_rel_tol}"
+            )
+        if (
+            not math.isfinite(self.convergence_abs_tol)
+            or self.convergence_abs_tol < 0.0
+        ):
+            raise ValidationError(
+                "convergence_abs_tol must be non-negative, got "
+                f"{self.convergence_abs_tol}"
+            )
+        if (
+            self.convergence_rel_tol == 0.0
+            and self.convergence_abs_tol == 0.0
+        ):
+            raise ValidationError(
+                "at least one of convergence_rel_tol or convergence_abs_tol "
+                "must be positive"
+            )
+        if (
+            self.auto_converge
+            and self.max_convergence_grid_points < self.grid_points
+        ):
+            raise ValidationError(
+                "max_convergence_grid_points must be at least grid_points, got "
+                f"{self.max_convergence_grid_points} < {self.grid_points}"
+            )
+        if self.max_convergence_grid_points % 2 == 0:
+            self.max_convergence_grid_points += 1
+        if (
+            self.barrier_reach_stddevs is not None
+            and (
+                not math.isfinite(self.barrier_reach_stddevs)
+                or self.barrier_reach_stddevs <= 0.0
+            )
+        ):
+            raise ValidationError(
+                "barrier_reach_stddevs must be positive when supplied, got "
+                f"{self.barrier_reach_stddevs}"
+            )
         if self.fft_padding_factor < 1:
             raise ValidationError(
                 f"fft_padding_factor must be >= 1, got {self.fft_padding_factor}"
@@ -772,6 +851,22 @@ class QuadParams(EngineParams):
         if self.event_smoothing_log_width <= 0.0:
             raise ValidationError(
                 f"event_smoothing_log_width must be positive, got {self.event_smoothing_log_width}"
+            )
+        if isinstance(self.event_projection, str):
+            try:
+                self.event_projection = EventProjectionMode(
+                    self.event_projection.lower()
+                )
+            except ValueError:
+                raise ValidationError(
+                    "event_projection must be one of "
+                    f"{[mode.value for mode in EventProjectionMode]}, "
+                    f"got {self.event_projection!r}"
+                )
+        elif not isinstance(self.event_projection, EventProjectionMode):
+            raise ValidationError(
+                "event_projection must be an EventProjectionMode or its "
+                f"string value, got {type(self.event_projection).__name__}"
             )
         if self.min_diffusion_stddev_cells < 0:
             raise ValidationError(

@@ -133,6 +133,19 @@ def test_external_validation_accepts_match_and_drifted_criticals():
     validate_external_layout(lay, fresh, MarketSnapshot(101.0, 0.2, 0.03, 0.01))
 
 
+def test_external_validation_accepts_unchanged_unreachable_marker():
+    b = binder()
+    marked = req(
+        critical_prices=(100.0, 103.0, 10_000.0),
+        event_times=(0.1, 0.2),
+    )
+    lay = b.bind(marked, MKT)
+    assert 10_000.0 not in lay.spatial.active_critical_prices
+    assert lay.time.step_at(0.1) > 0
+    assert lay.time.step_at(0.2) > lay.time.step_at(0.1)
+    validate_external_layout(lay, marked, MKT)
+
+
 def test_external_validation_rejects_alignment_mismatches():
     b = binder()
     lay = b.bind(req(), MKT)

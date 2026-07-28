@@ -12,6 +12,7 @@ from quantark.asset.equity.engine.pde.grid import (
     resolve_config,
 )
 from quantark.asset.equity.engine.pde.grid.space import build_space
+from quantark.util.exceptions import ValidationError
 
 MKT = MarketSnapshot(spot=100.0, sigma_ref=0.2, r_ref=0.03, q_ref=0.01)
 
@@ -96,15 +97,38 @@ def test_uniform_clamp_when_already_fine():
     assert dx.max() / dx.min() < 1.05  # near-uniform
 
 
-def test_unreachable_target_best_achievable(caplog):
-    with caplog.at_level(logging.WARNING):
-        lay = build_space(
+def test_unreachable_target_fails_closed():
+    with pytest.raises(ValidationError, match="GridConfig\\(points"):
+        build_space(
             req(critical_prices=(80.0, 100.0, 125.0)),
             MKT,
             CFG(points=31, eps_crit=1e-4),
         )
-    assert lay.achieved_eps > 1e-4  # best achievable, no raise
-    assert any("achieved" in r.message for r in caplog.records)
+
+
+def test_unreachable_critical_does_not_change_grid():
+    base = req(critical_prices=(80.0, 100.0, 103.0))
+    marked = req(critical_prices=(80.0, 100.0, 103.0, 10_000.0))
+    base_layout = build_space(base, MKT, CFG())
+    marked_layout = build_space(marked, MKT, CFG())
+
+    assert marked_layout.bounds == base_layout.bounds
+    assert np.array_equal(marked_layout.x, base_layout.x)
+    assert marked_layout.active_critical_prices == base_layout.active_critical_prices
+
+
+@pytest.mark.parametrize("points", [201, 401, 801, 1001, 2001])
+def test_dense_critical_point_sweep_is_finite_monotone(points):
+    criticals = tuple(np.linspace(75.0, 105.0, 34))
+    lay = build_space(
+        req(critical_prices=criticals),
+        MKT,
+        CFG(points=points, max_points=2500),
+    )
+    dx = np.diff(lay.x)
+    assert np.all(np.isfinite(lay.x))
+    assert np.all(dx > 0.0)
+    assert dx.max() / dx.min() <= 100.0 * (1.0 + 1e-8)
 
 
 def test_critical_outside_hard_bounds_excluded(caplog):

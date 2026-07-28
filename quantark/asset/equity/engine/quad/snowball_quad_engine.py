@@ -7,6 +7,7 @@ Implements a direct two-state (knocked-in / not-knocked-in) quadrature recursion
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Optional, Sequence
 
 import numpy as np
@@ -14,6 +15,10 @@ from scipy.special import erfc
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.pde.grid.events import (
+    breach_fractions,
+    project_event_values,
+)
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
 from quantark.priceenv.term_sampling import make_df_fn
@@ -22,7 +27,11 @@ from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType
-from quantark.util.enum.engine_enums import EngineType, KnockInMonitoringMode
+from quantark.util.enum.engine_enums import (
+    EngineType,
+    EventProjectionMode,
+    KnockInMonitoringMode,
+)
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
@@ -91,6 +100,13 @@ class SnowballQuadEngine(BaseEngine):
         self._backward_grids: dict = {}
 
     def price(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        if self.params.auto_converge:
+            return self._price_with_convergence(product, pricing_env)
+        return self._price_once(product, pricing_env)
+
+    def _price_once(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         if not isinstance(product, SnowballOption):
@@ -188,9 +204,34 @@ class SnowballQuadEngine(BaseEngine):
         )
         vol_max_val = float(np.max(vol_vec))
         df_local = make_df_fn(pricing_env)
+        dt = self._build_dt(times)
+        reachable_ko = self._reachable_ko_observations(
+            ko_records,
+            times,
+            spot,
+            rate_vec,
+            div_vec,
+            vol_vec,
+            dt,
+            is_reverse=product.is_reverse,
+        )
+        reachable_by_record = {
+            id(record): active
+            for record, active in zip(ko_records, reachable_ko)
+        }
+        self._last_ignored_ko_observation_indices = tuple(
+            index for index, active in enumerate(reachable_ko) if not active
+        )
 
         align_log = self._select_alignment_log(
-            spot, product, ki_barrier_override=ki_barrier_continuous
+            spot,
+            product,
+            ki_barrier_override=ki_barrier_continuous,
+            ko_candidates_override=[
+                float(record.barrier)
+                for record, active in zip(ko_records, reachable_ko)
+                if active and record.barrier is not None
+            ],
         )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
@@ -204,13 +245,13 @@ class SnowballQuadEngine(BaseEngine):
             vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
+            integration_rule=self.params.integration_rule,
             fft_padding_factor=fft_padding_factor,
             fft_filter_alpha=fft_filter_alpha,
             fft_filter_power=fft_filter_power,
         )
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
-        dt = self._build_dt(times)
         tau = 0.5 * vol_vec * vol_vec * dt
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
@@ -253,29 +294,46 @@ class SnowballQuadEngine(BaseEngine):
             ko_record = self._match_record(obs_time, ko_records)
             ko_weight = None
             if ko_record is not None:
+                ko_is_reachable = bool(reachable_by_record[id(ko_record)])
                 discount = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local
                 )
                 ko_value = ko_record.payoff * discount
-                ko_weight = self._smooth_step_weight(
-                    grid,
-                    ko_record.barrier,
-                    spot,
-                    smoothing_width,
-                    trigger_is_down=product.is_reverse,
-                )
-                if ko_weight is None:
-                    ko_mask = (
-                        spot_grid <= ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= ko_record.barrier
+                ko_weight = (
+                    self._event_weight(
+                        grid,
+                        ko_record.barrier,
+                        spot,
+                        smoothing_width,
+                        trigger_is_down=product.is_reverse,
                     )
-                    ko_weight = ko_mask.astype(float)
-
-                # KO always applies to the not-yet-KI surface; KI surface only if enabled.
-                v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
-                if not disable_ko_after_ki:
-                    v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
+                    if ko_is_reachable
+                    else np.zeros_like(grid)
+                )
+                if self._use_cell_average_events() and ko_is_reachable:
+                    v_out = self._project_quad_event(
+                        grid,
+                        ko_record.barrier,
+                        spot,
+                        v_survive=v_out,
+                        v_breach=ko_value,
+                        breach_up=not product.is_reverse,
+                    )
+                    if not disable_ko_after_ki:
+                        v_in = self._project_quad_event(
+                            grid,
+                            ko_record.barrier,
+                            spot,
+                            v_survive=v_in,
+                            v_breach=ko_value,
+                            breach_up=not product.is_reverse,
+                        )
+                elif ko_is_reachable:
+                    # KO always applies to the not-yet-KI surface; KI surface
+                    # only if enabled.
+                    v_out = ko_weight * ko_value + (1.0 - ko_weight) * v_out
+                    if not disable_ko_after_ki:
+                        v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
 
             if ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
@@ -372,6 +430,104 @@ class SnowballQuadEngine(BaseEngine):
         self._last_spot_greeks_grid = (spot_grid.copy(), value_surface.copy())
         return math_utils.interpolate(value_surface, x=0.0)
 
+    def _price_with_convergence(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        """Refine nested odd grids until consecutive prices meet tolerance.
+
+        The returned value is always the finest engine price, not a scalar
+        extrapolation, so ``_last_spot_greeks_grid`` and optional backward
+        surfaces remain consistent with the reported PV.
+        """
+        requested = int(self.params.grid_points)
+        cap = int(self.params.max_convergence_grid_points)
+        estimates = []
+        final_engine = None
+
+        while requested <= cap:
+            candidate_params = replace(
+                self.params,
+                grid_points=requested,
+                auto_converge=False,
+            )
+            candidate = self.__class__(params=candidate_params)
+            candidate.record_backward_grids = self.record_backward_grids
+            value = float(candidate.price(product, pricing_env))
+            grid_artifact = getattr(candidate, "_last_spot_greeks_grid", None)
+            used = (
+                int(grid_artifact[0].size)
+                if grid_artifact is not None
+                else requested
+            )
+            estimates.append((used, value))
+            final_engine = candidate
+
+            if len(estimates) >= 2:
+                previous = estimates[-2][1]
+                error = abs(value - previous)
+                tolerance = float(self.params.convergence_abs_tol) + float(
+                    self.params.convergence_rel_tol
+                ) * max(1.0, abs(value), abs(previous))
+                if error <= tolerance:
+                    self._adopt_converged_engine(candidate)
+                    self._last_convergence_info = {
+                        "converged": True,
+                        "grid_points": used,
+                        "error_estimate": error,
+                        "tolerance": tolerance,
+                        "estimates": tuple(estimates),
+                    }
+                    return value
+
+            next_requested = 2 * (used - 1) + 1
+            if next_requested <= requested:
+                next_requested = 2 * (requested - 1) + 1
+            if next_requested > cap:
+                break
+            requested = next_requested
+
+        if final_engine is not None:
+            self._adopt_converged_engine(final_engine)
+        last_error = (
+            abs(estimates[-1][1] - estimates[-2][1])
+            if len(estimates) >= 2
+            else float("inf")
+        )
+        self._last_convergence_info = {
+            "converged": False,
+            "grid_points": estimates[-1][0] if estimates else requested,
+            "error_estimate": last_error,
+            "tolerance": (
+                float(self.params.convergence_abs_tol)
+                + float(self.params.convergence_rel_tol)
+                * max(1.0, *(abs(v) for _, v in estimates[-2:]))
+                if estimates
+                else float("nan")
+            ),
+            "estimates": tuple(estimates),
+        }
+        raise NumericalError(
+            "QUAD grid convergence was not reached by "
+            f"max_convergence_grid_points={cap}; last successive PV difference "
+            f"was {last_error:.6g}. Increase the cap or relax "
+            "convergence_rel_tol/convergence_abs_tol."
+        )
+
+    def _adopt_converged_engine(self, candidate: "SnowballQuadEngine") -> None:
+        """Copy numerical artifacts from the accepted finest-grid solve."""
+        if hasattr(candidate, "_last_spot_greeks_grid"):
+            self._last_spot_greeks_grid = tuple(
+                np.array(values, copy=True)
+                for values in candidate._last_spot_greeks_grid
+            )
+        elif hasattr(self, "_last_spot_greeks_grid"):
+            del self._last_spot_greeks_grid
+        self._backward_grids = candidate._backward_grids
+        if hasattr(candidate, "_last_ignored_ko_observation_indices"):
+            self._last_ignored_ko_observation_indices = (
+                candidate._last_ignored_ko_observation_indices
+            )
+
     def calculate_event_stats(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Optional[AutocallableEventStats]:
@@ -395,7 +551,11 @@ class SnowballQuadEngine(BaseEngine):
         return AutocallableEventStats(**fields)
 
     def _event_stats_alignment_log(
-        self, spot: float, product, ki_barrier_override: Optional[float] = None
+        self,
+        spot: float,
+        product,
+        ki_barrier_override: Optional[float] = None,
+        ko_candidates_override: Optional[Sequence[float]] = None,
     ) -> Optional[float]:
         """Grid-alignment log used by event stats.
 
@@ -404,7 +564,11 @@ class SnowballQuadEngine(BaseEngine):
         different signature) does not intercept the event-stats recursion.
         """
         return SnowballQuadEngine._select_alignment_log(
-            self, spot, product, ki_barrier_override=ki_barrier_override
+            self,
+            spot,
+            product,
+            ki_barrier_override=ki_barrier_override,
+            ko_candidates_override=ko_candidates_override,
         )
 
     # --- Extra indicator-row hooks (overridden by Phoenix for coupons) ---
@@ -504,9 +668,26 @@ class SnowballQuadEngine(BaseEngine):
         )
         vol_max_val = float(np.max(vol_vec))
         df_local = make_df_fn(pricing_env)
+        reachable_ko = self._reachable_ko_observations(
+            ko_records,
+            times,
+            spot,
+            rate_vec,
+            div_vec,
+            vol_vec,
+            dt,
+            is_reverse=product.is_reverse,
+        )
 
         align_log = self._event_stats_alignment_log(
-            spot, product, ki_barrier_override=ki_barrier_continuous
+            spot,
+            product,
+            ki_barrier_override=ki_barrier_continuous,
+            ko_candidates_override=[
+                float(record.barrier)
+                for record, active in zip(ko_records, reachable_ko)
+                if active and record.barrier is not None
+            ],
         )
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
@@ -520,6 +701,7 @@ class SnowballQuadEngine(BaseEngine):
             vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
+            integration_rule=self.params.integration_rule,
             fft_padding_factor=fft_padding_factor,
             fft_filter_alpha=fft_filter_alpha,
             fft_filter_power=fft_filter_power,
@@ -562,29 +744,49 @@ class SnowballQuadEngine(BaseEngine):
                     break
 
             if ko_record is not None:
-                ko_mask = (
-                    spot_grid <= ko_record.barrier
-                    if product.is_reverse
-                    else spot_grid >= ko_record.barrier
-                )
+                ko_is_reachable = bool(reachable_ko[int(ko_index)])
                 discount_delay = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local
                 )
-                # Resolution-aware KO weight (spec 2026-07-01): a convex partition
-                # of surviving mass. `_smooth_step_weight` returns None at width 0,
-                # in which case we fall back to the exact hard mask.
-                ko_w = self._smooth_step_weight(
-                    grid, ko_record.barrier, spot, smoothing_width,
-                    trigger_is_down=product.is_reverse,
+                ko_w = (
+                    self._event_weight(
+                        grid,
+                        ko_record.barrier,
+                        spot,
+                        smoothing_width,
+                        trigger_is_down=product.is_reverse,
+                    )
+                    if ko_is_reachable
+                    else np.zeros_like(grid)
                 )
-                if ko_w is None:
-                    ko_w = ko_mask.astype(float)
-                # KO always applies to not-yet-KI surface; KI surface only if enabled.
-                v_out *= (1.0 - ko_w)
-                v_out[int(ko_index)] += ko_w * float(discount_delay)
-                if not disable_ko_after_ki:
-                    v_in *= (1.0 - ko_w)
-                    v_in[int(ko_index)] += ko_w * float(discount_delay)
+                if self._use_cell_average_events() and ko_is_reachable:
+                    breach = np.zeros_like(v_out)
+                    breach[int(ko_index)] = float(discount_delay)
+                    v_out = self._project_quad_event(
+                        grid,
+                        ko_record.barrier,
+                        spot,
+                        v_survive=v_out,
+                        v_breach=breach,
+                        breach_up=not product.is_reverse,
+                    )
+                    if not disable_ko_after_ki:
+                        v_in = self._project_quad_event(
+                            grid,
+                            ko_record.barrier,
+                            spot,
+                            v_survive=v_in,
+                            v_breach=breach,
+                            breach_up=not product.is_reverse,
+                        )
+                elif ko_is_reachable:
+                    # KO always applies to not-yet-KI surface; KI surface only
+                    # if enabled.
+                    v_out *= (1.0 - ko_w)
+                    v_out[int(ko_index)] += ko_w * float(discount_delay)
+                    if not disable_ko_after_ki:
+                        v_in *= (1.0 - ko_w)
+                        v_in[int(ko_index)] += ko_w * float(discount_delay)
                 # Extra rows (coupon) are set AFTER the KO scaling so a coupon at a
                 # simultaneous KO is retained; future-coupon rows stay scaled by KO.
                 self._set_extra_quad_indicators(
@@ -944,6 +1146,82 @@ class SnowballQuadEngine(BaseEngine):
                 "max_adaptive_grid_points or use a different pricing engine."
             )
         return max(requested, required)
+
+    def _reachable_ko_observations(
+        self,
+        ko_records: Sequence,
+        times: Sequence[float],
+        spot: float,
+        rate_vec: np.ndarray,
+        div_vec: np.ndarray,
+        vol_vec: np.ndarray,
+        dt: np.ndarray,
+        *,
+        is_reverse: bool,
+    ) -> tuple[bool, ...]:
+        """KO reachability at each record's own observation time.
+
+        This is a numerical sentinel policy, not schedule mutation. Every
+        observation remains on the time grid; only a KO trigger beyond the
+        configured Gaussian tail envelope is suppressed. A barrier already
+        triggered at valuation is always active.
+        """
+        if not self.params.filter_unreachable_barriers:
+            return tuple(True for _ in ko_records)
+
+        mu = (
+            np.asarray(rate_vec, dtype=float)
+            - np.asarray(div_vec, dtype=float)
+            - 0.5 * np.asarray(vol_vec, dtype=float) ** 2
+        )
+        dt_arr = np.asarray(dt, dtype=float)
+        cumulative_mean = np.cumsum(mu * dt_arr)
+        cumulative_var = np.cumsum(
+            np.asarray(vol_vec, dtype=float) ** 2 * dt_arr
+        )
+        reach_std = float(
+            self.params.barrier_reach_stddevs
+            if self.params.barrier_reach_stddevs is not None
+            else self.params.num_std_devs
+        )
+        time_arr = np.asarray(times, dtype=float)
+        active = []
+        for rec in ko_records:
+            barrier = getattr(rec, "barrier", None)
+            if barrier is None or not np.isfinite(float(barrier)) or barrier <= 0:
+                active.append(False)
+                continue
+            barrier = float(barrier)
+            triggered_now = barrier >= spot if is_reverse else barrier <= spot
+            if float(rec.observation_time) <= Tolerance.ZERO:
+                active.append(triggered_now)
+                continue
+            if triggered_now:
+                active.append(True)
+                continue
+
+            matches = np.flatnonzero(
+                np.isclose(
+                    time_arr,
+                    float(rec.observation_time),
+                    rtol=0.0,
+                    atol=Tolerance.PRECISION,
+                )
+            )
+            if matches.size == 0:
+                raise ValidationError(
+                    "KO observation time is missing from the QUAD recursion grid: "
+                    f"{rec.observation_time}"
+                )
+            step = int(matches[0]) + 1
+            sigma = math.sqrt(max(float(cumulative_var[step]), 0.0))
+            lower = float(cumulative_mean[step]) - reach_std * sigma
+            upper = float(cumulative_mean[step]) + reach_std * sigma
+            barrier_log = safe_log(barrier / float(spot))
+            active.append(
+                barrier_log >= lower if is_reverse else barrier_log <= upper
+            )
+        return tuple(active)
 
     def _ki_monitoring_mode(self) -> KnockInMonitoringMode:
         mode = getattr(
@@ -1479,15 +1757,23 @@ class SnowballQuadEngine(BaseEngine):
         spot: float,
         product: SnowballOption,
         ki_barrier_override: Optional[float] = None,
+        ko_candidates_override: Optional[Sequence[float]] = None,
     ) -> Optional[float]:
         ko_candidates: list[float] = []
         ki_candidates: list[float] = []
 
-        ko_barrier = product.barrier_config.ko_barrier
-        if isinstance(ko_barrier, list):
-            ko_candidates.extend([float(b) for b in ko_barrier if b > 0])
-        elif ko_barrier is not None and ko_barrier > 0:
-            ko_candidates.append(float(ko_barrier))
+        if ko_candidates_override is not None:
+            ko_candidates.extend(
+                float(barrier)
+                for barrier in ko_candidates_override
+                if barrier is not None and barrier > 0
+            )
+        else:
+            ko_barrier = product.barrier_config.ko_barrier
+            if isinstance(ko_barrier, list):
+                ko_candidates.extend([float(b) for b in ko_barrier if b > 0])
+            elif ko_barrier is not None and ko_barrier > 0:
+                ko_candidates.append(float(ko_barrier))
 
         if ki_barrier_override is not None:
             # The model's operative KI barrier (e.g. BGK-shifted) takes
@@ -1583,15 +1869,93 @@ class SnowballQuadEngine(BaseEngine):
         stacked (rows, grid) indicator array (the weight broadcasts over
         rows). Reduces exactly to the old hard-mask copy at width 0.
         """
-        ki_w = self._smooth_step_weight(
+        if self._use_cell_average_events():
+            # In cell-average mode the complete survive/breach branches are
+            # integrated over the threshold-straddling dual cell.  KO has
+            # already been applied to both branches when it keeps precedence.
+            return self._project_quad_event(
+                grid,
+                ki_barrier,
+                spot,
+                v_survive=v_out,
+                v_breach=v_in,
+                breach_up=is_reverse,
+            )
+
+        ki_w = self._event_weight(
             grid, ki_barrier, spot, width, trigger_is_down=not is_reverse
         )
-        if ki_w is None:
-            ki_mask = spot_grid >= ki_barrier if is_reverse else spot_grid <= ki_barrier
-            ki_w = ki_mask.astype(float)
         if ko_weight is not None:
             ki_w = ki_w * (1.0 - ko_weight)
         return (1.0 - ki_w) * v_out + ki_w * v_in
+
+    def _use_cell_average_events(self) -> bool:
+        """Whether discrete QUAD events use conservative dual-cell projection."""
+        return self.params.event_projection == EventProjectionMode.CELL_AVERAGE
+
+    def _event_weight(
+        self,
+        grid: np.ndarray,
+        barrier: float,
+        spot: float,
+        width: float,
+        *,
+        trigger_is_down: bool,
+    ) -> np.ndarray:
+        """Resolution-aware event weight for indicator recursions.
+
+        Cell-average mode returns the exact breached fraction of each dual
+        cell. Legacy nodal mode retains the configured smoothing kernel and
+        falls back to a hard mask when smoothing is disabled.
+        """
+        barrier_log = safe_log(float(barrier) / float(spot))
+        if self._use_cell_average_events():
+            return breach_fractions(
+                grid, barrier_log, breach_up=not trigger_is_down
+            )
+        weight = self._smooth_step_weight(
+            grid,
+            barrier,
+            spot,
+            width,
+            trigger_is_down=trigger_is_down,
+        )
+        if weight is not None:
+            return weight
+        if trigger_is_down:
+            return (grid <= barrier_log).astype(float)
+        return (grid >= barrier_log).astype(float)
+
+    @staticmethod
+    def _project_quad_event(
+        grid: np.ndarray,
+        barrier: float,
+        spot: float,
+        *,
+        v_survive,
+        v_breach,
+        breach_up: bool,
+    ) -> np.ndarray:
+        """Project a one-threshold event with spatial dimension last.
+
+        The shared projection core expects spot on axis zero. QUAD value
+        vectors are one-dimensional while event-stat stacks store spot on the
+        final axis, so stacked inputs are moved temporarily and restored.
+        """
+        survive = np.asarray(v_survive, dtype=float)
+        breach = np.asarray(v_breach, dtype=float)
+        stacked = survive.ndim > 1
+        if stacked:
+            survive = np.moveaxis(survive, -1, 0)
+            breach = np.moveaxis(breach, -1, 0)
+        projected = project_event_values(
+            grid,
+            safe_log(float(barrier) / float(spot)),
+            survive,
+            breach,
+            breach_up,
+        )
+        return np.moveaxis(projected, 0, -1) if stacked else projected
 
     def _smooth_step_weight(
         self,

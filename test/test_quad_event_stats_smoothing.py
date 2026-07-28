@@ -16,6 +16,7 @@ from quantark.param import (
     SpotQuote,
 )
 from quantark.priceenv import PricingEnvironment
+from quantark.util.enum.engine_enums import EventProjectionMode
 
 
 def _env(vol=0.22, rate=0.03, div=0.0, spot=100.0):
@@ -171,7 +172,12 @@ def test_cells_zero_reproduces_hard_mask_baseline():
     env = _env()
     ph = _ref_phoenix()
     stats = PhoenixQuadEngine(
-        params=QuadParams(grid_points=401, event_smoothing_cells=0)
+        params=QuadParams(
+            grid_points=401,
+            event_smoothing_cells=0,
+            event_projection=EventProjectionMode.NODAL,
+            integration_rule="simpson",
+        )
     ).calculate_event_stats(ph, env)
     ko_baseline = np.array([
         0.354468887686, 0.140439831531, 0.077573430563, 0.050661052323,
@@ -242,7 +248,12 @@ def test_discrete_ki_cells_zero_reduces_to_hard_mask():
     env = _env()
     ph = _discrete_ki_phoenix(ko_barrier=103.0, ki_barrier=75.0, disable_ko_after_ki=False)
     s = PhoenixQuadEngine(
-        params=QuadParams(grid_points=401, event_smoothing_cells=0)
+        params=QuadParams(
+            grid_points=401,
+            event_smoothing_cells=0,
+            event_projection=EventProjectionMode.NODAL,
+            integration_rule="simpson",
+        )
     ).calculate_event_stats(ph, env)
     ko_baseline = np.array([
         0.354468887677, 0.140439806223, 0.077572281329, 0.050650821005,

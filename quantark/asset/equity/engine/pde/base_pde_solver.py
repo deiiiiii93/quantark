@@ -618,6 +618,12 @@ class BasePDESolver(BaseEngine):
             dx=dx_vec,
             bounds=(float(s_vec[0]), float(s_vec[-1])),
             achieved_eps=float("nan"),
+            active_critical_prices=tuple(
+                float(p)
+                for p in request.critical_prices
+                if float(s_vec[0]) < float(p) < float(s_vec[-1])
+            ),
+            ignored_critical_prices=(),
         )
         return Layout(
             spatial=spatial,

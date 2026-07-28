@@ -24,6 +24,7 @@ class QuadratureMath:
         num_std_devs: float = 10.0,
         *,
         align_log: Optional[float] = None,
+        integration_rule: str = "simpson",
         fft_padding_factor: int = 1,
         fft_filter_alpha: float = 0.0,
         fft_filter_power: int = 8,
@@ -34,6 +35,7 @@ class QuadratureMath:
         self.vol_max = float(vol_max)
         self.num_std_devs = float(num_std_devs)
         self.align_log = float(align_log) if align_log is not None else None
+        self.integration_rule = str(integration_rule).lower()
         self.fft_padding_factor = int(fft_padding_factor)
         self.fft_filter_alpha = float(fft_filter_alpha)
         self.fft_filter_power = int(fft_filter_power)
@@ -53,6 +55,11 @@ class QuadratureMath:
         if self.num_std_devs < 3.0:
             raise ValidationError(
                 f"num_std_devs should be at least 3, got {self.num_std_devs}."
+            )
+        if self.integration_rule not in ("trapezoid", "simpson"):
+            raise ValidationError(
+                "integration_rule must be one of trapezoid, simpson, got "
+                f"{self.integration_rule}."
             )
 
         if self.fft_padding_factor < 1:
@@ -110,6 +117,11 @@ class QuadratureMath:
         self, values: np.ndarray, p_lr: int, p_ur: int, p0: int
     ) -> np.ndarray:
         u_array = np.zeros(2 * self.grid_x - 1)
+        if self.integration_rule == "trapezoid":
+            u_array[p_lr : p_ur + 1] = values[p_lr : p_ur + 1]
+            u_array[p_lr] *= 0.5
+            u_array[p_ur] *= 0.5
+            return u_array
         u_array[p_lr] = values[p_lr]
         u_array[p_ur + p0] = values[p_ur + p0]
         u_array[p_lr + 1 : p_ur + p0 : 2] = 4.0 * values[p_lr + 1 : p_ur + p0 : 2]
@@ -129,6 +141,11 @@ class QuadratureMath:
             )
 
         u_array = np.zeros((values.shape[0], 2 * self.grid_x - 1), dtype=values.dtype)
+        if self.integration_rule == "trapezoid":
+            u_array[:, p_lr : p_ur + 1] = values[:, p_lr : p_ur + 1]
+            u_array[:, p_lr] *= 0.5
+            u_array[:, p_ur] *= 0.5
+            return u_array
         u_array[:, p_lr] = values[:, p_lr]
         u_array[:, p_ur + p0] = values[:, p_ur + p0]
         u_array[:, p_lr + 1 : p_ur + p0 : 2] = (
@@ -141,10 +158,15 @@ class QuadratureMath:
 
     def simpson_weight_vector(self) -> np.ndarray:
         if self._weights is None:
-            weights = np.ones(self.grid_x)
-            weights[1:-1:2] = 4.0
-            weights[2:-1:2] = 2.0
-            self._weights = weights * self.h / 3.0
+            if self.integration_rule == "trapezoid":
+                weights = np.ones(self.grid_x)
+                weights[[0, -1]] = 0.5
+                self._weights = weights * self.h
+            else:
+                weights = np.ones(self.grid_x)
+                weights[1:-1:2] = 4.0
+                weights[2:-1:2] = 2.0
+                self._weights = weights * self.h / 3.0
         return self._weights
 
     def convolution_fft(self, omega_array: np.ndarray, u_array: np.ndarray) -> np.ndarray:
@@ -161,7 +183,8 @@ class QuadratureMath:
         if fft_filter is not None:
             product *= fft_filter
         f_array = np.fft.ifft(product).real
-        return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+        scale = self.h if self.integration_rule == "trapezoid" else self.h / 3.0
+        return f_array[self.grid_x - 1 : 2 * self.grid_x - 1] * scale
 
     def convolution_fft_many(
         self, omega_array: np.ndarray, u_array: np.ndarray
@@ -188,7 +211,8 @@ class QuadratureMath:
         if fft_filter is not None:
             product *= fft_filter.reshape(1, -1)
         f_array = np.fft.ifft(product, axis=1).real
-        return f_array[:, self.grid_x - 1 : 2 * self.grid_x - 1] * self.h / 3.0
+        scale = self.h if self.integration_rule == "trapezoid" else self.h / 3.0
+        return f_array[:, self.grid_x - 1 : 2 * self.grid_x - 1] * scale
 
     def _get_omega_fft(self, omega_array: np.ndarray, fft_len: int) -> np.ndarray:
         omega_array = np.ascontiguousarray(omega_array, dtype=float)

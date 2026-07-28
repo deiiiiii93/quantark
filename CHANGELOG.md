@@ -76,6 +76,21 @@ Clean rewrite of the PDE grid construction and event application layer
   products no longer trip `DeterminismViolation` against their own
   preparation when an artifact cache is active.
 
+### Fixed
+- Autocallable PDE grids ignore out-of-reach critical-price markers (such as
+  disabled 100× KO observations) for bounds and concentration while retaining
+  the observation date and any coupon event. Dense critical sets now use
+  bounded cumulative inversion of the Tavella-Randall monitor, removing the
+  overflow-prone shooting path and its non-monotonic construction-time cliff.
+- Snowball/Phoenix QUAD event handling now defaults to cell-average projection
+  and phase-stable trapezoidal integration. Unreachable KO markers are
+  suppressed without deleting their dates, and the legacy nodal/Simpson
+  behavior remains available explicitly.
+- QUAD can optionally refine nested odd grids until consecutive PV estimates
+  satisfy configured absolute/relative tolerances. Fixed
+  `grid_points=1001` remains a speed-oriented estimate rather than a universal
+  convergence guarantee.
+
 ### Deferred (recorded follow-ups)
 - Event-aligned 2D ADI time axis (uniform march retained).
 - Standalone vol engines (`LocalVolPDESolver`, `HestonPDESolver`,

@@ -71,7 +71,13 @@ def validate_external_layout(
             )
 
     _covered(market.spot, "spot")
+    inactive_old = set(layout.spatial.ignored_critical_prices)
     for p in fresh_request.critical_prices:
+        if p in inactive_old:
+            # The base layout deliberately ignored this unchanged,
+            # out-of-reach marker.  A new or moved critical still goes through
+            # the strict coverage check below.
+            continue
         _covered(p, "critical price")
 
 

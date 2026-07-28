@@ -255,25 +255,31 @@ expansions); tier-2 anchors certify the new formula:
 - base interval = envelope of `[ln(a) − h, ln(a) + h]` over the request's `bound_anchors`
   (spot and strike — a **separate field** from `critical_prices`, so the builder needs no
   classification heuristics);
-- widen so **every** critical price sits strictly interior with a margin of
-  `5 × ln(1 + eps_crit)` (five cells at target resolution);
+- define a conservative reachability envelope at `2 × h` around the bound
+  anchors. Widen only for critical prices inside that envelope, so each active
+  critical sits strictly interior with a margin of `5 × ln(1 + eps_crit)`
+  (five cells at target resolution). Out-of-envelope levels are excluded from
+  bounds and concentration; this covers operational "disabled observation"
+  sentinels such as a 100× KO barrier without deleting the event/coupon date;
 - degenerate floor: `h ≥ ln(1.10)` (±10 % domain) — covers near-expiry and near-zero vol;
 - hard bounds override their side verbatim (they are the domain edge — the absorbing barrier
   condition applies exactly there); critical prices equal to a hard edge are domain-boundary
   prices, not interior targets (see coverage validation, §4.6);
-- concentration at the interior `critical_prices` targeting `eps_crit` relative spacing.
-  **One** beta search, defined as an inequality on the worst critical point: local spacing at
-  a critical price = min of its two adjacent `dx`; `achieved_eps` = the **max** of that local
-  spacing over all interior critical prices (worst case). If the uniform grid already
-  satisfies `achieved_eps ≤ ln(1 + eps_crit)`, clamp to (near-)uniform (`beta_hi`) — no
-  bracket search. Otherwise bisect beta on `[1e-12, 1e3·(x_max − x_min)]`; if the target is
-  unreachable at maximum concentration, take `beta_lo` (best achievable). The
-  `use_heuristic_beta` variant dies;
+- concentration at the active interior `critical_prices` targeting `eps_crit`
+  relative spacing. Local spacing at a critical price = min of its two
+  adjacent `dx`; `achieved_eps` = the **max** over active criticals. If the
+  uniform grid already satisfies the target, clamp to uniform. Small,
+  well-behaved critical sets retain the certified layout. Dense sets, or any
+  small-set numerical/quality failure, use a bounded beta search over direct
+  cumulative inversion of the separable Tavella-Randall monitor. This avoids
+  nested RK4 shooting, overflow, and point-count timing cliffs;
 - zero interior critical points ⇒ uniform-in-log; uniform stops being a separate mode;
-- **infeasibility policy**: a critical price outside `[bounds]` (possible only under hard/expert
-  bounds) is excluded from concentration and logged; `achieved_eps > 2 × eps_crit` logs a
-  warning (accuracy degradation, not an error); explicit `points > max_points` →
-  `ValidationError` at config construction;
+- **infeasibility policy**: an out-of-reach critical or a critical outside
+  `[bounds]` (possible under hard/expert bounds) is excluded from concentration
+  and logged. Non-finite/non-monotone nodes, max/min `dx > 100`, or
+  `achieved_eps > 2 × eps_crit` raise `ValidationError` naming the
+  `accuracy`/`GridConfig(points=...)` remedy; explicit
+  `points > max_points` raises at config construction;
 - **barrier snapping is dropped.** Cell-average projection keeps second-order accuracy wherever
   a barrier falls relative to nodes, so node-on-barrier is no longer required. Not snapping is
   what makes layouts shareable across products and stable across bumps.

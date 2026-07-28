@@ -12,6 +12,7 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from quantark.asset.equity.engine.pde.grid.events import project_piecewise_event
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.priceenv.term_sampling import make_df_fn
@@ -37,6 +38,13 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             raise PricingError("PhoenixQuadEngine requires discrete KO monitoring.")
 
     def price(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> float:
+        if self.params.auto_converge:
+            return self._price_with_convergence(product, pricing_env)
+        return self._price_once(product, pricing_env)
+
+    def _price_once(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         if not isinstance(product, PhoenixOption):
@@ -106,18 +114,33 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         else:
             coupon_barriers = np.full(len(ko_records), float(coupon_barrier))
 
-        align_log = self._select_alignment_log(
-            spot,
-            ko_records,
-            coupon_barriers=coupon_barriers,
-            ki_records=ki_records,
-            product=product,
-        )
         rate_vec, div_vec, vol_vec = self._term_step_params(
             pricing_env, product.strike, times, rate, div, vol
         )
         vol_max_val = float(np.max(vol_vec))
         df_local = make_df_fn(pricing_env)
+        dt = self._build_dt(times)
+        reachable_ko = self._reachable_ko_observations(
+            ko_records,
+            times,
+            spot,
+            rate_vec,
+            div_vec,
+            vol_vec,
+            dt,
+            is_reverse=product.is_reverse,
+        )
+        self._last_ignored_ko_observation_indices = tuple(
+            index for index, active in enumerate(reachable_ko) if not active
+        )
+
+        align_log = self._select_alignment_log(
+            spot,
+            [rec for rec, active in zip(ko_records, reachable_ko) if active],
+            coupon_barriers=coupon_barriers,
+            ki_records=ki_records,
+            product=product,
+        )
 
         fft_padding_factor = self._resolve_fft_padding_factor()
         fft_filter_alpha, fft_filter_power = self._resolve_fft_filter()
@@ -131,13 +154,13 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             vol_max=vol_max_val,
             num_std_devs=self.params.num_std_devs,
             align_log=align_log,
+            integration_rule=self.params.integration_rule,
             fft_padding_factor=fft_padding_factor,
             fft_filter_alpha=fft_filter_alpha,
             fft_filter_power=fft_filter_power,
         )
         grid = math_utils.grid
         spot_grid = spot * np.exp(grid)
-        dt = self._build_dt(times)
         tau = 0.5 * vol_vec * vol_vec * dt
         if np.any(tau[1:] <= 0.0):
             raise ValidationError("time step too small for quadrature solver.")
@@ -243,6 +266,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
+            discrete_ki_record = (
+                self._match_record(obs_time, ki_records) if ki_records else None
+            )
+            ki_applied_jointly = False
 
             # EX-coupon recording: capture the per-memory continuation surfaces BEFORE
             # this observation's coupon/KO jump, indexed by post-resolution memory k
@@ -271,38 +298,28 @@ class PhoenixQuadEngine(SnowballQuadEngine):
             # We need to construct surfaces $W[k]$ for $k \in \{0, \dots, i\}$ (missed 0 to i coupons).
 
             if ko_record is not None and ko_index is not None:
+                ko_is_reachable = bool(reachable_ko[ko_index])
                 barrier_val = coupon_barriers[ko_index]
                 coupon_amt = float(coupon_amounts[ko_index])
-                
-                # Determine Pay/Miss weights (smoothed if enabled)
-                pay_weight = self._smooth_step_weight(
+
+                pay_weight = self._event_weight(
                     grid,
                     barrier_val,
                     spot,
                     smoothing_width,
                     trigger_is_down=product.is_reverse,
                 )
-                if pay_weight is None:
-                    if product.is_reverse:
-                        pay_mask = spot_grid <= barrier_val
-                    else:
-                        pay_mask = spot_grid >= barrier_val
-                    pay_weight = pay_mask.astype(float)
-
-                ko_weight = self._smooth_step_weight(
-                    grid,
-                    ko_record.barrier,
-                    spot,
-                    smoothing_width,
-                    trigger_is_down=product.is_reverse,
-                )
-                if ko_weight is None:
-                    ko_mask = (
-                        spot_grid <= ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= ko_record.barrier
+                ko_weight = (
+                    self._event_weight(
+                        grid,
+                        ko_record.barrier,
+                        spot,
+                        smoothing_width,
+                        trigger_is_down=product.is_reverse,
                     )
-                    ko_weight = ko_mask.astype(float)
+                    if ko_is_reachable
+                    else np.zeros_like(grid)
+                )
 
                 ko_discount = self._ko_discount(
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local)
@@ -346,46 +363,61 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     val_miss_out = v_out_list[next_k_miss]
                     val_miss_in = v_in_list[next_k_miss]
 
-                    # Combine
-                    # W[k] = PayMask * (Payoff + U[0]) + MissMask * U[k+1]
-                    combined_out = pay_weight * val_pay_out + (1.0 - pay_weight) * val_miss_out
-                    combined_in = pay_weight * val_pay_in + (1.0 - pay_weight) * val_miss_in
-
-                    # Apply KO logic (KO overrides everything if hit)
-                    # KO Payoff = BaseKO + (Current + k*Acc)
-                    # Note: KO usually implies coupon payment if coupon condition met?
-                    # Product logic `get_ko_payoff` adds `current_coupon` if triggered.
-                    # It also adds `accumulated_coupons`.
-                    # So:
-                    ko_pay_val = (base_ko_payoff + total_pay) * ko_discount
-                    # If miss coupon barrier but hit KO barrier? 
-                    # Usually KO barrier >= Coupon barrier (for standard).
-                    # If Spot > KO, then Spot > Coupon. So PayMask is True.
-                    # If reverse: Spot < KO <= Coupon. So PayMask is True.
-                    # So if KO hit, we typically pay the coupon too.
-                    # But we should be careful if KO barrier is tighter than coupon barrier (rare).
-                    # `get_ko_payoff` handles this check. 
-                    # Here we assume if KO hit, we pay.
-                    # Ideally we check masks again.
-                    
-                    # Detailed KO payoff logic:
-                    # If KO hit:
-                    #   If Coupon hit: Pay Base + Current + Acc.
-                    #   If Coupon miss: Pay Base + Acc? Or Base only?
-                    #   Phoenix `get_ko_payoff` adds `accumulated_coupons` unconditionally?
-                    #   Let's check `get_ko_payoff`.
-                    #   It adds `accumulated_coupons` unconditionally.
-                    #   It adds `current_coupon` IF `is_coupon_triggered`.
-                    
-                    ko_val_grid = np.full_like(combined_out, base_ko_payoff * ko_discount)
-                    # Add accumulated unconditionally
-                    ko_val_grid += (accumulated_pay * ko_discount)
-                    # Add current coupon proportionally to pay-weight
-                    ko_val_grid += pay_weight * (coupon_amt * ko_discount)
-
-                    combined_out = ko_weight * ko_val_grid + (1.0 - ko_weight) * combined_out
-                    if not disable_ko_after_ki:
-                        combined_in = ko_weight * ko_val_grid + (1.0 - ko_weight) * combined_in
+                    if self._use_cell_average_events():
+                        combined_out, combined_in = self._project_joint_phoenix_event(
+                            grid=grid,
+                            spot=spot,
+                            is_reverse=product.is_reverse,
+                            coupon_barrier=float(barrier_val),
+                            ko_barrier=(
+                                float(ko_record.barrier)
+                                if ko_is_reachable
+                                else None
+                            ),
+                            ki_barrier=(
+                                float(discrete_ki_record.barrier)
+                                if discrete_ki_record is not None
+                                else None
+                            ),
+                            val_miss_out=val_miss_out,
+                            val_pay_out=val_pay_out,
+                            val_miss_in=val_miss_in,
+                            val_pay_in=val_pay_in,
+                            ko_value_without_coupon=(
+                                base_ko_payoff + accumulated_pay
+                            )
+                            * ko_discount,
+                            ko_value_with_coupon=(
+                                base_ko_payoff + accumulated_pay + coupon_amt
+                            )
+                            * ko_discount,
+                            disable_ko_after_ki=disable_ko_after_ki,
+                        )
+                        ki_applied_jointly = discrete_ki_record is not None
+                    else:
+                        # Legacy smoothed/nodal composition.
+                        combined_out = (
+                            pay_weight * val_pay_out
+                            + (1.0 - pay_weight) * val_miss_out
+                        )
+                        combined_in = (
+                            pay_weight * val_pay_in
+                            + (1.0 - pay_weight) * val_miss_in
+                        )
+                        ko_val_grid = np.full_like(
+                            combined_out, base_ko_payoff * ko_discount
+                        )
+                        ko_val_grid += accumulated_pay * ko_discount
+                        ko_val_grid += pay_weight * coupon_amt * ko_discount
+                        combined_out = (
+                            ko_weight * ko_val_grid
+                            + (1.0 - ko_weight) * combined_out
+                        )
+                        if not disable_ko_after_ki:
+                            combined_in = (
+                                ko_weight * ko_val_grid
+                                + (1.0 - ko_weight) * combined_in
+                            )
 
                     new_v_in_list.append(combined_in)
                     new_v_out_list.append(combined_out)
@@ -402,27 +434,22 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 )
                 for i in range(len(v_out_list)):
                     v_out_list[i][ki_mask] = v_in_list[i][ki_mask]
-            elif ki_records:
-                ki_record = self._match_record(obs_time, ki_records)
-                if ki_record is not None:
-                    ki_weight = self._smooth_step_weight(
+            elif discrete_ki_record is not None and not ki_applied_jointly:
+                ki_record = discrete_ki_record
+                for i in range(len(v_out_list)):
+                    v_out_list[i] = self._blend_ki_transition(
+                        v_out_list[i],
+                        v_in_list[i],
                         grid,
+                        spot_grid,
                         ki_record.barrier,
                         spot,
                         smoothing_width,
-                        trigger_is_down=not product.is_reverse,
+                        product.is_reverse,
+                        ko_weight=(
+                            ko_weight if not disable_ko_after_ki else None
+                        ),
                     )
-                    if ki_weight is None:
-                        ki_mask = (
-                            spot_grid >= ki_record.barrier
-                            if product.is_reverse
-                            else spot_grid <= ki_record.barrier
-                        )
-                        ki_weight = ki_mask.astype(float)
-                    if ko_weight is not None and not disable_ko_after_ki:
-                        ki_weight = ki_weight * (1.0 - ko_weight)
-                    for i in range(len(v_out_list)):
-                        v_out_list[i] = (1.0 - ki_weight) * v_out_list[i] + ki_weight * v_in_list[i]
 
             # Diffusion Step
             tau_step = float(tau[step_index])
@@ -540,15 +567,10 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         # the first KO), not the KI bridge. The smoothed weights below — the same
         # ones price() uses — close it (coupon probability to within ~0.6% of MC).
         # See spec 2026-07-01.
-        pay_w = self._smooth_step_weight(
+        pay_w = self._event_weight(
             math_utils.grid, barrier, math_utils.spot, smoothing_width,
             trigger_is_down=product.is_reverse,
         )
-        if pay_w is None:
-            pay_mask = (
-                spot_grid <= barrier if product.is_reverse else spot_grid >= barrier
-            )
-            pay_w = pay_mask.astype(float)
         v_out[coup_row] = pay_w
         v_in[coup_row] = pay_w
 
@@ -595,6 +617,114 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
     def __repr__(self):
         return "PhoenixQuadEngine()"
+
+    @staticmethod
+    def _project_joint_phoenix_event(
+        *,
+        grid: np.ndarray,
+        spot: float,
+        is_reverse: bool,
+        coupon_barrier: float,
+        ko_barrier: Optional[float],
+        ki_barrier: Optional[float],
+        val_miss_out: np.ndarray,
+        val_pay_out: np.ndarray,
+        val_miss_in: np.ndarray,
+        val_pay_in: np.ndarray,
+        ko_value_without_coupon: float,
+        ko_value_with_coupon: float,
+        disable_ko_after_ki: bool,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """One-pass dual-cell projection of a Phoenix observation.
+
+        Coupon, KO, and an optional coincident discrete-KI transition are
+        resolved as one piecewise function. This avoids sequentially averaging
+        the same threshold cell and preserves the contractual precedence:
+        ordinary KO overrides KI; when KO is disabled after KI, a simultaneous
+        KI transition enters the already-KI continuation instead.
+        """
+        thresholds = [float(coupon_barrier)]
+        if ko_barrier is not None:
+            thresholds.append(float(ko_barrier))
+        if ki_barrier is not None:
+            thresholds.append(float(ki_barrier))
+        breaks = sorted(
+            {
+                safe_log(level / float(spot))
+                for level in thresholds
+                if level > 0.0
+            }
+        )
+
+        def region_samples() -> list[float]:
+            if not breaks:
+                return [0.0]
+            samples = [breaks[0] - 1.0]
+            samples.extend(
+                0.5 * (left + right)
+                for left, right in zip(breaks[:-1], breaks[1:])
+            )
+            samples.append(breaks[-1] + 1.0)
+            return samples
+
+        coupon_log = safe_log(float(coupon_barrier) / float(spot))
+        ko_log = (
+            safe_log(float(ko_barrier) / float(spot))
+            if ko_barrier is not None
+            else None
+        )
+        ki_log = (
+            safe_log(float(ki_barrier) / float(spot))
+            if ki_barrier is not None
+            else None
+        )
+
+        out_branches = []
+        in_branches = []
+        for sample in region_samples():
+            coupon_hit = sample <= coupon_log if is_reverse else sample >= coupon_log
+            ko_hit = (
+                (sample <= ko_log if is_reverse else sample >= ko_log)
+                if ko_log is not None
+                else False
+            )
+            ki_hit = (
+                (sample >= ki_log if is_reverse else sample <= ki_log)
+                if ki_log is not None
+                else False
+            )
+
+            continue_out = val_pay_out if coupon_hit else val_miss_out
+            continue_in = val_pay_in if coupon_hit else val_miss_in
+            ko_value = (
+                ko_value_with_coupon
+                if coupon_hit
+                else ko_value_without_coupon
+            )
+
+            if ko_hit and not disable_ko_after_ki:
+                branch_in = ko_value
+            else:
+                branch_in = continue_in
+
+            if ko_hit:
+                branch_out = (
+                    continue_in
+                    if disable_ko_after_ki and ki_hit
+                    else ko_value
+                )
+            elif ki_hit:
+                branch_out = continue_in
+            else:
+                branch_out = continue_out
+
+            out_branches.append(branch_out)
+            in_branches.append(branch_in)
+
+        return (
+            project_piecewise_event(grid, breaks, out_branches),
+            project_piecewise_event(grid, breaks, in_branches),
+        )
 
     def _select_alignment_log(
         self,
@@ -685,4 +815,3 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         if cells <= 0:
             return 0.0
         return float(cells) * float(math_utils.h)
-
