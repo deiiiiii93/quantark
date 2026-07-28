@@ -71,10 +71,12 @@ def test_single_product_summary_is_stable(single_summary):
     # These are the characterization anchors for the Task 1.2 refactor.
     # Re-pinned 2026-07-24: hedge deltas now use BumpConfig's documented 1%
     # spot bump (deprecated EngineParams.bump_size=1e-4 shim retired).
+    # Re-pinned 2026-07-28: QUAD autocallable defaults now use phase-stable
+    # trapezoid integration and cell-average event projection.
     assert single_summary["num_days"] == 86
     assert single_summary["num_trades"] == 5
     assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
-    assert single_summary["total_pnl"] == pytest.approx(-3417.8369450558384, rel=1e-9)
+    assert single_summary["total_pnl"] == pytest.approx(-3342.531116780636, rel=1e-9)
 
 
 def test_book_config_rejects_empty_products():
