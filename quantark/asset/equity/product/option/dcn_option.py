@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import validate_positive
@@ -53,6 +55,7 @@ class DCNOption(BaseEquityProduct):
         schedule: DCNSchedule,
         settlement_date: datetime,
         knocked_in_at_valuation: bool = False,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         self.notional = float(notional)
         self.initial_price = float(initial_price)
@@ -69,6 +72,7 @@ class DCNOption(BaseEquityProduct):
         self.schedule = schedule
         self.settlement_date = settlement_date
         self.knocked_in_at_valuation = bool(knocked_in_at_valuation)
+        self.settlement_convention = settlement_convention
         self.validate()
 
     # -- derived levels (ratios are the inputs; levels never independent) --
@@ -124,6 +128,13 @@ class DCNOption(BaseEquityProduct):
         )
 
     def validate(self) -> None:
+        if (
+            self.settlement_convention is not None
+            and not isinstance(self.settlement_convention, SettlementConvention)
+        ):
+            raise ValidationError(
+                "settlement_convention must be SettlementConvention or None"
+            )
         validate_positive(self.notional, "notional")
         validate_positive(self.initial_price, "initial_price")
         validate_positive(self.participation, "participation")

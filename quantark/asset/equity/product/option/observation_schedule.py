@@ -4,12 +4,23 @@ Observation schedule structures for barrier-like products.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from math import isclose
+from math import isclose, isfinite
+from types import SimpleNamespace
 from typing import List, Optional, TYPE_CHECKING
 from copy import deepcopy
 
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementConvention,
+    SettlementRequest,
+    SettlementResolver,
+)
 from quantark.util.enum import ObservationAggregation, TenorEnd, ObservationFrequency
-from quantark.util.calendar import DayCountConvention
+from quantark.util.calendar import (
+    DayCountConvention,
+    calculate_day_count_fraction,
+    calculate_year_fraction,
+)
 from quantark.util.exceptions import ValidationError
 
 if TYPE_CHECKING:
@@ -17,14 +28,6 @@ if TYPE_CHECKING:
 
 # Type alias for cleaner signatures
 PricingEnv = Optional["PricingEnvironment"]
-
-
-try:
-    from quantark.util.calendar import calculate_year_fraction, calculate_day_count_fraction
-except ImportError:
-    # Fallback for environments where calendar utilities are unavailable at import time.
-    calculate_year_fraction = None
-    calculate_day_count_fraction = None
 
 
 @dataclass
@@ -58,6 +61,7 @@ class ObservationRecord:
     day_count_convention: Optional[DayCountConvention] = None
     tenor_end: Optional[TenorEnd] = None
     day_count_fraction: Optional[float] = None
+    settlement_time: Optional[float] = None
 
     def resolve_time(self, pricing_env: PricingEnv) -> float:
         """Resolve observation time to a year fraction.
@@ -211,6 +215,8 @@ class ResolvedObservationRecord:
     lower_barrier: Optional[float] = None
     payoff: float = 0.0
     settlement_time: Optional[float] = None
+    observation_date: Optional[datetime] = None
+    settlement_date: Optional[datetime] = None
 
 
 @dataclass
@@ -273,6 +279,9 @@ class ObservationSchedule:
                     continue
                 rec_copy.observation_time = adjusted_time
 
+            if getattr(rec_copy, "settlement_time", None) is not None:
+                rec_copy.settlement_time -= time_bump
+
             updated_records.append(rec_copy)
 
         if not updated_records:
@@ -293,41 +302,60 @@ class ObservationSchedule:
         default_payoff: float = 0.0,
         require_single: bool = False,
         require_double: bool = False,
+        product=None,
+        settlement_convention: Optional[SettlementConvention] = None,
     ) -> List[ResolvedObservationRecord]:
         """
         Resolve records to concrete numeric times and defaults.
         Payoff calculation is delegated to ObservationRecord.get_payoff().
         """
+        if product is not None and settlement_convention is not None:
+            raise ValidationError(
+                "provide either product or settlement_convention, not both"
+            )
+        if settlement_convention is not None and not isinstance(
+            settlement_convention, SettlementConvention
+        ):
+            raise ValidationError(
+                "settlement_convention must be SettlementConvention or None"
+            )
+
+        settlement_context = product
+        if settlement_context is None:
+            settlement_context = SimpleNamespace(
+                settlement_date=None,
+                settlement_convention=settlement_convention,
+            )
+
         self.validate(require_single=require_single, require_double=require_double)
 
         resolved: List[ResolvedObservationRecord] = []
         times: List[float] = []
 
-        for rec in self.records:
-            # Resolve observation time
-            t = rec.resolve_time(pricing_env)
+        for index, rec in enumerate(self.records):
+            request = SettlementRequest(
+                kind=CashflowKind.OBSERVATION,
+                determination_date=rec.observation_date,
+                determination_time=rec.observation_time,
+                explicit_payment_date=rec.settlement_date,
+                explicit_payment_time=rec.settlement_time,
+                cashflow_id=f"observation[{index}]",
+            )
+            if pricing_env is None:
+                timing = self._resolve_numeric_without_environment(
+                    settlement_context, request
+                )
+            else:
+                timing = SettlementResolver.resolve_contingent(
+                    settlement_context,
+                    request,
+                    pricing_env,
+                )
+            t = timing.determination_time
             times.append(t)
 
             # Get payoff using the record's get_payoff method
             payoff_value = rec.get_payoff(default_payoff, pricing_env)
-
-            # Resolve settlement time
-            settlement_t: Optional[float] = None
-            if rec.settlement_date is not None and calculate_year_fraction is not None:
-                try:
-                    settlement_t = calculate_year_fraction(
-                        pricing_env.valuation_date,
-                        rec.settlement_date,
-                        pricing_env.day_count_convention,
-                        pricing_env.bus_days_in_year,
-                        calendar=getattr(pricing_env, "calendar", None),
-                    )
-                except Exception:
-                    # If calculation fails, default to observation time
-                    settlement_t = t
-            else:
-                # Default: settlement at observation time
-                settlement_t = t
 
             resolved.append(
                 ResolvedObservationRecord(
@@ -336,13 +364,73 @@ class ObservationSchedule:
                     upper_barrier=rec.upper_barrier if rec.upper_barrier is not None else default_upper,
                     lower_barrier=rec.lower_barrier if rec.lower_barrier is not None else default_lower,
                     payoff=payoff_value,
-                    settlement_time=settlement_t,
+                    settlement_time=timing.payment_time,
+                    observation_date=timing.determination_date,
+                    settlement_date=timing.payment_date,
                 )
             )
 
         if times and not self._is_sorted(times):
             raise ValidationError("Observation records must be ordered by resolved observation time.")
         return resolved
+
+    @staticmethod
+    def _resolve_numeric_without_environment(product, request):
+        """Retain the legacy numeric-only schedule helper contract.
+
+        This path exists for product-level payoff-profile helpers that do not
+        consume discount factors. Date conversion and non-zero lag derivation
+        still require a real PricingEnvironment and fail closed here.
+        """
+        if (
+            request.determination_date is not None
+            or request.explicit_payment_date is not None
+        ):
+            raise ValidationError(
+                "PricingEnvironment is required to resolve settlement dates"
+            )
+
+        convention = getattr(product, "settlement_convention", None)
+        if convention is not None and not isinstance(
+            convention, SettlementConvention
+        ):
+            raise ValidationError(
+                "product settlement_convention must be SettlementConvention"
+            )
+        if convention is not None and convention.lag != 0.0:
+            raise ValidationError(
+                "PricingEnvironment is required to resolve a settlement convention"
+            )
+
+        try:
+            determination_time = float(request.determination_time)
+            payment_time = (
+                determination_time
+                if request.explicit_payment_time is None
+                else float(request.explicit_payment_time)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                "numeric-only observation resolution requires numeric times"
+            ) from exc
+        if not isfinite(determination_time) or not isfinite(payment_time):
+            raise ValidationError(
+                "observation and settlement times must be finite"
+            )
+        if determination_time < 0.0:
+            raise ValidationError("observation time must be non-negative")
+        if payment_time < determination_time:
+            raise ValidationError(
+                "payment is before determination "
+                f"({payment_time:.12g} < {determination_time:.12g})"
+            )
+
+        return SimpleNamespace(
+            determination_time=determination_time,
+            determination_date=None,
+            payment_time=payment_time,
+            payment_date=None,
+        )
 
     def ensure_regular_frequency(
         self,

@@ -10,6 +10,7 @@ from typing import Optional, List
 from datetime import datetime
 from ..base_equity_product import BaseEquityProduct
 from .observation_schedule import ObservationRecord, ObservationSchedule
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.enum import (
     BarrierDirection,
     ObservationType,
@@ -52,6 +53,7 @@ class OneTouchOption(BaseEquityProduct):
     observation_schedule: Optional[ObservationSchedule] = None
     exercise_date: Optional[datetime] = None
     settlement_date: Optional[datetime] = None
+    settlement_convention: Optional[SettlementConvention] = None
 
     def __init__(
         self,
@@ -66,6 +68,7 @@ class OneTouchOption(BaseEquityProduct):
         observation_type: ObservationType = ObservationType.CONTINUOUS,
         observation_dates: Optional[List[float]] = None,
         observation_schedule: Optional[ObservationSchedule] = None,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize one-touch option.
@@ -102,6 +105,7 @@ class OneTouchOption(BaseEquityProduct):
         self.observation_schedule = observation_schedule
         self.exercise_date = exercise_date
         self.settlement_date = settlement_date
+        self.settlement_convention = settlement_convention
 
         self.validate()
 
@@ -125,6 +129,13 @@ class OneTouchOption(BaseEquityProduct):
 
         if not isinstance(self.touch_type, TouchType):
             raise ValidationError(f"Invalid touch type: {self.touch_type}")
+        if (
+            self.settlement_convention is not None
+            and not isinstance(self.settlement_convention, SettlementConvention)
+        ):
+            raise ValidationError(
+                "settlement_convention must be SettlementConvention or None"
+            )
 
         # Validate maturity
         has_dates = self.exercise_date is not None
@@ -155,6 +166,14 @@ class OneTouchOption(BaseEquityProduct):
                         barrier=rec.barrier if rec.barrier is not None else self.barrier,
                         payoff=rec.payoff if rec.payoff is not None else self.rebate,
                         return_rate=rec.return_rate,
+                        is_rate_annualized=rec.is_rate_annualized,
+                        initial_date=rec.initial_date,
+                        settlement_date=rec.settlement_date,
+                        settlement_time=rec.settlement_time,
+                        maturity_date=rec.maturity_date,
+                        day_count_convention=rec.day_count_convention,
+                        tenor_end=rec.tenor_end,
+                        day_count_fraction=rec.day_count_fraction,
                     )
                     for rec in self.observation_schedule.records
                 ],

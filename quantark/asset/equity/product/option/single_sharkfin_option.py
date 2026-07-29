@@ -26,6 +26,7 @@ from quantark.util.numerical import is_close
 
 from .base_equity_option import BaseEquityOption
 from .observation_schedule import ObservationRecord, ObservationSchedule
+from quantark.asset.equity.settlement import SettlementConvention
 
 
 @dataclass
@@ -97,6 +98,7 @@ class SingleSharkfinOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize a single sharkfin option.
@@ -149,6 +151,7 @@ class SingleSharkfinOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     def validate(self) -> None:
@@ -229,6 +232,7 @@ class SingleSharkfinOption(BaseEquityOption):
                         is_rate_annualized=rec.is_rate_annualized,
                         initial_date=rec.initial_date,
                         settlement_date=rec.settlement_date,
+                        settlement_time=rec.settlement_time,
                         maturity_date=rec.maturity_date,
                         day_count_convention=rec.day_count_convention,
                         tenor_end=rec.tenor_end,

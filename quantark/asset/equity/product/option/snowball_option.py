@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from quantark.asset.equity.product.option.base_equity_option import BaseEquityOption
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import (
@@ -141,6 +142,7 @@ class SnowballOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize Snowball option.
@@ -208,6 +210,7 @@ class SnowballOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     def validate(self) -> None:
@@ -967,6 +970,7 @@ class SnowballOption(BaseEquityOption):
             default_barrier=default_barrier,
             default_payoff=0.0,
             require_single=True,
+            product=self,
         )
 
         annualized_ko = self._effective_annualized_flag(
@@ -1053,6 +1057,8 @@ class SnowballOption(BaseEquityOption):
                     barrier=rec.barrier,
                     payoff=payoff,
                     settlement_time=settlement_time,
+                    observation_date=rec.observation_date,
+                    settlement_date=rec.settlement_date,
                 )
             )
         return ko_records
@@ -1087,6 +1093,7 @@ class SnowballOption(BaseEquityOption):
             default_barrier=default_barrier,
             default_payoff=0.0,
             require_single=True,
+            product=self,
         )
 
         return [
@@ -1095,6 +1102,8 @@ class SnowballOption(BaseEquityOption):
                 barrier=rec.barrier,
                 payoff=0.0,
                 settlement_time=rec.settlement_time,
+                observation_date=rec.observation_date,
+                settlement_date=rec.settlement_date,
             )
             for rec in resolved_schedule
         ]

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import OptionType, ExerciseType, TenorEnd
 from quantark.util.exceptions import ValidationError
@@ -37,6 +38,7 @@ class EuropeanVanillaOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize European vanilla option.
@@ -71,6 +73,7 @@ class EuropeanVanillaOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     def get_payoff(self, spot: float) -> float:

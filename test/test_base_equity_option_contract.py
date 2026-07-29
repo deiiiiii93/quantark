@@ -26,6 +26,10 @@ from quantark.asset.equity.product.option import (
     SnowballOption,
 )
 from quantark.util.calendar import DayCountConvention
+from quantark.asset.equity.settlement import (
+    SettlementConvention,
+    SettlementLagUnit,
+)
 from quantark.util.enum import (
     BarrierType,
     DoubleBarrierType,
@@ -61,6 +65,7 @@ LIFECYCLE_PARAMETERS = {
     "tenor_end",
     "annualization_day_count",
     "contract_multiplier",
+    "settlement_convention",
 }
 
 
@@ -140,6 +145,10 @@ def _shared_lifecycle_kwargs():
         "tenor_end": TenorEnd.MATURITY,
         "annualization_day_count": DayCountConvention.ACT_365,
         "contract_multiplier": 2.0,
+        "settlement_convention": SettlementConvention(
+            lag=2 / 365,
+            lag_unit=SettlementLagUnit.YEAR_FRACTION,
+        ),
     }
 
 
@@ -213,6 +222,18 @@ def _barrier_config():
             coupon_config=CouponBarrierConfig(
                 coupon_barrier=85.0,
                 coupon_rate=0.01,
+            ),
+            **terms,
+        ),
+        lambda terms: KnockOutResetSnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=_barrier_config(),
+            post_barrier_config=BarrierConfig(
+                ko_barrier=101.0,
+                ko_rate=0.10,
+                ko_observation_type=ObservationType.DISCRETE,
+                ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
             ),
             **terms,
         ),

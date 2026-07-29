@@ -11,6 +11,7 @@ from typing import Optional
 from datetime import datetime
 
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
+from quantark.asset.equity.settlement import SettlementConvention
 from ..base_equity_product import BaseEquityProduct
 from quantark.util.enum import OptionType, ExerciseType, TenorEnd
 from quantark.util.exceptions import ValidationError
@@ -60,6 +61,7 @@ class BaseEquityOption(BaseEquityProduct):
     maturity: Optional[float] = None
     tenor_end: TenorEnd = TenorEnd.EXERCISE
     annualization_day_count: DayCountConvention = DayCountConvention.ACT_365
+    settlement_convention: Optional[SettlementConvention] = None
 
     # ==========================================================================
     # Type parameters
@@ -91,6 +93,7 @@ class BaseEquityOption(BaseEquityProduct):
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
         contract_multiplier: float = 1.0,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize base equity option.
@@ -110,6 +113,7 @@ class BaseEquityOption(BaseEquityProduct):
             tenor_end: Determines which date to use for tenor calculations
             annualization_day_count: Day count convention for year fractions
             contract_multiplier: Underlying units represented by one contract
+            settlement_convention: Optional contractual payment lag convention
         """
         # Normalize alternate term-sheet representations into the two canonical
         # pricing forms used by engines: a remaining year fraction (`maturity`)
@@ -134,6 +138,7 @@ class BaseEquityOption(BaseEquityProduct):
         self.tenor_end = tenor_end
         self.annualization_day_count = annualization_day_count
         self.contract_multiplier = contract_multiplier
+        self.settlement_convention = settlement_convention
 
         self.validate()
 
@@ -165,6 +170,7 @@ class BaseEquityOption(BaseEquityProduct):
         self._validate_types()
         self._validate_tenor_end()
         self._validate_contract_multiplier()
+        self._validate_settlement_convention()
 
     def _validate_strike(self) -> None:
         """Validate strike price is positive."""
@@ -176,6 +182,17 @@ class BaseEquityOption(BaseEquityProduct):
         if self.contract_multiplier <= 0:
             raise ValidationError(
                 f"Contract multiplier must be positive, got {self.contract_multiplier}"
+            )
+
+    def _validate_settlement_convention(self) -> None:
+        """Validate the optional contractual payment-lag convention."""
+        if (
+            self.settlement_convention is not None
+            and not isinstance(self.settlement_convention, SettlementConvention)
+        ):
+            raise ValidationError(
+                "settlement_convention must be SettlementConvention or None, "
+                f"got {type(self.settlement_convention).__name__}"
             )
 
     def _validate_maturity_dates(self) -> None:

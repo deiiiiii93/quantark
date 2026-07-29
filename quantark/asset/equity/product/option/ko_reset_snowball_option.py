@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Union
 
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.calendar.day_counter import DayCountConvention
 from quantark.util.enum import (
@@ -68,6 +69,7 @@ class KnockOutResetSnowballOption(SnowballOption):
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
         post_ko_mode: PostKOScheduleMode = PostKOScheduleMode.ABSOLUTE,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         self.post_barrier_config = post_barrier_config
         self.post_ko_mode = post_ko_mode
@@ -89,6 +91,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             maturity_date=maturity_date,
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
+            settlement_convention=settlement_convention,
         )
 
     def validate(self) -> None:
@@ -232,6 +235,7 @@ class KnockOutResetSnowballOption(SnowballOption):
             default_barrier=default_barrier,
             default_payoff=0.0,
             require_single=True,
+            product=self,
         )
 
         rates: List[float] = []

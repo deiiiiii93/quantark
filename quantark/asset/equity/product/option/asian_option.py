@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 import numpy as np
 
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import (
     OptionType,
@@ -171,6 +172,7 @@ class AsianOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize Asian option.
@@ -220,6 +222,7 @@ class AsianOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     def validate(self) -> None:

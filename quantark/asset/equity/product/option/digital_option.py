@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import OptionType, ExerciseType, TenorEnd
 from quantark.util.exceptions import ValidationError
@@ -36,6 +37,7 @@ class CashOrNothingDigitalOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize cash-or-nothing digital option.
@@ -67,6 +69,7 @@ class CashOrNothingDigitalOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     def validate(self) -> None:

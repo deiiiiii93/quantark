@@ -10,6 +10,7 @@ from typing import Optional, List
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
 from .observation_schedule import ObservationRecord, ObservationSchedule
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import (
     OptionType,
@@ -74,6 +75,7 @@ class DoubleBarrierOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize double barrier option.
@@ -116,6 +118,7 @@ class DoubleBarrierOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     def validate(self) -> None:
@@ -181,6 +184,14 @@ class DoubleBarrierOption(BaseEquityOption):
                         lower_barrier=rec.lower_barrier if rec.lower_barrier is not None else self.lower_barrier,
                         payoff=rec.payoff if rec.payoff is not None else self.rebate,
                         return_rate=rec.return_rate,
+                        is_rate_annualized=rec.is_rate_annualized,
+                        initial_date=rec.initial_date,
+                        settlement_date=rec.settlement_date,
+                        maturity_date=rec.maturity_date,
+                        day_count_convention=rec.day_count_convention,
+                        tenor_end=rec.tenor_end,
+                        day_count_fraction=rec.day_count_fraction,
+                        settlement_time=rec.settlement_time,
                     )
                     for rec in self.observation_schedule.records
                 ],

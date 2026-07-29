@@ -2,6 +2,11 @@
 Equity option products.
 """
 
+from quantark.asset.equity.settlement import (
+    SettlementConvention,
+    SettlementLagUnit,
+)
+
 from .base_equity_option import BaseEquityOption
 from .european_vanilla_option import EuropeanVanillaOption
 from .american_option import AmericanOption
@@ -72,6 +77,8 @@ __all__ = [
     "ObservationRecord",
     "ObservationSchedule",
     "ResolvedObservationRecord",
+    "SettlementConvention",
+    "SettlementLagUnit",
     "SnowballOption",
     "KnockOutResetSnowballOption",
     "BarrierConfig",

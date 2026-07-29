@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import ExerciseType, OptionType, TenorEnd
 from quantark.util.exceptions import ValidationError
@@ -72,6 +73,7 @@ class RangeAccrualOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize Range Accrual option.
@@ -108,6 +110,7 @@ class RangeAccrualOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     def validate(self) -> None:
@@ -123,6 +126,7 @@ class RangeAccrualOption(BaseEquityOption):
         self._validate_types()
         self._validate_tenor_end()
         self._validate_contract_multiplier()
+        self._validate_settlement_convention()
         self._validate_range_accrual_parameters()
 
     def _validate_range_accrual_parameters(self) -> None:

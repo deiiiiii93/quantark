@@ -23,6 +23,7 @@ from datetime import datetime
 from math import ceil
 from typing import List, Optional, Sequence, Tuple
 
+from quantark.asset.equity.settlement import SettlementConvention
 from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import (
     AccumulatorKnockOutType,
@@ -115,6 +116,7 @@ class AccumulatorOption(BaseEquityOption):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
+        settlement_convention: Optional[SettlementConvention] = None,
     ):
         """
         Initialize an accumulator option.
@@ -187,6 +189,7 @@ class AccumulatorOption(BaseEquityOption):
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
+            settlement_convention=settlement_convention,
         )
 
     # ------------------------------------------------------------------
