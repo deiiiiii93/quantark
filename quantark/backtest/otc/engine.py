@@ -27,7 +27,7 @@ from .state import (
     AutocallableLifecycleState,
     FuturesHedgePosition,
 )
-from .vol_calibrators import VolModelCalibrator
+from quantark.volmodels.calibration import VolModelCalibrator
 
 
 class AutocallableBacktestEngine:

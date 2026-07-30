@@ -47,7 +47,7 @@ from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
 from .config import AutocallableEngineConfig
-from .vol_calibrators import CalibratedVolModel
+from quantark.volmodels.calibration import CalibratedVolModel
 
 
 def _create_analytical_engine(product: Any, config: AutocallableEngineConfig) -> BaseEngine:

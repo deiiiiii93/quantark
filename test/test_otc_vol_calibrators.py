@@ -859,3 +859,4 @@ class TestVolModelMcMethodSlot:
         )
         with pytest.raises(ValidationError, match="Invalid method type"):
             create_pricing_engine(product, config)
+

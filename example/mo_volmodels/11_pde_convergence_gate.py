@@ -69,7 +69,7 @@ from quantark.asset.equity.product.option.snowball_helpers import (
     create_standard_snowball,
 )
 from quantark.backtest.otc.config import VolModelCalibrationConfig
-from quantark.backtest.otc.vol_calibrators import (
+from quantark.volmodels.calibration import (
     VOL_MODEL_HESTON,
     VOL_MODEL_HESTON_SLV,
     VolModelCalibrator,

@@ -42,7 +42,7 @@ from .state import (
     AutocallableLifecycleState,
     FuturesHedgePosition,
 )
-from .vol_calibrators import CalibratedVolModel, VolModelCalibrator
+from quantark.volmodels.calibration import CalibratedVolModel, VolModelCalibrator
 from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
 
 __all__ = [

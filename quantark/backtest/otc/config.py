@@ -14,7 +14,7 @@ from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
 from .market import AutocallableMarketDataSet
-from .vol_calibrators import HESTON_PRESETS
+from quantark.volmodels.calibration import HESTON_PRESETS
 
 
 @dataclass
