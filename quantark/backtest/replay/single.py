@@ -76,11 +76,11 @@ class AutocallableBacktestEngine:
 
     @property
     def pricing_engine(self):
-        return self._inner._replays[0].pricing_engine
+        return self._inner._pricing_engines[0]
 
     @pricing_engine.setter
     def pricing_engine(self, engine) -> None:
-        self._inner._replays[0].pricing_engine = engine
+        self._inner._pricing_engines[0] = engine
 
     @property
     def lifecycle(self):
@@ -94,9 +94,16 @@ class AutocallableBacktestEngine:
     def hedge_position(self):
         return self._inner.hedge_position
 
-    def _calculate_greeks(self, product, env, price):
-        """Legacy passthrough (tests exercise per-day greeks directly)."""
-        return self._inner._replays[0].calculate_greeks(product, env, price)
+    def _calculate_greeks(self, product, env, price=None):
+        """Legacy passthrough (tests exercise per-day greeks directly).
+
+        ``price`` is accepted for signature compatibility; the engine
+        recomputes its own base price (identical for deterministic engines).
+        """
+        del price
+        return self._inner._replays[0].calculate_greeks(
+            product, env, engine=self.pricing_engine
+        )
 
     # ------------------------------------------------------------------
 

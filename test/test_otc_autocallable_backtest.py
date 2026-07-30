@@ -13,7 +13,13 @@ from quantark.asset.equity.engine.pde import GridConfig
 from quantark.asset.equity.engine.pde_engine import PDEEngine
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
-from quantark.asset.equity.param import EngineParams, MCParams, PDEParams, QuadParams
+from quantark.asset.equity.param import (
+    BumpConfig,
+    EngineParams,
+    MCParams,
+    PDEParams,
+    QuadParams,
+)
 from quantark.asset.equity.product.option import (
     create_standard_phoenix,
     create_standard_snowball,
@@ -112,8 +118,8 @@ def _market_data() -> AutocallableMarketDataSet:
 
 
 class QuadraticRecordingEngine(BaseEngine):
-    def __init__(self) -> None:
-        super().__init__(EngineParams(bump_size=0.001))
+    def __init__(self, params: EngineParams | None = None) -> None:
+        super().__init__(params or EngineParams(bump_size=0.001))
         self.spot_calls: list[float] = []
 
     def price(self, product, pricing_env: PricingEnvironment) -> float:
@@ -202,7 +208,12 @@ def test_gamma_bump_config_is_independent_from_delta_bump():
         calculate_event_probabilities=False,
     )
     backtest = AutocallableBacktestEngine(config)
-    recording_engine = QuadraticRecordingEngine()
+    # Post-consolidation contract: bump sizes live on the ENGINE's BumpConfig
+    # (config-level overrides flow into factory-built engines; an injected
+    # engine carries its own). The engine reprices its own base (100.0 first).
+    recording_engine = QuadraticRecordingEngine(
+        EngineParams(bump_config=BumpConfig(spot_bump=0.001, gamma_spot_bump=0.01))
+    )
     backtest.pricing_engine = recording_engine
     env = PricingEnvironment(
         spot_quote=SpotQuote(spot=100.0, asset_name="CSI500"),
@@ -217,8 +228,18 @@ def test_gamma_bump_config_is_independent_from_delta_bump():
     assert greeks["delta"] == pytest.approx(200.0)
     assert greeks["gamma"] == pytest.approx(2.0)
     assert recording_engine.spot_calls == pytest.approx(
-        [100.1, 99.9, 101.0, 99.0]
+        [100.0, 100.1, 99.9, 101.0, 99.0]
     )
+
+    # Config-level overrides reach engines the factory builds.
+    factory_engine = create_pricing_engine(
+        product,
+        config.engine_config,
+        delta_bump_size=config.delta_bump_size,
+        gamma_bump_size=config.gamma_bump_size,
+    )
+    factory_bumps = factory_engine.params.get_effective_bump_config()
+    assert factory_bumps.gamma_spot_bump == pytest.approx(0.01)
 
 
 def test_delta_hedge_contract_sizing_uses_futures_multiplier():

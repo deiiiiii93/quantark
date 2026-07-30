@@ -69,6 +69,29 @@ def _create_analytical_engine(product: Any, config: AutocallableEngineConfig) ->
     raise ValidationError(f"Unsupported analytical product type: {type(product).__name__}")
 
 
+def _apply_bump_overrides(engine, delta_bump_size, gamma_bump_size):
+    """Translate per-run bump overrides into the engine's own BumpConfig.
+
+    The replay never bumps by hand (spec §7): overrides land on a COPY of the
+    engine's params so shared params objects (config.pde_params reused across
+    products) are never mutated.
+    """
+    if delta_bump_size is None and gamma_bump_size is None:
+        return engine
+    from dataclasses import replace
+
+    from quantark.asset.equity.param import BumpConfig
+
+    base = engine.params.get_effective_bump_config()
+    spot = float(delta_bump_size) if delta_bump_size is not None else base.spot_bump
+    gamma = float(gamma_bump_size) if gamma_bump_size is not None else None
+    engine.params = replace(
+        engine.params,
+        bump_config=replace(base, spot_bump=spot, gamma_spot_bump=gamma),
+    )
+    return engine
+
+
 def create_autocallable_engine(
     *,
     product: Any,
@@ -111,12 +134,19 @@ def create_autocallable_engine(
     raise ValidationError(f"Unsupported engine type: {engine_type}")
 
 
-def create_pricing_engine(product: Any, config: AutocallableEngineConfig) -> BaseEngine:
-    return create_autocallable_engine(
+def create_pricing_engine(
+    product: Any,
+    config: AutocallableEngineConfig,
+    *,
+    delta_bump_size: float | None = None,
+    gamma_bump_size: float | None = None,
+) -> BaseEngine:
+    engine = create_autocallable_engine(
         product=product,
         engine_type=config.pricing_engine_type,
         config=config,
     )
+    return _apply_bump_overrides(engine, delta_bump_size, gamma_bump_size)
 
 
 def create_surface_engine(product: Any, config: AutocallableEngineConfig) -> BaseEngine:
@@ -158,6 +188,8 @@ def create_vol_model_engine(
     mc_params: Optional[MCParams] = None,
     mc_method: Any = None,
     engine_options: Optional[dict] = None,
+    delta_bump_size: Optional[float] = None,
+    gamma_bump_size: Optional[float] = None,
 ) -> BaseEngine:
     """Create a snowball engine wired to a per-day calibrated vol model.
 
@@ -191,17 +223,17 @@ def create_vol_model_engine(
                     "vol_model='localvol' requires calibrated.local_vol_surface"
                 )
             if solver == "pde":
-                return LocalVolSnowballPDESolver(
+                return _apply_bump_overrides(LocalVolSnowballPDESolver(
                     params=pde_params or PDEParams(),
                     local_vol_surface=calibrated.local_vol_surface,
                     **options,
-                )
-            return LocalVolSnowballMCEngine(
+                ), delta_bump_size, gamma_bump_size)
+            return _apply_bump_overrides(LocalVolSnowballMCEngine(
                 params=mc_params or MCParams(),
                 method=mc_method,
                 local_vol_surface=calibrated.local_vol_surface,
                 **options,
-            )
+            ), delta_bump_size, gamma_bump_size)
 
         if vol_model == "heston":
             if calibrated.heston_params is None:
@@ -209,17 +241,17 @@ def create_vol_model_engine(
                     "vol_model='heston' requires calibrated.heston_params"
                 )
             if solver == "pde":
-                return HestonSnowballPDESolver(
+                return _apply_bump_overrides(HestonSnowballPDESolver(
                     model_params=calibrated.heston_params,
                     params=pde_params or PDEParams(),
                     **options,
-                )
-            return HestonSnowballMCEngine(
+                ), delta_bump_size, gamma_bump_size)
+            return _apply_bump_overrides(HestonSnowballMCEngine(
                 model_params=calibrated.heston_params,
                 params=mc_params or MCParams(),
                 method=mc_method,
                 **options,
-            )
+            ), delta_bump_size, gamma_bump_size)
 
         if vol_model == "heston_slv":
             if calibrated.heston_params is None or calibrated.leverage_surface is None:
@@ -231,21 +263,21 @@ def create_vol_model_engine(
                 calibrated.slv_eta if calibrated.slv_eta is not None else 1.0
             )
             if solver == "pde":
-                return HestonSLVSnowballPDESolver(
+                return _apply_bump_overrides(HestonSLVSnowballPDESolver(
                     model_params=calibrated.heston_params,
                     leverage_surface=calibrated.leverage_surface,
                     eta=eta,
                     params=pde_params or PDEParams(),
                     **options,
-                )
-            return HestonSLVQESnowballMCEngine(
+                ), delta_bump_size, gamma_bump_size)
+            return _apply_bump_overrides(HestonSLVQESnowballMCEngine(
                 model_params=calibrated.heston_params,
                 params=mc_params or MCParams(),
                 leverage_surface=calibrated.leverage_surface,
                 eta=eta,
                 method=mc_method,
                 **options,
-            )
+            ), delta_bump_size, gamma_bump_size)
     except TypeError as exc:
         raise ValidationError(
             f"Invalid vol_model_engine_options for ({vol_model!r}, {solver!r}): {exc}"

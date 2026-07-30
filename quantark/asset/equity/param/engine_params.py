@@ -77,6 +77,10 @@ class BumpConfig:
     # Spot bump (relative) - for delta/gamma
     spot_bump: float = 0.01
 
+    # Optional separate relative bump for the gamma second difference;
+    # None means gamma reuses spot_bump (the default and common case).
+    gamma_spot_bump: Optional[float] = None
+
     # Volatility bump (absolute) - for vega
     vol_bump: float = 0.01
 
@@ -99,6 +103,16 @@ class BumpConfig:
             raise ValidationError(
                 f"spot_bump seems too large: {self.spot_bump} (max 10%)"
             )
+
+        if self.gamma_spot_bump is not None:
+            if self.gamma_spot_bump <= 0:
+                raise ValidationError(
+                    f"gamma_spot_bump must be positive, got {self.gamma_spot_bump}"
+                )
+            if self.gamma_spot_bump > 0.1:
+                raise ValidationError(
+                    f"gamma_spot_bump seems too large: {self.gamma_spot_bump} (max 10%)"
+                )
 
         # Vol bump: must be positive and reasonable
         if self.vol_bump <= 0:

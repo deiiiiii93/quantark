@@ -61,7 +61,6 @@ class ProductReplay:
         product_quantity: float,
         has_lifecycle: bool,
         lifecycle: Any,
-        pricing_engine: BaseEngine,
         surface_engine: BaseEngine,
         event_stats_engine: BaseEngine,
         engine_config: Any,
@@ -73,23 +72,18 @@ class ProductReplay:
         daily_event_sink: list[dict[str, Any]],
         surfaces_sink: list[dict[str, Any]],
         fixed_dividend_yield: Optional[float] = None,
-        delta_bump_size: Optional[float] = None,
-        gamma_bump_size: Optional[float] = None,
         surface_config: Any = None,
     ) -> None:
         self.product = product
         self.product_quantity = product_quantity
         self.has_lifecycle = has_lifecycle
         self.lifecycle = lifecycle
-        self.pricing_engine = pricing_engine
         self.surface_engine = surface_engine
         self.event_stats_engine = event_stats_engine
         self.engine_config = engine_config
         self.market_data = market_data
         self.underlying = underlying
         self.fixed_dividend_yield = fixed_dividend_yield
-        self.delta_bump_size = delta_bump_size
-        self.gamma_bump_size = gamma_bump_size
         self.surface_config = surface_config
 
         self.actions_sink = actions_sink
@@ -258,83 +252,16 @@ class ProductReplay:
         return float(implied_q)
 
     def calculate_greeks(
-        self, product: Any, env: PricingEnvironment, price: float
+        self, product: Any, env: PricingEnvironment, *, engine: BaseEngine
     ) -> dict[str, float]:
-        params = getattr(self.pricing_engine, "params", None)
-        uses_base_greeks = (
-            isinstance(self.pricing_engine, BaseEngine)
-            and type(self.pricing_engine).calculate_greeks is BaseEngine.calculate_greeks
-        )
-        engine_bump = 0.0
-        if params is not None:
-            get_cfg = getattr(params, "get_effective_bump_config", None)
-            if callable(get_cfg):
-                engine_bump = float(get_cfg().spot_bump)
-            else:
-                legacy = getattr(params, "bump_size", None)
-                engine_bump = float(legacy) if legacy is not None else 0.0
-        delta_bump = (
-            float(self.delta_bump_size)
-            if self.delta_bump_size is not None
-            else engine_bump
-        )
-        gamma_bump = (
-            float(self.gamma_bump_size)
-            if self.gamma_bump_size is not None
-            else engine_bump
-        )
-        if (
-            uses_base_greeks
-            and delta_bump > 0.0
-            and gamma_bump > 0.0
-            and np.isfinite(price)
-        ):
-            try:
-                spot = float(env.spot)
-                env_up = deepcopy(env)
-                env_up.spot_quote.spot *= 1.0 + delta_bump
-                delta_price_up = float(self.pricing_engine.price(product, env_up))
+        """Greeks via the engine's own method — native where the engine
+        overrides it, engine-side BumpConfig bumping otherwise.
 
-                env_down = deepcopy(env)
-                env_down.spot_quote.spot *= 1.0 - delta_bump
-                delta_price_down = float(self.pricing_engine.price(product, env_down))
-
-                delta_spot_bump = spot * delta_bump
-                delta = (delta_price_up - delta_price_down) / (
-                    2.0 * delta_spot_bump
-                )
-
-                if is_close(delta_bump, gamma_bump, rel_tol=1e-5, abs_tol=1e-8):
-                    gamma_price_up = delta_price_up
-                    gamma_price_down = delta_price_down
-                else:
-                    env_gamma_up = deepcopy(env)
-                    env_gamma_up.spot_quote.spot *= 1.0 + gamma_bump
-                    gamma_price_up = float(
-                        self.pricing_engine.price(product, env_gamma_up)
-                    )
-
-                    env_gamma_down = deepcopy(env)
-                    env_gamma_down.spot_quote.spot *= 1.0 - gamma_bump
-                    gamma_price_down = float(
-                        self.pricing_engine.price(product, env_gamma_down)
-                    )
-
-                gamma_spot_bump = spot * gamma_bump
-                gamma = (gamma_price_up - 2.0 * float(price) + gamma_price_down) / (
-                    gamma_spot_bump**2
-                )
-                return {"price": float(price), "delta": delta, "gamma": gamma}
-            except Exception:
-                pass
-        try:
-            greeks = dict(self.pricing_engine.calculate_greeks(product, env))
-        except Exception:
-            greeks = {"price": price, "delta": 0.0, "gamma": 0.0}
-        greeks.setdefault("price", price)
-        greeks.setdefault("delta", 0.0)
-        greeks.setdefault("gamma", 0.0)
-        return greeks
+        Fail-closed: an engine failure propagates. The pre-consolidation
+        silent ``delta=0.0`` fallback is deliberately gone — a zero-delta day
+        from a failed price manufactured phantom unwind trades.
+        """
+        return dict(engine.calculate_greeks(product, env))
 
     def record_surfaces(
         self,

@@ -84,9 +84,19 @@ class ReplayBacktestEngine:
 
         self._replays: list[ProductReplay] = []
         self._quantities: list[float] = []
+        # Pricing engines are resolved by the ENGINE and passed explicitly to
+        # every pricing call; vol-model days swap this list wholesale.
+        self._pricing_engines: list[Any] = []
         for bp in config.products:
             lifecycle = AutocallableLifecycleState()
-            pricing_engine = create_pricing_engine(bp.product, config.engine_config)
+            self._pricing_engines.append(
+                create_pricing_engine(
+                    bp.product,
+                    config.engine_config,
+                    delta_bump_size=config.delta_bump_size,
+                    gamma_bump_size=config.gamma_bump_size,
+                )
+            )
             surface_engine = create_surface_engine(bp.product, config.engine_config)
             event_stats_engine = create_event_stats_engine(
                 bp.product, config.engine_config
@@ -96,7 +106,6 @@ class ReplayBacktestEngine:
                 product_quantity=bp.quantity,
                 has_lifecycle=bp.has_lifecycle,
                 lifecycle=lifecycle,
-                pricing_engine=pricing_engine,
                 surface_engine=surface_engine,
                 event_stats_engine=event_stats_engine,
                 engine_config=config.engine_config,
@@ -104,8 +113,6 @@ class ReplayBacktestEngine:
                 start_date=None,
                 underlying=config.underlying,
                 fixed_dividend_yield=config.fixed_dividend_yield,
-                delta_bump_size=config.delta_bump_size,
-                gamma_bump_size=config.gamma_bump_size,
                 surface_config=config.surface_config,
                 actions_sink=self._actions,
                 event_prob_sink=self._event_probabilities,
@@ -178,12 +185,14 @@ class ReplayBacktestEngine:
             # mirroring the single engine's pre-lifecycle initial value.
             if self._initial_book_value is None:
                 initial_book_value = 0.0
-                for bp, replay in zip(self.config.products, self._replays):
+                for bp, replay, engine in zip(
+                    self.config.products, self._replays, self._pricing_engines
+                ):
                     if bp.initial_price is not None:
                         initial_price = float(bp.initial_price)
                     else:
                         product = replay.product_for_date(date, env)
-                        initial_price = float(replay.pricing_engine.price(product, env))
+                        initial_price = float(engine.price(product, env))
                     initial_book_value += float(bp.quantity) * initial_price
                 self._initial_book_value = initial_book_value
 
@@ -192,8 +201,9 @@ class ReplayBacktestEngine:
             book_product_mtm = 0.0
             book_cashflows = 0.0
 
-            for bp, quantity, replay in zip(
-                self.config.products, self._quantities, self._replays
+            for bp, quantity, replay, engine in zip(
+                self.config.products, self._quantities, self._replays,
+                self._pricing_engines,
             ):
                 lifecycle_product = replay.product_for_lifecycle()
                 replay.apply_lifecycle_events(
@@ -207,8 +217,8 @@ class ReplayBacktestEngine:
                 greeks: dict[str, float] = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
                 if replay.lifecycle.alive:
                     product = replay.product_for_date(date, env)
-                    price = float(replay.pricing_engine.price(product, env))
-                    greeks = replay.calculate_greeks(product, env, price)
+                    price = float(engine.price(product, env))
+                    greeks = replay.calculate_greeks(product, env, engine=engine)
                     if self.config.calculate_event_probabilities:
                         replay.record_event_probabilities(date, product, env)
                     if self.config.calculate_surfaces:
@@ -303,8 +313,8 @@ class ReplayBacktestEngine:
         engine_config = self.config.engine_config
         artifact = self.config.market_data.surface_history.surface_for(date)
         calibrated = self._calibrator.calibrate(engine_config.vol_model, artifact)
-        for replay in self._replays:
-            replay.pricing_engine = create_vol_model_engine(
+        self._pricing_engines = [
+            create_vol_model_engine(
                 vol_model=engine_config.vol_model,
                 solver=engine_config.vol_model_solver,
                 calibrated=calibrated,
@@ -312,7 +322,11 @@ class ReplayBacktestEngine:
                 mc_params=engine_config.mc_params,
                 mc_method=engine_config.resolve_vol_model_mc_method(),
                 engine_options=engine_config.vol_model_engine_options,
+                delta_bump_size=self.config.delta_bump_size,
+                gamma_bump_size=self.config.gamma_bump_size,
             )
+            for _ in self._replays
+        ]
         record = dict(calibrated.record)
         record["date"] = pd.Timestamp(date).date().isoformat()
         return record

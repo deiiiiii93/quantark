@@ -12,6 +12,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.util.enum.engine_enums import EngineType
+from quantark.util.numerical import is_close
 
 
 class BaseEngine(ABC):
@@ -130,7 +131,13 @@ class BaseEngine(ABC):
         """
         from copy import deepcopy
 
-        spot_bump = self.params.get_effective_bump_config().spot_bump
+        bump_config = self.params.get_effective_bump_config()
+        spot_bump = bump_config.spot_bump
+        gamma_bump = (
+            bump_config.gamma_spot_bump
+            if bump_config.gamma_spot_bump is not None
+            else spot_bump
+        )
         base_price = self.price(product, pricing_env)
         greeks = {"price": base_price}
 
@@ -146,9 +153,19 @@ class BaseEngine(ABC):
         delta = (price_up - price_down) / (2 * pricing_env.spot * spot_bump)
         greeks["delta"] = delta
 
-        # Gamma: d²V/dS²
-        gamma = (price_up - 2 * base_price + price_down) / (
-            pricing_env.spot * spot_bump
+        # Gamma: d²V/dS² — optionally on its own bump width
+        if is_close(gamma_bump, spot_bump, rel_tol=1e-5, abs_tol=1e-8):
+            gamma_up, gamma_down = price_up, price_down
+        else:
+            env_gup = deepcopy(pricing_env)
+            env_gup.spot_quote.spot *= 1 + gamma_bump
+            gamma_up = self.price(product, env_gup)
+
+            env_gdown = deepcopy(pricing_env)
+            env_gdown.spot_quote.spot *= 1 - gamma_bump
+            gamma_down = self.price(product, env_gdown)
+        gamma = (gamma_up - 2 * base_price + gamma_down) / (
+            pricing_env.spot * gamma_bump
         ) ** 2
         greeks["gamma"] = gamma
 
