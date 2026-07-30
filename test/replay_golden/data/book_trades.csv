@@ -1,0 +1,3 @@
+index,date,trade_type,instrument_type,contract,quantity,price,multiplier,notional,transaction_cost,reason
+0,2024-01-03,hedge_rebalance,futures,IF2402,1.0,96.96000000000001,300.0,29088.000000000004,0.0,delta_rebalance
+1,2024-01-04,hedge_close,futures,IF2402,-1.0,105.04,300.0,31512.000000000004,0.0,product_terminated

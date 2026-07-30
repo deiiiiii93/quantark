@@ -1,0 +1,3 @@
+date,next_ko_date,next_ko_probability,total_remaining_ko_probability,ki_probability_to_maturity,survival_probability,expected_discounted_ko_cashflow,expected_discounted_maturity_cashflow,pv
+2024-01-02,2024-01-04,0.0338,0.1394,0.0686,0.8606,1393.999958345536,8736.15686563278,10130.156823978314
+2024-01-03,2024-01-04,0.0,0.0016,1.0,0.9984,15.9999996157439,9579.458714488452,9595.458714104194

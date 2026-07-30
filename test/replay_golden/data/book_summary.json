@@ -1,0 +1,14 @@
+{
+  "end_date": "2024-01-06 00:00:00",
+  "final_portfolio_value": -27579.28767123288,
+  "hedge_pnl": 2423.9999999999995,
+  "initial_portfolio_value": -30394.824769126986,
+  "num_days": 5,
+  "num_lifecycle_events": 4,
+  "num_products": 2,
+  "num_trades": 2,
+  "product_pnl": 391.5370978941064,
+  "start_date": "2024-01-02 00:00:00",
+  "total_pnl": 2815.537097894106,
+  "transaction_costs": 0.0
+}

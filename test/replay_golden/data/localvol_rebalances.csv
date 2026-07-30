@@ -1,0 +1,4 @@
+date,active_contract,current_contracts,target_contracts,trade_contracts,should_rebalance,threshold_status,no_trade_reason,reason
+2024-01-02,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band
+2024-01-03,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band
+2024-01-04,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band

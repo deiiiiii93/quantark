@@ -1,0 +1,47 @@
+[
+  {
+    "cache_hit": false,
+    "date": "2024-01-02",
+    "grid_shape": [
+      3,
+      3
+    ],
+    "lv_max": 0.2551519798595603,
+    "lv_min": 0.17880347214306364,
+    "n_maturities": 3,
+    "n_strikes": 3,
+    "surface_date": "2024-01-02",
+    "surface_sha": "bd3297e60c64d30333343f1cd70c0ce67539124c53753d33c478f6d89111ec69",
+    "variant": "localvol"
+  },
+  {
+    "cache_hit": true,
+    "date": "2024-01-03",
+    "grid_shape": [
+      3,
+      3
+    ],
+    "lv_max": 0.2551519798595603,
+    "lv_min": 0.17880347214306364,
+    "n_maturities": 3,
+    "n_strikes": 3,
+    "surface_date": "2024-01-02",
+    "surface_sha": "bd3297e60c64d30333343f1cd70c0ce67539124c53753d33c478f6d89111ec69",
+    "variant": "localvol"
+  },
+  {
+    "cache_hit": false,
+    "date": "2024-01-04",
+    "grid_shape": [
+      3,
+      3
+    ],
+    "lv_max": 0.2904436999334625,
+    "lv_min": 0.21570759803818723,
+    "n_maturities": 3,
+    "n_strikes": 3,
+    "surface_date": "2024-01-04",
+    "surface_sha": "0a2e19dcd8641592f3fc0a28d3d02fd57a15473ed13de0971bf785b775f63761",
+    "variant": "localvol"
+  }
+]
