@@ -233,7 +233,14 @@ def make_scalar_bsm_config() -> AutocallableBacktestConfig:
     return AutocallableBacktestConfig(
         product=_snowball_product(),
         market_data=_market_data(),
-        engine_config=AutocallableEngineConfig(pricing_engine_type=EngineType.PDE),
+        engine_config=AutocallableEngineConfig(
+            pricing_engine_type=EngineType.PDE,
+            # Legacy behavior: the generic PDE engine returns no event stats
+            # for this product and the old code silently fell back to MC.
+            # The fallback is opt-in now; the goldens freeze that behavior
+            # and the provenance column discloses it.
+            event_stats_fallback="mc",
+        ),
         transaction_cost_model=ZeroCostModel(),
         product_quantity=-1.0,
         calculate_surfaces=True,
@@ -257,7 +264,8 @@ def make_book_config() -> BookAutocallableBacktestConfig:
         # QUADRATURE mirrors test_book_backtest: the PDE route needs a
         # date-based KI schedule the standard phoenix helper doesn't build.
         engine_config=AutocallableEngineConfig(
-            pricing_engine_type=EngineType.QUADRATURE
+            pricing_engine_type=EngineType.QUADRATURE,
+            event_stats_fallback="mc",
         ),
         transaction_cost_model=ZeroCostModel(),
         calculate_surfaces=False,
@@ -269,6 +277,7 @@ def make_localvol_config(history_root: Path = GOLDEN_DIR) -> AutocallableBacktes
     history_dir = write_localvol_history(history_root)
     engine_config = AutocallableEngineConfig(
         pricing_engine_type=EngineType.PDE,
+        event_stats_fallback="mc",
         vol_source="surface",
         vol_model="localvol",
         vol_model_solver="pde",

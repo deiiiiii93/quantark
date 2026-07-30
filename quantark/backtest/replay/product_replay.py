@@ -16,6 +16,8 @@ book-level accounting for itself.  The engine passes in its own output lists as
 
 from __future__ import annotations
 
+import logging
+
 from copy import deepcopy
 from datetime import timedelta
 from typing import Any, Optional
@@ -27,7 +29,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
-from quantark.util.exceptions import ValidationError
+from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close
 
 from .engine_factory import create_mc_event_stats_engine
@@ -36,6 +38,8 @@ from .market import (
     SignedDividendYield,
     derive_implied_dividend_yield,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ProductReplay:
@@ -311,6 +315,9 @@ class ProductReplay:
                         "gamma_cash_1pct": gamma * spot_node**2 / 100.0,
                     }
                 except Exception:
+                    logger.warning(
+                        "surface node failed (spot=%s, q=%s)", s, q, exc_info=True
+                    )
                     row = {
                         "date": date,
                         "surface_type": "spot_q",
@@ -327,9 +334,7 @@ class ProductReplay:
     def record_event_probabilities(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment
     ) -> None:
-        stats = self._calculate_event_stats(product, env)
-        if stats is None:
-            return
+        stats, stats_engine = self._calculate_event_stats(product, env)
 
         ko_probs = np.asarray(getattr(stats, "ko_probability", []), dtype=float)
         ko_times = np.asarray(getattr(stats, "ko_times", []), dtype=float)
@@ -356,6 +361,7 @@ class ProductReplay:
                     getattr(stats, "expected_discounted_maturity_cashflow", np.nan)
                 ),
                 "pv": float(getattr(stats, "pv", np.nan)),
+                "event_stats_engine": stats_engine,
             }
         )
 
@@ -372,6 +378,7 @@ class ProductReplay:
                     "conditional_probability": float(conditional),
                     "survival_probability": float(survival[i]) if i < survival.size else np.nan,
                     "expected_discounted_cashflow": float(ed_ko_cf[i]) if i < ed_ko_cf.size else np.nan,
+                    "event_stats_engine": stats_engine,
                 }
             )
             if i < survival.size:
@@ -400,21 +407,48 @@ class ProductReplay:
                     "conditional_probability": np.nan,
                     "survival_probability": float(ki_survival[i]) if i < ki_survival.size else np.nan,
                     "expected_discounted_cashflow": np.nan,
+                    "event_stats_engine": stats_engine,
                 }
             )
 
     def _calculate_event_stats(self, product: Any, env: PricingEnvironment):
+        """Event stats from the primary engine, fail-closed.
+
+        A ``None`` return is the engine layer's "unsupported" signal; when
+        event probabilities were requested that is a failure, not a silent
+        no-op. ``event_stats_fallback="mc"`` opts into the MC fallback, which
+        is logged and recorded in the rows' ``event_stats_engine`` column.
+        """
+        mode = getattr(self.engine_config, "event_stats_fallback", "none")
+        primary_failure: Optional[BaseException] = None
+        stats = None
         try:
             stats = self.event_stats_engine.calculate_event_stats(product, env)
-            if stats is not None:
-                return stats
-        except Exception:
-            pass
-        try:
-            fallback = create_mc_event_stats_engine(product, self.engine_config)
-            return fallback.calculate_event_stats(product, env)
-        except Exception:
-            return None
+        except Exception as exc:
+            if mode != "mc":
+                raise
+            primary_failure = exc
+        if stats is not None:
+            return stats, "primary"
+        if mode != "mc":
+            raise PricingError(
+                "event-stats engine "
+                f"{type(self.event_stats_engine).__name__} returned no stats "
+                "while event probabilities were requested; set "
+                "event_stats_fallback='mc' to opt into the MC fallback"
+            )
+        logger.warning(
+            "primary event-stats engine %s unavailable (%s); using MC fallback",
+            type(self.event_stats_engine).__name__,
+            primary_failure if primary_failure is not None else "returned None",
+        )
+        fallback = create_mc_event_stats_engine(product, self.engine_config)
+        stats = fallback.calculate_event_stats(product, env)
+        if stats is None:
+            raise PricingError(
+                "MC event-stats fallback returned no stats (fail-closed)"
+            )
+        return stats, "mc_fallback"
 
     def settle_maturity_if_due(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float

@@ -130,6 +130,7 @@ class AutocallableEngineConfig:
     vol_model_solver: Literal["pde", "mc"] = "pde"
     vol_model_calibration: Optional[VolModelCalibrationConfig] = None
     vol_model_engine_options: dict[str, Any] = field(default_factory=dict)
+    event_stats_fallback: Literal["none", "mc"] = "none"
 
     def __post_init__(self) -> None:
         supported = {
@@ -170,6 +171,8 @@ class AutocallableEngineConfig:
             )
         if self.vol_model_solver not in ("pde", "mc"):
             raise ValidationError("vol_model_solver must be 'pde' or 'mc'")
+        if self.event_stats_fallback not in ("none", "mc"):
+            raise ValidationError("event_stats_fallback must be 'none' or 'mc'")
         if self.vol_model_calibration is None:
             self.vol_model_calibration = VolModelCalibrationConfig()
         elif not isinstance(self.vol_model_calibration, VolModelCalibrationConfig):
