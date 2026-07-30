@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import date
@@ -38,6 +36,7 @@ from quantark.param import TermStructureDividendYield
 from quantark.param.rrf import LinearRateCurve
 from quantark.param.term_sampling import forward_carry_on_grid, forward_rates_on_grid
 from quantark.util.exceptions import NumericalError, ValidationError
+from quantark.util.io import atomic_write_json
 from quantark.volmodels.black_scholes import implied_vol_call
 from quantark.volmodels.heston import (
     HestonParams,
@@ -126,21 +125,8 @@ class CalibratedVolModel:
     record: Dict[str, Any] = field(default_factory=dict)
 
 
-def _atomic_write_json(path: Path, payload: Any) -> None:
-    """Write JSON atomically: tmp file in the same directory + os.replace."""
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w") as handle:
-            json.dump(payload, handle, allow_nan=False)
-        os.replace(tmp_name, path)
-    except BaseException:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
+# Canonical home: quantark.util.io (kept as an alias for existing importers).
+_atomic_write_json = atomic_write_json
 
 
 def _json_safe(value: Any) -> Any:

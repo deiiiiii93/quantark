@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from .vol_calibrators import _atomic_write_json
+from quantark.util.io import atomic_write_json
 
 
 class AutocallableBacktestResults:
@@ -183,5 +183,5 @@ class AutocallableBacktestResults:
         """
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_json(path, self.calibration_records)
+        atomic_write_json(path, self.calibration_records)
 
