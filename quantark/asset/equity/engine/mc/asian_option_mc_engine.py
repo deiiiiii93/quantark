@@ -20,6 +20,13 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option.asian_option import AsianOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
@@ -90,6 +97,8 @@ class AsianOptionMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     # Request-scoped term-structure context (set at every public pricing
     # entry point from ITS pricing_env; never carried across calls).
@@ -164,7 +173,11 @@ class AsianOptionMCEngine(BaseEngine):
         self._last_result: Optional[AsianMCResult] = None
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price an Asian option using Monte Carlo simulation.
@@ -185,6 +198,11 @@ class AsianOptionMCEngine(BaseEngine):
                 f"AsianOptionMCEngine only supports AsianOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
 
         # Extract market data
         S = pricing_env.spot
@@ -203,7 +221,10 @@ class AsianOptionMCEngine(BaseEngine):
         # Handle near-expiry case
         if is_zero(T):
             # At expiry, return payoff with current spot as both spot and average
-            return product.get_payoff(S, average=S)
+            return (
+                product.get_payoff(S, average=S) * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         # Price using appropriate method
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
@@ -211,6 +232,11 @@ class AsianOptionMCEngine(BaseEngine):
         else:
             result = self._price_mc_or_qmc(product, pricing_env, S, K, T, r, q, sigma)
 
+        result.price = (
+            result.price * timing.delay_df
+            + pending_receivable_pv(lifecycle_state, pricing_env)
+        )
+        result.std_error *= timing.delay_df
         self._last_result = result
 
         if result.price < 0:

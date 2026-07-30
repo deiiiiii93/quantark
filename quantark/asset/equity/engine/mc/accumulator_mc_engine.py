@@ -20,6 +20,13 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from quantark.asset.equity.process.bsm.qmc_sobol import (
@@ -31,7 +38,12 @@ from quantark.asset.equity.process.bsm.qmc_variance_reduction import (
 )
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import AccumulatorOption
-from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
+from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import AccumulatorKnockOutType
 from quantark.util.enum.engine_enums import EngineType, MonteCarloMethod
@@ -54,15 +66,11 @@ class AccumulatorMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
-    # Request-scoped term-structure context (set at every public pricing
-    # entry point from ITS pricing_env; never carried across calls).
-    # Private helpers called outside a public entry fall back to their
-    # scalar arguments (None ctx) or fail loudly (None _df) rather than
-    # silently reusing a previous environment. Engine instances are not
-    # safe for concurrent pricing calls (pre-existing engine contract).
+    # Request-scoped term-structure context, refreshed at every public call.
     _term_ctx = None
-    _df = None
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
     def __init__(
@@ -80,7 +88,11 @@ class AccumulatorMCEngine(BaseEngine):
         self.method = self._resolve_method(method)
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price an accumulator option using Monte Carlo simulation.
@@ -101,17 +113,28 @@ class AccumulatorMCEngine(BaseEngine):
                 "AccumulatorMCEngine only supports AccumulatorOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
 
         spot = pricing_env.spot
         strike = product.strike
         maturity = product.get_maturity(pricing_env)
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         if is_zero(maturity):
             # At expiry only locked-in accrual and the deterministic terminal
             # extra-shares leg remain -- no rate/dividend/volatility needed.
             self._last_std_error = 0.0
-            return product.get_realized_accrual() + self._extra_shares_intrinsic(
-                product, spot
+            realized = product.get_realized_accrual()
+            if product.settlement_at_expiry:
+                realized *= terminal_timing.payment_df
+            return (
+                realized
+                + self._extra_shares_intrinsic(product, spot)
+                * terminal_timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
             )
 
         rate = pricing_env.get_rate(maturity)
@@ -119,30 +142,108 @@ class AccumulatorMCEngine(BaseEngine):
         vol = pricing_env.get_vol(strike, maturity)
         # Term-structure context for this pricing call (see term_inputs.py)
         self._term_ctx = (pricing_env, strike)
-        self._df = make_df_fn(pricing_env)
 
 
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product)
 
         realized = product.get_realized_accrual()
         if product.settlement_at_expiry:
-            realized *= float(pricing_env.get_discount_factor(maturity))
+            realized *= terminal_timing.payment_df
 
-        times = product.get_observation_times()
+        resolved_legs = self._resolve_observation_legs(
+            product,
+            pricing_env,
+            terminal_timing.payment_df,
+        )
+        times = [leg[0] for leg in resolved_legs]
+        payment_dfs = np.asarray([leg[1] for leg in resolved_legs])
         if not times:
             # No accrual fixings, but a terminal extra-shares leg may still pay.
             extra_val, std_error = self._price_terminal_extra(
-                product, pricing_env, spot, strike, maturity, rate, div, vol
+                product,
+                pricing_env,
+                spot,
+                strike,
+                maturity,
+                rate,
+                div,
+                vol,
+                terminal_timing.payment_df,
             )
             self._last_std_error = std_error
-            return realized + extra_val
+            return (
+                realized
+                + extra_val
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         price, std_error = self._price_mc(
-            product, pricing_env, spot, strike, maturity, rate, div, vol, times
+            product,
+            pricing_env,
+            spot,
+            strike,
+            maturity,
+            rate,
+            div,
+            vol,
+            times,
+            payment_dfs,
+            terminal_timing.payment_df,
         )
         price += realized
         self._last_std_error = std_error
-        return price
+        return price + pending_receivable_pv(lifecycle_state, pricing_env)
+
+    def _resolve_observation_legs(
+        self,
+        product: AccumulatorOption,
+        pricing_env: PricingEnvironment,
+        terminal_payment_df: float,
+    ) -> list[tuple[float, float]]:
+        """Return aligned observation times and contractual payment DFs."""
+        schedule = product.observation_schedule
+        if schedule is None:
+            times = product.get_observation_times()
+            legs = []
+            for index, time in enumerate(times):
+                timing = SettlementResolver.resolve_contingent(
+                    product,
+                    SettlementRequest(
+                        kind=CashflowKind.OBSERVATION,
+                        determination_time=time,
+                        cashflow_id=f"accumulator[{index}]",
+                    ),
+                    pricing_env,
+                )
+                legs.append(
+                    (
+                        timing.determination_time,
+                        (
+                            terminal_payment_df
+                            if product.settlement_at_expiry
+                            else timing.payment_df
+                        ),
+                    )
+                )
+            return legs
+
+        resolved = schedule.resolve(pricing_env, product=product)
+        legs = []
+        for raw, record in zip(schedule.records, resolved):
+            use_terminal = (
+                product.settlement_at_expiry
+                and raw.settlement_date is None
+                and raw.settlement_time is None
+            )
+            payment_df = (
+                terminal_payment_df
+                if use_terminal
+                else float(
+                    pricing_env.get_discount_factor(record.settlement_time)
+                )
+            )
+            legs.append((float(record.observation_time), payment_df))
+        return legs
 
     def _extra_shares_intrinsic(self, product: AccumulatorOption, spot: float) -> float:
         """Deterministic terminal value of the extra-shares leg at expiry."""
@@ -152,7 +253,16 @@ class AccumulatorMCEngine(BaseEngine):
         return -extra * max(product.strike - spot, 0.0) * product.contract_multiplier
 
     def _price_terminal_extra(
-        self, product, pricing_env, spot, strike, maturity, rate, div, vol
+        self,
+        product,
+        pricing_env,
+        spot,
+        strike,
+        maturity,
+        rate,
+        div,
+        vol,
+        terminal_payment_df,
     ) -> Tuple[float, float]:
         """Value the terminal extra-shares leg alone (no accrual fixings)."""
         extra = product.extra_shares_at_expiry
@@ -164,8 +274,13 @@ class AccumulatorMCEngine(BaseEngine):
         terminal = paths[:, -1]
         put = np.maximum(strike - terminal, 0.0)
         alive = terminal < product.knock_out_barrier  # expiry up-and-out check
-        df_T = float(pricing_env.get_discount_factor(maturity))
-        discounted = -extra * put * product.contract_multiplier * df_T * alive
+        discounted = (
+            -extra
+            * put
+            * product.contract_multiplier
+            * terminal_payment_df
+            * alive
+        )
         return self._mean_and_std_error(discounted)
 
     # ------------------------------------------------------------------
@@ -183,6 +298,8 @@ class AccumulatorMCEngine(BaseEngine):
         div: float,
         vol: float,
         times: list,
+        payment_dfs: np.ndarray,
+        terminal_payment_df: float,
     ) -> Tuple[float, float]:
         obs_times = np.asarray(times, dtype=float)
         # Grid hits every observation date and the contract maturity.
@@ -210,35 +327,26 @@ class AccumulatorMCEngine(BaseEngine):
         leverage = np.where(obs_prices >= strike, 1.0, product.gearing)
         accrual = leverage * gain * daily * mult  # (num_paths, n_obs)
 
-        # Discount factor for each observation: settle on the observation date,
-        # or defer all accruals to maturity when settlement_at_expiry.
-        if product.settlement_at_expiry:
-            df_obs = np.full(
-                obs_times.shape, float(pricing_env.get_discount_factor(maturity))
-            )
-        else:
-            df_obs = np.array(
-                [float(pricing_env.get_discount_factor(t)) for t in obs_times]
-            )
+        df_obs = payment_dfs
 
         hit_matrix = obs_prices >= ko  # (num_paths, n_obs)
 
         if product.knock_out_type == AccumulatorKnockOutType.TERMINATION:
             discounted = self._terminate_payoffs(
                 product, pricing_env, accrual, df_obs, hit_matrix, obs_times,
-                terminal_prices, strike, maturity, mult,
+                terminal_prices, strike, maturity, mult, terminal_payment_df,
             )
         else:
             discounted = self._single_day_payoffs(
                 product, pricing_env, accrual, df_obs, hit_matrix,
-                terminal_prices, strike, maturity, mult,
+                terminal_prices, strike, maturity, mult, terminal_payment_df,
             )
 
         return self._mean_and_std_error(discounted)
 
     def _terminate_payoffs(
         self, product, pricing_env, accrual, df_obs, hit_matrix, obs_times,
-        terminal_prices, strike, maturity, mult,
+        terminal_prices, strike, maturity, mult, terminal_payment_df,
     ) -> np.ndarray:
         """Discounted path payoffs for TERMINATION knock-out."""
         n_obs = hit_matrix.shape[1]
@@ -256,10 +364,7 @@ class AccumulatorMCEngine(BaseEngine):
         # Knock-out rebate paid at the hit time (payment_at_hit).
         rebate_full = product.get_knock_out_rebate_cash() * mult
         if rebate_full != 0.0:
-            hit_times = obs_times[first_idx]
-            df_hit = np.array(
-                [float(pricing_env.get_discount_factor(t)) for t in hit_times]
-            )
+            df_hit = df_obs[first_idx]
             discounted = discounted + np.where(hit_any, rebate_full * df_hit, 0.0)
 
         # Extra shares at expiry: short up-and-out put, alive only if neither an
@@ -270,15 +375,17 @@ class AccumulatorMCEngine(BaseEngine):
         extra = product.extra_shares_at_expiry
         if extra > 0.0:
             put = np.maximum(strike - terminal_prices, 0.0)
-            df_T = float(pricing_env.get_discount_factor(maturity))
             alive = (~hit_any) & (terminal_prices < product.knock_out_barrier)
-            discounted = discounted - extra * put * mult * df_T * alive
+            discounted = (
+                discounted
+                - extra * put * mult * terminal_payment_df * alive
+            )
 
         return discounted
 
     def _single_day_payoffs(
         self, product, pricing_env, accrual, df_obs, hit_matrix,
-        terminal_prices, strike, maturity, mult,
+        terminal_prices, strike, maturity, mult, terminal_payment_df,
     ) -> np.ndarray:
         """Discounted path payoffs for SINGLE_DAY knock-out."""
         # Accrue every observation whose spot is below the barrier.
@@ -289,9 +396,11 @@ class AccumulatorMCEngine(BaseEngine):
         extra = product.extra_shares_at_expiry
         if extra > 0.0:
             put = np.maximum(strike - terminal_prices, 0.0)
-            df_T = float(pricing_env.get_discount_factor(maturity))
             alive = terminal_prices < product.knock_out_barrier
-            discounted = discounted - extra * put * mult * df_T * alive
+            discounted = (
+                discounted
+                - extra * put * mult * terminal_payment_df * alive
+            )
 
         return discounted
 

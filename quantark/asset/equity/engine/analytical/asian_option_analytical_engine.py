@@ -28,6 +28,13 @@ from typing import Optional, Union, Dict, Tuple, List
 from scipy.stats import norm
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option.asian_option import AsianOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import EngineParams
@@ -66,6 +73,8 @@ class AsianOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     DEFAULT_METHOD = AsianAnalyticalMethod.TURNBULL_WAKEMAN
     DEFAULT_GEOMETRIC_METHOD = AsianAnalyticalMethod.KEMNA_VORST
@@ -126,7 +135,11 @@ class AsianOptionAnalyticalEngine(BaseEngine):
             )
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price an Asian option using the selected analytical method.
@@ -148,6 +161,12 @@ class AsianOptionAnalyticalEngine(BaseEngine):
                 f"AsianOptionAnalyticalEngine only supports AsianOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+        pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
         # Extract parameters
         params = self._extract_params(product, pricing_env)
@@ -158,7 +177,10 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         # Handle near-expiry case
         if params["T"] < self.MIN_MATURITY:
             price = self._handle_near_expiry(product, params)
-            return price * product.contract_multiplier
+            return (
+                price * product.contract_multiplier * timing.delay_df
+                + pending_pv
+            )
 
         # Clamp parameters for numerical stability
         params["sigma"] = np.clip(params["sigma"], self.MIN_VOL, self.MAX_VOL)
@@ -173,11 +195,17 @@ class AsianOptionAnalyticalEngine(BaseEngine):
         # Handle floating-strike via symmetry
         if product.is_floating_strike():
             price = self._price_floating_strike(product, params, method)
-            return price * product.contract_multiplier
+            return (
+                price * product.contract_multiplier * timing.delay_df
+                + pending_pv
+            )
 
         # Price fixed-strike option
         price = self._price_fixed_strike(product, params, method)
-        return price * product.contract_multiplier
+        return (
+            price * product.contract_multiplier * timing.delay_df
+            + pending_pv
+        )
 
     def _extract_params(
         self, product: AsianOption, pricing_env: PricingEnvironment

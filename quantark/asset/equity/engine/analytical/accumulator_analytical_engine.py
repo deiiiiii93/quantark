@@ -21,6 +21,13 @@ approximation implemented by the composed barrier and one-touch engines.
 from typing import List, Optional
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import (
@@ -29,6 +36,12 @@ from quantark.asset.equity.product.option import (
     EuropeanVanillaOption,
     OneTouchOption,
 )
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
+from quantark.execution.errors import CapabilityError
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import (
     AccumulatorKnockOutType,
@@ -41,7 +54,6 @@ from quantark.util.enum import (
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
-    safe_exp,
     validate_non_negative,
     validate_positive,
 )
@@ -61,6 +73,8 @@ class AccumulatorAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     MIN_VOL = 0.001
     MAX_VOL = 5.0
@@ -74,7 +88,11 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         self._one_touch_engine = OneTouchAnalyticalEngine(params)
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price an accumulator option analytically.
@@ -95,16 +113,27 @@ class AccumulatorAnalyticalEngine(BaseEngine):
                 "AccumulatorAnalyticalEngine only supports AccumulatorOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
 
         spot = pricing_env.spot
         strike = product.strike
         maturity = product.get_maturity(pricing_env)
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         if maturity < self.MIN_MATURITY:
             # At expiry only the locked-in accrual and the deterministic terminal
             # extra-shares leg remain -- no rate/dividend/volatility needed.
-            return product.get_realized_accrual() + self._extra_shares_intrinsic(
-                product, spot
+            realized = product.get_realized_accrual()
+            if product.settlement_at_expiry:
+                realized *= terminal_timing.payment_df
+            return (
+                realized
+                + self._extra_shares_intrinsic(product, spot)
+                * terminal_timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
             )
 
         rate = pricing_env.get_rate(maturity)
@@ -117,31 +146,110 @@ class AccumulatorAnalyticalEngine(BaseEngine):
         # supplied by the product; discounting is applied here).
         realized = product.get_realized_accrual()
         if product.settlement_at_expiry:
-            realized *= safe_exp(-rate * maturity)
+            realized *= terminal_timing.payment_df
 
-        times = product.get_observation_times()
+        resolved_legs = self._resolve_observation_legs(
+            product,
+            pricing_env,
+            terminal_timing.payment_df,
+        )
+        times = [leg[0] for leg in resolved_legs]
         daily = product.daily_share_accumulation
-        df_maturity = pricing_env.get_discount_factor(maturity)
         per_contract = 0.0
-        for idx, t_i in enumerate(times):
+        for idx, (t_i, _payment_df, delay_df) in enumerate(resolved_legs):
             sub_dates = times[: idx + 1]
             leg = self._price_leg(product, pricing_env, sub_dates, t_i, daily)
-            if product.settlement_at_expiry:
-                # Defer the leg's payoff from t_i to T using curve discount
-                # factors: DF(0, T) / DF(0, t_i) (curve-consistent, not flat-only).
-                leg *= df_maturity / pricing_env.get_discount_factor(t_i)
-            per_contract += leg
+            per_contract += leg * delay_df
 
         # The rebate is conditional on a knock-out observation; with no accrual
         # fixings there is nothing to monitor.
         if times:
-            per_contract += self._price_rebate_leg(product, pricing_env, times)
+            rebate = self._price_rebate_leg(product, pricing_env, times)
+            if rebate:
+                delay_ratios = [leg[2] for leg in resolved_legs]
+                if not all(
+                    abs(ratio - delay_ratios[0]) <= 1.0e-12
+                    for ratio in delay_ratios[1:]
+                ):
+                    raise CapabilityError(
+                        "AccumulatorAnalyticalEngine cannot decompose a "
+                        "knock-out rebate across non-uniform event settlement"
+                    )
+                rebate *= delay_ratios[0]
+            per_contract += rebate
         per_contract += self._price_extra_shares_leg(
             product, pricing_env, times, maturity
-        )
+        ) * terminal_timing.delay_df
 
         value = per_contract * product.contract_multiplier + realized
-        return value
+        return value + pending_receivable_pv(lifecycle_state, pricing_env)
+
+    def _resolve_observation_legs(
+        self,
+        product: AccumulatorOption,
+        pricing_env: PricingEnvironment,
+        terminal_payment_df: float,
+    ) -> List[tuple[float, float, float]]:
+        """Return determination time, payment DF, and node-to-payment DF."""
+        schedule = product.observation_schedule
+        if schedule is None:
+            resolved_legs = []
+            for index, time in enumerate(product.get_observation_times()):
+                timing = SettlementResolver.resolve_contingent(
+                    product,
+                    SettlementRequest(
+                        kind=CashflowKind.OBSERVATION,
+                        determination_time=time,
+                        cashflow_id=f"accumulator[{index}]",
+                    ),
+                    pricing_env,
+                )
+                payment_df = (
+                    terminal_payment_df
+                    if product.settlement_at_expiry
+                    else timing.payment_df
+                )
+                resolved_legs.append(
+                    (
+                        timing.determination_time,
+                        payment_df,
+                        payment_df / timing.determination_df,
+                    )
+                )
+            return resolved_legs
+
+        records = schedule.resolve(pricing_env, product=product)
+        resolved_legs = []
+        for raw, record in zip(schedule.records, records):
+            determination_time = float(record.observation_time)
+            use_terminal = (
+                product.settlement_at_expiry
+                and (
+                    raw is None
+                    or (
+                        raw.settlement_date is None
+                        and raw.settlement_time is None
+                    )
+                )
+            )
+            payment_df = (
+                terminal_payment_df
+                if use_terminal
+                else float(
+                    pricing_env.get_discount_factor(record.settlement_time)
+                )
+            )
+            determination_df = float(
+                pricing_env.get_discount_factor(determination_time)
+            )
+            resolved_legs.append(
+                (
+                    determination_time,
+                    payment_df,
+                    payment_df / determination_df,
+                )
+            )
+        return resolved_legs
 
     def _extra_shares_intrinsic(self, product: AccumulatorOption, spot: float) -> float:
         """Deterministic terminal value of the extra-shares leg at expiry."""

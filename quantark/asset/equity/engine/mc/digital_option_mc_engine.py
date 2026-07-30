@@ -7,6 +7,13 @@ from typing import Optional, Union, Tuple
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option.digital_option import CashOrNothingDigitalOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
@@ -57,6 +64,8 @@ class DigitalOptionMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
@@ -119,7 +128,11 @@ class DigitalOptionMCEngine(BaseEngine):
             )
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a cash-or-nothing digital option using Monte Carlo simulation.
@@ -140,6 +153,11 @@ class DigitalOptionMCEngine(BaseEngine):
                 f"DigitalOptionMCEngine only supports CashOrNothingDigitalOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
 
         S = pricing_env.spot
         K = product.strike
@@ -152,13 +170,16 @@ class DigitalOptionMCEngine(BaseEngine):
         self._validate_inputs(S, K, T, r, q, sigma, payout)
 
         if T < 1e-10:
-            return product.get_payoff(S)
+            return (
+                product.get_payoff(S) * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         term = build_mc_term_inputs(
             pricing_env, ref_strike=K, maturity=T,
             time_steps=self.params.time_steps,
         )
-        df = pricing_env.get_discount_factor(T)
+        df = timing.payment_df
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             price, std_error = self._price_rqmc(
@@ -182,7 +203,7 @@ class DigitalOptionMCEngine(BaseEngine):
                 f"Price ({price:.6f}) exceeds discounted payout ({max_price:.6f})"
             )
 
-        return price
+        return price + pending_receivable_pv(lifecycle_state, pricing_env)
 
     def _validate_inputs(
         self, S: float, K: float, T: float, r: float, q: float,

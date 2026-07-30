@@ -32,6 +32,13 @@ from quantark.util.enum import OptionType
 from quantark.util.enum.engine_enums import EngineType
 
 
+class _NonOptedDigitalEngine(DigitalOptionAnalyticalEngine):
+    """Test sentinel for the shared fail-closed guard."""
+
+    settlement_support = SettlementSupport.NONE
+    supports_lifecycle_state = False
+
+
 @pytest.mark.parametrize(
     ("dynamics", "engine_type", "supported"),
     [
@@ -71,7 +78,7 @@ def test_non_opted_in_engine_rejects_delayed_settlement_before_pricing():
     )
 
     with pytest.raises(CapabilityError, match="settlement"):
-        DigitalOptionAnalyticalEngine().price(product, object())
+        _NonOptedDigitalEngine().price(product, object())
 
 
 def test_zero_lag_keeps_legacy_digital_price():
@@ -109,7 +116,7 @@ def test_non_opted_in_engine_rejects_lifecycle_state_before_pricing():
     )
 
     with pytest.raises(CapabilityError, match="lifecycle_state"):
-        DigitalOptionAnalyticalEngine().price(
+        _NonOptedDigitalEngine().price(
             product,
             object(),
             lifecycle_state=AutocallableLifecycleState(),

@@ -22,6 +22,13 @@ import numpy as np
 from scipy import stats
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.range_accrual_option import RangeAccrualOption
@@ -68,6 +75,8 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     MIN_VOL = 0.001
     MAX_VOL = 5.0
@@ -79,7 +88,11 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
         self._last_result: Optional[RangeAccrualAnalyticalResult] = None
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a Range Accrual option analytically.
@@ -101,6 +114,12 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
                 f"RangeAccrualAnalyticalEngine only supports RangeAccrualOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+        pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
         if product.range_config is None:
             raise ValidationError("range_config is required for Range Accrual option")
@@ -116,11 +135,15 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
         if is_zero(T):
             past_in_range, _ = product.get_past_accrual(pricing_env)
             total_weights = product.get_total_weights()
-            return product.get_payoff(
-                S,
-                in_range_weights=past_in_range,
-                total_weights=total_weights,
-                pricing_env=pricing_env,
+            return (
+                product.get_payoff(
+                    S,
+                    in_range_weights=past_in_range,
+                    total_weights=total_weights,
+                    pricing_env=pricing_env,
+                )
+                * timing.delay_df
+                + pending_pv
             )
 
         # Resolve past vs future observations
@@ -144,7 +167,7 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
         # Compute price
         year_fraction = product.get_year_fraction(pricing_env)
         accrual_rate = product.range_config.accrual_rate
-        discount = math.exp(-r * T)
+        discount = timing.payment_df
 
         price = (
             discount
@@ -166,7 +189,7 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
             num_future_observations=len(future_obs),
         )
 
-        return price
+        return price + pending_pv
 
     def _compute_future_expected_weights(
         self,
@@ -282,7 +305,11 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
         return self._last_result
 
     def calculate_greeks(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> Dict[str, float]:
         """
         Calculate Greeks using analytical formulas where possible.
@@ -302,6 +329,11 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
                 f"RangeAccrualAnalyticalEngine only supports RangeAccrualOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
+        timing = resolve_terminal_timing(product, pricing_env)
 
         config = product.range_config
         if config is None:
@@ -312,7 +344,11 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
         r = pricing_env.get_rate(T)
         q = pricing_env.get_div_yield(T)
 
-        base_price = self.price(product, pricing_env)
+        base_price = self.price(
+            product,
+            pricing_env,
+            lifecycle_state=lifecycle_state,
+        )
         greeks: Dict[str, float] = {"price": base_price}
 
         # Near-expiry: delta/gamma are zero (payoff is flat w.r.t. spot)
@@ -375,7 +411,7 @@ class RangeAccrualAnalyticalEngine(BaseEngine):
         # Scale by payoff parameters
         year_fraction = product.get_year_fraction(pricing_env)
         accrual_rate = config.accrual_rate
-        discount = math.exp(-r * T)
+        discount = timing.payment_df
         scale = (
             discount
             * product.initial_price

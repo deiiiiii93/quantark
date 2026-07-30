@@ -21,6 +21,13 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from quantark.asset.equity.process.bsm.qmc_rqmc_driver import run_rqmc
@@ -90,6 +97,8 @@ class RangeAccrualMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     # Request-scoped term-structure context (set at every public pricing
     # entry point from ITS pricing_env; never carried across calls).
@@ -164,7 +173,11 @@ class RangeAccrualMCEngine(BaseEngine):
         self._last_result: Optional[RangeAccrualMCResult] = None
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a Range Accrual option using Monte Carlo simulation.
@@ -185,6 +198,11 @@ class RangeAccrualMCEngine(BaseEngine):
                 f"RangeAccrualMCEngine only supports RangeAccrualOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
 
         # Extract market data
         S = pricing_env.spot
@@ -204,11 +222,15 @@ class RangeAccrualMCEngine(BaseEngine):
             # At expiry, use product's payoff calculation with known weights
             past_in_range, past_total = product.get_past_accrual(pricing_env)
             total_weights = product.get_total_weights()
-            return product.get_payoff(
-                S,
-                in_range_weights=past_in_range,
-                total_weights=total_weights,
-                pricing_env=pricing_env,
+            return (
+                product.get_payoff(
+                    S,
+                    in_range_weights=past_in_range,
+                    total_weights=total_weights,
+                    pricing_env=pricing_env,
+                )
+                * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
             )
 
         # Price using appropriate method
@@ -217,6 +239,11 @@ class RangeAccrualMCEngine(BaseEngine):
         else:
             result = self._price_mc_or_qmc(product, pricing_env, S, T, r, q, sigma)
 
+        result.price = (
+            result.price * timing.delay_df
+            + pending_receivable_pv(lifecycle_state, pricing_env)
+        )
+        result.std_error *= timing.delay_df
         self._last_result = result
 
         # Range accrual payoffs are non-negative by construction

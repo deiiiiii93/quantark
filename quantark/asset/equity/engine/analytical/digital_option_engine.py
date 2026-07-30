@@ -8,6 +8,13 @@ from scipy import stats
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.analytical.black_scholes_engine import BlackScholesEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option import (
     CashOrNothingDigitalOption,
     EuropeanVanillaOption,
@@ -33,6 +40,8 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     MIN_VOL = 0.001
     MAX_VOL = 5.0
@@ -54,7 +63,11 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
         self._vanilla_engine = BlackScholesEngine()
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a cash-or-nothing digital option using closed-form Black-Scholes.
@@ -76,6 +89,11 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
                 f"DigitalOptionAnalyticalEngine only supports CashOrNothingDigitalOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
 
         # Extract parameters
         S = pricing_env.spot
@@ -91,13 +109,21 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
 
         # Handle near-expiry
         if T < self.MIN_MATURITY:
-            return product.get_payoff(S)
+            return (
+                product.get_payoff(S) * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         # Under a smile surface the level-only N(d2) digital misses the skew
         # term (-vega * d-sigma/d-K). Price by static replication off the
         # smile-consistent vanilla call spread instead.
         if getattr(pricing_env.vol_surface, "is_smile", False):
-            return self._replicated_digital(product, pricing_env) * product.contract_multiplier
+            return (
+                self._replicated_digital(product, pricing_env)
+                * product.contract_multiplier
+                * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         # Calculate d1 and d2 with numerical stability checks
         try:
@@ -107,7 +133,7 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
 
         # Calculate option price
         try:
-            discount = math.exp(-r * T)
+            discount = timing.payment_df
             if product.is_call():
                 price = payout * discount * stats.norm.cdf(d2)
             else:
@@ -118,7 +144,10 @@ class DigitalOptionAnalyticalEngine(BaseEngine):
         if price < 0:
             raise NumericalError(f"Negative price computed: {price}")
 
-        return price * product.contract_multiplier
+        return (
+            price * product.contract_multiplier
+            + pending_receivable_pv(lifecycle_state, pricing_env)
+        )
 
     def _replicated_digital(
         self, option: CashOrNothingDigitalOption, pricing_env: PricingEnvironment
