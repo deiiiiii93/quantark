@@ -43,12 +43,53 @@ possible, and the revised gates, run matrix, and cost model.
 | Check | Result |
 |---|---|
 | Do stages 11/12/13 use any deleted knob? | **No.** They pass bare `PDEParams()`; `n_x/n_v/n_t` go only to the 2D vol-model solvers, where those knobs remain live. |
-| Does `quantark/backtest/otc/` pass a rejected knob? | **No.** `engine_factory.py` uses `PDEParams()` defaults throughout. |
+| Does the replay backtest pass a rejected knob? | **No.** `replay/engine_factory.py` uses `PDEParams()` defaults throughout. |
 | Does the framework still run end-to-end on 0.4.0? | **Yes.** `12_snowball_volmodel_backtest.py --quick --max-inceptions 1` completes Gate G4 and replays `flat_bsm` and `ts_bsm` with no code change. |
 | Do prices move? | **Yes, materially.** The 2023-05-04 fair coupon solves to **15.0707%** on 0.4.0 versus **15.0975%** recorded on 0.3.0 — a 2.7 bp shift in the *contract terms*, not merely the valuation. |
 
 The last row is the decisive one: pre- and post-0.4.0 runs price different
 contracts and cannot be pooled.
+
+### 1.2 Backtest replay consolidation (landed 2026-07-30)
+
+A second platform change arrived after this spec was first written:
+`quantark.backtest.otc` was consolidated into `quantark.backtest.replay` — ONE
+multi-product daily loop, with `otc/` kept as a deprecated shim until 0.5.0. It
+resolves three of this spec's requirements and moves several of its citations.
+
+**Delivered, so no longer work items:**
+
+| This spec asked for | Delivered by |
+|---|---|
+| §6 KO termination at settlement | `terminate_on_lifecycle_end=True` (default) + pending-settlement semantics, `7455484` |
+| Framework committed and secured | consolidation merged; stages 11/12/13 already migrated to canonical imports |
+| Per-day IV-surface channel | `replay/market.py:147` `surface_history` |
+
+**Relocations** (all citations in this spec updated):
+
+| was | now |
+|---|---|
+| `backtest/otc/vol_calibrators.py` | `quantark/volmodels/calibration.py` |
+| `backtest/otc/vol_history.py` | `quantark/param/vol/surface_history.py` |
+| `backtest/otc/engine_factory.py` | `backtest/replay/engine_factory.py` |
+| `backtest/otc/_replay.py` | `backtest/replay/product_replay.py` |
+
+**Newly available, and relevant:**
+
+- `replay/schema.py` — typed row schemas as the single source of truth for record
+  columns (`STATE_COLUMNS`, `GREEK_COLUMNS`, `CALIBRATION_RECORD_KEYS`, …). Stage
+  13's `REQUIRED_CATEGORIES` currently duplicates column lists by hand; deriving
+  them from `schema.py` would make the §6.2 completeness gate impossible to drift
+  from the writer. Worth doing while stage 13 is being touched anyway.
+- `event_stats_fallback: Literal["none","mc"] = "none"` (`replay/config.py:133`) —
+  fail-closed by default. Consistent with this study's no-silent-fallback rule.
+- `futures_ledger.py` — shared `FuturesHedgePosition` / `FuturesRollPolicy`,
+  replacing per-engine hedge bookkeeping.
+- Greeks now **fail closed**: the silent `delta = 0.0` fallback is gone (see §7.1).
+
+**Verified still outstanding:** both §7A.4 engine fixes. `enforce_feller` remains
+`False` (`quantark/volmodels/calibration.py:83`) and `v0_boundary` is still not
+plumbed through the vol PDE solvers. The consolidation did not touch either.
 
 ---
 
@@ -101,7 +142,7 @@ KI observations, real surfaces), price only, per solve:
 | 0.25 y | 1.16 s | 0.02 s | 58× | 0.0004% |
 
 Quadrature agrees with the PDE inside 0.015% of notional and is 17–22× cheaper.
-It is already constructed by `otc/engine_factory.py:108`, so routing is a
+It is already constructed by `replay/engine_factory.py:135`, so routing is a
 configuration change, not new plumbing. Its limit is structural: the FFT
 convolution kernel must be spatially homogeneous, so quadrature supports
 time-varying vol (`build_quad_term_params` supplies per-step `(rate, div, vol)`)
@@ -220,27 +261,37 @@ the relative component is disabled. The existing G2 already respects this
 
 ---
 
-## 6. Replay termination at knock-out
+## 6. Replay termination at knock-out — **DELIVERED by the library**
 
-**Current behaviour is a defect for this study.** The 2023-05-04 trade knocked
-out on 2025-09-04 (life 2.34 y) yet the run priced all 726 trading days to the
-2026-05-06 maturity, where 570 would have sufficed — **156 trading days of a
-terminated contract**, with records to match.
+*Status changed 2026-07-30: this section specified a requirement; the backtest
+replay consolidation implemented it. It is recorded here as satisfied, not as
+work.*
 
-**Revised rule:** the replay ends on the later of the KO observation date and
-its resolved settlement time, taken from the product's KO records
-(`snowball_option.py:1041`, `rec.settlement_time`; `CouponPayType.EXPIRY` would
-defer it to maturity). The KO cash must land in the ledger before the run stops.
-Under the current term sheet this resolves to T+0, i.e. the KO observation date;
-the rule is stated generally so adding a settlement lag does not silently change
-the window.
+The defect was real: the 2023-05-04 trade knocked out on 2025-09-04 (life 2.34 y)
+yet the run priced all 726 trading days to the 2026-05-06 maturity, where 570
+would have sufficed — **156 trading days of a terminated contract**, with records
+to match, and (per §7.2) 61% of fleet replay-days wasted across the 27 inceptions.
 
-The run manifest records `termination_reason ∈ {ko, ki_maturity, maturity,
-data_end}` and both `days_replayed` and `days_in_contract`, so the truncation is
-visible in the output rather than inferred. Stage 13's completeness check
-(`verify_run_completeness`) validates against `days_replayed`.
+`7455484 feat(backtest): pending-settlement KO termination — replay ends when
+terminal cash lands` implements exactly the rule this section asked for, including
+the settlement semantics: the replay ends once the terminal cash has landed in the
+ledger, not on the observation date. It is exposed as
+`terminate_on_lifecycle_end: bool = True` on both `AutocallableBacktestConfig`
+(`replay/config.py:257`) and `ReplayBacktestConfig` (`replay/config.py:325`).
 
-Unchanged: KI does **not** terminate — a knocked-in trade runs to maturity.
+**Stage 12 inherits it automatically** — it constructs
+`AutocallableBacktestConfig` without passing the flag, so the `True` default
+applies. No stage-12 change is required.
+
+Unchanged and still correct: KI does **not** terminate — a knocked-in trade runs
+to maturity.
+
+**Residual requirement.** The library does not emit a `termination_reason` field.
+Stage 12's own manifest already records `lifecycle`
+(`censored_at_data_end`/`knocked_in`/`knocked_out`/`ko_date`/`matured`) plus
+`n_days` and `last_date`, which is sufficient to distinguish KO / maturity /
+data-end termination after the fact. Deriving an explicit `termination_reason`
+from those flags during aggregation is a stage-13 nicety, not a blocker.
 
 ---
 
@@ -259,12 +310,22 @@ Per-solve timings do **not** compose into per-day cost, for two measured reasons
 1. **Layout reuse.** 0.4.0's `GridBinder` caches spatial layouts (LRU,
    `bind_shared`) and bump contexts reuse the base layout by object identity, so
    a warm solve costs far less than the cold single-solve figure.
-2. **The greeks path differs per engine.** `_replay.calculate_greeks`
-   (`otc/_replay.py:264–267`) branches on whether the engine overrides
-   `BaseEngine.calculate_greeks`. Every PDE solver does
-   (`snowball_pde_solver.py:1067`), so it takes the **native** path — one extra
-   `self._solve()` with delta/gamma read off the grid. MC engines inherit the
-   base method and take the **central-bump** path — two extra full prices.
+2. **The greeks path differs per engine.** Every PDE solver overrides
+   `BaseEngine.calculate_greeks` (`snowball_pde_solver.py:1067`), so it takes the
+   **native** path — one extra `self._solve()` with delta/gamma read off the grid.
+   MC engines inherit the base method and take the **central-bump** path — two
+   extra full prices.
+
+   *Updated 2026-07-30 for the replay consolidation.* The branch used to live in
+   the replay layer (`otc/_replay.py:264–267`, which hand-rolled the bumps).
+   `ProductReplay.calculate_greeks` (`replay/product_replay.py:282`) now delegates
+   unconditionally to `engine.calculate_greeks`, so the native-vs-bump decision is
+   entirely engine-side. The **cost accounting above is unchanged** — 2 solves/day
+   for PDE-priced variants, 3 prices/day for MC-priced — but the mechanism moved,
+   and the consolidation also removed a silent `delta = 0.0` fallback on engine
+   failure. That fallback matters to this study specifically: a zero-delta day
+   manufactured phantom unwind trades, which would have contaminated exactly the
+   cost-drag and hedge-turnover figures the study reports. Greeks now fail closed.
 
 So a PDE-priced day is `price` + one native-greeks solve = **2 solve-equivalents**;
 an MC-priced day is **3 MC prices**. Measured confirmation: 29.56 s/day for
@@ -406,7 +467,7 @@ relying on the boundary alone.
    previously violated Feller — this **must** be reported as per-date calibration
    RMSE, since it changes the model being tested.
    Cache safety verified: the heston fingerprint embeds the full preset contents
-   (`vol_calibrators.py:542`) and `heston_slv` chains it, so the key changes
+   (`quantark/volmodels/calibration.py:528`) and `heston_slv` chains it, so the key changes
    automatically — no stale hits and no `_CACHE_SCHEMA_VERSION` bump. The 552
    cached `localvol-` entries stay valid; their fingerprint excludes the preset.
 2. **Plumb `v0_boundary` and default it to `degenerate_pde`** for the snowball and
@@ -607,30 +668,31 @@ decision.
 
 ## 10. Sequencing
 
-0. **Secure the framework first.** Phases 1–5 are entirely uncommitted: 519
-   lines across `quantark/backtest/otc/` plus untracked `vol_calibrators.py` and
-   `vol_history.py`, stages 11/12/13, and 17 test files — none in HEAD, in a
-   tree through which another session pushed 41 engine commits. Commit this
-   scope, and only this scope, on a feature branch. The 13 modified
-   option-product files and other sessions' WIP are left untouched.
-1. **Apply the §7A.4 engine and calibration fixes first** — `enforce_feller=True`
-   in the `mo_frozen` preset, `v0_boundary` plumbed through the snowball/phoenix
-   vol PDE solvers, MC reference on `martingale_correction=True` with
-   `substeps_per_interval` ≥ 4. G2 must not be re-run before these land, or it
-   will certify the configuration §7A just disproved.
-2. Re-execute Gate G4 (coupon solve) and Gate G1 (surface admission) on 0.4.0.
+*Revised 2026-07-30 after the backtest replay consolidation (§1.2). Two prior
+steps are now complete: "secure the framework" (it is committed and consolidated)
+and "implement §6 termination" (the library delivers it).*
+
+1. **Apply the §7A.4 engine and calibration fixes.** Both are verified still
+   outstanding as of the consolidation: `enforce_feller` is `False` at
+   `quantark/volmodels/calibration.py:83`, and `v0_boundary` appears nowhere in
+   `snowball_vol_pde_solvers.py` / `phoenix_vol_pde_solvers.py`. Also set the MC
+   reference to `martingale_correction=True` with `substeps_per_interval` ≥ 4.
+   **G2 must not re-run before these land**, or it will certify the configuration
+   §7A disproved.
+2. Re-execute Gate G4 (coupon solve) and Gate G1 (surface admission).
 3. Re-run and re-scope Gate G2 per §5, with the verdict conditioned on the Feller
    regime and `2κθ/σ²` recorded per date; emit a fresh `gate_decision.json` and
-   evidence hash. The 2D route is genuinely open — §7A.3's control reaches +0.034%
-   of notional, inside the MC 95% interval.
-4. Implement §6 termination, the `flat_bsm_quad` variant, and §9 pre-flight.
-4. Gate G3 on one inception, 0.4.0.
-5. **Task 6.1 timing run** — measure the per-day cost curve across remaining
+   evidence hash. The 2D route is genuinely open — §7A.7 shows the *existing*
+   200×60×`ceil(400·T)` grid passing at +0.159% once (1) lands.
+4. Add the `flat_bsm_quad` variant and the §9 pre-flight sweep. (§6 termination
+   needs no work — stage 12 inherits `terminate_on_lifecycle_end=True`.)
+5. Gate G3 on one inception.
+6. **Task 6.1 timing run** — measure the per-day cost curve across remaining
    maturity for every route actually configured, validated against the §7.2
    anchors. The fleet total is set here (§7.3), not before.
-6. Run the 1D block (4 variants × 27 inceptions). Review checkpoint.
-7. Run the 2D block (2 variants × 27 inceptions) per the §5 routing.
-8. Aggregate and report, with §8 caveats.
+7. Run the 1D block (4 variants × 27 inceptions). Review checkpoint.
+8. Run the 2D block (2 variants × 27 inceptions) per the §5 routing.
+9. Aggregate and report, with §8 caveats.
 
 ---
 
@@ -645,6 +707,11 @@ decision.
 - **G3** — one inception end-to-end accounting sanity via `sanity_check_run`:
   PnL decomposition, portfolio and cash identities, cost reconciliation,
   lifecycle monotonicity, hedge effectiveness, NaN screening. *Unchanged, re-run.*
+  Two consolidation changes make this re-run more than a formality: the replay now
+  terminates at KO-plus-settlement (§6), so the cash and cost identities must
+  reconcile at a **truncated** window with terminal cash landing on the final day,
+  and `f1506ff` altered P&L to be receivable-inclusive with an honest `data_end` —
+  both squarely inside what `sanity_check_run` asserts.
 - **G4** — coupon solver converges for every inception; solved coupon recorded.
   *Unchanged, re-run — the roots move.*
 - **G5 (new)** — pre-flight grid-resolution sweep over every operating point
@@ -665,5 +732,6 @@ decision.
 | `enforce_feller=True` degrades the smile fit on previously-violating dates | Report per-date calibration RMSE before/after. This changes the model being tested and must be stated as such, not buried — a constrained Heston is a different model from a free one |
 | The `degenerate_pde` boundary leaves a +0.33–0.55% residual on violated dates that grows under refinement | `enforce_feller=True` removes the regime entirely; the boundary flag is belt-and-braces. If violated dates somehow persist, they are flagged per date rather than silently priced |
 | MO surface ends ~1 y against a 3 y trade | Explicit flat-total-variance extrapolation, stated in the report. *Carried forward.* |
-| Another session's WIP in the shared tree is disturbed | §10 step 0 commits a strict file scope on a branch |
+| `backtest.otc` shim is removed in 0.5.0, breaking the study mid-flight | Stages 11/12/13 already import canonical `quantark.backtest.replay` and `quantark.param.vol.surface_history` (§1.2) — verified, no shim dependency |
+| Stage 13's hand-copied column lists drift from what the replay writer emits | Derive `REQUIRED_CATEGORIES` from `replay/schema.py` (§1.2) rather than maintaining a parallel list |
 | Fleet killed again mid-run | Stop via process group, never `pkill -f`; per-run output isolation means completed runs survive |
