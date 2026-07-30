@@ -20,7 +20,11 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats, KOResetEventStats
+from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
+    resolve_autocallable_payment_timings,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from quantark.montecarlo.conditional_snowball import (
@@ -37,6 +41,11 @@ from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
 )
 from quantark.asset.equity.product.option.observation_schedule import ObservationRecord
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.calendar import DayCountConvention, calculate_year_fraction
@@ -117,9 +126,11 @@ class SnowballMCEngine(BaseEngine):
     # safe for concurrent pricing calls (pre-existing engine contract).
     _term_ctx = None
     _df = None
+    _payment_timings = None
 
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def __init__(
         self,
@@ -234,12 +245,27 @@ class SnowballMCEngine(BaseEngine):
         # Term-structure context for this pricing call (see term_inputs.py)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
+        self._prepare_payment_timings(product, pricing_env)
 
 
         # Handle near-expiry case
         if T < 1e-10:
             knocked_in = bool(getattr(product, "_otc_lifecycle_knocked_in", False))
-            return product.get_payoff(S, pricing_env, knocked_in=knocked_in)
+            payoff = product.get_payoff(
+                S, pricing_env, knocked_in=knocked_in
+            )
+            if self._payment_timings is None:
+                payment_time = self._resolve_payment_time(
+                    product,
+                    pricing_env,
+                    float(T),
+                    CashflowKind.TERMINAL,
+                    cashflow_id="ko_reset_near_expiry",
+                )
+                return payoff * (
+                    self._df(payment_time) / self._df(float(T))
+                )
+            return payoff * self._payment_timings.terminal.delay_df
 
         # Price using appropriate method
         if isinstance(product, KnockOutResetSnowballOption):
@@ -273,6 +299,92 @@ class SnowballMCEngine(BaseEngine):
         if result.price < 0 and product.payoff_config.include_principal:
             raise PricingError(f"Negative price computed: {result.price}")
         return result.price
+
+    def _prepare_payment_timings(self, product, pricing_env) -> None:
+        """Resolve standard Snowball KO and terminal payment timing once."""
+        if isinstance(product, KnockOutResetSnowballOption):
+            self._payment_timings = None
+            return
+        records = product.resolve_ko_observations(pricing_env)
+        self._payment_timings = resolve_autocallable_payment_timings(
+            product,
+            pricing_env,
+            records,
+            event_paid=(
+                product.accrual_config.coupon_pay_type
+                == CouponPayType.INSTANT
+            ),
+        )
+
+    @staticmethod
+    def _resolve_payment_time(
+        product,
+        pricing_env,
+        determination_time: float,
+        kind: CashflowKind,
+        *,
+        record: Optional[ObservationRecord] = None,
+        cashflow_id: str,
+    ) -> float:
+        timing = SettlementResolver.resolve_contingent(
+            product,
+            SettlementRequest(
+                kind=kind,
+                determination_time=float(determination_time),
+                explicit_payment_date=(
+                    None if record is None else record.settlement_date
+                ),
+                explicit_payment_time=(
+                    None if record is None else record.settlement_time
+                ),
+                cashflow_id=cashflow_id,
+            ),
+            pricing_env,
+        )
+        return float(timing.payment_time)
+
+    @classmethod
+    def _resolve_payment_time_array(
+        cls,
+        product,
+        pricing_env,
+        determination_times,
+        kind: CashflowKind,
+        *,
+        records: Optional[List[ObservationRecord]] = None,
+        record_indices=None,
+        cashflow_id: str,
+    ) -> np.ndarray:
+        """Resolve the small set of unique event nodes, then vectorize."""
+        times = np.asarray(determination_times, dtype=float)
+        indices = (
+            np.full(times.shape, -1, dtype=int)
+            if record_indices is None
+            else np.asarray(record_indices, dtype=int)
+        )
+        pairs = np.column_stack((times.ravel(), indices.ravel()))
+        unique, inverse = np.unique(pairs, axis=0, return_inverse=True)
+        resolved = np.empty(unique.shape[0], dtype=float)
+        for index, (time, record_index_raw) in enumerate(unique):
+            record_index = int(record_index_raw)
+            record = (
+                None
+                if records is None or record_index < 0
+                else records[record_index]
+            )
+            resolved[index] = cls._resolve_payment_time(
+                product,
+                pricing_env,
+                float(time),
+                kind,
+                record=record,
+                cashflow_id=(
+                    f"{cashflow_id}[{record_index}]"
+                    if record_index >= 0
+                    else cashflow_id
+                ),
+            )
+        return resolved[inverse].reshape(times.shape)
 
     def _rqmc_streams_per_step(self) -> int:
         """Random streams consumed per time step in RQMC mode (session
@@ -333,6 +445,7 @@ class SnowballMCEngine(BaseEngine):
         self._validate_inputs(S, T, r, q, sigma, product)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
+        self._prepare_payment_timings(product, pricing_env)
         if T < 1e-10:
             return None
         if isinstance(product, KnockOutResetSnowballOption):
@@ -364,6 +477,7 @@ class SnowballMCEngine(BaseEngine):
         # Term-structure context for this entry point (see term_inputs.py)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
+        self._prepare_payment_timings(product, pricing_env)
         self._validate_inputs(S, T, r, q, sigma, product)
 
         all_times, dt_array, ko_indices, ki_indices = self._build_time_grid(
@@ -376,7 +490,11 @@ class SnowballMCEngine(BaseEngine):
         ko_times = np.array(ko_profile["observation_times"], dtype=float)
         ko_barriers = np.array(ko_profile["barriers"], dtype=float)
         ko_payoffs = np.array(ko_profile["payoffs"], dtype=float)
-        ko_settlement_times = np.array(ko_profile["settlement_times"], dtype=float)
+        timings = self._payment_timings
+        ko_settlement_times = np.asarray(
+            timings.observation_payment_times,
+            dtype=float,
+        )
 
         ko_triggered, first_ko_idx = self._check_ko_barriers(
             paths, ko_indices, ko_barriers, product.is_reverse
@@ -450,7 +568,7 @@ class SnowballMCEngine(BaseEngine):
             p_i = float(np.mean(hit_i))
             ko_probability[i] = p_i
             if p_i > 0.0:
-                df = pricing_env.get_discount_factor(float(ko_settlement_times[i]))
+                df = timings.observation_payment_dfs[i]
                 expected_discounted_ko_cashflow[i] = p_i * float(ko_payoffs[i]) * df
 
         survival_probability = np.ones(len(ko_times), dtype=float)
@@ -477,7 +595,7 @@ class SnowballMCEngine(BaseEngine):
                 )
 
         maturity_spots = paths[:, -1]
-        maturity_df = pricing_env.get_discount_factor(float(T))
+        maturity_df = timings.terminal.payment_df
         maturity_payoff_all = np.zeros(len(paths), dtype=float)
         if is_v0.any():
             maturity_payoff_all[is_v0] = np.array(
@@ -556,6 +674,7 @@ class SnowballMCEngine(BaseEngine):
         # Term-structure context for this entry point (see term_inputs.py)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
+        self._prepare_payment_timings(product, pricing_env)
         self._validate_inputs(S, T, r, q, sigma, product)
 
         grid = self._build_time_grid_ko_reset(product, pricing_env, T)
@@ -943,9 +1062,31 @@ class SnowballMCEngine(BaseEngine):
             payoffs[idx] = principal_component + coupon
 
         if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
-            settlement_times = np.array(times, dtype=float)
+            settlement_times = np.array(
+                [
+                    self._resolve_payment_time(
+                        product,
+                        pricing_env,
+                        float(time),
+                        CashflowKind.REDEMPTION,
+                        record=records[index],
+                        cashflow_id=f"ko_reset[{index}]",
+                    )
+                    for index, time in enumerate(times)
+                ],
+                dtype=float,
+            )
         else:
-            settlement_times = np.full(len(times), float(maturity_time), dtype=float)
+            terminal_payment_time = self._resolve_payment_time(
+                product,
+                pricing_env,
+                float(maturity_time),
+                CashflowKind.TERMINAL,
+                cashflow_id="ko_reset_terminal",
+            )
+            settlement_times = np.full(
+                len(times), terminal_payment_time, dtype=float
+            )
 
         return payoffs, settlement_times
 
@@ -1304,7 +1445,14 @@ class SnowballMCEngine(BaseEngine):
         ko_barriers = np.array(ko_profile["barriers"])
         ko_payoffs_schedule = np.array(ko_profile["payoffs"])
         ko_times = np.array(ko_profile["observation_times"])
-        ko_settlement_times = np.array(ko_profile["settlement_times"])
+        timings = self._payment_timings
+        if timings is None:
+            self._prepare_payment_timings(product, pricing_env)
+            timings = self._payment_timings
+        ko_settlement_times = np.array(
+            timings.observation_payment_times,
+            copy=False,
+        )
 
         # Get KI barriers (can be scalar or array)
         ki_barriers_val = None
@@ -1384,7 +1532,10 @@ class SnowballMCEngine(BaseEngine):
 
         # Initialize payoffs and settlement times
         payoffs = np.zeros(num_paths)
-        settlement_times = np.full(num_paths, T)
+        settlement_times = np.full(
+            num_paths,
+            float(timings.terminal.payment_time),
+        )
 
         # KO payoffs
         if is_ko.any():
@@ -1645,19 +1796,13 @@ class SnowballMCEngine(BaseEngine):
         if is_pre_ko.any():
             ko_idx = first_pre_idx[is_pre_ko]
             payoffs[is_pre_ko] = pre_payoffs[ko_idx]
-            if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
-                settlement_times[is_pre_ko] = pre_settlement_times[ko_idx]
-            else:
-                settlement_times[is_pre_ko] = float(pre_maturity)
+            settlement_times[is_pre_ko] = pre_settlement_times[ko_idx]
 
         if is_post_ko.any():
             if post_mode == PostKOScheduleMode.ABSOLUTE:
                 ko_idx = first_post_idx[is_post_ko]
                 payoffs[is_post_ko] = post_payoffs[ko_idx]
-                if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
-                    settlement_times[is_post_ko] = post_settlement_times[ko_idx]
-                else:
-                    settlement_times[is_post_ko] = float(post_maturity_abs)
+                settlement_times[is_post_ko] = post_settlement_times[ko_idx]
             else:
                 principal_component = (
                     product.initial_price * product.contract_multiplier
@@ -1705,9 +1850,25 @@ class SnowballMCEngine(BaseEngine):
                 )
                 payoffs[idx] = principal_component + coupon
                 if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
-                    settlement_times[idx] = ki_time[idx] + offsets
+                    determination_times = ki_time[idx] + offsets
+                    settlement_times[idx] = self._resolve_payment_time_array(
+                        product,
+                        pricing_env,
+                        determination_times,
+                        CashflowKind.REDEMPTION,
+                        records=post_records,
+                        record_indices=local_idx,
+                        cashflow_id="ko_reset_rebased",
+                    )
                 else:
-                    settlement_times[idx] = ki_time[idx] + post_max_offset
+                    determination_times = ki_time[idx] + post_max_offset
+                    settlement_times[idx] = self._resolve_payment_time_array(
+                        product,
+                        pricing_env,
+                        determination_times,
+                        CashflowKind.TERMINAL,
+                        cashflow_id="ko_reset_rebased_terminal",
+                    )
 
         if is_v0.any():
             terminal_spots = paths[is_v0, -1]
@@ -1719,7 +1880,13 @@ class SnowballMCEngine(BaseEngine):
                 dtype=float,
             )
             payoffs[is_v0] = v0_payoffs
-            settlement_times[is_v0] = float(pre_maturity)
+            settlement_times[is_v0] = self._resolve_payment_time(
+                product,
+                pricing_env,
+                float(pre_maturity),
+                CashflowKind.TERMINAL,
+                cashflow_id="ko_reset_v0_terminal",
+            )
 
         if is_v1.any():
             terminal_spots = paths[is_v1, -1]
@@ -1732,9 +1899,24 @@ class SnowballMCEngine(BaseEngine):
             )
             payoffs[is_v1] = v1_payoffs
             if post_mode == PostKOScheduleMode.ABSOLUTE:
-                settlement_times[is_v1] = float(post_maturity_abs)
+                settlement_times[is_v1] = self._resolve_payment_time(
+                    product,
+                    pricing_env,
+                    float(post_maturity_abs),
+                    CashflowKind.TERMINAL,
+                    cashflow_id="ko_reset_v1_terminal",
+                )
             else:
-                settlement_times[is_v1] = ki_time[is_v1] + post_max_offset
+                determination_times = (
+                    ki_time[is_v1] + post_max_offset
+                )
+                settlement_times[is_v1] = self._resolve_payment_time_array(
+                    product,
+                    pricing_env,
+                    determination_times,
+                    CashflowKind.TERMINAL,
+                    cashflow_id="ko_reset_v1_rebased_terminal",
+                )
 
         ko_time = np.where(is_pre_ko, pre_ko_time, np.where(is_post_ko, post_ko_time, np.inf))
 

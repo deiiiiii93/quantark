@@ -18,7 +18,11 @@ from typing import Dict, Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
+    resolve_autocallable_payment_timings,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
 from quantark.montecarlo.qmc_rqmc_driver import RQMCRunSpec, run_rqmc
@@ -81,9 +85,11 @@ class PhoenixMCEngine(BaseEngine):
     # safe for concurrent pricing calls (pre-existing engine contract).
     _term_ctx = None
     _df = None
+    _payment_timings = None
 
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def __init__(
         self,
@@ -159,10 +165,14 @@ class PhoenixMCEngine(BaseEngine):
         # Term-structure context for this pricing call (see term_inputs.py)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
+        self._prepare_payment_timings(product, pricing_env)
 
 
         if T < 1e-10:
-            return product.get_payoff(S, pricing_env=pricing_env)
+            return (
+                product.get_payoff(S, pricing_env=pricing_env)
+                * self._payment_timings.terminal.delay_df
+            )
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             result = self._price_rqmc(product, pricing_env, S, T, r, q, sigma)
@@ -179,6 +189,18 @@ class PhoenixMCEngine(BaseEngine):
         if result.price < 0 and product.payoff_config.include_principal:
             raise PricingError(f"Negative price computed: {result.price}")
         return result.price
+
+    def _prepare_payment_timings(self, product, pricing_env) -> None:
+        records = product.resolve_ko_observations(pricing_env)
+        self._payment_timings = resolve_autocallable_payment_timings(
+            product,
+            pricing_env,
+            records,
+            event_paid=(
+                product.coupon_config.coupon_pay_type
+                == CouponPayType.INSTANT
+            ),
+        )
 
     def _rqmc_streams_per_step(self) -> int:
         """Random streams consumed per time step in RQMC mode (session
@@ -218,6 +240,7 @@ class PhoenixMCEngine(BaseEngine):
         self._validate_inputs(S, T, r, q, sigma, product)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
+        self._prepare_payment_timings(product, pricing_env)
         if T < 1e-10:
             return None
         return self._rqmc_spec(product, pricing_env, S, T, r, q, sigma)
@@ -236,6 +259,7 @@ class PhoenixMCEngine(BaseEngine):
         # Term-structure context for this entry point (see term_inputs.py)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
+        self._prepare_payment_timings(product, pricing_env)
         self._validate_inputs(S, T, r, q, sigma, product)
 
         all_times, dt_array, ko_indices, ki_indices = self._build_time_grid(
@@ -287,12 +311,13 @@ class PhoenixMCEngine(BaseEngine):
 
         ko_probability = np.zeros(len(ko_times), dtype=float)
         expected_discounted_ko_cashflow = np.zeros(len(ko_times), dtype=float)
+        timings = self._payment_timings
         for i in range(len(ko_times)):
             hit_i = stats["is_ko"] & (stats["first_ko_idx"] == i)
             p_i = float(np.mean(hit_i))
             ko_probability[i] = p_i
             if p_i > 0.0:
-                df = self._df(float(ko_settlement_times[i]))
+                df = timings.observation_payment_dfs[i]
                 expected_discounted_ko_cashflow[i] = p_i * float(ko_payoffs[i]) * df
 
         survival_probability = np.ones(len(ko_times), dtype=float)
@@ -301,7 +326,7 @@ class PhoenixMCEngine(BaseEngine):
             cumulative_ko += ko_probability[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
 
-        maturity_df = self._df(float(T))
+        maturity_df = timings.terminal.payment_df
         maturity_payoff_all = np.zeros(len(paths), dtype=float)
         is_ko = stats["is_ko"]
         is_v0 = stats["is_v0"]
@@ -750,7 +775,14 @@ class PhoenixMCEngine(BaseEngine):
         ko_times = np.array(ko_profile["observation_times"], dtype=float)
         ko_barriers = np.array(ko_profile["barriers"], dtype=float)
         ko_payoffs_schedule = np.array(ko_profile["payoffs"], dtype=float)
-        ko_settlement_times = np.array(ko_profile["settlement_times"], dtype=float)
+        timings = self._payment_timings
+        if timings is None:
+            self._prepare_payment_timings(product, pricing_env)
+            timings = self._payment_timings
+        ko_settlement_times = np.asarray(
+            timings.observation_payment_times,
+            dtype=float,
+        )
 
         num_obs = len(ko_times)
         coupon_barrier = product.coupon_config.coupon_barrier
@@ -846,7 +878,11 @@ class PhoenixMCEngine(BaseEngine):
         is_v1 = ~is_ko & ki_triggered
 
         payoffs = np.zeros(num_paths, dtype=float)
-        settlement_times = np.full(num_paths, T, dtype=float)
+        settlement_times = np.full(
+            num_paths,
+            float(timings.terminal.payment_time),
+            dtype=float,
+        )
         instant_coupon_discounted = np.zeros(num_paths, dtype=float)
 
         coupon_probabilities = np.zeros(num_obs, dtype=float)
@@ -872,12 +908,12 @@ class PhoenixMCEngine(BaseEngine):
             if collect_coupon_stats:
                 coupon_probabilities[obs_idx] = float(np.mean(coupon_hit))
                 if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
-                    df_obs = self._df(float(ko_times[obs_idx]))
+                    df_obs = timings.observation_payment_dfs[obs_idx]
                     coupon_cashflows[obs_idx] = float(
                         np.mean(coupon_to_pay * coupon_hit) * df_obs
                     )
                 else:
-                    df_T = self._df(float(T))
+                    df_T = timings.terminal.payment_df
                     coupon_cashflows[obs_idx] = float(
                         np.mean(coupon_to_pay * coupon_hit) * df_T
                     )
@@ -885,7 +921,7 @@ class PhoenixMCEngine(BaseEngine):
             non_ko_coupon = coupon_hit & ~ko_at_obs
             if non_ko_coupon.any():
                 if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
-                    df_obs = self._df(float(ko_times[obs_idx]))
+                    df_obs = timings.observation_payment_dfs[obs_idx]
                     instant_coupon_discounted[non_ko_coupon] += (
                         coupon_to_pay[non_ko_coupon] * df_obs
                     )
