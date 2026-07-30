@@ -161,24 +161,63 @@ column order as the single source of truth, documented in the module
 docstring. No runtime validation layer.
 
 **KO termination** (module-level implementation of study-spec §6). New
-config flag `terminate_on_lifecycle_end: bool = True`. The replay ends on
-the later of the terminal observation date and its resolved settlement time
-from the product's KO records; terminal cash lands in the ledger before the
-stop. Book semantics: terminate when **all** products are dead. KI never
-terminates. `get_summary()` gains
-`termination_reason ∈ {ko, ki_maturity, maturity, data_end}`,
-`days_replayed`, `days_in_contract`. Default ON — replaying a dead contract
-is wrong semantics; the flag exists for golden comparison and diagnostics.
+config flag `terminate_on_lifecycle_end: bool = True`. This is **not** a
+bare loop stop: the current tracker posts the whole KO payoff to
+`realized_cashflows` on the observation date and does not retain
+`settlement_time`, so delayed or `CouponPayType.EXPIRY` settlement cannot
+be expressed by truncation alone. The design introduces an explicit
+**pending-settlement state**, separating four moments:
 
-**Metrics.** `PerformanceMetrics` moves to `backtest/metrics.py`,
-generalized to the `BaseBacktestResults` protocol
-(`get_pnl_series`/`get_value_series`/`get_hedge_trades`);
-`equity/metrics.py` becomes a shim. `ReplayBacktestResults` gains a
-`.metrics` property. FI-specific metrics stay in `fi/`.
+1. **Economic termination** — the terminal observation date: product dead,
+   pricing/greeks/event-stats stop (as today), hedge closes here.
+2. **Receivable valuation** — between observation and settlement the
+   terminal cashflow is carried in portfolio value as a discounted
+   receivable, `cashflow × df(t_settle)` off the day's rate curve.
+3. **Cash posting** — `realized_cashflows` is credited on the resolved
+   settlement date, not the observation date. The tracker is extended to
+   surface each terminal event's `settlement_time` (the product's KO
+   records already carry it, `snowball_option.py:1041`).
+4. **Replay stop** — the run ends at
+   `date_resolver(max(observation_date, settlement_date))`; if that date
+   lies beyond the market data, the run ends at data end with
+   `termination_reason="data_end"` and the receivable still open in the
+   summary.
+
+Under the study's current term sheet settlement resolves to T+0, so moments
+1–4 coincide and behavior degenerates to "stop on the KO date with cash
+posted" — but the rule is stated generally so a settlement lag or
+EXPIRY-paid KO does not silently change the ledger. Book semantics:
+terminate when **all** products are settled. KI never terminates.
+`get_summary()` gains
+`termination_reason ∈ {ko, ki_maturity, maturity, data_end}`,
+`days_replayed`, `days_in_contract`. Default ON; the flag exists for golden
+comparison and diagnostics. Tests cover T+0 (degenerate), a synthetic T+5
+lag, and an EXPIRY-paid KO (dead-but-unsettled run to maturity).
+
+**Metrics.** The existing `PerformanceMetrics` is **not** protocol-clean:
+it also reads `num_hedges`, `state_tracker`, `get_delta_series()`,
+`total_transaction_costs`, `initial_value`/`final_value`, and
+`config.strategy.target_delta`. It is therefore **split**, not moved
+wholesale:
+
+- `backtest/metrics.py` gains `CorePerformanceMetrics`, consuming only the
+  `BaseBacktestResults` protocol (`get_pnl_series`/`get_value_series`/
+  `get_hedge_trades`): Sharpe, drawdown (+duration), VaR/CVaR, volatility,
+  win rate, profit factor, skew/kurtosis.
+- Equity's `PerformanceMetrics` stays in `equity/metrics.py`, now extending
+  `CorePerformanceMetrics` with the equity-only hedge/delta metrics — its
+  public API is unchanged, so no shim and no equity breakage.
+- `ReplayBacktestResults.metrics` returns `CorePerformanceMetrics`.
+- Contract tests exercise every public metric on both equity and replay
+  results. FI-specific metrics stay in `fi/`.
 
 **Efficiency.**
 
-- KO termination removes 61% of study replay-days (measured, study spec §7.2).
+- KO termination removes 61% of study replay-*days* (measured, study spec
+  §7.2) — but post-KO days are already cheap because pricing stops at
+  `alive=False`; the saving is loop iteration, env construction, futures
+  selection, and record rows, not pricing. The primary benefit is
+  record correctness, and the cost claim is stated accordingly.
 - `_env_with_spot` shallow-copy helper (curves/surfaces shared — they are
   immutable by project convention) replaces `deepcopy(env)` in the
   surface-grid recorder; the greeks path inherits engine-side copying by
@@ -194,20 +233,43 @@ backtest-common level now so that migration needs no further moves).
 
 ## 9. Testing and golden gates
 
-1. **Golden capture precedes any refactor:** the pinned stage-12 quick run
-   (`--quick --max-inceptions 1`, `flat_bsm` + `ts_bsm`,
-   `terminate_on_lifecycle_end=False`) and the existing
-   `test_otc_autocallable_backtest` / `test_book_backtest` fixtures.
-   Same-machine comparisons are exact (no tolerance).
-2. **Refactor gate:** byte-identical states/greeks/trades/actions frames
-   from the wrapper-based single engine vs the goldens. Book-of-one ≡
-   single becomes a permanent test, not a docstring claim.
+1. **Golden capture precedes any refactor**, three goldens:
+   - the pinned stage-12 quick run (`--quick --max-inceptions 1`,
+     `flat_bsm` + `ts_bsm`, `terminate_on_lifecycle_end=False`);
+   - **a calibrated-variant golden** — `localvol` on the PDE route (fully
+     deterministic), one inception, short window. The bsm-only quick run
+     never touches `VolModelCalibrator`/`create_vol_model_engine`, so
+     without this golden the riskiest ported capability
+     (calibrate-before-any-pricing ordering, per-day engine swap,
+     calibration records) would go unexercised. The golden additionally
+     asserts calibration call count and surface selection per day;
+   - the existing `test_otc_autocallable_backtest` / `test_book_backtest`
+     fixtures.
+2. **Refactor gate — canonical comparison contract.** "Byte-identical"
+   means: for **every** deterministic result surface — states, greeks,
+   trades, rebalances, actions, surfaces, daily-event summary, event
+   probabilities, calibration records, and `get_summary()` —
+   `assert_frame_equal(check_exact=True)` plus explicit column-name and
+   column-order equality (dict/scalar outputs compared by `==` after
+   ordering). Wall-clock fields (`pricing_seconds`,
+   `calibration_seconds`) are excluded by name; `cache_hit` is kept but the
+   golden runs pin a fresh in-memory cache so its sequence is
+   deterministic. Book-of-one ≡ single becomes a permanent test under the
+   same contract, not a docstring claim.
 3. **New behavior tests:** greeks failure propagates;
-   `event_stats_fallback` opt-in + provenance column; KO termination
-   (reason, day counts, terminal cash landed); schema column-order
-   stability; calibration cache-key invariance across relocation.
-4. Existing tests keep passing; the shim compat test (§3) covers the old
-   import paths.
+   `event_stats_fallback` opt-in + provenance column; termination
+   semantics per §8 (T+0 degenerate, synthetic T+5, EXPIRY-paid KO;
+   reason/day counts; receivable and cash-posting dates); schema
+   column-order stability; calibration cache-key invariance across
+   relocation.
+4. **Behavioral legacy compatibility**, not import-only: the old book API
+   exposes *callable* accessors (`results.trades_df()`) where the single
+   results use *properties*, and `products_meta` in its constructor —
+   legacy adapters must preserve constructor signatures and
+   method-vs-property shapes exactly. The compat test constructs configs
+   through the old paths, runs both engines end-to-end, touches **every**
+   public result accessor, verifies root `quantark.backtest` exports, and
+   asserts the `DeprecationWarning`s.
 
 ## 10. Sequencing
 
@@ -228,7 +290,8 @@ backtest-common level now so that migration needs no further moves).
 | Risk | Mitigation |
 |---|---|
 | Byte-identity fails between unified and legacy single engine | Goldens captured first; unification lands as its own commit against them; any diff is a bug to fix, not a tolerance to widen |
-| Book engine lacks calibrator support today; porting it introduces subtle ordering differences (calibrate-before-any-pricing invariant) | The invariant is stated in §4; the vol-model golden (`stage-12 quick`) exercises exactly this path |
+| Book engine lacks calibrator support today; porting it introduces subtle ordering differences (calibrate-before-any-pricing invariant) | The invariant is stated in §4; the dedicated **calibrated-variant golden** (§9.1, `localvol`/PDE) exercises exactly this path — the bsm-only quick run does not |
+| Pending-settlement state (§8) is new machinery in the terminal path | Degenerate T+0 case must reproduce legacy cash timing exactly (golden-gated); T+N and EXPIRY paths are new-behavior tests, unreachable under the study term sheet |
 | Relocation invalidates the on-disk calibration cache | Keys verified path-independent; explicit invariance test (§9.3) |
 | Another session's WIP in the shared tree | §10 step 0 commits a strict file scope first; this work proceeds in an isolated worktree |
 | Behavior changes (termination, fail-closed) alter study numbers | Intended — they land before gates G4/G2 re-run, so gates certify the final configuration |
