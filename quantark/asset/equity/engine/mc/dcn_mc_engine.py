@@ -22,7 +22,10 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.event_stats import DCNEventStats
+from quantark.asset.equity.engine.event_stats import (
+    DCNEventStats,
+    payment_aware_cashflow_fields,
+)
 from quantark.asset.equity.engine.mc.dcn_payoff import compute_dcn_cashflows
 from quantark.asset.equity.engine.mc.qmc_draws import qmc_normals
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
@@ -135,7 +138,16 @@ class _LegAccumulator:
         self.life_sum += float(life.sum())
 
 
-def _finalize_dcn_result(acc, product, seed, stderr, t0) -> "DCNMCResult":
+def _finalize_dcn_result(
+    acc,
+    product,
+    seed,
+    stderr,
+    t0,
+    *,
+    pricing_env,
+    ctx,
+) -> "DCNMCResult":
     """Assemble a DCNMCResult from a fully-populated accumulator.
 
     Shared verbatim by the direct path and the execution-framework batch
@@ -150,6 +162,45 @@ def _finalize_dcn_result(acc, product, seed, stderr, t0) -> "DCNMCResult":
     pv = pv_fixed + pv_ko + pv_loss
 
     ko_probability = float(acc.ko_timing_count.sum() / n)
+    observations = product.schedule.monthly
+    observation_times = np.asarray(
+        ctx.times[ctx.obs_cols],
+        dtype=float,
+    )
+    cashflow_fields = payment_aware_cashflow_fields(
+        pricing_env,
+        determination_times=np.concatenate(
+            [
+                observation_times,
+                observation_times,
+                [observation_times[-1]],
+            ]
+        ),
+        payment_times=np.concatenate(
+            [
+                ctx.coupon_pay_times,
+                ctx.ko_pay_times,
+                [ctx.loss_pay_time],
+            ]
+        ),
+        expected_discounted_cashflows=np.concatenate(
+            [
+                sign * acc.fixed_by_period_sum / n,
+                sign * acc.ko_by_period_sum / n,
+                [pv_loss],
+            ]
+        ),
+        determination_dates=[
+            *(row.observation_date for row in observations),
+            *(row.observation_date for row in observations),
+            observations[-1].observation_date,
+        ],
+        payment_dates=[
+            *(row.coupon_payment_date for row in observations),
+            *(row.ko_payment_date for row in observations),
+            product.settlement_date,
+        ],
+    )
     stats = DCNEventStats(
         ki_probability=float(acc.ki_count / n),
         ko_probability=ko_probability,
@@ -163,6 +214,8 @@ def _finalize_dcn_result(acc, product, seed, stderr, t0) -> "DCNMCResult":
         prob_survive_no_ki=float(acc.survive_no_ki_count / n),
         prob_survive_ki=float(acc.survive_ki_count / n),
         expected_discounted_loss_leg=pv_loss,
+        pv=pv,
+        **cashflow_fields,
     )
     return DCNMCResult(
         pv=pv,
@@ -313,7 +366,15 @@ class DCNMCEngine(BaseEngine):
             # — use num_batches >= 2 for a valid QMC error estimate.
             totals = sign * np.concatenate(acc.totals)
             stderr = float(totals.std(ddof=1) / np.sqrt(n))
-        result = _finalize_dcn_result(acc, product, self.seed, stderr, t0)
+        result = _finalize_dcn_result(
+            acc,
+            product,
+            self.seed,
+            stderr,
+            t0,
+            pricing_env=pricing_env,
+            ctx=ctx,
+        )
         self._last_result = result
         return result
 

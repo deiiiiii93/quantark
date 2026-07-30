@@ -29,6 +29,9 @@ def test_phoenix_quad_ko_survival_match_mc():
     s_q = _quad().calculate_event_stats(ph, env)
     s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
     assert isinstance(s_q, PhoenixEventStats)
+    assert s_q.determination_times.shape == (5,)
+    assert s_q.payment_times.shape == (5,)
+    assert abs(s_q.pv - s_q.expected_discounted_cashflows.sum()) < 1e-8
     np.testing.assert_allclose(s_q.ko_probability, s_mc.ko_probability, atol=6e-3)
     np.testing.assert_allclose(s_q.survival_probability, s_mc.survival_probability, atol=6e-3)
 

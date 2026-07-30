@@ -15,7 +15,10 @@ from scipy.special import erfc
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.event_stats import (
+    AutocallableEventStats,
+    payment_aware_cashflow_fields,
+)
 from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
     project_event_values,
@@ -30,7 +33,7 @@ from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import ObservationType
+from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import (
     EngineType,
     EventProjectionMode,
@@ -601,7 +604,7 @@ class SnowballQuadEngine(BaseEngine):
 
     def _extract_extra_quad_stats(
         self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity,
-        df_fn=None,
+        pricing_env=None, df_fn=None,
     ) -> dict:
         """Extra event-stats fields from the extra rows (none for Snowball)."""
         return {}
@@ -1103,13 +1106,89 @@ class SnowballQuadEngine(BaseEngine):
                 ki_ever_probability = float(pv_ki_ever / df_T)
 
         extra_fields = self._extract_extra_quad_stats(
-            initial_surface, math_utils, n_ko, ko_records, rate, product, maturity, df_fn=df_local,
+            initial_surface,
+            math_utils,
+            n_ko,
+            ko_records,
+            rate,
+            product,
+            maturity,
+            pricing_env=pricing_env,
+            df_fn=df_local,
         )
         # Remove extra cashflow streams (Phoenix coupons) from the maturity field
         # so pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
         coupon_cf = extra_fields.get("expected_discounted_coupon_cashflow")
         if coupon_cf is not None:
             expected_discounted_maturity_cf -= float(np.sum(coupon_cf))
+
+        payment_timings = resolve_structured_payment_timings(
+            product,
+            pricing_env,
+            ko_records,
+        )
+        terminal = payment_timings.terminal
+        determination_times = list(ko_times)
+        payment_times = list(payment_timings.event_payment_times)
+        discounted_cashflows = list(ed_ko_cf)
+        determination_dates = [
+            record.observation_date for record in ko_records
+        ]
+        payment_dates = [
+            record.settlement_date for record in ko_records
+        ]
+
+        if "coupon_probability" in extra_fields:
+            coupon_cashflows = np.asarray(
+                (
+                    extra_fields["expected_discounted_coupon_cashflow"]
+                    if coupon_cf is not None
+                    else np.zeros(n_ko, dtype=float)
+                ),
+                dtype=float,
+            )
+            coupon_at_expiry = (
+                product.coupon_config.coupon_pay_type
+                == CouponPayType.EXPIRY
+            )
+            determination_times.extend(ko_times)
+            payment_times.extend(
+                (
+                    np.full(
+                        n_ko,
+                        float(terminal.payment_time),
+                        dtype=float,
+                    )
+                    if coupon_at_expiry
+                    else payment_timings.event_payment_times
+                )
+            )
+            discounted_cashflows.extend(coupon_cashflows)
+            determination_dates.extend(
+                record.observation_date for record in ko_records
+            )
+            payment_dates.extend(
+                (
+                    terminal.payment_date
+                    if coupon_at_expiry
+                    else record.settlement_date
+                )
+                for record in ko_records
+            )
+
+        determination_times.append(float(terminal.determination_time))
+        payment_times.append(float(terminal.payment_time))
+        discounted_cashflows.append(expected_discounted_maturity_cf)
+        determination_dates.append(terminal.determination_date)
+        payment_dates.append(terminal.payment_date)
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=determination_times,
+            payment_times=payment_times,
+            expected_discounted_cashflows=discounted_cashflows,
+            determination_dates=determination_dates,
+            payment_dates=payment_dates,
+        )
 
         return self._make_event_stats(
             pv=pv,
@@ -1125,6 +1204,7 @@ class SnowballQuadEngine(BaseEngine):
             ki_survival_probability=ki_survival_probability,
             ki_ever_probability=ki_ever_probability,
             ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
+            **cashflow_fields,
             **extra_fields,
         )
 
@@ -1756,6 +1836,36 @@ class SnowballQuadEngine(BaseEngine):
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
 
+        payment_timings = resolve_structured_payment_timings(
+            product,
+            pricing_env,
+            ko_records,
+        )
+        terminal = payment_timings.terminal
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=np.concatenate(
+                [ko_times, [terminal.determination_time]]
+            ),
+            payment_times=np.concatenate(
+                [
+                    payment_timings.event_payment_times,
+                    [terminal.payment_time],
+                ]
+            ),
+            expected_discounted_cashflows=np.concatenate(
+                [expected_discounted_ko_cashflow, [0.0]]
+            ),
+            determination_dates=[
+                *(record.observation_date for record in ko_records),
+                terminal.determination_date,
+            ],
+            payment_dates=[
+                *(record.settlement_date for record in ko_records),
+                terminal.payment_date,
+            ],
+        )
+
         return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
@@ -1768,6 +1878,7 @@ class SnowballQuadEngine(BaseEngine):
             ki_times=ki_times,
             ki_event_probability=ki_event_probability,
             ki_survival_probability=ki_survival_probability,
+            **cashflow_fields,
         )
 
     def _resolve_fft_padding_factor(self) -> int:

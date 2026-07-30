@@ -23,6 +23,9 @@ def test_phoenix_pde_ko_survival_match_mc():
     s_pde = make_engine("pde", "phoenix").calculate_event_stats(ph, env)
     s_mc = make_engine("mc", "phoenix").calculate_event_stats(ph, env)
     assert isinstance(s_pde, PhoenixEventStats)
+    assert s_pde.determination_times.shape == (5,)
+    assert s_pde.payment_times.shape == (5,)
+    assert abs(s_pde.pv - s_pde.expected_discounted_cashflows.sum()) < 1e-8
     np.testing.assert_allclose(s_pde.ko_times, s_mc.ko_times, atol=1e-9)
     np.testing.assert_allclose(s_pde.ko_probability, s_mc.ko_probability, atol=5e-3)
     np.testing.assert_allclose(

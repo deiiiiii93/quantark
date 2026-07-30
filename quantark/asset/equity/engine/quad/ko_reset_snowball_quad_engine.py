@@ -13,7 +13,10 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
-from quantark.asset.equity.engine.event_stats import KOResetEventStats
+from quantark.asset.equity.engine.event_stats import (
+    KOResetEventStats,
+    payment_aware_cashflow_fields,
+)
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
@@ -686,7 +689,10 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         pre_probability = np.zeros(n_pre, dtype=float)
         post_probability = np.zeros(n_post, dtype=float)
         expected_discounted_pre_ko_cashflow = np.zeros(n_pre, dtype=float)
-        expected_discounted_post_ko_cashflow = 0.0
+        expected_discounted_post_ko_cashflows = np.zeros(
+            n_post,
+            dtype=float,
+        )
 
         for i, rec in enumerate(pre_ko_records):
             df_total = float(df_local(float(rec.observation_time))) * float(
@@ -710,7 +716,12 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if df_total > 0:
                 post_probability[i] = float(post_unit[i] / df_total)
             payoff = float(rec.payoff) if rec.payoff is not None else 0.0
-            expected_discounted_post_ko_cashflow += float(post_unit[i] * payoff)
+            expected_discounted_post_ko_cashflows[i] = float(
+                post_unit[i] * payoff
+            )
+        expected_discounted_post_ko_cashflow = float(
+            np.sum(expected_discounted_post_ko_cashflows)
+        )
 
         df_maturity = float(df_local(maturity))
         ki_survive = 0.0
@@ -736,6 +747,37 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             - float(np.sum(expected_discounted_pre_ko_cashflow))
             - expected_discounted_post_ko_cashflow
         )
+        terminal = resolve_terminal_timing(product, pricing_env)
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=np.concatenate(
+                [pre_times, post_times, [terminal.determination_time]]
+            ),
+            payment_times=np.concatenate(
+                [
+                    [record.settlement_time for record in pre_ko_records],
+                    [record.settlement_time for record in post_ko_records],
+                    [terminal.payment_time],
+                ]
+            ),
+            expected_discounted_cashflows=np.concatenate(
+                [
+                    expected_discounted_pre_ko_cashflow,
+                    expected_discounted_post_ko_cashflows,
+                    [expected_discounted_maturity_cashflow],
+                ]
+            ),
+            determination_dates=[
+                *(record.observation_date for record in pre_ko_records),
+                *(record.observation_date for record in post_ko_records),
+                terminal.determination_date,
+            ],
+            payment_dates=[
+                *(record.settlement_date for record in pre_ko_records),
+                *(record.settlement_date for record in post_ko_records),
+                terminal.payment_date,
+            ],
+        )
 
         return KOResetEventStats(
             pv=pv,
@@ -757,6 +799,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             expected_discounted_post_ko_cashflow=float(
                 expected_discounted_post_ko_cashflow
             ),
+            **cashflow_fields,
         )
 
     def _validate_product(self, product: KnockOutResetSnowballOption) -> None:

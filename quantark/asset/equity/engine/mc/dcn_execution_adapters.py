@@ -466,7 +466,13 @@ class _DCNBatchMixin:
             totals = sign * np.concatenate(acc.totals)
             stderr = float(totals.std(ddof=1) / np.sqrt(acc.n))
         result = _finalize_dcn_result(
-            acc, sim.product, sim.engine.seed, stderr, sim.t0
+            acc,
+            sim.product,
+            sim.engine.seed,
+            stderr,
+            sim.t0,
+            pricing_env=sim.pricing_env,
+            ctx=sim.ctx,
         )
         economics = (
             ("pv", float(result.pv)),

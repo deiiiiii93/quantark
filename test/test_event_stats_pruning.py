@@ -160,6 +160,9 @@ def test_npv_passthrough_skips_internal_price():
     sentinel = 123456.0
     passed = solver._compute_event_stats(product, env, npv=sentinel)
     assert float(passed.pv) == sentinel
+    assert abs(
+        float(passed.expected_discounted_cashflows.sum()) - sentinel
+    ) < 1e-8
     # maturity residual shifts by exactly the pv delta; KO cashflows unchanged.
     assert np.array_equal(
         np.asarray(internal.expected_discounted_ko_cashflow),

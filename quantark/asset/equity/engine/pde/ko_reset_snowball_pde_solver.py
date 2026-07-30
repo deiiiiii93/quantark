@@ -14,6 +14,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from quantark.asset.equity.engine.event_stats import (
+    payment_aware_cashflow_fields,
+)
 from quantark.asset.equity.engine.pde.base_pde_solver import PDESolutionResult
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.param import QuadParams
@@ -91,12 +94,28 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
 
         pde_pv = float(npv) if npv is not None else float(self.price(product, pricing_env))
         pv_delta = pde_pv - float(quad_stats.pv)
+        discounted_cashflows = np.array(
+            quad_stats.expected_discounted_cashflows,
+            dtype=float,
+            copy=True,
+        )
+        if discounted_cashflows.size:
+            discounted_cashflows[-1] += pv_delta
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=quad_stats.determination_times,
+            payment_times=quad_stats.payment_times,
+            expected_discounted_cashflows=discounted_cashflows,
+            determination_dates=quad_stats.determination_dates,
+            payment_dates=quad_stats.payment_dates,
+        )
         return replace(
             quad_stats,
             pv=pde_pv,
             expected_discounted_maturity_cashflow=(
                 float(quad_stats.expected_discounted_maturity_cashflow) + pv_delta
             ),
+            **cashflow_fields,
         )
 
     def _validate_product(self, product: KnockOutResetSnowballOption) -> None:

@@ -662,7 +662,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
     def _extract_extra_quad_stats(
         self, initial_surface, math_utils, n_ko, ko_records, rate, product, maturity,
-        df_fn=None,
+        pricing_env=None, df_fn=None,
     ) -> dict:
         coupon_probability = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
@@ -687,10 +687,19 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
                 for i in range(n_ko)
             ]
+            payment_timings = resolve_structured_payment_timings(
+                product,
+                pricing_env,
+                ko_records,
+            )
             expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
             ecc = np.zeros(n_ko, dtype=float)
             for i in range(n_ko):
-                settle = float(maturity) if expiry else ko_times[i]
+                settle = (
+                    float(payment_timings.terminal.payment_time)
+                    if expiry
+                    else float(payment_timings.event_payment_times[i])
+                )
                 df_settle = (
                     float(df_fn(settle)) if df_fn is not None
                     else math.exp(-rate * settle)

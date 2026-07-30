@@ -77,11 +77,16 @@ class PhoenixPDESolver(SnowballPDESolver):
         if ko_idx is None or ko_idx >= self._coupon_barriers.shape[0]:
             return
         coupon_barrier = float(self._coupon_barriers[ko_idx])
+        coupon_payment_time = self._coupon_payment_time(
+            product,
+            pricing_env,
+            ko_idx,
+        )
         df_delay = self._cashflow_value_at_time(
             pricing_env=pricing_env,
             cashflow=1.0,
             current_time=float(t_vec[t_idx]),
-            settlement_time=rec.settlement_time,
+            settlement_time=coupon_payment_time,
         )
         coup_col = n_ko + ko_idx
         if self._event_uses_projection(t_idx):
@@ -127,7 +132,18 @@ class PhoenixPDESolver(SnowballPDESolver):
                 at_valuation=True,
             )[0]
         )
-        overrides[n_ko + rec0_pos] = df_delay0 if pay else 0.0
+        coupon_payment_time = self._coupon_payment_time(
+            product,
+            pricing_env,
+            rec0_pos,
+        )
+        coupon_delay0 = self._cashflow_value_at_time(
+            pricing_env=pricing_env,
+            cashflow=1.0,
+            current_time=float(t_vec[0]),
+            settlement_time=coupon_payment_time,
+        )
+        overrides[n_ko + rec0_pos] = coupon_delay0 if pay else 0.0
         if ko_triggered:
             for i in range(n_ko):
                 if i != rec0_pos:
@@ -156,8 +172,10 @@ class PhoenixPDESolver(SnowballPDESolver):
         coupon_probability = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
             obs_time = float(rec.observation_time)
-            settle = float(
-                rec.settlement_time if rec.settlement_time is not None else obs_time
+            settle = self._coupon_payment_time(
+                product,
+                pricing_env,
+                i,
             )
             df0 = pricing_env.get_discount_factor(settle)
             if df0 > 0.0:
@@ -183,12 +201,13 @@ class PhoenixPDESolver(SnowballPDESolver):
         """
         if product.has_memory_coupon:
             return None
-        expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-        maturity = float(product.get_maturity(pricing_env))
         ecc = np.zeros(n_ko, dtype=float)
         for i, rec in enumerate(ko_records):
-            obs_time = float(rec.observation_time)
-            settle = maturity if expiry else obs_time
+            settle = self._coupon_payment_time(
+                product,
+                pricing_env,
+                i,
+            )
             amt = (
                 float(self._coupon_amounts[i])
                 if i < self._coupon_amounts.shape[0]

@@ -39,14 +39,20 @@ from quantark.asset.equity.engine.pde.grid import (
     MarketSnapshot,
     project_between,
 )
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.event_stats import (
+    AutocallableEventStats,
+    payment_aware_cashflow_fields,
+)
 from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    resolve_terminal_timing,
+)
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import ObservationType, ProtectionType
+from quantark.util.enum import CouponPayType, ObservationType, ProtectionType
 from quantark.util.enum.engine_enums import (
     ContinuousKICorrection,
     EventProjectionMode,
@@ -1315,6 +1321,79 @@ class SnowballPDESolver(BasePDESolver):
         if coupon_cf is not None:
             expected_discounted_maturity_cf -= float(np.sum(coupon_cf))
 
+        terminal = resolve_terminal_timing(product, pricing_env)
+        determination_times = list(ko_times)
+        payment_times = [
+            float(
+                record.settlement_time
+                if record.settlement_time is not None
+                else record.observation_time
+            )
+            for record in ko_records
+        ]
+        discounted_cashflows = list(ed_ko_cf)
+        determination_dates = [
+            record.observation_date for record in ko_records
+        ]
+        payment_dates = [
+            record.settlement_date for record in ko_records
+        ]
+
+        if "coupon_probability" in extra_fields:
+            coupon_cashflows = np.asarray(
+                (
+                    extra_fields["expected_discounted_coupon_cashflow"]
+                    if coupon_cf is not None
+                    else np.zeros(n_ko, dtype=float)
+                ),
+                dtype=float,
+            )
+            coupon_at_expiry = (
+                product.coupon_config.coupon_pay_type
+                == CouponPayType.EXPIRY
+            )
+            determination_times.extend(ko_times)
+            payment_times.extend(
+                [
+                    (
+                        float(terminal.payment_time)
+                        if coupon_at_expiry
+                        else float(
+                            record.settlement_time
+                            if record.settlement_time is not None
+                            else record.observation_time
+                        )
+                    )
+                    for record in ko_records
+                ]
+            )
+            discounted_cashflows.extend(coupon_cashflows)
+            determination_dates.extend(
+                record.observation_date for record in ko_records
+            )
+            payment_dates.extend(
+                (
+                    terminal.payment_date
+                    if coupon_at_expiry
+                    else record.settlement_date
+                )
+                for record in ko_records
+            )
+
+        determination_times.append(float(terminal.determination_time))
+        payment_times.append(float(terminal.payment_time))
+        discounted_cashflows.append(expected_discounted_maturity_cf)
+        determination_dates.append(terminal.determination_date)
+        payment_dates.append(terminal.payment_date)
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=determination_times,
+            payment_times=payment_times,
+            expected_discounted_cashflows=discounted_cashflows,
+            determination_dates=determination_dates,
+            payment_dates=payment_dates,
+        )
+
         return self._make_event_stats(
             pv=pv,
             ko_times=ko_times,
@@ -1334,6 +1413,7 @@ class SnowballPDESolver(BasePDESolver):
             # the dedicated KI-ever column that carries no KO absorption.
             ki_ever_probability=ki_ever_probability,
             ki_survive_knocked_in_probability=ki_probability,
+            **cashflow_fields,
             **extra_fields,
         )
 

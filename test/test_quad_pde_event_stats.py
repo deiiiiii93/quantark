@@ -40,6 +40,8 @@ def test_snowball_quad_event_stats_shapes_and_mass():
     assert stats.ko_probability.shape == (6,)
     assert stats.survival_probability.shape == (6,)
     assert stats.expected_discounted_ko_cashflow.shape == (6,)
+    assert stats.determination_times.shape == (7,)
+    assert stats.payment_times.shape == (7,)
 
     assert float(np.sum(stats.ko_probability)) <= 1.0 + 1e-6
     assert all(
@@ -50,6 +52,7 @@ def test_snowball_quad_event_stats_shapes_and_mass():
     # PV decomposition consistency (constructed as residual)
     pv_parts = float(np.sum(stats.expected_discounted_ko_cashflow) + stats.expected_discounted_maturity_cashflow)
     assert abs(stats.pv - pv_parts) < 1e-8
+    assert abs(stats.pv - stats.expected_discounted_cashflows.sum()) < 1e-8
 
 
 def test_snowball_pde_event_stats_delegates_to_quad():
@@ -66,6 +69,9 @@ def test_snowball_pde_event_stats_delegates_to_quad():
     stats = pde.calculate_event_stats(product, env)
     assert stats is not None
     assert stats.ko_times.shape == (4,)
+    assert stats.determination_times.shape == (5,)
+    assert stats.payment_times.shape == (5,)
+    assert abs(stats.pv - stats.expected_discounted_cashflows.sum()) < 1e-8
 
     # Basic sanity: probabilities are between 0 and 1 (tolerances allow small numerical drift).
     assert float(stats.ko_probability.min()) >= -1e-6

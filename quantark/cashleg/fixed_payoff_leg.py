@@ -68,16 +68,18 @@ class FixedPayoffLeg(CashLeg):
 
         offset_yf = float(self.payment_offset_days) / 365.0
         if self.trigger is PaymentTrigger.AT_MATURITY_ANY:
-            probability = float(
-                event_dist.probabilities.get(EventType.MATURITY_NO_KO, 0.0)
-            ) + float(event_dist.probabilities.get(EventType.MATURITY_WITH_KI, 0.0))
-            pay_time = float(event_dist.event_times[-1]) + offset_yf
-            return (
-                self.sign()
-                * float(self.amount)
-                * probability
-                * env.get_discount_factor(pay_time)
+            expected_df = sum(
+                float(event_dist.probabilities.get(event_type, 0.0))
+                * env.get_discount_factor(
+                    float(event_dist.payment_times_for(event_type))
+                    + offset_yf
+                )
+                for event_type in (
+                    EventType.MATURITY_NO_KO,
+                    EventType.MATURITY_WITH_KI,
+                )
             )
+            return self.sign() * float(self.amount) * expected_df
 
         event_type = _TRIGGER_TO_EVENT[self.trigger]
         if event_type not in event_dist.probabilities:
@@ -88,11 +90,17 @@ class FixedPayoffLeg(CashLeg):
 
         probability = event_dist.probabilities[event_type]
         if isinstance(probability, np.ndarray):
-            pay_times = event_dist.event_times + offset_yf
+            pay_times = (
+                np.asarray(
+                    event_dist.payment_times_for(event_type),
+                    dtype=float,
+                )
+                + offset_yf
+            )
             dfs = np.array([env.get_discount_factor(float(t)) for t in pay_times])
             return self.sign() * float(self.amount) * float(np.sum(probability * dfs))
 
-        pay_time = float(event_dist.event_times[-1]) + offset_yf
+        pay_time = float(event_dist.payment_times_for(event_type)) + offset_yf
         return (
             self.sign()
             * float(self.amount)

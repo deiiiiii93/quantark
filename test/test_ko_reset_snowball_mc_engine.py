@@ -63,14 +63,21 @@ def test_ko_reset_rebased_requires_discrete_ki():
         )
 
 
-def test_ko_reset_event_stats_shape():
+@pytest.mark.parametrize(
+    "post_ko_mode",
+    [
+        PostKOScheduleMode.ABSOLUTE,
+        PostKOScheduleMode.REBASED,
+    ],
+)
+def test_ko_reset_event_stats_shape(post_ko_mode):
     pricing_env = create_pricing_env()
     product = create_ko_reset_snowball(
         initial_price=100.0,
         strike=100.0,
         maturity_pre=1.0,
         maturity_post=2.0,
-        post_ko_mode=PostKOScheduleMode.REBASED,
+        post_ko_mode=post_ko_mode,
         ki_continuous=False,
     )
     engine = SnowballMCEngine(params=MCParams(num_paths=1000, time_steps=252))
@@ -78,3 +85,9 @@ def test_ko_reset_event_stats_shape():
     assert isinstance(stats, KOResetEventStats)
     assert len(stats.pre_ko_times) == len(stats.pre_ko_probability)
     assert len(stats.post_ko_times) == len(stats.post_ko_probability)
+    assert len(stats.determination_times) == len(stats.payment_times)
+    assert np.all(stats.payment_times >= stats.determination_times)
+    assert stats.pv == pytest.approx(
+        float(stats.expected_discounted_cashflows.sum()),
+        abs=1.0e-8,
+    )

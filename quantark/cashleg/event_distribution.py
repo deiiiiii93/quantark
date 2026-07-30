@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Union
@@ -48,6 +48,12 @@ class EventDistribution:
     event_dates: Optional[List[datetime]]
     probabilities: Dict[EventType, Union[np.ndarray, float]]
     survival_probability: np.ndarray
+    payment_times: Dict[EventType, Union[np.ndarray, float]] = field(
+        default_factory=dict
+    )
+    payment_dates: Optional[
+        Dict[EventType, Union[tuple[datetime, ...], datetime]]
+    ] = None
     mc_ko_times: Optional[np.ndarray] = None
 
     def __post_init__(self) -> None:
@@ -69,6 +75,31 @@ class EventDistribution:
                 for event_type, probability in self.probabilities.items()
             },
         )
+        object.__setattr__(
+            self,
+            "payment_times",
+            {
+                event_type: (
+                    np.asarray(payment_time, dtype=float)
+                    if isinstance(payment_time, np.ndarray)
+                    else float(payment_time)
+                )
+                for event_type, payment_time in self.payment_times.items()
+            },
+        )
+        if self.payment_dates is not None:
+            object.__setattr__(
+                self,
+                "payment_dates",
+                {
+                    event_type: (
+                        tuple(payment_date)
+                        if not isinstance(payment_date, datetime)
+                        else payment_date
+                    )
+                    for event_type, payment_date in self.payment_dates.items()
+                },
+            )
         self._validate_invariants()
 
     @classmethod
@@ -81,6 +112,10 @@ class EventDistribution:
             event_dates=None,
             probabilities={EventType.MATURITY_NO_KO: 1.0},
             survival_probability=np.array([1.0, 1.0], dtype=float),
+            payment_times={
+                EventType.MATURITY_NO_KO: maturity,
+                EventType.MATURITY_WITH_KI: maturity,
+            },
         )
 
     @classmethod
@@ -125,13 +160,75 @@ class EventDistribution:
                 stats.coupon_probability, dtype=float
             )
 
+        payment_times: Dict[EventType, Union[np.ndarray, float]] = {}
+        payment_dates = {}
+        event_dates = None
+        ledger_payment_times = np.asarray(
+            getattr(stats, "payment_times", np.array([])),
+            dtype=float,
+        )
+        n_ko = ko_times.size
+        if ledger_payment_times.size >= n_ko + 1:
+            payment_times[EventType.KO] = ledger_payment_times[:n_ko]
+            next_index = n_ko
+            if (
+                isinstance(stats, PhoenixEventStats)
+                and stats.coupon_probability.size == n_ko
+                and ledger_payment_times.size >= 2 * n_ko + 1
+            ):
+                payment_times[EventType.COUPON] = ledger_payment_times[
+                    n_ko : 2 * n_ko
+                ]
+                next_index = 2 * n_ko
+            terminal_payment_time = float(ledger_payment_times[-1])
+            payment_times[EventType.MATURITY_NO_KO] = terminal_payment_time
+            payment_times[EventType.MATURITY_WITH_KI] = terminal_payment_time
+
+            ledger_payment_dates = getattr(stats, "payment_dates", None)
+            ledger_determination_dates = getattr(
+                stats,
+                "determination_dates",
+                None,
+            )
+            if ledger_determination_dates is not None:
+                event_dates = list(ledger_determination_dates[:n_ko])
+            if ledger_payment_dates is not None:
+                payment_dates[EventType.KO] = tuple(
+                    ledger_payment_dates[:n_ko]
+                )
+                if next_index == 2 * n_ko:
+                    payment_dates[EventType.COUPON] = tuple(
+                        ledger_payment_dates[n_ko:next_index]
+                    )
+                payment_dates[EventType.MATURITY_NO_KO] = (
+                    ledger_payment_dates[-1]
+                )
+                payment_dates[EventType.MATURITY_WITH_KI] = (
+                    ledger_payment_dates[-1]
+                )
+
         dist = cls(
             event_times=ko_times,
-            event_dates=None,
+            event_dates=event_dates,
             probabilities=probabilities,
             survival_probability=survival,
+            payment_times=payment_times,
+            payment_dates=payment_dates or None,
         )
         return dist.normalized()
+
+    def payment_times_for(
+        self,
+        event_type: EventType,
+    ) -> Union[np.ndarray, float]:
+        """Return payment timing, falling back to determination timing."""
+
+        if event_type in self.payment_times:
+            return self.payment_times[event_type]
+        probability = self.probabilities.get(event_type)
+        if isinstance(probability, np.ndarray):
+            return self.event_times
+        return float(self.event_times[-1])
 
     def survival_at(self, t: float) -> float:
         """Linearly interpolate survival probability at a year fraction."""
@@ -172,6 +269,8 @@ class EventDistribution:
             event_dates=self.event_dates,
             probabilities=probabilities,
             survival_probability=self.survival_probability,
+            payment_times=self.payment_times,
+            payment_dates=self.payment_dates,
             mc_ko_times=self.mc_ko_times,
         )
 
@@ -221,6 +320,42 @@ class EventDistribution:
                 raise NumericalError(
                     f"EventDistribution probability {event_type.value} has shape "
                     f"{probability.shape}, expected {self.event_times.shape}"
+                )
+
+        for event_type, payment_time in self.payment_times.items():
+            if event_type not in self.probabilities:
+                continue
+            times = np.asarray(payment_time, dtype=float)
+            if np.any(~np.isfinite(times)):
+                raise NumericalError(
+                    f"EventDistribution payment time {event_type.value} is non-finite"
+                )
+            probability = self.probabilities[event_type]
+            if isinstance(probability, np.ndarray):
+                if times.shape != self.event_times.shape:
+                    raise NumericalError(
+                        f"EventDistribution payment time {event_type.value} has "
+                        f"shape {times.shape}, expected {self.event_times.shape}"
+                    )
+                if np.any(
+                    times + Tolerance.PROBABILITY < self.event_times
+                ):
+                    raise NumericalError(
+                        f"EventDistribution payment time {event_type.value} "
+                        "precedes its determination time"
+                    )
+            elif times.ndim != 0:
+                raise NumericalError(
+                    f"EventDistribution scalar event {event_type.value} requires "
+                    "a scalar payment time"
+                )
+            elif (
+                float(times) + Tolerance.PROBABILITY
+                < float(self.event_times[-1])
+            ):
+                raise NumericalError(
+                    f"EventDistribution payment time {event_type.value} "
+                    "precedes terminal determination"
                 )
 
         total = self._termination_probability_total()

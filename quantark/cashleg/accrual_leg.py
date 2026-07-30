@@ -117,7 +117,12 @@ class AccrualLeg(CashLeg):
     def _payment_times(self, event_dist: EventDistribution) -> np.ndarray:
         if self.payment_convention is PaymentConvention.AT_MATURITY:
             return np.full(
-                len(self.schedule.payment_times), float(event_dist.event_times[-1])
+                len(self.schedule.payment_times),
+                float(
+                    event_dist.payment_times_for(
+                        EventType.MATURITY_NO_KO
+                    )
+                ),
             )
         return self.schedule.payment_times
 

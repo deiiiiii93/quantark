@@ -36,6 +36,10 @@ def test_snowball_mc_engine_event_stats_shapes():
     assert stats.ko_probability.shape == (4,)
     assert stats.survival_probability.shape == (4,)
     assert stats.expected_discounted_ko_cashflow.shape == (4,)
+    assert stats.determination_times.shape == (5,)
+    assert stats.payment_times.shape == (5,)
+    assert stats.expected_discounted_cashflows.shape == (5,)
+    assert stats.expected_undiscounted_cashflows.shape == (5,)
 
     assert 0.0 <= stats.ki_probability <= 1.0
     assert stats.pv == stats.pv  # not NaN
@@ -50,4 +54,4 @@ def test_snowball_mc_engine_event_stats_shapes():
 
     # PV reconciliation should be close (same simulation)
     assert abs(stats.reconciliation_error) < 1e-8
-
+    assert abs(stats.pv - stats.expected_discounted_cashflows.sum()) < 1e-8

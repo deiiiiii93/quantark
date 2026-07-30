@@ -19,7 +19,10 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.event_stats import PhoenixEventStats
+from quantark.asset.equity.engine.event_stats import (
+    PhoenixEventStats,
+    payment_aware_cashflow_fields,
+)
 from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
     resolve_autocallable_payment_timings,
 )
@@ -326,49 +329,13 @@ class PhoenixMCEngine(BaseEngine):
             cumulative_ko += ko_probability[i]
             survival_probability[i] = max(0.0, 1.0 - cumulative_ko)
 
-        maturity_df = timings.terminal.payment_df
-        maturity_payoff_all = np.zeros(len(paths), dtype=float)
         is_ko = stats["is_ko"]
-        is_v0 = stats["is_v0"]
-        is_v1 = stats["is_v1"]
-        if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
-            maturity_payoff_all[~is_ko] = payoffs[~is_ko]
-        else:
-            if is_v0.any():
-                maturity_payoff_all[is_v0] = np.array(
-                    [
-                        product.get_maturity_payoff_v0(
-                            float(s),
-                            pricing_env=pricing_env,
-                        )
-                        for s in paths[is_v0, -1]
-                    ],
-                    dtype=float,
-                )
-            if is_v1.any():
-                maturity_payoff_all[is_v1] = np.array(
-                    [
-                        product.get_maturity_payoff_v1(
-                            float(s),
-                            pricing_env=pricing_env,
-                        )
-                        for s in paths[is_v1, -1]
-                    ],
-                    dtype=float,
-                )
         expected_discounted_maturity_cashflow = float(
-            np.mean(maturity_payoff_all * maturity_df)
+            pv
+            - np.sum(expected_discounted_ko_cashflow)
+            - np.sum(coupon_cashflows)
         )
-
-        coupon_cf_total = float(np.sum(coupon_cashflows))
-        if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
-            coupon_cf_total = 0.0
-        pv_cashflows = float(
-            np.sum(expected_discounted_ko_cashflow)
-            + expected_discounted_maturity_cashflow
-            + coupon_cf_total
-        )
-        reconciliation_error = pv - pv_cashflows
+        reconciliation_error = 0.0
         ki_event_probability = np.array([], dtype=float)
         ki_survival_probability = np.array([], dtype=float)
         if product.has_ki_barrier:
@@ -403,6 +370,54 @@ class PhoenixMCEngine(BaseEngine):
             ki_ever_probability = 0.0
             ki_survive_knocked_in_probability = 0.0
 
+        records = product.resolve_ko_observations(pricing_env)
+        terminal = timings.terminal
+        observation_payment_dates = [
+            (
+                record.settlement_date
+                if (
+                    product.coupon_config.coupon_pay_type
+                    == CouponPayType.INSTANT
+                )
+                else terminal.payment_date
+            )
+            for record in records
+        ]
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=np.concatenate(
+                [
+                    np.asarray(ko_times, dtype=float),
+                    np.asarray(ko_times, dtype=float),
+                    [terminal.determination_time],
+                ]
+            ),
+            payment_times=np.concatenate(
+                [
+                    timings.observation_payment_times,
+                    timings.observation_payment_times,
+                    [terminal.payment_time],
+                ]
+            ),
+            expected_discounted_cashflows=np.concatenate(
+                [
+                    expected_discounted_ko_cashflow,
+                    coupon_cashflows,
+                    [expected_discounted_maturity_cashflow],
+                ]
+            ),
+            determination_dates=[
+                *(record.observation_date for record in records),
+                *(record.observation_date for record in records),
+                terminal.determination_date,
+            ],
+            payment_dates=[
+                *observation_payment_dates,
+                *observation_payment_dates,
+                terminal.payment_date,
+            ],
+        )
+
         return PhoenixEventStats(
             pv=pv,
             ko_times=np.array(ko_times, dtype=float),
@@ -419,6 +434,7 @@ class PhoenixMCEngine(BaseEngine):
             ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
             coupon_probability=coupon_probabilities,
             expected_discounted_coupon_cashflow=coupon_cashflows,
+            **cashflow_fields,
         )
 
     def _validate_inputs(

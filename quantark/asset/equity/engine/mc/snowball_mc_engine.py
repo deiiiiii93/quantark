@@ -21,7 +21,11 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.capabilities import SettlementSupport
-from quantark.asset.equity.engine.event_stats import AutocallableEventStats, KOResetEventStats
+from quantark.asset.equity.engine.event_stats import (
+    AutocallableEventStats,
+    KOResetEventStats,
+    payment_aware_cashflow_fields,
+)
 from quantark.asset.equity.engine.mc.autocallable_payment_timings import (
     resolve_autocallable_payment_timings,
 )
@@ -613,10 +617,6 @@ class SnowballMCEngine(BaseEngine):
                 ],
                 dtype=float,
             )
-        expected_discounted_maturity_cashflow = float(
-            np.mean(maturity_payoff_all * maturity_df)
-        )
-
         # Total discounted payoff PV from the same simulation.
         total_discounted = np.zeros(len(paths), dtype=float)
         if is_ko.any():
@@ -629,10 +629,47 @@ class SnowballMCEngine(BaseEngine):
         total_discounted[~is_ko] = maturity_payoff_all[~is_ko] * maturity_df
 
         pv = float(np.mean(total_discounted))
-        pv_cashflows = float(
-            np.sum(expected_discounted_ko_cashflow) + expected_discounted_maturity_cashflow
+        expected_discounted_maturity_cashflow = float(
+            pv - np.sum(expected_discounted_ko_cashflow)
         )
-        reconciliation_error = pv - pv_cashflows
+        reconciliation_error = 0.0
+
+        records = product.resolve_ko_observations(pricing_env)
+        terminal = timings.terminal
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=np.concatenate(
+                [ko_times, [terminal.determination_time]]
+            ),
+            payment_times=np.concatenate(
+                [
+                    timings.observation_payment_times,
+                    [terminal.payment_time],
+                ]
+            ),
+            expected_discounted_cashflows=np.concatenate(
+                [
+                    expected_discounted_ko_cashflow,
+                    [expected_discounted_maturity_cashflow],
+                ]
+            ),
+            determination_dates=[
+                *(record.observation_date for record in records),
+                terminal.determination_date,
+            ],
+            payment_dates=[
+                *(
+                    record.settlement_date
+                    if (
+                        product.accrual_config.coupon_pay_type
+                        == CouponPayType.INSTANT
+                    )
+                    else terminal.payment_date
+                    for record in records
+                ),
+                terminal.payment_date,
+            ],
+        )
 
         # Unambiguous, cross-engine-consistent KI definitions (investigation
         # 2026-07-01): ki_ever = P(KI ever, KO-independent); ki_survive =
@@ -659,6 +696,7 @@ class SnowballMCEngine(BaseEngine):
             ki_survival_probability=ki_survival_probability,
             ki_ever_probability=ki_ever_probability,
             ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
+            **cashflow_fields,
         )
 
     def _calculate_event_stats_ko_reset(
@@ -696,10 +734,20 @@ class SnowballMCEngine(BaseEngine):
         is_post_ko = extra["is_post_ko"]
         is_ko = is_pre_ko | is_post_ko
         ki_triggered = extra["ki_triggered"]
+        is_v0 = ~is_ko & ~ki_triggered
+        is_v1 = ~is_ko & ki_triggered
 
         pre_times = grid["pre_times"]
         post_times = grid["post_times"]
         post_mode = grid["post_profile"]["mode"]
+        post_maturity_abs = (
+            product.get_post_maturity_time(pricing_env)
+            if post_mode == PostKOScheduleMode.ABSOLUTE
+            else None
+        )
+        post_max_offset = (
+            float(max(post_times)) if len(post_times) else 0.0
+        )
 
         pre_prob = np.zeros(len(pre_times), dtype=float)
         for i in range(len(pre_times)):
@@ -754,12 +802,76 @@ class SnowballMCEngine(BaseEngine):
 
         total_discounted = payoffs * dfs_all
         pv = float(np.mean(total_discounted))
-        pv_cashflows = float(
-            np.sum(expected_discounted_ko_cashflow)
-            + expected_discounted_post_ko_cashflow
-            + expected_discounted_maturity_cashflow
+        reconciliation_error = 0.0
+
+        determination_ledger = list(np.asarray(pre_times, dtype=float))
+        payment_ledger = list(np.asarray(pre_settlement_times, dtype=float))
+        discounted_ledger = list(expected_discounted_ko_cashflow)
+
+        def _append_grouped_path_cashflows(mask, determination_times):
+            indices = np.flatnonzero(mask)
+            if indices.size == 0:
+                return
+            grouped = {}
+            for path_index, determination_time in zip(
+                indices,
+                np.asarray(determination_times, dtype=float),
+            ):
+                payment_time = float(settlement_times[path_index])
+                key = (float(determination_time), payment_time)
+                discounted = float(
+                    payoffs[path_index]
+                    * pricing_env.get_discount_factor(payment_time)
+                    / len(paths)
+                )
+                grouped[key] = grouped.get(key, 0.0) + discounted
+            for (determination_time, payment_time), discounted in sorted(
+                grouped.items()
+            ):
+                determination_ledger.append(determination_time)
+                payment_ledger.append(payment_time)
+                discounted_ledger.append(discounted)
+
+        _append_grouped_path_cashflows(
+            is_post_ko,
+            extra["ko_time"][is_post_ko],
         )
-        reconciliation_error = pv - pv_cashflows
+        if post_mode == PostKOScheduleMode.ABSOLUTE:
+            terminal_determination = np.where(
+                is_v0,
+                float(pre_maturity),
+                float(post_maturity_abs),
+            )
+        else:
+            terminal_determination = np.where(
+                is_v0,
+                float(pre_maturity),
+                extra["ki_time"] + post_max_offset,
+            )
+        _append_grouped_path_cashflows(
+            ~is_ko,
+            terminal_determination[~is_ko],
+        )
+
+        cashflow_fields = payment_aware_cashflow_fields(
+            pricing_env,
+            determination_times=determination_ledger,
+            payment_times=payment_ledger,
+            expected_discounted_cashflows=discounted_ledger,
+        )
+        ledger_sum = float(np.sum(cashflow_fields["expected_discounted_cashflows"]))
+        if discounted_ledger:
+            adjusted = np.array(
+                cashflow_fields["expected_discounted_cashflows"],
+                copy=True,
+            )
+            adjusted[-1] += pv - ledger_sum
+            cashflow_fields = payment_aware_cashflow_fields(
+                pricing_env,
+                determination_times=determination_ledger,
+                payment_times=payment_ledger,
+                expected_discounted_cashflows=adjusted,
+            )
 
         survival_probability = np.ones(len(pre_times), dtype=float)
         cumulative_ko = 0.0
@@ -787,6 +899,7 @@ class SnowballMCEngine(BaseEngine):
             pre_ko_probability_total=pre_prob_total,
             post_ko_probability_total=post_prob_total,
             expected_discounted_post_ko_cashflow=float(expected_discounted_post_ko_cashflow),
+            **cashflow_fields,
         )
 
     def _validate_inputs(
