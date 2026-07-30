@@ -34,12 +34,32 @@ The consolidation must build on the uncommitted study framework (study spec §10
 - [ ] **Step 1: Enumerate and sanity-check the scope**
 
 Run: `git status --porcelain | grep -E "backtest/otc|mo_volmodels|test_otc|test_book_backtest|test_equity_lifecycle|ppp_dki"`
-For each file ask: is this backtest-framework/study code? EXCLUDE anything under `quantark/asset/` (13 modified option-product files are another session's WIP), `quantark/volmodels/`, `example/fx_volmodels/`, `.codegraph/`, `example/bucketed_greeks*`, `example/data/*`.
+The scope is a **coherent set**, not a stage subset: ALL modified/untracked
+`example/mo_volmodels/*.py` (including the stage-04 script and
+`_heston_diagnostics.py` — the modified `test_stage04_heston.py` depends on
+both; committing the test without its script produces a knowingly broken
+baseline), ALL `test/mo_volmodels/*.py`, all `quantark/backtest/otc/` files,
+the `test_otc_*`/`test_book_backtest`/`test_equity_lifecycle_trackers`/
+`ppp_dki` files, plus any `example/mo_volmodels/data/` file that a committed
+test actually reads (check with `grep -rn "data/" test/mo_volmodels | grep -o "data/[^\"']*" | sort -u`).
+EXCLUDE anything under `quantark/asset/` (13 modified option-product files
+are another session's WIP), `quantark/volmodels/`, `example/fx_volmodels/`,
+`.codegraph/`, `example/bucketed_greeks*`, `example/data/*`,
+`example/snowball_volmodel_backtest/` (run output).
 
-- [ ] **Step 2: Verify the scoped tree passes its own tests**
+- [ ] **Step 2: Verify the scoped tree passes its own tests — including the staged study tests**
 
-Run: `.venv/bin/python -m pytest test/test_otc_autocallable_backtest.py test/test_book_backtest.py test/test_otc_vol_calibrators.py test/test_otc_vol_history_env.py test/test_backtest_interface.py -q`
-Expected: all pass (this is the baseline being frozen).
+Run against the exact staged tree (stash-everything-else check):
+
+```bash
+git stash push --keep-index -u -m "task0-scope-check" || true   # only if unstaged noise interferes
+.venv/bin/python -m pytest test/test_otc_autocallable_backtest.py test/test_book_backtest.py \
+  test/test_otc_vol_calibrators.py test/test_otc_vol_history_env.py \
+  test/test_backtest_interface.py test/mo_volmodels -q
+git stash pop || true
+```
+Expected: all pass (this is the baseline being frozen). A failure here means
+the scope is incoherent — fix the scope, not the tests.
 
 - [ ] **Step 3: Commit on main**
 
@@ -252,6 +272,17 @@ Pure move + rename. NO logic changes. Canonical aliases: `ReplayBacktestEngine =
 - Produces (in `replay/__init__.py` and `quantark.backtest`): `ReplayBacktestEngine`, `ReplayBacktestConfig`, `ReplayProduct`, `ReplayBacktestResults`, `HedgeSpec` — for now simple aliases: `ReplayBacktestEngine = BookAutocallableBacktestEngine` (class renamed with alias kept), `ReplayBacktestConfig = BookAutocallableBacktestConfig` (alias), `ReplayProduct = BookProduct` (alias), `ReplayBacktestResults = BookBacktestResults` (alias). Renames-in-place happen in Tasks 7–8; aliases guarantee both names always resolve.
 
 - [ ] **Step 1: `git mv` + create shims + fix intra-package relative imports** (`from .config import` etc. move cleanly; `replay/single.py` imports `from .product_replay import ProductReplay`).
+
+- [ ] **Step 1b: Relocate the book classes to the canonical modules.** The live
+`BookAutocallableBacktestConfig`, `BookProduct`, and `HedgeSpec` are defined in
+`book_engine.py` (→ now `replay/engine.py`) and `BookBacktestResults` at its
+bottom. Move the class definitions: `BookAutocallableBacktestConfig`,
+`BookProduct`, `HedgeSpec` → `replay/config.py`; `BookBacktestResults` →
+`replay/results.py`; `replay/engine.py` imports them from there. This is what
+makes `from quantark.backtest.replay.config import ReplayBacktestConfig` (Task
+6 dispatch, Task 8/12/14 edits to `config.py`/`results.py`) actually resolve —
+without it, later tasks would edit the wrong modules. The `otc/book_engine.py`
+shim re-exports all four names regardless.
 - [ ] **Step 2: Update `base.py`, `backtest/__init__.py`, canonical-path consumers.**
 
 In `get_backtest_engine` (`base.py:260`), point the existing `AutocallableBacktestConfig` branch at `quantark.backtest.replay` and ADD the canonical dispatch ahead of it:
@@ -301,15 +332,16 @@ Expected: PASS, with DeprecationWarnings from shim-covered tests only.
 Book engine gains the single engine's calibration capability. The single engine is NOT yet a wrapper (that is Task 9); this task only makes the book engine calibration-capable and byte-equal on book-of-one localvol.
 
 **Files:**
-- Modify: `quantark/backtest/replay/engine.py` (class renamed `ReplayBacktestEngine`, alias `BookAutocallableBacktestEngine = ReplayBacktestEngine`; config renamed `ReplayBacktestConfig` with alias; `BookProduct` renamed `ReplayProduct` with alias)
-- Modify: `quantark/backtest/replay/results.py` (book results: add `calibration_records` param + property + `export_calibration_records`, same as single results)
+- Modify: `quantark/backtest/replay/engine.py` (class renamed `ReplayBacktestEngine`, alias `BookAutocallableBacktestEngine = ReplayBacktestEngine`)
+- Modify: `quantark/backtest/replay/config.py` (Task 6 Step 1b put the book config classes here: rename `BookAutocallableBacktestConfig`→`ReplayBacktestConfig` and `BookProduct`→`ReplayProduct`, old names kept as aliases; add the vol-model admissibility validation below)
+- Modify: `quantark/backtest/replay/results.py` (book results — canonical home per Task 6 Step 1b: add `calibration_records` param + property + `export_calibration_records`, same as single results)
 - Test: extend `test/test_book_backtest.py`-adjacent new file `test/test_replay_engine_unified.py`
 
 **Interfaces:**
 - Consumes: `VolModelCalibrator` (Task 4 canonical path), `create_vol_model_engine` (existing).
 - Produces: `ReplayBacktestEngine._calibrate_day(date) -> dict | None` — calibrates ONCE per day (shared artifact), then rebuilds each alive replay's day-engine from the same `CalibratedVolModel`. Engine resolution order per day (MUST mirror `replay/single.py:130-166` exactly): build env → calibrate (if `vol_model != "bsm"` and (any alive or initial value pending)) → initial book value → lifecycle → price/greeks.
 
-- [ ] **Step 1: Failing test** — `test_replay_engine_unified.py::test_book_of_one_localvol_matches_single`: run `fixtures.make_localvol_config` through the (still separate) single engine AND the same product wrapped as a book-of-one `ReplayBacktestConfig` with `vol_model="localvol"`; compare per-frame with the golden contract (`assert_frame_equal(check_exact=True)` on states/greeks/trades/actions; calibration_records equal after dropping timing keys).
+- [ ] **Step 1: Failing test** — `test_replay_engine_unified.py::test_book_of_one_localvol_matches_single`: run `fixtures.make_localvol_config` through the (still separate) single engine AND the same product wrapped as a book-of-one `ReplayBacktestConfig` with `vol_model="localvol"`; compare per-frame with the golden contract (`assert_frame_equal(check_exact=True)` on states/greeks/trades/actions; calibration_records equal after dropping timing keys). Add rejection tests: a Phoenix book-of-one with `vol_model="localvol"` raises `ValidationError` at config construction; a mixed Snowball+Phoenix book with `vol_model="localvol"` raises; the same mixed book with `vol_model="bsm"` constructs fine.
 - [ ] **Step 2:** FAIL (`ReplayBacktestConfig` rejects/ignores vol_model → book run diverges or errors).
 - [ ] **Step 3: Implement** — in `ReplayBacktestEngine.__init__`, mirror `single.py:71-81` (validator + `VolModelCalibrator` construction, `ValidationError` when `surface_history` missing). In `run()`, insert after env build:
 
@@ -324,6 +356,17 @@ if self._calibrator is not None and (
 (The condition mirrors `single.py:131-133`: calibrate while anything is alive, and always on the first day so the initial price is model-consistent.)
 
 `_calibrate_day` calibrates once, then for each replay sets that day's engine (delivered to the replay calls — until Task 10 lands, assign `replay.pricing_engine = day_engine` for each replay, exactly like the single engine does today). Timing: wrap the per-day pricing block with `time.perf_counter()` into `pricing_seconds` as `single.py:158-166` does.
+
+**Product/model admissibility (fail-closed):** `create_vol_model_engine` builds
+ONLY Snowball vol-model engines (`LocalVolSnowball*`, `HestonSnowball*`,
+`HestonSLVSnowball*`) and takes no product argument, while replay books accept
+Phoenix and European products. Guard at config construction: when
+`engine_config.vol_model != "bsm"`, `ReplayBacktestConfig.__post_init__` (and
+the single config via the wrapper) raises `ValidationError` unless EVERY
+`ReplayProduct.product` is a `SnowballOption`. Wiring the existing Phoenix
+vol-model solvers into the factory is explicitly deferred (YAGNI — the study
+prices snowballs); the rejection makes the gap loud instead of silently
+pricing a Phoenix with a Snowball engine.
 
 - [ ] **Step 4: Run** unified test + Task-6 suite + goldens → PASS.
 - [ ] **Step 5: Commit** `git commit -m "feat(backtest): ReplayBacktestEngine gains per-day vol-model calibration (book-of-one == single, exact)"`
@@ -370,13 +413,13 @@ if self._calibrator is not None and (
 
 **Files:**
 - Modify: `quantark/backtest/replay/config.py` — `AutocallableEngineConfig.event_stats_fallback: Literal["none","mc"] = "none"` (validated in `__post_init__`).
-- Modify: `quantark/backtest/replay/product_replay.py` — `_calculate_event_stats`: `"none"` → exceptions propagate; `"mc"` → fallback via `create_mc_event_stats_engine`, `logger.warning`, and every row appended in that day's `record_event_probabilities`/`daily_event_sink` gains `"event_stats_engine": "mc_fallback"` (primary path writes `"primary"`). `record_surfaces` failure branch logs `logger.warning("surface node failed", exc_info=True)` — NaN row kept.
+- Modify: `quantark/backtest/replay/product_replay.py` — `_calculate_event_stats`: `"none"` → exceptions propagate, **and a `None` return from the primary engine (the `BaseEngine.calculate_event_stats` "unsupported" signal) raises `PricingError`** when event probabilities were requested — today `None` is a silent no-op that leaves the requested frames empty, which is exactly the fail-open path being removed; `"mc"` → on exception OR `None`, fallback via `create_mc_event_stats_engine`, `logger.warning`, and every row appended in that day's `record_event_probabilities`/`daily_event_sink` gains `"event_stats_engine": "mc_fallback"` (primary path writes `"primary"`). `record_surfaces` failure branch logs `logger.warning("surface node failed", exc_info=True)` — NaN row kept.
 - Test: `test/test_replay_event_stats_fallback.py`, and `test/test_backtest_otc_compat.py` (the §9.4 behavioral compat test)
 
 **Interfaces:**
 - Produces: new column `event_stats_engine` in `daily_event_summary` and `event_probabilities` frames. Goldens: REGENERATE these two frame families ONLY (the new column with constant `"primary"`), via a targeted re-capture run; every other golden file must remain bit-identical (`git diff --stat` on `test/replay_golden/data` shows only `*_daily_event_summary.csv` / `*_event_probabilities.csv`).
 
-- [ ] **Step 1: Failing tests** — default `"none"`: a raising stub event-stats engine propagates; `"mc"`: run completes, warning logged (`caplog`), provenance column present with `mc_fallback`.
+- [ ] **Step 1: Failing tests** — default `"none"`: a raising stub event-stats engine propagates AND a `None`-returning stub raises `PricingError`; `"mc"`: for both a raising stub and a `None`-returning stub, the run completes, warning logged (`caplog`), provenance column present with `mc_fallback`.
 - [ ] **Step 2–3:** Implement; regenerate the two golden families; verify `git diff --stat`.
 - [ ] **Step 4: Behavioral compat test** (`test_backtest_otc_compat.py`): via OLD paths only (`quantark.backtest.otc.*`): construct both configs, run both engines end-to-end on the scalar fixture, touch EVERY public accessor — single results properties (`states_df, greeks_df, rebalance_df, trades_df, actions_df, surfaces_df, daily_event_summary_df, event_probability_df, calibration_records, get_summary, get_total_pnl, get_total_return, get_pnl_series, get_value_series, get_hedge_trades, get_lifecycle_events`), book results **methods** (`states_df(), greeks_df(), rebalances_df(), trades_df(), actions_df(), daily_event_summary_df(), event_probability_df(), surfaces_df(), get_summary()`) and `BookBacktestResults(..., products_meta=[…])` constructor kwarg; assert `quantark.backtest` re-exports (`AutocallableBacktestEngine`, `get_backtest_engine` dispatch on both config types); assert `pytest.warns(DeprecationWarning)` on shim imports (use `importlib.reload` to re-trigger).
 - [ ] **Step 5:** Run everything → PASS. **Step 6: Commit** `git commit -m "feat(backtest): opt-in MC event-stats fallback with provenance; behavioral otc compat suite"`
@@ -418,13 +461,14 @@ if self._calibrator is not None and (
 ### Task 14: Pending-settlement KO termination
 
 **Files:**
-- Modify: `quantark/asset/equity/lifecycle/state.py` — `AutocallableLifecycleState` gains `pending_settlement_cashflow: float = 0.0`, `settlement_date: Optional[datetime] = None`, `settled: bool = False`; `mark_ko(date, cashflow, settlement_date=None)`: when `settlement_date` is later than `date`, park cashflow in `pending_settlement_cashflow` instead of `realized_cashflows`; new `settle(date)` moves it to `realized_cashflows` and sets `settled=True`. When `settlement_date is None` (or equal to `date`) behavior is EXACTLY today's (immediate realization, `settled=True`) — the T+0 degenerate case.
+- Modify: `quantark/asset/equity/lifecycle/state.py` — `AutocallableLifecycleState` gains `pending_settlement_cashflow: float = 0.0`, `settlement_date: Optional[datetime] = None`, `settled: bool = False`; `mark_ko(date, cashflow, settlement_date=None)`: when `settlement_date` is later than `date`, park cashflow in `pending_settlement_cashflow` instead of `realized_cashflows`; new `settle(date)` moves it to `realized_cashflows` and sets `settled=True`. When `settlement_date is None` (or equal to `date`) behavior is EXACTLY today's (immediate realization, `settled=True`) — the T+0 degenerate case. **`mark_maturity` sets `settled=True` unconditionally** (maturity settlement is immediate) — without this, clean-maturity and KI-maturity runs never satisfy the all-settled termination predicate and default-on runs would continue to data end with a wrong `termination_reason`.
 - Modify: `quantark/asset/equity/lifecycle/autocallable.py` — `_scheduled_records` carries `settlement_time` when the product's schedule records expose it (`getattr(rec, "settlement_time", None)` on `ko_observation_schedule.records`; `None` → observation date); `observe()` KO branch resolves `settlement_date = self._date_resolver(obs_date_for(settlement_time))` and passes it to `mark_ko`; KO `LifecycleEvent.metadata` gains `settlement_date`.
 - Modify: `quantark/backtest/replay/config.py` — `terminate_on_lifecycle_end: bool = True` on BOTH configs (`ReplayBacktestConfig`, `AutocallableBacktestConfig`).
-- Modify: `quantark/backtest/replay/engine.py` — daily: after lifecycle, call `replay.settle_pending_if_due(date)` (new `ProductReplay` passthrough to `lifecycle.settle`); portfolio value adds the discounted receivable `pending_settlement_cashflow * env.get_df(t_settle)` (use the day's rate curve discount factor; when settlement ≤ date the receivable is zero); loop breaks when `terminate_on_lifecycle_end` and every replay is `settled` (dead AND cash posted) — AFTER recording that day's row. `get_summary()` gains `termination_reason` (`"ko"` if any KO'd, `"ki_maturity"` if matured knocked-in, `"maturity"` if matured clean, `"data_end"` otherwise), `days_replayed`, `days_in_contract` (calendar length of `_backtest_dates()`).
+- Modify: `quantark/backtest/replay/engine.py` — daily: after lifecycle, call `replay.settle_pending_if_due(date)` (new `ProductReplay` passthrough to `lifecycle.settle`); portfolio value adds the discounted receivable `pending_settlement_cashflow * env.get_discount_factor(tau_settle)` where `tau_settle = (settlement_date - date).days / 365.0` (**the live `PricingEnvironment` API is `get_discount_factor`, not `get_df`**; when settlement ≤ date the receivable is zero); loop breaks when `terminate_on_lifecycle_end` and every replay is `settled` (dead AND cash posted) — AFTER recording that day's row. `get_summary()` gains `termination_reason` (`"ko"` if any KO'd, `"ki_maturity"` if matured knocked-in, `"maturity"` if matured clean, `"data_end"` otherwise), `days_replayed`, `days_in_contract` (calendar length of `_backtest_dates()`).
+- Modify: `test/replay_golden/fixtures.py` — **every fixture config gains `terminate_on_lifecycle_end=False`** in the same commit that introduces the flag. The goldens were frozen before the flag existed and the scalar fixture KOs mid-path; without this edit the default-on truncation fails every golden. The golden DATA files are untouched — only the fixture configs pin legacy semantics.
 - Test: `test/test_replay_termination.py`
 
-- [ ] **Step 1: Failing tests** — (a) **T+0 degenerate:** scalar fixture with a path forcing KO; flag ON → last state row is the KO date, cash posted that day, `termination_reason=="ko"`, `days_replayed < days_in_contract`; flag OFF → frames equal the golden (goldens run flag OFF — assert against the same golden files); (b) **T+5 synthetic:** monkeypatch the product's KO schedule records with `settlement_time = obs_time + 5/365`; KO cash absent from `realized_cashflows` on obs date, portfolio value includes discounted receivable, cash posts on resolved settlement date, replay ends there; (c) **EXPIRY-paid:** settlement_time = maturity; run continues (dead, unpriced) to maturity, cash posts at maturity; (d) book: two products, one KO'd — run continues until BOTH settled.
+- [ ] **Step 1: Failing tests** — (a) **T+0 degenerate:** scalar fixture with a path forcing KO; flag ON → last state row is the KO date, cash posted that day, `termination_reason=="ko"`, `days_replayed < days_in_contract`; flag OFF → frames equal the golden (goldens run flag OFF — assert against the same golden files); (b) **T+5 synthetic:** monkeypatch the product's KO schedule records with `settlement_time = obs_time + 5/365`; KO cash absent from `realized_cashflows` on obs date, portfolio value includes discounted receivable, cash posts on resolved settlement date, replay ends there; (c) **EXPIRY-paid:** settlement_time = maturity; run continues (dead, unpriced) to maturity, cash posts at maturity; (d) book: two products, one KO'd — run continues until BOTH settled; (e) **clean maturity:** no-KO path, flag ON → run ends on the maturity settlement date with `termination_reason=="maturity"`, not `data_end`; (f) **KI maturity:** KI'd no-KO path → ends at maturity with `termination_reason=="ki_maturity"`.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement per file list. **Step 4:** Run termination tests + goldens (flag OFF path) + `test/test_equity_lifecycle_trackers.py` + `test/test_dynamic_scenario*.py -k lifecycle` (the tracker is shared with dynamicscenario — its callers pass no `settlement_date`, so behavior there is unchanged; verify) → PASS.
 - [ ] **Step 5: Commit** `git commit -m "feat(backtest): pending-settlement KO termination — replay ends when terminal cash lands"`
 
