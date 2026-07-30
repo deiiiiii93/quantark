@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Optional, Sequence, TYPE_CHECKING
+
+import numpy as np
 
 from quantark.asset.equity.settlement import (
     CashflowKind,
     ResolvedPaymentTiming,
+    SettlementLagUnit,
     SettlementRequest,
     SettlementResolver,
 )
 from quantark.execution.errors import CapabilityError
+from quantark.util.calendar import calculate_year_fraction
 from quantark.util.exceptions import ValidationError
+from quantark.util.numerical import is_close
 
 from .capabilities import SettlementSupport
 
@@ -41,6 +48,250 @@ _EVENT_PRODUCT_NAMES = {
     "SingleSharkfinOption",
     "SnowballOption",
 }
+
+
+@dataclass(frozen=True)
+class AmericanExerciseTimings:
+    """Curve-ready payment timing carried by an American exercise grid.
+
+    A date-based PDE may have diffusion nodes between contractual exercise
+    dates. Those nodes remain in ``node_times`` but are marked ineligible and
+    carry NaN payment data. Engines must apply the exercise obstacle only
+    where ``eligible`` is true.
+    """
+
+    node_times: np.ndarray
+    node_dates: tuple[Optional[datetime], ...]
+    eligible: np.ndarray
+    payment_dates: tuple[Optional[datetime], ...]
+    payment_times: np.ndarray
+    payment_dfs: np.ndarray
+    delay_dfs: np.ndarray
+
+    def __post_init__(self) -> None:
+        node_times = np.array(self.node_times, dtype=float, copy=True)
+        eligible = np.array(self.eligible, dtype=bool, copy=True)
+        payment_times = np.array(self.payment_times, dtype=float, copy=True)
+        payment_dfs = np.array(self.payment_dfs, dtype=float, copy=True)
+        delay_dfs = np.array(self.delay_dfs, dtype=float, copy=True)
+        node_dates = tuple(self.node_dates)
+        payment_dates = tuple(self.payment_dates)
+        size = node_times.size
+        arrays = (
+            eligible,
+            payment_times,
+            payment_dfs,
+            delay_dfs,
+        )
+        if node_times.ndim != 1 or any(
+            array.ndim != 1 or array.size != size for array in arrays
+        ):
+            raise ValidationError(
+                "American exercise timing arrays must be one-dimensional "
+                "and aligned"
+            )
+        if len(node_dates) != size or len(payment_dates) != size:
+            raise ValidationError(
+                "American exercise timing dates must align with node_times"
+            )
+        for array in (node_times, *arrays):
+            array.setflags(write=False)
+        object.__setattr__(self, "node_times", node_times)
+        object.__setattr__(self, "eligible", eligible)
+        object.__setattr__(self, "payment_times", payment_times)
+        object.__setattr__(self, "payment_dfs", payment_dfs)
+        object.__setattr__(self, "delay_dfs", delay_dfs)
+        object.__setattr__(self, "node_dates", node_dates)
+        object.__setattr__(self, "payment_dates", payment_dates)
+
+
+def american_exercise_requires_dates(product) -> bool:
+    """Whether the requested convention needs a real date at every exercise."""
+    convention = getattr(product, "settlement_convention", None)
+    if convention is None or float(convention.lag) == 0.0:
+        return False
+    return convention.lag_unit in {
+        SettlementLagUnit.BUSINESS_DAYS,
+        SettlementLagUnit.CALENDAR_DAYS,
+    }
+
+
+def build_american_exercise_date_grid(
+    product,
+    pricing_env: "PricingEnvironment",
+) -> tuple[tuple[datetime, ...], np.ndarray]:
+    """Enumerate authoritative calendar dates from valuation through expiry.
+
+    Dates come only from the two contractual endpoints. No date is inferred
+    from a numeric year fraction.
+    """
+    exercise_date = getattr(product, "exercise_date", None)
+    if exercise_date is None:
+        raise ValidationError(
+            "day-based American settlement requires an authoritative "
+            "exercise_date; a numeric American product may use only a "
+            "YEAR_FRACTION settlement lag"
+        )
+    valuation_date = pricing_env.valuation_date
+    if exercise_date < valuation_date:
+        raise ValidationError(
+            "American exercise_date cannot precede valuation_date"
+        )
+    if exercise_date == valuation_date:
+        return (valuation_date,), np.array([0.0], dtype=float)
+
+    dates = [valuation_date]
+    current = valuation_date
+    while current < exercise_date:
+        current = min(current + timedelta(days=1), exercise_date)
+        dates.append(current)
+
+    resolved_dates: list[datetime] = []
+    resolved_times: list[float] = []
+    for date in dates:
+        if date == valuation_date:
+            time = 0.0
+        else:
+            time = float(
+                calculate_year_fraction(
+                    valuation_date,
+                    date,
+                    pricing_env.day_count_convention,
+                    pricing_env.bus_days_in_year,
+                    calendar=getattr(pricing_env, "calendar", None),
+                )
+            )
+        if resolved_times and time <= resolved_times[-1]:
+            # BUSINESS_DAYS time does not advance on weekends/holidays.
+            # Such dates cannot be separate stochastic nodes on that clock.
+            continue
+        resolved_dates.append(date)
+        resolved_times.append(time)
+
+    if not resolved_dates or resolved_dates[-1] != exercise_date:
+        raise ValidationError(
+            "exercise_date does not form a distinct node under the pricing "
+            "environment day-count convention"
+        )
+
+    maturity = float(product.get_maturity(pricing_env))
+    if not is_close(resolved_times[-1], maturity):
+        raise ValidationError(
+            "American exercise date grid is inconsistent with product maturity"
+        )
+    resolved_times[-1] = maturity
+    return tuple(resolved_dates), np.asarray(resolved_times, dtype=float)
+
+
+def resolve_american_exercise_timings(
+    product,
+    pricing_env: "PricingEnvironment",
+    node_times: Sequence[float],
+    *,
+    exercise_dates: Optional[Sequence[Optional[datetime]]] = None,
+) -> AmericanExerciseTimings:
+    """Resolve one delayed-exercise obstacle factor per eligible grid node.
+
+    ``exercise_dates`` may contain ``None`` for diffusion-only PDE nodes.
+    Date-based conventions reject a grid with no authoritative dates.
+    """
+    times = np.asarray(node_times, dtype=float)
+    if times.ndim != 1 or times.size == 0:
+        raise ValidationError(
+            "American exercise node_times must be a non-empty 1D array"
+        )
+    if not np.all(np.isfinite(times)) or np.any(times < 0.0):
+        raise ValidationError(
+            "American exercise node_times must be finite and non-negative"
+        )
+    if np.any(np.diff(times) <= 0.0):
+        raise ValidationError(
+            "American exercise node_times must be strictly increasing"
+        )
+
+    if exercise_dates is None:
+        dates: tuple[Optional[datetime], ...] = (None,) * times.size
+    else:
+        dates = tuple(exercise_dates)
+        if len(dates) != times.size:
+            raise ValidationError(
+                "exercise_dates must align one-for-one with node_times"
+            )
+        if any(
+            date is not None and not isinstance(date, datetime)
+            for date in dates
+        ):
+            raise ValidationError(
+                "American exercise node dates must be datetime or None"
+            )
+
+    requires_dates = american_exercise_requires_dates(product)
+    if requires_dates and not any(date is not None for date in dates):
+        raise ValidationError(
+            "day-based American settlement requires an authoritative "
+            "exercise_date and date-carrying exercise grid"
+        )
+
+    eligible = np.ones(times.size, dtype=bool)
+    if requires_dates:
+        eligible = np.asarray(
+            [date is not None for date in dates],
+            dtype=bool,
+        )
+        if not eligible[-1]:
+            raise ValidationError(
+                "date-based American settlement requires a terminal "
+                "exercise-node date"
+            )
+
+    payment_dates: list[Optional[datetime]] = [None] * times.size
+    payment_times = np.full(times.size, np.nan, dtype=float)
+    payment_dfs = np.full(times.size, np.nan, dtype=float)
+    delay_dfs = np.full(times.size, np.nan, dtype=float)
+
+    for index, (node_time, node_date) in enumerate(zip(times, dates)):
+        if not eligible[index]:
+            continue
+        kind = (
+            CashflowKind.TERMINAL
+            if index == times.size - 1
+            else CashflowKind.EXERCISE
+        )
+        timing = SettlementResolver.resolve_contingent(
+            product,
+            SettlementRequest(
+                kind=kind,
+                determination_date=node_date,
+                determination_time=(
+                    None if node_date is not None else float(node_time)
+                ),
+                cashflow_id=f"american_exercise_{index}",
+            ),
+            pricing_env,
+        )
+        if timing.payment_time + 1.0e-10 < node_time:
+            raise ValidationError(
+                "American exercise payment cannot precede its numerical node"
+            )
+        node_df = float(pricing_env.get_discount_factor(float(node_time)))
+        if not np.isfinite(node_df) or node_df <= 0.0:
+            raise ValidationError(
+                f"American exercise node DF must be positive at {node_time}"
+            )
+        payment_dates[index] = timing.payment_date
+        payment_times[index] = timing.payment_time
+        payment_dfs[index] = timing.payment_df
+        delay_dfs[index] = timing.payment_df / node_df
+
+    return AmericanExerciseTimings(
+        node_times=times,
+        node_dates=dates,
+        eligible=eligible,
+        payment_dates=tuple(payment_dates),
+        payment_times=payment_times,
+        payment_dfs=payment_dfs,
+        delay_dfs=delay_dfs,
+    )
 
 
 def requested_settlement_support(
@@ -104,10 +355,14 @@ def validate_settlement_capability(
             f"SettlementSupport, got {declared!r}"
         )
     if _SUPPORT_LEVEL[declared] < _SUPPORT_LEVEL[required]:
-        raise CapabilityError(
+        message = (
             f"{type(engine).__name__} settlement support is "
             f"{declared.value}; request requires {required.value}"
         )
+        hint = getattr(engine, "settlement_capability_hint", None)
+        if hint:
+            message = f"{message}; {hint}"
+        raise CapabilityError(message)
     return required
 
 
@@ -227,10 +482,14 @@ def _has_explicit_event_timing(product) -> bool:
 
 
 __all__ = [
+    "AmericanExerciseTimings",
     "SettlementSupport",
+    "american_exercise_requires_dates",
     "apply_determination_to_payment",
+    "build_american_exercise_date_grid",
     "pending_receivable_pv",
     "requested_settlement_support",
+    "resolve_american_exercise_timings",
     "resolve_terminal_timing",
     "terminal_lifecycle_pv",
     "validate_settlement_capability",

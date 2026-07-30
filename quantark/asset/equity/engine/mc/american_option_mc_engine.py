@@ -8,6 +8,13 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    AmericanExerciseTimings,
+    american_exercise_requires_dates,
+    build_american_exercise_date_grid,
+    resolve_american_exercise_timings,
+)
 from quantark.asset.equity.product.option import AmericanOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
@@ -75,6 +82,7 @@ class AmericanOptionMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.AMERICAN_EXERCISE
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
@@ -159,6 +167,7 @@ class AmericanOptionMCEngine(BaseEngine):
         self.min_regression_points = min_regression_points
         self._last_result: Optional[AmericanMCResult] = None
         self._last_rqmc_result: Optional[RQMCResult] = None
+        self._last_exercise_timings: Optional[AmericanExerciseTimings] = None
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -193,17 +202,54 @@ class AmericanOptionMCEngine(BaseEngine):
         self._validate_inputs(S, K, T, r, q, sigma)
 
         if is_zero(T):
-            return product.get_payoff(S)
+            exercise_dates = None
+            if american_exercise_requires_dates(product):
+                exercise_dates, _ = build_american_exercise_date_grid(
+                    product, pricing_env
+                )
+            exercise_timings = resolve_american_exercise_timings(
+                product,
+                pricing_env,
+                np.array([0.0]),
+                exercise_dates=exercise_dates,
+            )
+            self._last_exercise_timings = exercise_timings
+            return product.get_payoff(S) * exercise_timings.delay_dfs[0]
 
-        term = build_mc_term_inputs(
-            pricing_env, ref_strike=K, maturity=T,
-            time_steps=self.params.time_steps,
+        term, exercise_timings, dt_array = self._build_exercise_term_inputs(
+            product,
+            pricing_env,
+            K,
+            T,
         )
+        self._last_exercise_timings = exercise_timings
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
-            result = self._price_rqmc(product, S, K, T, r, q, sigma, term=term)
+            result = self._price_rqmc(
+                product,
+                S,
+                K,
+                T,
+                r,
+                q,
+                sigma,
+                term=term,
+                exercise_timings=exercise_timings,
+                dt_array=dt_array,
+            )
         else:
-            result = self._price_mc_or_qmc(product, S, K, T, r, q, sigma, term=term)
+            result = self._price_mc_or_qmc(
+                product,
+                S,
+                K,
+                T,
+                r,
+                q,
+                sigma,
+                term=term,
+                exercise_timings=exercise_timings,
+                dt_array=dt_array,
+            )
 
         contract_multiplier = product.contract_multiplier
         result.price *= contract_multiplier
@@ -213,8 +259,60 @@ class AmericanOptionMCEngine(BaseEngine):
         if result.price < 0.0:
             raise PricingError(f"Negative price computed: {result.price}")
 
-        intrinsic = product.intrinsic_value(S)
+        intrinsic = (
+            product.intrinsic_value(S)
+            * exercise_timings.delay_dfs[0]
+        )
         return max(result.price, intrinsic)
+
+    def _build_exercise_term_inputs(
+        self,
+        product: AmericanOption,
+        pricing_env: PricingEnvironment,
+        strike: float,
+        maturity: float,
+    ) -> tuple[object, AmericanExerciseTimings, Optional[np.ndarray]]:
+        """Build one path grid and resolve its exercise payments once."""
+        dt_array: Optional[np.ndarray] = None
+        exercise_dates = None
+        time_steps = self.params.time_steps
+
+        if american_exercise_requires_dates(product):
+            all_dates, all_times = build_american_exercise_date_grid(
+                product, pricing_env
+            )
+            max_nodes = self.params.time_steps + 1
+            if len(all_dates) > max_nodes:
+                selected = np.unique(
+                    np.linspace(
+                        0,
+                        len(all_dates) - 1,
+                        max_nodes,
+                        dtype=int,
+                    )
+                )
+                exercise_dates = tuple(all_dates[index] for index in selected)
+                exercise_times = all_times[selected]
+            else:
+                exercise_dates = all_dates
+                exercise_times = all_times
+            dt_array = np.diff(exercise_times)
+            time_steps = dt_array.size
+
+        term = build_mc_term_inputs(
+            pricing_env,
+            ref_strike=strike,
+            maturity=maturity,
+            time_steps=time_steps,
+            dt_array=dt_array,
+        )
+        exercise_timings = resolve_american_exercise_timings(
+            product,
+            pricing_env,
+            term.times,
+            exercise_dates=exercise_dates,
+        )
+        return term, exercise_timings, dt_array
 
     def _validate_inputs(
         self, S: float, K: float, T: float, r: float, q: float, sigma: float
@@ -236,6 +334,7 @@ class AmericanOptionMCEngine(BaseEngine):
         T: float,
         num_paths: Optional[int] = None,
         term=None,
+        dt_array: Optional[np.ndarray] = None,
     ) -> GBMPathGenerator:
         """Create a GBMPathGenerator configured for the current method."""
         params = self.params
@@ -263,19 +362,25 @@ class AmericanOptionMCEngine(BaseEngine):
         else:
             vol_in, rrf_in, div_in = sigma, r, q
 
+        time_steps = (
+            int(np.asarray(dt_array).size)
+            if dt_array is not None
+            else params.time_steps
+        )
         return GBMPathGenerator(
             initial_value=S,
             vol=vol_in,
             rrf=rrf_in,
             div=div_in,
             maturity=T,
-            time_steps=params.time_steps,
+            time_steps=time_steps,
             num_paths=effective_num_paths,
             model="bsm",
             random_stream=random_stream,
             use_brownian_bridge=False,
             vr_config=vr_config,
             is_qmc=is_qmc,
+            dt_array=dt_array,
         )
 
     def _price_mc_or_qmc(
@@ -289,9 +394,19 @@ class AmericanOptionMCEngine(BaseEngine):
         sigma: float,
         *,
         term=None,
+        exercise_timings: AmericanExerciseTimings,
+        dt_array: Optional[np.ndarray] = None,
     ) -> AmericanMCResult:
         """Price using normal MC or QMC (non-randomized)."""
-        generator = self._create_path_generator(S, r, q, sigma, T, term=term)
+        generator = self._create_path_generator(
+            S,
+            r,
+            q,
+            sigma,
+            T,
+            term=term,
+            dt_array=dt_array,
+        )
         paths, _ = generator.generate_paths(return_aux=False)
 
         discount_factors = (
@@ -305,6 +420,7 @@ class AmericanOptionMCEngine(BaseEngine):
             paths=paths,
             discount_factors=discount_factors,
             strike=K,
+            exercise_delay_dfs=exercise_timings.delay_dfs,
             return_exercise_steps=True,
         )
 
@@ -344,6 +460,8 @@ class AmericanOptionMCEngine(BaseEngine):
         sigma: float,
         *,
         term=None,
+        exercise_timings: AmericanExerciseTimings,
+        dt_array: Optional[np.ndarray] = None,
     ) -> AmericanMCResult:
         """Price using Randomized QMC with adaptive batching."""
         params = self.params
@@ -365,7 +483,14 @@ class AmericanOptionMCEngine(BaseEngine):
             per_batch_paths = params.num_paths
 
         generator = self._create_path_generator(
-            S, r, q, sigma, T, num_paths=per_batch_paths, term=term
+            S,
+            r,
+            q,
+            sigma,
+            T,
+            num_paths=per_batch_paths,
+            term=term,
+            dt_array=dt_array,
         )
         discount_factors = (
             term.node_dfs[1:] / term.node_dfs[:-1]
@@ -379,6 +504,7 @@ class AmericanOptionMCEngine(BaseEngine):
                 paths=paths,
                 discount_factors=discount_factors,
                 strike=K,
+                exercise_delay_dfs=exercise_timings.delay_dfs,
                 return_exercise_steps=False,
             )
 
@@ -407,6 +533,7 @@ class AmericanOptionMCEngine(BaseEngine):
         paths: np.ndarray,
         discount_factors: np.ndarray,
         strike: float,
+        exercise_delay_dfs: np.ndarray,
         return_exercise_steps: bool = False,
     ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
@@ -416,16 +543,29 @@ class AmericanOptionMCEngine(BaseEngine):
         """
         num_paths, num_steps_plus_one = paths.shape
         time_steps = num_steps_plus_one - 1
+        delay_dfs = np.asarray(exercise_delay_dfs, dtype=float)
+        if delay_dfs.shape != (num_steps_plus_one,):
+            raise ValidationError(
+                "exercise_delay_dfs must align with every path time node"
+            )
+        if not np.all(np.isfinite(delay_dfs)) or np.any(delay_dfs <= 0.0):
+            raise ValidationError(
+                "exercise_delay_dfs must be finite and strictly positive"
+            )
 
-        payoffs = self._intrinsic_values(product, paths[:, -1], strike)
+        payoffs = (
+            self._intrinsic_values(product, paths[:, -1], strike)
+            * delay_dfs[-1]
+        )
         exercise_steps = np.full(num_paths, time_steps, dtype=int)
 
         for step in range(time_steps - 1, 0, -1):
             payoffs = payoffs * discount_factors[step]
 
             spot = paths[:, step]
-            exercise_values = self._intrinsic_values(product, spot, strike)
-            in_the_money = exercise_values > Tolerance.ZERO
+            intrinsic_values = self._intrinsic_values(product, spot, strike)
+            exercise_values = intrinsic_values * delay_dfs[step]
+            in_the_money = intrinsic_values > Tolerance.ZERO
 
             if not np.any(in_the_money):
                 continue

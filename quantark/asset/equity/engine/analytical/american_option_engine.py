@@ -19,6 +19,7 @@ from typing import Optional, Union
 
 from scipy.stats import norm, multivariate_normal
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.product.option import AmericanOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import EngineParams
@@ -40,6 +41,10 @@ class AmericanOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.NONE
+    settlement_capability_hint = (
+        "use AmericanOptionMCEngine or AmericanPDESolver for delayed exercise"
+    )
 
     DEFAULT_METHOD = AmericanAnalyticalMethod.BS93
 
