@@ -5,6 +5,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [Unreleased]
+
+Backtest replay consolidation
+(spec: `docs/superpowers/specs/2026-07-30-backtest-replay-consolidation-design.md`).
+
+### Added
+- `quantark.backtest.replay`: canonical home of the product-replay backtest —
+  ONE multi-product daily loop (`ReplayBacktestEngine`/`ReplayBacktestConfig`/
+  `ReplayProduct`/`ReplayBacktestResults`); the single-product
+  `AutocallableBacktestEngine` is now a book-of-one wrapper with byte-identical
+  output (golden-gated). Book runs gain per-day vol-model calibration.
+- `quantark.backtest.futures_ledger`: shared `FuturesHedgePosition` +
+  `FuturesRollPolicy`.
+- `quantark.backtest.metrics.CorePerformanceMetrics`: cross-asset metrics over
+  the `BaseBacktestResults` protocol; replay results expose `.metrics` and the
+  full protocol; equity `PerformanceMetrics` now extends the core.
+- `quantark.backtest.replay.schema`: typed row schemas — the single source of
+  truth for every record column.
+- Pending-settlement KO termination: `terminate_on_lifecycle_end=True`
+  (default) ends a replay when terminal cash lands (observation vs settlement
+  are separate moments; discounted receivable carried in portfolio value);
+  summaries gain `termination_reason` / `days_replayed` / `days_in_contract`.
+- `AutocallableEngineConfig.event_stats_fallback` (`"none"` default): the
+  silent 5000-path MC event-stats fallback is now opt-in, logged, and recorded
+  per row in the new `event_stats_engine` column.
+- `BumpConfig.gamma_spot_bump`: engine-side asymmetric gamma bumping;
+  replay-side manual bumping removed (greeks are always
+  `engine.calculate_greeks`, failures raise — no silent zero-delta days).
+- `AutocallableDeltaHedgeStrategy` joined the `BaseStrategy` hierarchy
+  (`quantark.backtest.strategy`).
+
+### Changed
+- Relocations (old paths remain as `DeprecationWarning` shims until 0.5.0):
+  `quantark.backtest.otc.*` -> `quantark.backtest.replay.*`;
+  `otc.vol_calibrators` -> `quantark.volmodels.calibration`;
+  `otc.vol_history` -> `quantark.param.vol.surface_history`;
+  `_atomic_write_json` -> `quantark.util.io.atomic_write_json`.
+- Replay books with `vol_model != "bsm"` reject non-Snowball products at
+  config construction (the vol-model engine factory is snowball-only).
+
 ## [0.4.0] - 2026-07-27
 
 Clean rewrite of the PDE grid construction and event application layer
