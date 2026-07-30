@@ -13,6 +13,9 @@ from quantark.backtest.strategy.base_strategy import (
     HedgingTarget,
     passes_frequency_gate,
 )
+from quantark.backtest.strategy.futures_delta_strategy import (
+    AutocallableDeltaHedgeStrategy,
+)
 from quantark.backtest.strategy.delta_neutral_strategy import DeltaNeutralStrategy
 from quantark.backtest.strategy.dv01_neutral_strategy import DV01NeutralStrategy
 from quantark.backtest.strategy.convexity_neutral_strategy import ConvexityNeutralStrategy
@@ -52,6 +55,7 @@ from quantark.backtest.strategy.triggered_hedge_strategy import (
 )
 
 __all__ = [
+    'AutocallableDeltaHedgeStrategy',
     # Base
     'BaseStrategy',
     'AssetClass',
