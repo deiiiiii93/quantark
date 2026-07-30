@@ -1,0 +1,167 @@
+{
+  "spec": {
+    "s0": 8489.2704,
+    "strike": 8489.27,
+    "ko_barrier": 8743.95,
+    "ki_barrier": 6791.42,
+    "T": 2.0,
+    "type": "standard snowball",
+    "principal": "excluded",
+    "include_principal": false,
+    "ko_monitoring": "monthly discrete",
+    "ki_monitoring": "continuous",
+    "n_ko_obs": 24,
+    "ko_rate": 0.12,
+    "notional": 8489.2704,
+    "mc_method": "quasi",
+    "mc_paths": 16384,
+    "n_steps": 96,
+    "pde_grid_focus": "auto",
+    "pde_grid_policy": "2D Heston/SLV PDE centers at KI when present; multi-level critical pinning is opt-in diagnostics",
+    "vol_floor": null,
+    "iv_smoothing": {
+      "method": "sabr_calendar_projected",
+      "beta": 1.0,
+      "moneyness_width": 0.35,
+      "grid_size": 25,
+      "min_calendar_slope": 1e-08,
+      "calendar_adjusted_nodes": 0,
+      "raw_grid_rmse_iv": 0.009603555322794256,
+      "raw_points_rmse_iv": 0.007696758483535996,
+      "slice_mean_mse": 5.2271629735485405e-05,
+      "slices": [
+        {
+          "T": 0.030136986301369864,
+          "alpha": 0.28184922840321536,
+          "beta": 1.0,
+          "rho": 1.1102230246251565e-16,
+          "nu": 2.9167083333333337,
+          "shift": 0.0,
+          "mse": 0.0001741048697956577
+        },
+        {
+          "T": 0.12602739726027398,
+          "alpha": 0.25455763828061057,
+          "beta": 1.0,
+          "rho": -0.14152499999999996,
+          "nu": 1.3334066666666666,
+          "shift": 0.0,
+          "mse": 2.59888445702118e-05
+        },
+        {
+          "T": 0.20273972602739726,
+          "alpha": 0.2695373289591841,
+          "beta": 1.0,
+          "rho": -0.10822499999999993,
+          "nu": 1.1042445833333334,
+          "shift": 0.0,
+          "mse": 1.7657569594898934e-05
+        },
+        {
+          "T": 0.4520547945205479,
+          "alpha": 0.27741554440460536,
+          "beta": 1.0,
+          "rho": -0.08324999999999994,
+          "nu": 0.41675833333333334,
+          "shift": 0.0,
+          "mse": 1.1574801164564913e-05
+        },
+        {
+          "T": 0.7013698630136986,
+          "alpha": 0.2835115436505842,
+          "beta": 1.0,
+          "rho": -0.10822499999999993,
+          "nu": 0.16676333333333332,
+          "shift": 0.0,
+          "mse": 1.843868534142029e-05
+        },
+        {
+          "T": 0.9506849315068493,
+          "alpha": 0.28425133242116796,
+          "beta": 1.0,
+          "rho": -0.17482499999999984,
+          "nu": 0.7084191666666667,
+          "shift": 0.0,
+          "mse": 6.586500794615881e-05
+        }
+      ]
+    }
+  },
+  "models": {
+    "BSM (flat ATM)": {
+      "mc": -714.322691025252,
+      "mc_stderr": 12.91119166583566,
+      "mc_pct_initial": -8.414417934257955,
+      "pde": -697.1068913515951,
+      "pde_pct_initial": -8.211623125487852,
+      "gap": 17.215799673656875,
+      "gap_pct": 2.410087190279145,
+      "cross_check": true,
+      "ko_probability": 0.6885986328125,
+      "v0_probability": 6.103515625e-05,
+      "v1_probability": 0.31134033203125,
+      "batches_used": null,
+      "paths_used": 16384
+    },
+    "Local Vol": {
+      "mc": -648.9092279109163,
+      "mc_stderr": 14.042765519537811,
+      "mc_pct_initial": -7.643875119243656,
+      "pde": -646.8656338985805,
+      "pde_pct_initial": -7.619802449673185,
+      "gap": 2.0435940123358023,
+      "gap_pct": 0.3149275621977056,
+      "cross_check": true,
+      "ko_probability": 0.7158203125,
+      "v0_probability": 0.0,
+      "v1_probability": 0.2841796875,
+      "batches_used": null,
+      "paths_used": 16384
+    },
+    "Heston QE": {
+      "mc": -753.597252747683,
+      "mc_stderr": 12.901118976019612,
+      "mc_pct_initial": -8.877055591817207,
+      "pde": -724.8278421243856,
+      "pde_pct_initial": -8.538164152768484,
+      "gap": 28.769410623297404,
+      "gap_pct": 3.8176108681927325,
+      "cross_check": true,
+      "ko_probability": 0.65447998046875,
+      "v0_probability": 0.00262451171875,
+      "v1_probability": 0.3428955078125,
+      "batches_used": null,
+      "paths_used": 16384
+    },
+    "SLV": {
+      "mc": -675.1712828049085,
+      "mc_stderr": 13.856103412510556,
+      "mc_pct_initial": -7.953230972651179,
+      "pde": -660.7953288850438,
+      "pde_pct_initial": -7.783888340805397,
+      "gap": 14.375953919864742,
+      "gap_pct": 2.1292306539078156,
+      "cross_check": true,
+      "ko_probability": 0.6944580078125,
+      "v0_probability": 0.002197265625,
+      "v1_probability": 0.3033447265625,
+      "batches_used": null,
+      "paths_used": 16384
+    },
+    "SLV QE": {
+      "mc": -694.3480690828553,
+      "mc_stderr": 13.977449918493546,
+      "mc_pct_initial": -8.179125370807547,
+      "pde": null,
+      "pde_pct_initial": null,
+      "gap": null,
+      "gap_pct": null,
+      "cross_check": null,
+      "ko_probability": 0.6917724609375,
+      "v0_probability": 0.0015869140625,
+      "v1_probability": 0.306640625,
+      "batches_used": null,
+      "paths_used": 16384
+    }
+  }
+}

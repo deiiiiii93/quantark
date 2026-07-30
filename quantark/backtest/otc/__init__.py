@@ -14,6 +14,7 @@ from .config import (
     AutocallableEngineConfig,
     FuturesRollPolicy,
     SurfaceGridConfig,
+    VolModelCalibrationConfig,
 )
 from .dashboard import AutocallableBacktestDashboard, AutocallableDashboardConfig
 from .engine import AutocallableBacktestEngine
@@ -23,6 +24,7 @@ from .engine_factory import (
     create_mc_event_stats_engine,
     create_pricing_engine,
     create_surface_engine,
+    create_vol_model_engine,
 )
 from .market import (
     AKShareAutocallableDataAdapter,
@@ -40,6 +42,8 @@ from .state import (
     AutocallableLifecycleState,
     FuturesHedgePosition,
 )
+from .vol_calibrators import CalibratedVolModel, VolModelCalibrator
+from .vol_history import IvSurfaceArtifact, VolSurfaceHistory
 
 __all__ = [
     "AKShareAutocallableDataAdapter",
@@ -57,17 +61,23 @@ __all__ = [
     "AutocallableEngineConfig",
     "AutocallableLifecycleState",
     "AutocallableMarketDataSet",
+    "CalibratedVolModel",
     "FuturesHedgePosition",
     "FuturesRollPolicy",
     "ImpliedBasisYield",
+    "IvSurfaceArtifact",
     "SignedDividendYield",
     "SurfaceGridConfig",
+    "VolModelCalibrationConfig",
+    "VolModelCalibrator",
+    "VolSurfaceHistory",
     "calculate_basis_yield",
     "create_autocallable_engine",
     "create_event_stats_engine",
     "create_mc_event_stats_engine",
     "create_pricing_engine",
     "create_surface_engine",
+    "create_vol_model_engine",
     "derive_implied_dividend_yield",
     "normalize_futures_chain",
     "normalize_time_series",

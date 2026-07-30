@@ -27,6 +27,7 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.lifecycle import AutocallableLifecycleTracker
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
 
 from .engine_factory import create_mc_event_stats_engine
@@ -96,6 +97,11 @@ class ProductReplay:
         self.daily_event_sink = daily_event_sink
         self.surfaces_sink = surfaces_sink
 
+        # Provenance of the IV-surface artifact used by the most recent
+        # surface-mode build_env call (None in scalar mode).  The engine
+        # folds this into the per-day state row when present.
+        self.last_surface_provenance: Optional[dict[str, Any]] = None
+
         # date_resolver captures self; do not replace self.market_data
         # post-construction or the resolver will keep using the old one.
         self._tracker = AutocallableLifecycleTracker(
@@ -131,15 +137,120 @@ class ProductReplay:
             time_to_maturity=futures_ttm,
         )
         pricing_q = self.pricing_dividend_yield(implied_q)
+        vol_surface, div_yield = self._vol_and_dividend(date, market, pricing_q)
+        rate_curve = FlatRateCurve(rate=market["rate"])
         env = PricingEnvironment(
             spot_quote=SpotQuote(spot=market["spot"], asset_name=self.underlying),
-            vol_surface=FlatVolSurface(volatility=market["volatility"]),
-            rate_curve=FlatRateCurve(rate=market["rate"]),
-            div_yield=SignedDividendYield(pricing_q),
+            vol_surface=vol_surface,
+            rate_curve=rate_curve,
+            div_yield=div_yield,
             basis_yield=ImpliedBasisYield(basis_yield),
             valuation_date=date.to_pydatetime(),
         )
         return env, basis_yield, implied_q, futures_ttm
+
+    def _vol_source(self) -> str:
+        return getattr(self.engine_config, "vol_source", "scalar")
+
+    def _surface_vol_mode(self) -> str:
+        return getattr(self.engine_config, "surface_vol_mode", "flat_atm_remaining")
+
+    def _vol_and_dividend(self, date: pd.Timestamp, market: dict[str, float], pricing_q: float):
+        """
+        Build the day's vol surface and dividend curve.
+
+        Scalar mode (the default) is byte-for-byte the historical behavior:
+        ``FlatVolSurface(market["volatility"])`` plus a flat signed implied-q.
+
+        Surface mode reprices against the admitted IV-surface artifact for
+        ``date`` (carry-forward over excluded dates per the manifest gap
+        policy) and requires ``market_data.surface_history``.  The vol object
+        depends on ``surface_vol_mode``:
+
+        - ``flat_atm_remaining``: the artifact's ATM term structure sampled
+          at the product's remaining maturity (valuation date -> final
+          maturity), wrapped in a ``FlatVolSurface``; refreshed daily.
+        - ``term_structure``: the artifact's ATM pillar term structure.
+        - ``full_grid``: the artifact's full strike x maturity smile grid.
+
+        Curves: the rate curve stays on the existing flat rate channel; the
+        dividend curve is derived from the artifact's parity forward pillars,
+        ``q(T_i) = rate - ln(F_i / s0) / T_i`` (the flat rate is kept fixed
+        while carry comes from the option-implied forwards), as a
+        ``TermStructureDividendYield`` — internally consistent with the
+        smile.  ``fixed_dividend_yield`` is a scalar-mode knob and does not
+        override this term structure.  Extrapolation beyond the artifact's
+        ``max_listed_T`` relies on each class's native edge behavior: the vol
+        surfaces clamp flat (matching the artifact's ``flat_total_variance``
+        policy) and the dividend leg clamps to the endpoint yield (flat-q).
+        """
+        vol_source = self._vol_source()
+        if vol_source == "scalar":
+            self.last_surface_provenance = None
+            return FlatVolSurface(volatility=market["volatility"]), SignedDividendYield(
+                pricing_q
+            )
+        if vol_source != "surface":
+            raise ValidationError(f"Unknown vol_source: {vol_source!r}")
+
+        history = getattr(self.market_data, "surface_history", None)
+        if history is None:
+            raise ValidationError(
+                "vol_source='surface' requires market_data.surface_history; "
+                "attach a VolSurfaceHistory or use vol_source='scalar'"
+            )
+        artifact = history.surface_for(date)
+        mode = self._surface_vol_mode()
+        if mode == "term_structure":
+            vol_surface = artifact.term_structure_vol_surface()
+        elif mode == "full_grid":
+            vol_surface = artifact.grid_vol_surface()
+        elif mode == "flat_atm_remaining":
+            atm_term_structure = artifact.term_structure_vol_surface()
+            remaining = self._remaining_maturity_years(date, market)
+            vol_surface = FlatVolSurface(
+                volatility=float(atm_term_structure.get_vol(0.0, remaining, 0.0))
+            )
+        else:
+            raise ValidationError(f"Unknown surface_vol_mode: {mode!r}")
+        div_yield = artifact.term_structure_dividend_yield(rate=market["rate"])
+        self.last_surface_provenance = {
+            "surface_date": artifact.trade_date.isoformat(),
+            "surface_sha": artifact.sha256,
+            "surface_extrapolation": artifact.extrapolation_policy.get(
+                "beyond_last_listed_expiry"
+            ),
+            "surface_max_listed_T": artifact.max_listed_T,
+        }
+        return vol_surface, div_yield
+
+    def _remaining_maturity_years(
+        self, date: pd.Timestamp, market: dict[str, float]
+    ) -> float:
+        """
+        Product remaining maturity (valuation date -> final maturity) in years.
+
+        Uses the lifecycle tracker's time-decayed pricing product so the ATM
+        sample point matches the maturity the pricing engines actually use
+        for this date.  A throwaway probe env carries the valuation date and
+        day-count convention; its vol/dividend contents are irrelevant to the
+        maturity calculation.
+        """
+        probe_env = PricingEnvironment(
+            spot_quote=SpotQuote(spot=market["spot"], asset_name=self.underlying),
+            vol_surface=FlatVolSurface(volatility=market["volatility"]),
+            rate_curve=FlatRateCurve(rate=market["rate"]),
+            div_yield=SignedDividendYield(0.0),
+            basis_yield=ImpliedBasisYield(0.0),
+            valuation_date=date.to_pydatetime(),
+        )
+        product = self._tracker.product_for_pricing(date, probe_env)
+        try:
+            return float(product.get_maturity(probe_env))
+        except ValidationError:
+            # Valuation date on/after a date-based final maturity: sample the
+            # shortest pillar (the product settles today; its price is unused).
+            return 1e-8
 
     def pricing_dividend_yield(self, implied_q: float) -> float:
         if self.fixed_dividend_yield is not None:

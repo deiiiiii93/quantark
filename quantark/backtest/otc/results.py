@@ -4,9 +4,12 @@ Result container for OTC autocallable backtests.
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 import pandas as pd
+
+from .vol_calibrators import _atomic_write_json
 
 
 class AutocallableBacktestResults:
@@ -24,6 +27,7 @@ class AutocallableBacktestResults:
         surfaces: list[dict[str, Any]],
         daily_event_summary: list[dict[str, Any]],
         event_probabilities: list[dict[str, Any]],
+        calibration_records: Optional[list[dict[str, Any]]] = None,
     ) -> None:
         self.config = config
         self._states = states
@@ -34,6 +38,7 @@ class AutocallableBacktestResults:
         self._surfaces = surfaces
         self._daily_event_summary = daily_event_summary
         self._event_probabilities = event_probabilities
+        self._calibration_records = [dict(r) for r in (calibration_records or [])]
 
     @staticmethod
     def _frame(rows: list[dict[str, Any]], index: str | None = None) -> pd.DataFrame:
@@ -74,6 +79,17 @@ class AutocallableBacktestResults:
     @property
     def event_probability_df(self) -> pd.DataFrame:
         return self._frame(self._event_probabilities, "date")
+
+    @property
+    def calibration_records(self) -> list[dict[str, Any]]:
+        """Per-day vol-model calibration records (empty for BSM runs).
+
+        One entry per priced day: date, variant, surface_date, surface_sha,
+        cache_hit, calibration_seconds, pricing_seconds, plus the
+        variant-specific calibration record (LV stats / Heston params +
+        fit metrics / SLV leverage stats).
+        """
+        return [dict(r) for r in self._calibration_records]
 
     # ------------------------------------------------------------------
     # BaseBacktestResults interface (thin adapters over the *_df frames),
@@ -158,4 +174,14 @@ class AutocallableBacktestResults:
 
     def export_surfaces_to_parquet(self, filepath: str) -> None:
         self.surfaces_df.to_parquet(filepath)
+
+    def export_calibration_records(self, filepath: str) -> None:
+        """Persist per-day calibration records as one JSON file per run.
+
+        The payload is the bare list of per-day records (date, variant,
+        surface_sha, timings, ...).  Written atomically (tmp + os.replace).
+        """
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(path, self.calibration_records)
 

@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "source_class": "synthetic_test_fixture",
+  "price_field": "settlement",
+  "requested_tags": [
+    "sample"
+  ],
+  "strict_comparability_gate": {
+    "required_source_class": "synthetic_test_fixture",
+    "required_price_field": "settlement",
+    "unique_trade_dates": true,
+    "unique_source_sha256": true,
+    "required_config": {
+      "calibration_target": "synthetic_raw_settlement_implied_vols",
+      "weighting": "equal_total_weight_per_expiry",
+      "jacobian_scale_for_cross_date": "fixed_economic"
+    }
+  },
+  "included": [
+    {
+      "schema_version": 1,
+      "trade_date": "2026-07-06",
+      "source_class": "synthetic_test_fixture",
+      "source_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "price_field": "settlement",
+      "config": {
+        "calibration_target": "synthetic_raw_settlement_implied_vols",
+        "weighting": "equal_total_weight_per_expiry",
+        "jacobian_scale_for_cross_date": "fixed_economic"
+      },
+      "node_universe": {
+        "node_count": 90,
+        "expiry_count": 5
+      },
+      "best": {
+        "success": true,
+        "params": {
+          "v0": 0.04,
+          "kappa": 3.0,
+          "theta": 0.04,
+          "sigma": 0.7,
+          "rho": -0.2
+        },
+        "weighted_rmse_iv": 0.012,
+        "feller_ratio": 0.48979591836734704,
+        "bound_hits": {
+          "v0": {"lower": false, "upper": false},
+          "kappa": {"lower": false, "upper": true},
+          "theta": {"lower": false, "upper": false},
+          "sigma": {"lower": false, "upper": true},
+          "rho": {"lower": false, "upper": false}
+        }
+      },
+      "jacobian": {
+        "svd": {
+          "fixed_economic": {
+            "singular_values": [1.0, 0.6, 0.3, 0.1, 0.05],
+            "condition_number": 20.0,
+            "numerical_rank": 5,
+            "policy_effective_rank": 5
+          }
+        }
+      }
+    }
+  ],
+  "exclusions": [],
+  "stability": {
+    "parameters": {
+      "v0": {"min": 0.04, "max": 0.04, "cv_abs_mean": 0.0},
+      "kappa": {"min": 3.0, "max": 3.0, "cv_abs_mean": 0.0},
+      "theta": {"min": 0.04, "max": 0.04, "cv_abs_mean": 0.0},
+      "sigma": {"min": 0.7, "max": 0.7, "cv_abs_mean": 0.0},
+      "rho": {"min": -0.2, "max": -0.2, "cv_abs_mean": 0.0}
+    },
+    "weighted_rmse_iv": {"min": 0.012, "max": 0.012},
+    "feller_ratio": {"min": 0.48979591836734704, "max": 0.48979591836734704},
+    "bound_hit_frequency": {
+      "v0": 0.0,
+      "kappa": 1.0,
+      "theta": 0.0,
+      "sigma": 1.0,
+      "rho": 0.0
+    },
+    "identification": {
+      "condition_number_range": [20.0, 20.0],
+      "minimum_policy_effective_rank": 5,
+      "scale_policy": "fixed_economic"
+    }
+  },
+  "verdicts": [
+    {
+      "name": "synthetic_fixture_only",
+      "status": "insufficient",
+      "interpretation": "Pipeline fixture, not market evidence."
+    }
+  ]
+}

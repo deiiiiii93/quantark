@@ -2,7 +2,7 @@
 Pricing engine factory for OTC autocallable backtests.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from quantark.asset.equity.engine.analytical import (
     AsianOptionAnalyticalEngine,
@@ -17,6 +17,16 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.mc.euro_mc_engine import EuropeanMCEngine
 from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
+    HestonSLVQESnowballMCEngine,
+    HestonSnowballMCEngine,
+    LocalVolSnowballMCEngine,
+)
+from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
+    HestonSLVSnowballPDESolver,
+    HestonSnowballPDESolver,
+    LocalVolSnowballPDESolver,
+)
 from quantark.asset.equity.engine.pde_engine import PDEEngine
 from quantark.asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
 from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
@@ -37,6 +47,7 @@ from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
 from .config import AutocallableEngineConfig
+from .vol_calibrators import CalibratedVolModel
 
 
 def _create_analytical_engine(product: Any, config: AutocallableEngineConfig) -> BaseEngine:
@@ -136,3 +147,108 @@ def create_mc_event_stats_engine(product: Any, config: AutocallableEngineConfig)
         engine_type=EngineType.MONTE_CARLO,
         config=fallback,
     )
+
+
+def create_vol_model_engine(
+    *,
+    vol_model: str,
+    solver: str,
+    calibrated: CalibratedVolModel,
+    pde_params: Optional[PDEParams] = None,
+    mc_params: Optional[MCParams] = None,
+    mc_method: Any = None,
+    engine_options: Optional[dict] = None,
+) -> BaseEngine:
+    """Create a snowball engine wired to a per-day calibrated vol model.
+
+    The calibrated model is FROZEN into the engine (prebuilt LV surface /
+    Heston params / leverage surface), so spot-bump greeks reprice with the
+    same calibrated model and never trigger a recalibration.  ``eta`` for
+    the SLV variants comes from the calibration (``calibrated.slv_eta``) so
+    engine and leverage surface always agree.
+
+    ``engine_options`` are passed through to the solver constructor (e.g.
+    ``n_x``/``n_v``/``n_t`` for the 2D Heston PDE solvers); unknown options
+    raise ``ValidationError`` (fail-closed, never silently dropped).
+    """
+    options = dict(engine_options or {})
+    if not isinstance(calibrated, CalibratedVolModel):
+        raise ValidationError(
+            f"calibrated must be a CalibratedVolModel, got {type(calibrated).__name__}"
+        )
+    if calibrated.variant != vol_model:
+        raise ValidationError(
+            f"calibrated variant {calibrated.variant!r} does not match "
+            f"requested vol_model {vol_model!r}"
+        )
+    if solver not in ("pde", "mc"):
+        raise ValidationError(f"solver must be 'pde' or 'mc', got {solver!r}")
+
+    try:
+        if vol_model == "localvol":
+            if calibrated.local_vol_surface is None:
+                raise ValidationError(
+                    "vol_model='localvol' requires calibrated.local_vol_surface"
+                )
+            if solver == "pde":
+                return LocalVolSnowballPDESolver(
+                    params=pde_params or PDEParams(),
+                    local_vol_surface=calibrated.local_vol_surface,
+                    **options,
+                )
+            return LocalVolSnowballMCEngine(
+                params=mc_params or MCParams(),
+                method=mc_method,
+                local_vol_surface=calibrated.local_vol_surface,
+                **options,
+            )
+
+        if vol_model == "heston":
+            if calibrated.heston_params is None:
+                raise ValidationError(
+                    "vol_model='heston' requires calibrated.heston_params"
+                )
+            if solver == "pde":
+                return HestonSnowballPDESolver(
+                    model_params=calibrated.heston_params,
+                    params=pde_params or PDEParams(),
+                    **options,
+                )
+            return HestonSnowballMCEngine(
+                model_params=calibrated.heston_params,
+                params=mc_params or MCParams(),
+                method=mc_method,
+                **options,
+            )
+
+        if vol_model == "heston_slv":
+            if calibrated.heston_params is None or calibrated.leverage_surface is None:
+                raise ValidationError(
+                    "vol_model='heston_slv' requires calibrated.heston_params "
+                    "and calibrated.leverage_surface"
+                )
+            eta = float(
+                calibrated.slv_eta if calibrated.slv_eta is not None else 1.0
+            )
+            if solver == "pde":
+                return HestonSLVSnowballPDESolver(
+                    model_params=calibrated.heston_params,
+                    leverage_surface=calibrated.leverage_surface,
+                    eta=eta,
+                    params=pde_params or PDEParams(),
+                    **options,
+                )
+            return HestonSLVQESnowballMCEngine(
+                model_params=calibrated.heston_params,
+                params=mc_params or MCParams(),
+                leverage_surface=calibrated.leverage_surface,
+                eta=eta,
+                method=mc_method,
+                **options,
+            )
+    except TypeError as exc:
+        raise ValidationError(
+            f"Invalid vol_model_engine_options for ({vol_model!r}, {solver!r}): {exc}"
+        ) from exc
+
+    raise ValidationError(f"Unknown vol_model: {vol_model!r}")

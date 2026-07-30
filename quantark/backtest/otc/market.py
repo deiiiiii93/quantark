@@ -10,6 +10,8 @@ import pandas as pd
 
 from quantark.util.exceptions import ValidationError
 
+from .vol_history import VolSurfaceHistory
+
 
 @dataclass(frozen=True)
 class SignedDividendYield:
@@ -130,6 +132,11 @@ def normalize_futures_chain(df: pd.DataFrame) -> pd.DataFrame:
 class AutocallableMarketDataSet:
     """
     Normalized historical market data for OTC autocallable backtests.
+
+    ``surface_history`` is an optional per-day IV-surface channel.  It does
+    not participate in the ``dates`` calendar intersection: surfaces attach
+    to the existing calendar dates via the manifest carry-forward gap policy
+    (see :class:`quantark.backtest.otc.vol_history.VolSurfaceHistory`).
     """
 
     spot_data: pd.DataFrame
@@ -137,6 +144,7 @@ class AutocallableMarketDataSet:
     rate_data: pd.DataFrame
     futures_data: pd.DataFrame
     metadata: Dict[str, Any] | None = None
+    surface_history: Optional[VolSurfaceHistory] = None
 
     @classmethod
     def from_dataframes(
@@ -147,6 +155,7 @@ class AutocallableMarketDataSet:
         rate_data: pd.DataFrame,
         futures_data: pd.DataFrame,
         metadata: Optional[Dict[str, Any]] = None,
+        surface_history: Optional[VolSurfaceHistory] = None,
     ) -> "AutocallableMarketDataSet":
         return cls(
             spot_data=normalize_time_series(spot_data, ["date", "spot"]),
@@ -154,6 +163,7 @@ class AutocallableMarketDataSet:
             rate_data=normalize_time_series(rate_data, ["date", "rate"]),
             futures_data=normalize_futures_chain(futures_data),
             metadata=metadata or {},
+            surface_history=surface_history,
         )
 
     @property

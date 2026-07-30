@@ -1,0 +1,1305 @@
+"""Stage 13 - Aggregate the vol-model backtest fleet and write the lecture report.
+
+Consumes the per-run artifacts written by stage 12
+(``12_snowball_volmodel_backtest.py``) and produces:
+
+    aggregate.json          per-run metrics + per-variant distributions +
+                            paired (same-inception) comparisons vs flat BSM
+    per_run_metrics.csv     one row per inception x variant
+    variant_summary.csv     one row per variant
+    paired_vs_flat_bsm.csv  one row per inception x variant (flat BSM excluded)
+    volmodel_backtest_lecture.html   the explanatory report
+
+Why paired comparisons: the five variants of one inception share an identical
+contract and an identical market path, so their PnL difference is entirely
+attributable to the pricing/hedging model.  Comparing pooled distributions
+instead would be dominated by which inceptions happened to knock out.
+
+Run:
+    .venv/bin/python example/mo_volmodels/13_aggregate_and_report.py \
+        --run-dir output/volmodel_backtest
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import statistics
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
+
+import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_RUN_DIR = PROJECT_ROOT / "output/volmodel_backtest"
+
+BASELINE_VARIANT = "flat_bsm"
+VARIANT_ORDER = ("flat_bsm", "ts_bsm", "localvol", "heston", "heston_slv")
+VARIANT_LABELS = {
+    "flat_bsm": "Flat BSM",
+    "ts_bsm": "TS BSM",
+    "localvol": "Local Vol",
+    "heston": "Heston",
+    "heston_slv": "Heston-SLV",
+}
+SCHEMA_VERSION = 1
+
+
+# ---------------------------------------------------------------------------
+# Small numeric helpers (empty-safe; never fabricate a value)
+# ---------------------------------------------------------------------------
+
+def _finite(values: Sequence[float]) -> List[float]:
+    return [float(v) for v in values if v is not None and math.isfinite(float(v))]
+
+
+def _mean(values: Sequence[float]) -> Optional[float]:
+    vals = _finite(values)
+    return float(statistics.fmean(vals)) if vals else None
+
+
+def _median(values: Sequence[float]) -> Optional[float]:
+    vals = _finite(values)
+    return float(statistics.median(vals)) if vals else None
+
+
+def _stdev(values: Sequence[float]) -> Optional[float]:
+    vals = _finite(values)
+    return float(statistics.stdev(vals)) if len(vals) > 1 else None
+
+
+def _rms(values: Sequence[float]) -> Optional[float]:
+    vals = _finite(values)
+    if not vals:
+        return None
+    return float(math.sqrt(statistics.fmean([v * v for v in vals])))
+
+
+def _distribution(values: Sequence[float]) -> Dict[str, Optional[float]]:
+    vals = _finite(values)
+    return {
+        "n": len(vals),
+        "mean": _mean(vals),
+        "median": _median(vals),
+        "stdev": _stdev(vals),
+        "min": min(vals) if vals else None,
+        "max": max(vals) if vals else None,
+    }
+
+
+def _atomic_write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Per-run metrics
+# ---------------------------------------------------------------------------
+
+def run_dir_for(root: Path, inception: str, variant: str) -> Path:
+    return Path(root) / "runs" / inception / variant
+
+
+def load_run_frames(run_dir: Path) -> Dict[str, Any]:
+    """Load one run's artifacts. Missing optional frames come back empty."""
+    def read(name: str) -> pd.DataFrame:
+        path = run_dir / name
+        if not path.exists():
+            return pd.DataFrame()
+        return pd.read_csv(path, index_col=0)
+
+    calibration: List[Dict[str, Any]] = []
+    cal_path = run_dir / "calibration_records.json"
+    if cal_path.exists():
+        loaded = json.loads(cal_path.read_text())
+        if isinstance(loaded, list):
+            calibration = loaded
+
+    summary: Dict[str, Any] = {}
+    sum_path = run_dir / "run_summary.json"
+    if sum_path.exists():
+        summary = json.loads(sum_path.read_text())
+
+    return {
+        "states": read("states.csv"),
+        "greeks": read("greeks.csv"),
+        "trades": read("trades.csv"),
+        "rebalances": read("rebalances.csv"),
+        "calibration": calibration,
+        "summary": summary,
+    }
+
+
+def _col(frame: pd.DataFrame, name: str) -> List[float]:
+    if frame.empty or name not in frame.columns:
+        return []
+    return [float(v) for v in frame[name].tolist()]
+
+
+def calibration_quality(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarise per-day model fit: RMSE, bound hits, Feller, leverage range.
+
+    Reported honestly - the repo's own diagnostics show Heston is weakly
+    identified on public CFFEX settlement data, so bound hits and Feller
+    violations are surfaced rather than hidden.
+    """
+    if not records:
+        return {"n_records": 0}
+    rmse = [r.get("overall_rmse_iv") for r in records if r.get("overall_rmse_iv") is not None]
+    bound_hits = [r for r in records if r.get("bound_hits")]
+    feller_flags = [r.get("feller_satisfied") for r in records if "feller_satisfied" in r]
+    lev_min = [r.get("leverage_min") for r in records if r.get("leverage_min") is not None]
+    lev_max = [r.get("leverage_max") for r in records if r.get("leverage_max") is not None]
+    neg_mass = [
+        r.get("max_negative_mass") for r in records
+        if r.get("max_negative_mass") is not None
+    ]
+    return {
+        "n_records": len(records),
+        "n_unique_surfaces": len({r.get("surface_sha") for r in records if r.get("surface_sha")}),
+        "rmse_iv": _distribution(rmse),
+        "n_bound_hits": len(bound_hits),
+        "bound_hit_fraction": len(bound_hits) / len(records) if records else None,
+        "n_feller_violated": sum(1 for f in feller_flags if f is False),
+        "feller_violated_fraction": (
+            sum(1 for f in feller_flags if f is False) / len(feller_flags)
+            if feller_flags else None
+        ),
+        "leverage_min": min(_finite(lev_min)) if _finite(lev_min) else None,
+        "leverage_max": max(_finite(lev_max)) if _finite(lev_max) else None,
+        "max_negative_mass": max(_finite(neg_mass)) if _finite(neg_mass) else None,
+    }
+
+
+def metrics_for_run(
+    *, inception: str, variant: str, notional: float, frames: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Per-run metrics: PnL decomposition, hedge quality, greek path, costs."""
+    states = frames["states"]
+    greeks = frames["greeks"]
+    trades = frames["trades"]
+    summary = frames["summary"]
+
+    total_pnl = _col(states, "total_pnl")
+    product_pnl = _col(states, "product_pnl")
+    hedge_pnl = _col(states, "hedge_pnl")
+    costs = _col(states, "transaction_costs")
+
+    # Hedge quality: residual position delta AFTER the day's rebalance,
+    # expressed in cash per 1% spot move so it is comparable across spot levels.
+    residual_delta_cash = _col(greeks, "post_hedge_delta_cash_1pct")
+    pre_hedge_delta_cash = _col(greeks, "pre_hedge_delta_cash_1pct")
+    gamma_cash = _col(greeks, "gamma_cash_1pct")
+    position_delta = _col(greeks, "product_position_delta")
+
+    traded_contracts = [abs(v) for v in _col(trades, "quantity")]
+    traded_notional = [abs(v) for v in _col(trades, "notional")]
+
+    final_pnl = total_pnl[-1] if total_pnl else None
+    final_costs = costs[-1] if costs else None
+
+    def pct_notional(value: Optional[float]) -> Optional[float]:
+        if value is None or not notional:
+            return None
+        return 100.0 * value / float(notional)
+
+    return {
+        "inception": inception,
+        "variant": variant,
+        "n_days": int(len(states)),
+        "notional": float(notional),
+        "lifecycle": summary.get("lifecycle", {}),
+        "coupon": summary.get("coupon"),
+        "vol_model_solver": summary.get("vol_model_solver"),
+        "elapsed_seconds": summary.get("elapsed_seconds"),
+        # --- PnL ---
+        "total_pnl": final_pnl,
+        "total_pnl_pct_notional": pct_notional(final_pnl),
+        "product_pnl": product_pnl[-1] if product_pnl else None,
+        "hedge_pnl": hedge_pnl[-1] if hedge_pnl else None,
+        "transaction_costs": final_costs,
+        "cost_drag_pct_notional": pct_notional(final_costs),
+        "pnl_path_stdev": _stdev(total_pnl),
+        "pnl_max_drawdown": _max_drawdown(total_pnl),
+        # --- hedge quality ---
+        "residual_delta_cash_rms": _rms(residual_delta_cash),
+        "residual_delta_cash_rms_pct_notional": pct_notional(_rms(residual_delta_cash)),
+        "residual_delta_cash_max_abs": max((abs(v) for v in _finite(residual_delta_cash)), default=None),
+        "pre_hedge_delta_cash_rms": _rms(pre_hedge_delta_cash),
+        # --- greek path ---
+        "position_delta": _distribution(position_delta),
+        "gamma_cash_1pct": _distribution(gamma_cash),
+        # --- turnover / costs ---
+        "n_trades": int(len(trades)),
+        "traded_contracts_total": sum(traded_contracts) if traded_contracts else 0.0,
+        "traded_notional_total": sum(traded_notional) if traded_notional else 0.0,
+        # --- model fit ---
+        "calibration": calibration_quality(frames["calibration"]),
+    }
+
+
+def _max_drawdown(series: Sequence[float]) -> Optional[float]:
+    vals = _finite(series)
+    if not vals:
+        return None
+    peak = vals[0]
+    worst = 0.0
+    for v in vals:
+        peak = max(peak, v)
+        worst = min(worst, v - peak)
+    return float(worst)
+
+
+# ---------------------------------------------------------------------------
+# Output completeness (Gate: design doc section 7)
+# ---------------------------------------------------------------------------
+
+# Each category names the artifact that must exist, be non-empty, and carry
+# the listed columns.  Categories are checked per run so a partially-written
+# run is reported rather than quietly averaged into the results.
+REQUIRED_CATEGORIES: Dict[str, Dict[str, Any]] = {
+    "market_data": {"file": "states.csv", "columns": ["spot", "futures_price", "basis_yield"]},
+    "implied_vol_and_q": {"file": "states.csv", "columns": ["volatility", "implied_q", "pricing_q"]},
+    "position_info": {
+        "file": "states.csv",
+        "columns": ["futures_contracts", "alive", "knocked_in", "knocked_out"],
+    },
+    "pnl_path": {
+        "file": "states.csv",
+        "columns": ["total_pnl", "product_pnl", "hedge_pnl", "transaction_costs"],
+    },
+    "greeks_path": {
+        "file": "greeks.csv",
+        "columns": ["price", "delta", "gamma", "post_hedge_delta_cash_1pct"],
+    },
+    "trading_records": {"file": "trades.csv", "columns": ["quantity", "price", "transaction_cost"],
+                        "may_be_empty": True},
+}
+
+# Categories only meaningful for the calibrated variants.
+CALIBRATED_CATEGORIES = {
+    "calibration_records": {"variants": {"localvol", "heston", "heston_slv"}},
+    "lv_surface_records": {"variants": {"localvol", "heston_slv"}, "keys": ["lv_min", "lv_max"]},
+}
+
+
+def verify_run_completeness(
+    run_dir: Path, *, variant: str, expected_days: Optional[int] = None
+) -> Dict[str, Any]:
+    """Check every daily output category the design promises for one run.
+
+    ``trades.csv`` may legitimately be empty (a run can end before any
+    rebalance clears the rounding threshold), so it is checked for schema
+    rather than row count.  Everything else must have one row per replay day.
+    """
+    issues: List[str] = []
+    present: Dict[str, bool] = {}
+    frames: Dict[str, pd.DataFrame] = {}
+
+    for category, rule in REQUIRED_CATEGORIES.items():
+        path = run_dir / rule["file"]
+        if not path.exists():
+            issues.append(f"{category}: missing {rule['file']}")
+            present[category] = False
+            continue
+        if rule["file"] not in frames:
+            frames[rule["file"]] = pd.read_csv(path, index_col=0)
+        frame = frames[rule["file"]]
+        if frame.empty and not rule.get("may_be_empty"):
+            issues.append(f"{category}: {rule['file']} has no rows")
+            present[category] = False
+            continue
+        missing_cols = [c for c in rule["columns"] if c not in frame.columns]
+        if missing_cols:
+            issues.append(f"{category}: {rule['file']} missing columns {missing_cols}")
+        present[category] = not missing_cols
+
+    n_days = len(frames.get("states.csv", pd.DataFrame()))
+    if expected_days is not None and n_days != expected_days:
+        issues.append(f"states.csv has {n_days} rows, run summary claims {expected_days}")
+    greeks = frames.get("greeks.csv")
+    if greeks is not None and not greeks.empty and n_days and len(greeks) != n_days:
+        issues.append(f"greeks.csv has {len(greeks)} rows but states.csv has {n_days}")
+
+    cal_path = run_dir / "calibration_records.json"
+    records: List[Dict[str, Any]] = []
+    if cal_path.exists():
+        loaded = json.loads(cal_path.read_text())
+        records = loaded if isinstance(loaded, list) else []
+
+    for category, rule in CALIBRATED_CATEGORIES.items():
+        if variant not in rule["variants"]:
+            present[category] = True  # not applicable to this variant
+            continue
+        if not records:
+            issues.append(f"{category}: no calibration records for variant {variant}")
+            present[category] = False
+            continue
+        keys = rule.get("keys")
+        if keys and not any(all(k in r for k in keys) for r in records):
+            issues.append(f"{category}: no record carries {keys}")
+            present[category] = False
+            continue
+        present[category] = True
+
+    return {
+        "run_dir": str(run_dir),
+        "variant": variant,
+        "n_days": n_days,
+        "categories": present,
+        "issues": issues,
+        "complete": not issues,
+    }
+
+
+def verify_fleet_completeness(
+    run_dir: Path, manifest: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Run the completeness check over every run in the manifest."""
+    checks = []
+    sanity = []
+    for run in manifest.get("runs", []):
+        d = run_dir_for(run_dir, run["inception"], run["variant"])
+        checks.append(
+            verify_run_completeness(
+                d, variant=run["variant"], expected_days=run.get("n_days")
+            )
+        )
+        report = sanity_check_run(d)
+        report["inception"] = run["inception"]
+        report["variant"] = run["variant"]
+        sanity.append(report)
+    incomplete = [c for c in checks if not c["complete"]]
+    insane = [s for s in sanity if not s["sane"]]
+    return {
+        "n_runs_checked": len(checks),
+        "n_complete": len(checks) - len(incomplete),
+        "n_incomplete": len(incomplete),
+        "all_complete": not incomplete,
+        "incomplete": incomplete,
+        "n_sane": len(sanity) - len(insane),
+        "all_sane": not insane,
+        "sanity_failures": insane,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Run sanity invariants (Gate G3)
+# ---------------------------------------------------------------------------
+
+def sanity_check_run(run_dir: Path, *, rel_tol: float = 1e-9) -> Dict[str, Any]:
+    """Check the accounting identities a correct replay must satisfy.
+
+    Completeness (``verify_run_completeness``) asks whether the outputs are
+    THERE; this asks whether they are CONSISTENT.  Every check below is an
+    identity the engine constructs by definition, so any violation is a real
+    defect rather than a tolerance question:
+
+      * PnL decomposition   total = product + hedge - costs
+      * portfolio identity  value = product_mtm + hedge_mtm + cash
+      * cash identity       cash = cashflows - costs
+      * cost reconciliation cumulative costs == sum of per-trade costs
+      * position tracking   futures_contracts == cumulative traded quantity
+      * lifecycle monotone  a dead trade never comes back to life
+      * event corroboration a knocked-out run has a KO action row
+      * hedge effectiveness post-hedge |delta| <= pre-hedge |delta|
+    """
+    issues: List[str] = []
+    checks: Dict[str, Any] = {}
+
+    states_path = run_dir / "states.csv"
+    if not states_path.exists():
+        return {"run_dir": str(run_dir), "issues": ["states.csv missing"], "sane": False}
+    states = pd.read_csv(states_path, index_col=0, parse_dates=True)
+    greeks_path = run_dir / "greeks.csv"
+    greeks = (
+        pd.read_csv(greeks_path, index_col=0, parse_dates=True)
+        if greeks_path.exists() else pd.DataFrame()
+    )
+    trades_path = run_dir / "trades.csv"
+    trades = (
+        pd.read_csv(trades_path, index_col=0, parse_dates=True)
+        if trades_path.exists() else pd.DataFrame()
+    )
+    actions_path = run_dir / "actions.csv"
+    actions = (
+        pd.read_csv(actions_path, index_col=0, parse_dates=True)
+        if actions_path.exists() else pd.DataFrame()
+    )
+
+    def has(frame: pd.DataFrame, *cols: str) -> bool:
+        return not frame.empty and all(c in frame.columns for c in cols)
+
+    def worst_abs(series) -> float:
+        return float(pd.Series(series).abs().max()) if len(series) else 0.0
+
+    # --- dates ---
+    if not states.index.is_monotonic_increasing:
+        issues.append("states.csv dates are not increasing")
+    if states.index.duplicated().any():
+        issues.append("states.csv has duplicate dates")
+
+    scale = max(1.0, float(pd.Series(states.get("portfolio_value", [1.0])).abs().max()))
+
+    # --- PnL decomposition ---
+    if has(states, "total_pnl", "product_pnl", "hedge_pnl", "transaction_costs"):
+        resid = (
+            states["total_pnl"]
+            - (states["product_pnl"] + states["hedge_pnl"] - states["transaction_costs"])
+        )
+        checks["pnl_identity_max_abs"] = worst_abs(resid)
+        if worst_abs(resid) > rel_tol * scale:
+            issues.append(
+                f"PnL identity violated by up to {worst_abs(resid):,.6f} "
+                "(total != product + hedge - costs)"
+            )
+
+    # --- portfolio value / cash identities ---
+    if has(states, "portfolio_value", "product_mtm", "hedge_mtm", "cash"):
+        resid = states["portfolio_value"] - (
+            states["product_mtm"] + states["hedge_mtm"] + states["cash"]
+        )
+        checks["portfolio_identity_max_abs"] = worst_abs(resid)
+        if worst_abs(resid) > rel_tol * scale:
+            issues.append(
+                f"portfolio identity violated by up to {worst_abs(resid):,.6f}"
+            )
+    if has(states, "cash", "cashflows", "transaction_costs"):
+        resid = states["cash"] - (states["cashflows"] - states["transaction_costs"])
+        checks["cash_identity_max_abs"] = worst_abs(resid)
+        if worst_abs(resid) > rel_tol * scale:
+            issues.append(f"cash identity violated by up to {worst_abs(resid):,.6f}")
+
+    # --- transaction costs ---
+    if has(states, "transaction_costs"):
+        costs = states["transaction_costs"]
+        if (costs.diff().dropna() < -rel_tol * scale).any():
+            issues.append("cumulative transaction costs decrease on some day")
+        if has(trades, "transaction_cost"):
+            booked = float(trades["transaction_cost"].sum())
+            final = float(costs.iloc[-1])
+            checks["cost_reconciliation_gap"] = abs(final - booked)
+            if abs(final - booked) > max(1e-6, rel_tol * scale):
+                issues.append(
+                    f"cost reconciliation: states {final:,.4f} vs trades {booked:,.4f}"
+                )
+
+    # --- futures position tracking ---
+    if has(states, "futures_contracts") and has(trades, "quantity"):
+        traded = float(trades["quantity"].sum())
+        final_pos = float(states["futures_contracts"].iloc[-1])
+        checks["position_tracking_gap"] = abs(final_pos - traded)
+        if abs(final_pos - traded) > 1e-6:
+            issues.append(
+                f"position tracking: final {final_pos:,.4f} contracts vs "
+                f"{traded:,.4f} traded"
+            )
+
+    # --- lifecycle monotonicity ---
+    for flag in ("knocked_out", "knocked_in", "matured"):
+        if flag in states.columns:
+            series = states[flag].astype(bool).astype(int)
+            if (series.diff().dropna() < 0).any():
+                issues.append(f"{flag} flag turns back off after being set")
+    if "alive" in states.columns:
+        alive = states["alive"].astype(bool).astype(int)
+        if (alive.diff().dropna() > 0).any():
+            issues.append("a dead trade came back to life")
+
+    # --- event corroboration ---
+    if "knocked_out" in states.columns and bool(states["knocked_out"].iloc[-1]):
+        if actions.empty or "action_type" not in actions.columns:
+            issues.append("run knocked out but has no action log")
+        elif not (actions["action_type"].astype(str).str.upper() == "KO").any():
+            issues.append("run knocked out but no KO action row was recorded")
+
+    # --- hedge effectiveness ---
+    if has(greeks, "pre_hedge_delta_cash_1pct", "post_hedge_delta_cash_1pct"):
+        pre = greeks["pre_hedge_delta_cash_1pct"].abs()
+        post = greeks["post_hedge_delta_cash_1pct"].abs()
+        worse = int((post > pre + 1e-6).sum())
+        checks["days_hedge_increased_delta"] = worse
+        checks["post_hedge_delta_rms"] = float((post ** 2).mean() ** 0.5)
+        checks["pre_hedge_delta_rms"] = float((pre ** 2).mean() ** 0.5)
+        if worse:
+            issues.append(
+                f"hedging increased |delta| on {worse} day(s) - rebalance sign error?"
+            )
+
+    # --- no NaNs where they would be silent ---
+    for col in ("total_pnl", "spot", "futures_price", "portfolio_value"):
+        if col in states.columns and states[col].isna().any():
+            issues.append(f"states.csv column {col!r} contains NaN")
+
+    return {
+        "run_dir": str(run_dir),
+        "n_days": int(len(states)),
+        "checks": checks,
+        "issues": issues,
+        "sane": not issues,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Aggregation
+# ---------------------------------------------------------------------------
+
+def variant_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pooled distribution of the headline metrics for one variant."""
+    lifecycles = [r.get("lifecycle") or {} for r in rows]
+    return {
+        "n_runs": len(rows),
+        "pnl_pct_notional": _distribution([r["total_pnl_pct_notional"] for r in rows]),
+        "cost_drag_pct_notional": _distribution(
+            [r["cost_drag_pct_notional"] for r in rows]
+        ),
+        "residual_delta_cash_rms_pct_notional": _distribution(
+            [r["residual_delta_cash_rms_pct_notional"] for r in rows]
+        ),
+        "pnl_max_drawdown": _distribution([r["pnl_max_drawdown"] for r in rows]),
+        "n_trades": _distribution([r["n_trades"] for r in rows]),
+        "gamma_cash_mean": _distribution(
+            [(r["gamma_cash_1pct"] or {}).get("mean") for r in rows]
+        ),
+        "lifecycle_counts": {
+            "knocked_out": sum(1 for lc in lifecycles if lc.get("knocked_out")),
+            "knocked_in": sum(1 for lc in lifecycles if lc.get("knocked_in")),
+            "matured": sum(1 for lc in lifecycles if lc.get("matured")),
+            "censored_at_data_end": sum(
+                1 for lc in lifecycles if lc.get("censored_at_data_end")
+            ),
+        },
+        "calibration": _pooled_calibration([r.get("calibration") or {} for r in rows]),
+        "total_elapsed_seconds": sum(
+            _finite([r.get("elapsed_seconds") for r in rows])
+        ),
+    }
+
+
+def _pooled_calibration(entries: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    with_records = [e for e in entries if e.get("n_records")]
+    if not with_records:
+        return {"n_records": 0}
+    return {
+        "n_records": sum(int(e["n_records"]) for e in with_records),
+        "rmse_iv_mean": _mean(
+            [(e.get("rmse_iv") or {}).get("mean") for e in with_records]
+        ),
+        "rmse_iv_max": max(
+            _finite([(e.get("rmse_iv") or {}).get("max") for e in with_records]),
+            default=None,
+        ),
+        "bound_hit_fraction": _mean(
+            [e.get("bound_hit_fraction") for e in with_records]
+        ),
+        "feller_violated_fraction": _mean(
+            [e.get("feller_violated_fraction") for e in with_records]
+        ),
+    }
+
+
+def paired_comparisons(
+    per_run: Sequence[Dict[str, Any]], baseline: str = BASELINE_VARIANT
+) -> List[Dict[str, Any]]:
+    """Same-inception differences vs the baseline variant.
+
+    Each inception's five variants share one contract and one market path, so
+    a paired difference isolates the model.  Inceptions where the baseline run
+    is missing are skipped (and counted by the caller), never imputed.
+    """
+    by_key = {(r["inception"], r["variant"]): r for r in per_run}
+    inceptions = sorted({r["inception"] for r in per_run})
+    out: List[Dict[str, Any]] = []
+    for inception in inceptions:
+        base = by_key.get((inception, baseline))
+        if base is None:
+            continue
+        for variant in sorted({r["variant"] for r in per_run}):
+            if variant == baseline:
+                continue
+            row = by_key.get((inception, variant))
+            if row is None:
+                continue
+            out.append(
+                {
+                    "inception": inception,
+                    "variant": variant,
+                    "baseline": baseline,
+                    "d_pnl_pct_notional": _diff(
+                        row["total_pnl_pct_notional"], base["total_pnl_pct_notional"]
+                    ),
+                    "d_cost_drag_pct_notional": _diff(
+                        row["cost_drag_pct_notional"], base["cost_drag_pct_notional"]
+                    ),
+                    "d_residual_delta_rms_pct_notional": _diff(
+                        row["residual_delta_cash_rms_pct_notional"],
+                        base["residual_delta_cash_rms_pct_notional"],
+                    ),
+                    "d_n_trades": _diff(row["n_trades"], base["n_trades"]),
+                    "same_lifecycle": (
+                        (row.get("lifecycle") or {}).get("knocked_out")
+                        == (base.get("lifecycle") or {}).get("knocked_out")
+                    ),
+                }
+            )
+    return out
+
+
+def _diff(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    if a is None or b is None:
+        return None
+    if not math.isfinite(float(a)) or not math.isfinite(float(b)):
+        return None
+    return float(a) - float(b)
+
+
+def paired_summary(pairs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Per-variant summary of the paired edge vs baseline, with a win rate."""
+    out: Dict[str, Any] = {}
+    for variant in sorted({p["variant"] for p in pairs}):
+        rows = [p for p in pairs if p["variant"] == variant]
+        deltas = _finite([p["d_pnl_pct_notional"] for p in rows])
+        hedge_deltas = _finite([p["d_residual_delta_rms_pct_notional"] for p in rows])
+        out[variant] = {
+            "n_pairs": len(rows),
+            "d_pnl_pct_notional": _distribution(deltas),
+            "d_residual_delta_rms_pct_notional": _distribution(hedge_deltas),
+            "d_cost_drag_pct_notional": _distribution(
+                [p["d_cost_drag_pct_notional"] for p in rows]
+            ),
+            # Fraction of inceptions where the variant beat the baseline.
+            "pnl_win_rate": (
+                sum(1 for d in deltas if d > 0.0) / len(deltas) if deltas else None
+            ),
+            "hedge_win_rate": (
+                sum(1 for d in hedge_deltas if d < 0.0) / len(hedge_deltas)
+                if hedge_deltas else None
+            ),
+        }
+    return out
+
+
+def aggregate(run_dir: Path) -> Dict[str, Any]:
+    """Read the fleet manifest and build every comparison table."""
+    manifest_path = Path(run_dir) / "run_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"no run manifest at {manifest_path}; run stage 12 first "
+            "(12_snowball_volmodel_backtest.py)"
+        )
+    manifest = json.loads(manifest_path.read_text())
+    notional = float(manifest.get("config", {}).get("notional", 0.0))
+
+    per_run: List[Dict[str, Any]] = []
+    missing: List[Dict[str, str]] = []
+    for run in manifest.get("runs", []):
+        inception, variant = run["inception"], run["variant"]
+        d = run_dir_for(run_dir, inception, variant)
+        if not (d / "states.csv").exists():
+            missing.append({"inception": inception, "variant": variant})
+            continue
+        frames = load_run_frames(d)
+        per_run.append(
+            metrics_for_run(
+                inception=inception, variant=variant, notional=notional, frames=frames
+            )
+        )
+
+    variants = sorted(
+        {r["variant"] for r in per_run},
+        key=lambda v: VARIANT_ORDER.index(v) if v in VARIANT_ORDER else 99,
+    )
+    summaries = {
+        v: variant_summary([r for r in per_run if r["variant"] == v]) for v in variants
+    }
+    pairs = paired_comparisons(per_run)
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "study": "snowball_volmodel_backtest_aggregate",
+        "run_dir": str(run_dir),
+        "manifest_counts": manifest.get("counts", {}),
+        "config": manifest.get("config", {}),
+        "term_sheet": manifest.get("term_sheet", {}),
+        "hedge_costs": manifest.get("hedge_costs", {}),
+        "gate_g2": manifest.get("gate_g2", {}),
+        "inceptions": manifest.get("inceptions", []),
+        "variants": variants,
+        "per_run": per_run,
+        "variant_summary": summaries,
+        "paired_vs_baseline": pairs,
+        "paired_summary": paired_summary(pairs),
+        "missing_runs": missing,
+        "completeness": verify_fleet_completeness(Path(run_dir), manifest),
+        "failures": manifest.get("failures", []),
+    }
+
+
+# ---------------------------------------------------------------------------
+# CSV tables
+# ---------------------------------------------------------------------------
+
+def write_tables(agg: Dict[str, Any], out_dir: Path) -> Dict[str, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: Dict[str, Path] = {}
+
+    rows = []
+    for r in agg["per_run"]:
+        lc = r.get("lifecycle") or {}
+        rows.append(
+            {
+                "inception": r["inception"],
+                "variant": r["variant"],
+                "n_days": r["n_days"],
+                "coupon": r.get("coupon"),
+                "solver": r.get("vol_model_solver"),
+                "total_pnl": r["total_pnl"],
+                "pnl_pct_notional": r["total_pnl_pct_notional"],
+                "product_pnl": r["product_pnl"],
+                "hedge_pnl": r["hedge_pnl"],
+                "transaction_costs": r["transaction_costs"],
+                "cost_drag_pct_notional": r["cost_drag_pct_notional"],
+                "pnl_max_drawdown": r["pnl_max_drawdown"],
+                "residual_delta_rms_pct_notional": r[
+                    "residual_delta_cash_rms_pct_notional"
+                ],
+                "gamma_cash_mean": (r.get("gamma_cash_1pct") or {}).get("mean"),
+                "n_trades": r["n_trades"],
+                "knocked_out": lc.get("knocked_out"),
+                "knocked_in": lc.get("knocked_in"),
+                "matured": lc.get("matured"),
+                "censored": lc.get("censored_at_data_end"),
+                "calib_rmse_iv_mean": (
+                    (r.get("calibration") or {}).get("rmse_iv") or {}
+                ).get("mean"),
+                "calib_bound_hit_fraction": (r.get("calibration") or {}).get(
+                    "bound_hit_fraction"
+                ),
+                "elapsed_seconds": r.get("elapsed_seconds"),
+            }
+        )
+    per_run = pd.DataFrame(rows).sort_values(["inception", "variant"])
+    paths["per_run"] = out_dir / "per_run_metrics.csv"
+    per_run.to_csv(paths["per_run"], index=False)
+
+    srows = []
+    for variant, s in agg["variant_summary"].items():
+        srows.append(
+            {
+                "variant": variant,
+                "n_runs": s["n_runs"],
+                "pnl_pct_mean": s["pnl_pct_notional"]["mean"],
+                "pnl_pct_median": s["pnl_pct_notional"]["median"],
+                "pnl_pct_stdev": s["pnl_pct_notional"]["stdev"],
+                "pnl_pct_min": s["pnl_pct_notional"]["min"],
+                "pnl_pct_max": s["pnl_pct_notional"]["max"],
+                "cost_drag_pct_mean": s["cost_drag_pct_notional"]["mean"],
+                "residual_delta_rms_pct_mean": s[
+                    "residual_delta_cash_rms_pct_notional"
+                ]["mean"],
+                "n_trades_mean": s["n_trades"]["mean"],
+                "knocked_out": s["lifecycle_counts"]["knocked_out"],
+                "knocked_in": s["lifecycle_counts"]["knocked_in"],
+                "matured": s["lifecycle_counts"]["matured"],
+                "censored": s["lifecycle_counts"]["censored_at_data_end"],
+                "calib_rmse_iv_mean": s["calibration"].get("rmse_iv_mean"),
+                "calib_bound_hit_fraction": s["calibration"].get("bound_hit_fraction"),
+                "hours": (s["total_elapsed_seconds"] or 0.0) / 3600.0,
+            }
+        )
+    paths["variant_summary"] = out_dir / "variant_summary.csv"
+    pd.DataFrame(srows).to_csv(paths["variant_summary"], index=False)
+
+    paths["paired"] = out_dir / "paired_vs_flat_bsm.csv"
+    pd.DataFrame(agg["paired_vs_baseline"]).to_csv(paths["paired"], index=False)
+    return paths
+
+
+# ---------------------------------------------------------------------------
+# Lecture-style HTML report
+# ---------------------------------------------------------------------------
+
+def _fmt(value: Optional[float], digits: int = 3, suffix: str = "") -> str:
+    if value is None or (isinstance(value, float) and not math.isfinite(value)):
+        return "&mdash;"
+    return f"{value:,.{digits}f}{suffix}"
+
+
+def _num_cells(values: Sequence[Any], digits: int = 3, suffix: str = "") -> str:
+    return "".join(f'<td class="num">{_fmt(v, digits, suffix)}</td>' for v in values)
+
+
+def build_report(agg: Dict[str, Any]) -> str:
+    cfg = agg.get("config", {})
+    term = agg.get("term_sheet", {})
+    costs = agg.get("hedge_costs", {})
+    gate = agg.get("gate_g2", {})
+    counts = agg.get("manifest_counts", {})
+    variants = agg["variants"]
+    summaries = agg["variant_summary"]
+    paired = agg["paired_summary"]
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    incomplete_banner = ""
+    n_expected = counts.get("runs_expected")
+    n_done = counts.get("runs_completed")
+    missing_variants = [v for v in VARIANT_ORDER if v not in variants]
+    if missing_variants or (n_expected and n_done and n_done < n_expected):
+        bits = []
+        if missing_variants:
+            bits.append(
+                "variants not in this run: <b>"
+                + ", ".join(VARIANT_LABELS.get(v, v) for v in missing_variants)
+                + "</b>"
+            )
+        if n_expected and n_done and n_done < n_expected:
+            bits.append(f"<b>{n_done}/{n_expected}</b> runs completed")
+        incomplete_banner = (
+            '<div style="background:#b5432f;color:#fff;padding:.7rem 1rem;'
+            'border-radius:8px;margin:1rem 0;font-weight:600">'
+            "&#9888; PARTIAL RESULT &mdash; " + "; ".join(bits) + ". Conclusions below "
+            "cover only what actually ran.</div>"
+        )
+
+    # --- table: per-variant PnL distribution -------------------------------
+    dist_rows = ""
+    for v in variants:
+        s = summaries[v]
+        p = s["pnl_pct_notional"]
+        dist_rows += (
+            f"<tr><td><b>{VARIANT_LABELS.get(v, v)}</b></td>"
+            f'<td class="num">{s["n_runs"]}</td>'
+            + _num_cells([p["mean"], p["median"], p["stdev"], p["min"], p["max"]], 3)
+            + _num_cells([s["cost_drag_pct_notional"]["mean"]], 4)
+            + _num_cells([s["residual_delta_cash_rms_pct_notional"]["mean"]], 4)
+            + _num_cells([s["n_trades"]["mean"]], 1)
+            + "</tr>"
+        )
+
+    # --- table: paired edge vs flat BSM ------------------------------------
+    paired_rows = ""
+    for v in variants:
+        if v == BASELINE_VARIANT or v not in paired:
+            continue
+        p = paired[v]
+        d = p["d_pnl_pct_notional"]
+        h = p["d_residual_delta_rms_pct_notional"]
+        win = p["pnl_win_rate"]
+        hwin = p["hedge_win_rate"]
+        paired_rows += (
+            f"<tr><td><b>{VARIANT_LABELS.get(v, v)}</b></td>"
+            f'<td class="num">{p["n_pairs"]}</td>'
+            + _num_cells([d["mean"], d["median"], d["stdev"]], 3)
+            + f'<td class="num">{_fmt(100.0 * win, 1, "%") if win is not None else "&mdash;"}</td>'
+            + _num_cells([h["mean"]], 4)
+            + f'<td class="num">{_fmt(100.0 * hwin, 1, "%") if hwin is not None else "&mdash;"}</td>'
+            + "</tr>"
+        )
+    if not paired_rows:
+        paired_rows = (
+            '<tr><td colspan="8">No paired comparisons &mdash; the baseline '
+            f"variant ({BASELINE_VARIANT}) is not in this run.</td></tr>"
+        )
+
+    # --- table: lifecycle outcomes ----------------------------------------
+    life_rows = ""
+    for v in variants:
+        lc = summaries[v]["lifecycle_counts"]
+        life_rows += (
+            f"<tr><td><b>{VARIANT_LABELS.get(v, v)}</b></td>"
+            f'<td class="num">{lc["knocked_out"]}</td>'
+            f'<td class="num">{lc["knocked_in"]}</td>'
+            f'<td class="num">{lc["matured"]}</td>'
+            f'<td class="num">{lc["censored_at_data_end"]}</td></tr>'
+        )
+
+    # --- table: calibration quality ---------------------------------------
+    calib_rows = ""
+    for v in variants:
+        c = summaries[v]["calibration"]
+        if not c.get("n_records"):
+            continue
+        calib_rows += (
+            f"<tr><td><b>{VARIANT_LABELS.get(v, v)}</b></td>"
+            f'<td class="num">{c["n_records"]:,}</td>'
+            + _num_cells([c.get("rmse_iv_mean"), c.get("rmse_iv_max")], 5)
+            + _num_cells(
+                [
+                    None if c.get("bound_hit_fraction") is None
+                    else 100.0 * c["bound_hit_fraction"],
+                    None if c.get("feller_violated_fraction") is None
+                    else 100.0 * c["feller_violated_fraction"],
+                ],
+                1,
+                "%",
+            )
+            + "</tr>"
+        )
+    calib_section = (
+        f"""<h3>5.1 &nbsp; Per-day model fit</h3>
+<table><thead><tr><th>variant</th><th>records</th><th>mean RMSE (IV)</th>
+<th>max RMSE (IV)</th><th>bound hits</th><th>Feller violated</th></tr></thead>
+<tbody>{calib_rows}</tbody></table>
+<div class="callout"><b>Read the bound hits honestly.</b> The repo's own diagnostics
+(<code>example/mo_volmodels/MODEL_DIAGNOSTICS.md</code>) already showed Heston to be
+<em>weakly identified</em> on public CFFEX settlement data &mdash; &kappa; and &sigma; hit their
+frozen bounds on roughly half the sampled dates. A low IV RMSE therefore does <em>not</em>
+mean the parameters are well determined; it means several very different parameter sets
+fit the observed smile about equally well. Any Heston/SLV edge reported above should be
+read with that caveat attached.</div>"""
+        if calib_rows
+        else '<p class="lede">No calibrated variants in this run.</p>'
+    )
+
+    # --- inception table ---------------------------------------------------
+    inception_rows = ""
+    for entry in agg.get("inceptions", []):
+        sol = entry.get("coupon_solution", {})
+        inception_rows += (
+            f"<tr><td>{entry['inception']}</td>"
+            f'<td class="num">{_fmt(entry.get("initial_spot"), 2)}</td>'
+            f'<td class="num">{_fmt(100.0 * entry["coupon"], 3, "%")}</td>'
+            f'<td class="num">{_fmt(entry.get("atm_vol_at_inception"), 4)}</td>'
+            f'<td class="num">{_fmt(entry.get("futures_implied_q"), 4)}</td>'
+            f'<td class="num">{sol.get("iterations", "&mdash;")}</td>'
+            f'<td class="num">{_fmt(abs(sol.get("pv", 0.0)), 2)}</td></tr>'
+        )
+
+    verdict = _verdict_paragraph(agg)
+    outcome_caveat = _outcome_concentration_caveat(agg)
+
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Does Vol-Model Sophistication Pay in Snowball Hedging?</title>
+<style>
+:root {{ --ink:#1a2230; --muted:#5a6577; --line:#e2e6ee; --accent:#1E3A5F; --accent2:#b5432f;
+        --bg:#ffffff; --card:#f7f9fc; --code:#0d1b2a; }}
+* {{ box-sizing:border-box; }}
+body {{ font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+       color:var(--ink); background:var(--bg); margin:0; line-height:1.62; }}
+.wrap {{ max-width:960px; margin:0 auto; padding:2.5rem 1.4rem 5rem; }}
+h1 {{ font-size:2rem; line-height:1.2; margin:.2rem 0 .4rem; }}
+h2 {{ font-size:1.4rem; margin:2.6rem 0 .6rem; padding-top:1rem; border-top:2px solid var(--line); color:var(--accent); }}
+h3 {{ font-size:1.08rem; margin:1.5rem 0 .3rem; color:var(--accent2); }}
+.lede {{ color:var(--muted); font-size:1.05rem; }}
+.meta {{ font-size:.85rem; color:var(--muted); background:var(--card); border:1px solid var(--line);
+         border-radius:8px; padding:.7rem 1rem; margin:1rem 0 0; }}
+p, li {{ font-size:.98rem; }}
+code {{ font-family:"SF Mono",Menlo,Consolas,monospace; background:#eef1f6; padding:.05rem .3rem; border-radius:4px; font-size:.9em; }}
+.eq {{ background:var(--code); color:#e6edf3; border-radius:8px; padding:.8rem 1.1rem; margin:.8rem 0;
+       font-family:"SF Mono",Menlo,Consolas,monospace; font-size:.92rem; overflow-x:auto; }}
+.eq .c {{ color:#7d8aa0; }}
+.tablewrap {{ overflow-x:auto; }}
+table {{ border-collapse:collapse; width:100%; margin:1rem 0; font-size:.9rem; }}
+th,td {{ border:1px solid var(--line); padding:.42rem .6rem; text-align:left; }}
+th {{ background:var(--accent); color:#fff; font-weight:600; }}
+td.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+tr:nth-child(even) td {{ background:var(--card); }}
+.callout {{ border-left:4px solid var(--accent2); background:#fbf2ef; padding:.8rem 1.1rem; border-radius:0 8px 8px 0; margin:1.1rem 0; }}
+.callout.key {{ border-color:var(--accent); background:#eef3f9; }}
+.callout b {{ color:var(--accent2); }}
+.callout.key b {{ color:var(--accent); }}
+.toc {{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:1rem 1.3rem; margin:1.4rem 0; }}
+.toc ol {{ margin:.3rem 0; padding-left:1.2rem; }}
+.toc a {{ color:var(--accent); text-decoration:none; }}
+footer {{ margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line); font-size:.82rem; color:var(--muted); }}
+@media (prefers-color-scheme: dark) {{
+  :root {{ --ink:#e6edf3; --muted:#9aa7b8; --line:#2b3648; --accent:#8fb4e0; --accent2:#e8927c;
+           --bg:#0d131c; --card:#141d2b; --code:#060b12; }}
+  code {{ background:#1c2634; }} .callout {{ background:#1b1512; }} .callout.key {{ background:#111a26; }}
+}}
+</style></head><body><div class="wrap">
+{incomplete_banner}
+<h1>Does vol-model sophistication pay in snowball hedging?</h1>
+<p class="lede">A historical backtest of a <b>short 3-year CSI&nbsp;1000 snowball</b>
+(中证1000, <code>000852.SH</code>), delta-hedged daily with IM index futures, priced and
+hedged five different ways &mdash; flat Black-Scholes, a term-structure of ATM vol, Dupire
+local volatility, Heston, and Heston-SLV &mdash; over overlapping monthly inceptions on
+real CFFEX settlement data.</p>
+
+<div class="meta">
+{counts.get("inceptions", "?")} monthly inceptions &middot; {len(variants)} variants &middot;
+{counts.get("runs_completed", "?")}/{counts.get("runs_expected", "?")} runs completed &middot;
+notional {_fmt(cfg.get("notional"), 0)} CNY &middot; flat rate {_fmt(cfg.get("rate"), 4)} &middot;
+generated {generated}
+</div>
+
+<div class="toc"><b>Contents</b>
+<ol>
+<li><a href="#s1">What is being tested, and why it is a fair test</a></li>
+<li><a href="#s2">Data provenance and the honest gaps</a></li>
+<li><a href="#s3">Results: PnL distribution across inceptions</a></li>
+<li><a href="#s4">The paired edge over flat BSM</a></li>
+<li><a href="#s5">Calibration quality &mdash; can we even trust the models?</a></li>
+<li><a href="#s6">Caveats and what this study does not show</a></li>
+</ol></div>
+
+<h2 id="s1">1 &nbsp; What is being tested, and why it is a fair test</h2>
+<p>A snowball is a short volatility, short skew, path-dependent position: the seller collects a
+coupon for as long as the index stays between a knock-in floor and a knock-out ceiling, and takes
+equity-like downside if the floor is breached and the trade never knocks out. Its delta is unstable
+&mdash; it flips sign near the KO barrier and grows sharply near the KI barrier &mdash; so the
+<em>model that produces the delta</em> matters in a way it never does for a vanilla option.</p>
+
+<h3>1.1 &nbsp; The term sheet</h3>
+<div class="tablewrap"><table><tbody>
+<tr><th>Underlying</th><td>{term.get("underlying", "000852.SH")} (CSI 1000)</td></tr>
+<tr><th>Position</th><td>Seller, quantity {term.get("product_quantity", -1.0)}, notional {_fmt(cfg.get("notional"), 0)} CNY</td></tr>
+<tr><th>Tenor</th><td>{term.get("tenor_months", 36)} months</td></tr>
+<tr><th>KO barrier</th><td>{_fmt(100.0 * float(term.get("ko_pct", 1.03)), 0, "%")} of initial spot, monthly, {term.get("lockout_months", 3)}-month lockout</td></tr>
+<tr><th>KI barrier</th><td>{_fmt(100.0 * float(term.get("ki_pct", 0.75)), 0, "%")} of initial spot, observed every trading day</td></tr>
+<tr><th>Coupon</th><td>{term.get("coupon", "solved per inception under flat BSM")}</td></tr>
+<tr><th>Hedge</th><td>IM futures, daily rebalance at close, contract rounding, roll 5 days before expiry</td></tr>
+<tr><th>Costs</th><td>{costs.get("model", "?")} &mdash; {_fmt(1e4 * float(costs.get("proportional_rate") or 0.0), 2, "bp")} commission, {_fmt(costs.get("spread_bps"), 1, "bp")} spread</td></tr>
+</tbody></table></div>
+
+<h3>1.2 &nbsp; The one design choice that makes this a controlled experiment</h3>
+<p>The <b>fair coupon is solved once per inception under flat BSM</b>, and all five variants then
+trade <em>that identical contract</em>. If each model priced its own fair coupon, the variants would
+be trading different products and any PnL difference would confound model quality with term
+generosity. Fixing the terms means every difference below is attributable to the model's
+<em>delta</em>, not to what it charged.</p>
+<div class="callout key"><b>Why the coupon solve is cheap.</b> Snowball PV is
+<em>exactly affine</em> in the coupon: neither the KO trigger nor the KI trigger depends on it,
+so the coupon leg and the rebate leg both scale linearly. False position therefore lands on the
+fair coupon in a single step &mdash; three pricing calls instead of the forty a bisection needs.
+The solver still prices the answer and checks it against tolerance, so the affine structure is
+exploited but never trusted.</div>
+
+<h3>1.3 &nbsp; Solved terms per inception</h3>
+<div class="tablewrap"><table><thead><tr><th>inception</th><th>initial spot</th><th>fair coupon</th>
+<th>ATM vol (3Y)</th><th>futures-implied q</th><th>solver iters</th><th>|PV| residual</th></tr></thead>
+<tbody>{inception_rows}</tbody></table></div>
+
+<h2 id="s2">2 &nbsp; Data provenance and the honest gaps</h2>
+<p>Every surface is built from <b>official CFFEX end-of-day MO settlement files</b>, one per trading
+date: put-call parity recovers the discount factor and forward per expiry, out-of-the-money quotes
+are inverted to Black implied vols, and a SABR fit smooths the smile. Dates that fail the arbitrage
+checks are <em>excluded and logged</em>, never patched &mdash; an excluded date reuses the previous
+admitted surface under the manifest's carry-forward policy.</p>
+<div class="callout"><b>The gap that matters most.</b> MO options list out to roughly one year,
+but the trade runs three. Beyond the last listed expiry the surface is extrapolated
+<b>flat in total variance</b>. So for the first two years of every trade, the long end of the
+surface every model calibrates to is an <em>assumption</em>, not a quote. This affects all five
+variants, but it bites the term-structure and stochastic-vol variants hardest, since they are
+precisely the ones trying to exploit term-structure shape.</div>
+
+<h3>2.1 &nbsp; Which engine priced which variant</h3>
+<p>The Heston and Heston-SLV 2D-ADI PDE routes were put through a convergence gate against a
+high-quality RQMC reference before being allowed near this backtest. The gate's verdict, which
+this run reads from disk rather than assuming:</p>
+<div class="eq">{json.dumps(gate.get("routes", {}), sort_keys=True)}
+&nbsp;&nbsp;<span class="c">// evidence sha256: {str(gate.get("evidence_sha256"))[:16]}...</span></div>
+<p>Both stochastic-vol variants failed the PDE gate and therefore price on <b>Monte Carlo (QE
+scheme, randomized quasi-random)</b>; flat BSM, TS BSM and local vol price on the deterministic
+1D snowball PDE. This is the study reporting its own numerical limits rather than papering over
+them.</p>
+
+<h2 id="s3">3 &nbsp; Results: PnL distribution across inceptions</h2>
+<p>All figures are <b>percent of notional</b>, from the seller's perspective, net of hedging costs.
+Residual delta is the RMS of the position's leftover delta <em>after</em> each day's rebalance,
+expressed as cash per 1% spot move &mdash; the direct measure of hedge quality.</p>
+<div class="tablewrap"><table><thead><tr><th>variant</th><th>runs</th><th>mean PnL</th>
+<th>median</th><th>stdev</th><th>min</th><th>max</th><th>cost drag</th>
+<th>residual &delta; RMS</th><th>trades</th></tr></thead>
+<tbody>{dist_rows}</tbody></table></div>
+
+<h3>3.1 &nbsp; Lifecycle outcomes</h3>
+<div class="tablewrap"><table><thead><tr><th>variant</th><th>knocked out</th><th>knocked in</th>
+<th>matured</th><th>censored at data end</th></tr></thead>
+<tbody>{life_rows}</tbody></table></div>
+<p>Lifecycle counts are near-identical across variants by construction &mdash; KO and KI are
+triggered by the <em>realized index path</em>, not by anybody's model. Differences between variants
+therefore live entirely in the hedge, which is exactly what this study wants to isolate.</p>
+{outcome_caveat}
+
+<h2 id="s4">4 &nbsp; The paired edge over flat BSM</h2>
+<p>Because all five variants of one inception share a contract and a market path, the honest
+comparison is <b>paired</b>: for each inception, subtract the flat-BSM result. Pooled averages
+would instead be dominated by which inceptions happened to knock out early.</p>
+<div class="tablewrap"><table><thead><tr><th>variant</th><th>pairs</th><th>mean &Delta;PnL</th>
+<th>median &Delta;PnL</th><th>stdev</th><th>PnL win rate</th>
+<th>mean &Delta;residual &delta;</th><th>hedge win rate</th></tr></thead>
+<tbody>{paired_rows}</tbody></table></div>
+<div class="callout key"><b>How to read the two win rates.</b> <em>PnL win rate</em> is the fraction
+of inceptions where the variant made more money than flat BSM. <em>Hedge win rate</em> is the
+fraction where it left <em>less</em> residual delta. They can disagree, and when they do it is
+informative: a model can hedge more tightly and still lose money if the tighter hedge costs more
+in turnover than the risk it removes.</div>
+{verdict}
+
+<h2 id="s5">5 &nbsp; Calibration quality &mdash; can we even trust the models?</h2>
+{calib_section}
+
+<h2 id="s6">6 &nbsp; Caveats and what this study does not show</h2>
+<ul>
+<li><b>Long-end extrapolation.</b> Two of every three years of each trade sit beyond the last
+listed MO expiry, on a flat-total-variance extrapolation. A study on a market with 3-year listed
+options could reach a different conclusion.</li>
+<li><b>Censoring.</b> {counts.get("censored_at_data_end", "?")} of {counts.get("runs_completed", "?")}
+runs reached the end of the data before knocking out or maturing. Their PnL is a mark-to-market
+snapshot, not a realized outcome, and they are over-weighted toward the expensive early life of
+the trade.</li>
+<li><b>One underlying, one term sheet, one regime.</b> Every inception is the same product on the
+same index over an overlapping window, so the runs are <em>not</em> independent observations. The
+spread across inceptions understates true sampling uncertainty.</li>
+<li><b>Heston identification.</b> See &sect;5: parameters that fit the smile are not necessarily
+determined by it.</li>
+<li><b>Monte Carlo noise in the SV deltas.</b> Heston and Heston-SLV deltas come from bumped MC
+reprices. Randomized-QMC with common random numbers keeps bump noise far below raw price noise,
+but it is not zero, and it does not shrink the way a PDE delta's discretization error does.</li>
+</ul>
+
+<footer>
+Generated {generated} &middot; source
+<code>example/mo_volmodels/12_snowball_volmodel_backtest.py</code> (fleet) and
+<code>example/mo_volmodels/13_aggregate_and_report.py</code> (this report) &middot;
+engines from <code>quantark.volmodels</code> / <code>quantark.asset.equity.engine</code> &middot;
+market data: official CFFEX MO settlement files via AKShare.
+</footer>
+</div></body></html>"""
+
+
+def _outcome_concentration_caveat(agg: Dict[str, Any]) -> str:
+    """Warn when the sample contains only one kind of terminal outcome.
+
+    A snowball's model risk is largest for a trade that is knocked IN at
+    maturity and settles into equity downside.  If the realized window never
+    produced that path, the study simply cannot speak to it, and the report
+    has to say so rather than let the reader assume otherwise.
+    """
+    per_run = agg.get("per_run") or []
+    baseline = [r for r in per_run if r["variant"] == BASELINE_VARIANT] or per_run
+    if not baseline:
+        return ""
+    lifecycles = [r.get("lifecycle") or {} for r in baseline]
+    n = len(lifecycles)
+    ko = sum(1 for lc in lifecycles if lc.get("knocked_out"))
+    matured = sum(1 for lc in lifecycles if lc.get("matured"))
+    ki = sum(1 for lc in lifecycles if lc.get("knocked_in"))
+    ki_at_maturity = sum(
+        1 for lc in lifecycles if lc.get("knocked_in") and lc.get("matured")
+    )
+    if ko < n or matured > 0:
+        return ""  # a mixed sample needs no special warning
+    return (
+        '<div class="callout"><b>Every trade in this sample knocked out.</b> '
+        f"All {n} inceptions terminated at a knock-out; none reached maturity, and "
+        f"{ki_at_maturity} settled knocked-in at maturity "
+        f"({ki} knocked in at some point and then recovered into a knock-out). "
+        "That is a property of the realized 2023&ndash;2026 CSI&nbsp;1000 path, not a "
+        "modelling choice &mdash; but it bounds the conclusion hard: a snowball's model "
+        "risk is largest precisely for the trade that is <em>knocked in at maturity</em> "
+        "and settles into equity downside, and that path does not occur here. Any "
+        "'no measurable edge' finding below should be read as <em>no edge on "
+        "knock-out paths</em>, not as a general statement about snowball model risk."
+        "</div>"
+    )
+
+
+def _verdict_paragraph(agg: Dict[str, Any]) -> str:
+    """State the finding in plain words, including 'no measurable edge'."""
+    paired = agg.get("paired_summary", {})
+    if not paired:
+        return ""
+    lines = []
+    for variant, p in paired.items():
+        dist = p.get("d_pnl_pct_notional") or {}
+        mean, stdev, n = dist.get("mean"), dist.get("stdev"), dist.get("n") or 0
+        label = VARIANT_LABELS.get(variant, variant)
+        if mean is None or n == 0:
+            continue
+        if stdev is not None and n > 1:
+            se = stdev / math.sqrt(n)
+            # se == 0 means every pair gave the identical edge; that is the
+            # most consistent case, not an unknown one, so a non-zero mean
+            # counts as significant rather than falling through.
+            significant = abs(mean) > 2.0 * se if se > 0.0 else mean != 0.0
+            verdict = (
+                f"<b>{label}</b>: mean edge {mean:+.3f}% of notional over {n} paired "
+                f"inceptions (standard error {se:.3f}%) &mdash; "
+                + (
+                    "outside two standard errors, so a real effect on this sample."
+                    if significant
+                    else "well inside two standard errors, i.e. <em>not</em> "
+                    "distinguishable from zero on this sample."
+                )
+            )
+        else:
+            verdict = f"<b>{label}</b>: mean edge {mean:+.3f}% of notional over {n} pair(s)."
+        lines.append(f"<li>{verdict}</li>")
+    if not lines:
+        return ""
+    return (
+        "<h3>4.1 &nbsp; The finding, stated plainly</h3><ul>"
+        + "".join(lines)
+        + "</ul><p>A standard error computed across overlapping inceptions of the same "
+        "product understates the true uncertainty (the runs share market history), so "
+        "treat the two-standard-error test above as a <em>generous</em> bar: an edge "
+        "that fails it is certainly not established.</p>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--run-dir", default=str(DEFAULT_RUN_DIR))
+    parser.add_argument(
+        "--out-dir", default=None, help="defaults to <run-dir>/aggregate"
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parse_args(argv)
+    run_dir = Path(args.run_dir)
+    out_dir = Path(args.out_dir) if args.out_dir else run_dir / "aggregate"
+
+    agg = aggregate(run_dir)
+    _atomic_write_json(out_dir / "aggregate.json", agg)
+    paths = write_tables(agg, out_dir)
+    report_path = out_dir / "volmodel_backtest_lecture.html"
+    report_path.write_text(build_report(agg), encoding="utf-8")
+
+    print(f"[aggregate] {len(agg['per_run'])} runs, {len(agg['variants'])} variants")
+    for name, path in paths.items():
+        print(f"  {name}: {path}")
+    print(f"  report: {report_path}")
+    comp = agg["completeness"]
+    print(
+        f"  completeness: {comp['n_complete']}/{comp['n_runs_checked']} runs "
+        "have every required daily output category"
+    )
+    for check in comp["incomplete"][:10]:
+        print(f"    INCOMPLETE {check['run_dir']}: {'; '.join(check['issues'][:3])}")
+    print(
+        f"  sanity: {comp['n_sane']}/{comp['n_runs_checked']} runs satisfy every "
+        "accounting identity"
+    )
+    for check in comp["sanity_failures"][:10]:
+        print(f"    UNSOUND {check['run_dir']}: {'; '.join(check['issues'][:3])}")
+    if agg["missing_runs"]:
+        print(f"  WARNING: {len(agg['missing_runs'])} runs had no states.csv")
+    if agg["failures"]:
+        print(f"  WARNING: {len(agg['failures'])} runs failed in the fleet")
+    ok = comp["all_complete"] and comp["all_sane"] and not agg["failures"]
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

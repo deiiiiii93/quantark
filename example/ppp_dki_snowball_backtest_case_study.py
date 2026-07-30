@@ -244,6 +244,12 @@ def load_akshare():
     return ak
 
 
+# The fetch/normalize helpers below (_pick_column, normalize_index_spot,
+# fetch_csi1000_spot, third_friday, add_months, contract_expiry,
+# futures_contract_symbols, normalize_im_futures, fetch_im_futures) are
+# mirrored in example/mo_volmodels/01_refresh_market_cache.py — that script
+# runs under the AKShare interpreter, which cannot import quantark. Keep the
+# two copies in sync.
 def _pick_column(df: pd.DataFrame, candidates: list[str], label: str) -> str:
     for column in candidates:
         if column in df.columns:

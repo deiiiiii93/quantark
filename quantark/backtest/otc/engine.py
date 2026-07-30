@@ -4,6 +4,7 @@ Daily OTC autocallable futures-hedging backtest engine.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 import numpy as np
@@ -18,6 +19,7 @@ from .engine_factory import (
     create_event_stats_engine,
     create_pricing_engine,
     create_surface_engine,
+    create_vol_model_engine,
 )
 from .results import AutocallableBacktestResults
 from .state import (
@@ -25,6 +27,7 @@ from .state import (
     AutocallableLifecycleState,
     FuturesHedgePosition,
 )
+from .vol_calibrators import VolModelCalibrator
 
 
 class AutocallableBacktestEngine:
@@ -55,10 +58,26 @@ class AutocallableBacktestEngine:
         self._surfaces: list[dict[str, Any]] = []
         self._daily_event_summary: list[dict[str, Any]] = []
         self._event_probabilities: list[dict[str, Any]] = []
+        self._calibration_records: list[dict[str, Any]] = []
 
         self._initial_product_value: Optional[float] = None
         self._transaction_costs: float = 0.0
         self._start_date: Optional[pd.Timestamp] = None
+
+        # Per-day vol-model calibration (Task 2.3/2.4).  The calibrator is
+        # keyed by surface artifact sha and shared across days; each priced
+        # day swaps self.pricing_engine for a fresh vol-model engine wired
+        # to that day's calibrated model.
+        self._calibrator: Optional[VolModelCalibrator] = None
+        if config.engine_config.vol_model != "bsm":
+            if getattr(config.market_data, "surface_history", None) is None:
+                raise ValidationError(
+                    "vol_model != 'bsm' requires market_data.surface_history "
+                    "(per-day vol-model calibration is keyed by surface artifact)"
+                )
+            self._calibrator = VolModelCalibrator(
+                config.engine_config.vol_model_calibration
+            )
 
         self._replay = ProductReplay(
             product=config.product,
@@ -104,6 +123,15 @@ class AutocallableBacktestEngine:
             env, basis_yield, implied_q, futures_ttm = self._replay.build_env(
                 date, market, selected
             )
+            # Vol-model variants: calibrate once per surface artifact and
+            # swap in the day's vol-model engine before ANY pricing (initial
+            # price, base price, bumped greeks) so the whole day is
+            # model-consistent.  Skipped once the product is dead.
+            day_calibration_record: Optional[dict[str, Any]] = None
+            if self._calibrator is not None and (
+                self.lifecycle.alive or self._initial_product_value is None
+            ):
+                day_calibration_record = self._calibrate_day(date)
             product = self._replay.product_for_date(date, env)
 
             if self._initial_product_value is None:
@@ -127,9 +155,15 @@ class AutocallableBacktestEngine:
 
             price = 0.0
             greeks = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
+            pricing_started = time.perf_counter()
             if self.lifecycle.alive:
                 price = float(self.pricing_engine.price(product, env))
                 greeks = self._calculate_greeks(product, env, price)
+            if day_calibration_record is not None:
+                day_calibration_record["pricing_seconds"] = (
+                    time.perf_counter() - pricing_started
+                )
+                self._calibration_records.append(day_calibration_record)
 
             if self.config.calculate_event_probabilities and self.lifecycle.alive:
                 self._replay.record_event_probabilities(date, product, env)
@@ -158,7 +192,7 @@ class AutocallableBacktestEngine:
                 pre_hedge_contracts=pre_hedge_contracts,
             )
 
-        return AutocallableBacktestResults(
+        results = AutocallableBacktestResults(
             config=self.config,
             states=self._states,
             greeks=self._greeks,
@@ -168,7 +202,43 @@ class AutocallableBacktestEngine:
             surfaces=self._surfaces,
             daily_event_summary=self._daily_event_summary,
             event_probabilities=self._event_probabilities,
+            calibration_records=self._calibration_records,
         )
+        records_path = getattr(
+            self.config.engine_config.vol_model_calibration, "records_path", None
+        )
+        if records_path:
+            results.export_calibration_records(records_path)
+        return results
+
+    def _calibrate_day(self, date: pd.Timestamp) -> dict[str, Any]:
+        """Calibrate the day's vol model and swap in its pricing engine.
+
+        The calibrator caches by surface artifact sha, so carry-forward days
+        (and fleet runs sharing the surface) reuse the stored calibration.
+        A fresh engine is constructed per day from the frozen calibrated
+        model — never a mutation of a shared engine — and drives both the
+        base price and the bumped-greek reprices of the day.  Any failure
+        propagates (fail-closed; no flat-vol fallback).
+        """
+        engine_config = self.config.engine_config
+        artifact = self.config.market_data.surface_history.surface_for(date)
+        calibrated = self._calibrator.calibrate(engine_config.vol_model, artifact)
+        self.pricing_engine = create_vol_model_engine(
+            vol_model=engine_config.vol_model,
+            solver=engine_config.vol_model_solver,
+            calibrated=calibrated,
+            pde_params=engine_config.pde_params,
+            mc_params=engine_config.mc_params,
+            mc_method=engine_config.resolve_vol_model_mc_method(),
+            engine_options=engine_config.vol_model_engine_options,
+        )
+        # Sync the replay immediately so no code path can see yesterday's
+        # engine (``_calculate_greeks`` also syncs lazily; do not rely on it).
+        self._replay.pricing_engine = self.pricing_engine
+        record = dict(calibrated.record)
+        record["date"] = pd.Timestamp(date).date().isoformat()
+        return record
 
     def _backtest_dates(self) -> pd.DatetimeIndex:
         dates = self.config.market_data.dates
@@ -355,35 +425,39 @@ class AutocallableBacktestEngine:
         pre_hedge_gamma_cash_1pct = pre_hedge_gamma * spot**2 / 100.0
         post_hedge_gamma_cash_1pct = post_hedge_gamma * spot**2 / 100.0
 
-        self._states.append(
-            {
-                "date": date,
-                "portfolio_value": portfolio_value,
-                "product_mtm": product_mtm,
-                "hedge_mtm": hedge_mtm,
-                "cash": cash,
-                "cashflows": self.lifecycle.realized_cashflows,
-                "transaction_costs": self._transaction_costs,
-                "product_pnl": product_pnl,
-                "hedge_pnl": hedge_mtm,
-                "total_pnl": total_pnl,
-                "spot": market["spot"],
-                "volatility": market["volatility"],
-                "rate": market["rate"],
-                "basis_yield": basis_yield,
-                "implied_q": implied_q,
-                "pricing_q": pricing_q,
-                "active_contract": str(selected["contract"]),
-                "futures_price": futures_price,
-                "futures_ttm": futures_ttm,
-                "futures_multiplier": multiplier,
-                "futures_contracts": self.hedge_position.quantity,
-                "alive": self.lifecycle.alive,
-                "knocked_in": self.lifecycle.knocked_in,
-                "knocked_out": self.lifecycle.knocked_out,
-                "matured": self.lifecycle.matured,
-            }
-        )
+        state_row = {
+            "date": date,
+            "portfolio_value": portfolio_value,
+            "product_mtm": product_mtm,
+            "hedge_mtm": hedge_mtm,
+            "cash": cash,
+            "cashflows": self.lifecycle.realized_cashflows,
+            "transaction_costs": self._transaction_costs,
+            "product_pnl": product_pnl,
+            "hedge_pnl": hedge_mtm,
+            "total_pnl": total_pnl,
+            "spot": market["spot"],
+            "volatility": market["volatility"],
+            "rate": market["rate"],
+            "basis_yield": basis_yield,
+            "implied_q": implied_q,
+            "pricing_q": pricing_q,
+            "active_contract": str(selected["contract"]),
+            "futures_price": futures_price,
+            "futures_ttm": futures_ttm,
+            "futures_multiplier": multiplier,
+            "futures_contracts": self.hedge_position.quantity,
+            "alive": self.lifecycle.alive,
+            "knocked_in": self.lifecycle.knocked_in,
+            "knocked_out": self.lifecycle.knocked_out,
+            "matured": self.lifecycle.matured,
+        }
+        # Surface mode only: record which IV-surface artifact (post
+        # carry-forward) priced this day.  Scalar mode adds no columns.
+        surface_provenance = getattr(self._replay, "last_surface_provenance", None)
+        if surface_provenance:
+            state_row.update(surface_provenance)
+        self._states.append(state_row)
         self._greeks.append(
             {
                 "date": date,
