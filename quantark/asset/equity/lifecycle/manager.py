@@ -7,7 +7,7 @@ Portfolio-driving lifecycle manager shared by historical backtests
 realized lifecycle semantics, attaches the appropriate tracker from this
 package, and processes each day's close: detecting events, mutating positions
 (KI flags / product substitution / engine override), removing terminated
-positions, and accumulating settlement cash in a run-level ledger.
+positions, and retaining determined cashflows in a run-level ledger.
 
 It is intentionally consumer-agnostic. ``process_day`` returns a list of
 ``ProcessedLifecycleEvent`` records — each pairing the raw
@@ -22,16 +22,17 @@ any object exposing ``positions`` (mapping of position-id to objects with
 and ``remove_position``. Keeping it duck-typed avoids an
 ``asset -> portfolio -> asset`` import cycle.
 
-Settlement convention: terminated positions settle to cash that remains part
-of portfolio value (``portfolio_value = positions MTM + realized_cash``), so
-daily P&L is continuous across event days. Ledger cash earns no interest
-within the path.
+Settlement convention: determination removes the contingent claim, a fixed
+receivable remains until payment, and paid cash then remains in portfolio
+value (``live MTM + pending PV + paid cash``). Paid ledger cash earns no
+interest within the path.
 """
 
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -45,6 +46,10 @@ from quantark.asset.equity.product.option.snowball_option import SnowballOption
 
 from .autocallable import AutocallableLifecycleTracker
 from .barrier import TRACKED_BARRIER_PRODUCTS, BarrierLifecycleTracker
+from .cashflows import (
+    LifecycleCashflowLedger,
+    ValuationPoint,
+)
 from .events import LifecycleEvent
 
 
@@ -74,9 +79,17 @@ class PortfolioLifecycleManager:
 
     def __init__(self, base_date: datetime) -> None:
         self.base_date = pd.Timestamp(base_date).normalize()
-        self.realized_cash: float = 0.0
+        self.ledger = LifecycleCashflowLedger()
+        self.pending_receivable_pv: float = 0.0
+        self.paid_cash: float = 0.0
+        self._cashflow_underlyings: Dict[str, str] = {}
         self._autocallable: Dict[str, AutocallableLifecycleTracker] = {}
         self._barrier: Dict[str, BarrierLifecycleTracker] = {}
+
+    @property
+    def realized_cash(self) -> float:
+        """Backward-compatible alias for cash that has actually been paid."""
+        return self.paid_cash
 
     @property
     def num_tracked(self) -> int:
@@ -103,17 +116,21 @@ class PortfolioLifecycleManager:
                 )
                 continue
             if isinstance(product, (SnowballOption, PhoenixOption)):
-                self._autocallable[position_id] = AutocallableLifecycleTracker(
+                tracker = AutocallableLifecycleTracker(
                     product=product,
                     quantity=position.quantity,
                     start_date=self.base_date,
                 )
+                self._autocallable[position_id] = tracker
+                position.lifecycle_state = tracker.lifecycle
             elif isinstance(product, TRACKED_BARRIER_PRODUCTS):
-                self._barrier[position_id] = BarrierLifecycleTracker(
+                tracker = BarrierLifecycleTracker(
                     product=product,
                     quantity=position.quantity,
                     start_date=self.base_date,
                 )
+                self._barrier[position_id] = tracker
+                position.lifecycle_state = tracker.state
 
     def date_for_day(self, day_index: int, day_date: Optional[datetime]) -> pd.Timestamp:
         """Resolve the calendar date of a replay day."""
@@ -147,6 +164,7 @@ class PortfolioLifecycleManager:
                         portfolio, position_id, position, env, spot, date
                     )
                 )
+        self._revalue_ledger(portfolio, date)
         return processed
 
     def _process_autocallable(
@@ -161,12 +179,17 @@ class PortfolioLifecycleManager:
         if maturity_event is not None:
             events.append(maturity_event)
 
+        events, terminated = self._book_events(
+            position_id,
+            position.underlying,
+            events,
+        )
         # Capture context BEFORE mutating/removing the position so product_type
         # reflects the product at event time.
         processed = [
             self._processed(position_id, position, event) for event in events
         ]
-        if self._book_events(events):
+        if terminated:
             portfolio.remove_position(position_id)
             del self._autocallable[position_id]
         else:
@@ -179,11 +202,16 @@ class PortfolioLifecycleManager:
         tracker = self._barrier[position_id]
         events = tracker.observe(date, env, spot)
 
+        events, terminated = self._book_events(
+            position_id,
+            position.underlying,
+            events,
+        )
         # Capture context BEFORE mutating/removing the position.
         processed = [
             self._processed(position_id, position, event) for event in events
         ]
-        if self._book_events(events):
+        if terminated:
             portfolio.remove_position(position_id)
             del self._barrier[position_id]
         else:
@@ -193,13 +221,74 @@ class PortfolioLifecycleManager:
                 position.engine = engine_override
         return processed
 
-    def _book_events(self, events: List[LifecycleEvent]) -> bool:
-        """Book event cashflows to the ledger; return True if terminated."""
+    def _book_events(
+        self,
+        position_id: str,
+        underlying: str,
+        events: List[LifecycleEvent],
+    ) -> tuple[List[LifecycleEvent], bool]:
+        """Register determined cashflows and namespace their portfolio IDs."""
+        managed_events: List[LifecycleEvent] = []
         terminated = False
         for event in events:
-            self.realized_cash += event.cashflow
+            cashflow = event.realized_cashflow
+            if cashflow is not None:
+                global_id = f"{position_id}:{cashflow.cashflow_id}"
+                metadata = dict(cashflow.metadata)
+                metadata.update(
+                    {
+                        "position_id": position_id,
+                        "underlying": underlying,
+                    }
+                )
+                ledger_cashflow = replace(
+                    cashflow,
+                    cashflow_id=global_id,
+                    metadata=metadata,
+                )
+                self.ledger.register(ledger_cashflow)
+                self._cashflow_underlyings[global_id] = underlying
+                event = replace(
+                    event,
+                    realized_cashflow=ledger_cashflow,
+                )
+            managed_events.append(event)
             terminated = terminated or event.terminates_position
-        return terminated
+        return managed_events, terminated
+
+    def _revalue_ledger(self, portfolio, date: pd.Timestamp) -> None:
+        pending_pv = 0.0
+        paid_cash = 0.0
+        elapsed = max(
+            0.0,
+            (
+                pd.Timestamp(date).normalize() - self.base_date
+            ).days
+            / 365.0,
+        )
+        for cashflow in self.ledger.cashflows:
+            underlying = self._cashflow_underlyings[cashflow.cashflow_id]
+            env = portfolio.pricing_environments[underlying]
+            if cashflow.payment_date is not None:
+                point = ValuationPoint(
+                    date=pd.Timestamp(date).to_pydatetime()
+                )
+                valuation_env = env
+                if env.valuation_date != point.date:
+                    valuation_env = deepcopy(env)
+                    valuation_env.valuation_date = point.date
+            else:
+                point = ValuationPoint(time=elapsed)
+                valuation_env = env
+
+            single = LifecycleCashflowLedger([cashflow])
+            if single.pending(point):
+                pending_pv += single.pending_pv(point, valuation_env)
+            else:
+                paid_cash += cashflow.amount
+
+        self.pending_receivable_pv = float(pending_pv)
+        self.paid_cash = float(paid_cash)
 
     @staticmethod
     def _processed(

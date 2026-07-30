@@ -272,10 +272,18 @@ class TestBarrierLifecycleTracker:
         events = tracker.observe(hit_date, env, 112.0)
         assert [e.event_type for e in events] == [LifecycleEventType.KNOCK_OUT]
         remaining = 1.0 - 10.0 / 365.0
-        expected = 2.0 * product.contract_multiplier * safe_exp(
+        amount = 2.0 * product.contract_multiplier
+        expected_pv = amount * safe_exp(
             -env.get_rate(remaining) * remaining
         )
-        assert almost_equal(events[0].cashflow, expected)
+        assert almost_equal(events[0].cashflow, amount)
+        assert almost_equal(
+            tracker.state.ledger.pending_pv(
+                tracker.state.valuation_point,
+                env,
+            ),
+            expected_pv,
+        )
 
     def test_down_in_put_knock_in_substitutes_european(self):
         from quantark.asset.equity.lifecycle import LifecycleEventType
@@ -388,5 +396,13 @@ class TestBarrierLifecycleTracker:
         assert events[0].terminates_position
         # pay_at_hit=False => PV-discount the barrier payoff
         remaining = 1.0 - 5.0 / 365.0
-        expected = product.get_barrier_payoff() * safe_exp(-env.get_rate(remaining) * remaining)
-        assert almost_equal(events[0].cashflow, expected)
+        amount = product.get_barrier_payoff()
+        expected_pv = amount * safe_exp(-env.get_rate(remaining) * remaining)
+        assert almost_equal(events[0].cashflow, amount)
+        assert almost_equal(
+            tracker.state.ledger.pending_pv(
+                tracker.state.valuation_point,
+                env,
+            ),
+            expected_pv,
+        )

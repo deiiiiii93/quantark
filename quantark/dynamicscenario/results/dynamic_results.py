@@ -116,6 +116,11 @@ class LifecycleEventSnapshot:
     payoff: float
     cashflow: float
     terminates_position: bool
+    cashflow_id: Optional[str] = None
+    determination_date: Optional[datetime] = None
+    determination_time: Optional[float] = None
+    payment_date: Optional[datetime] = None
+    payment_time: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -131,6 +136,17 @@ class LifecycleEventSnapshot:
             "payoff": self.payoff,
             "cashflow": self.cashflow,
             "terminates_position": self.terminates_position,
+            "cashflow_id": self.cashflow_id,
+            "determination_date": (
+                self.determination_date.isoformat()
+                if self.determination_date
+                else None
+            ),
+            "determination_time": self.determination_time,
+            "payment_date": (
+                self.payment_date.isoformat() if self.payment_date else None
+            ),
+            "payment_time": self.payment_time,
         }
 
 
@@ -187,8 +203,9 @@ class DayResult:
         market_state: Market state after day's changes
         metadata: Additional data
         lifecycle_events: Lifecycle events realized on this day
-        realized_cash: Cumulative settlement cash booked through this day
-            (running ledger total, not a per-day increment)
+        pending_receivable_pv: PV of determined cashflows awaiting payment
+        paid_cash: Cumulative lifecycle cash paid through this day
+        realized_cash: Backward-compatible alias of ``paid_cash``
     """
     day_index: int
     date: Optional[datetime] = None
@@ -205,6 +222,8 @@ class DayResult:
     market_state: Optional[MarketState] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     lifecycle_events: List[LifecycleEventSnapshot] = field(default_factory=list)
+    pending_receivable_pv: float = 0.0
+    paid_cash: float = 0.0
     realized_cash: float = 0.0
 
     @property
@@ -255,6 +274,8 @@ class DayResult:
             'market_state': self.market_state.to_dict() if self.market_state else None,
             'metadata': self.metadata,
             'lifecycle_events': [e.to_dict() for e in self.lifecycle_events],
+            'pending_receivable_pv': self.pending_receivable_pv,
+            'paid_cash': self.paid_cash,
             'realized_cash': self.realized_cash,
         }
     

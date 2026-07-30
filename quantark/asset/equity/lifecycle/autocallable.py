@@ -19,16 +19,19 @@ observation method is called.
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
+from quantark.asset.equity.engine.settlement_support import (
+    resolve_terminal_timing,
+)
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+from quantark.asset.equity.settlement import SettlementLagUnit
 from quantark.priceenv import PricingEnvironment
 
 from .events import LifecycleEvent, LifecycleEventType
-from .cashflows import ValuationPoint
+from .cashflows import RealizedCashflow, ValuationPoint
 from .state import AutocallableLifecycleState
 
 DateResolver = Callable[[pd.Timestamp], pd.Timestamp]
@@ -122,7 +125,8 @@ class AutocallableLifecycleTracker:
     ) -> List[LifecycleEvent]:
         """Detect KO / KI / coupon events at this day's close."""
         timestamp = pd.Timestamp(date).to_pydatetime()
-        self.lifecycle.valuation_point = ValuationPoint(date=timestamp)
+        valuation_point = self._valuation_point(date, product)
+        self.lifecycle.valuation_point = valuation_point
         if not self.lifecycle.alive:
             return []
         if not self.has_lifecycle:
@@ -138,7 +142,7 @@ class AutocallableLifecycleTracker:
             for idx, rec in enumerate(ko_records):
                 if idx in self.lifecycle.observed_ko_indices:
                     continue
-                if date < rec["date"]:
+                if not self._record_is_due(date, valuation_point, rec):
                     continue
                 self.lifecycle.observed_ko_indices.add(idx)
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=True):
@@ -148,10 +152,19 @@ class AutocallableLifecycleTracker:
                     settlement_date = rec.get("settlement_date")
                     if settlement_date is not None:
                         settlement_date = pd.Timestamp(settlement_date).to_pydatetime()
+                    realized = self._record_cashflow(
+                        LifecycleEventType.KNOCK_OUT,
+                        f"knock-out:{idx}",
+                        cashflow,
+                        rec,
+                        valuation_point,
+                    )
                     if self.lifecycle.mark_ko(
-                        pd.Timestamp(date).to_pydatetime(),
+                        timestamp,
                         cashflow,
                         settlement_date=settlement_date,
+                        realized_cashflow=realized,
+                        valuation_point=valuation_point,
                     ):
                         events.append(
                             LifecycleEvent(
@@ -162,6 +175,7 @@ class AutocallableLifecycleTracker:
                                 barrier=rec["barrier"],
                                 payoff=payoff,
                                 cashflow=cashflow,
+                                realized_cashflow=realized,
                                 terminates_position=True,
                                 state_before=before,
                                 state_after=self._state_snapshot(),
@@ -205,7 +219,7 @@ class AutocallableLifecycleTracker:
             for idx, rec in enumerate(ki_records):
                 if idx in self.lifecycle.observed_ki_indices:
                     continue
-                if date < rec["date"]:
+                if not self._record_is_due(date, valuation_point, rec):
                     continue
                 self.lifecycle.observed_ki_indices.add(idx)
                 if self._barrier_hit(spot, rec["barrier"], product.is_reverse, is_ko=False):
@@ -230,19 +244,24 @@ class AutocallableLifecycleTracker:
             for idx, rec in enumerate(ko_records):
                 if idx in self.lifecycle.observed_coupon_indices:
                     continue
-                if date < rec["date"]:
+                if not self._record_is_due(date, valuation_point, rec):
                     continue
                 self.lifecycle.observed_coupon_indices.add(idx)
                 if product.is_coupon_triggered(spot, idx):
                     before = self._state_snapshot()
                     payoff = float(product.get_coupon_payoff(idx))
                     coupon = self.quantity * payoff
+                    realized = self._record_cashflow(
+                        LifecycleEventType.COUPON,
+                        f"coupon:{idx}",
+                        coupon,
+                        rec,
+                        valuation_point,
+                    )
                     self.lifecycle.add_cashflow(
                         coupon,
-                        cashflow_id=(
-                            f"coupon:{idx}:{timestamp.isoformat()}"
-                        ),
-                        timestamp=timestamp,
+                        realized_cashflow=realized,
+                        valuation_point=valuation_point,
                     )
                     self.lifecycle.coupon_memory_count = 0
                     events.append(
@@ -254,6 +273,7 @@ class AutocallableLifecycleTracker:
                             barrier=product.get_coupon_barrier_at(idx),
                             payoff=payoff,
                             cashflow=coupon,
+                            realized_cashflow=realized,
                             terminates_position=False,
                             state_before=before,
                             state_after=self._state_snapshot(),
@@ -267,12 +287,15 @@ class AutocallableLifecycleTracker:
     def settle_maturity_if_due(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> Optional[LifecycleEvent]:
-        """Settle the product at maturity if the settlement date has been reached."""
+        """Determine the terminal payoff once contractual maturity is reached."""
         timestamp = pd.Timestamp(date).to_pydatetime()
-        self.lifecycle.valuation_point = ValuationPoint(date=timestamp)
+        valuation_point = self._valuation_point(date, product)
+        self.lifecycle.valuation_point = valuation_point
         if not self.lifecycle.alive:
             return None
-        if pd.Timestamp(date) < self._maturity_settlement_date(product, env):
+        schedule_env = self._schedule_resolution_env(product, env)
+        timing = resolve_terminal_timing(product, schedule_env)
+        if not self._timing_is_due(date, valuation_point, timing):
             return None
 
         before = self._state_snapshot()
@@ -280,7 +303,19 @@ class AutocallableLifecycleTracker:
             product.get_payoff(spot, env, knocked_in=self.lifecycle.knocked_in)
         )
         cashflow = self.quantity * payoff
-        if self.lifecycle.mark_maturity(pd.Timestamp(date).to_pydatetime(), cashflow):
+        realized = self._timing_cashflow(
+            LifecycleEventType.MATURITY,
+            "maturity",
+            cashflow,
+            timing,
+            valuation_point,
+        )
+        if self.lifecycle.mark_maturity(
+            timestamp,
+            cashflow,
+            realized_cashflow=realized,
+            valuation_point=valuation_point,
+        ):
             return LifecycleEvent(
                 event_type=LifecycleEventType.MATURITY,
                 date=date,
@@ -289,6 +324,7 @@ class AutocallableLifecycleTracker:
                 barrier=None,
                 payoff=payoff,
                 cashflow=cashflow,
+                realized_cashflow=realized,
                 terminates_position=True,
                 state_before=before,
                 state_after=self._state_snapshot(),
@@ -325,74 +361,168 @@ class AutocallableLifecycleTracker:
     ) -> List[Dict[str, Any]]:
         schedule_env = self._schedule_resolution_env(product, env)
         if kind == "ko":
-            profile = product.get_ko_observation_profile(schedule_env)
-            schedule = getattr(product.barrier_config, "ko_observation_schedule", None)
+            resolved = product.resolve_ko_observations(schedule_env)
         else:
             if not getattr(product, "has_ki_barrier", False):
                 return []
-            profile = product.get_ki_observation_profile(schedule_env)
-            schedule = getattr(product.barrier_config, "ki_observation_schedule", None)
+            resolved = product.resolve_ki_observations(schedule_env)
 
-        times = list(profile.get("observation_times", []))
-        barriers = list(profile.get("barriers", []))
-        payoffs = list(profile.get("payoffs", [0.0] * len(times)))
-        settlement_times = list(profile.get("settlement_times", []))
-        schedule_dates = []
-        if schedule is not None:
-            for rec in schedule.records:
-                schedule_dates.append(getattr(rec, "observation_date", None))
-
-        records = []
-        base_date = pd.Timestamp(getattr(product, "initial_date", None) or self.start_date)
-        for idx, obs_time in enumerate(times):
-            if idx < len(schedule_dates) and schedule_dates[idx] is not None:
-                obs_date = pd.Timestamp(schedule_dates[idx]).normalize()
-            else:
-                obs_date = (
-                    base_date + timedelta(days=int(round(float(obs_time) * 365)))
-                ).normalize()
-            obs_date = self._date_resolver(obs_date)
-            settlement_time = (
-                settlement_times[idx] if idx < len(settlement_times) else None
-            )
-            if settlement_time is None or float(settlement_time) <= float(obs_time):
-                settlement_date = obs_date
-            else:
-                settlement_date = self._date_resolver(
-                    (
-                        base_date + timedelta(days=int(round(float(settlement_time) * 365)))
-                    ).normalize()
+        records: List[Dict[str, Any]] = []
+        for rec in resolved:
+            observation_date = getattr(rec, "observation_date", None)
+            determination_date = observation_date
+            if observation_date is not None:
+                observation_date = self._date_resolver(
+                    pd.Timestamp(observation_date).normalize()
                 )
             records.append(
                 {
-                    "date": obs_date,
-                    "time": float(obs_time),
-                    "barrier": float(barriers[idx]) if idx < len(barriers) and barriers[idx] is not None else None,
-                    "payoff": float(payoffs[idx]) if idx < len(payoffs) and payoffs[idx] is not None else 0.0,
-                    "settlement_time": (
-                        float(settlement_time) if settlement_time is not None else None
+                    "date": observation_date,
+                    "determination_date": determination_date,
+                    "time": float(rec.observation_time),
+                    "settlement_date": getattr(rec, "settlement_date", None),
+                    "settlement_time": float(rec.settlement_time),
+                    "barrier": (
+                        float(rec.barrier)
+                        if rec.barrier is not None
+                        else None
                     ),
-                    "settlement_date": settlement_date,
+                    "payoff": float(rec.payoff),
                 }
             )
         return records
 
-    def _maturity_settlement_date(
-        self, product: Any, env: PricingEnvironment
-    ) -> pd.Timestamp:
-        explicit = (
-            getattr(product, "maturity_date", None)
-            or getattr(product, "exercise_date", None)
-        )
-        if explicit is not None:
-            return self._date_resolver(pd.Timestamp(explicit).normalize())
+    def _valuation_point(
+        self, date: pd.Timestamp, product: Any
+    ) -> ValuationPoint:
+        if self._uses_date_timing(product):
+            return ValuationPoint(date=pd.Timestamp(date).to_pydatetime())
+        if self.start_date is None:
+            raise ValueError(
+                "start_date is required for numeric lifecycle schedules"
+            )
+        elapsed_days = (
+            pd.Timestamp(date).normalize()
+            - pd.Timestamp(self.start_date).normalize()
+        ).days
+        return ValuationPoint(time=max(0.0, elapsed_days / 365.0))
 
-        maturity = float(product.get_maturity(env))
-        base_date = pd.Timestamp(getattr(product, "initial_date", None) or self.start_date)
-        maturity_date = (
-            base_date + timedelta(days=int(round(maturity * 365.0)))
-        ).normalize()
-        return self._date_resolver(maturity_date)
+    @staticmethod
+    def _uses_date_timing(product: Any) -> bool:
+        convention = getattr(product, "settlement_convention", None)
+        if (
+            convention is not None
+            and convention.lag_unit is SettlementLagUnit.YEAR_FRACTION
+        ):
+            return False
+        if (
+            getattr(product, "exercise_date", None) is not None
+            or getattr(product, "maturity_date", None) is not None
+        ):
+            return True
+        barrier_config = getattr(product, "barrier_config", None)
+        has_date_schedule = False
+        for name in ("ko_observation_schedule", "ki_observation_schedule"):
+            schedule = getattr(barrier_config, name, None)
+            if schedule is None or not schedule.uses_dates():
+                continue
+            has_date_schedule = True
+            if any(
+                record.settlement_time is not None
+                and record.settlement_date is None
+                for record in schedule.records
+            ):
+                return False
+        return has_date_schedule
+
+    @staticmethod
+    def _record_is_due(
+        date: pd.Timestamp,
+        valuation_point: ValuationPoint,
+        record: Dict[str, Any],
+    ) -> bool:
+        if record["date"] is not None:
+            return pd.Timestamp(date).normalize() >= record["date"]
+        elapsed_days = int(round(float(valuation_point.time) * 365.0))
+        due_days = int(round(float(record["time"]) * 365.0))
+        return elapsed_days >= due_days
+
+    @staticmethod
+    def _timing_is_due(date, valuation_point, timing) -> bool:
+        if timing.determination_date is not None:
+            return (
+                pd.Timestamp(date).normalize()
+                >= pd.Timestamp(timing.determination_date).normalize()
+            )
+        elapsed_days = int(round(float(valuation_point.time) * 365.0))
+        due_days = int(round(float(timing.determination_time) * 365.0))
+        return elapsed_days >= due_days
+
+    @staticmethod
+    def _record_cashflow(
+        event_type: LifecycleEventType,
+        cashflow_id: str,
+        amount: float,
+        record: Dict[str, Any],
+        valuation_point: ValuationPoint,
+    ) -> RealizedCashflow:
+        if (
+            record["date"] is not None
+            and record["settlement_date"] is not None
+        ):
+            determination_date = pd.Timestamp(
+                record["determination_date"]
+            ).to_pydatetime()
+            payment_date = pd.Timestamp(
+                record["settlement_date"]
+            ).to_pydatetime()
+            return RealizedCashflow(
+                cashflow_id=cashflow_id,
+                event_type=event_type,
+                amount=amount,
+                determination_date=determination_date,
+                payment_date=payment_date,
+            )
+
+        delay = float(record["settlement_time"]) - float(record["time"])
+        determination_time = float(valuation_point.time)
+        return RealizedCashflow(
+            cashflow_id=cashflow_id,
+            event_type=event_type,
+            amount=amount,
+            determination_time=determination_time,
+            payment_time=determination_time + delay,
+        )
+
+    @staticmethod
+    def _timing_cashflow(
+        event_type: LifecycleEventType,
+        cashflow_id: str,
+        amount: float,
+        timing,
+        valuation_point: ValuationPoint,
+    ) -> RealizedCashflow:
+        if (
+            timing.determination_date is not None
+            and timing.payment_date is not None
+        ):
+            return RealizedCashflow(
+                cashflow_id=cashflow_id,
+                event_type=event_type,
+                amount=amount,
+                determination_date=timing.determination_date,
+                payment_date=timing.payment_date,
+            )
+
+        delay = float(timing.payment_time) - float(timing.determination_time)
+        determination_time = float(valuation_point.time)
+        return RealizedCashflow(
+            cashflow_id=cashflow_id,
+            event_type=event_type,
+            amount=amount,
+            determination_time=determination_time,
+            payment_time=determination_time + delay,
+        )
 
     @staticmethod
     def _barrier_hit(

@@ -33,9 +33,10 @@ class BacktestConfig:
         greeks_method: Method for Greeks calculation ('analytical' or 'numerical')
         handle_lifecycle_events: Detect realized product lifecycle events
             (Snowball/Phoenix KO/KI/coupon/maturity, barrier-family KO/KI/expiry)
-            on each day's close. Terminated positions settle to cash that stays
-            in portfolio value; knocked-in barriers reprice as their European
-            equivalent. Positions with no lifecycle semantics are unaffected.
+            on each day's close. Determined cashflows remain pending until
+            payment and then become cash; knocked-in barriers reprice as their
+            European equivalent. Positions with no lifecycle semantics are
+            unaffected.
         metadata: Additional metadata for the backtest
     """
 

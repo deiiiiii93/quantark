@@ -82,7 +82,7 @@ class BacktestEngine:
 
         # Lifecycle event handling (Snowball/Phoenix/barrier-family)
         self.lifecycle_manager: Optional[PortfolioLifecycleManager] = None
-        self._realized_lifecycle_pnl: float = 0.0
+        self._terminated_lifecycle_cost_basis: float = 0.0
         self._lifecycle_events_today: list = []
 
         # Performance tracking
@@ -238,10 +238,10 @@ class BacktestEngine:
         # Update pricing environment with current market data
         self._update_pricing_environment(timestamp)
 
-        # Process realized lifecycle events on this day's close. Terminated
-        # positions settle to cash (kept in portfolio value); knocked-in
-        # barriers reprice as their European equivalent. Booked before Greeks
-        # so the hedge sizes against the surviving portfolio.
+        # Process realized lifecycle events on this day's close. Determined
+        # cashflows remain as receivables until their payment dates; knocked-in
+        # barriers reprice as their European equivalent. Processed before
+        # Greeks so the hedge sizes against the surviving contingent portfolio.
         self._lifecycle_events_today = []
         if self.lifecycle_manager is not None:
             self._process_lifecycle(timestamp)
@@ -336,11 +336,10 @@ class BacktestEngine:
         Detect and apply realized lifecycle events for this day's close.
 
         Delegates event detection and position mutation/removal to the shared
-        ``PortfolioLifecycleManager`` (which books settlement cash into its
-        ``realized_cash`` ledger), then accumulates the realized P&L impact:
-        a terminating event swaps the position's cost basis for its settlement
-        cash, while a non-terminating cash event (coupon, knock-in) is pure
-        realized gain.
+        ``PortfolioLifecycleManager`` registers immutable determined
+        cashflows, retains their pending PV until payment, and removes
+        terminated contingent positions. This method preserves the cost basis
+        of removed positions for P&L attribution.
 
         Args:
             timestamp: Current timestamp (the day's close).
@@ -356,13 +355,11 @@ class BacktestEngine:
             self.portfolio, day_index=0, day_date=timestamp
         )
         for item in events:
-            event = item.event
-            if event.terminates_position:
-                self._realized_lifecycle_pnl += (
-                    event.cashflow - pre_costs.get(item.position_id, 0.0)
+            if item.event.terminates_position:
+                self._terminated_lifecycle_cost_basis += pre_costs.get(
+                    item.position_id,
+                    0.0,
                 )
-            else:
-                self._realized_lifecycle_pnl += event.cashflow
         self._lifecycle_events_today = events
 
     def _update_pricing_environment(self, timestamp: datetime):
@@ -535,14 +532,23 @@ class BacktestEngine:
         trade_records: list,
     ):
         """Record current state."""
-        # Settlement cash from terminated lifecycle positions stays in
-        # portfolio value, so value (and P&L) is continuous across event days.
-        realized_cash = (
-            self.lifecycle_manager.realized_cash
+        # Fixed receivables and paid lifecycle cash stay in portfolio value, so
+        # value (and P&L) is continuous across determination and payment.
+        pending_receivable_pv = (
+            self.lifecycle_manager.pending_receivable_pv
             if self.lifecycle_manager is not None
             else 0.0
         )
-        portfolio_value = self.portfolio.get_portfolio_value() + realized_cash
+        paid_cash = (
+            self.lifecycle_manager.paid_cash
+            if self.lifecycle_manager is not None
+            else 0.0
+        )
+        portfolio_value = (
+            self.portfolio.get_portfolio_value()
+            + pending_receivable_pv
+            + paid_cash
+        )
         portfolio_pnl = self.portfolio.get_portfolio_pnl()
 
         # Calculate net P&L (after transaction costs), including realized
@@ -551,7 +557,9 @@ class BacktestEngine:
         realized_pnl = getattr(self.hedge_executor, "realized_pnl", 0.0)
         net_pnl = (
             portfolio_pnl
-            + self._realized_lifecycle_pnl
+            + pending_receivable_pv
+            + paid_cash
+            - self._terminated_lifecycle_cost_basis
             + realized_pnl
             - self._cumulative_transaction_costs
         )
@@ -566,7 +574,10 @@ class BacktestEngine:
             greeks=portfolio_greeks,
             market_data=market_data,
             trades=trade_records,
-            realized_cash=realized_cash,
+            cash=paid_cash,
+            pending_receivable_pv=pending_receivable_pv,
+            paid_cash=paid_cash,
+            realized_cash=paid_cash,
             lifecycle_events=self._lifecycle_events_today,
         )
 
@@ -586,10 +597,15 @@ class BacktestEngine:
         """Finalize backtest and create results."""
         from .results import BacktestResults
 
-        # Settled lifecycle cash stays in portfolio value so final value (and
-        # total P&L) stays continuous after terminated positions are removed.
-        realized_cash = (
-            self.lifecycle_manager.realized_cash
+        # Pending receivables and paid lifecycle cash remain in final value
+        # after terminated contingent positions have been removed.
+        pending_receivable_pv = (
+            self.lifecycle_manager.pending_receivable_pv
+            if self.lifecycle_manager is not None
+            else 0.0
+        )
+        paid_cash = (
+            self.lifecycle_manager.paid_cash
             if self.lifecycle_manager is not None
             else 0.0
         )
@@ -599,7 +615,11 @@ class BacktestEngine:
             config=self.config,
             state_tracker=self.state_tracker,
             initial_value=self._initial_portfolio_value,
-            final_value=self.portfolio.get_portfolio_value() + realized_cash,
+            final_value=(
+                self.portfolio.get_portfolio_value()
+                + pending_receivable_pv
+                + paid_cash
+            ),
             num_hedges=self._num_hedges_executed,
             total_transaction_costs=self._cumulative_transaction_costs,
         )

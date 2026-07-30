@@ -24,6 +24,10 @@ from quantark.asset.equity.product.option import (
     create_standard_phoenix,
     create_standard_snowball,
 )
+from quantark.asset.equity.settlement import (
+    SettlementConvention,
+    SettlementLagUnit,
+)
 from quantark.backtest.otc import (
     AKShareAutocallableDataAdapter,
     AutocallableBacktestConfig,
@@ -371,3 +375,37 @@ def test_synthetic_snowball_backtest_outputs_daily_records_and_events():
         expected_gamma_cash,
         equal_nan=True,
     )
+
+
+def test_delayed_ko_is_pending_before_otc_backtest_books_cash():
+    product = _snowball_product()
+    product.settlement_convention = SettlementConvention(
+        lag=2.0 / 365.0,
+        lag_unit=SettlementLagUnit.YEAR_FRACTION,
+    )
+    config = AutocallableBacktestConfig(
+        product=product,
+        market_data=_market_data(),
+        engine_config=AutocallableEngineConfig(
+            pricing_engine_type=EngineType.QUADRATURE,
+            quad_params=QuadParams(grid_points=101, num_std_devs=4.0),
+        ),
+        strategy=AutocallableDeltaHedgeStrategy(delta_threshold=1e12),
+        calculate_surfaces=False,
+        calculate_event_probabilities=False,
+        product_quantity=1.0,
+        underlying="CSI500",
+    )
+
+    results = AutocallableBacktestEngine(config).run()
+    ko_date = results.actions_df.loc[
+        results.actions_df["action_type"] == "KO"
+    ].index[0]
+    ko_state = results.states_df.loc[ko_date]
+    final_state = results.states_df.iloc[-1]
+
+    assert ko_state["pending_receivable_pv"] > 0.0
+    assert ko_state["paid_cash"] == 0.0
+    assert final_state["pending_receivable_pv"] == 0.0
+    assert final_state["paid_cash"] > 0.0
+    assert final_state["cashflows"] == final_state["paid_cash"]

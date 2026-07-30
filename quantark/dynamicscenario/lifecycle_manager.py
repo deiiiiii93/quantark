@@ -4,14 +4,13 @@ Lifecycle event management for dynamic scenario simulations.
 ``LifecycleManager`` is a thin dynamic-scenario adapter over the shared
 :class:`~quantark.asset.equity.lifecycle.PortfolioLifecycleManager`. The core
 manager does all the work — attaching trackers, observing each day's close,
-mutating/removing positions, and accumulating settlement cash. This adapter
+mutating/removing positions, and valuing determined cashflows. This adapter
 only maps the neutral ``ProcessedLifecycleEvent`` records the core returns into
 the dynamic-scenario :class:`LifecycleEventSnapshot` result type.
 
-Settlement convention: terminated positions settle to cash that remains part
-of portfolio value (``portfolio_value = positions MTM + realized_cash``), so
-daily P&L is continuous across event days. Ledger cash earns no interest
-within the path.
+Settlement convention: determination removes the contingent claim, pending
+cashflows remain at discounted value until payment, and only then move to paid
+cash (``portfolio_value = live MTM + pending PV + paid cash``).
 """
 
 from __future__ import annotations
@@ -44,8 +43,18 @@ class LifecycleManager:
 
     @property
     def realized_cash(self) -> float:
-        """Cumulative settlement cash booked across all processed days."""
-        return self._core.realized_cash
+        """Backward-compatible alias for cash that has actually been paid."""
+        return self._core.paid_cash
+
+    @property
+    def pending_receivable_pv(self) -> float:
+        """PV of determined lifecycle cashflows awaiting payment."""
+        return self._core.pending_receivable_pv
+
+    @property
+    def paid_cash(self) -> float:
+        """Cumulative lifecycle cash paid through the current day."""
+        return self._core.paid_cash
 
     @property
     def num_tracked(self) -> int:
@@ -75,6 +84,7 @@ class LifecycleManager:
         event_date = event.date
         if isinstance(event_date, pd.Timestamp):
             event_date = event_date.to_pydatetime()
+        cashflow = event.realized_cashflow
         return LifecycleEventSnapshot(
             position_id=item.position_id,
             underlying=item.underlying,
@@ -87,4 +97,19 @@ class LifecycleManager:
             payoff=event.payoff,
             cashflow=event.cashflow,
             terminates_position=event.terminates_position,
+            cashflow_id=(
+                cashflow.cashflow_id if cashflow is not None else None
+            ),
+            determination_date=(
+                cashflow.determination_date if cashflow is not None else None
+            ),
+            determination_time=(
+                cashflow.determination_time if cashflow is not None else None
+            ),
+            payment_date=(
+                cashflow.payment_date if cashflow is not None else None
+            ),
+            payment_time=(
+                cashflow.payment_time if cashflow is not None else None
+            ),
         )

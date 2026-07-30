@@ -185,12 +185,21 @@ class DynamicScenarioEngine:
                 lifecycle_events_today = lifecycle_manager.process_day(
                     working_portfolio, day_step.day_index, day_date
                 )
-            realized_cash = (
-                lifecycle_manager.realized_cash if lifecycle_manager else 0.0
+            pending_receivable_pv = (
+                lifecycle_manager.pending_receivable_pv
+                if lifecycle_manager
+                else 0.0
+            )
+            paid_cash = (
+                lifecycle_manager.paid_cash if lifecycle_manager else 0.0
             )
 
             # Calculate portfolio value and Greeks
-            portfolio_value = working_portfolio.get_portfolio_value() + realized_cash
+            portfolio_value = (
+                working_portfolio.get_portfolio_value()
+                + pending_receivable_pv
+                + paid_cash
+            )
             daily_pnl = portfolio_value - previous_value
             cumulative_pnl = portfolio_value - baseline_value
             
@@ -288,7 +297,9 @@ class DynamicScenarioEngine:
                 trades=trades_today,
                 market_state=market_state,
                 lifecycle_events=lifecycle_events_today,
-                realized_cash=realized_cash,
+                pending_receivable_pv=pending_receivable_pv,
+                paid_cash=paid_cash,
+                realized_cash=paid_cash,
             )
             day_results.append(day_result)
             
@@ -298,9 +309,12 @@ class DynamicScenarioEngine:
         total_time = time.time() - start_time
         
         # Build final results
-        final_value = working_portfolio.get_portfolio_value() + (
-            lifecycle_manager.realized_cash if lifecycle_manager else 0.0
-        )
+        final_value = working_portfolio.get_portfolio_value()
+        if lifecycle_manager is not None:
+            final_value += (
+                lifecycle_manager.pending_receivable_pv
+                + lifecycle_manager.paid_cash
+            )
         
         results = DynamicScenarioResults(
             path_name=day_path.name,

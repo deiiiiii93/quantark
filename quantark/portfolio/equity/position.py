@@ -36,6 +36,7 @@ class EquityPosition:
         entry_timestamp: When the position was opened
         position_id: Unique identifier for this position
         cash_legs: Optional cash terms attached to this position
+        lifecycle_state: Optional realized lifecycle state attached by replay
     """
     product: BaseEquityProduct
     quantity: float
@@ -45,6 +46,7 @@ class EquityPosition:
     entry_timestamp: datetime
     position_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     cash_legs: List[CashLeg] = field(default_factory=list)
+    lifecycle_state: Optional[Any] = None
     
     def __post_init__(self):
         """Validate position parameters."""

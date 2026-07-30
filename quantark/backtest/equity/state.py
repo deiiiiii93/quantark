@@ -76,7 +76,9 @@ class BacktestState:
         greeks: Portfolio Greeks (delta, gamma, vega, theta, rho)
         market_data: Current market data (spot, vol, rate, div_yield)
         trades: List of trades executed at this timestamp
-        realized_cash: Cumulative settlement cash booked from lifecycle events
+        pending_receivable_pv: PV of determined lifecycle cashflows not yet paid
+        paid_cash: Cumulative lifecycle cash that has reached its payment date
+        realized_cash: Backward-compatible alias of ``paid_cash``
         lifecycle_events: Lifecycle events that fired at this timestamp
             (``ProcessedLifecycleEvent`` records; empty when none)
         metadata: Additional state information
@@ -93,6 +95,8 @@ class BacktestState:
     greeks: Dict[str, float] = field(default_factory=dict)
     market_data: Dict[str, float] = field(default_factory=dict)
     trades: List[TradeRecord] = field(default_factory=list)
+    pending_receivable_pv: float = 0.0
+    paid_cash: float = 0.0
     realized_cash: float = 0.0
     lifecycle_events: List[Any] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -114,6 +118,8 @@ class BacktestState:
             'transaction_costs': self.transaction_costs,
             'num_positions': self.num_positions,
             'num_hedges': self.num_hedges,
+            'pending_receivable_pv': self.pending_receivable_pv,
+            'paid_cash': self.paid_cash,
             'realized_cash': self.realized_cash,
         }
         
@@ -250,6 +256,31 @@ class StateTracker:
                 'barrier': event.barrier,
                 'payoff': event.payoff,
                 'cashflow': event.cashflow,
+                'cashflow_id': (
+                    event.realized_cashflow.cashflow_id
+                    if event.realized_cashflow is not None
+                    else None
+                ),
+                'determination_date': (
+                    event.realized_cashflow.determination_date
+                    if event.realized_cashflow is not None
+                    else None
+                ),
+                'determination_time': (
+                    event.realized_cashflow.determination_time
+                    if event.realized_cashflow is not None
+                    else None
+                ),
+                'payment_date': (
+                    event.realized_cashflow.payment_date
+                    if event.realized_cashflow is not None
+                    else None
+                ),
+                'payment_time': (
+                    event.realized_cashflow.payment_time
+                    if event.realized_cashflow is not None
+                    else None
+                ),
                 'terminates_position': event.terminates_position,
             })
 
@@ -296,4 +327,3 @@ class StateTracker:
     
     def __repr__(self) -> str:
         return f"StateTracker(snapshots={len(self.states)}, trades={len(self.trades)})"
-

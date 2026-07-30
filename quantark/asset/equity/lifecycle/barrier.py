@@ -10,8 +10,8 @@ Knock-in semantics: a knocked-in single/double barrier option *is* a European
 option, so after KI ``product_for_pricing`` returns the exact European
 equivalent (and ``engine_for_pricing`` returns a ``BlackScholesEngine``).
 
-All payoff arithmetic uses ``quantark.util.numerical`` — never raw float
-comparisons or bare math operations.
+Terminal events register the undiscounted contractual amount; the lifecycle
+ledger handles discounting from determination to payment.
 """
 
 from __future__ import annotations
@@ -22,6 +22,9 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from quantark.asset.equity.engine.analytical import BlackScholesEngine
+from quantark.asset.equity.engine.settlement_support import (
+    resolve_terminal_timing,
+)
 from quantark.asset.equity.product.option import (
     BarrierOption,
     EuropeanVanillaOption,
@@ -40,7 +43,13 @@ from quantark.asset.equity.product.option.single_sharkfin_option import (
     SingleSharkfinOption,
 )
 from quantark.priceenv import PricingEnvironment
-from quantark.util.numerical import is_zero, safe_exp
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementLagUnit,
+    SettlementRequest,
+    SettlementResolver,
+)
+from quantark.util.numerical import is_zero
 
 from .events import LifecycleEvent, LifecycleEventType
 from .cashflows import RealizedCashflow, ValuationPoint
@@ -86,6 +95,7 @@ class BarrierLifecycleTracker:
         self.start_date = pd.Timestamp(start_date).normalize()
         self.state = BarrierLifecycleState()
         self._bs_engine: Optional[BlackScholesEngine] = None
+        self._observation_env: Optional[PricingEnvironment] = None
 
     # ------------------------------------------------------------------
     # Time helpers
@@ -251,9 +261,8 @@ class BarrierLifecycleTracker:
             List of ``LifecycleEvent`` objects (may be empty).
         """
         date = pd.Timestamp(date).normalize()
-        self.state.valuation_point = ValuationPoint(
-            date=date.to_pydatetime()
-        )
+        self._observation_env = env
+        self.state.valuation_point = self._valuation_point(date)
         if not self.state.alive:
             return []
 
@@ -282,13 +291,7 @@ class BarrierLifecycleTracker:
         if product.is_knock_out:
             # Intra-path KO check
             if barrier_hit and self._monitored_intra_path():
-                payoff = self._rebate_payoff(
-                    rebate=product.rebate,
-                    pay_at_hit=product.pay_at_hit,
-                    date=date,
-                    env=env,
-                    contract_multiplier=product.contract_multiplier,
-                )
+                payoff = product.rebate * product.contract_multiplier
                 return [
                     self._terminal_event(
                         LifecycleEventType.KNOCK_OUT,
@@ -358,15 +361,9 @@ class BarrierLifecycleTracker:
 
         if product.is_knock_out:
             if barrier_hit and self._monitored_intra_path():
-                # DoubleBarrierOption has no pay_at_hit; treat as pay-at-expiry
-                # (PV-discount the rebate).
-                payoff = self._rebate_payoff(
-                    rebate=product.rebate,
-                    pay_at_hit=False,
-                    date=date,
-                    env=env,
-                    contract_multiplier=product.contract_multiplier,
-                )
+                # DoubleBarrierOption has no pay_at_hit; its fixed rebate
+                # remains pending until the terminal payment date.
+                payoff = product.rebate * product.contract_multiplier
                 barrier = product.upper_barrier if spot >= product.upper_barrier else product.lower_barrier
                 return [
                     self._terminal_event(
@@ -431,19 +428,16 @@ class BarrierLifecycleTracker:
     ) -> List[LifecycleEvent]:
         """Lifecycle observation for ``SingleSharkfinOption`` and ``DoubleSharkfinOption``.
 
-        Sharkfins are always knock-out structures. Barrier hit → knock-out with
-        the barrier payoff (PV-discounted when ``pay_at_hit=False``). Expiry
-        without a hit → no-hit payoff.
+        Sharkfins are always knock-out structures. Barrier hit fixes the
+        barrier payoff; the ledger retains it until hit or terminal payment.
+        Expiry without a hit fixes the no-hit payoff.
         """
         product = self.product
         barrier_hit = product.is_barrier_hit(spot)
 
         if barrier_hit and self._monitored_intra_path():
             raw_payoff = product.get_barrier_payoff()
-            if product.pay_at_hit:
-                payoff = raw_payoff
-            else:
-                payoff = self._discount_to_expiry(raw_payoff, date, env)
+            payoff = raw_payoff
             if isinstance(product, SingleSharkfinOption):
                 barrier = product.barrier
             else:
@@ -479,9 +473,8 @@ class BarrierLifecycleTracker:
     ) -> List[LifecycleEvent]:
         """Lifecycle observation for ``OneTouchOption`` and ``DoubleOneTouchOption``.
 
-        One-touch: barrier hit → KNOCK_OUT (terminal). Payment at hit or
-        discounted to expiry per ``payment_at_hit``. No-touch: barrier never
-        touched → pay rebate at expiry.
+        One-touch: barrier hit → KNOCK_OUT (terminal). Payment is scheduled at
+        hit or expiry per ``payment_at_hit``. No-touch pays at expiry.
 
         For double variants the same logic applies with two barriers.
         """
@@ -490,11 +483,7 @@ class BarrierLifecycleTracker:
 
         if barrier_hit and self._monitored_intra_path():
             raw_payoff = product.get_payoff(spot, touched=True)
-            payment_at_hit = getattr(product, "payment_at_hit", True)
-            if payment_at_hit or is_zero(raw_payoff):
-                payoff = raw_payoff
-            else:
-                payoff = self._discount_to_expiry(raw_payoff, date, env)
+            payoff = raw_payoff
 
             if isinstance(product, OneTouchOption):
                 barrier = product.barrier
@@ -525,61 +514,6 @@ class BarrierLifecycleTracker:
             ]
 
         return []
-
-    # ------------------------------------------------------------------
-    # Payoff / discount helpers
-    # ------------------------------------------------------------------
-
-    def _rebate_payoff(
-        self,
-        rebate: float,
-        pay_at_hit: bool,
-        date: pd.Timestamp,
-        env: PricingEnvironment,
-        *,
-        contract_multiplier: float,
-    ) -> float:
-        """Compute the per-contract rebate payoff, optionally PV-discounted.
-
-        Args:
-            rebate: Raw rebate amount (before multiplier).
-            pay_at_hit: If True, return undiscounted amount; if False, PV-discount.
-            date: Hit date.
-            env: Pricing environment.
-            contract_multiplier: Contract multiplier to apply to the rebate.
-
-        Returns:
-            Rebate payoff per contract (scaled by contract_multiplier).
-        """
-        amount = rebate * contract_multiplier
-        if pay_at_hit:
-            return amount
-        return self._discount_to_expiry(amount, date, env)
-
-    def _discount_to_expiry(
-        self,
-        amount: float,
-        date: pd.Timestamp,
-        env: PricingEnvironment,
-    ) -> float:
-        """PV-discount *amount* from *date* to the current remaining maturity.
-
-        When remaining maturity is zero (or negligibly small), no discounting
-        is applied.
-
-        Args:
-            amount: Amount to discount.
-            date: Current observation date.
-            env: Pricing environment (provides ``get_rate``).
-
-        Returns:
-            Discounted present value of *amount*.
-        """
-        remaining = self._remaining_maturity(date)
-        if is_zero(remaining) or remaining <= 0.0:
-            return amount
-        rate = env.get_rate(remaining)
-        return float(amount * safe_exp(-rate * remaining))
 
     # ------------------------------------------------------------------
     # State snapshot & event constructors
@@ -646,7 +580,7 @@ class BarrierLifecycleTracker:
 
         Args:
             event_type: ``KNOCK_OUT`` or ``EXPIRY``.
-            date: Settlement date.
+            date: Determination date.
             spot: Spot at settlement.
             barrier: Barrier level (or None for expiry-no-hit).
             payoff: Per-contract payoff amount.
@@ -663,18 +597,19 @@ class BarrierLifecycleTracker:
             if hasattr(date, "to_pydatetime")
             else date
         )
-        self.state.valuation_point = ValuationPoint(date=timestamp)
-        self.state.ledger.register(
-            RealizedCashflow(
-                cashflow_id=(
-                    f"{event_type.value.lower()}:{timestamp.isoformat()}"
-                ),
-                event_type=event_type,
-                amount=cashflow,
-                determination_date=timestamp,
-                payment_date=timestamp,
-            )
+        realized = self._realized_cashflow(
+            event_type,
+            cashflow,
+            timestamp,
+            expired=expired,
         )
+        valuation_point = (
+            ValuationPoint(date=timestamp)
+            if realized.payment_date is not None
+            else ValuationPoint(time=self._elapsed_years(pd.Timestamp(date)))
+        )
+        self.state.valuation_point = valuation_point
+        self.state.ledger.register(realized)
 
         if expired:
             self.state.expired = True
@@ -692,8 +627,107 @@ class BarrierLifecycleTracker:
             barrier=barrier,
             payoff=payoff,
             cashflow=cashflow,
+            realized_cashflow=realized,
             terminates_position=True,
             state_before=before,
             state_after=after,
             metadata={"monitoring": "daily_close"},
         )
+
+    def _valuation_point(self, date: pd.Timestamp) -> ValuationPoint:
+        if self.state.ledger.cashflows:
+            first = self.state.ledger.cashflows[0]
+            if first.payment_time is not None:
+                return ValuationPoint(time=self._elapsed_years(date))
+        convention = getattr(self.product, "settlement_convention", None)
+        if (
+            convention is not None
+            and convention.lag_unit is SettlementLagUnit.YEAR_FRACTION
+        ):
+            return ValuationPoint(time=self._elapsed_years(date))
+        return ValuationPoint(date=pd.Timestamp(date).to_pydatetime())
+
+    def _schedule_resolution_env(
+        self, env: PricingEnvironment
+    ) -> PricingEnvironment:
+        schedule_env = deepcopy(env)
+        schedule_env.valuation_date = self.start_date.to_pydatetime()
+        return schedule_env
+
+    def _realized_cashflow(
+        self,
+        event_type: LifecycleEventType,
+        amount: float,
+        timestamp,
+        *,
+        expired: bool,
+    ) -> RealizedCashflow:
+        if self._observation_env is None:
+            raise RuntimeError("barrier lifecycle observation environment is missing")
+
+        pays_at_hit = self._pays_at_hit()
+        if expired or not pays_at_hit:
+            timing = resolve_terminal_timing(
+                self.product,
+                self._schedule_resolution_env(self._observation_env),
+            )
+        else:
+            timing = SettlementResolver.resolve_contingent(
+                self.product,
+                SettlementRequest(
+                    kind=CashflowKind.HIT,
+                    determination_date=timestamp,
+                    cashflow_id=(
+                        f"{event_type.value.lower()}:{timestamp.isoformat()}"
+                    ),
+                ),
+                self._observation_env,
+            )
+
+        cashflow_id = f"{event_type.value.lower()}:{timestamp.isoformat()}"
+        if not expired and not pays_at_hit:
+            if timing.payment_date is not None:
+                return RealizedCashflow(
+                    cashflow_id=cashflow_id,
+                    event_type=event_type,
+                    amount=amount,
+                    determination_date=timestamp,
+                    payment_date=timing.payment_date,
+                )
+            return RealizedCashflow(
+                cashflow_id=cashflow_id,
+                event_type=event_type,
+                amount=amount,
+                determination_time=self._elapsed_years(
+                    pd.Timestamp(timestamp)
+                ),
+                payment_time=timing.payment_time,
+            )
+
+        if (
+            timing.determination_date is not None
+            and timing.payment_date is not None
+        ):
+            return RealizedCashflow(
+                cashflow_id=cashflow_id,
+                event_type=event_type,
+                amount=amount,
+                determination_date=timing.determination_date,
+                payment_date=timing.payment_date,
+            )
+
+        delay = float(timing.payment_time) - float(timing.determination_time)
+        determination_time = self._elapsed_years(pd.Timestamp(timestamp))
+        return RealizedCashflow(
+            cashflow_id=cashflow_id,
+            event_type=event_type,
+            amount=amount,
+            determination_time=determination_time,
+            payment_time=determination_time + delay,
+        )
+
+    def _pays_at_hit(self) -> bool:
+        product = self.product
+        if isinstance(product, (OneTouchOption, DoubleOneTouchOption)):
+            return bool(getattr(product, "payment_at_hit", True))
+        return bool(getattr(product, "pay_at_hit", False))

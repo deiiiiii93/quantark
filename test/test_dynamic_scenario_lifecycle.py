@@ -154,6 +154,8 @@ class TestEngineLifecycleIntegration:
         ko_result = results.day_results[ko_day]
         assert [e.event_type for e in ko_result.lifecycle_events] == ["KO"]
         assert ko_result.realized_cash > 0.0
+        assert is_zero(ko_result.pending_receivable_pv)
+        assert is_close(ko_result.paid_cash, ko_result.realized_cash)
         # From the KO day onward the portfolio is pure cash
         for day in results.day_results[ko_day:]:
             assert len(day.positions) == 0
@@ -239,6 +241,8 @@ class TestConfigAndResults:
 
         day = DayResult(day_index=0)
         assert day.lifecycle_events == []
+        assert day.pending_receivable_pv == 0.0
+        assert day.paid_cash == 0.0
         assert day.realized_cash == 0.0
 
     def test_lifecycle_event_snapshot_roundtrip(self):
