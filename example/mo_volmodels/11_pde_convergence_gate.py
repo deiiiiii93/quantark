@@ -74,7 +74,7 @@ from quantark.backtest.otc.vol_calibrators import (
     VOL_MODEL_HESTON_SLV,
     VolModelCalibrator,
 )
-from quantark.backtest.otc.vol_history import IvSurfaceArtifact, VolSurfaceHistory
+from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
 from quantark.param import FlatRateCurve, GridVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType

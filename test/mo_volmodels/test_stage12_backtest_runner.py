@@ -190,7 +190,7 @@ def test_schedule_rejects_negative_requirement(calendar):
 )
 def test_schedule_on_the_real_window(calendar):
     """The production window must yield the 27 monthly inceptions of record."""
-    from quantark.backtest.otc.vol_history import VolSurfaceHistory
+    from quantark.param.vol.surface_history import VolSurfaceHistory
 
     history = VolSurfaceHistory(HISTORY_DIR)
     spot = s12.load_spot_frame(HISTORY_DIR)

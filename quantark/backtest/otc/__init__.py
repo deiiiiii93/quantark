@@ -43,7 +43,7 @@ from .state import (
     FuturesHedgePosition,
 )
 from .vol_calibrators import CalibratedVolModel, VolModelCalibrator
-from .vol_history import IvSurfaceArtifact, VolSurfaceHistory
+from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
 
 __all__ = [
     "AKShareAutocallableDataAdapter",

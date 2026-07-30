@@ -51,7 +51,7 @@ from quantark.volmodels.slv.fokkerplanck import (
 )
 from quantark.volmodels.slv.leverage import LeverageSurface
 
-from .vol_history import IvSurfaceArtifact
+from quantark.param.vol.surface_history import IvSurfaceArtifact
 
 VOL_MODEL_LOCALVOL = "localvol"
 VOL_MODEL_HESTON = "heston"

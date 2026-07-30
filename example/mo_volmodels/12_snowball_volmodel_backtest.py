@@ -80,7 +80,7 @@ from quantark.backtest.otc import (
 from quantark.backtest.otc.config import VolModelCalibrationConfig
 from quantark.backtest.otc.market import derive_implied_dividend_yield
 from quantark.backtest.otc.state import AutocallableDeltaHedgeStrategy
-from quantark.backtest.otc.vol_history import VolSurfaceHistory
+from quantark.param.vol.surface_history import VolSurfaceHistory
 from quantark.backtest.transaction_costs import CompleteCostModel, ZeroCostModel
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment

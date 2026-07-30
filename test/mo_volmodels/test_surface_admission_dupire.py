@@ -61,7 +61,7 @@ def test_exclusion_is_recorded_in_the_manifest_for_provenance():
 
 
 def test_history_loader_admits_only_the_usable_surfaces():
-    from quantark.backtest.otc.vol_history import VolSurfaceHistory
+    from quantark.param.vol.surface_history import VolSurfaceHistory
 
     history = VolSurfaceHistory(HISTORY_DIR)
     assert len(history.admitted_dates) == 760
@@ -71,7 +71,7 @@ def test_carry_forward_covers_an_excluded_date():
     """An excluded date must resolve to the previous admitted surface."""
     from datetime import date
 
-    from quantark.backtest.otc.vol_history import VolSurfaceHistory
+    from quantark.param.vol.surface_history import VolSurfaceHistory
 
     history = VolSurfaceHistory(HISTORY_DIR)
     artifact = history.surface_for(date(2024, 9, 30))

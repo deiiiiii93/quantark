@@ -10,7 +10,7 @@ import pandas as pd
 
 from quantark.util.exceptions import ValidationError
 
-from .vol_history import VolSurfaceHistory
+from quantark.param.vol.surface_history import VolSurfaceHistory
 
 
 @dataclass(frozen=True)
@@ -136,7 +136,7 @@ class AutocallableMarketDataSet:
     ``surface_history`` is an optional per-day IV-surface channel.  It does
     not participate in the ``dates`` calendar intersection: surfaces attach
     to the existing calendar dates via the manifest carry-forward gap policy
-    (see :class:`quantark.backtest.otc.vol_history.VolSurfaceHistory`).
+    (see :class:`quantark.param.vol.surface_history.VolSurfaceHistory`).
     """
 
     spot_data: pd.DataFrame

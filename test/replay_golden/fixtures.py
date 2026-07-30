@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -176,6 +177,16 @@ def _artifact_payload(trade_date: date, *, s0: float, atm_vols) -> dict:
     }
 
 
+def _write_if_changed(path: Path, raw: bytes) -> None:
+    """Byte-stable, xdist-race-safe write: skip identical content, replace
+    atomically otherwise (parallel golden workers share this directory)."""
+    if path.is_file() and path.read_bytes() == raw:
+        return
+    tmp = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
+    tmp.write_bytes(raw)
+    os.replace(tmp, path)
+
+
 def write_localvol_history(root: Path) -> Path:
     """Write (idempotently, byte-stable) the synthetic surface history."""
     history_dir = root / "history_localvol"
@@ -187,7 +198,7 @@ def write_localvol_history(root: Path) -> Path:
         (DATE_B, _artifact_payload(DATE_B, s0=104.0, atm_vols=ATM_VOLS_B)),
     ):
         raw = json.dumps(payload).encode()
-        (surface_dir / f"mo_iv_surface_{d:%Y%m%d}.json").write_bytes(raw)
+        _write_if_changed(surface_dir / f"mo_iv_surface_{d:%Y%m%d}.json", raw)
         records.append(
             {
                 "date": f"{d:%Y%m%d}",
@@ -212,7 +223,9 @@ def write_localvol_history(root: Path) -> Path:
         "gap_policy": "consumers carry forward previous admitted surface",
         "records": records,
     }
-    (history_dir / "surface_manifest.json").write_text(json.dumps(manifest))
+    _write_if_changed(
+        history_dir / "surface_manifest.json", json.dumps(manifest).encode()
+    )
     return history_dir
 
 
