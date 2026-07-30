@@ -133,6 +133,7 @@ class ReplayBacktestEngine:
         current_contract: Optional[str] = None
         self._days_replayed = 0
         self._days_in_contract = int(len(dates))
+        self._terminated_all_settled = False
         for date in dates:
             date = pd.Timestamp(date).normalize()
             market = self.config.market_data.get_market_row(date)
@@ -304,6 +305,7 @@ class ReplayBacktestEngine:
             ):
                 # Terminal cash has landed for every product: the replay ends
                 # on the later of observation and settlement (study spec §6).
+                self._terminated_all_settled = True
                 break
 
         return BookBacktestResults(
@@ -330,8 +332,17 @@ class ReplayBacktestEngine:
         )
 
     def _run_info(self) -> dict[str, Any]:
-        """Termination provenance for the summary (study spec §6)."""
-        if any(r.lifecycle.knocked_out for r in self._replays):
+        """Termination provenance for the summary (study spec §6).
+
+        Outcome labels (ko / ki_maturity / maturity) apply only when every
+        leg actually settled inside the data window; a run that exhausted
+        market data with an open receivable is "data_end" — anything else
+        would hide truncated settlement exposure.
+        """
+        all_settled = all(r.lifecycle.settled for r in self._replays)
+        if not all_settled:
+            reason = "data_end"
+        elif any(r.lifecycle.knocked_out for r in self._replays):
             reason = "ko"
         elif all(r.lifecycle.matured for r in self._replays) and any(
             r.lifecycle.knocked_in for r in self._replays
@@ -345,6 +356,13 @@ class ReplayBacktestEngine:
             "termination_reason": reason,
             "days_replayed": int(self._days_replayed),
             "days_in_contract": int(self._days_in_contract),
+            "all_settled": bool(all_settled),
+            "outstanding_receivable": float(
+                sum(
+                    r.lifecycle.pending_settlement_cashflow
+                    for r in self._replays
+                )
+            ),
         }
 
     def _calibrate_day(self, date: pd.Timestamp) -> dict[str, Any]:
@@ -556,13 +574,19 @@ class ReplayBacktestEngine:
         hedge_mtm = self.hedge_position.mark_to_market(futures_price)
         # book_product_mtm already only sums alive products.
         product_mtm = book_product_mtm
+        # A pending terminal receivable (delayed KO settlement) is carried at
+        # its discounted value in BOTH portfolio value and marked P&L — else
+        # P&L would drop at observation and jump at settlement (phantom P&L).
+        # Zero under T+0 settlement (golden-invariant). Identity preserved:
+        # total_pnl == portfolio_value - initial_book_value.
         product_pnl = (
-            product_mtm + book_cashflows - float(self._initial_book_value or 0.0)
+            product_mtm
+            + receivable_pv
+            + book_cashflows
+            - float(self._initial_book_value or 0.0)
         )
         total_pnl = product_pnl + hedge_mtm - self._transaction_costs
         cash = book_cashflows - self._transaction_costs
-        # A pending terminal receivable (delayed KO settlement) is carried at
-        # its discounted value; zero under T+0 settlement (golden-invariant).
         portfolio_value = product_mtm + hedge_mtm + cash + receivable_pv
         product_position_delta = float(net_position_delta)
         product_position_gamma = float(net_position_gamma)

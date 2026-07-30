@@ -1,4 +1,5 @@
 {
+  "all_settled": true,
   "days_in_contract": 5,
   "days_replayed": 5,
   "end_date": "2024-01-06T00:00:00",
@@ -7,6 +8,7 @@
   "num_actions": 2,
   "num_days": 5,
   "num_trades": 0,
+  "outstanding_receivable": 0.0,
   "start_date": "2024-01-02T00:00:00",
   "termination_reason": "ko",
   "total_pnl": 130.76636639859134

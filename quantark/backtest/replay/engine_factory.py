@@ -84,7 +84,11 @@ def _apply_bump_overrides(engine, delta_bump_size, gamma_bump_size):
 
     base = engine.params.get_effective_bump_config()
     spot = float(delta_bump_size) if delta_bump_size is not None else base.spot_bump
-    gamma = float(gamma_bump_size) if gamma_bump_size is not None else None
+    gamma = (
+        float(gamma_bump_size)
+        if gamma_bump_size is not None
+        else base.gamma_spot_bump  # a delta-only override must not erase it
+    )
     engine.params = replace(
         engine.params,
         bump_config=replace(base, spot_bump=spot, gamma_spot_bump=gamma),

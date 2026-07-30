@@ -101,3 +101,42 @@ def test_config_bump_overrides_flow_into_factory_engines():
     # Shared params objects must not be mutated by the override.
     plain = create_pricing_engine(cfg.product, cfg.engine_config)
     assert plain.params.get_effective_bump_config().gamma_spot_bump is None
+
+
+def test_delta_only_override_preserves_configured_gamma_bump():
+    """Override matrix (review finding): delta-only must not erase a
+    configured gamma bump; gamma-only must not touch delta."""
+    from dataclasses import replace as dc_replace
+
+    from quantark.asset.equity.param import PDEParams
+    from quantark.backtest.replay.engine_factory import create_pricing_engine
+
+    cfg = fixtures.make_scalar_bsm_config()
+    base_params = PDEParams(
+        bump_config=BumpConfig(spot_bump=0.01, gamma_spot_bump=0.02)
+    )
+    engine_config = dc_replace(cfg.engine_config, pde_params=base_params)
+
+    delta_only = create_pricing_engine(
+        cfg.product, engine_config, delta_bump_size=0.005
+    ).params.get_effective_bump_config()
+    assert delta_only.spot_bump == pytest.approx(0.005)
+    assert delta_only.gamma_spot_bump == pytest.approx(0.02)
+
+    gamma_only = create_pricing_engine(
+        cfg.product, engine_config, gamma_bump_size=0.03
+    ).params.get_effective_bump_config()
+    assert gamma_only.spot_bump == pytest.approx(0.01)
+    assert gamma_only.gamma_spot_bump == pytest.approx(0.03)
+
+    neither = create_pricing_engine(
+        cfg.product, engine_config
+    ).params.get_effective_bump_config()
+    assert neither.spot_bump == pytest.approx(0.01)
+    assert neither.gamma_spot_bump == pytest.approx(0.02)
+
+    both = create_pricing_engine(
+        cfg.product, engine_config, delta_bump_size=0.004, gamma_bump_size=0.04
+    ).params.get_effective_bump_config()
+    assert both.spot_bump == pytest.approx(0.004)
+    assert both.gamma_spot_bump == pytest.approx(0.04)

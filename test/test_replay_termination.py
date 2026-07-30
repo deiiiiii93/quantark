@@ -94,7 +94,8 @@ def test_t5_settlement_carries_receivable_then_posts(monkeypatch):
 
 def test_expiry_paid_ko_runs_dead_to_maturity(monkeypatch):
     # Settlement at the product's final maturity (6/365): beyond the 5-day
-    # data window, so the run must go to data end with the receivable open.
+    # data window, so the run must go to data end with the receivable open —
+    # and be LABELED data_end, never a completed "ko" (review finding).
     _shift_ko_settlement(monkeypatch, 4.0 / 365.0)
     config = fixtures.make_scalar_bsm_config()
     config.terminate_on_lifecycle_end = True
@@ -103,7 +104,32 @@ def test_expiry_paid_ko_runs_dead_to_maturity(monkeypatch):
     assert len(states) == 5  # data end reached, still unsettled
     ko_day = pd.Timestamp("2024-01-04")
     assert states.loc[ko_day:, "cashflows"].eq(0.0).all()
-    assert results.get_summary()["days_replayed"] == 5
+    summary = results.get_summary()
+    assert summary["days_replayed"] == 5
+    assert summary["termination_reason"] == "data_end"
+    assert summary["all_settled"] is False
+    assert summary["outstanding_receivable"] != 0.0
+
+
+def test_pnl_identity_holds_across_pending_settlement(monkeypatch):
+    """portfolio_value - total_pnl must be constant (the initial book value)
+    on observation, pending, and settlement days — the receivable belongs in
+    marked P&L, not only in portfolio value (review finding: phantom P&L)."""
+    _shift_ko_settlement(monkeypatch, 2.0 / 365.0)
+    config = fixtures.make_scalar_bsm_config()
+    config.terminate_on_lifecycle_end = True
+    results = _run_single(config)
+    states = results.states_df
+    anchor = states["portfolio_value"] - states["total_pnl"]
+    assert (anchor - anchor.iloc[0]).abs().max() < 1e-9
+    # No phantom jump at settlement: day-over-day P&L move across the
+    # settlement boundary is small next to the receivable magnitude.
+    settle_day = pd.Timestamp("2024-01-06")
+    prev_day = pd.Timestamp("2024-01-05")
+    jump = abs(
+        states.loc[settle_day, "total_pnl"] - states.loc[prev_day, "total_pnl"]
+    )
+    assert jump < 100.0  # discounting drift only, not the ~10k terminal cash
 
 
 def _extended_market(spots):
