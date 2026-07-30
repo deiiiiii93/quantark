@@ -60,7 +60,9 @@ from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
 
-import quantark.backtest.otc.vol_calibrators as vol_calibrators
+# Kernel spies must patch the CANONICAL module — the otc path is a
+# re-export shim since the relocation and patching it intercepts nothing.
+import quantark.volmodels.calibration as vol_calibrators
 
 
 REAL_ARTIFACT = (
