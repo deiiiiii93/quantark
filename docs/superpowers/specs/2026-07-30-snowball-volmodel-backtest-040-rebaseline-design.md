@@ -409,16 +409,65 @@ relying on the boundary alone.
    (`vol_calibrators.py:542`) and `heston_slv` chains it, so the key changes
    automatically — no stale hits and no `_CACHE_SCHEMA_VERSION` bump. The 552
    cached `localvol-` entries stay valid; their fingerprint excludes the preset.
-2. **Plumb `v0_boundary`** through the snowball and phoenix vol PDE solvers,
-   selecting `degenerate_pde` when `2κθ < σ²`. Belt-and-braces after (1), and it
-   closes a real gap: a fix that exists is currently unreachable from the
-   production route.
+2. **Plumb `v0_boundary` and default it to `degenerate_pde`** for the snowball and
+   phoenix vol PDE solvers. **Mandatory, not belt-and-braces** — see §7A.6. An
+   earlier draft called this redundant after (1); the Feller-boundary sweep
+   disproves that. `enforce_feller=True` lands constrained fits *on* the boundary
+   at `2κθ/σ² ≈ 1.0`, which is exactly where `neumann` fails (−0.540% of
+   notional). The two fixes are complementary: (1) removes the deep-violation
+   regime, (2) is required for the marginal regime that (1) produces.
 3. **G2 records `2κθ/σ²` and bound-hit flags per date**, and evaluates its verdict
    **conditioned on the Feller ratio** rather than pooling regimes. §7A.3 shows a
    uniform verdict would average a 0.03% regime with a 2.5% one.
 4. **MC reference upgraded** to `martingale_correction=True` with
    `substeps_per_interval` ≥ 4. The measured reference bias is only 0.078% of
    notional, but it is free to remove and the gate's tolerance is 0.25%.
+
+### 7A.6 Feller-boundary sweep and accuracy-matched performance
+
+`enforce_feller=True` constrains the fit to `2κθ ≥ σ²`; a constrained optimiser
+pushed by the data sits **on** that boundary, at ratio ≈ 1.0, not comfortably
+inside it. §7A.3's passing control was at 6.617, so it did not test the regime the
+constraint actually produces. Sweeping σ to hit target ratios at T=1 on the
+production sheet (κ, θ, v0, ρ held at the calibration; PDE 200×60×1600; MC QE-M,
+8 substeps, 32 batches = 262,144 paths):
+
+| `2κθ/σ²` | σ | `neumann` | verdict | `degenerate_pde` | verdict | MC | PDE | speedup |
+|---|---|---|---|---|---|---|---|---|
+| **1.000** | 0.5145 | **−0.540%** | **FAIL** | **+0.156%** | **PASS** | 39.7 s | 8.6 s | **4.6×** |
+| 1.250 | 0.4601 | −0.242% | PASS (marginal) | +0.112% | PASS | 46.3 s | 8.8 s | 5.2× |
+| 1.500 | 0.4200 | −0.076% | PASS | +0.101% | PASS | 49.5 s | 9.0 s | 5.5× |
+| 3.000 | 0.2970 | +0.070% | PASS | +0.051% | PASS | 48.3 s | 8.8 s | 5.5× |
+| 6.617 | 0.2000 | +0.034% | PASS | +0.036% | PASS | — | — | — |
+
+Verdicts apply the gate criterion `max(2·mc_se_pct, 0.25%)`, which is the 0.25%
+floor throughout (`mc_se` ≈ 0.023% of notional).
+
+Two conclusions:
+
+1. **`degenerate_pde` is required.** It holds +0.10 … +0.16% across the whole
+   regime range and passes everywhere, while `neumann` swings from −0.540% (FAIL
+   at the boundary) to +0.034%. A treatment whose error is insensitive to regime is
+   the correct default; one that fails precisely where `enforce_feller` lands is not.
+2. **Accuracy-matched, the 2D PDE is 4.6–5.5× faster than MC** at T=1, measured at
+   the configurations that pass. This reverses an earlier claim in this spec that
+   MC was the cheaper route — that comparison had put PDE at a passing resolution
+   against MC at the gate's *failing* configuration.
+
+For a hedging study the margin is wider than the table shows: daily deltas come
+from bumped re-prices, so MC pays its cost three times per day (§7.1) and
+differences two noisy numbers, whereas the PDE reads delta and gamma off the same
+solve (`snowball_pde_solver.py:1124`) at no extra cost.
+
+**Two caveats bounding this result.** Measured exponents are `pde2d ≈ T^1.78`
+against `mc ≈ T^1.04–1.20`, so the advantage narrows with maturity — an
+extrapolation to T=3 gives ~92 s vs ~136 s, thin enough that it must be measured,
+not assumed. And every fixed-configuration number here is `heston`;
+`heston_slv` adds a leverage surface on the same ADI core and is **not** assumed to
+inherit the result. Both are G2's job.
+
+**Prediction on the record:** with (1) and (2) applied, G2 admits the PDE route for
+both 2D variants. Recorded as a prediction so the gate can falsify it.
 
 ### 7A.5 Method note
 
