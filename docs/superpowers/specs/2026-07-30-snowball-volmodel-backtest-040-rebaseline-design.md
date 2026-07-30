@@ -423,7 +423,7 @@ relying on the boundary alone.
    `substeps_per_interval` ≥ 4. The measured reference bias is only 0.078% of
    notional, but it is free to remove and the gate's tolerance is 0.25%.
 
-### 7A.6 Feller-boundary sweep and accuracy-matched performance
+### 7A.6 Feller-boundary sweep
 
 `enforce_feller=True` constrains the fit to `2κθ ≥ σ²`; a constrained optimiser
 pushed by the data sits **on** that boundary, at ratio ≈ 1.0, not comfortably
@@ -449,27 +449,71 @@ Two conclusions:
    regime range and passes everywhere, while `neumann` swings from −0.540% (FAIL
    at the boundary) to +0.034%. A treatment whose error is insensitive to regime is
    the correct default; one that fails precisely where `enforce_feller` lands is not.
-2. **Accuracy-matched, the 2D PDE is 4.6–5.5× faster than MC** at T=1, measured at
-   the configurations that pass. This reverses an earlier claim in this spec that
-   MC was the cheaper route — that comparison had put PDE at a passing resolution
-   against MC at the gate's *failing* configuration.
+2. The PDE column above used `n_t=1600`, which §7A.7 shows is **unnecessary**.
 
-For a hedging study the margin is wider than the table shows: daily deltas come
-from bumped re-prices, so MC pays its cost three times per day (§7.1) and
-differences two noisy numbers, whereas the PDE reads delta and gamma off the same
-solve (`snowball_pde_solver.py:1124`) at no extra cost.
+### 7A.7 Cheapest passing configuration, per replay day
 
-**Two caveats bounding this result.** Measured exponents are `pde2d ≈ T^1.78`
-against `mc ≈ T^1.04–1.20`, so the advantage narrows with maturity — an
-extrapolation to T=3 gives ~92 s vs ~136 s, thin enough that it must be measured,
-not assumed. And every fixed-configuration number here is `heston`;
-`heston_slv` adds a leverage surface on the same ADI core and is **not** assumed to
-inherit the result. Both are G2's job.
+Speed claims are only meaningful between the *cheapest configuration of each
+engine that meets tolerance*, in the units the fleet pays (§7.1: MC = 3 prices/day
+via the bump path, PDE = 2 solves/day via native greeks). Measured at T=1, Feller
+ratio 1.0, `degenerate_pde`, against the QE-M/8/32 reference:
 
-**Prediction on the record:** with (1) and (2) applied, G2 admits the PDE route for
-both 2D variants. Recorded as a prediction so the gate can falsify it.
+| engine | PV gap | gate | 1 call | **per replay day** | delta (cash / 1% spot) |
+|---|---|---|---|---|---|
+| MC `QE` sub=1 bat=16 | +0.071% | PASS | 2.0 s | 6.1 s | 485,747 |
+| MC `QE-M` sub=1 bat=16 | +0.071% | PASS | 2.4 s | 7.1 s | 485,747 |
+| MC `QE-M` sub=2 bat=16 | −0.001% | PASS | 4.9 s | 14.8 s | 478,306 |
+| MC `QE-M` sub=4 bat=16 | +0.016% | PASS | 10.3 s | 30.9 s | 480,146 |
+| **PDE degen 200×60×400** | **+0.159%** | **PASS** | **2.1 s** | **4.2 s** | 482,792 |
+| PDE degen 200×60×800 | +0.139% | PASS | 3.9 s | 7.9 s | 482,850 |
+| PDE degen 200×60×1600 | +0.156% | PASS | 8.6 s | 17.3 s | 481,745 |
 
-### 7A.5 Method note
+**The gate's existing 200×60×`ceil(400·T)` grid passes** once `degenerate_pde` is
+in place; refining to `n_t=1600` does not improve it (+0.156% vs +0.159%), so the
+residual is not time resolution and the extra cost buys nothing. Cheapest passing
+PDE is **4.2 s/day** against MC's **6.1 s/day** — PDE ~1.45× cheaper.
+
+**Two superseded claims, recorded so they are not re-cited.** This spec has twice
+stated a speed conclusion from a mismatched pair: first that MC was cheaper
+(PDE at a passing resolution vs MC at the gate's *failing* configuration), then
+that PDE was 4.6–5.5× cheaper (over-resolved PDE vs MC at an *arbiter-grade*
+configuration no production run would use). Both are withdrawn. The margin is
+**1.45×**, and it is the weaker half of the case.
+
+### 7A.8 Delta stability — the deciding factor
+
+The study trades on delta, not PV. MC delta comes from differencing two noisy
+prices; the PDE reads delta and gamma off the same solve
+(`snowball_pde_solver.py:1124`). Measured at the cheapest passing MC config,
+central 1% bump, three seeds:
+
+```
+seed 20260723 : 485,747      seed 11111 : 488,989      seed 99999 : 492,256
+spread 6,509    stdev 3,254   (cash per 1% spot move)
+```
+
+§5.3 sets the delta admission threshold at half an IM contract = **6,734** cash per
+1% move, derived from the hedge's own granularity. **MC's seed-to-seed delta noise
+is 0.97 contracts wide — it consumes essentially the whole tolerance before any
+engine-vs-engine disagreement is counted.** The PDE's delta is deterministic.
+
+This does not average away over a ~700-day daily rebalance: every spurious contract
+crossing is a real trade at 0.5 bp commission + 1 bp spread, so MC would
+manufacture hedge turnover that is a numerical artifact — and cost drag and hedge
+slippage are exactly what the study measures.
+
+**Two caveats bounding all of §7A.6–7A.8.** Measured exponents are
+`pde2d ≈ T^1.78` against `mc ≈ T^1.04–1.20`, so the cost advantage narrows with
+maturity; the T=3 pair is **extrapolated, not measured**. And every
+fixed-configuration number is `heston` — `heston_slv` adds a leverage surface on
+the same ADI core and is **not** assumed to inherit the result. Both are G2's job.
+
+**Prediction on the record:** with `enforce_feller=True` and
+`v0_boundary=degenerate_pde`, G2 admits the PDE route for both 2D variants at the
+existing 200×60×`ceil(400·T)` grid, on delta stability more than on speed.
+Recorded as a prediction so the gate can falsify it.
+
+### 7A.9 Method note
 
 The first version of this evidence was rejected by the owner for using cases whose
 |PV| was too small to support a conclusion. That objection was correct and is what
