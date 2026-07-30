@@ -9,9 +9,18 @@ portfolio-driving ``PortfolioLifecycleManager`` is shared by the latter two.
 
 from .autocallable import AutocallableLifecycleTracker
 from .barrier import TRACKED_BARRIER_PRODUCTS, BarrierLifecycleTracker
+from .cashflows import (
+    LifecycleCashflowLedger,
+    RealizedCashflow,
+    ValuationPoint,
+)
 from .events import LifecycleEvent, LifecycleEventType
 from .manager import PortfolioLifecycleManager, ProcessedLifecycleEvent
-from .state import AutocallableLifecycleState, BarrierLifecycleState
+from .state import (
+    AutocallableLifecycleState,
+    BarrierLifecycleState,
+    EquityOptionLifecycleState,
+)
 
 __all__ = [
     "AutocallableLifecycleTracker",
@@ -19,8 +28,12 @@ __all__ = [
     "TRACKED_BARRIER_PRODUCTS",
     "LifecycleEvent",
     "LifecycleEventType",
+    "LifecycleCashflowLedger",
+    "RealizedCashflow",
+    "ValuationPoint",
     "PortfolioLifecycleManager",
     "ProcessedLifecycleEvent",
     "AutocallableLifecycleState",
     "BarrierLifecycleState",
+    "EquityOptionLifecycleState",
 ]

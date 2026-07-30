@@ -43,6 +43,7 @@ from quantark.priceenv import PricingEnvironment
 from quantark.util.numerical import is_zero, safe_exp
 
 from .events import LifecycleEvent, LifecycleEventType
+from .cashflows import RealizedCashflow, ValuationPoint
 from .state import BarrierLifecycleState
 
 TRACKED_BARRIER_PRODUCTS = (
@@ -249,10 +250,12 @@ class BarrierLifecycleTracker:
         Returns:
             List of ``LifecycleEvent`` objects (may be empty).
         """
+        date = pd.Timestamp(date).normalize()
+        self.state.valuation_point = ValuationPoint(
+            date=date.to_pydatetime()
+        )
         if not self.state.alive:
             return []
-
-        date = pd.Timestamp(date).normalize()
 
         if isinstance(self.product, (BarrierOption,)):
             return self._observe_single_barrier(date, env, spot)
@@ -655,7 +658,23 @@ class BarrierLifecycleTracker:
         before = self._snapshot()
 
         cashflow = self.quantity * payoff
-        self.state.realized_cashflows += cashflow
+        timestamp = (
+            date.to_pydatetime()
+            if hasattr(date, "to_pydatetime")
+            else date
+        )
+        self.state.valuation_point = ValuationPoint(date=timestamp)
+        self.state.ledger.register(
+            RealizedCashflow(
+                cashflow_id=(
+                    f"{event_type.value.lower()}:{timestamp.isoformat()}"
+                ),
+                event_type=event_type,
+                amount=cashflow,
+                determination_date=timestamp,
+                payment_date=timestamp,
+            )
+        )
 
         if expired:
             self.state.expired = True

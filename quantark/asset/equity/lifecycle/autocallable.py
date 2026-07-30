@@ -28,6 +28,7 @@ from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
 from quantark.priceenv import PricingEnvironment
 
 from .events import LifecycleEvent, LifecycleEventType
+from .cashflows import ValuationPoint
 from .state import AutocallableLifecycleState
 
 DateResolver = Callable[[pd.Timestamp], pd.Timestamp]
@@ -120,6 +121,8 @@ class AutocallableLifecycleTracker:
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> List[LifecycleEvent]:
         """Detect KO / KI / coupon events at this day's close."""
+        timestamp = pd.Timestamp(date).to_pydatetime()
+        self.lifecycle.valuation_point = ValuationPoint(date=timestamp)
         if not self.lifecycle.alive:
             return []
         if not self.has_lifecycle:
@@ -234,7 +237,13 @@ class AutocallableLifecycleTracker:
                     before = self._state_snapshot()
                     payoff = float(product.get_coupon_payoff(idx))
                     coupon = self.quantity * payoff
-                    self.lifecycle.add_cashflow(coupon)
+                    self.lifecycle.add_cashflow(
+                        coupon,
+                        cashflow_id=(
+                            f"coupon:{idx}:{timestamp.isoformat()}"
+                        ),
+                        timestamp=timestamp,
+                    )
                     self.lifecycle.coupon_memory_count = 0
                     events.append(
                         LifecycleEvent(
@@ -259,6 +268,8 @@ class AutocallableLifecycleTracker:
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> Optional[LifecycleEvent]:
         """Settle the product at maturity if the settlement date has been reached."""
+        timestamp = pd.Timestamp(date).to_pydatetime()
+        self.lifecycle.valuation_point = ValuationPoint(date=timestamp)
         if not self.lifecycle.alive:
             return None
         if pd.Timestamp(date) < self._maturity_settlement_date(product, env):

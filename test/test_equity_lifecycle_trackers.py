@@ -112,6 +112,11 @@ class TestAutocallableLifecycleTracker:
         expected = 2.0 * float(profile["payoffs"][0])
         assert almost_equal(event.cashflow, expected)
         assert almost_equal(tracker.lifecycle.realized_cashflows, expected)
+        assert len(tracker.lifecycle.ledger.cashflows) == 1
+        assert (
+            tracker.lifecycle.ledger.cashflows[0].event_type
+            is LifecycleEventType.KNOCK_OUT
+        )
 
     def test_continuous_ki_sets_flag_and_pricing_product(self):
         from quantark.asset.equity.lifecycle import LifecycleEventType
@@ -246,6 +251,8 @@ class TestBarrierLifecycleTracker:
         assert events[0].terminates_position
         assert almost_equal(events[0].cashflow, 3.0 * 2.0 * product.contract_multiplier)
         assert tracker.state.knocked_out and not tracker.state.alive
+        assert tracker.state.realized_cashflows == events[0].cashflow
+        assert tracker.state.ledger.cashflows[0].amount == events[0].cashflow
 
     def test_up_out_ko_pay_at_expiry_rebate_is_discounted(self):
         from quantark.asset.equity.lifecycle import LifecycleEventType

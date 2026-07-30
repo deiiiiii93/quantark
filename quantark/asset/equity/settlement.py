@@ -237,6 +237,106 @@ class SettlementResolver:
             raise ValidationError(f"{context}: {exc}") from exc
 
     @classmethod
+    def resolve_pending(
+        cls,
+        realized_cashflow,
+        pricing_env: "PricingEnvironment",
+        *,
+        valuation_point=None,
+    ) -> ResolvedPaymentTiming:
+        """Resolve a fixed receivable from the current valuation to payment.
+
+        The historical determination is already realized and therefore does
+        not form part of the pending receivable's discount interval.  The
+        returned determination anchor is the current valuation point.
+        """
+        if pricing_env is None:
+            raise ValidationError(
+                "pricing environment is required for pending settlement"
+            )
+
+        cashflow_id = getattr(realized_cashflow, "cashflow_id", "<unspecified>")
+        event_type = getattr(realized_cashflow, "event_type", None)
+        event_name = getattr(event_type, "name", None)
+        kind_by_event = {
+            "COUPON": CashflowKind.COUPON,
+            "KNOCK_OUT": CashflowKind.REDEMPTION,
+            "KNOCK_IN": CashflowKind.HIT,
+            "MATURITY": CashflowKind.TERMINAL,
+            "EXPIRY": CashflowKind.TERMINAL,
+        }
+        kind = kind_by_event.get(event_name)
+        if kind is None:
+            raise ValidationError(
+                f"pending cashflow id={cashflow_id!r} has unsupported "
+                f"event type {event_type!r}"
+            )
+
+        point_date = getattr(valuation_point, "date", None)
+        point_time = getattr(valuation_point, "time", None)
+        payment_date = getattr(realized_cashflow, "payment_date", None)
+        payment_time = getattr(realized_cashflow, "payment_time", None)
+
+        if point_date is not None:
+            if pricing_env.valuation_date != point_date:
+                raise ValidationError(
+                    "pending valuation point date must equal pricing "
+                    "environment valuation_date"
+                )
+            if payment_date is None:
+                raise ValidationError(
+                    f"pending cashflow id={cashflow_id!r} requires payment_date"
+                )
+            resolved_payment_time = cls._time_from_date(
+                payment_date,
+                pricing_env,
+                "pending payment",
+            )
+            determination_date = point_date
+        else:
+            if payment_time is None:
+                raise ValidationError(
+                    f"pending cashflow id={cashflow_id!r} requires payment_time"
+                )
+            try:
+                resolved_payment_time = float(payment_time)
+                if point_time is not None:
+                    resolved_payment_time -= float(point_time)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    f"pending cashflow id={cashflow_id!r} has invalid "
+                    "numeric payment timing"
+                ) from exc
+            determination_date = None
+            payment_date = None
+
+        if (
+            not isfinite(resolved_payment_time)
+            or resolved_payment_time <= _TIME_TOLERANCE
+        ):
+            raise ValidationError(
+                f"pending cashflow id={cashflow_id!r} payment must be "
+                "strictly after valuation"
+            )
+
+        determination_df = cls._checked_df(
+            pricing_env, 0.0, "pending valuation"
+        )
+        payment_df = cls._checked_df(
+            pricing_env, resolved_payment_time, "pending payment"
+        )
+        return ResolvedPaymentTiming(
+            kind=kind,
+            determination_date=determination_date,
+            determination_time=0.0,
+            payment_date=payment_date,
+            payment_time=resolved_payment_time,
+            determination_df=determination_df,
+            payment_df=payment_df,
+            delay_df=payment_df / determination_df,
+        )
+
+    @classmethod
     def _resolve_payment(
         cls,
         product,
