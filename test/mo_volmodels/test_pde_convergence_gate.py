@@ -534,6 +534,10 @@ def _run_quick(out_dir: Path) -> subprocess.CompletedProcess:
     )
 
 
+@pytest.mark.skipif(
+    not (HISTORY_DIR / "surface_manifest.json").is_file(),
+    reason="frozen surface history not present",
+)
 def test_quick_end_to_end(tmp_path):
     out1 = tmp_path / "run1"
     proc = _run_quick(out1)
