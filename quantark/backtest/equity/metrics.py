@@ -1,165 +1,30 @@
 """
 Performance metrics calculation for backtest results.
+
+Core P&L/risk metrics live in :class:`quantark.backtest.metrics.CorePerformanceMetrics`
+(protocol-only); this class adds the equity hedge/delta metrics that need
+equity-results attributes. Public API unchanged.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import numpy as np
 import pandas as pd
-from scipy import stats
+
+from quantark.backtest.metrics import CorePerformanceMetrics
 
 
-class PerformanceMetrics:
+class PerformanceMetrics(CorePerformanceMetrics):
     """
     Calculate performance metrics from backtest results.
 
     Provides comprehensive metrics including:
-    - P&L metrics (total, Sharpe, max drawdown)
+    - P&L metrics (total, Sharpe, max drawdown) — inherited core
     - Hedging metrics (frequency, costs, tracking error)
-    - Greeks evolution metrics
-    - Risk metrics (VaR, CVaR)
+    - Risk metrics (VaR, CVaR) — inherited core
 
     Attributes:
         results: BacktestResults instance
     """
-
-    def __init__(self, results: "BacktestResults"):
-        """
-        Initialize metrics calculator.
-
-        Args:
-            results: BacktestResults instance
-        """
-        self.results = results
-        self._returns_series: Optional[pd.Series] = None
-
-    @property
-    def returns_series(self) -> pd.Series:
-        """Get returns time series (cached)."""
-        if self._returns_series is None:
-            value_series = self.results.get_value_series()
-            if len(value_series) > 1:
-                self._returns_series = value_series.pct_change().dropna()
-            else:
-                self._returns_series = pd.Series()
-        return self._returns_series
-
-    # =========================================================================
-    # P&L Metrics
-    # =========================================================================
-
-    def total_pnl(self) -> float:
-        """Total P&L."""
-        return self.results.get_total_pnl()
-
-    def total_return(self) -> float:
-        """Total return as decimal."""
-        return self.results.get_total_return()
-
-    def sharpe_ratio(
-        self, risk_free_rate: float = 0.0, annualization_factor: int = 252
-    ) -> float:
-        """
-        Calculate Sharpe ratio.
-
-        Args:
-            risk_free_rate: Risk-free rate (annualized)
-            annualization_factor: Days per year for annualization
-
-        Returns:
-            Sharpe ratio
-        """
-        if len(self.returns_series) < 2:
-            return 0.0
-
-        excess_returns = self.returns_series - (risk_free_rate / annualization_factor)
-
-        if excess_returns.std() == 0:
-            return 0.0
-
-        sharpe = (excess_returns.mean() / excess_returns.std()) * np.sqrt(
-            annualization_factor
-        )
-        return sharpe
-
-    def max_drawdown(self) -> float:
-        """
-        Calculate maximum drawdown.
-
-        Returns:
-            Maximum drawdown as positive decimal (e.g., 0.15 = 15% drawdown)
-        """
-        value_series = self.results.get_value_series()
-        if len(value_series) < 2:
-            return 0.0
-
-        cumulative_max = value_series.expanding().max()
-        drawdown = (value_series - cumulative_max) / cumulative_max
-        max_dd = abs(drawdown.min())
-
-        return max_dd
-
-    def max_drawdown_duration(self) -> Optional[pd.Timedelta]:
-        """
-        Calculate maximum drawdown duration.
-
-        Returns:
-            Maximum time spent in drawdown
-        """
-        value_series = self.results.get_value_series()
-        if len(value_series) < 2:
-            return None
-
-        cumulative_max = value_series.expanding().max()
-        is_in_drawdown = value_series < cumulative_max
-
-        # Find consecutive drawdown periods
-        drawdown_periods = []
-        current_start = None
-
-        for timestamp, in_dd in is_in_drawdown.items():
-            if in_dd and current_start is None:
-                current_start = timestamp
-            elif not in_dd and current_start is not None:
-                drawdown_periods.append(timestamp - current_start)
-                current_start = None
-
-        if len(drawdown_periods) == 0:
-            return pd.Timedelta(0)
-
-        return max(drawdown_periods)
-
-    def win_rate(self) -> float:
-        """
-        Calculate win rate (proportion of positive return periods).
-
-        Returns:
-            Win rate as decimal (0-1)
-        """
-        if len(self.returns_series) == 0:
-            return 0.0
-
-        winning_periods = (self.returns_series > 0).sum()
-        total_periods = len(self.returns_series)
-
-        return winning_periods / total_periods
-
-    def profit_factor(self) -> float:
-        """
-        Calculate profit factor (gross profit / gross loss).
-
-        Returns:
-            Profit factor
-        """
-        if len(self.returns_series) == 0:
-            return 0.0
-
-        gross_profit = self.returns_series[self.returns_series > 0].sum()
-        gross_loss = abs(self.returns_series[self.returns_series < 0].sum())
-
-        if gross_loss == 0:
-            return float("inf") if gross_profit > 0 else 0.0
-
-        return gross_profit / gross_loss
 
     # =========================================================================
     # Hedging Metrics
@@ -261,77 +126,6 @@ class PerformanceMetrics:
             if self.results.num_hedges > 0
             else 0.0
         )
-
-    # =========================================================================
-    # Risk Metrics
-    # =========================================================================
-
-    def value_at_risk(self, confidence_level: float = 0.95) -> float:
-        """
-        Calculate Value at Risk (VaR).
-
-        Args:
-            confidence_level: Confidence level (e.g., 0.95 for 95% VaR)
-
-        Returns:
-            VaR as positive value
-        """
-        if len(self.returns_series) < 2:
-            return 0.0
-
-        var = abs(self.returns_series.quantile(1 - confidence_level))
-        return var
-
-    def conditional_var(self, confidence_level: float = 0.95) -> float:
-        """
-        Calculate Conditional VaR (CVaR or Expected Shortfall).
-
-        Args:
-            confidence_level: Confidence level
-
-        Returns:
-            CVaR as positive value
-        """
-        if len(self.returns_series) < 2:
-            return 0.0
-
-        var = self.value_at_risk(confidence_level)
-        cvar = abs(self.returns_series[self.returns_series <= -var].mean())
-
-        return cvar if not np.isnan(cvar) else 0.0
-
-    def volatility(self, annualization_factor: int = 252) -> float:
-        """
-        Calculate annualized volatility.
-
-        Args:
-            annualization_factor: Days per year
-
-        Returns:
-            Annualized volatility
-        """
-        if len(self.returns_series) < 2:
-            return 0.0
-
-        return self.returns_series.std() * np.sqrt(annualization_factor)
-
-    def skewness(self) -> float:
-        """Calculate returns skewness."""
-        if len(self.returns_series) < 3:
-            return 0.0
-
-        return stats.skew(self.returns_series.dropna())
-
-    def kurtosis(self) -> float:
-        """Calculate returns kurtosis (excess kurtosis)."""
-        if len(self.returns_series) < 4:
-            return 0.0
-
-        return stats.kurtosis(self.returns_series.dropna())
-
-    # =========================================================================
-    # Comprehensive Report
-    # =========================================================================
 
     def calculate_all_metrics(self) -> Dict[str, Any]:
         """

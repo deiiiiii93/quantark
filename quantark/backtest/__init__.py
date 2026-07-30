@@ -60,6 +60,7 @@ from quantark.backtest.transaction_costs import (
 
 # Product-replay backtests (canonical home; quantark.backtest.otc is a
 # deprecated alias package until 0.5.0)
+from quantark.backtest.metrics import CorePerformanceMetrics
 from quantark.backtest.replay import (
     ReplayBacktestConfig,
     ReplayBacktestEngine,

@@ -145,6 +145,13 @@ class AutocallableBacktestResults:
             actions = actions.rename(columns={"action_type": "event_type"})
         return actions
 
+    @property
+    def metrics(self):
+        """Cross-asset performance metrics over the protocol accessors."""
+        from quantark.backtest.metrics import CorePerformanceMetrics
+
+        return CorePerformanceMetrics(self)
+
     def get_summary(self) -> dict[str, Any]:
         states = self.states_df
         if states.empty:
@@ -231,6 +238,55 @@ class BookBacktestResults:
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(path, self.calibration_records)
+
+    # ------------------------------------------------------------------
+    # BaseBacktestResults protocol adapters (book-level series)
+    # ------------------------------------------------------------------
+
+    def get_total_pnl(self):
+        states = self.states_df()
+        if states.empty or "total_pnl" not in states.columns:
+            return 0.0
+        return float(states["total_pnl"].iloc[-1])
+
+    def get_total_return(self):
+        states = self.states_df()
+        if states.empty or "portfolio_value" not in states.columns:
+            return 0.0
+        initial = float(states["portfolio_value"].iloc[0])
+        if initial == 0.0:
+            return 0.0
+        return self.get_total_pnl() / initial
+
+    def get_pnl_series(self):
+        states = self.states_df()
+        if states.empty or "total_pnl" not in states.columns:
+            return pd.Series(dtype=float)
+        return states.set_index("date")["total_pnl"]
+
+    def get_value_series(self):
+        states = self.states_df()
+        if states.empty or "portfolio_value" not in states.columns:
+            return pd.Series(dtype=float)
+        return states.set_index("date")["portfolio_value"]
+
+    def get_hedge_trades(self):
+        return self.trades_df()
+
+    def get_lifecycle_events(self):
+        actions = self.actions_df()
+        if actions.empty:
+            return actions
+        if "action_type" in actions.columns:
+            actions = actions.rename(columns={"action_type": "event_type"})
+        return actions
+
+    @property
+    def metrics(self):
+        """Cross-asset performance metrics over the protocol accessors."""
+        from quantark.backtest.metrics import CorePerformanceMetrics
+
+        return CorePerformanceMetrics(self)
 
     def get_summary(self):
         states = self.states_df()
