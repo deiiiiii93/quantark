@@ -64,6 +64,9 @@ class ReplayBacktestEngine:
         self._start_date: Optional[pd.Timestamp] = None
 
         self._calibration_records: list[dict[str, Any]] = []
+        # Per-product per-day rows (position_id-ordered within each day);
+        # the single-product wrapper builds its legacy frames from these.
+        self._product_daily: list[dict[str, Any]] = []
         # Per-day vol-model calibration (mirrors the single engine): the
         # calibrator is keyed by surface artifact sha; each priced day swaps
         # every replay's pricing engine for a fresh vol-model engine wired to
@@ -189,7 +192,9 @@ class ReplayBacktestEngine:
             book_product_mtm = 0.0
             book_cashflows = 0.0
 
-            for quantity, replay in zip(self._quantities, self._replays):
+            for bp, quantity, replay in zip(
+                self.config.products, self._quantities, self._replays
+            ):
                 lifecycle_product = replay.product_for_lifecycle()
                 replay.apply_lifecycle_events(
                     date, lifecycle_product, env, market["spot"]
@@ -198,6 +203,8 @@ class ReplayBacktestEngine:
                     date, lifecycle_product, env, market["spot"]
                 )
 
+                price = 0.0
+                greeks: dict[str, float] = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
                 if replay.lifecycle.alive:
                     product = replay.product_for_date(date, env)
                     price = float(replay.pricing_engine.price(product, env))
@@ -215,6 +222,22 @@ class ReplayBacktestEngine:
                     net_position_delta += float(greeks.get("delta", 0.0)) * quantity
                     net_position_gamma += float(greeks.get("gamma", 0.0)) * quantity
                     book_product_mtm += quantity * price
+
+                provenance = getattr(replay, "last_surface_provenance", None)
+                self._product_daily.append(
+                    {
+                        "date": date,
+                        "position_id": bp.position_id,
+                        "price": price,
+                        "greeks": dict(greeks),
+                        "alive": replay.lifecycle.alive,
+                        "knocked_in": replay.lifecycle.knocked_in,
+                        "knocked_out": replay.lifecycle.knocked_out,
+                        "matured": replay.lifecycle.matured,
+                        "realized_cashflows": replay.lifecycle.realized_cashflows,
+                        "provenance": dict(provenance) if provenance else None,
+                    }
+                )
 
                 book_cashflows += replay.lifecycle.realized_cashflows
 
