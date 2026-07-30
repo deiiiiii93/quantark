@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from quantark.execution.errors import CapabilityError
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.exceptions import ValidationError
 
@@ -44,6 +45,7 @@ def _cap(
     supported: bool,
     supports_market_vol_term_structure: bool,
     notes: str,
+    settlement_support: SettlementSupport = SettlementSupport.NONE,
 ) -> EngineCapability:
     return EngineCapability(
         engine_type=engine_type,
@@ -54,6 +56,7 @@ def _cap(
         supports_market_vol_term_structure=supports_market_vol_term_structure,
         supports_path_dependent_payoff=supported,
         notes=notes,
+        settlement_support=settlement_support,
     )
 
 
@@ -64,6 +67,7 @@ _CAPABILITIES = {
         True,
         True,
         "BSM MC consumes per-step r, carry, and Black step vols.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.BSM, EngineType.PDE): _cap(
         VolDynamicsType.BSM,
@@ -71,6 +75,7 @@ _CAPABILITIES = {
         True,
         True,
         "BSM PDE consumes per-step r, carry, and Black step vols.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.BSM, EngineType.QUADRATURE): _cap(
         VolDynamicsType.BSM,
@@ -78,6 +83,7 @@ _CAPABILITIES = {
         True,
         True,
         "BSM QUAD consumes per-observation r, carry, and Black step vols.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.LOCAL_VOL, EngineType.MONTE_CARLO): _cap(
         VolDynamicsType.LOCAL_VOL,
@@ -85,6 +91,7 @@ _CAPABILITIES = {
         True,
         True,
         "Local Vol MC consumes per-step r/carry and a LocalVolSurface.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.LOCAL_VOL, EngineType.PDE): _cap(
         VolDynamicsType.LOCAL_VOL,
@@ -92,6 +99,7 @@ _CAPABILITIES = {
         True,
         True,
         "Local Vol PDE consumes per-step r/carry and a LocalVolSurface.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.LOCAL_VOL, EngineType.QUADRATURE): _cap(
         VolDynamicsType.LOCAL_VOL,
@@ -106,6 +114,7 @@ _CAPABILITIES = {
         True,
         False,
         "Heston MC consumes per-step r/carry; volatility dynamics are HestonParams, not pricing_env.vol_surface.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.HESTON, EngineType.PDE): _cap(
         VolDynamicsType.HESTON,
@@ -113,6 +122,7 @@ _CAPABILITIES = {
         True,
         False,
         "Heston PDE consumes per-step r/carry for path-dependent ADI; volatility dynamics are HestonParams.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.HESTON, EngineType.QUADRATURE): _cap(
         VolDynamicsType.HESTON,
@@ -127,6 +137,7 @@ _CAPABILITIES = {
         True,
         False,
         "SLV MC consumes per-step r/carry plus HestonParams, LocalVolSurface, and LeverageSurface artifacts.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.SLV, EngineType.PDE): _cap(
         VolDynamicsType.SLV,
@@ -134,6 +145,7 @@ _CAPABILITIES = {
         True,
         False,
         "SLV PDE consumes per-step r/carry plus HestonParams, LocalVolSurface, and LeverageSurface artifacts.",
+        SettlementSupport.TERMINAL_ONLY,
     ),
     (VolDynamicsType.SLV, EngineType.QUADRATURE): _cap(
         VolDynamicsType.SLV,
@@ -184,5 +196,5 @@ def get_engine_capability(dynamics_type, engine_type) -> EngineCapability:
 def validate_engine_capability(dynamics_type, engine_type) -> EngineCapability:
     cap = get_engine_capability(dynamics_type, engine_type)
     if not cap.supported:
-        raise ValidationError(cap.notes)
+        raise CapabilityError(cap.notes)
     return cap

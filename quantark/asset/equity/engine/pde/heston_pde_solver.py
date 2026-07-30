@@ -7,6 +7,13 @@ from typing import Dict, Optional, Union
 from copy import deepcopy
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.param.rrf import ParallelShiftRateCurve
@@ -30,6 +37,8 @@ class HestonPDESolver(BaseEngine):
     """
 
     engine_type = EngineType.PDE
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     def __init__(self, model_params: HestonParams,
                  scheme: Union[ADIScheme, str] = ADIScheme.CRAIG_SNEYD,
@@ -66,14 +75,38 @@ class HestonPDESolver(BaseEngine):
         )
         return unit * float(getattr(product, "contract_multiplier", 1.0))
 
-    def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
-        return self._price(product, pricing_env)
+    def price(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> float:
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+        return (
+            self._price(product, pricing_env) * timing.delay_df
+            + pending_receivable_pv(lifecycle_state, pricing_env)
+        )
 
-    def calculate_greeks(self, product: BaseEquityProduct,
-                         pricing_env: PricingEnvironment) -> Dict[str, float]:
+    def calculate_greeks(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> Dict[str, float]:
         from quantark.asset.equity.product.option import EuropeanVanillaOption
         if not isinstance(product, EuropeanVanillaOption):
             raise PricingError("HestonPDESolver supports EuropeanVanillaOption only")
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
+        timing = resolve_terminal_timing(product, pricing_env)
         T = float(product.get_maturity(pricing_env))
         if T <= 0:
             raise ValidationError("maturity must be positive")
@@ -89,16 +122,24 @@ class HestonPDESolver(BaseEngine):
             n_x=self.n_x, n_v=self.n_v, n_t=self.n_t, scheme=self.scheme, use_sparse=self.use_sparse,
         )
         greeks: Dict[str, float] = {
-            "price": price * mult, "delta": delta * mult, "gamma": gamma * mult,
+            "price": (
+                price * mult * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            ),
+            "delta": delta * mult * timing.delay_df,
+            "gamma": gamma * mult * timing.delay_df,
         }
 
         # rho via bumped rate curve (reprice); theta via shrunk maturity (reprice).
-        base = price * mult
+        base = greeks["price"]
         env_ru = deepcopy(pricing_env)
         env_ru.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, bump.rate_bump)
         env_rd = deepcopy(pricing_env)
         env_rd.rate_curve = ParallelShiftRateCurve(pricing_env.rate_curve, -bump.rate_bump)
-        greeks["rho"] = (self._price(product, env_ru) - self._price(product, env_rd)) / (2.0 * bump.rate_bump) / 100.0
+        greeks["rho"] = (
+            self.price(product, env_ru, lifecycle_state=lifecycle_state)
+            - self.price(product, env_rd, lifecycle_state=lifecycle_state)
+        ) / (2.0 * bump.rate_bump) / 100.0
 
         # Theta: shrink a float maturity; for date-based products advance the valuation date.
         maturity_attr = getattr(product, "maturity", None)
@@ -106,10 +147,24 @@ class HestonPDESolver(BaseEngine):
             eff = min(bump.time_bump_days / 365.0, 0.5 * float(maturity_attr))
             shifted = deepcopy(product)
             shifted.maturity = float(maturity_attr) - eff
-            greeks["theta"] = (self._price(shifted, pricing_env) - base) / (eff * 365.0)
+            greeks["theta"] = (
+                self.price(
+                    shifted,
+                    pricing_env,
+                    lifecycle_state=lifecycle_state,
+                )
+                - base
+            ) / (eff * 365.0)
         else:
             from datetime import timedelta
             env_fut = deepcopy(pricing_env)
             env_fut.valuation_date = pricing_env.valuation_date + timedelta(days=bump.time_bump_days)
-            greeks["theta"] = (self._price(product, env_fut) - base) / bump.time_bump_days
+            greeks["theta"] = (
+                self.price(
+                    product,
+                    env_fut,
+                    lifecycle_state=lifecycle_state,
+                )
+                - base
+            ) / bump.time_bump_days
         return greeks

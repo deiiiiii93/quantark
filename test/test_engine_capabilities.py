@@ -5,8 +5,8 @@ from quantark.asset.equity.engine.capabilities import (
     get_engine_capability,
     validate_engine_capability,
 )
+from quantark.execution.errors import CapabilityError
 from quantark.util.enum.engine_enums import EngineType
-from quantark.util.exceptions import ValidationError
 
 
 def test_bsm_quad_is_supported_and_term_structured():
@@ -30,7 +30,7 @@ def test_vol_model_quad_routes_are_explicitly_unsupported(dynamics):
     cap = get_engine_capability(dynamics, EngineType.QUADRATURE)
 
     assert cap.supported is False
-    with pytest.raises(ValidationError, match="QUAD is not supported"):
+    with pytest.raises(CapabilityError, match="QUAD is not supported"):
         validate_engine_capability(dynamics, EngineType.QUADRATURE)
 
 

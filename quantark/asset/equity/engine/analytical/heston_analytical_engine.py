@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import Dict, Optional, Union
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.localvol_greeks import local_vol_model_greeks
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import EngineParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.priceenv import PricingEnvironment
@@ -42,6 +49,8 @@ class HestonAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     def __init__(self, model_params: HestonParams,
                  method: Union[str, HestonAnalyticalMethod, tuple, None] = None,
@@ -52,10 +61,21 @@ class HestonAnalyticalEngine(BaseEngine):
         self.model_params = model_params
         self.method = _resolve_method(method)
 
-    def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
+    def price(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> float:
         from quantark.asset.equity.product.option import EuropeanVanillaOption
         if not isinstance(product, EuropeanVanillaOption):
             raise PricingError("HestonAnalyticalEngine supports EuropeanVanillaOption only")
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
         T = float(product.get_maturity(pricing_env))
         if T <= 0:
             raise ValidationError("maturity must be positive")
@@ -67,13 +87,34 @@ class HestonAnalyticalEngine(BaseEngine):
             unit = heston_call_price(s0, k, T, self.model_params, r, carry, method=self.method)
         else:
             unit = heston_put_price(s0, k, T, self.model_params, r, carry, method=self.method)
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        return (
+            unit
+            * float(getattr(product, "contract_multiplier", 1.0))
+            * timing.delay_df
+            + pending_receivable_pv(lifecycle_state, pricing_env)
+        )
 
-    def calculate_greeks(self, product: BaseEquityProduct,
-                         pricing_env: PricingEnvironment) -> Dict[str, float]:
+    def calculate_greeks(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> Dict[str, float]:
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
         bump = self.params.get_effective_bump_config()
         return local_vol_model_greeks(
-            lambda p, e, _surface: self.price(p, e), product, pricing_env, None,
+            lambda p, e, _surface: self.price(
+                p,
+                e,
+                lifecycle_state=lifecycle_state,
+            ),
+            product,
+            pricing_env,
+            None,
             spot_bump=bump.spot_bump, rate_bump=bump.rate_bump,
             theta_days=bump.time_bump_days,
         )

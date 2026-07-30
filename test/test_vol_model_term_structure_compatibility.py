@@ -7,6 +7,7 @@ from quantark.asset.equity.engine.capabilities import (
     VolDynamicsType,
     validate_engine_capability,
 )
+from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.engine.pde import (
     HestonBarrierPDESolver,
     HestonPhoenixPDESolver,
@@ -290,5 +291,5 @@ def test_slv_phoenix_pde_sees_non_flat_rate_and_carry():
     [VolDynamicsType.LOCAL_VOL, VolDynamicsType.HESTON, VolDynamicsType.SLV],
 )
 def test_vol_model_quad_requests_are_rejected(dynamics):
-    with pytest.raises(ValidationError, match="QUAD is not supported"):
+    with pytest.raises(CapabilityError, match="QUAD is not supported"):
         validate_engine_capability(dynamics, EngineType.QUADRATURE)

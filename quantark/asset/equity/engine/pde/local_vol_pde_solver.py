@@ -7,7 +7,14 @@ from typing import Dict, Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.localvol_greeks import local_vol_model_greeks
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.param import GridVolSurface
@@ -29,6 +36,8 @@ class LocalVolPDESolver(BaseEngine):
     """
 
     engine_type = EngineType.PDE
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     def __init__(self, params: Optional[PDEParams] = None,
                  local_vol_surface: Optional[LocalVolSurface] = None):
@@ -71,11 +80,49 @@ class LocalVolPDESolver(BaseEngine):
         )
         return unit * float(getattr(product, "contract_multiplier", 1.0))
 
-    def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
-        return self._price_with_surface(product, pricing_env, self._build_surface(pricing_env))
+    def _price_with_settlement(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        lv: LocalVolSurface,
+        lifecycle_state=None,
+    ) -> float:
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+        return (
+            self._price_with_surface(product, pricing_env, lv)
+            * timing.delay_df
+            + pending_receivable_pv(lifecycle_state, pricing_env)
+        )
 
-    def calculate_greeks(self, product: BaseEquityProduct,
-                         pricing_env: PricingEnvironment) -> Dict[str, float]:
+    def price(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> float:
+        return self._price_with_settlement(
+            product,
+            pricing_env,
+            self._build_surface(pricing_env),
+            lifecycle_state,
+        )
+
+    def calculate_greeks(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> Dict[str, float]:
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return {"price": fixed_pv, "delta": 0.0, "gamma": 0.0}
         lv = self._build_surface(pricing_env)
         bump = self.params.get_effective_bump_config()
         # Pin the spatial grid (s_max) across spot bumps so finite differences are not
@@ -86,7 +133,15 @@ class LocalVolPDESolver(BaseEngine):
         self._greeks_smax = base_smax
         try:
             return local_vol_model_greeks(
-                self._price_with_surface, product, pricing_env, lv,
+                lambda p, e, surface: self._price_with_settlement(
+                    p,
+                    e,
+                    surface,
+                    lifecycle_state,
+                ),
+                product,
+                pricing_env,
+                lv,
                 spot_bump=bump.spot_bump, rate_bump=bump.rate_bump,
                 theta_days=bump.time_bump_days,
             )
