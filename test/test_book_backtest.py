@@ -54,6 +54,9 @@ def _single_config(market):
         product_quantity=-350.0, underlying="CSI500",
         start_date=datetime(2024, 1, 2), end_date=datetime(2024, 4, 30),
         calculate_surfaces=False, calculate_event_probabilities=False,
+        # Characterization anchors span the full window; pin the pre-0.5
+        # termination behavior (terminate_on_lifecycle_end now defaults True).
+        terminate_on_lifecycle_end=False,
     )
 
 
@@ -123,6 +126,7 @@ def test_book_of_one_matches_single_product(single_summary):
         end_date=datetime(2024, 4, 30),
         calculate_surfaces=False,
         calculate_event_probabilities=False,
+        terminate_on_lifecycle_end=False,
     )
     book = BookAutocallableBacktestEngine(cfg).run().get_summary()
     assert book["num_days"] == single_summary["num_days"]      # 86
@@ -161,6 +165,7 @@ def test_offsetting_products_net_to_near_zero_hedge():
         start_date=datetime(2024, 1, 2),
         end_date=datetime(2024, 4, 30),
         calculate_event_probabilities=False,
+        terminate_on_lifecycle_end=False,
     )
     summary = BookAutocallableBacktestEngine(cfg).run().get_summary()
     assert summary["num_products"] == 2
@@ -198,6 +203,7 @@ def test_spot_hedge_mode_runs():
         start_date=datetime(2024, 1, 2),
         end_date=datetime(2024, 4, 30),
         calculate_event_probabilities=False,
+        terminate_on_lifecycle_end=False,
     )
     results = BookAutocallableBacktestEngine(cfg).run()
     summary = results.get_summary()
@@ -229,6 +235,7 @@ def test_book_backtest_supports_european_quad_engine():
         end_date=datetime(2024, 1, 31),
         calculate_surfaces=False,
         calculate_event_probabilities=False,
+        terminate_on_lifecycle_end=False,
     )
 
     summary = BookAutocallableBacktestEngine(cfg).run().get_summary()

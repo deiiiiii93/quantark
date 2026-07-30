@@ -42,6 +42,30 @@ from .market import (
 logger = logging.getLogger(__name__)
 
 
+def _env_with(
+    env: PricingEnvironment,
+    *,
+    spot: Optional[float] = None,
+    div_yield: Any = None,
+    underlying: str = "",
+) -> PricingEnvironment:
+    """Shallow env variant: shares the (immutable-by-convention) vol surface,
+    rate curve, and basis yield; replaces only spot/dividend. Replaces the
+    deepcopy-per-node pattern, which cloned entire smile-grid surfaces."""
+    return PricingEnvironment(
+        spot_quote=(
+            SpotQuote(spot=float(spot), asset_name=underlying)
+            if spot is not None
+            else env.spot_quote
+        ),
+        vol_surface=env.vol_surface,
+        rate_curve=env.rate_curve,
+        div_yield=div_yield if div_yield is not None else env.div_yield,
+        basis_yield=env.basis_yield,
+        valuation_date=env.valuation_date,
+    )
+
+
 class ProductReplay:
     """
     Per-product daily replay logic for a single autocallable product.
@@ -294,9 +318,12 @@ class ProductReplay:
 
         for s in spot_grid:
             for q in q_grid:
-                surf_env = deepcopy(env)
-                surf_env.spot_quote = SpotQuote(spot=float(s), asset_name=self.underlying)
-                surf_env.div_yield = SignedDividendYield(float(q))
+                surf_env = _env_with(
+                    env,
+                    spot=float(s),
+                    div_yield=SignedDividendYield(float(q)),
+                    underlying=self.underlying,
+                )
                 try:
                     greeks = self.surface_engine.calculate_greeks(product, surf_env)
                     delta = float(greeks.get("delta", np.nan))

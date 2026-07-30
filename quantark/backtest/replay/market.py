@@ -183,8 +183,16 @@ class AutocallableMarketDataSet:
 
     def get_futures_slice(self, date: pd.Timestamp) -> pd.DataFrame:
         date = pd.Timestamp(date).normalize()
-        rows = self.futures_data[self.futures_data["date"] == date]
-        if rows.empty:
+        by_date = getattr(self, "_futures_by_date", None)
+        if by_date is None:
+            # Grouped once (lazily): the per-day boolean filter over the full
+            # chain was O(total_rows) per replay day.
+            by_date = {
+                key: frame for key, frame in self.futures_data.groupby("date")
+            }
+            object.__setattr__(self, "_futures_by_date", by_date)
+        rows = by_date.get(date)
+        if rows is None or rows.empty:
             raise ValidationError(f"No futures data for {date.date()}")
         return rows.copy()
 

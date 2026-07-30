@@ -303,6 +303,8 @@ def test_synthetic_snowball_backtest_outputs_daily_records_and_events():
         surface_config=SurfaceGridConfig(spot_nodes=3, q_nodes=3),
         calculate_surfaces=True,
         calculate_event_probabilities=True,
+        # Records over the full window: pin the pre-0.5 termination behavior.
+        terminate_on_lifecycle_end=False,
         product_quantity=-1.0,
         underlying="CSI500",
     )
