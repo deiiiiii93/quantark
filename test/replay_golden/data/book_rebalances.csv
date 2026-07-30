@@ -1,6 +1,6 @@
-index,date,active_contract,current_contracts,target_contracts,trade_contracts,should_rebalance,threshold_status,no_trade_reason,reason
-0,2024-01-02,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band
-1,2024-01-03,IF2402,1.0,1.0,1.0,True,outside_band,,delta_rebalance
-2,2024-01-04,IF2402,0.0,0.0,-1.0,True,outside_band,,product_terminated
-3,2024-01-05,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band
-4,2024-01-06,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band
+date,active_contract,current_contracts,target_contracts,trade_contracts,should_rebalance,threshold_status,no_trade_reason,reason
+2024-01-02,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band
+2024-01-03,IF2402,1.0,1.0,1.0,True,outside_band,,delta_rebalance
+2024-01-04,IF2402,0.0,0.0,-1.0,True,outside_band,,product_terminated
+2024-01-05,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band
+2024-01-06,IF2402,0.0,0.0,0.0,False,inside_band,inside_band,inside_band

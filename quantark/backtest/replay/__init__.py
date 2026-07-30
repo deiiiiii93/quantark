@@ -8,6 +8,8 @@ names remain as compatible aliases (single-product API in ``single.py``).
 
 from .config import (
     AutocallableEngineConfig,
+    ReplayBacktestConfig,
+    ReplayProduct,
     BookAutocallableBacktestConfig,
     BookProduct,
     HedgeSpec,
@@ -15,7 +17,7 @@ from .config import (
     VolModelCalibrationConfig,
 )
 from .dashboard import AutocallableBacktestDashboard, AutocallableDashboardConfig
-from .engine import BookAutocallableBacktestEngine
+from .engine import BookAutocallableBacktestEngine, ReplayBacktestEngine
 from .engine_factory import (
     create_autocallable_engine,
     create_event_stats_engine,
@@ -35,7 +37,11 @@ from .market import (
     normalize_time_series,
 )
 from .config import AutocallableBacktestConfig
-from .results import AutocallableBacktestResults, BookBacktestResults
+from .results import (
+    AutocallableBacktestResults,
+    BookBacktestResults,
+    ReplayBacktestResults,
+)
 from .single import AutocallableBacktestEngine
 from .strategy_state import (
     AutocallableDeltaHedgeStrategy,
@@ -44,12 +50,6 @@ from .strategy_state import (
 )
 from quantark.backtest.futures_ledger import FuturesRollPolicy
 
-# Canonical aliases (renamed in place during unification; both names are
-# permanent public API for the 0.4.x line).
-ReplayBacktestEngine = BookAutocallableBacktestEngine
-ReplayBacktestConfig = BookAutocallableBacktestConfig
-ReplayProduct = BookProduct
-ReplayBacktestResults = BookBacktestResults
 
 __all__ = [
     "AKShareAutocallableDataAdapter",

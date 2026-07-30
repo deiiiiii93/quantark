@@ -3,25 +3,33 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
+import time
+
 import pandas as pd
 
 from quantark.util.exceptions import ValidationError
 from .config import (
     AutocallableEngineConfig,
-    BookAutocallableBacktestConfig,
-    BookProduct,
     HedgeSpec,
+    ReplayBacktestConfig,
+    ReplayProduct,
     SurfaceGridConfig,
 )
 from .market import AutocallableMarketDataSet, ImpliedBasisYield, SignedDividendYield
 from .strategy_state import AutocallableDeltaHedgeStrategy, AutocallableLifecycleState, FuturesHedgePosition
 from quantark.backtest.transaction_costs import TransactionCostModel, ZeroCostModel
-from .engine_factory import create_pricing_engine, create_surface_engine, create_event_stats_engine
+from .engine_factory import (
+    create_event_stats_engine,
+    create_pricing_engine,
+    create_surface_engine,
+    create_vol_model_engine,
+)
+from quantark.volmodels.calibration import VolModelCalibrator
 from .product_replay import ProductReplay
 from .results import BookBacktestResults
 
 
-class BookAutocallableBacktestEngine:
+class ReplayBacktestEngine:
     """
     Per-underlying multi-product net-delta hedging backtest engine.
 
@@ -36,7 +44,7 @@ class BookAutocallableBacktestEngine:
     :class:`AutocallableBacktestEngine` run.
     """
 
-    def __init__(self, config: BookAutocallableBacktestConfig):
+    def __init__(self, config: ReplayBacktestConfig):
         self.config = config
         self.strategy = config.strategy
         self.hedge = config.hedge
@@ -54,6 +62,22 @@ class BookAutocallableBacktestEngine:
         self._initial_book_value: Optional[float] = None
         self._transaction_costs: float = 0.0
         self._start_date: Optional[pd.Timestamp] = None
+
+        self._calibration_records: list[dict[str, Any]] = []
+        # Per-day vol-model calibration (mirrors the single engine): the
+        # calibrator is keyed by surface artifact sha; each priced day swaps
+        # every replay's pricing engine for a fresh vol-model engine wired to
+        # that day's calibrated model.
+        self._calibrator = None
+        if config.engine_config.vol_model != "bsm":
+            if getattr(config.market_data, "surface_history", None) is None:
+                raise ValidationError(
+                    "vol_model != 'bsm' requires market_data.surface_history "
+                    "(per-day vol-model calibration is keyed by surface artifact)"
+                )
+            self._calibrator = VolModelCalibrator(
+                config.engine_config.vol_model_calibration
+            )
 
         self._replays: list[ProductReplay] = []
         self._quantities: list[float] = []
@@ -135,6 +159,18 @@ class BookAutocallableBacktestEngine:
                 env.basis_yield = ImpliedBasisYield(0.0)
             pricing_q = self._replays[0].pricing_dividend_yield(implied_q)
 
+            # Vol-model variants: calibrate once per surface artifact and swap
+            # every replay's engine before ANY pricing of the day (initial
+            # price, base price, bumped greeks) so the whole day is
+            # model-consistent. Skipped once all products are dead.
+            day_calibration_record = None
+            if self._calibrator is not None and (
+                any(r.lifecycle.alive for r in self._replays)
+                or self._initial_book_value is None
+            ):
+                day_calibration_record = self._calibrate_day(date)
+            pricing_started = time.perf_counter()
+
             # Initial book value: priced BEFORE lifecycle on the first day,
             # mirroring the single engine's pre-lifecycle initial value.
             if self._initial_book_value is None:
@@ -184,6 +220,12 @@ class BookAutocallableBacktestEngine:
 
             any_alive = any(replay.lifecycle.alive for replay in self._replays)
 
+            if day_calibration_record is not None:
+                day_calibration_record["pricing_seconds"] = (
+                    time.perf_counter() - pricing_started
+                )
+                self._calibration_records.append(day_calibration_record)
+
             pre_hedge_contracts = self.hedge_position.quantity
             self._rebalance(
                 date, selected, net_position_delta, multiplier, any_alive
@@ -207,6 +249,7 @@ class BookAutocallableBacktestEngine:
 
         return BookBacktestResults(
             config=self.config,
+            calibration_records=self._calibration_records,
             states=self._states,
             greeks=self._greeks,
             rebalances=self._rebalances,
@@ -225,6 +268,31 @@ class BookAutocallableBacktestEngine:
                 for bp in self.config.products
             ],
         )
+
+    def _calibrate_day(self, date: pd.Timestamp) -> dict[str, Any]:
+        """Calibrate the day's vol model and swap in per-replay day engines.
+
+        One calibration per day (the surface artifact is shared across the
+        book); each replay gets a fresh engine built from the same frozen
+        CalibratedVolModel — engine construction is cheap, calibration is the
+        cached expensive step. Any failure propagates (fail-closed).
+        """
+        engine_config = self.config.engine_config
+        artifact = self.config.market_data.surface_history.surface_for(date)
+        calibrated = self._calibrator.calibrate(engine_config.vol_model, artifact)
+        for replay in self._replays:
+            replay.pricing_engine = create_vol_model_engine(
+                vol_model=engine_config.vol_model,
+                solver=engine_config.vol_model_solver,
+                calibrated=calibrated,
+                pde_params=engine_config.pde_params,
+                mc_params=engine_config.mc_params,
+                mc_method=engine_config.resolve_vol_model_mc_method(),
+                engine_options=engine_config.vol_model_engine_options,
+            )
+        record = dict(calibrated.record)
+        record["date"] = pd.Timestamp(date).date().isoformat()
+        return record
 
     def _backtest_dates(self) -> pd.DatetimeIndex:
         dates = self.config.market_data.dates
@@ -486,3 +554,6 @@ class BookAutocallableBacktestEngine:
             }
         )
 
+
+# Compatible alias (canonical name above).
+BookAutocallableBacktestEngine = ReplayBacktestEngine

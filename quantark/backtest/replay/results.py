@@ -188,7 +188,8 @@ class AutocallableBacktestResults:
 
 class BookBacktestResults:
     def __init__(self, *, config, states, greeks, rebalances, trades, actions,
-                 daily_event_summary, event_probabilities, surfaces, products_meta):
+                 daily_event_summary, event_probabilities, surfaces, products_meta,
+                 calibration_records=None):
         self.config = config
         self._states = states
         self._greeks = greeks
@@ -199,6 +200,7 @@ class BookBacktestResults:
         self._event_probabilities = event_probabilities
         self._surfaces = surfaces
         self._products_meta = products_meta
+        self._calibration_records = [dict(r) for r in (calibration_records or [])]
 
     @staticmethod
     def _frame(rows, index=None):
@@ -215,6 +217,20 @@ class BookBacktestResults:
     def daily_event_summary_df(self): return self._frame(self._daily_event_summary)
     def event_probability_df(self): return self._frame(self._event_probabilities)
     def surfaces_df(self): return self._frame(self._surfaces)
+
+    @property
+    def calibration_records(self):
+        """Per-day vol-model calibration records (empty for BSM runs)."""
+        return [dict(r) for r in self._calibration_records]
+
+    def export_calibration_records(self, filepath: str) -> None:
+        from pathlib import Path
+
+        from quantark.util.io import atomic_write_json
+
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(path, self.calibration_records)
 
     def get_summary(self):
         states = self.states_df()
@@ -235,3 +251,7 @@ class BookBacktestResults:
             "num_products": len(self._products_meta),
             "num_lifecycle_events": len(self._actions),
         }
+
+
+# Compatible alias set (canonical names above).
+ReplayBacktestResults = BookBacktestResults

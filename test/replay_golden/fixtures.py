@@ -312,6 +312,10 @@ def result_frames(results) -> dict[str, pd.DataFrame]:
                 f"no accessor among {candidates} on {type(results).__name__}"
             )
         df = df.reset_index()
+        # A RangeIndex leaves a literal "index" artifact column; only real
+        # index columns (date) are part of the contract.
+        if "index" in df.columns:
+            df = df.drop(columns=["index"])
         df = df.drop(columns=[c for c in TIMING_FIELDS if c in df.columns])
         frames[name] = df
     return frames

@@ -61,6 +61,11 @@ def test_frame_matches_golden(all_results, case, frame_name, tmp_path):
     actual_path = tmp_path / golden_path.name
     actual_df.to_csv(actual_path, index=False)
 
+    if golden_path.read_text().strip() == "":
+        # Frame recorded as genuinely empty (e.g. surfaces disabled): the
+        # actual frame must be empty too; there is nothing to parse.
+        assert actual_df.empty and len(actual_df.columns) == 0
+        return
     actual = pd.read_csv(actual_path)
     expected = pd.read_csv(golden_path)
     assert list(actual.columns) == list(expected.columns), (

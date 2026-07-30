@@ -274,7 +274,7 @@ class AutocallableBacktestConfig:
 
 
 @dataclass
-class BookProduct:
+class ReplayProduct:
     product: Any
     quantity: float
     position_id: int
@@ -283,9 +283,9 @@ class BookProduct:
 
     def __post_init__(self):
         if self.product is None:
-            raise ValidationError("BookProduct.product is required")
+            raise ValidationError("ReplayProduct.product is required")
         if self.quantity == 0:
-            raise ValidationError("BookProduct.quantity must be non-zero")
+            raise ValidationError("ReplayProduct.quantity must be non-zero")
 
 
 @dataclass
@@ -302,8 +302,8 @@ class HedgeSpec:
 
 
 @dataclass
-class BookAutocallableBacktestConfig:
-    products: list[BookProduct]
+class ReplayBacktestConfig:
+    products: list[ReplayProduct]
     market_data: AutocallableMarketDataSet
     hedge: HedgeSpec = field(default_factory=HedgeSpec)
     engine_config: AutocallableEngineConfig = field(default_factory=AutocallableEngineConfig)
@@ -322,8 +322,28 @@ class BookAutocallableBacktestConfig:
 
     def __post_init__(self):
         if not self.products:
-            raise ValidationError("BookAutocallableBacktestConfig.products must be non-empty")
+            raise ValidationError("ReplayBacktestConfig.products must be non-empty")
         if self.market_data is None:
             raise ValidationError("market_data is required")
         if self.strategy is None:
             self.strategy = AutocallableDeltaHedgeStrategy()
+        if self.engine_config.vol_model != "bsm":
+            # create_vol_model_engine builds Snowball engines only; pricing a
+            # Phoenix/European with one would be silently wrong (fail-closed).
+            from quantark.asset.equity.product.option.snowball_option import (
+                SnowballOption,
+            )
+
+            for bp in self.products:
+                if not isinstance(bp.product, SnowballOption):
+                    raise ValidationError(
+                        "vol_model != 'bsm' supports SnowballOption products "
+                        f"only; position_id={bp.position_id} holds "
+                        f"{type(bp.product).__name__}. Wire the corresponding "
+                        "vol-model engines before booking other product types."
+                    )
+
+
+# Compatible aliases (canonical names above).
+BookProduct = ReplayProduct
+BookAutocallableBacktestConfig = ReplayBacktestConfig
