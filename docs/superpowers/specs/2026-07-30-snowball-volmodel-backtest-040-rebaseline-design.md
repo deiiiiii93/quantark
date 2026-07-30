@@ -156,11 +156,18 @@ quadrature, and quasi-Monte-Carlo — which was not guaranteed:
 `LocalVolSnowballMCEngine` (`snowball_vol_mc_engines.py:195`) is what makes the
 `localvol` route checkable rather than self-referential.
 
-### 5.2 PV tolerance — unchanged
+### 5.2 PV tolerance — unchanged, with one corrected detail
 
 0.25% of notional, plus 2σ of MC standard error where the reference is MC, plus
 the existing bias detector (`bias_sign_fraction` 0.9, `bias_median_fraction_of_tol`
 0.5) and the `medium→fine` drift bound.
+
+**Correction:** the bias detector must be evaluated **within maturity buckets**,
+not pooled across them. §7A measures a discretization error whose sign flips
+between short and long remaining maturity; pooled, that scores a 0.75 sign
+fraction and reads as unbiased, which is how the original G2 recorded
+`biased: false` at 0.533 while a systematic per-maturity bias was present. Within
+any single maturity the sign is unanimous.
 
 ### 5.3 Delta tolerance — derived from the hedge instrument
 
@@ -245,42 +252,216 @@ That is the whole of the ~2× miss. Mean realized trade life over the 27
 inceptions is **0.78 y** — the plan's 0.77 y figure was correct; it was applied
 to the wrong window.
 
-Fitted to the measured 0.4.0 per-solve timings and calibrated against the four
-completed fleet runs (5.67–5.81 h each):
+### 7.1 What a replay day actually costs, and why it cannot be extrapolated
 
-```
-PDE  cost/solve = 1.717·T^1.91 + 1.005 s
-QUAD cost/solve = 0.208·T^1.13 s
-effective solves per replay day = 4.87   (price + central-bump greeks + daily event stats)
-```
+Per-solve timings do **not** compose into per-day cost, for two measured reasons:
+
+1. **Layout reuse.** 0.4.0's `GridBinder` caches spatial layouts (LRU,
+   `bind_shared`) and bump contexts reuse the base layout by object identity, so
+   a warm solve costs far less than the cold single-solve figure.
+2. **The greeks path differs per engine.** `_replay.calculate_greeks`
+   (`otc/_replay.py:264–267`) branches on whether the engine overrides
+   `BaseEngine.calculate_greeks`. Every PDE solver does
+   (`snowball_pde_solver.py:1067`), so it takes the **native** path — one extra
+   `self._solve()` with delta/gamma read off the grid. MC engines inherit the
+   base method and take the **central-bump** path — two extra full prices.
+
+So a PDE-priced day is `price` + one native-greeks solve = **2 solve-equivalents**;
+an MC-priced day is **3 MC prices**. Measured confirmation: 29.56 s/day for
+`flat_bsm` at T≈3 against a 15.06 s cold solve is a ratio of **1.96**.
+
+Two hypotheses were tested and falsified, and are recorded so they are not
+re-proposed:
+
+- **Auxiliary engines are a major cost.** They are not. Measured with daily event
+  probabilities ON: 29.56 s/day; OFF: 29.60 s/day — **−0.2%, zero within noise**.
+  The event-stats engine rides the cached layout. Consequently the option of
+  re-routing the auxiliary engines to quadrature is void: there is nothing to
+  save. **Daily event probabilities stay ON** (owner decision 2026-07-30,
+  confirming the 2026-07-25 decision on measured evidence).
+- **Per-day cost follows a power law in `T`.** It does not, because per-day fixed
+  overhead (surface load, calibration cache read, hedge accounting, CSV writes)
+  floors the cost at short remaining maturity while the KI schedule shrinks more
+  slowly than `T²`.
+
+### 7.2 Figures that survive validation
+
+| quantity | value | basis |
+|---|---|---|
+| PDE-priced variant, full 3 y contract calendar | **5.67–5.81 h** | 4 completed fleet runs, measured |
+| PDE-priced variant, T≈3 | **29.56 s/day** | 25-day stage-12 smoke, measured |
+| Replay-days, KO-terminated vs not | **5,039 vs 12,995** | realized KO dates, path arithmetic |
+| Cold Heston + SLV calibration | **2.76 s/date**, 780 dates = **0.60 CPU-h** once, shared | measured |
 
 Realized KO dates are pure path arithmetic — realized spot against 103% of each
 inception spot on the monthly schedule — so all 27 are derivable without pricing.
-Fleet totals, 27 inceptions:
+KO termination removes **61% of replay-days**, and its benefit is strongly
+inception-dependent: small on the earliest inceptions (the removed tail is the
+cheap low-`T` end) and large on the latest (the removed span is the expensive
+`T≈3` head). It must be computed per inception, never scaled.
 
-| configuration | per variant | 4 approved 1D variants | wall, 12 workers |
+### 7.3 What is deliberately not estimated
+
+Fleet totals for the QUAD-priced and MC-priced variants are **not stated here**.
+No such routing has ever been run end-to-end — it does not exist in the code yet
+— and §7.1 shows why single-solve extrapolation is unsound. Earlier drafts of
+this section carried figures (`flat_bsm_quad` 28.3 CPU-h, `heston@mc` 52.5,
+a 311.3 CPU-h matrix total, a "48% aux-routing saving") derived from a solve
+decomposition that measurement has since falsified; they are withdrawn.
+
+Plan **Task 6.1** already prescribes the correct instrument: time one inception
+across the variants, then extrapolate. That step is now load-bearing rather than
+a formality, and the fleet total is set there — from a measured per-day curve
+across remaining maturity, validated against the 29.56 s/day and 5.67–5.81 h
+anchors in §7.2.
+
+**Staging is retained as a review gate, not a resource gate.** The Phase A/B
+split existed to manage a 39 h+ run. Whatever Task 6.1 measures, the checkpoint
+after the 1D block stays — inspect the engine-control spread and the 1D results
+before committing to the 2D block.
+
+---
+
+## 7A. The 2D PDE–MC disagreement: cause identified
+
+**Conclusion: the 2D ADI scheme is sound. The disagreement measured on the
+production sheet is the `v=0` boundary treatment in the Feller-violated regime,
+reachable only because the production Heston calibration is pinned at its bounds.**
+
+This section supersedes two earlier wrong diagnoses of mine, both recorded so they
+are not revisited: a "systematic PDE scheme bias", and "time under-resolution of a
+dense event schedule". Neither survived measurement.
+
+### 7A.1 Owner's independent controlled case
+
+An owner-authored controlled case (`S₀=K=100`, `T=1`, `r=2%`, `q=1%`, Heston
+`v0=θ=0.04, κ=2, σ=0.30, ρ=−0.50`, monthly KO at 103 @ 12%, monthly discrete KI
+at 75) found 2D ADI converging cleanly into the QE-M RQMC 95% interval:
+
+| resolution | PV | successive move |
+|---|---|---|
+| 64×24×96 | 1.170888 | — |
+| 96×36×192 | 1.189080 | 0.018192 |
+| 144×54×384 | 1.194053 | 0.004973 |
+| **216×81×768** | **1.196041** | **0.001988** |
+| QE-M RQMC, 1,048,576 paths | 1.208693 | SE 0.006915 |
+
+Extra-fine PDE is inside `[1.195139, 1.222248]`; gap **1.27 bp of notional**,
+1.83 MC standard errors. Increments contract at ratios 3.7 and 2.5 against a
+refinement factor of 1.5 — a **convergent, roughly second-order scheme**.
+
+### 7A.2 Two candidate explanations, both refuted
+
+The production sheet showed gaps of 185–404 bp — ~150× the controlled case. Two
+hypotheses were tested at T=1 on the production sheet:
+
+- **Dense event schedule.** The controlled case has 24 discrete events against
+  `n_t=768` (~32 steps per event interval); the production sheet has 254
+  events/year against `n_t=ceil(400·T)` (~1.6). **Refuted:** refining `n_t`
+  400→3200 (steps/event 1.57→12.60) moved the PDE only −38,719 cash *in total*,
+  and **away** from MC. Successive moves contracted cleanly (−23,217, −12,782,
+  −2,720) — the PDE was converging, to the wrong value.
+- **Biased MC reference.** `QESnowballMCEngine` defaults to
+  `martingale_correction=False` (scheme `QUADEXP`), and the committed gate
+  decision records `QUADEXP` with `substeps_per_interval=1`, while QE-M exists to
+  remove coarse-step martingale bias. **Refuted:** gate config vs QE-M/8-substeps
+  differs by only **+0.078% of notional** — real, but not a 2.5% explanation.
+
+### 7A.3 The cause, with a control
+
+The production calibration for 2025-05-06 returns `κ=3.000` and `σ=0.700`, which
+are **exactly the `mo_frozen` upper bounds** `(0.5, 3.0, 0.5, 0.7, 0.0)`. That
+gives `2κθ/σ² = 0.540` — **Feller violated**, so variance reaches zero.
+`HestonSLVADICore` supports `v0_boundary="degenerate_pde"` for precisely that
+regime, but defaults to `"neumann"` and `snowball_vol_pde_solvers.py` never passes
+it, so the production route cannot reach it.
+
+Forcing the boundary at core level (T=1, production sheet, 200×60, MC reference
+QE-M / 8 substeps / 32 batches):
+
+| case | `2κθ/σ²` | `v0_boundary` | n_t=400 | n_t=1600 | inside MC 95% CI |
+|---|---|---|---|---|---|
+| production | 0.540 (violated) | `neumann` | −2.467% | −2.539% | no |
+| production | 0.540 (violated) | `degenerate_pde` | +0.334% | +0.553% | no |
+| **control** (σ 0.700→0.200) | 6.617 (satisfied) | `neumann` | +0.104% | **+0.034%** | **yes** |
+| **control** | 6.617 (satisfied) | `degenerate_pde` | +0.106% | +0.036% | yes |
+
+The boundary switch moves the violated case by ~3% of notional and cuts the gap
+**4.6×**; in the satisfied case the two treatments agree to **0.002% of notional**
+— the flag matters exactly where theory says it must and nowhere else. The control
+also reproduces the owner's result **on the production sheet**, with its 254
+events/year, confirming event density was never the issue.
+
+Residual: even with `degenerate_pde` the violated case sits +0.33%/+0.55% off and
+drifts *away* from MC under refinement. The boundary fix removes the dominant
+error, not all of it — which is why §7A.4 constrains the calibration instead of
+relying on the boundary alone.
+
+### 7A.4 Decisions
+
+1. **`enforce_feller=True`** in the `mo_frozen` Heston preset (owner decision
+   2026-07-30; currently `False` with only a soft `regularize_feller=0.05`
+   penalty). No date may then produce a degenerate parameter set, both engines
+   agree, and the PDE route reopens. Cost: a worse smile fit on the dates that
+   previously violated Feller — this **must** be reported as per-date calibration
+   RMSE, since it changes the model being tested.
+   Cache safety verified: the heston fingerprint embeds the full preset contents
+   (`vol_calibrators.py:542`) and `heston_slv` chains it, so the key changes
+   automatically — no stale hits and no `_CACHE_SCHEMA_VERSION` bump. The 552
+   cached `localvol-` entries stay valid; their fingerprint excludes the preset.
+2. **Plumb `v0_boundary`** through the snowball and phoenix vol PDE solvers,
+   selecting `degenerate_pde` when `2κθ < σ²`. Belt-and-braces after (1), and it
+   closes a real gap: a fix that exists is currently unreachable from the
+   production route.
+3. **G2 records `2κθ/σ²` and bound-hit flags per date**, and evaluates its verdict
+   **conditioned on the Feller ratio** rather than pooling regimes. §7A.3 shows a
+   uniform verdict would average a 0.03% regime with a 2.5% one.
+4. **MC reference upgraded** to `martingale_correction=True` with
+   `substeps_per_interval` ≥ 4. The measured reference bias is only 0.078% of
+   notional, but it is free to remove and the gate's tolerance is 0.25%.
+
+### 7A.5 Method note
+
+The first version of this evidence was rejected by the owner for using cases whose
+|PV| was too small to support a conclusion. That objection was correct and is what
+led here. The replacement design sweeps the KO coupon (0.05/0.15/0.30) to move
+|PV| widely **at a fixed state**, separating conditioning from error, and records
+MC standard error so the gate's real criterion
+`max(2·mc_se_pct, 0.25%)` (`11_pde_convergence_gate.py:532`) can be applied.
+Measured `mc_se` is 0.003–0.076% of notional, so the tolerance is the 0.25% floor
+throughout and MC is a sound arbiter.
+
+One property of that probe worth preserving in G2: the PDE error **changes sign
+with maturity** (positive at T=0.25, negative at T≥1). Pooled, that scores a 0.75
+sign fraction — below the 0.9 threshold — which is how the original G2 recorded
+`biased: false` at 0.533 while a systematic per-maturity bias was present. The
+bias test must be evaluated within maturity buckets (§5.2).
+
+For the record, the 24-cell probe run under the **unfixed** configuration
+(`v0_boundary="neumann"`, bound-pinned calibration) measured:
+
+| T | gap % notional | gap % \|PV\| | spatial drift (200×60 → 300×90) |
 |---|---|---|---|
-| PDE, no termination (old basis) | 138.0 CPU-h | 552.1 CPU-h | 46.0 h |
-| PDE, KO-terminated | 68.3 CPU-h | — | — |
-| QUAD, KO-terminated | 3.5 CPU-h | — | — |
-| **approved mix** (2 PDE + 2 QUAD) | — | **143.4 CPU-h** | **12.0 h** |
+| 0.25 | +0.001 … +0.075% | 0.2–2.6% | ~0.000% |
+| 1.00 | −1.85 … −4.04% | 15–198% | 0.40–0.86% |
+| 2.00 | −0.74 … −0.85% | 3.6–6.1% | 0.115–0.150% |
+| 3.01 | −1.05 … −3.13% | 24–178% | not measured |
 
-A 3.85× reduction from two independent sources: termination removes 51% of PDE
-cost, and quadrature takes two of four variants from 68.3 to 3.5 CPU-hours.
+Two properties of that table are worth keeping, because they are what made the
+diagnosis findable: the gaps do **not** shrink when |PV| is large (T=2.00 /
+coupon 0.05 has PV at 20% of notional and still fails by 3.3×), and at T=2 they
+**survive spatial convergence** (drift 0.115–0.150%, passing). A gap immune to
+both PV magnitude and spatial refinement is not a conditioning artifact and not
+under-resolution — which is what pointed at the boundary condition.
 
-Termination's benefit is strongly inception-dependent and had to be computed per
-inception rather than scaled: 4% on the earliest (3.55 → 3.39 h, because the
-removed tail is the cheap low-`T` end) against 67% on the latest
-(2.33 → 0.77 h, because the removed span is the expensive `T≈3` head).
+Note this probe refined **space only**, holding `n_t = ceil(400·T)` fixed at both
+ladder levels; the `n_t` sweep in §7A.2 supplied the time axis separately.
 
-The 2D variants are carried forward from the plan's 0.3.0-era MC measurements
-(Heston RQMC-QE 7.1 s at 3.0 y, SLV 11.9 s) at roughly 180 CPU-h / ~15 h wall,
-and must be re-timed once §5 fixes their routing.
-
-**Staging is no longer a resource decision.** The Phase A/B split existed to
-manage a 39 h+ run. At 12 h wall for the 1D block, the checkpoint after it is
-retained as a *review* gate — inspect the engine-control spread and the 1D
-results before committing to the 2D block — not as a resource gate.
+**Routing is no longer predetermined.** Earlier drafts concluded
+`heston`/`heston_slv` would stay on `route=mc`. With §7A.4 (1) and (2) applied the
+PDE route is viable again — the control reaches +0.034% of notional, inside the MC
+95% interval — so G2 decides on fresh evidence, per Feller regime, and the 2D cost
+question in §7.3 reopens with it.
 
 ---
 
@@ -339,14 +520,24 @@ decision.
    tree through which another session pushed 41 engine commits. Commit this
    scope, and only this scope, on a feature branch. The 13 modified
    option-product files and other sessions' WIP are left untouched.
-1. Re-execute Gate G4 (coupon solve) and Gate G1 (surface admission) on 0.4.0.
-2. Re-run and re-scope Gate G2 per §5; emit a fresh `gate_decision.json` and
-   evidence hash. Re-time the 2D routes.
-3. Implement §6 termination, the `flat_bsm_quad` variant, and §9 pre-flight.
+1. **Apply the §7A.4 engine and calibration fixes first** — `enforce_feller=True`
+   in the `mo_frozen` preset, `v0_boundary` plumbed through the snowball/phoenix
+   vol PDE solvers, MC reference on `martingale_correction=True` with
+   `substeps_per_interval` ≥ 4. G2 must not be re-run before these land, or it
+   will certify the configuration §7A just disproved.
+2. Re-execute Gate G4 (coupon solve) and Gate G1 (surface admission) on 0.4.0.
+3. Re-run and re-scope Gate G2 per §5, with the verdict conditioned on the Feller
+   regime and `2κθ/σ²` recorded per date; emit a fresh `gate_decision.json` and
+   evidence hash. The 2D route is genuinely open — §7A.3's control reaches +0.034%
+   of notional, inside the MC 95% interval.
+4. Implement §6 termination, the `flat_bsm_quad` variant, and §9 pre-flight.
 4. Gate G3 on one inception, 0.4.0.
-5. Run the 1D block (4 variants × 27 inceptions, ~12 h wall). Review checkpoint.
-6. Run the 2D block (2 variants × 27 inceptions) per the §5 routing.
-7. Aggregate and report, with §8 caveats.
+5. **Task 6.1 timing run** — measure the per-day cost curve across remaining
+   maturity for every route actually configured, validated against the §7.2
+   anchors. The fleet total is set here (§7.3), not before.
+6. Run the 1D block (4 variants × 27 inceptions). Review checkpoint.
+7. Run the 2D block (2 variants × 27 inceptions) per the §5 routing.
+8. Aggregate and report, with §8 caveats.
 
 ---
 
@@ -356,7 +547,8 @@ decision.
   fail-closed and logged. *Unchanged.*
 - **G2** — engine admission for all six variants, in PV (§5.2) and delta (§5.3),
   against an independent method (§5.1), with tolerances relative to notional
-  (§5.4). *Re-scoped and re-run.*
+  (§5.4) and the bias test evaluated within maturity buckets (§5.2).
+  *Re-scoped and re-run.*
 - **G3** — one inception end-to-end accounting sanity via `sanity_check_run`:
   PnL decomposition, portfolio and cash identities, cost reconciliation,
   lifecycle monotonicity, hedge effectiveness, NaN screening. *Unchanged, re-run.*
@@ -371,10 +563,14 @@ decision.
 
 | Risk | Mitigation |
 |---|---|
-| G2 re-run admits Heston/SLV to PDE, changing 2D cost and results | Gate decides on evidence; timing re-measured before the 2D block |
+| G2 re-run admits Heston/SLV to PDE, changing 2D cost and results | Expected, not feared: §7A.3's control reaches +0.034% of notional inside the MC 95% interval once the §7A.4 fixes land. Gate decides on fresh evidence per Feller regime; 2D timing is measured in the Task 6.1 run before the 2D block |
+| Fleet cost is unknown until Task 6.1, so the run cannot be scheduled in advance | Accepted deliberately (§7.3). Single-solve extrapolation is unsound here; a wrong estimate is worse than a deferred one. The measured anchors in §7.2 bound the PDE-priced variants |
+| 2D uniform ADI time grid carries a ~0.8%-of-notional bias at T=2 (§7A) | Out of scope — the MC route avoids it. Recorded as a quantified engine defect with evidence, so event-aligned 2D time can be prioritised on data rather than intuition |
 | Engine-control spread turns out large enough to swamp model edges | That *is* the finding — report it; it invalidates cross-engine comparisons honestly rather than silently |
 | Quadrature cannot price some operating point (unreachable-barrier filtering, dense-KI refinement) | G5 pre-flight covers QUAD routes as well as PDE |
-| Heston weakly identified on CFFEX settlement data (κ/σ bound hits ~half of sampled dates) | Frozen bounds config, per-day diagnostics in calibration records, reported honestly. *Carried forward unchanged.* |
+| Heston weakly identified on CFFEX settlement data (κ/σ bound hits ~half of sampled dates) | **Escalated.** §7A shows this has a pricing consequence, not only a parameter-stability one: bound-pinned κ/σ violate Feller and drive a 2.5%-of-notional PDE–MC gap. Mitigated by `enforce_feller=True` (§7A.4), per-date Feller ratio and bound-hit flags in the calibration records, and a G2 verdict conditioned on regime |
+| `enforce_feller=True` degrades the smile fit on previously-violating dates | Report per-date calibration RMSE before/after. This changes the model being tested and must be stated as such, not buried — a constrained Heston is a different model from a free one |
+| The `degenerate_pde` boundary leaves a +0.33–0.55% residual on violated dates that grows under refinement | `enforce_feller=True` removes the regime entirely; the boundary flag is belt-and-braces. If violated dates somehow persist, they are flagged per date rather than silently priced |
 | MO surface ends ~1 y against a 3 y trade | Explicit flat-total-variance extrapolation, stated in the report. *Carried forward.* |
 | Another session's WIP in the shared tree is disturbed | §10 step 0 commits a strict file scope on a branch |
 | Fleet killed again mid-run | Stop via process group, never `pkill -f`; per-run output isolation means completed runs survive |
