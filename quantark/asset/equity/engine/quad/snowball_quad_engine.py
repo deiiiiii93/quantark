@@ -14,12 +14,16 @@ import numpy as np
 from scipy.special import erfc
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.engine.pde.grid.events import (
     breach_fractions,
     project_event_values,
 )
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
+from quantark.asset.equity.engine.quad.quad_adapters import (
+    resolve_structured_payment_timings,
+)
 from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.param import QuadParams
@@ -80,6 +84,7 @@ class SnowballQuadEngine(BaseEngine):
     """
 
     engine_type = EngineType.QUADRATURE
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     supports_spot_greeks_grid = True
 
     def __init__(self, params: Optional[QuadParams] = None) -> None:
@@ -146,6 +151,15 @@ class SnowballQuadEngine(BaseEngine):
         ko_records = product.resolve_ko_observations(pricing_env)
         if not ko_records:
             raise PricingError("KO observation schedule is empty for SnowballQuadEngine.")
+        payment_timings = resolve_structured_payment_timings(
+            product, pricing_env, ko_records
+        )
+        event_delay_by_record = {
+            id(record): float(delay_df)
+            for record, delay_df in zip(
+                ko_records, payment_timings.event_delay_dfs
+            )
+        }
 
         ki_continuous = product.has_ki_barrier and (
             product.barrier_config.ki_continuous
@@ -269,14 +283,14 @@ class SnowballQuadEngine(BaseEngine):
                 for spot_value in spot_grid
             ],
             dtype=float,
-        )
+        ) * payment_timings.terminal.delay_df
         v_out = np.array(
             [
                 product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
                 for spot_value in spot_grid
             ],
             dtype=float,
-        )
+        ) * payment_timings.terminal.delay_df
 
         log_ki_barrier = None
         if product.has_ki_barrier and ki_continuous:
@@ -295,9 +309,7 @@ class SnowballQuadEngine(BaseEngine):
             ko_weight = None
             if ko_record is not None:
                 ko_is_reachable = bool(reachable_by_record[id(ko_record)])
-                discount = self._ko_discount(
-                    rate, obs_time, ko_record.settlement_time, df_fn=df_local
-                )
+                discount = event_delay_by_record[id(ko_record)]
                 ko_value = ko_record.payoff * discount
                 ko_weight = (
                     self._event_weight(

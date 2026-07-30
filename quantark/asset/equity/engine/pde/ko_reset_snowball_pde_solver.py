@@ -124,7 +124,6 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
             if product.payoff_config.include_principal
             else 0.0
         )
-        maturity_time: Optional[float] = None
         ko_records: List[ResolvedObservationRecord] = []
         for idx, rec in enumerate(resolved_schedule):
             rate = rates[idx]
@@ -142,12 +141,10 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
 
             settlement_time = rec.settlement_time
             if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
-                maturity_time = (
-                    maturity_time
-                    if maturity_time is not None
-                    else product.get_maturity(pricing_env)
+                settlement_time = self._terminal_payment_time(
+                    product,
+                    pricing_env,
                 )
-                settlement_time = maturity_time
 
             ko_records.append(
                 ResolvedObservationRecord(

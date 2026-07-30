@@ -435,7 +435,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         # V1 (Knocked-In): Payoff usually doesn't depend on memory (coupon lost?)
         payoff_v1 = np.array(
             [product.get_maturity_payoff_v1(s, pricing_env) for s in s_vec]
-        )
+        ) * self._structured_terminal_delay_df
         for grid in grid_v1_list:
             grid[:, -1] = payoff_v1
 
@@ -448,8 +448,22 @@ class PhoenixPDESolver(SnowballPDESolver):
                     )
                     for s in s_vec
                 ]
-            )
+            ) * self._structured_terminal_delay_df
             grid[:, -1] = payoff_v0
+
+    def _coupon_payment_time(
+        self,
+        product: PhoenixOption,
+        pricing_env: PricingEnvironment,
+        obs_idx: int,
+    ) -> float:
+        """Return the contractual payment time for one coupon observation."""
+        if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
+            return self._terminal_payment_time(product, pricing_env)
+        records = self._get_cached_ko_records(pricing_env, product)
+        if obs_idx < 0 or obs_idx >= len(records):
+            raise ValidationError("coupon observation index is out of range")
+        return float(records[obs_idx].settlement_time)
 
     def _build_grids(
         self,
@@ -787,9 +801,13 @@ class PhoenixPDESolver(SnowballPDESolver):
         df_maturity = np.empty(num_t, dtype=float)
         df_next_ko = np.empty(num_t, dtype=float)
         next_settlement = None
+        # The no-KO leg of W pays when the note survives to maturity, which is
+        # the terminal determination — so it discounts to the RESOLVED terminal
+        # payment (identical to _total_tau when no settlement terms exist).
+        terminal_payment = self._terminal_payment_time(product, pricing_env)
         for j in range(num_t - 1, -1, -1):
             now = float(t_vec[j])
-            df_maturity[j] = self._df_between_times(pricing_env, now, self._total_tau)
+            df_maturity[j] = self._df_between_times(pricing_env, now, terminal_payment)
             rec = self._ko_observation_indices.get(j)
             if rec is not None:
                 next_settlement = (
@@ -805,10 +823,11 @@ class PhoenixPDESolver(SnowballPDESolver):
 
         w0 = np.zeros((num_x, num_t), dtype=float)
         w1 = np.zeros((num_x, num_t), dtype=float)
-        # At maturity the note ends however it got there, so one unit paid at
-        # termination is one unit paid now.
-        w0[:, -1] = 1.0
-        w1[:, -1] = 1.0
+        # At maturity the note ends however it got there; one unit paid at
+        # termination is worth the discount from maturity to the RESOLVED
+        # terminal payment (exactly 1.0 when no settlement terms exist).
+        w0[:, -1] = df_maturity[-1]
+        w1[:, -1] = df_maturity[-1]
 
         self._term_w0 = w0
         self._term_w1 = w1
@@ -862,20 +881,41 @@ class PhoenixPDESolver(SnowballPDESolver):
         for grid in grids:
             grid[mask, t_idx] = settled
 
-    def _coupon_discounts(self, t_idx: int, current_time: float, product, pricing_env):
+    def _coupon_discounts(
+        self,
+        t_idx: int,
+        current_time: float,
+        product,
+        pricing_env,
+        obs_idx: Optional[int] = None,
+    ):
         """Per-regime discount applied to a coupon earned now.
 
-        INSTANT pays immediately and EXPIRY without a reachable knock-out is a
-        plain discount to maturity; otherwise each regime carries its own
-        termination law, so V0 and V1 discount the same coupon differently.
+        INSTANT pays at its record's settlement time (the observation itself
+        when no settlement terms exist) and EXPIRY without a reachable
+        knock-out is a plain discount to the terminal payment; otherwise each
+        regime carries its own termination law, so V0 and V1 discount the
+        same coupon differently.
         """
         if self._term_w0 is not None:
             return self._term_w0[:, t_idx], self._term_w1[:, t_idx]
-        settlement_time = (
-            self._total_tau
-            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-            else current_time
-        )
+        if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
+            settlement_time = self._terminal_payment_time(product, pricing_env)
+        else:
+            # The grid node and the record's observation time can differ by an
+            # ULP, so reroute through the record's settlement ONLY when it
+            # actually differs from its observation — otherwise keep the
+            # node's own time and the discount stays exactly 1.0.
+            settlement_time = current_time
+            if obs_idx is not None:
+                records = self._get_cached_ko_records(pricing_env, product)
+                if 0 <= obs_idx < len(records):
+                    rec = records[obs_idx]
+                    if (
+                        rec.settlement_time is not None
+                        and rec.settlement_time != rec.observation_time
+                    ):
+                        settlement_time = float(rec.settlement_time)
         scalar = self._df_between_times(pricing_env, current_time, settlement_time)
         return scalar, scalar
 
@@ -898,7 +938,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         use_memory = product.has_memory_coupon
         
         disc_v0, disc_v1 = self._coupon_discounts(
-            t_idx, current_time, product, pricing_env
+            t_idx, current_time, product, pricing_env, obs_idx=obs_idx
         )
 
         max_k = obs_idx if use_memory else 0
@@ -1027,7 +1067,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         x_vec = np.log(np.asarray(s_vec, dtype=float))
         coupon_barrier = float(self._coupon_barriers[obs_idx])
         disc_v0, disc_v1 = self._coupon_discounts(
-            t_idx, current_time, product, pricing_env
+            t_idx, current_time, product, pricing_env, obs_idx=obs_idx
         )
         trig_up = not bool(product.is_reverse)
         breaks = sorted((np.log(coupon_barrier), np.log(float(ko_barrier))))

@@ -12,7 +12,12 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from quantark.asset.equity.product.option.base_equity_option import BaseEquityOption
-from quantark.asset.equity.settlement import SettlementConvention
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementConvention,
+    SettlementRequest,
+    SettlementResolver,
+)
 from quantark.util.calendar import calculate_year_fraction
 from quantark.util.calendar.day_counter import DayCountConvention, calculate_day_count_fraction
 from quantark.util.enum import (
@@ -532,7 +537,29 @@ class PhoenixOption(BaseEquityOption):
             if isinstance(self.barrier_config.ko_barrier, list)
             else self.barrier_config.ko_barrier
         )
-        resolved_schedule = schedule.resolve(
+        active_indices = [
+            index
+            for index, record in enumerate(schedule.records)
+            if not (
+                (
+                    record.observation_time is not None
+                    and float(record.observation_time) < 0.0
+                )
+                or (
+                    record.observation_date is not None
+                    and pricing_env is not None
+                    and record.observation_date < pricing_env.valuation_date
+                )
+            )
+        ]
+        if not active_indices:
+            return []
+        active_schedule = ObservationSchedule(
+            records=[schedule.records[index] for index in active_indices],
+            aggregation_mode=schedule.aggregation_mode,
+            frequency=schedule.frequency,
+        )
+        resolved_schedule = active_schedule.resolve(
             pricing_env=pricing_env,
             default_barrier=default_barrier,
             default_payoff=0.0,
@@ -548,20 +575,22 @@ class PhoenixOption(BaseEquityOption):
             if self.payoff_config.include_principal
             else 0.0
         )
-        maturity_time: Optional[float] = None
+        terminal_timing = None
         bus_days_in_year = pricing_env.bus_days_in_year if pricing_env else 252
 
         ko_records: List[ResolvedObservationRecord] = []
         accrual_factors = self.accrual_config.accrual_factors
         for idx, rec in enumerate(resolved_schedule):
-            rate = schedule.records[idx].return_rate
+            source_idx = active_indices[idx]
+            source_record = schedule.records[source_idx]
+            rate = source_record.return_rate
             if rate is None:
-                rate = self.get_ko_rate_at(idx)
+                rate = self.get_ko_rate_at(source_idx)
 
             if accrual_factors is not None:
-                accrual_factor = float(accrual_factors[idx])
+                accrual_factor = float(accrual_factors[source_idx])
             elif annualized_ko:
-                schedule_record = schedule.records[idx]
+                schedule_record = source_record
                 accrual_start_date = self.initial_date
                 if schedule_record.observation_date is not None:
                     if accrual_start_date is None:
@@ -609,13 +638,29 @@ class PhoenixOption(BaseEquityOption):
             payoff = principal_component + ko_coupon
 
             settlement_time = rec.settlement_time
+            settlement_date = rec.settlement_date
             if self.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
-                maturity_time = (
-                    maturity_time
-                    if maturity_time is not None
-                    else self.get_maturity(pricing_env)
-                )
-                settlement_time = maturity_time
+                if pricing_env is None:
+                    settlement_time = self.get_maturity(pricing_env)
+                    settlement_date = self.exercise_date
+                elif terminal_timing is None:
+                    terminal_timing = SettlementResolver.resolve_contingent(
+                        self,
+                        SettlementRequest(
+                            kind=CashflowKind.TERMINAL,
+                            determination_date=self.exercise_date,
+                            determination_time=(
+                                None
+                                if self.exercise_date is not None
+                                else self.get_maturity(pricing_env)
+                            ),
+                            cashflow_id="terminal",
+                        ),
+                        pricing_env,
+                    )
+                if terminal_timing is not None:
+                    settlement_time = terminal_timing.payment_time
+                    settlement_date = terminal_timing.payment_date
 
             ko_records.append(
                 ResolvedObservationRecord(
@@ -624,7 +669,7 @@ class PhoenixOption(BaseEquityOption):
                     payoff=payoff,
                     settlement_time=settlement_time,
                     observation_date=rec.observation_date,
-                    settlement_date=rec.settlement_date,
+                    settlement_date=settlement_date,
                 )
             )
         return ko_records

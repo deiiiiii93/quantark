@@ -1053,6 +1053,9 @@ class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
 
     def _prepare_state(self, product, pricing_env, T: float, ki_continuous: bool) -> None:
         self._total_tau = float(T)
+        self._structured_terminal_delay_df = self._terminal_delay_df(
+            product, pricing_env
+        )
         self._is_reverse = product.is_reverse
         self._ki_continuous = bool(ki_continuous)
         self._bgk_active = False
@@ -1068,7 +1071,8 @@ class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
             values = [product.get_maturity_payoff_v1(float(s), env) for s in core.S_grid]
         else:
             values = [product.get_maturity_payoff_v0(float(s), env) for s in core.S_grid]
-        return np.repeat(np.asarray(values, dtype=float)[:, None], core.V_grid.size, axis=1)
+        values = np.asarray(values, dtype=float) * self._structured_terminal_delay_df
+        return np.repeat(values[:, None], core.V_grid.size, axis=1)
 
     def _boundary_hook(self, core, product, env, knocked_in: bool):
         def hook(U, tau):

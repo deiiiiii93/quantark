@@ -15,6 +15,7 @@ import numpy as np
 from quantark.asset.equity.engine.settlement_support import (
     resolve_terminal_timing,
 )
+from quantark.asset.equity.settlement import ResolvedPaymentTiming
 from quantark.asset.equity.engine.quad.quad_core import QuadCoreInputs
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import (
@@ -77,6 +78,64 @@ class QuadPricingContext:
             return self.df_fn(t)
         arr = np.exp(-self.rate * np.asarray(t, dtype=float))
         return float(arr) if arr.ndim == 0 else arr
+
+
+@dataclass(frozen=True)
+class StructuredPaymentTimings:
+    """Payment timing arrays aligned with structured observation records."""
+
+    observation_times: np.ndarray
+    event_payment_times: np.ndarray
+    event_delay_dfs: np.ndarray
+    terminal: ResolvedPaymentTiming
+
+    def __post_init__(self) -> None:
+        size = self.observation_times.size
+        if (
+            self.event_payment_times.size != size
+            or self.event_delay_dfs.size != size
+        ):
+            raise ValidationError(
+                "structured payment timing arrays must be aligned"
+            )
+        for value in (
+            self.observation_times,
+            self.event_payment_times,
+            self.event_delay_dfs,
+        ):
+            value.setflags(write=False)
+
+
+def resolve_structured_payment_timings(
+    product,
+    pricing_env,
+    records: Sequence[ResolvedObservationRecord],
+) -> StructuredPaymentTimings:
+    """Resolve event arrays and terminal timing without adding transition nodes."""
+    observation_times = np.asarray(
+        [record.observation_time for record in records],
+        dtype=float,
+    )
+    payment_times = np.asarray(
+        [record.settlement_time for record in records],
+        dtype=float,
+    )
+    event_delay_dfs = np.asarray(
+        [
+            pricing_env.get_discount_factor(float(payment_time))
+            / pricing_env.get_discount_factor(float(observation_time))
+            for observation_time, payment_time in zip(
+                observation_times, payment_times
+            )
+        ],
+        dtype=float,
+    )
+    return StructuredPaymentTimings(
+        observation_times=observation_times,
+        event_payment_times=payment_times,
+        event_delay_dfs=event_delay_dfs,
+        terminal=resolve_terminal_timing(product, pricing_env),
+    )
 
 
 class QuadInputAdapter(ABC):

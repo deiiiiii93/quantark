@@ -230,7 +230,29 @@ class KnockOutResetSnowballOption(SnowballOption):
         default_barrier = (
             None if isinstance(config.ko_barrier, list) else config.ko_barrier
         )
-        resolved_schedule = schedule.resolve(
+        active_indices = [
+            index
+            for index, record in enumerate(schedule.records)
+            if not (
+                (
+                    record.observation_time is not None
+                    and float(record.observation_time) < 0.0
+                )
+                or (
+                    record.observation_date is not None
+                    and pricing_env is not None
+                    and record.observation_date < pricing_env.valuation_date
+                )
+            )
+        ]
+        if not active_indices:
+            return [], [], []
+        active_schedule = ObservationSchedule(
+            records=[schedule.records[index] for index in active_indices],
+            aggregation_mode=schedule.aggregation_mode,
+            frequency=schedule.frequency,
+        )
+        resolved_schedule = active_schedule.resolve(
             pricing_env=pricing_env,
             default_barrier=default_barrier,
             default_payoff=0.0,
@@ -239,13 +261,19 @@ class KnockOutResetSnowballOption(SnowballOption):
         )
 
         rates: List[float] = []
-        for idx, _ in enumerate(resolved_schedule):
-            rate = schedule.records[idx].return_rate
+        for source_idx in active_indices:
+            rate = schedule.records[source_idx].return_rate
             if rate is None:
-                rate = self._get_barrier_at(config.ko_rate, idx, "KO rate")
+                rate = self._get_barrier_at(
+                    config.ko_rate, source_idx, "KO rate"
+                )
             rates.append(rate)
 
-        return resolved_schedule, rates, schedule.records
+        return (
+            resolved_schedule,
+            rates,
+            [schedule.records[index] for index in active_indices],
+        )
 
     def get_pre_ko_observation_profile(self, pricing_env: PricingEnv) -> Dict[str, List[float]]:
         resolved, rates, records = self._resolve_ko_schedule(

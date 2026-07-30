@@ -13,6 +13,9 @@ from typing import Optional, Sequence
 import numpy as np
 
 from quantark.asset.equity.engine.pde.grid.events import project_piecewise_event
+from quantark.asset.equity.engine.quad.quad_adapters import (
+    resolve_structured_payment_timings,
+)
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.priceenv.term_sampling import make_df_fn
@@ -85,6 +88,15 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         ko_records = product.resolve_ko_observations(pricing_env)
         if not ko_records:
             raise PricingError("KO observation schedule is empty for PhoenixQuadEngine.")
+        payment_timings = resolve_structured_payment_timings(
+            product, pricing_env, ko_records
+        )
+        event_delay_by_record = {
+            id(record): float(delay_df)
+            for record, delay_df in zip(
+                ko_records, payment_timings.event_delay_dfs
+            )
+        }
 
         ki_continuous = product.has_ki_barrier and (
             product.barrier_config.ki_continuous
@@ -237,8 +249,20 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         expiry_coupons = (
             product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
         )
-        w_out = np.ones_like(spot_grid, dtype=float) if expiry_coupons else None
-        w_in = np.ones_like(spot_grid, dtype=float) if expiry_coupons else None
+        # A note surviving to maturity pays at the RESOLVED terminal payment,
+        # so W's terminal condition is the value at maturity of one unit paid
+        # there (exactly 1.0 when no settlement terms exist).
+        terminal_w = float(payment_timings.terminal.delay_df)
+        w_out = (
+            np.full_like(spot_grid, terminal_w, dtype=float)
+            if expiry_coupons
+            else None
+        )
+        w_in = (
+            np.full_like(spot_grid, terminal_w, dtype=float)
+            if expiry_coupons
+            else None
+        )
 
         def accumulated_before(obs_idx: int, missed: int) -> float:
             if missed <= 0 or obs_idx <= 0:
@@ -254,7 +278,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     for spot_value in spot_grid
                 ],
                 dtype=float,
-            )
+            ) * payment_timings.terminal.delay_df
             # V1 usually doesn't pay coupons? Checked logic: get_maturity_payoff_v1 doesn't take accumulated.
             # So accumulated is ignored for V1.
 
@@ -268,7 +292,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     for spot_value in spot_grid
                 ],
                 dtype=float,
-            )
+            ) * payment_timings.terminal.delay_df
             v_in_list.append(v_in_k)
             v_out_list.append(v_out_k)
 
@@ -334,16 +358,20 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     else np.zeros_like(grid)
                 )
 
-                ko_discount = self._ko_discount(
-                    rate, obs_time, ko_record.settlement_time, df_fn=df_local)
+                ko_discount = event_delay_by_record[id(ko_record)]
                 base_ko_payoff = float(ko_record.payoff or 0.0)
                 
-                # INSTANT pays the coupon now; EXPIRY pays it at termination,
-                # whose value is the regime's own W surface.
+                # INSTANT pays the coupon at its record's settlement (the
+                # observation itself when no settlement terms exist); EXPIRY
+                # pays it at termination, whose value is the regime's own W
+                # surface — never a fixed terminal discount, which is wrong
+                # whenever a knock-out is possible.
                 if expiry_coupons:
                     coupon_discount_out, coupon_discount_in = w_out, w_in
                 else:
-                    coupon_discount_out = coupon_discount_in = 1.0
+                    coupon_discount_out = coupon_discount_in = (
+                        event_delay_by_record[id(ko_record)]
+                    )
 
                 new_v_in_list = []
                 new_v_out_list = []

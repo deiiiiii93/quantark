@@ -595,6 +595,9 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
         self, product: PhoenixOption, pricing_env, T: float, ki_continuous: bool
     ) -> None:
         self._total_tau = float(T)
+        self._structured_terminal_delay_df = self._terminal_delay_df(
+            product, pricing_env
+        )
         self._is_reverse = product.is_reverse
         self._ki_continuous = bool(ki_continuous)
         self._bgk_active = False
@@ -620,7 +623,8 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
                 )
                 for s in core.S_grid
             ]
-        return np.repeat(np.asarray(values, dtype=float)[:, None], core.V_grid.size, axis=1)
+        values = np.asarray(values, dtype=float) * self._structured_terminal_delay_df
+        return np.repeat(values[:, None], core.V_grid.size, axis=1)
 
     def _boundary_hook(self, core, product, env, knocked_in: bool):
         def hook(U, tau):
@@ -732,10 +736,10 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
         if obs_idx < 0 or obs_idx >= self._coupon_barriers.shape[0]:
             return U
         current_time = max(T - float(tau), 0.0)
-        settlement_time = (
-            T
-            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-            else current_time
+        settlement_time = self._coupon_payment_time(
+            product,
+            env,
+            obs_idx,
         )
         coupon_discount = self._df_between_times(env, current_time, settlement_time)
         coupon_value = float(self._coupon_amounts[obs_idx]) * coupon_discount
@@ -883,10 +887,10 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
             survive & miss: U
         """
         current_time = max(T - float(tau), 0.0)
-        settlement_time = (
-            T
-            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-            else current_time
+        settlement_time = self._coupon_payment_time(
+            product,
+            env,
+            obs_idx,
         )
         coupon_discount = self._df_between_times(env, current_time, settlement_time)
         coupon_amt = float(self._coupon_amounts[obs_idx])

@@ -14,6 +14,12 @@ from typing import List, Optional, Sequence
 import numpy as np
 
 from quantark.asset.equity.engine.event_stats import KOResetEventStats
+from quantark.asset.equity.engine.settlement_support import (
+    resolve_terminal_timing,
+)
+from quantark.asset.equity.engine.quad.quad_adapters import (
+    resolve_structured_payment_timings,
+)
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.asset.equity.engine.quad.quad_math import QuadratureMath
@@ -104,6 +110,19 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         ]
         if not post_ko_records:
             raise PricingError("Post-KO observation schedule is empty for KOResetSnowballQuadEngine.")
+        all_ko_records = [*pre_ko_records, *post_ko_records]
+        payment_timings = resolve_structured_payment_timings(
+            product,
+            pricing_env,
+            all_ko_records,
+        )
+        event_delay_by_record = {
+            id(record): float(delay_df)
+            for record, delay_df in zip(
+                all_ko_records,
+                payment_timings.event_delay_dfs,
+            )
+        }
 
         ki_continuous = product.has_ki_barrier and (
             product.barrier_config.ki_continuous
@@ -172,7 +191,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 for spot_value in spot_grid
             ],
             dtype=float,
-        )
+        ) * payment_timings.terminal.delay_df
         # The not-yet-knocked-in contract matures on the PRE-KI schedule; only a
         # knocked-in one runs on to `maturity`. Seeding v_out at the end of the
         # grid would price it through a period it can never reach, so it is
@@ -186,7 +205,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 for spot_value in spot_grid
             ],
             dtype=float,
-        )
+        ) * payment_timings.terminal.delay_df
         v_out = np.zeros_like(v_out_terminal)
         v_out_seeded = False
 
@@ -219,8 +238,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             pre_ko_weight = None
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
             if pre_ko_record is not None:
-                discount = self._ko_discount(
-                    rate, obs_time, pre_ko_record.settlement_time, df_fn=df_local)
+                discount = event_delay_by_record[id(pre_ko_record)]
                 ko_value = pre_ko_record.payoff * discount
                 ko_weight = self._smooth_step_weight(
                     grid,
@@ -242,8 +260,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
             post_ko_record = self._match_record(obs_time, post_ko_records)
             if post_ko_record is not None and not disable_ko_after_ki:
-                discount = self._ko_discount(
-                    rate, obs_time, post_ko_record.settlement_time, df_fn=df_local)
+                discount = event_delay_by_record[id(post_ko_record)]
                 ko_value = post_ko_record.payoff * discount
                 ko_weight = self._smooth_step_weight(
                     grid,
@@ -768,7 +785,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if product.payoff_config.include_principal
             else 0.0
         )
-        maturity_time: Optional[float] = None
+        terminal_payment_time: Optional[float] = None
         ko_records: List[ResolvedObservationRecord] = []
         for idx, rec in enumerate(resolved_schedule):
             rate = rates[idx]
@@ -786,12 +803,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
             settlement_time = rec.settlement_time
             if product.accrual_config.coupon_pay_type == CouponPayType.EXPIRY:
-                maturity_time = (
-                    maturity_time
-                    if maturity_time is not None
-                    else product.get_maturity(pricing_env)
+                terminal_payment_time = (
+                    terminal_payment_time
+                    if terminal_payment_time is not None
+                    else resolve_terminal_timing(
+                        product, pricing_env
+                    ).payment_time
                 )
-                settlement_time = maturity_time
+                settlement_time = terminal_payment_time
 
             ko_records.append(
                 ResolvedObservationRecord(

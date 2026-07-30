@@ -40,6 +40,7 @@ from quantark.asset.equity.engine.pde.grid import (
     project_between,
 )
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.observation_schedule import ResolvedObservationRecord
@@ -274,6 +275,7 @@ class SnowballPDESolver(BasePDESolver):
     #: a few step-widths from it (see _first_passage_step_coefficients).
     #: Kept as a hook for solvers whose barrier treatment must stay pinned.
     _first_passage_ki_supported: bool = True
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def __init__(
         self, params: Optional[PDEParams] = None, enable_profiling: bool = False
@@ -318,6 +320,7 @@ class SnowballPDESolver(BasePDESolver):
 
         # Time tracking
         self._total_tau: float = 0.0
+        self._structured_terminal_delay_df: float = 1.0
         self._banded_cache: "OrderedDict[Tuple[float, float], Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]" = OrderedDict()
         self._banded_cache_max_entries = self.params.banded_cache_max_entries
         # Session-injected banded factorization pack (read-only; see
@@ -519,6 +522,9 @@ class SnowballPDESolver(BasePDESolver):
                 self._ki_barrier = ki_barrier[0]
             else:
                 self._ki_barrier = ki_barrier
+        self._structured_terminal_delay_df = self._terminal_delay_df(
+            product, pricing_env
+        )
         return knocked_in_at_valuation
 
     def _prepare_continuous_ki_correction(
@@ -2326,7 +2332,7 @@ class SnowballPDESolver(BasePDESolver):
         payoffs = np.array(
             [product.get_maturity_payoff_v0(s, pricing_env) for s in s_vec]
         )
-        grid[:, -1] = payoffs
+        grid[:, -1] = payoffs * self._structured_terminal_delay_df
 
     def _set_terminal_condition_v1(
         self,
@@ -2345,7 +2351,7 @@ class SnowballPDESolver(BasePDESolver):
         payoffs = np.array(
             [product.get_maturity_payoff_v1(s, pricing_env) for s in s_vec]
         )
-        grid[:, -1] = payoffs
+        grid[:, -1] = payoffs * self._structured_terminal_delay_df
 
     def _apply_terminal_ko(
         self,
@@ -2648,7 +2654,7 @@ class SnowballPDESolver(BasePDESolver):
         current_time = self._total_tau - tau
         df_to_maturity = self._df_between_times(
             pricing_env, current_time, self._total_tau
-        )
+        ) * self._structured_terminal_delay_df
 
         principal_per_contract = product.initial_price * product.contract_multiplier
         principal = (
@@ -2716,7 +2722,7 @@ class SnowballPDESolver(BasePDESolver):
         current_time = self._total_tau - tau
         df_to_maturity = self._df_between_times(
             pricing_env, current_time, self._total_tau
-        )
+        ) * self._structured_terminal_delay_df
 
         principal_per_contract = product.initial_price * product.contract_multiplier
         principal = (
@@ -3005,7 +3011,8 @@ class SnowballPDESolver(BasePDESolver):
         current_time = max(total_tau - tau_to_maturity, 0.0)
         df = self._df_between_times(pricing_env, current_time, total_tau)
         df_div = self._carry_df_between_times(pricing_env, current_time, total_tau)
-        return float(df), float(df_div)
+        delay_df = self._structured_terminal_delay_df
+        return float(df) * delay_df, float(df_div) * delay_df
 
     # Override abstract methods from base class (not used for two-surface)
     def set_terminal_condition(
