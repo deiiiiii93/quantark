@@ -9,6 +9,7 @@ from typing import Dict, List
 
 import numpy as np
 
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
 from quantark.priceenv import PricingEnvironment
@@ -37,6 +38,8 @@ class BarrierPDESolver(BasePDESolver):
     This solver also handles discrete observation by only checking
     the barrier at specified observation times.
     """
+
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -86,7 +89,11 @@ class BarrierPDESolver(BasePDESolver):
         if product.is_barrier_hit(spot):
             if product.is_knock_out:
                 maturity = product.get_maturity(pricing_env)
-                settlement_time = 0.0 if product.pay_at_hit else maturity
+                settlement_time = (
+                    self._event_payment_time(product, pricing_env, 0.0)
+                    if product.pay_at_hit
+                    else self._terminal_payment_time(product, pricing_env)
+                )
                 return self._cashflow_value_at_time(
                     pricing_env=pricing_env,
                     cashflow=product.rebate,
@@ -131,6 +138,7 @@ class BarrierPDESolver(BasePDESolver):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
         )
 
         solver = EuropeanPDESolver(self.params)
@@ -176,6 +184,7 @@ class BarrierPDESolver(BasePDESolver):
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,
+            settlement_convention=product.settlement_convention,
         )
 
         return super().price(ko_product, pricing_env)
@@ -226,7 +235,11 @@ class BarrierPDESolver(BasePDESolver):
             if product.is_knock_out:
                 # Knocked out: return rebate Greeks (rebate is constant, so delta=gamma=0)
                 maturity = product.get_maturity(pricing_env)
-                settlement_time = 0.0 if product.pay_at_hit else maturity
+                settlement_time = (
+                    self._event_payment_time(product, pricing_env, 0.0)
+                    if product.pay_at_hit
+                    else self._terminal_payment_time(product, pricing_env)
+                )
                 rebate_value = self._cashflow_value_at_time(
                     pricing_env=pricing_env,
                     cashflow=product.rebate,
@@ -274,6 +287,7 @@ class BarrierPDESolver(BasePDESolver):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
         )
 
         solver = EuropeanPDESolver(self.params)
@@ -326,6 +340,7 @@ class BarrierPDESolver(BasePDESolver):
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,
+            settlement_convention=product.settlement_convention,
         )
 
         return super().calculate_greeks(ko_product, pricing_env)
@@ -361,7 +376,8 @@ class BarrierPDESolver(BasePDESolver):
             payoff = np.maximum(s_vec - K, 0.0)
         else:
             payoff = np.maximum(K - s_vec, 0.0)
-        payoff = payoff * participation
+        terminal_delay_df = self._terminal_delay_df(product, pricing_env)
+        payoff = payoff * participation * terminal_delay_df
 
         apply_terminal_barrier = product.observation_type != ObservationType.DISCRETE
         apply_terminal_barrier = (
@@ -380,7 +396,13 @@ class BarrierPDESolver(BasePDESolver):
                         pricing_env=pricing_env,
                         cashflow=rec.payoff,
                         current_time=current_time,
-                        settlement_time=rec.settlement_time,
+                        settlement_time=(
+                            rec.settlement_time
+                            if product.pay_at_hit
+                            else self._terminal_payment_time(
+                                product, pricing_env
+                            )
+                        ),
                     )
                     if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
                         if product.is_up_barrier:
@@ -394,10 +416,11 @@ class BarrierPDESolver(BasePDESolver):
                             payoff[s_vec <= rec_barrier] = cashflow_value
                         break
             else:
+                rebate_value = product.rebate * terminal_delay_df
                 if product.is_up_barrier:
-                    payoff[s_vec >= barrier] = product.rebate
+                    payoff[s_vec >= barrier] = rebate_value
                 else:
-                    payoff[s_vec <= barrier] = product.rebate
+                    payoff[s_vec <= barrier] = rebate_value
 
         grid[:, -1] = payoff
 
@@ -434,6 +457,7 @@ class BarrierPDESolver(BasePDESolver):
         )
         current_time = self._current_time(total_tau, tau)
         df_to_maturity = self._df_between_times(pricing_env, current_time, total_tau)
+        terminal_delay_df = self._terminal_delay_df(product, pricing_env)
 
         q = pricing_env.get_div_yield(tau) if tau > 0 else 0.0
         df_div = np.exp(-q * tau) if tau > 0 else 1.0
@@ -443,14 +467,22 @@ class BarrierPDESolver(BasePDESolver):
             if product.is_call():
                 grid[0, t_idx] = 0.0
                 grid[-1, t_idx] = (
-                    max(s_vec[-1] * df_div - K * df_to_maturity, 0.0) * participation
+                    max(s_vec[-1] * df_div - K * df_to_maturity, 0.0)
+                    * participation
+                    * terminal_delay_df
                 )
             else:
-                grid[0, t_idx] = K * df_to_maturity * participation
+                grid[0, t_idx] = (
+                    K * df_to_maturity * participation * terminal_delay_df
+                )
                 grid[-1, t_idx] = 0.0
             return
 
-        settlement_time = current_time if product.pay_at_hit else total_tau
+        settlement_time = (
+            self._event_payment_time(product, pricing_env, current_time)
+            if product.pay_at_hit
+            else self._terminal_payment_time(product, pricing_env)
+        )
         rebate_value = self._cashflow_value_at_time(
             pricing_env=pricing_env,
             cashflow=product.rebate,
@@ -462,13 +494,17 @@ class BarrierPDESolver(BasePDESolver):
             if product.is_call():
                 grid[0, t_idx] = 0.0
             else:
-                grid[0, t_idx] = K * df_to_maturity * participation
+                grid[0, t_idx] = (
+                    K * df_to_maturity * participation * terminal_delay_df
+                )
             grid[-1, t_idx] = rebate_value
         else:
             grid[0, t_idx] = rebate_value
             if product.is_call():
                 grid[-1, t_idx] = (
-                    max(s_vec[-1] * df_div - K * df_to_maturity, 0.0) * participation
+                    max(s_vec[-1] * df_div - K * df_to_maturity, 0.0)
+                    * participation
+                    * terminal_delay_df
                 )
             else:
                 grid[-1, t_idx] = 0.0
@@ -519,7 +555,13 @@ class BarrierPDESolver(BasePDESolver):
                     pricing_env=pricing_env,
                     cashflow=rec.payoff,
                     current_time=current_time,
-                    settlement_time=rec.settlement_time,
+                    settlement_time=(
+                        rec.settlement_time
+                        if product.pay_at_hit
+                        else self._terminal_payment_time(
+                            product, pricing_env
+                        )
+                    ),
                 )
                 if self._schedule_aggregation == ObservationAggregation.ACCUMULATE:
                     if product.is_up_barrier:
@@ -535,7 +577,11 @@ class BarrierPDESolver(BasePDESolver):
                     return
             return
 
-        settlement_time = current_time if product.pay_at_hit else total_tau
+        settlement_time = (
+            self._event_payment_time(product, pricing_env, current_time)
+            if product.pay_at_hit
+            else self._terminal_payment_time(product, pricing_env)
+        )
         rebate_value = self._cashflow_value_at_time(
             pricing_env=pricing_env,
             cashflow=product.rebate,

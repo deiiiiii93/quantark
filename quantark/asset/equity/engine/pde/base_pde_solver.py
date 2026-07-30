@@ -18,6 +18,14 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.settlement_support import (
+    resolve_terminal_timing,
+)
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
 from quantark.asset.equity.engine.pde.grid import (
     EventSchedule,
     GridBinder,
@@ -231,8 +239,10 @@ class BasePDESolver(BaseEngine):
 
         schedule = getattr(product, "observation_schedule", None)
         if schedule is not None:
+            schedule_kwargs = dict(resolve_kwargs or {})
+            schedule_kwargs.setdefault("product", product)
             resolved_records = schedule.resolve(
-                pricing_env=pricing_env, **(resolve_kwargs or {})
+                pricing_env=pricing_env, **schedule_kwargs
             )
             self._schedule_aggregation = schedule.aggregation_mode
             if self._schedule_aggregation in (
@@ -272,6 +282,8 @@ class BasePDESolver(BaseEngine):
         product: BaseEquityProduct,
         pricing_env: PricingEnvironment,
         default_payoff: float,
+        *,
+        event_payment: bool = True,
     ) -> List[Tuple]:
         """
         Terminal observation records paired with settlement-discounted payoffs.
@@ -280,8 +292,8 @@ class BasePDESolver(BaseEngine):
         records when the product is discretely monitored and the schedule
         observes at t=T, else a single ``(None, default_payoff)`` entry (the
         product-level default for continuous monitoring or date-list
-        schedules). Record payoffs with a settlement_time are discounted back
-        to maturity via the forward discount factor.
+        schedules). Event-paid records use their resolved payment time;
+        expiry-paid records use the product's terminal payment timing.
         """
         records = (
             self._terminal_schedule_records
@@ -295,13 +307,17 @@ class BasePDESolver(BaseEngine):
         out = []
         for rec in records:
             payoff = rec.payoff if rec is not None else default_payoff
-            if rec is not None and rec.settlement_time is not None:
-                payoff = self._cashflow_value_at_time(
-                    pricing_env=pricing_env,
-                    cashflow=payoff,
-                    current_time=self._total_tau,
-                    settlement_time=rec.settlement_time,
-                )
+            settlement_time = self._terminal_payment_time(
+                product, pricing_env
+            )
+            if rec is not None and event_payment:
+                settlement_time = rec.settlement_time
+            payoff = self._cashflow_value_at_time(
+                pricing_env=pricing_env,
+                cashflow=payoff,
+                current_time=self._total_tau,
+                settlement_time=settlement_time,
+            )
             out.append((rec, payoff))
         return out
 
@@ -1495,6 +1511,43 @@ class BasePDESolver(BaseEngine):
             return float(cashflow)
         df = self._df_between_times(pricing_env, current_time, settlement_time)
         return float(cashflow) * df
+
+    def _terminal_payment_time(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+    ) -> float:
+        """Return the payment time for the terminal determination."""
+        return float(resolve_terminal_timing(product, pricing_env).payment_time)
+
+    def _terminal_delay_df(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+    ) -> float:
+        """Return DF(payment) / DF(terminal determination)."""
+        return float(resolve_terminal_timing(product, pricing_env).delay_df)
+
+    def _event_payment_time(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        determination_time: float,
+        *,
+        kind: CashflowKind = CashflowKind.HIT,
+        cashflow_id: str = "barrier_event",
+    ) -> float:
+        """Resolve a node-determined event to its contractual payment time."""
+        timing = SettlementResolver.resolve_contingent(
+            product,
+            SettlementRequest(
+                kind=kind,
+                determination_time=float(determination_time),
+                cashflow_id=cashflow_id,
+            ),
+            pricing_env,
+        )
+        return float(timing.payment_time)
 
     def _calculate_intrinsic(self, product: BaseEquityProduct, spot: float) -> float:
         """

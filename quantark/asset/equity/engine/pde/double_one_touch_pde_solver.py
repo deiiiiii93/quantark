@@ -8,6 +8,7 @@ with two barriers (upper and lower).
 from typing import Dict, Optional, List
 import numpy as np
 
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.double_one_touch_option import DoubleOneTouchOption
 from quantark.asset.equity.param import PDEParams
@@ -34,6 +35,8 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         - Boundary conditions: 0 at both barriers (touched = failed)
         - Terminal condition: rebate inside corridor
     """
+
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -78,8 +81,17 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         spot = pricing_env.spot
         if product.is_barrier_hit(spot):
             if product.is_double_one_touch:
-                # Already touched, immediate rebate
-                return product.rebate
+                settlement_time = (
+                    self._event_payment_time(product, pricing_env, 0.0)
+                    if product.payment_at_hit
+                    else self._terminal_payment_time(product, pricing_env)
+                )
+                return self._cashflow_value_at_time(
+                    pricing_env,
+                    product.rebate,
+                    0.0,
+                    settlement_time,
+                )
             else:
                 # No-touch already failed
                 return 0.0
@@ -123,7 +135,18 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         if product.is_barrier_hit(spot):
             if product.is_double_one_touch:
                 # Already touched, fixed rebate (delta=gamma=0)
-                return {"price": product.rebate, "delta": 0.0, "gamma": 0.0}
+                settlement_time = (
+                    self._event_payment_time(product, pricing_env, 0.0)
+                    if product.payment_at_hit
+                    else self._terminal_payment_time(product, pricing_env)
+                )
+                price = self._cashflow_value_at_time(
+                    pricing_env,
+                    product.rebate,
+                    0.0,
+                    settlement_time,
+                )
+                return {"price": price, "delta": 0.0, "gamma": 0.0}
             else:
                 # No-touch already failed
                 return {"price": 0.0, "delta": 0.0, "gamma": 0.0}
@@ -164,7 +187,9 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         if product.is_double_one_touch:
             grid[:, -1] = 0.0
         else:
-            grid[:, -1] = rebate
+            grid[:, -1] = rebate * self._terminal_delay_df(
+                product, pricing_env
+            )
 
         # Apply the touch check at maturity only for continuous monitoring or
         # when the discrete schedule actually observes at t=T; otherwise this
@@ -177,7 +202,12 @@ class DoubleOneTouchPDESolver(BasePDESolver):
             return
 
         for rec, payoff in self._resolved_terminal_payoffs(
-            product, pricing_env, default_payoff=rebate
+            product,
+            pricing_env,
+            default_payoff=rebate,
+            event_payment=(
+                product.is_double_one_touch and product.payment_at_hit
+            ),
         ):
             rec_upper = (
                 rec.upper_barrier
@@ -236,16 +266,26 @@ class DoubleOneTouchPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         rebate = product.rebate
-        # Forward discount factor from the current step to maturity,
-        # term-structure consistent (DF(t,T), not DF(0,tau)).
         current_time = self._current_time(self._total_tau, tau)
-        df = self._df_between_times(pricing_env, current_time, self._total_tau)
+        terminal_payment_time = self._terminal_payment_time(
+            product, pricing_env
+        )
+        terminal_df = self._df_between_times(
+            pricing_env, current_time, terminal_payment_time
+        )
 
         if product.is_double_one_touch:
             if product.payment_at_hit:
-                barrier_value = rebate
+                barrier_value = self._cashflow_value_at_time(
+                    pricing_env,
+                    rebate,
+                    current_time,
+                    self._event_payment_time(
+                        product, pricing_env, current_time
+                    ),
+                )
             else:
-                barrier_value = rebate * df
+                barrier_value = rebate * terminal_df
 
             # Both boundaries are barriers
             grid[0, t_idx] = barrier_value  # Lower barrier
@@ -290,7 +330,12 @@ class DoubleOneTouchPDESolver(BasePDESolver):
         lower = product.lower_barrier
         rebate = product.rebate
         current_time = self._current_time(self._total_tau, tau)
-        df = self._df_between_times(pricing_env, current_time, self._total_tau)
+        terminal_payment_time = self._terminal_payment_time(
+            product, pricing_env
+        )
+        terminal_df = self._df_between_times(
+            pricing_env, current_time, terminal_payment_time
+        )
 
         if schedule_records:
             for rec in schedule_records:
@@ -306,8 +351,7 @@ class DoubleOneTouchPDESolver(BasePDESolver):
                 )
                 payoff = rec.payoff
                 if product.is_double_one_touch:
-                    if rec.settlement_time is not None:
-                        # Record-level settlement overrides pay-at-hit/expiry.
+                    if product.payment_at_hit:
                         barrier_value = self._cashflow_value_at_time(
                             pricing_env=pricing_env,
                             cashflow=payoff,
@@ -315,9 +359,7 @@ class DoubleOneTouchPDESolver(BasePDESolver):
                             settlement_time=rec.settlement_time,
                         )
                     else:
-                        barrier_value = (
-                            payoff if product.payment_at_hit else payoff * df
-                        )
+                        barrier_value = payoff * terminal_df
                 else:
                     barrier_value = 0.0
                 at_or_above_upper = s_vec >= upper
@@ -332,9 +374,16 @@ class DoubleOneTouchPDESolver(BasePDESolver):
 
         if product.is_double_one_touch:
             if product.payment_at_hit:
-                barrier_value = rebate
+                barrier_value = self._cashflow_value_at_time(
+                    pricing_env,
+                    rebate,
+                    current_time,
+                    self._event_payment_time(
+                        product, pricing_env, current_time
+                    ),
+                )
             else:
-                barrier_value = rebate * df
+                barrier_value = rebate * terminal_df
         else:
             barrier_value = 0.0
 

@@ -12,6 +12,9 @@ from typing import Sequence, TYPE_CHECKING
 
 import numpy as np
 
+from quantark.asset.equity.engine.settlement_support import (
+    resolve_terminal_timing,
+)
 from quantark.asset.equity.engine.quad.quad_core import QuadCoreInputs
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import (
@@ -25,13 +28,17 @@ from quantark.asset.equity.product.option.observation_schedule import (
     ObservationSchedule,
     ResolvedObservationRecord,
 )
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
 from quantark.priceenv import PricingEnvironment
 from quantark.priceenv.term_sampling import make_df_fn
 from quantark.util.enum import ObservationAggregation, ObservationType, TouchType
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
-    is_close,
     is_zero,
     validate_non_negative,
     validate_positive,
@@ -58,6 +65,9 @@ class QuadPricingContext:
     div: float
     vol: float
     contract_multiplier: float
+    terminal_payment_time: float
+    terminal_payment_df: float
+    terminal_delay_df: float
     df_fn: Optional[Callable] = None
     ref_strike: Optional[float] = None
 
@@ -164,6 +174,7 @@ class BaseDiscreteQuadAdapter(QuadInputAdapter):
             default_barrier=product.barrier,
             default_payoff=default_payoff,
             require_single=True,
+            product=product,
         )
         return resolved
 
@@ -175,6 +186,7 @@ class BaseDiscreteQuadAdapter(QuadInputAdapter):
         resolved: Sequence[ResolvedObservationRecord],
         maturity: float,
         is_up_barrier: bool,
+        terminal_payment_time: float,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         barriers = np.array([rec.barrier for rec in resolved], dtype=float)
@@ -194,7 +206,9 @@ class BaseDiscreteQuadAdapter(QuadInputAdapter):
             obs_times = np.append(obs_times, maturity)
             barriers = np.append(barriers, math.inf if is_up_barrier else 0.0)
             payoffs = np.append(payoffs, 0.0)
-            settlement_times = np.append(settlement_times, maturity)
+            settlement_times = np.append(
+                settlement_times, terminal_payment_time
+            )
 
         return obs_times, barriers, payoffs, settlement_times
 
@@ -216,13 +230,30 @@ class BaseDiscreteQuadAdapter(QuadInputAdapter):
                 settle = np.maximum(settlement_times, observation_times)
                 discount = context.df(settle) / df_obs
             else:
-                discount = context.df(maturity) / df_obs
+                discount = context.terminal_payment_df / df_obs
         elif pay_at_hit:
             delays = np.maximum(settlement_times - observation_times, 0.0)
             discount = np.exp(-rate * delays)
         else:
             discount = np.exp(-rate * (maturity - observation_times))
         return payoffs * discount
+
+    def _event_payment_df(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        determination_time: float,
+    ) -> float:
+        timing = SettlementResolver.resolve_contingent(
+            product,
+            SettlementRequest(
+                kind=CashflowKind.HIT,
+                determination_time=float(determination_time),
+                cashflow_id="quad_barrier_event",
+            ),
+            pricing_env,
+        )
+        return float(timing.payment_df)
 
 
 class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
@@ -244,6 +275,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         vol = pricing_env.get_vol(product.strike, maturity)
         _vol_ref = product.strike
         contract_multiplier = product.contract_multiplier
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         self._validate_inputs(
             spot, product.strike, maturity, rate, div, vol, product.barrier, engine
@@ -256,6 +288,9 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             div=div,
             vol=vol,
             contract_multiplier=contract_multiplier,
+            terminal_payment_time=terminal_timing.payment_time,
+            terminal_payment_df=terminal_timing.payment_df,
+            terminal_delay_df=terminal_timing.delay_df,
             df_fn=make_df_fn(pricing_env),
             ref_strike=_vol_ref,
         )
@@ -270,7 +305,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         if context.maturity < engine.MIN_MATURITY:
             value = self._barrier_expired_price(
                 product, context.spot, context.rate, context.maturity,
-                df=context.df(context.maturity),
+                df=context.terminal_payment_df,
             )
             return value * context.contract_multiplier
 
@@ -281,7 +316,11 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             if product.is_knock_out:
                 value = self._barrier_immediate_ko_price(
                     product, context.rate, context.maturity,
-                    df=context.df(context.maturity),
+                    df=(
+                        self._event_payment_df(product, pricing_env, 0.0)
+                        if product.pay_at_hit
+                        else context.terminal_payment_df
+                    ),
                 )
                 return value * context.contract_multiplier
             value = self._vanilla_price(product, pricing_env, engine)
@@ -310,7 +349,10 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         context: QuadPricingContext,
     ) -> QuadCoreInputs:
         obs_times, barriers, payoffs, settlement_times = self._extract_observations(
-            resolved, context.maturity, product.is_up_barrier
+            resolved,
+            context.maturity,
+            product.is_up_barrier,
+            context.terminal_payment_time,
         )
 
         if product.is_up_barrier:
@@ -357,6 +399,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             b_minus,
             a_plus,
             b_plus,
+            context.terminal_delay_df,
         )
 
         return QuadCoreInputs(
@@ -381,7 +424,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
     ) -> float:
         if product.is_knock_in:
             vanilla_price = self._vanilla_price(product, pricing_env, engine)
-            rebate_discount = product.rebate * context.df(context.maturity)
+            rebate_discount = product.rebate * context.terminal_payment_df
             value = vanilla_price + rebate_discount - core_price
             return value * context.contract_multiplier
         return core_price * context.contract_multiplier
@@ -435,8 +478,9 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         b_minus: np.ndarray,
         a_plus: np.ndarray,
         b_plus: np.ndarray,
+        terminal_delay_df: float,
     ) -> tuple[float, float]:
-        participation = product.participation_rate
+        participation = product.participation_rate * terminal_delay_df
         strike = product.strike
         is_call = product.is_call()
         a_terminal = 0.0
@@ -502,16 +546,20 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             value = product.rebate if hit else vanilla
         else:
             value = vanilla if hit else product.rebate
+        if df is not None:
+            return value * df
         if maturity <= 0.0:
             return value
-        return value * (df if df is not None else math.exp(-rate * maturity))
+        return value * math.exp(-rate * maturity)
 
     def _barrier_immediate_ko_price(
         self, product: BarrierOption, rate: float, maturity: float, df: Optional[float] = None,
     ) -> float:
+        if df is not None:
+            return product.rebate * df
         if product.pay_at_hit:
             return product.rebate
-        return product.rebate * (df if df is not None else math.exp(-rate * maturity))
+        return product.rebate * math.exp(-rate * maturity)
 
     def _vanilla_price(
         self,
@@ -525,6 +573,7 @@ class BarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
             contract_multiplier=1.0,
         )
         price = engine.vanilla_engine.price(vanilla, pricing_env)
@@ -550,6 +599,7 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         vol = pricing_env.get_vol(product.barrier, maturity)
         _vol_ref = product.barrier
         contract_multiplier = getattr(product, "contract_multiplier", 1.0)
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         self._validate_inputs(
             spot, product.barrier, maturity, rate, div, vol, product.rebate, engine
@@ -562,6 +612,9 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             div=div,
             vol=vol,
             contract_multiplier=contract_multiplier,
+            terminal_payment_time=terminal_timing.payment_time,
+            terminal_payment_df=terminal_timing.payment_df,
+            terminal_delay_df=terminal_timing.delay_df,
             df_fn=make_df_fn(pricing_env),
             ref_strike=_vol_ref,
         )
@@ -577,7 +630,11 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             pay_at_hit = product.payment_at_hit if product.is_one_touch else False
             value = self._one_touch_instant_payoff(
                 product, context.spot, context.maturity, context.rate, pay_at_hit,
-                df=context.df(context.maturity),
+                df=(
+                    self._event_payment_df(product, pricing_env, 0.0)
+                    if pay_at_hit
+                    else context.terminal_payment_df
+                ),
             )
             return value * context.contract_multiplier
 
@@ -587,7 +644,12 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         ):
             if product.is_one_touch:
                 pay_at_hit = product.payment_at_hit
-                value = product.rebate if pay_at_hit else product.rebate * context.df(context.maturity)
+                payment_df = (
+                    self._event_payment_df(product, pricing_env, 0.0)
+                    if pay_at_hit
+                    else context.terminal_payment_df
+                )
+                value = product.rebate * payment_df
                 return value * context.contract_multiplier
             return 0.0
 
@@ -617,7 +679,10 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         context: QuadPricingContext,
     ) -> QuadCoreInputs:
         obs_times, barriers, payoffs, settlement_times = self._extract_observations(
-            resolved, context.maturity, product.is_up_barrier
+            resolved,
+            context.maturity,
+            product.is_up_barrier,
+            context.terminal_payment_time,
         )
 
         if product.is_up_barrier:
@@ -671,7 +736,7 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         engine: "DiscreteQuadEngine",
     ) -> float:
         if product.is_no_touch:
-            rebate_discount = product.rebate * context.df(context.maturity)
+            rebate_discount = product.rebate * context.terminal_payment_df
             value = rebate_discount - core_price
             return max(0.0, value) * context.contract_multiplier
         return core_price * context.contract_multiplier
@@ -710,7 +775,7 @@ class OneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         discount = (df if df is not None else math.exp(-rate * maturity))
         if product.is_one_touch:
             if touched:
-                return product.rebate if pay_at_hit else product.rebate * discount
+                return product.rebate * discount
             return 0.0
         return product.rebate * discount if not touched else 0.0
 
@@ -734,6 +799,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         vol = pricing_env.get_vol(product.strike, maturity)
         _vol_ref = product.strike
         contract_multiplier = product.contract_multiplier
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         self._validate_inputs(
             spot,
@@ -754,6 +820,9 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             div=div,
             vol=vol,
             contract_multiplier=contract_multiplier,
+            terminal_payment_time=terminal_timing.payment_time,
+            terminal_payment_df=terminal_timing.payment_df,
+            terminal_delay_df=terminal_timing.delay_df,
             df_fn=make_df_fn(pricing_env),
             ref_strike=_vol_ref,
         )
@@ -768,7 +837,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         if is_zero(context.maturity, tol=engine.MIN_MATURITY):
             value = self._double_barrier_expired_price(
                 product, context.spot, context.rate, context.maturity,
-                df=context.df(context.maturity),
+                df=context.terminal_payment_df,
             )
             return value * context.contract_multiplier
 
@@ -777,7 +846,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             and product.is_barrier_hit(context.spot)
         ):
             if product.is_knock_out:
-                rebate_discount = context.df(context.maturity)
+                rebate_discount = context.terminal_payment_df
                 return product.rebate * rebate_discount * context.contract_multiplier
             vanilla_price = self._vanilla_price(product, pricing_env, engine)
             return vanilla_price * context.contract_multiplier
@@ -828,6 +897,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             default_lower=product.lower_barrier,
             default_payoff=product.rebate,
             require_double=True,
+            product=product,
         )
 
     def build_inputs(
@@ -842,7 +912,11 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             lower_barriers,
             payoffs,
             settlement_times,
-        ) = self._extract_double_observations(resolved, context.maturity)
+        ) = self._extract_double_observations(
+            resolved,
+            context.maturity,
+            context.terminal_payment_time,
+        )
 
         k_plus = np.array(upper_barriers, dtype=float)
         k_minus = np.array(lower_barriers, dtype=float)
@@ -852,21 +926,23 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         b_plus = np.zeros_like(k_plus, dtype=float)
 
         if np.any(payoffs > 0.0):
-            pay_at_hit = self._pay_at_hit(settlement_times, context.maturity)
             rebate_values = self._discount_rebates(
                 payoffs,
                 obs_times,
                 settlement_times,
                 context.maturity,
                 context.rate,
-                pay_at_hit,
+                False,
                 context=context,
             )
             b_minus = rebate_values
             b_plus = rebate_values
 
         a_terminal, b_terminal = self._terminal_payoff_coefficients(
-            product, k_minus, k_plus
+            product,
+            k_minus,
+            k_plus,
+            context.terminal_delay_df,
         )
 
         return QuadCoreInputs(
@@ -891,13 +967,16 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
     ) -> float:
         if product.is_knock_in:
             vanilla_price = self._vanilla_price(product, pricing_env, engine)
-            rebate_discount = product.rebate * context.df(context.maturity)
+            rebate_discount = product.rebate * context.terminal_payment_df
             value = vanilla_price + rebate_discount - core_price
             return value * context.contract_multiplier
         return core_price * context.contract_multiplier
 
     def _extract_double_observations(
-        self, resolved: Sequence[ResolvedObservationRecord], maturity: float
+        self,
+        resolved: Sequence[ResolvedObservationRecord],
+        maturity: float,
+        terminal_payment_time: float,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         upper = np.array([rec.upper_barrier for rec in resolved], dtype=float)
@@ -919,7 +998,9 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             upper = np.append(upper, math.inf)
             lower = np.append(lower, 0.0)
             payoffs = np.append(payoffs, 0.0)
-            settlement_times = np.append(settlement_times, maturity)
+            settlement_times = np.append(
+                settlement_times, terminal_payment_time
+            )
 
         return obs_times, upper, lower, payoffs, settlement_times
 
@@ -928,6 +1009,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
         product: DoubleBarrierOption,
         k_minus: np.ndarray,
         k_plus: np.ndarray,
+        terminal_delay_df: float,
     ) -> tuple[float, float]:
         strike = product.strike
         lower = float(k_minus[-1])
@@ -935,18 +1017,18 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
 
         if product.is_call():
             if strike <= lower:
-                return 1.0, -strike
+                return terminal_delay_df, -strike * terminal_delay_df
             if strike >= upper:
                 return 0.0, 0.0
             k_minus[-1] = strike
-            return 1.0, -strike
+            return terminal_delay_df, -strike * terminal_delay_df
 
         if strike >= upper:
-            return -1.0, strike
+            return -terminal_delay_df, strike * terminal_delay_df
         if strike <= lower:
             return 0.0, 0.0
         k_plus[-1] = strike
-        return -1.0, strike
+        return -terminal_delay_df, strike * terminal_delay_df
 
     def _double_barrier_expired_price(
         self,
@@ -964,16 +1046,11 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             value = product.rebate if hit else intrinsic
         else:
             value = intrinsic if hit else product.rebate
+        if df is not None:
+            return value * df
         if maturity <= 0.0:
             return value
-        return value * (df if df is not None else math.exp(-rate * maturity))
-
-    def _pay_at_hit(self, settlement_times: np.ndarray, maturity: float) -> bool:
-        if settlement_times.size == 0:
-            return False
-        return not np.all(
-            [is_close(t, maturity, abs_tol=Tolerance.PRECISION) for t in settlement_times]
-        )
+        return value * math.exp(-rate * maturity)
 
     def _vanilla_price(
         self,
@@ -987,6 +1064,7 @@ class DoubleBarrierQuadInputAdapter(BaseDiscreteQuadAdapter):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
             contract_multiplier=1.0,
         )
         return engine.vanilla_engine.price(vanilla, pricing_env)
@@ -1040,6 +1118,7 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         vol = pricing_env.get_vol(barrier_ref, maturity)
         _vol_ref = barrier_ref
         contract_multiplier = getattr(product, "contract_multiplier", 1.0)
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         self._validate_inputs(
             spot,
@@ -1060,6 +1139,9 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             div=div,
             vol=vol,
             contract_multiplier=contract_multiplier,
+            terminal_payment_time=terminal_timing.payment_time,
+            terminal_payment_df=terminal_timing.payment_df,
+            terminal_delay_df=terminal_timing.delay_df,
             df_fn=make_df_fn(pricing_env),
             ref_strike=_vol_ref,
         )
@@ -1074,7 +1156,14 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         if is_zero(context.maturity, tol=engine.MIN_MATURITY):
             value = self._double_touch_instant_payoff(
                 product, context.spot, context.maturity, context.rate,
-                df=context.df(context.maturity),
+                df=(
+                    self._event_payment_df(product, pricing_env, 0.0)
+                    if (
+                        product.touch_type == TouchType.DOUBLE_ONE_TOUCH
+                        and product.payment_at_hit
+                    )
+                    else context.terminal_payment_df
+                ),
             )
             return value * context.contract_multiplier
 
@@ -1085,7 +1174,12 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         if product.observation_type != ObservationType.EXPIRY and touched:
             if product.touch_type == TouchType.DOUBLE_ONE_TOUCH:
                 pay_at_hit = product.payment_at_hit
-                value = product.rebate if pay_at_hit else product.rebate * context.df(context.maturity)
+                payment_df = (
+                    self._event_payment_df(product, pricing_env, 0.0)
+                    if pay_at_hit
+                    else context.terminal_payment_df
+                )
+                value = product.rebate * payment_df
                 return value * context.contract_multiplier
             return 0.0
 
@@ -1138,6 +1232,7 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             default_lower=product.lower_barrier,
             default_payoff=product.rebate,
             require_double=True,
+            product=product,
         )
 
     def build_inputs(
@@ -1152,7 +1247,11 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             lower_barriers,
             payoffs,
             settlement_times,
-        ) = self._extract_double_observations(resolved, context.maturity)
+        ) = self._extract_double_observations(
+            resolved,
+            context.maturity,
+            context.terminal_payment_time,
+        )
 
         k_plus = np.array(upper_barriers, dtype=float)
         k_minus = np.array(lower_barriers, dtype=float)
@@ -1202,13 +1301,16 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         engine: "DiscreteQuadEngine",
     ) -> float:
         if product.touch_type == TouchType.DOUBLE_NO_TOUCH:
-            rebate_discount = product.rebate * context.df(context.maturity)
+            rebate_discount = product.rebate * context.terminal_payment_df
             value = rebate_discount - core_price
             return max(0.0, value) * context.contract_multiplier
         return core_price * context.contract_multiplier
 
     def _extract_double_observations(
-        self, resolved: Sequence[ResolvedObservationRecord], maturity: float
+        self,
+        resolved: Sequence[ResolvedObservationRecord],
+        maturity: float,
+        terminal_payment_time: float,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         upper = np.array([rec.upper_barrier for rec in resolved], dtype=float)
@@ -1230,7 +1332,9 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
             upper = np.append(upper, math.inf)
             lower = np.append(lower, 0.0)
             payoffs = np.append(payoffs, 0.0)
-            settlement_times = np.append(settlement_times, maturity)
+            settlement_times = np.append(
+                settlement_times, terminal_payment_time
+            )
 
         return obs_times, upper, lower, payoffs, settlement_times
 
@@ -1245,7 +1349,7 @@ class DoubleOneTouchQuadInputAdapter(BaseDiscreteQuadAdapter):
         discount = (df if df is not None else math.exp(-rate * maturity))
         if product.touch_type == TouchType.DOUBLE_ONE_TOUCH:
             if touched:
-                return product.rebate if product.payment_at_hit else product.rebate * discount
+                return product.rebate * discount
             return 0.0
         return product.rebate * discount if not touched else 0.0
 

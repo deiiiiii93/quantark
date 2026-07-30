@@ -13,9 +13,14 @@ from typing import Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    resolve_terminal_timing,
+)
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
+from quantark.execution.errors import CapabilityError
 from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.util.enum import OptionType, ObservationType
@@ -73,10 +78,44 @@ def _apply_participation(product, price_of_rebate):
     return price_of_rebate(reb) + (p - 1.0) * price_of_rebate(0.0)
 
 
+def _settlement_scale(engine, product, env) -> float:
+    """Return the safe whole-kernel terminal scale or fail closed."""
+    terminal_timing = resolve_terminal_timing(product, env)
+    delayed_hit = False
+    schedule = getattr(product, "observation_schedule", None)
+    if product.pay_at_hit and schedule is not None and schedule.records:
+        resolved = schedule.resolve(
+            env,
+            default_barrier=product.barrier,
+            default_payoff=product.rebate,
+            require_single=True,
+            product=product,
+        )
+        delayed_hit = any(
+            not np.isclose(rec.settlement_time, rec.observation_time)
+            for rec in resolved
+        )
+    convention = getattr(product, "settlement_convention", None)
+    delayed_hit = delayed_hit or bool(
+        product.pay_at_hit
+        and convention is not None
+        and float(convention.lag) != 0.0
+    )
+    if product.pay_at_hit and (
+        delayed_hit or not np.isclose(terminal_timing.delay_df, 1.0)
+    ):
+        raise CapabilityError(
+            f"{type(engine).__name__} cannot separate delayed first-hit "
+            "cashflows from terminal cashflows in the vol-model kernel"
+        )
+    return float(terminal_timing.delay_df)
+
+
 class LocalVolBarrierPDESolver(BaseEngine):
     """1D Crank-Nicolson barrier PDE under a Dupire local-volatility surface."""
 
     engine_type = EngineType.PDE
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def __init__(self, params: Optional[PDEParams] = None, local_vol_surface: Optional[LocalVolSurface] = None):
         super().__init__(params or PDEParams())
@@ -84,6 +123,7 @@ class LocalVolBarrierPDESolver(BaseEngine):
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("LocalVolBarrierPDESolver", product)
+        settlement_scale = _settlement_scale(self, product, env)
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         market = TermMarketContext.from_env(env, t_grid, ref_strike=float(product.strike))
@@ -106,11 +146,16 @@ class LocalVolBarrierPDESolver(BaseEngine):
                                         n_s=int(self.params.grid_size), **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        return (
+            unit
+            * float(getattr(product, "contract_multiplier", 1.0))
+            * settlement_scale
+        )
 
 
 class _Heston2DBarrierBase(BaseEngine):
     engine_type = EngineType.PDE
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def __init__(self, n_x=200, n_v=100, n_t=100, scheme=ADIScheme.CRAIG_SNEYD):
         super().__init__(PDEParams())
@@ -132,6 +177,7 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonBarrierPDESolver", product)
+        settlement_scale = _settlement_scale(self, product, env)
         T = float(product.get_maturity(env))
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(
@@ -149,7 +195,11 @@ class HestonBarrierPDESolver(_Heston2DBarrierBase):
                                             **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        return (
+            unit
+            * float(getattr(product, "contract_multiplier", 1.0))
+            * settlement_scale
+        )
 
 
 class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
@@ -168,6 +218,7 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
 
     def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
         _check("HestonSLVBarrierPDESolver", product)
+        settlement_scale = _settlement_scale(self, product, env)
         T = float(product.get_maturity(env))
         t_grid = np.linspace(0.0, T, self.n_t + 1)
         market = TermMarketContext.from_env(
@@ -186,4 +237,8 @@ class HestonSLVBarrierPDESolver(_Heston2DBarrierBase):
                                          **_bkw(product))
 
         unit = _apply_participation(product, price_of_rebate)
-        return unit * float(getattr(product, "contract_multiplier", 1.0))
+        return (
+            unit
+            * float(getattr(product, "contract_multiplier", 1.0))
+            * settlement_scale
+        )

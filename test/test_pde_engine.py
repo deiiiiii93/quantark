@@ -438,6 +438,7 @@ class TestBarrierPDESolver:
             barrier_type=BarrierType.UP_OUT,
             maturity=1.0,
             rebate=5.0,
+            pay_at_hit=True,
             observation_type=ObservationType.DISCRETE,
             observation_dates=[0.5],
         )

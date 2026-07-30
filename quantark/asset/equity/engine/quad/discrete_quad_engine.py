@@ -10,6 +10,7 @@ from typing import Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.quad.european_quad_engine import EuropeanQuadEngine
 from quantark.asset.equity.engine.quad.quad_adapters import QuadInputAdapter, resolve_quad_adapter
 from quantark.asset.equity.engine.quad.term_inputs import build_quad_term_params
@@ -29,6 +30,7 @@ class DiscreteQuadEngine(BaseEngine):
     """
 
     engine_type = EngineType.QUADRATURE
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     MIN_MATURITY = 1e-10
     MAX_VOL = 5.0
 

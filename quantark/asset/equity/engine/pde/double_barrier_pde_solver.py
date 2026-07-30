@@ -8,6 +8,7 @@ knock-out barrier options (corridor options).
 from typing import Dict, Optional, List
 import numpy as np
 
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.double_barrier_option import DoubleBarrierOption
 from quantark.asset.equity.param import PDEParams
@@ -32,6 +33,8 @@ class DoubleBarrierPDESolver(BasePDESolver):
     For knock-in corridor options, we use:
         Knock-in = Vanilla - Knock-out
     """
+
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def _uses_grid_layer(self) -> bool:
         return True
@@ -79,7 +82,12 @@ class DoubleBarrierPDESolver(BasePDESolver):
         if product.is_barrier_hit(spot):
             if product.is_knock_out:
                 # Already knocked out
-                return product.rebate
+                return self._cashflow_value_at_time(
+                    pricing_env,
+                    product.rebate,
+                    0.0,
+                    self._event_payment_time(product, pricing_env, 0.0),
+                )
             else:
                 # Knocked in, price as vanilla
                 return self._price_vanilla(product, pricing_env)
@@ -108,6 +116,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
         )
 
         solver = EuropeanPDESolver(self.params)
@@ -132,6 +141,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,
+            settlement_convention=product.settlement_convention,
         )
 
         return super().price(ko_product, pricing_env)
@@ -209,6 +219,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
         )
 
         solver = EuropeanPDESolver(self.params)
@@ -233,6 +244,7 @@ class DoubleBarrierPDESolver(BasePDESolver):
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
             observation_schedule=product.observation_schedule,
+            settlement_convention=product.settlement_convention,
         )
 
         return super().calculate_greeks(ko_product, pricing_env)
@@ -264,11 +276,14 @@ class DoubleBarrierPDESolver(BasePDESolver):
         lower = product.lower_barrier
         rebate = product.rebate
 
+        terminal_delay_df = self._terminal_delay_df(product, pricing_env)
+
         # Calculate base payoff
         if product.is_call():
             payoff = np.maximum(s_vec - K, 0.0)
         else:
             payoff = np.maximum(K - s_vec, 0.0)
+        payoff *= terminal_delay_df
 
         # Apply the corridor check at maturity only for continuous monitoring
         # or when the discrete schedule actually observes at t=T; otherwise
@@ -280,7 +295,10 @@ class DoubleBarrierPDESolver(BasePDESolver):
 
         if apply_terminal_barrier:
             for rec, cashflow_value in self._resolved_terminal_payoffs(
-                product, pricing_env, default_payoff=rebate
+                product,
+                pricing_env,
+                default_payoff=rebate,
+                event_payment=False,
             ):
                 rec_upper = (
                     rec.upper_barrier
@@ -332,11 +350,11 @@ class DoubleBarrierPDESolver(BasePDESolver):
             pricing_env: Pricing environment
         """
         rebate = product.rebate
-        # Rebate paid at maturity, discounted with the forward factor
-        # DF(t, T) (term-structure consistent, not DF(0, tau)).
         current_time = self._current_time(self._total_tau, tau)
         discounted_rebate = rebate * self._df_between_times(
-            pricing_env, current_time, self._total_tau
+            pricing_env,
+            current_time,
+            self._terminal_payment_time(product, pricing_env),
         )
 
         # Continuous monitoring: edges sit AT the barriers (absorbing).
@@ -401,10 +419,8 @@ class DoubleBarrierPDESolver(BasePDESolver):
                     pricing_env=pricing_env,
                     cashflow=rec.payoff,
                     current_time=current_time,
-                    settlement_time=(
-                        rec.settlement_time
-                        if rec.settlement_time is not None
-                        else total_tau
+                    settlement_time=self._terminal_payment_time(
+                        product, pricing_env
                     ),
                 )
                 outside_corridor = (s_vec >= upper) | (s_vec <= lower)
@@ -420,7 +436,9 @@ class DoubleBarrierPDESolver(BasePDESolver):
         rebate = product.rebate
 
         discounted_rebate = rebate * self._df_between_times(
-            pricing_env, current_time, total_tau
+            pricing_env,
+            current_time,
+            self._terminal_payment_time(product, pricing_env),
         )
 
         # Apply knockout at both barriers
