@@ -325,7 +325,8 @@ def _make_replay(market_data, engine_config, product, start_date) -> ProductRepl
         product_quantity=-1.0,
         has_lifecycle=True,
         lifecycle=AutocallableLifecycleState(),
-        pricing_engine=None,
+        # pricing engines now flow explicitly from the engine (Task 10);
+        # ProductReplay no longer holds one.
         surface_engine=None,
         event_stats_engine=None,
         engine_config=engine_config,
