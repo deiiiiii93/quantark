@@ -245,6 +245,8 @@ def make_scalar_bsm_config() -> AutocallableBacktestConfig:
         product_quantity=-1.0,
         calculate_surfaces=True,
         calculate_event_probabilities=True,
+        # Goldens freeze pre-consolidation semantics: no early termination.
+        terminate_on_lifecycle_end=False,
     )
 
 
@@ -270,6 +272,7 @@ def make_book_config() -> BookAutocallableBacktestConfig:
         transaction_cost_model=ZeroCostModel(),
         calculate_surfaces=False,
         calculate_event_probabilities=True,
+        terminate_on_lifecycle_end=False,
     )
 
 
@@ -293,6 +296,7 @@ def make_localvol_config(history_root: Path = GOLDEN_DIR) -> AutocallableBacktes
         product_quantity=-1.0,
         calculate_surfaces=False,
         calculate_event_probabilities=True,
+        terminate_on_lifecycle_end=False,
     )
 
 

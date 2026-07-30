@@ -254,6 +254,7 @@ class AutocallableBacktestConfig:
     surface_config: SurfaceGridConfig = field(default_factory=SurfaceGridConfig)
     calculate_surfaces: bool = True
     calculate_event_probabilities: bool = True
+    terminate_on_lifecycle_end: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -321,6 +322,7 @@ class ReplayBacktestConfig:
     surface_config: SurfaceGridConfig = field(default_factory=SurfaceGridConfig)
     calculate_surfaces: bool = False
     calculate_event_probabilities: bool = True
+    terminate_on_lifecycle_end: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):

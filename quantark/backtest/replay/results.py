@@ -28,8 +28,10 @@ class AutocallableBacktestResults:
         daily_event_summary: list[dict[str, Any]],
         event_probabilities: list[dict[str, Any]],
         calibration_records: Optional[list[dict[str, Any]]] = None,
+        run_info: Optional[dict[str, Any]] = None,
     ) -> None:
         self.config = config
+        self._run_info = dict(run_info or {})
         self._states = states
         self._greeks = greeks
         self._rebalances = rebalances
@@ -39,6 +41,7 @@ class AutocallableBacktestResults:
         self._daily_event_summary = daily_event_summary
         self._event_probabilities = event_probabilities
         self._calibration_records = [dict(r) for r in (calibration_records or [])]
+        self._run_info = dict(run_info or {})
 
     @staticmethod
     def _frame(rows: list[dict[str, Any]], index: str | None = None) -> pd.DataFrame:
@@ -165,6 +168,7 @@ class AutocallableBacktestResults:
             "total_pnl": float(states["total_pnl"].iloc[-1]),
             "num_trades": int(len(self._trades)),
             "num_actions": int(len(self._actions)),
+            **self._run_info,
         }
 
     def export_to_excel(self, filepath: str) -> None:
@@ -196,7 +200,7 @@ class AutocallableBacktestResults:
 class BookBacktestResults:
     def __init__(self, *, config, states, greeks, rebalances, trades, actions,
                  daily_event_summary, event_probabilities, surfaces, products_meta,
-                 calibration_records=None):
+                 calibration_records=None, run_info=None):
         self.config = config
         self._states = states
         self._greeks = greeks
@@ -208,6 +212,7 @@ class BookBacktestResults:
         self._surfaces = surfaces
         self._products_meta = products_meta
         self._calibration_records = [dict(r) for r in (calibration_records or [])]
+        self._run_info = dict(run_info or {})
 
     @staticmethod
     def _frame(rows, index=None):
@@ -306,6 +311,7 @@ class BookBacktestResults:
             "num_trades": int(len(self._trades)),
             "num_products": len(self._products_meta),
             "num_lifecycle_events": len(self._actions),
+            **self._run_info,
         }
 
 

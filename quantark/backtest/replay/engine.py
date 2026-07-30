@@ -131,6 +131,8 @@ class ReplayBacktestEngine:
             replay.start_date = self._start_date
 
         current_contract: Optional[str] = None
+        self._days_replayed = 0
+        self._days_in_contract = int(len(dates))
         for date in dates:
             date = pd.Timestamp(date).normalize()
             market = self.config.market_data.get_market_row(date)
@@ -212,6 +214,7 @@ class ReplayBacktestEngine:
                 replay.settle_maturity_if_due(
                     date, lifecycle_product, env, market["spot"]
                 )
+                replay.settle_pending_if_due(date)
 
                 price = 0.0
                 greeks: dict[str, float] = {"price": 0.0, "delta": 0.0, "gamma": 0.0}
@@ -252,6 +255,21 @@ class ReplayBacktestEngine:
                 book_cashflows += replay.lifecycle.realized_cashflows
 
             any_alive = any(replay.lifecycle.alive for replay in self._replays)
+            book_receivable_pv = 0.0
+            for replay in self._replays:
+                pending = float(replay.lifecycle.pending_settlement_cashflow)
+                if pending != 0.0 and replay.lifecycle.settlement_date is not None:
+                    tau_settle = max(
+                        (
+                            pd.Timestamp(replay.lifecycle.settlement_date).normalize()
+                            - date
+                        ).days
+                        / 365.0,
+                        0.0,
+                    )
+                    book_receivable_pv += pending * float(
+                        env.get_discount_factor(tau_settle)
+                    )
 
             if day_calibration_record is not None:
                 day_calibration_record["pricing_seconds"] = (
@@ -278,11 +296,20 @@ class ReplayBacktestEngine:
                 pre_hedge_contracts=pre_hedge_contracts,
                 multiplier=multiplier,
                 any_alive=any_alive,
+                receivable_pv=book_receivable_pv,
             )
+            self._days_replayed += 1
+            if self.config.terminate_on_lifecycle_end and all(
+                r.lifecycle.settled for r in self._replays
+            ):
+                # Terminal cash has landed for every product: the replay ends
+                # on the later of observation and settlement (study spec §6).
+                break
 
         return BookBacktestResults(
             config=self.config,
             calibration_records=self._calibration_records,
+            run_info=self._run_info(),
             states=self._states,
             greeks=self._greeks,
             rebalances=self._rebalances,
@@ -301,6 +328,24 @@ class ReplayBacktestEngine:
                 for bp in self.config.products
             ],
         )
+
+    def _run_info(self) -> dict[str, Any]:
+        """Termination provenance for the summary (study spec §6)."""
+        if any(r.lifecycle.knocked_out for r in self._replays):
+            reason = "ko"
+        elif all(r.lifecycle.matured for r in self._replays) and any(
+            r.lifecycle.knocked_in for r in self._replays
+        ):
+            reason = "ki_maturity"
+        elif all(r.lifecycle.matured for r in self._replays):
+            reason = "maturity"
+        else:
+            reason = "data_end"
+        return {
+            "termination_reason": reason,
+            "days_replayed": int(self._days_replayed),
+            "days_in_contract": int(self._days_in_contract),
+        }
 
     def _calibrate_day(self, date: pd.Timestamp) -> dict[str, Any]:
         """Calibrate the day's vol model and swap in per-replay day engines.
@@ -504,6 +549,7 @@ class ReplayBacktestEngine:
         pre_hedge_contracts: float,
         multiplier: float,
         any_alive: bool,
+        receivable_pv: float = 0.0,
     ) -> None:
         futures_price = float(selected["futures_price"])
         spot = float(market["spot"])
@@ -515,7 +561,9 @@ class ReplayBacktestEngine:
         )
         total_pnl = product_pnl + hedge_mtm - self._transaction_costs
         cash = book_cashflows - self._transaction_costs
-        portfolio_value = product_mtm + hedge_mtm + cash
+        # A pending terminal receivable (delayed KO settlement) is carried at
+        # its discounted value; zero under T+0 settlement (golden-invariant).
+        portfolio_value = product_mtm + hedge_mtm + cash + receivable_pv
         product_position_delta = float(net_position_delta)
         product_position_gamma = float(net_position_gamma)
         pre_hedge_futures_delta = float(pre_hedge_contracts) * multiplier

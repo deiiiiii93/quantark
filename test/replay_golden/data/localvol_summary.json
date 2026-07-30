@@ -1,4 +1,6 @@
 {
+  "days_in_contract": 3,
+  "days_replayed": 3,
   "end_date": "2024-01-04T00:00:00",
   "final_portfolio_value": -10001.09589041096,
   "initial_portfolio_value": -10156.288723735766,
@@ -6,5 +8,6 @@
   "num_days": 3,
   "num_trades": 0,
   "start_date": "2024-01-02T00:00:00",
+  "termination_reason": "ko",
   "total_pnl": 155.192833324807
 }

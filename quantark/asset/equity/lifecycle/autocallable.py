@@ -142,7 +142,14 @@ class AutocallableLifecycleTracker:
                     before = self._state_snapshot()
                     payoff = float(rec.get("payoff", 0.0))
                     cashflow = self.quantity * payoff
-                    if self.lifecycle.mark_ko(pd.Timestamp(date).to_pydatetime(), cashflow):
+                    settlement_date = rec.get("settlement_date")
+                    if settlement_date is not None:
+                        settlement_date = pd.Timestamp(settlement_date).to_pydatetime()
+                    if self.lifecycle.mark_ko(
+                        pd.Timestamp(date).to_pydatetime(),
+                        cashflow,
+                        settlement_date=settlement_date,
+                    ):
                         events.append(
                             LifecycleEvent(
                                 event_type=LifecycleEventType.KNOCK_OUT,
@@ -155,7 +162,10 @@ class AutocallableLifecycleTracker:
                                 terminates_position=True,
                                 state_before=before,
                                 state_after=self._state_snapshot(),
-                                metadata={"payoff": payoff},
+                                metadata={
+                                    "payoff": payoff,
+                                    "settlement_date": settlement_date,
+                                },
                             )
                         )
                     return events
@@ -315,6 +325,7 @@ class AutocallableLifecycleTracker:
         times = list(profile.get("observation_times", []))
         barriers = list(profile.get("barriers", []))
         payoffs = list(profile.get("payoffs", [0.0] * len(times)))
+        settlement_times = list(profile.get("settlement_times", []))
         schedule_dates = []
         if schedule is not None:
             for rec in schedule.records:
@@ -330,12 +341,27 @@ class AutocallableLifecycleTracker:
                     base_date + timedelta(days=int(round(float(obs_time) * 365)))
                 ).normalize()
             obs_date = self._date_resolver(obs_date)
+            settlement_time = (
+                settlement_times[idx] if idx < len(settlement_times) else None
+            )
+            if settlement_time is None or float(settlement_time) <= float(obs_time):
+                settlement_date = obs_date
+            else:
+                settlement_date = self._date_resolver(
+                    (
+                        base_date + timedelta(days=int(round(float(settlement_time) * 365)))
+                    ).normalize()
+                )
             records.append(
                 {
                     "date": obs_date,
                     "time": float(obs_time),
                     "barrier": float(barriers[idx]) if idx < len(barriers) and barriers[idx] is not None else None,
                     "payoff": float(payoffs[idx]) if idx < len(payoffs) and payoffs[idx] is not None else 0.0,
+                    "settlement_time": (
+                        float(settlement_time) if settlement_time is not None else None
+                    ),
+                    "settlement_date": settlement_date,
                 }
             )
         return records

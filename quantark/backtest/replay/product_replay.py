@@ -450,6 +450,18 @@ class ProductReplay:
             )
         return stats, "mc_fallback"
 
+    def settle_pending_if_due(self, date: pd.Timestamp) -> float:
+        """Post a pending terminal receivable once its settlement date is
+        reached; returns the amount posted (0.0 otherwise)."""
+        lifecycle = self.lifecycle
+        if lifecycle.settled or lifecycle.settlement_date is None:
+            return 0.0
+        if pd.Timestamp(date).normalize() >= pd.Timestamp(
+            lifecycle.settlement_date
+        ).normalize():
+            return lifecycle.settle()
+        return 0.0
+
     def settle_maturity_if_due(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
