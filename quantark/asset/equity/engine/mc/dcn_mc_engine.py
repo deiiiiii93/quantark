@@ -21,6 +21,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import DCNEventStats
 from quantark.asset.equity.engine.mc.dcn_payoff import compute_dcn_cashflows
 from quantark.asset.equity.engine.mc.qmc_draws import qmc_normals
@@ -199,6 +200,7 @@ class DCNMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
     # Session-path hook (execution-framework adapter clones only): a callable
     # ``(n_dims, n_paths, batch_id) -> ndarray | None`` consulted before the
     # engine's own generators; None on every direct-path engine.

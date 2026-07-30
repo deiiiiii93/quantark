@@ -57,6 +57,7 @@ class PricingRequest:
     outputs: frozenset = DEFAULT_OUTPUTS
     operation_options: tuple = ()
     request_id: str | None = None
+    lifecycle_state: object | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ class NormalizedPricingRequest:
     pricing_env_ref: object | None
     snapshot_complete: bool
     fingerprint: str | None
+    lifecycle_state_ref: object | None = None
 
 
 @dataclass(frozen=True)

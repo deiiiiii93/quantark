@@ -80,6 +80,18 @@ class LegacyPriceAdapter:
             raise CapabilityError(
                 "pricing_env is required for product_env engines"
             )
+        if type(engine).__module__.startswith(
+            "quantark.asset.equity.engine."
+        ):
+            from quantark.asset.equity.engine.settlement_support import (
+                validate_settlement_capability,
+            )
+
+            validate_settlement_capability(
+                engine,
+                request.product,
+                request.lifecycle_state,
+            )
 
     def normalize(self, engine, request: PricingRequest) -> NormalizedPricingRequest:
         cls = type(engine)
@@ -92,6 +104,7 @@ class LegacyPriceAdapter:
             pricing_env_ref=request.pricing_env,
             snapshot_complete=False,
             fingerprint=None,
+            lifecycle_state_ref=request.lifecycle_state,
         )
 
     def execute_native(self, engine, request, normalized, context, prepared=None):
@@ -110,7 +123,11 @@ class LegacyPriceAdapter:
     def _call_price(self, engine, request):
         if self.call_shape == "env_bound":
             return engine.price(request.product)
-        return engine.price(request.product, request.pricing_env)
+        return engine.price(
+            request.product,
+            request.pricing_env,
+            lifecycle_state=request.lifecycle_state,
+        )
 
     def _call_detailed(self, engine, request):
         if self.call_shape == "env_bound":

@@ -16,6 +16,15 @@ class VolDynamicsType(Enum):
     SLV = "slv"
 
 
+class SettlementSupport(Enum):
+    """Cashflow payment-timing forms implemented by an engine."""
+
+    NONE = "none"
+    TERMINAL_ONLY = "terminal_only"
+    EVENT_AND_TERMINAL = "event_and_terminal"
+    AMERICAN_EXERCISE = "american_exercise"
+
+
 @dataclass(frozen=True)
 class EngineCapability:
     engine_type: EngineType
@@ -26,6 +35,7 @@ class EngineCapability:
     supports_market_vol_term_structure: bool
     supports_path_dependent_payoff: bool
     notes: str
+    settlement_support: SettlementSupport = SettlementSupport.NONE
 
 
 def _cap(

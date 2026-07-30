@@ -19,6 +19,7 @@ import numpy as np
 from scipy.linalg import solve_banded
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.grid import GridConfig, GridRequest
 from quantark.asset.equity.engine.pde.grid.binder import GridLayerMixin
 from quantark.asset.equity.product.option.dcn_grid import build_dcn_grid_context
@@ -138,6 +139,7 @@ class DCNPDEEngine(GridLayerMixin, BaseEngine):
     """
 
     engine_type = EngineType.PDE
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def __init__(
         self,

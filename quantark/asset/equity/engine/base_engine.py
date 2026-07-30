@@ -4,15 +4,74 @@ Base class for pricing engines.
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from functools import update_wrapper
+import inspect
 from math import isfinite
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional, Sequence, TYPE_CHECKING
 import numpy as np
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.priceenv import PricingEnvironment
 from quantark.asset.equity.param import EngineParams
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.util.enum.engine_enums import EngineType
 from quantark.util.numerical import is_close
+
+if TYPE_CHECKING:
+    from quantark.asset.equity.lifecycle import EquityOptionLifecycleState
+
+
+def _install_lifecycle_keyword(cls, method_name: str) -> None:
+    """Add the shared keyword/guard to legacy concrete equity methods."""
+    original = cls.__dict__.get(method_name)
+    if original is None:
+        return
+    signature = inspect.signature(original)
+    if (
+        "product" not in signature.parameters
+        or "lifecycle_state" in signature.parameters
+    ):
+        return
+    if not cls.__module__.startswith("quantark.asset.equity.engine."):
+        return
+
+    parameters = list(signature.parameters.values())
+    lifecycle_parameter = inspect.Parameter(
+        "lifecycle_state",
+        kind=inspect.Parameter.KEYWORD_ONLY,
+        default=None,
+    )
+    for index, parameter in enumerate(parameters):
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            parameters.insert(index, lifecycle_parameter)
+            break
+    else:
+        parameters.append(lifecycle_parameter)
+    public_signature = signature.replace(parameters=parameters)
+
+    def lifecycle_aware_method(
+        self,
+        *args,
+        lifecycle_state=None,
+        **kwargs,
+    ):
+        bound = signature.bind_partial(self, *args, **kwargs)
+        product = bound.arguments.get("product")
+        if product is not None:
+            from quantark.asset.equity.engine.settlement_support import (
+                validate_settlement_capability,
+            )
+
+            validate_settlement_capability(
+                self,
+                product,
+                lifecycle_state,
+            )
+        return original(self, *args, **kwargs)
+
+    update_wrapper(lifecycle_aware_method, original)
+    lifecycle_aware_method.__signature__ = public_signature
+    setattr(cls, method_name, lifecycle_aware_method)
 
 
 class BaseEngine(ABC):
@@ -27,6 +86,13 @@ class BaseEngine(ABC):
 
     engine_type: EngineType = EngineType.ANALYTICAL
     supports_spot_greeks_grid = False
+    settlement_support = SettlementSupport.NONE
+    supports_lifecycle_state = False
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for method_name in ("price", "price_with_events", "calculate_greeks"):
+            _install_lifecycle_keyword(cls, method_name)
 
     def __init__(self, params: Optional[EngineParams] = None):
         """
@@ -39,7 +105,11 @@ class BaseEngine(ABC):
 
     @abstractmethod
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state: Optional["EquityOptionLifecycleState"] = None,
     ) -> float:
         """
         Calculate the price of the product.
@@ -84,6 +154,8 @@ class BaseEngine(ABC):
         pricing_env: PricingEnvironment,
         emit_distribution: bool = True,
         streams: "Optional[frozenset]" = None,
+        *,
+        lifecycle_state: Optional["EquityOptionLifecycleState"] = None,
     ) -> "PricingResult":
         """
         Return product NPV and an event distribution for cash-leg valuation.
@@ -98,6 +170,11 @@ class BaseEngine(ABC):
         other engines ignore it and return the full distribution.
         """
         from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.asset.equity.engine.settlement_support import (
+            validate_settlement_capability,
+        )
+
+        validate_settlement_capability(self, product, lifecycle_state)
 
         if emit_distribution:
             stats = self.calculate_event_stats(product, pricing_env)
@@ -107,14 +184,22 @@ class BaseEngine(ABC):
                     event_distribution=EventDistribution.from_autocallable_stats(stats),
                 )
 
-        npv = self.price(product, pricing_env)
+        npv = self.price(
+            product,
+            pricing_env,
+            lifecycle_state=lifecycle_state,
+        )
         return PricingResult(
             npv=npv,
             event_distribution=EventDistribution.trivial(product.get_maturity(pricing_env)),
         )
 
     def calculate_greeks(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state: Optional["EquityOptionLifecycleState"] = None,
     ) -> Dict[str, float]:
         """
         Calculate Greeks using finite difference method.
@@ -145,17 +230,23 @@ class BaseEngine(ABC):
         if bump_engine is None:
             bump_engine = self
 
-        base_price = bump_engine.price(product, pricing_env)
+        base_price = bump_engine.price(
+            product, pricing_env, lifecycle_state=lifecycle_state
+        )
         greeks = {"price": base_price}
 
         # Delta: dV/dS
         env_up = deepcopy(pricing_env)
         env_up.spot_quote.spot *= 1 + spot_bump
-        price_up = bump_engine.price(product, env_up)
+        price_up = bump_engine.price(
+            product, env_up, lifecycle_state=lifecycle_state
+        )
 
         env_down = deepcopy(pricing_env)
         env_down.spot_quote.spot *= 1 - spot_bump
-        price_down = bump_engine.price(product, env_down)
+        price_down = bump_engine.price(
+            product, env_down, lifecycle_state=lifecycle_state
+        )
 
         delta = (price_up - price_down) / (2 * pricing_env.spot * spot_bump)
         greeks["delta"] = delta
@@ -166,11 +257,15 @@ class BaseEngine(ABC):
         else:
             env_gup = deepcopy(pricing_env)
             env_gup.spot_quote.spot *= 1 + gamma_bump
-            gamma_up = bump_engine.price(product, env_gup)
+            gamma_up = bump_engine.price(
+                product, env_gup, lifecycle_state=lifecycle_state
+            )
 
             env_gdown = deepcopy(pricing_env)
             env_gdown.spot_quote.spot *= 1 - gamma_bump
-            gamma_down = bump_engine.price(product, env_gdown)
+            gamma_down = bump_engine.price(
+                product, env_gdown, lifecycle_state=lifecycle_state
+            )
         gamma = (gamma_up - 2 * base_price + gamma_down) / (
             pricing_env.spot * gamma_bump
         ) ** 2

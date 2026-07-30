@@ -5,6 +5,7 @@ Pricing engines for equity derivatives.
 from .base_engine import BaseEngine
 from .capabilities import (
     EngineCapability,
+    SettlementSupport,
     VolDynamicsType,
     get_engine_capability,
     validate_engine_capability,
@@ -79,6 +80,7 @@ __all__ = [
     # Base
     "BaseEngine",
     "EngineCapability",
+    "SettlementSupport",
     "VolDynamicsType",
     "get_engine_capability",
     "validate_engine_capability",

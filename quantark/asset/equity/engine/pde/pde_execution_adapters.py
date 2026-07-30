@@ -253,7 +253,11 @@ class _EquityPDESessionBase(LegacyPriceAdapter):
             return super().execute_native(clone, request, normalized, context)
         product, env = request.product, request.pricing_env
         if request.outputs == frozenset({OutputKind.PV}):
-            value = clone.price(product, env)
+            value = clone.price(
+                product,
+                env,
+                lifecycle_state=request.lifecycle_state,
+            )
             return value, (("pv", float(value)),)
 
         want_events = OutputKind.EVENT_STATS in request.outputs

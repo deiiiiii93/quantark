@@ -26,6 +26,7 @@ from typing import Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
 from quantark.asset.equity.engine.pde.dcn_pde_solver import (
     DCNPDEEngine,
     DCNPDEResult,
@@ -105,6 +106,7 @@ class HestonDCNPDESolver(BaseEngine):
     """
 
     engine_type = EngineType.PDE
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
 
     def __init__(
         self,
