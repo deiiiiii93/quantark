@@ -7,6 +7,13 @@ from typing import Optional, Union, Tuple
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import MCParams
@@ -59,6 +66,8 @@ class EuropeanMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
@@ -121,7 +130,11 @@ class EuropeanMCEngine(BaseEngine):
             )
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a European vanilla option using Monte Carlo simulation.
@@ -143,6 +156,12 @@ class EuropeanMCEngine(BaseEngine):
                 f"got {type(product).__name__}"
             )
 
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+
         S = pricing_env.spot
         K = product.strike
         T = product.get_maturity(pricing_env)
@@ -159,13 +178,16 @@ class EuropeanMCEngine(BaseEngine):
         self._validate_inputs(S, K, T, r, q, sigma)
 
         if T < 1e-10:
-            return product.get_payoff(S)
+            return (
+                product.get_payoff(S) * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         term = build_mc_term_inputs(
             pricing_env, ref_strike=K, maturity=T,
             time_steps=self.params.time_steps,
         )
-        df = pricing_env.get_discount_factor(T)
+        df = timing.payment_df
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             price, std_error = self._price_rqmc(
@@ -184,14 +206,22 @@ class EuropeanMCEngine(BaseEngine):
         if price < 0:
             raise PricingError(f"Negative price computed: {price}")
 
-        lower_bound = self._european_lower_bound(product, S, K, T, q, df)
+        lower_bound = self._european_lower_bound(
+            product,
+            S,
+            K,
+            T,
+            q,
+            timing.payment_df,
+            timing.delay_df,
+        )
         if price < lower_bound - 1e-6:
             raise PricingError(
                 f"Price ({price:.6f}) below discounted European lower bound "
                 f"({lower_bound:.6f})"
             )
 
-        return price
+        return price + pending_receivable_pv(lifecycle_state, pricing_env)
 
     def _european_lower_bound(
         self,
@@ -200,11 +230,12 @@ class EuropeanMCEngine(BaseEngine):
         K: float,
         T: float,
         q: float,
-        df: float,
+        payment_df: float,
+        delay_df: float,
     ) -> float:
         """Calculate the discounted no-arbitrage lower bound for a European option."""
-        spot_pv = S * safe_exp(-q * T)
-        strike_pv = K * df
+        spot_pv = S * safe_exp(-q * T) * delay_df
+        strike_pv = K * payment_df
         if product.is_call():
             lower_bound = max(spot_pv - strike_pv, 0.0)
         else:

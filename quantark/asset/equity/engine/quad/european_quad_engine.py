@@ -11,6 +11,13 @@ import numpy as np
 from scipy.integrate import simpson, fixed_quad
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import QuadParams
@@ -42,6 +49,8 @@ class EuropeanQuadEngine(BaseEngine):
     """
 
     engine_type = EngineType.QUADRATURE
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
     DEFAULT_METHOD = QuadratureMethod.SIMPSON
 
     def __init__(
@@ -95,7 +104,11 @@ class EuropeanQuadEngine(BaseEngine):
         raise ValidationError(f"Invalid method type: {type(method)}")
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a European vanilla option using numerical quadrature.
@@ -117,6 +130,12 @@ class EuropeanQuadEngine(BaseEngine):
                 f"got {type(product).__name__}"
             )
 
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+
         # Extract parameters
         S = pricing_env.spot
         K = product.strike
@@ -130,18 +149,21 @@ class EuropeanQuadEngine(BaseEngine):
 
         # Handle edge cases
         if T < 1e-10:  # Option has expired
-            return product.get_payoff(S)
+            return (
+                product.get_payoff(S) * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         # Price using quadrature
         if self.method == QuadratureMethod.SIMPSON:
             price = self._price_simpson(
                 S, K, T, r, q, sigma, product.is_call(),
-                df=pricing_env.get_discount_factor(T),
+                df=timing.payment_df,
             )
         elif self.method == QuadratureMethod.GAUSS_LEGENDRE:
             price = self._price_gauss_legendre(
                 S, K, T, r, q, sigma, product.is_call(),
-                df=pricing_env.get_discount_factor(T),
+                df=timing.payment_df,
             )
         else:
             raise PricingError(f"Unsupported quadrature method: {self.method}")
@@ -153,7 +175,13 @@ class EuropeanQuadEngine(BaseEngine):
             raise NumericalError(f"Negative price computed: {price}")
 
         lower_bound = self._european_lower_bound(
-            product, S, K, T, q, pricing_env.get_discount_factor(T)
+            product,
+            S,
+            K,
+            T,
+            q,
+            timing.payment_df,
+            timing.delay_df,
         )
         if price < lower_bound - 1e-4:  # Small tolerance for numerical errors
             raise NumericalError(
@@ -161,7 +189,7 @@ class EuropeanQuadEngine(BaseEngine):
                 f"({lower_bound:.6f})"
             )
 
-        return price
+        return price + pending_receivable_pv(lifecycle_state, pricing_env)
 
     def _european_lower_bound(
         self,
@@ -170,11 +198,12 @@ class EuropeanQuadEngine(BaseEngine):
         K: float,
         T: float,
         q: float,
-        df: float,
+        payment_df: float,
+        delay_df: float,
     ) -> float:
         """Calculate the discounted no-arbitrage lower bound for a European option."""
-        spot_pv = S * safe_exp(-q * T)
-        strike_pv = K * df
+        spot_pv = S * safe_exp(-q * T) * delay_df
+        strike_pv = K * payment_df
         if product.is_call():
             lower_bound = max(spot_pv - strike_pv, 0.0)
         else:

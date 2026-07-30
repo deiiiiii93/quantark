@@ -6,6 +6,13 @@ import math
 from typing import Optional
 from scipy import stats
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option import EuropeanVanillaOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.param import EngineParams
@@ -29,6 +36,8 @@ class BlackScholesEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.TERMINAL_ONLY
+    supports_lifecycle_state = True
 
     def __init__(self, params: Optional[EngineParams] = None):
         """
@@ -40,7 +49,11 @@ class BlackScholesEngine(BaseEngine):
         super().__init__(params)
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a European vanilla option using Black-Scholes formula.
@@ -62,6 +75,12 @@ class BlackScholesEngine(BaseEngine):
                 f"got {type(product).__name__}"
             )
 
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+
         # Extract parameters
         S = pricing_env.spot
         K = product.strike
@@ -75,7 +94,10 @@ class BlackScholesEngine(BaseEngine):
 
         # Handle edge cases
         if T < 1e-10:  # Option has expired
-            return product.get_payoff(S)
+            return (
+                product.get_payoff(S) * timing.delay_df
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         # Calculate d1 and d2 with numerical stability checks
         try:
@@ -92,20 +114,28 @@ class BlackScholesEngine(BaseEngine):
         except Exception as e:
             raise NumericalError(f"Error calculating option price: {e}")
 
-        price *= product.contract_multiplier
+        price *= product.contract_multiplier * timing.delay_df
 
         # Sanity checks on output
         if price < 0:
             raise NumericalError(f"Negative price computed: {price}")
 
-        lower_bound = self._european_lower_bound(product, S, K, T, r, q)
+        lower_bound = self._european_lower_bound(
+            product,
+            S,
+            K,
+            T,
+            q,
+            timing.payment_df,
+            timing.delay_df,
+        )
         if price < lower_bound - 1e-6:  # Small tolerance for numerical errors
             raise NumericalError(
                 f"Price ({price:.6f}) below discounted European lower bound "
                 f"({lower_bound:.6f})"
             )
 
-        return price
+        return price + pending_receivable_pv(lifecycle_state, pricing_env)
 
     def _european_lower_bound(
         self,
@@ -113,12 +143,13 @@ class BlackScholesEngine(BaseEngine):
         S: float,
         K: float,
         T: float,
-        r: float,
         q: float,
+        payment_df: float,
+        delay_df: float,
     ) -> float:
         """Calculate the discounted no-arbitrage lower bound for a European option."""
-        spot_pv = S * safe_exp(-q * T)
-        strike_pv = K * safe_exp(-r * T)
+        spot_pv = S * safe_exp(-q * T) * delay_df
+        strike_pv = K * payment_df
         if product.is_call():
             lower_bound = max(spot_pv - strike_pv, 0.0)
         else:

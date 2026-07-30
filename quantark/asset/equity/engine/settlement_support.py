@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from quantark.asset.equity.lifecycle import ValuationPoint
 from quantark.asset.equity.settlement import (
     CashflowKind,
     ResolvedPaymentTiming,
@@ -75,13 +74,11 @@ def requested_settlement_support(
     if getattr(exercise_type, "name", None) == "AMERICAN":
         return SettlementSupport.AMERICAN_EXERCISE
 
+    is_event_product = type(product).__name__ in _EVENT_PRODUCT_NAMES
     if (
-        has_lifecycle
-        or has_explicit_event_timing
-        or (
-            convention_lag != 0.0
-            and type(product).__name__ in _EVENT_PRODUCT_NAMES
-        )
+        has_explicit_event_timing
+        or (has_lifecycle and is_event_product)
+        or (convention_lag != 0.0 and is_event_product)
     ):
         return SettlementSupport.EVENT_AND_TERMINAL
     return SettlementSupport.TERMINAL_ONLY
@@ -155,10 +152,47 @@ def pending_receivable_pv(
     """Return the PV of fixed, realized, not-yet-paid lifecycle cashflows."""
     if lifecycle_state is None:
         return 0.0
-    return lifecycle_state.ledger.pending_pv(
-        ValuationPoint(date=pricing_env.valuation_date),
+    ledger = getattr(lifecycle_state, "ledger", None)
+    if ledger is None:
+        raise ValidationError("lifecycle_state requires a cashflow ledger")
+    valuation_point = getattr(lifecycle_state, "valuation_point", None)
+    if valuation_point is None:
+        if ledger.cashflows:
+            raise ValidationError(
+                "lifecycle_state with realized cashflows requires "
+                "an explicit valuation_point"
+            )
+        return 0.0
+    return ledger.pending_pv(
+        valuation_point,
         pricing_env,
     )
+
+
+def terminal_lifecycle_pv(
+    lifecycle_state: Optional["EquityOptionLifecycleState"],
+    pricing_env: "PricingEnvironment",
+) -> Optional[float]:
+    """Return fixed-cashflow PV when the contingent contract has terminated."""
+    if lifecycle_state is None:
+        return None
+
+    terminal = (
+        getattr(lifecycle_state, "alive", None) is False
+        or bool(getattr(lifecycle_state, "matured", False))
+        or bool(getattr(lifecycle_state, "expired", False))
+        or bool(getattr(lifecycle_state, "knocked_out", False))
+    )
+    if not terminal:
+        return None
+
+    ledger = getattr(lifecycle_state, "ledger", None)
+    if ledger is None or not ledger.cashflows:
+        raise ValidationError(
+            "terminal lifecycle_state requires an authoritative "
+            "realized cashflow"
+        )
+    return pending_receivable_pv(lifecycle_state, pricing_env)
 
 
 def _has_explicit_event_timing(product) -> bool:
@@ -198,5 +232,6 @@ __all__ = [
     "pending_receivable_pv",
     "requested_settlement_support",
     "resolve_terminal_timing",
+    "terminal_lifecycle_pv",
     "validate_settlement_capability",
 ]
