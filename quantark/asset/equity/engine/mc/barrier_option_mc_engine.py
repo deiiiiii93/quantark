@@ -8,8 +8,21 @@ from typing import Optional, Union, Tuple
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.option import BarrierOption
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
+from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
@@ -21,7 +34,6 @@ from quantark.util.numerical import (
     is_close,
     validate_positive,
     validate_non_negative,
-    safe_exp,
     safe_log,
 )
 
@@ -49,6 +61,8 @@ class BarrierOptionMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     # Request-scoped term-structure context (set at every public pricing
     # entry point from ITS pricing_env; never carried across calls).
@@ -58,6 +72,8 @@ class BarrierOptionMCEngine(BaseEngine):
     # safe for concurrent pricing calls (pre-existing engine contract).
     _term_ctx = None
     _df = None
+    _terminal_df = None
+    _pricing_env = None
     _term_vol = None
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
@@ -129,7 +145,11 @@ class BarrierOptionMCEngine(BaseEngine):
         self.use_brownian_bridge = use_brownian_bridge
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a barrier option using Monte Carlo simulation.
@@ -150,6 +170,11 @@ class BarrierOptionMCEngine(BaseEngine):
                 f"BarrierOptionMCEngine only supports BarrierOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
 
         S = pricing_env.spot
         K = product.strike
@@ -161,17 +186,31 @@ class BarrierOptionMCEngine(BaseEngine):
         # Term-structure context for this pricing call (see term_inputs.py)
         self._term_ctx = (pricing_env, K)
         self._df = make_df_fn(pricing_env)
+        self._terminal_df = terminal_timing.payment_df
+        self._pricing_env = pricing_env
         self._term_vol = None
 
         self._validate_inputs(S, K, T, r, q, sigma, product)
 
         if is_zero(T):
-            return self._price_expiry_payoff(product, S, r, T)
+            return (
+                self._price_expiry_payoff(product, S, r, T)
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         if product.observation_type != ObservationType.EXPIRY and product.is_barrier_hit(S):
             if product.is_knock_out:
-                return self._price_immediate_knock_out(product, r, T)
-            return self._price_vanilla_mc(product, pricing_env)
+                return (
+                    self._price_immediate_knock_out(
+                        product,
+                        pricing_env,
+                    )
+                    + pending_receivable_pv(lifecycle_state, pricing_env)
+                )
+            return (
+                self._price_vanilla_mc(product, pricing_env)
+                + pending_receivable_pv(lifecycle_state, pricing_env)
+            )
 
         if product.observation_type == ObservationType.EXPIRY:
             if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
@@ -196,7 +235,7 @@ class BarrierOptionMCEngine(BaseEngine):
         if price < 0.0:
             raise PricingError(f"Negative price computed: {price}")
 
-        return price
+        return price + pending_receivable_pv(lifecycle_state, pricing_env)
 
     def _validate_inputs(
         self,
@@ -218,11 +257,23 @@ class BarrierOptionMCEngine(BaseEngine):
         validate_positive(product.participation_rate, "participation_rate")
 
     def _price_immediate_knock_out(
-        self, product: BarrierOption, r: float, T: float
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
     ) -> float:
         if product.pay_at_hit:
-            return product.rebate
-        return product.rebate * self._df(T)
+            timing = SettlementResolver.resolve_contingent(
+                product,
+                SettlementRequest(
+                    kind=CashflowKind.HIT,
+                    determination_date=pricing_env.valuation_date,
+                    determination_time=0.0,
+                    cashflow_id="barrier:already-hit",
+                ),
+                pricing_env,
+            )
+            return product.rebate * timing.payment_df
+        return product.rebate * self._terminal_df
 
     def _price_vanilla_mc(
         self, product: BarrierOption, pricing_env: PricingEnvironment
@@ -236,6 +287,7 @@ class BarrierOptionMCEngine(BaseEngine):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
         )
 
         engine = EuropeanMCEngine(params=self.params, method=self.method)
@@ -336,6 +388,7 @@ class BarrierOptionMCEngine(BaseEngine):
             default_barrier=product.barrier,
             default_payoff=product.rebate,
             require_single=True,
+            product=product,
         )
 
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
@@ -391,7 +444,7 @@ class BarrierOptionMCEngine(BaseEngine):
             value = product.rebate if hit else payoff
         else:
             value = payoff if hit else product.rebate
-        return value * self._df(T)
+        return value * self._terminal_df
 
     def _expiry_payoffs(
         self, product: BarrierOption, terminal_prices: np.ndarray
@@ -415,6 +468,7 @@ class BarrierOptionMCEngine(BaseEngine):
 
     def _expected_rebate_at_hit(
         self,
+        product: BarrierOption,
         step_hit_prob: np.ndarray,
         times: np.ndarray,
         r: float,
@@ -425,8 +479,39 @@ class BarrierOptionMCEngine(BaseEngine):
             [np.ones((step_hit_prob.shape[0], 1)), survival_before[:, :-1]], axis=1
         )
         first_hit_prob = survival_before * step_hit_prob
-        discount = self._df(times).reshape(1, -1)
+        discount = self._event_payment_dfs(
+            product, self._pricing_env, times
+        ).reshape(1, -1)
         return rebate * np.sum(first_hit_prob * discount, axis=1)
+
+    def _event_payment_dfs(
+        self,
+        product: BarrierOption,
+        pricing_env: PricingEnvironment,
+        determination_times: np.ndarray,
+    ) -> np.ndarray:
+        """Resolve payment discount factors for simulated first-hit times."""
+        try:
+            return np.asarray(
+                [
+                    SettlementResolver.resolve_contingent(
+                        product,
+                        SettlementRequest(
+                            kind=CashflowKind.HIT,
+                            determination_time=float(time),
+                            cashflow_id=f"simulated-hit[{index}]",
+                        ),
+                        pricing_env,
+                    ).payment_df
+                    for index, time in enumerate(determination_times)
+                ],
+                dtype=float,
+            )
+        except ValidationError as exc:
+            raise CapabilityError(
+                f"{type(self).__name__} cannot resolve delayed first-hit "
+                "settlement from a numeric simulation grid"
+            ) from exc
 
     def _aggregate_discrete_hit_payoffs(
         self,
@@ -448,7 +533,7 @@ class BarrierOptionMCEngine(BaseEngine):
             if pay_at_hit:
                 discount = self._df(settlement_times[first_idx])
             else:
-                discount = self._df(T)
+                discount = self._terminal_df
             discounted = payoff * discount
             discounted[~hit_any] = 0.0
             return discounted, hit_any
@@ -459,7 +544,7 @@ class BarrierOptionMCEngine(BaseEngine):
                 discounted = np.sum(hit_matrix * (payoffs * discount), axis=1)
             else:
                 total = np.sum(hit_matrix * payoffs, axis=1)
-                discounted = total * self._df(T)
+                discounted = total * self._terminal_df
             return discounted, hit_any
 
         if aggregation in (ObservationAggregation.BEST, ObservationAggregation.WORST):
@@ -475,11 +560,11 @@ class BarrierOptionMCEngine(BaseEngine):
                 value_matrix = hit_matrix * payoffs
                 if aggregation == ObservationAggregation.BEST:
                     best = value_matrix.max(axis=1)
-                    discounted = best * self._df(T)
+                    discounted = best * self._terminal_df
                 else:
                     value_matrix = np.where(hit_matrix, value_matrix, np.inf)
                     worst = value_matrix.min(axis=1)
-                    discounted = worst * self._df(T)
+                    discounted = worst * self._terminal_df
             discounted[~hit_any] = 0.0
             return discounted, hit_any
 
@@ -496,7 +581,7 @@ class BarrierOptionMCEngine(BaseEngine):
     ) -> np.ndarray:
         terminal_prices = paths[:, -1]
         vanilla_payoffs = self._calculate_vanilla_payoff(product, terminal_prices)
-        df_T = self._df(T)
+        df_T = self._terminal_df
 
         if self.use_brownian_bridge:
             step_hit_prob = self._compute_bridge_step_hit_probabilities(
@@ -507,7 +592,7 @@ class BarrierOptionMCEngine(BaseEngine):
             if product.is_knock_out:
                 if product.pay_at_hit:
                     rebate_leg = self._expected_rebate_at_hit(
-                        step_hit_prob, times, r, product.rebate
+                        product, step_hit_prob, times, r, product.rebate
                     )
                     return rebate_leg + survival_prob * vanilla_payoffs * df_T
                 return (
@@ -531,7 +616,9 @@ class BarrierOptionMCEngine(BaseEngine):
             if product.pay_at_hit:
                 first_idx = np.argmax(hit_matrix, axis=1)
                 hit_time = times[first_idx]
-                rebate_payoff = product.rebate * self._df(hit_time)
+                rebate_payoff = product.rebate * self._event_payment_dfs(
+                    product, self._pricing_env, hit_time
+                )
                 rebate_payoff[~hit_any] = 0.0
                 return np.where(hit_any, rebate_payoff, vanilla_payoffs * df_T)
             return np.where(hit_any, product.rebate, vanilla_payoffs) * df_T
@@ -552,7 +639,7 @@ class BarrierOptionMCEngine(BaseEngine):
     ) -> np.ndarray:
         terminal_prices = paths[:, -1]
         vanilla_payoffs = self._calculate_vanilla_payoff(product, terminal_prices)
-        df_T = self._df(T)
+        df_T = self._terminal_df
 
         obs_prices = paths[:, obs_indices + 1]
         hit_matrix = obs_prices >= barriers if product.is_up_barrier else obs_prices <= barriers
@@ -637,7 +724,7 @@ class BarrierOptionMCEngine(BaseEngine):
             def pricer_fn(paths, aux):
                 terminal_prices = paths[:, -1]
                 payoffs = self._expiry_payoffs(product, terminal_prices)
-                return payoffs * self._df(T)
+                return payoffs * self._terminal_df
 
         elif product.observation_type == ObservationType.DISCRETE:
             (
@@ -722,7 +809,7 @@ class BarrierOptionMCEngine(BaseEngine):
         terminal_prices = paths[:, -1]
 
         payoffs = self._expiry_payoffs(product, terminal_prices)
-        discounted = payoffs * self._df(T)
+        discounted = payoffs * self._terminal_df
 
         mean_payoff = float(discounted.mean())
         std_payoff = float(discounted.std(ddof=1))

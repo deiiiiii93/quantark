@@ -13,9 +13,17 @@ from typing import Optional
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.barrier_option import BarrierOption
+from quantark.execution.errors import CapabilityError
 from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import OptionType, ObservationType
@@ -80,6 +88,63 @@ def _barrier_kwargs(product: BarrierOption, continuous, observe_idx):
                 participation=float(product.participation_rate))
 
 
+def _settlement_scale(engine, product, env, lifecycle_state):
+    """Return fixed lifecycle PV or the safe whole-kernel terminal scale."""
+    validate_settlement_capability(engine, product, lifecycle_state)
+    fixed_pv = terminal_lifecycle_pv(lifecycle_state, env)
+    if fixed_pv is not None:
+        return fixed_pv, None
+
+    terminal_timing = resolve_terminal_timing(product, env)
+    convention = getattr(product, "settlement_convention", None)
+    delayed_hit = bool(
+        product.pay_at_hit
+        and convention is not None
+        and float(convention.lag) != 0.0
+    )
+
+    schedule = getattr(product, "observation_schedule", None)
+    if product.pay_at_hit and schedule is not None and schedule.records:
+        resolved = schedule.resolve(
+            env,
+            default_barrier=product.barrier,
+            default_payoff=product.rebate,
+            require_single=True,
+            product=product,
+        )
+        delayed_hit = delayed_hit or any(
+            not np.isclose(rec.settlement_time, rec.observation_time)
+            for rec in resolved
+        )
+
+    if product.pay_at_hit and (
+        delayed_hit or not np.isclose(terminal_timing.delay_df, 1.0)
+    ):
+        raise CapabilityError(
+            f"{type(engine).__name__} cannot separate delayed first-hit "
+            "cashflows from terminal cashflows in the vol-model kernel"
+        )
+    return None, terminal_timing.delay_df
+
+
+def _finish_price(
+    engine,
+    unit,
+    se,
+    product,
+    env,
+    lifecycle_state,
+    settlement_scale,
+):
+    mult = float(getattr(product, "contract_multiplier", 1.0))
+    scale = float(settlement_scale)
+    engine._last_std_error = float(se) * mult * scale
+    return (
+        float(unit) * mult * scale
+        + pending_receivable_pv(lifecycle_state, env)
+    )
+
+
 class _StdErrMixin:
     """Records the MC standard error of the last pricing run.
 
@@ -96,13 +161,27 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
     """Barrier MC under a Dupire local-volatility surface."""
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     def __init__(self, params: Optional[MCParams] = None, local_vol_surface: Optional[LocalVolSurface] = None):
         super().__init__(params or MCParams())
         self._prebuilt = local_vol_surface
 
-    def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
+    def price(
+        self,
+        product: BaseEquityProduct,
+        env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> float:
         _check_barrier("LocalVolBarrierMCEngine", product)
+        fixed_pv, settlement_scale = _settlement_scale(
+            self, product, env, lifecycle_state
+        )
+        if fixed_pv is not None:
+            self._last_std_error = 0.0
+            return fixed_pv
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
@@ -120,15 +199,17 @@ class LocalVolBarrierMCEngine(_StdErrMixin, BaseEngine):
                                        num_paths=int(self.params.num_paths), seed=self.params.seed,
                                        use_antithetic=bool(self.params.use_antithetic), return_stderr=True,
                                        **_barrier_kwargs(product, continuous, observe_idx))
-        mult = float(getattr(product, "contract_multiplier", 1.0))
-        self._last_std_error = float(se) * mult
-        return unit * mult
+        return _finish_price(
+            self, unit, se, product, env, lifecycle_state, settlement_scale
+        )
 
 
 class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
     """Barrier MC under the Heston stochastic-volatility model."""
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     def __init__(self, model_params: HestonParams, params: Optional[MCParams] = None):
         super().__init__(params or MCParams())
@@ -136,8 +217,20 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
             raise ValidationError("model_params must be a HestonParams")
         self.model_params = model_params
 
-    def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
+    def price(
+        self,
+        product: BaseEquityProduct,
+        env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> float:
         _check_barrier("HestonBarrierMCEngine", product)
+        fixed_pv, settlement_scale = _settlement_scale(
+            self, product, env, lifecycle_state
+        )
+        if fixed_pv is not None:
+            self._last_std_error = 0.0
+            return fixed_pv
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
@@ -149,15 +242,17 @@ class HestonBarrierMCEngine(_StdErrMixin, BaseEngine):
                                            num_paths=int(self.params.num_paths), seed=self.params.seed,
                                            return_stderr=True,
                                            **_barrier_kwargs(product, continuous, observe_idx))
-        mult = float(getattr(product, "contract_multiplier", 1.0))
-        self._last_std_error = float(se) * mult
-        return unit * mult
+        return _finish_price(
+            self, unit, se, product, env, lifecycle_state, settlement_scale
+        )
 
 
 class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
     """Barrier MC under Heston-SLV using a precomputed leverage surface."""
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     def __init__(self, model_params: HestonParams, leverage_surface: LeverageSurface,
                  params: Optional[MCParams] = None, eta: float = 1.0):
@@ -170,8 +265,20 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
         self.leverage_surface = leverage_surface
         self.eta = float(eta)
 
-    def price(self, product: BaseEquityProduct, env: PricingEnvironment) -> float:
+    def price(
+        self,
+        product: BaseEquityProduct,
+        env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> float:
         _check_barrier("HestonSLVBarrierMCEngine", product)
+        fixed_pv, settlement_scale = _settlement_scale(
+            self, product, env, lifecycle_state
+        )
+        if fixed_pv is not None:
+            self._last_std_error = 0.0
+            return fixed_pv
         T = float(product.get_maturity(env)); n = int(self.params.time_steps)
         t_grid = np.linspace(0.0, T, n + 1)
         r_fwd = forward_rates_on_grid(env.rate_curve, t_grid)
@@ -184,6 +291,6 @@ class HestonSLVBarrierMCEngine(_StdErrMixin, BaseEngine):
                                         num_paths=int(self.params.num_paths), seed=self.params.seed,
                                         return_stderr=True,
                                         **_barrier_kwargs(product, continuous, observe_idx))
-        mult = float(getattr(product, "contract_multiplier", 1.0))
-        self._last_std_error = float(se) * mult
-        return unit * mult
+        return _finish_price(
+            self, unit, se, product, env, lifecycle_state, settlement_scale
+        )

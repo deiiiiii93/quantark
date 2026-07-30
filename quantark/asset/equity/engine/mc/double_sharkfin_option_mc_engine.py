@@ -8,6 +8,13 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_brownian_bridge import (
     compute_step_crossing_probabilities,
@@ -21,6 +28,12 @@ from quantark.asset.equity.process.bsm.qmc_sobol import (
 from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import DoubleSharkfinOption
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
+from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationAggregation, ObservationType
@@ -29,7 +42,6 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     is_close,
     is_zero,
-    safe_exp,
     validate_non_negative,
     validate_positive,
 )
@@ -45,6 +57,8 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     # Request-scoped term-structure context (set at every public pricing
     # entry point from ITS pricing_env; never carried across calls).
@@ -54,6 +68,8 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
     # safe for concurrent pricing calls (pre-existing engine contract).
     _term_ctx = None
     _df = None
+    _terminal_df = None
+    _pricing_env = None
 
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
@@ -91,7 +107,11 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         self.use_brownian_bridge = use_brownian_bridge
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a double sharkfin option by Monte Carlo simulation.
@@ -108,6 +128,13 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
                 "DoubleSharkfinOptionMCEngine only supports DoubleSharkfinOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            self._last_std_error = 0.0
+            return fixed_pv
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
+        pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -117,17 +144,21 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         # Term-structure context for this pricing call (see term_inputs.py)
         self._term_ctx = (pricing_env, product.strike)
         self._df = make_df_fn(pricing_env)
-
+        self._terminal_df = terminal_timing.payment_df
+        self._pricing_env = pricing_env
 
         self._validate_inputs(spot, maturity, rate, div, vol, product)
 
         if is_zero(maturity):
             self._last_std_error = 0.0
-            return product.get_payoff(spot)
+            return (
+                product.get_payoff(spot) * self._terminal_df
+                + pending_pv
+            )
 
         if product.observation_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
             self._last_std_error = 0.0
-            return self._price_already_hit(product, rate, maturity)
+            return self._price_already_hit(product, pricing_env) + pending_pv
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             price, std_error = self._price_rqmc(
@@ -145,7 +176,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         self._last_std_error = std_error
         if price < 0.0:
             raise PricingError(f"Negative price computed: {price}")
-        return price
+        return price + pending_pv
 
     def _resolve_method(
         self, method: Union[str, MonteCarloMethod, tuple, None]
@@ -210,12 +241,25 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
 
     def _price_already_hit(
-        self, product: DoubleSharkfinOption, rate: float, maturity: float
+        self,
+        product: DoubleSharkfinOption,
+        pricing_env: PricingEnvironment,
     ) -> float:
         """Value a continuously monitored product whose spot has already hit."""
         if product.pay_at_hit:
-            return product.get_barrier_payoff()
-        return product.get_barrier_payoff() * self._df(maturity)
+            payment_df = SettlementResolver.resolve_contingent(
+                product,
+                SettlementRequest(
+                    kind=CashflowKind.HIT,
+                    determination_date=pricing_env.valuation_date,
+                    determination_time=0.0,
+                    cashflow_id="double-sharkfin:already-hit",
+                ),
+                pricing_env,
+            ).payment_df
+        else:
+            payment_df = self._terminal_df
+        return product.get_barrier_payoff() * payment_df
 
     def _create_path_generator(
         self,
@@ -302,6 +346,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             default_lower=product.lower_barrier,
             default_payoff=product.knock_out_rebate,
             require_double=True,
+            product=product,
         )
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         if np.any(obs_times < 0.0) or np.any(obs_times > maturity):
@@ -385,7 +430,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             discount = (
                 self._df(settlement_times[first_idx])
                 if pay_at_hit
-                else self._df(maturity)
+                else self._terminal_df
             )
             discounted = payoff * discount
             discounted[~hit_any] = 0.0
@@ -397,7 +442,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
                 discounted = np.sum(hit_matrix * (payoffs * discount), axis=1)
             else:
                 total = np.sum(hit_matrix * payoffs, axis=1)
-                discounted = total * self._df(maturity)
+                discounted = total * self._terminal_df
             return discounted, hit_any
 
         if aggregation in (ObservationAggregation.BEST, ObservationAggregation.WORST):
@@ -412,10 +457,10 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             else:
                 value_matrix = hit_matrix * payoffs
                 if aggregation == ObservationAggregation.BEST:
-                    discounted = value_matrix.max(axis=1) * self._df(maturity)
+                    discounted = value_matrix.max(axis=1) * self._terminal_df
                 else:
                     value_matrix = np.where(hit_matrix, value_matrix, np.inf)
-                    discounted = value_matrix.min(axis=1) * self._df(maturity)
+                    discounted = value_matrix.min(axis=1) * self._terminal_df
             discounted[~hit_any] = 0.0
             return discounted, hit_any
 
@@ -433,7 +478,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         """Discounted unit payoffs for continuous monitoring."""
         terminal_prices = paths[:, -1]
         no_hit_payoffs = self._no_hit_unit_payoff(product, terminal_prices)
-        discount_maturity = self._df(maturity)
+        discount_maturity = self._terminal_df
         hit_matrix = (paths[:, 1:] >= product.upper_barrier) | (
             paths[:, 1:] <= product.lower_barrier
         )
@@ -453,7 +498,11 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
 
             if product.pay_at_hit:
                 hit_leg = self._expected_rebate_at_hit(
-                    step_hit_prob, times, rate, product.knock_out_rebate
+                    product,
+                    step_hit_prob,
+                    times,
+                    rate,
+                    product.knock_out_rebate,
                 )
                 return hit_leg + survival_prob * no_hit_payoffs * discount_maturity
             return (
@@ -465,7 +514,10 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         if product.pay_at_hit:
             first_idx = np.argmax(hit_matrix, axis=1)
             hit_time = times[first_idx]
-            hit_payoff = product.knock_out_rebate * self._df(hit_time)
+            hit_payoff = (
+                product.knock_out_rebate
+                * self._event_payment_dfs(product, hit_time)
+            )
             hit_payoff[~hit_any] = 0.0
             return np.where(hit_any, hit_payoff, no_hit_payoffs * discount_maturity)
 
@@ -473,6 +525,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
 
     def _expected_rebate_at_hit(
         self,
+        product: DoubleSharkfinOption,
         step_hit_prob: np.ndarray,
         times: np.ndarray,
         rate: float,
@@ -484,8 +537,36 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
             [np.ones((step_hit_prob.shape[0], 1)), survival_before[:, :-1]], axis=1
         )
         first_hit_prob = survival_before * step_hit_prob
-        discount = self._df(times).reshape(1, -1)
+        discount = self._event_payment_dfs(product, times).reshape(1, -1)
         return rebate * np.sum(first_hit_prob * discount, axis=1)
+
+    def _event_payment_dfs(
+        self,
+        product: DoubleSharkfinOption,
+        determination_times: np.ndarray,
+    ) -> np.ndarray:
+        """Resolve event payment discount factors on the simulated hit grid."""
+        try:
+            return np.asarray(
+                [
+                    SettlementResolver.resolve_contingent(
+                        product,
+                        SettlementRequest(
+                            kind=CashflowKind.HIT,
+                            determination_time=float(time),
+                            cashflow_id=f"simulated-hit[{index}]",
+                        ),
+                        self._pricing_env,
+                    ).payment_df
+                    for index, time in enumerate(determination_times)
+                ],
+                dtype=float,
+            )
+        except ValidationError as exc:
+            raise CapabilityError(
+                f"{type(self).__name__} cannot resolve delayed first-hit "
+                "settlement from a numeric simulation grid"
+            ) from exc
 
     def _discounted_payoffs_discrete(
         self,
@@ -503,7 +584,7 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         """Discounted unit payoffs for discrete monitoring."""
         terminal_prices = paths[:, -1]
         no_hit_payoffs = self._no_hit_unit_payoff(product, terminal_prices)
-        discount_maturity = self._df(maturity)
+        discount_maturity = self._terminal_df
 
         obs_prices = paths[:, obs_indices + 1]
         hit_matrix = (obs_prices >= upper_barriers) | (obs_prices <= lower_barriers)
@@ -587,8 +668,9 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
 
             def pricer_fn(paths, aux):
                 terminal_prices = paths[:, -1]
-                return self._expiry_payoffs(product, terminal_prices) * safe_exp(
-                    -rate * maturity
+                return (
+                    self._expiry_payoffs(product, terminal_prices)
+                    * self._terminal_df
                 )
 
         elif product.observation_type == ObservationType.DISCRETE:
@@ -671,8 +753,9 @@ class DoubleSharkfinOptionMCEngine(BaseEngine):
         generator = self._create_path_generator(spot, rate, div, vol, maturity, dt_array)
         paths, _ = generator.generate_paths(return_aux=True)
         terminal_prices = paths[:, -1]
-        discounted = self._expiry_payoffs(product, terminal_prices) * safe_exp(
-            -rate * maturity
+        discounted = (
+            self._expiry_payoffs(product, terminal_prices)
+            * self._terminal_df
         )
         return self._summarize_discounted(product, discounted)
 

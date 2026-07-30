@@ -486,6 +486,8 @@ class SettlementResolver:
             raise ValidationError(
                 f"{label} date must be datetime, got {type(date_value).__name__}"
             )
+        if date_value == pricing_env.valuation_date:
+            return 0.0
         value = calculate_year_fraction(
             pricing_env.valuation_date,
             date_value,

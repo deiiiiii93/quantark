@@ -12,8 +12,21 @@ import numpy as np
 from scipy import stats
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import DoubleBarrierOption, DoubleSharkfinOption
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
+from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
@@ -43,6 +56,8 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     MIN_MATURITY = 1e-10
     MIN_VOL = 0.001
@@ -79,7 +94,11 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         self._double_barrier_engine = DoubleBarrierOptionAnalyticalEngine(params)
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a double sharkfin option analytically.
@@ -96,6 +115,12 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 "DoubleSharkfinOptionAnalyticalEngine only supports "
                 f"DoubleSharkfinOption, got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
+        pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -119,7 +144,10 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         )
 
         if maturity < self.MIN_MATURITY:
-            return product.get_payoff(spot)
+            return (
+                product.get_payoff(spot) * terminal_timing.payment_df
+                + pending_pv
+            )
 
         if product.observation_type not in (
             ObservationType.EXPIRY,
@@ -131,7 +159,23 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             )
 
         if product.observation_type != ObservationType.EXPIRY and product.is_barrier_hit(spot):
-            return self._price_already_hit(product, rate, maturity)
+            return (
+                self._price_already_hit(
+                    product, pricing_env, terminal_timing.payment_df
+                )
+                + pending_pv
+            )
+
+        if (
+            product.observation_type == ObservationType.CONTINUOUS
+            and product.pay_at_hit
+            and product.settlement_convention is not None
+            and product.settlement_convention.lag != 0.0
+        ):
+            raise CapabilityError(
+                "DoubleSharkfinOptionAnalyticalEngine cannot represent a "
+                "delayed continuous first-hit payment"
+            )
 
         option_leg = self._price_no_rebate_knock_out(product, pricing_env)
         survival_prob = self._survival_probability(
@@ -146,20 +190,42 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             pricing_env=pricing_env,
             survival_prob=survival_prob,
         )
-        no_hit_cash = product.no_hit_rebate * safe_exp(-rate * maturity) * survival_prob
+        no_hit_cash = (
+            product.no_hit_rebate
+            * terminal_timing.payment_df
+            * survival_prob
+        )
 
         value = product.participation_rate * option_leg + knock_out_cash + no_hit_cash
-        return max(float(value), 0.0) * product.contract_multiplier
+        return (
+            max(float(value), 0.0) * product.contract_multiplier
+            + pending_pv
+        )
 
     def _price_already_hit(
-        self, product: DoubleSharkfinOption, rate: float, maturity: float
+        self,
+        product: DoubleSharkfinOption,
+        pricing_env: PricingEnvironment,
+        terminal_payment_df: float,
     ) -> float:
         """Return the value when a monitored product is already hit."""
         if product.pay_at_hit:
-            return product.knock_out_rebate * product.contract_multiplier
+            timing = SettlementResolver.resolve_contingent(
+                product,
+                SettlementRequest(
+                    kind=CashflowKind.HIT,
+                    determination_date=pricing_env.valuation_date,
+                    determination_time=0.0,
+                    cashflow_id="double-sharkfin:already-hit",
+                ),
+                pricing_env,
+            )
+            payment_df = timing.payment_df
+        else:
+            payment_df = terminal_payment_df
         return (
             product.knock_out_rebate
-            * safe_exp(-rate * maturity)
+            * payment_df
             * product.contract_multiplier
         )
 
@@ -176,6 +242,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
             rebate=0.0,
             observation_type=product.observation_type,
             observation_dates=product.observation_dates,
@@ -249,8 +316,10 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
             return 0.0
 
         if product.observation_type == ObservationType.EXPIRY or not product.pay_at_hit:
-            return product.knock_out_rebate * safe_exp(-rate * maturity) * (
-                1.0 - survival_prob
+            return (
+                product.knock_out_rebate
+                * resolve_terminal_timing(product, pricing_env).payment_df
+                * (1.0 - survival_prob)
             )
 
         if product.observation_type == ObservationType.DISCRETE:
@@ -261,6 +330,7 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 div=div,
                 vol=vol,
                 spot=pricing_env.spot,
+                pricing_env=pricing_env,
             )
         else:
             hit_discount_factor = self._continuous_hit_discount_factor(
@@ -284,19 +354,28 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
         div: float,
         vol: float,
         spot: float,
+        pricing_env: PricingEnvironment,
     ) -> float:
         """Approximate discounted first-hit probability on a discrete grid."""
         lower_barrier, upper_barrier = self._shift_discrete_barriers(product, vol)
-        times = product.get_observation_times()
-        if not times:
+        schedule = product.observation_schedule
+        if schedule is None or not schedule.records:
             raise PricingError(
                 "Discrete double sharkfin monitoring requires observation times."
             )
+        resolved = schedule.resolve(
+            pricing_env,
+            default_upper=product.upper_barrier,
+            default_lower=product.lower_barrier,
+            default_payoff=product.knock_out_rebate,
+            require_double=True,
+            product=product,
+        )
 
         previous_survival = 1.0
         hit_discount_factor = 0.0
-        for observation_time in times:
-            current_time = min(float(observation_time), maturity)
+        for record in resolved:
+            current_time = min(float(record.observation_time), maturity)
             current_survival = self._survival_probability_continuous(
                 spot=spot,
                 maturity=current_time,
@@ -307,7 +386,10 @@ class DoubleSharkfinOptionAnalyticalEngine(BaseEngine):
                 upper_barrier=upper_barrier,
             )
             first_hit_prob = max(previous_survival - current_survival, 0.0)
-            hit_discount_factor += first_hit_prob * safe_exp(-rate * current_time)
+            hit_discount_factor += (
+                first_hit_prob
+                * pricing_env.get_discount_factor(record.settlement_time)
+            )
             previous_survival = min(max(current_survival, 0.0), previous_survival)
 
         return hit_discount_factor

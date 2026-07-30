@@ -8,6 +8,13 @@ from typing import Optional, Tuple, Union
 import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_brownian_bridge import (
     compute_step_crossing_probabilities,
@@ -21,6 +28,12 @@ from quantark.asset.equity.process.bsm.qmc_sobol import (
 from quantark.asset.equity.process.bsm.qmc_variance_reduction import VarianceReductionConfig
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import SingleSharkfinOption
+from quantark.asset.equity.settlement import (
+    CashflowKind,
+    SettlementRequest,
+    SettlementResolver,
+)
+from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs, make_df_fn
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationAggregation, ObservationType
@@ -29,7 +42,6 @@ from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     is_close,
     is_zero,
-    safe_exp,
     validate_non_negative,
     validate_positive,
 )
@@ -45,6 +57,8 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
     """
 
     engine_type = EngineType.MONTE_CARLO
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     # Request-scoped term-structure context (set at every public pricing
     # entry point from ITS pricing_env; never carried across calls).
@@ -54,6 +68,8 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
     # safe for concurrent pricing calls (pre-existing engine contract).
     _term_ctx = None
     _df = None
+    _terminal_df = None
+    _pricing_env = None
     DEFAULT_METHOD = MonteCarloMethod.PSEUDO
 
     def __init__(
@@ -79,7 +95,11 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         self.use_brownian_bridge = use_brownian_bridge
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a single sharkfin option using Monte Carlo simulation.
@@ -89,6 +109,13 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
                 "SingleSharkfinOptionMCEngine only supports SingleSharkfinOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            self._last_std_error = 0.0
+            return fixed_pv
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
+        pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
         spot = pricing_env.spot
         strike = product.strike
@@ -99,20 +126,27 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         # Term-structure context for this pricing call (see term_inputs.py)
         self._term_ctx = (pricing_env, strike)
         self._df = make_df_fn(pricing_env)
-
+        self._terminal_df = terminal_timing.payment_df
+        self._pricing_env = pricing_env
 
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product)
 
         if is_zero(maturity):
             self._last_std_error = 0.0
-            return product.get_payoff(spot)
+            return (
+                product.get_payoff(spot) * self._terminal_df
+                + pending_pv
+            )
 
         if (
             product.observation_type != ObservationType.EXPIRY
             and product.is_barrier_hit(spot)
         ):
             self._last_std_error = 0.0
-            return self._price_immediate_knock_out(product, rate, maturity)
+            return (
+                self._price_immediate_knock_out(product, pricing_env)
+                + pending_pv
+            )
 
         if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
             price, std_error = self._price_rqmc(
@@ -135,7 +169,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if price < 0.0:
             raise PricingError(f"Negative price computed: {price}")
 
-        return price
+        return price + pending_pv
 
     def _resolve_method(
         self, method: Union[str, MonteCarloMethod, tuple, None]
@@ -193,13 +227,26 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
             raise ValidationError(f"Risk-free rate outside reasonable bounds: {rate}")
 
     def _price_immediate_knock_out(
-        self, product: SingleSharkfinOption, rate: float, maturity: float
+        self,
+        product: SingleSharkfinOption,
+        pricing_env: PricingEnvironment,
     ) -> float:
         if product.pay_at_hit:
-            return product.knock_out_rebate * product.contract_multiplier
+            payment_df = SettlementResolver.resolve_contingent(
+                product,
+                SettlementRequest(
+                    kind=CashflowKind.HIT,
+                    determination_date=pricing_env.valuation_date,
+                    determination_time=0.0,
+                    cashflow_id="single-sharkfin:already-hit",
+                ),
+                pricing_env,
+            ).payment_df
+        else:
+            payment_df = self._terminal_df
         return (
             product.knock_out_rebate
-            * self._df(maturity)
+            * payment_df
             * product.contract_multiplier
         )
 
@@ -286,6 +333,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
             default_barrier=product.barrier,
             default_payoff=product.knock_out_rebate,
             require_single=True,
+            product=product,
         )
         obs_times = np.array([rec.observation_time for rec in resolved], dtype=float)
         if np.any(obs_times < 0.0) or np.any(obs_times > maturity):
@@ -354,8 +402,9 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         dt_array = np.array([maturity], dtype=float)
         generator = self._create_path_generator(spot, rate, div, vol, maturity, dt_array)
         paths, _ = generator.generate_paths(return_aux=True)
-        discounted = self._price_expiry_payoff(product, paths[:, -1]) * safe_exp(
-            -rate * maturity
+        discounted = (
+            self._price_expiry_payoff(product, paths[:, -1])
+            * self._terminal_df
         )
         return self._mean_and_std_error(discounted)
 
@@ -382,12 +431,12 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if product.pay_at_hit:
             hit_discount = self._df(settlement_times[first_idx])
         else:
-            hit_discount = self._df(maturity)
+            hit_discount = self._terminal_df
         discounted_hit = hit_payoff * hit_discount
         discounted_hit[~hit_any] = 0.0
 
-        discounted_no_hit = self._no_hit_payoff(product, terminal_prices) * safe_exp(
-            -rate * maturity
+        discounted_no_hit = (
+            self._no_hit_payoff(product, terminal_prices) * self._terminal_df
         )
         return np.where(hit_any, discounted_hit, discounted_no_hit)
 
@@ -402,7 +451,7 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
     ) -> np.ndarray:
         terminal_prices = paths[:, -1]
         no_hit_payoff = self._no_hit_payoff(product, terminal_prices)
-        df_t = self._df(maturity)
+        df_t = self._terminal_df
 
         if self.use_brownian_bridge:
             step_hit_prob = compute_step_crossing_probabilities(
@@ -421,7 +470,9 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
                     axis=1,
                 )
                 first_hit_prob = survival_before * step_hit_prob
-                discount = self._df(times).reshape(1, -1)
+                discount = self._event_payment_dfs(
+                    product, times
+                ).reshape(1, -1)
                 hit_leg = product.knock_out_rebate * np.sum(
                     first_hit_prob * discount, axis=1
                 )
@@ -440,13 +491,44 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
         if product.pay_at_hit:
             first_idx = np.argmax(hit_matrix, axis=1)
             hit_time = times[first_idx]
-            hit_payoff = product.knock_out_rebate * self._df(hit_time)
+            hit_payoff = (
+                product.knock_out_rebate
+                * self._event_payment_dfs(product, hit_time)
+            )
             hit_payoff[~hit_any] = 0.0
         else:
             hit_payoff = product.knock_out_rebate * df_t
 
         no_hit_value = no_hit_payoff * df_t
         return np.where(hit_any, hit_payoff, no_hit_value)
+
+    def _event_payment_dfs(
+        self,
+        product: SingleSharkfinOption,
+        determination_times: np.ndarray,
+    ) -> np.ndarray:
+        """Resolve event payment discount factors on the simulated hit grid."""
+        try:
+            return np.asarray(
+                [
+                    SettlementResolver.resolve_contingent(
+                        product,
+                        SettlementRequest(
+                            kind=CashflowKind.HIT,
+                            determination_time=float(time),
+                            cashflow_id=f"simulated-hit[{index}]",
+                        ),
+                        self._pricing_env,
+                    ).payment_df
+                    for index, time in enumerate(determination_times)
+                ],
+                dtype=float,
+            )
+        except ValidationError as exc:
+            raise CapabilityError(
+                f"{type(self).__name__} cannot resolve delayed first-hit "
+                "settlement from a numeric simulation grid"
+            ) from exc
 
     def _price_mc_or_qmc(
         self,
@@ -501,8 +583,9 @@ class SingleSharkfinOptionMCEngine(BaseEngine):
             dt_array = np.array([maturity], dtype=float)
 
             def pricer_fn(paths, aux):
-                return self._price_expiry_payoff(product, paths[:, -1]) * safe_exp(
-                    -rate * maturity
+                return (
+                    self._price_expiry_payoff(product, paths[:, -1])
+                    * self._terminal_df
                 )
 
         elif product.observation_type == ObservationType.DISCRETE:

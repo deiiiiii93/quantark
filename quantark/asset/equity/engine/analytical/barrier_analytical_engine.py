@@ -13,12 +13,20 @@ from typing import Optional
 from scipy import stats
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import (
     BarrierOption,
     EuropeanVanillaOption,
     OneTouchOption,
 )
+from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.barrier_shift import apply_barrier_shift
@@ -41,6 +49,8 @@ class BarrierAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     MIN_VOL = 0.001
     MAX_VOL = 5.0
@@ -53,13 +63,23 @@ class BarrierAnalyticalEngine(BaseEngine):
         self._one_touch_engine = OneTouchAnalyticalEngine(params)
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         if not isinstance(product, BarrierOption):
             raise PricingError(
                 f"BarrierAnalyticalEngine only supports BarrierOption, "
                 f"got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
+        pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
         spot = pricing_env.spot
         strike = product.strike
@@ -71,16 +91,48 @@ class BarrierAnalyticalEngine(BaseEngine):
         multiplier = product.contract_multiplier
 
         self._validate_inputs(spot, strike, maturity, rate, div, vol, product.barrier)
+        if (
+            product.is_knock_out
+            and product.pay_at_hit
+            and product.observation_type != ObservationType.EXPIRY
+            and not product.is_barrier_hit(spot)
+            and self._one_touch_engine._requests_delayed_hit_payment(product)
+        ):
+            raise CapabilityError(
+                "BarrierAnalyticalEngine cannot represent a delayed "
+                "continuous/discrete first-hit payment"
+            )
 
         # Immediate handling for zero maturity
         if maturity < self.MIN_MATURITY:
             if product.is_knock_out and product.is_barrier_hit(spot):
-                return product.rebate * multiplier
+                if product.pay_at_hit:
+                    return (
+                        self._price_rebate_leg(product, pricing_env)
+                        * multiplier
+                        + pending_pv
+                    )
+                return (
+                    product.rebate
+                    * terminal_timing.payment_df
+                    * multiplier
+                    + pending_pv
+                )
             if product.is_knock_in and product.is_barrier_hit(spot):
-                return product.get_payoff(spot) * participation
+                return (
+                    product.get_payoff(spot)
+                    * participation
+                    * terminal_timing.payment_df
+                    + pending_pv
+                )
             if product.is_knock_in:
-                return 0.0
-            return product.get_payoff(spot) * participation
+                return pending_pv
+            return (
+                product.get_payoff(spot)
+                * participation
+                * terminal_timing.payment_df
+                + pending_pv
+            )
 
         obs_type = product.observation_type
 
@@ -89,22 +141,37 @@ class BarrierAnalyticalEngine(BaseEngine):
             if product.is_knock_out:
                 # Pay rebate depending on timing preference
                 if product.pay_at_hit:
-                    return product.rebate * multiplier
-                return product.rebate * math.exp(-rate * maturity) * multiplier
+                    return (
+                        self._price_rebate_leg(product, pricing_env)
+                        * multiplier
+                        + pending_pv
+                    )
+                return (
+                    product.rebate
+                    * terminal_timing.payment_df
+                    * multiplier
+                    + pending_pv
+                )
             vanilla = EuropeanVanillaOption(
                 strike=product.strike,
                 option_type=product.option_type,
                 maturity=product.maturity,
                 exercise_date=product.exercise_date,
-                settlement_date=product.settlement_date,
             )
             vanilla_price = self._bs_engine.price(vanilla, pricing_env)
-            return participation * vanilla_price * multiplier
+            return (
+                participation
+                * vanilla_price
+                * terminal_timing.delay_df
+                * multiplier
+                + pending_pv
+            )
 
         if obs_type == ObservationType.EXPIRY:
-            return self._price_expiry(
+            value = self._price_expiry(
                 product, pricing_env, spot, maturity, rate, div, vol
             )
+            return value * terminal_timing.delay_df + pending_pv
 
         if obs_type == ObservationType.DISCRETE:
             schedule = product.observation_schedule
@@ -129,7 +196,7 @@ class BarrierAnalyticalEngine(BaseEngine):
                 vol=vol,
                 maturity=maturity,
                 participation=participation,
-            )
+            ) + pending_pv
 
         if obs_type == ObservationType.CONTINUOUS:
             return self._price_continuous(
@@ -141,7 +208,7 @@ class BarrierAnalyticalEngine(BaseEngine):
                 vol=vol,
                 maturity=maturity,
                 participation=participation,
-            )
+            ) + pending_pv
 
         raise PricingError(f"Unsupported observation type: {obs_type}")
 
@@ -170,9 +237,16 @@ class BarrierAnalyticalEngine(BaseEngine):
         )
 
         rebate_val = self._price_rebate_leg(product, pricing_env)
+        terminal_delay = resolve_terminal_timing(
+            product,
+            pricing_env,
+        ).delay_df
 
         if product.is_knock_out:
-            value = participation * max(ko_price, 0.0) + rebate_val
+            value = (
+                participation * max(ko_price, 0.0) * terminal_delay
+                + rebate_val
+            )
             return value * product.contract_multiplier
 
         vanilla = EuropeanVanillaOption(
@@ -180,11 +254,10 @@ class BarrierAnalyticalEngine(BaseEngine):
             option_type=product.option_type,
             maturity=product.maturity,
             exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
         )
         vanilla_price = self._bs_engine.price(vanilla, pricing_env)
         ki_price = max(vanilla_price - max(ko_price, 0.0), 0.0)
-        value = participation * ki_price + rebate_val
+        value = participation * ki_price * terminal_delay + rebate_val
         return value * product.contract_multiplier
 
     def _price_knock_out_closed_form(
@@ -290,7 +363,6 @@ class BarrierAnalyticalEngine(BaseEngine):
             option_type=product.option_type,
             maturity=product.maturity,
             exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
         )
         vanilla_price = self._bs_engine.price(vanilla, pricing_env)
 
@@ -413,6 +485,7 @@ class BarrierAnalyticalEngine(BaseEngine):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
             rebate=product.rebate,
             payment_at_hit=pay_at_hit,
             touch_type=touch_type,

@@ -16,6 +16,13 @@ from typing import Optional
 from scipy import stats
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import DoubleBarrierOption, EuropeanVanillaOption
 from quantark.asset.equity.param import EngineParams
@@ -56,6 +63,8 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     MIN_VOL = 1e-12
     MAX_VOL = 5.0
@@ -74,6 +83,23 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
         self._bs_engine = BlackScholesEngine(params)
 
     def price(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
+    ) -> float:
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        timing = resolve_terminal_timing(product, pricing_env)
+        return (
+            self._price_immediate(product, pricing_env) * timing.delay_df
+            + pending_receivable_pv(lifecycle_state, pricing_env)
+        )
+
+    def _price_immediate(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> float:
         """
@@ -427,7 +453,6 @@ class DoubleBarrierOptionAnalyticalEngine(BaseEngine):
             option_type=product.option_type,
             maturity=product.maturity,
             exercise_date=product.exercise_date,
-            settlement_date=product.settlement_date,
         )
 
     def _validate_inputs(

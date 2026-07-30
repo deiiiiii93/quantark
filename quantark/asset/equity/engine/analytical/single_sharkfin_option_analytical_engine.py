@@ -13,12 +13,20 @@ analytical engines using the Broadie-Glasserman-Kou barrier shift.
 from typing import Optional
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.capabilities import SettlementSupport
+from quantark.asset.equity.engine.settlement_support import (
+    pending_receivable_pv,
+    resolve_terminal_timing,
+    terminal_lifecycle_pv,
+    validate_settlement_capability,
+)
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import (
     BarrierOption,
     OneTouchOption,
     SingleSharkfinOption,
 )
+from quantark.execution.errors import CapabilityError
 from quantark.asset.equity.param import EngineParams
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import BarrierDirection, BarrierType, ObservationType, TouchType
@@ -41,6 +49,8 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
     """
 
     engine_type = EngineType.ANALYTICAL
+    settlement_support = SettlementSupport.EVENT_AND_TERMINAL
+    supports_lifecycle_state = True
 
     MIN_MATURITY = 1e-10
     MAX_MATURITY = 50.0
@@ -53,7 +63,11 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
         self._one_touch_engine = OneTouchAnalyticalEngine(params)
 
     def price(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        lifecycle_state=None,
     ) -> float:
         """
         Price a single sharkfin option analytically.
@@ -74,6 +88,12 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
                 "SingleSharkfinOptionAnalyticalEngine only supports "
                 f"SingleSharkfinOption, got {type(product).__name__}"
             )
+        validate_settlement_capability(self, product, lifecycle_state)
+        fixed_pv = terminal_lifecycle_pv(lifecycle_state, pricing_env)
+        if fixed_pv is not None:
+            return fixed_pv
+        terminal_timing = resolve_terminal_timing(product, pricing_env)
+        pending_pv = pending_receivable_pv(lifecycle_state, pricing_env)
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -94,9 +114,22 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             no_hit_rebate=product.no_hit_rebate,
             contract_multiplier=product.contract_multiplier,
         )
+        if (
+            product.pay_at_hit
+            and product.observation_type != ObservationType.EXPIRY
+            and not product.is_barrier_hit(spot)
+            and self._one_touch_engine._requests_delayed_hit_payment(product)
+        ):
+            raise CapabilityError(
+                "SingleSharkfinOptionAnalyticalEngine cannot represent a "
+                "delayed continuous/discrete first-hit payment"
+            )
 
         if maturity < self.MIN_MATURITY:
-            return product.get_payoff(spot)
+            return (
+                product.get_payoff(spot) * terminal_timing.payment_df
+                + pending_pv
+            )
 
         if product.observation_type not in (
             ObservationType.EXPIRY,
@@ -126,7 +159,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             + knock_out_rebate_value
             + no_hit_rebate_value
         )
-        return max(value, 0.0) * product.contract_multiplier
+        return max(value, 0.0) * product.contract_multiplier + pending_pv
 
     def _price_no_rebate_knock_out(
         self, product: SingleSharkfinOption, pricing_env: PricingEnvironment
@@ -140,6 +173,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
             rebate=0.0,
             participation_rate=1.0,
             pay_at_hit=False,
@@ -167,6 +201,7 @@ class SingleSharkfinOptionAnalyticalEngine(BaseEngine):
             maturity=product.maturity,
             exercise_date=product.exercise_date,
             settlement_date=product.settlement_date,
+            settlement_convention=product.settlement_convention,
             rebate=rebate,
             payment_at_hit=(
                 product.pay_at_hit if touch_type == TouchType.ONE_TOUCH else False

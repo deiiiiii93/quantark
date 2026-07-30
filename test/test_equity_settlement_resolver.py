@@ -169,6 +169,29 @@ def test_business_day_lag_skips_weekend_and_holiday(
     assert timing.payment_date == datetime(2026, 8, 5)
 
 
+def test_event_on_valuation_date_resolves_from_time_zero(pricing_env):
+    product = SimpleNamespace(
+        settlement_date=None,
+        settlement_convention=SettlementConvention(
+            lag=2,
+            lag_unit=SettlementLagUnit.BUSINESS_DAYS,
+        ),
+    )
+
+    timing = SettlementResolver.resolve_contingent(
+        product,
+        SettlementRequest(
+            kind=CashflowKind.HIT,
+            determination_date=pricing_env.valuation_date,
+            determination_time=0.0,
+        ),
+        pricing_env,
+    )
+
+    assert timing.determination_time == 0.0
+    assert timing.payment_date == datetime(2026, 7, 31)
+
+
 def test_calendar_day_lag_applies_modified_following(pricing_env):
     product = SimpleNamespace(
         settlement_date=None,
