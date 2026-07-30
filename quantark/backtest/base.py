@@ -284,10 +284,16 @@ def get_backtest_engine(config: Any) -> BaseBacktestEngine:
     """
     from quantark.util.exceptions import ValidationError
 
-    from quantark.backtest.otc.config import AutocallableBacktestConfig
+    from quantark.backtest.replay.config import BookAutocallableBacktestConfig
+    from quantark.backtest.replay.config import AutocallableBacktestConfig
+
+    if isinstance(config, BookAutocallableBacktestConfig):
+        from quantark.backtest.replay.engine import BookAutocallableBacktestEngine
+
+        return BookAutocallableBacktestEngine(config)
 
     if isinstance(config, AutocallableBacktestConfig):
-        from quantark.backtest.otc.engine import AutocallableBacktestEngine
+        from quantark.backtest.replay.single import AutocallableBacktestEngine
 
         return AutocallableBacktestEngine(config)
 

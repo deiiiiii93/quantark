@@ -1,49 +1,56 @@
 """
-OTC autocallable backtesting tools.
-"""
+Deprecated shim package — OTC autocallable backtesting moved to
+``quantark.backtest.replay`` (0.5.0 removes this package).
 
-from .book_engine import (
+Relocated infrastructure:
+- vol calibrators -> ``quantark.volmodels.calibration``
+- IV-surface history -> ``quantark.param.vol.surface_history``
+- futures ledger -> ``quantark.backtest.futures_ledger``
+"""
+import warnings
+
+from quantark.backtest.replay import (
+    AKShareAutocallableDataAdapter,
+    AutocallableBacktestConfig,
+    AutocallableBacktestDashboard,
+    AutocallableBacktestEngine,
+    AutocallableBacktestResults,
+    AutocallableDashboardConfig,
+    AutocallableDeltaHedgeStrategy,
+    AutocallableEngineConfig,
+    AutocallableLifecycleState,
+    AutocallableMarketDataSet,
     BookAutocallableBacktestConfig,
     BookAutocallableBacktestEngine,
     BookBacktestResults,
     BookProduct,
-    HedgeSpec,
-)
-from .config import (
-    AutocallableBacktestConfig,
-    AutocallableEngineConfig,
+    FuturesHedgePosition,
     FuturesRollPolicy,
+    HedgeSpec,
+    ImpliedBasisYield,
+    SignedDividendYield,
     SurfaceGridConfig,
     VolModelCalibrationConfig,
-)
-from .dashboard import AutocallableBacktestDashboard, AutocallableDashboardConfig
-from .engine import AutocallableBacktestEngine
-from .engine_factory import (
+    calculate_basis_yield,
     create_autocallable_engine,
     create_event_stats_engine,
     create_mc_event_stats_engine,
     create_pricing_engine,
     create_surface_engine,
     create_vol_model_engine,
-)
-from .market import (
-    AKShareAutocallableDataAdapter,
-    AutocallableMarketDataSet,
-    ImpliedBasisYield,
-    SignedDividendYield,
-    calculate_basis_yield,
     derive_implied_dividend_yield,
     normalize_futures_chain,
     normalize_time_series,
 )
-from .results import AutocallableBacktestResults
-from .state import (
-    AutocallableDeltaHedgeStrategy,
-    AutocallableLifecycleState,
-    FuturesHedgePosition,
-)
-from quantark.volmodels.calibration import CalibratedVolModel, VolModelCalibrator
 from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
+from quantark.volmodels.calibration import CalibratedVolModel, VolModelCalibrator
+
+warnings.warn(
+    "quantark.backtest.otc moved to quantark.backtest.replay; "
+    "this alias package is removed in 0.5.0",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 __all__ = [
     "AKShareAutocallableDataAdapter",

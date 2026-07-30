@@ -2,7 +2,7 @@
 Real-data OTC autocallable backtest demo.
 
 The demo builds a CSI500 Snowball and hedges it with listed IC futures using the
-new ``backtest.otc`` module. AKShare is optional and loaded lazily; normalized
+``backtest.replay`` module. AKShare is optional and loaded lazily; normalized
 spot/futures data is cached so the demo can be rerun without another network
 fetch.
 
@@ -30,7 +30,7 @@ import pandas as pd
 from quantark.asset.equity.engine.pde import GridConfig
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option import create_standard_snowball
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableBacktestDashboard,
     AutocallableDashboardConfig,

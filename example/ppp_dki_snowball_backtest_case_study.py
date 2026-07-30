@@ -41,7 +41,7 @@ from quantark.asset.equity.product.option import (
     SnowballOption,
     create_parachute_snowball,
 )
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableDeltaHedgeStrategy,
@@ -51,7 +51,7 @@ from quantark.backtest.otc import (
     SignedDividendYield,
     SurfaceGridConfig,
 )
-from quantark.backtest.otc.engine_factory import create_pricing_engine
+from quantark.backtest.replay.engine_factory import create_pricing_engine
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, ProtectionType

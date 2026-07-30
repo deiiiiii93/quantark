@@ -44,7 +44,7 @@ class TestLifecyclePackage:
 
     def test_backtest_state_is_reexport(self):
         from quantark.asset.equity.lifecycle import AutocallableLifecycleState as Shared
-        from quantark.backtest.otc.state import AutocallableLifecycleState as Legacy
+        from quantark.backtest.replay.strategy_state import AutocallableLifecycleState as Legacy
 
         assert Shared is Legacy
 

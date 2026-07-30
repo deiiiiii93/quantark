@@ -58,8 +58,13 @@ from quantark.backtest.transaction_costs import (
     CompleteCostModel,
 )
 
-# OTC autocallable backtests
-from quantark.backtest.otc import (
+# Product-replay backtests (canonical home; quantark.backtest.otc is a
+# deprecated alias package until 0.5.0)
+from quantark.backtest.replay import (
+    ReplayBacktestConfig,
+    ReplayBacktestEngine,
+    ReplayBacktestResults,
+    ReplayProduct,
     AKShareAutocallableDataAdapter,
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,

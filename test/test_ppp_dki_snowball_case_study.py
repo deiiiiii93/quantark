@@ -8,7 +8,7 @@ import pytest
 
 from quantark.asset.equity.param import QuadParams
 from quantark.asset.equity.product.option import AccrualConfig, BarrierConfig, PayoffConfig, SnowballOption
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableDeltaHedgeStrategy,

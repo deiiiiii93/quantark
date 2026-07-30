@@ -99,3 +99,31 @@ class TestResultsInterface:
         assert isinstance(results.get_pnl_series(), pd.Series)
         assert isinstance(results.get_value_series(), pd.Series)
         assert isinstance(results.get_lifecycle_events(), pd.DataFrame)
+
+
+class TestReplayFactoryDispatch:
+    def test_factory_dispatches_replay_config(self):
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).parent))
+        from replay_golden import fixtures
+
+        from quantark.backtest import get_backtest_engine
+        from quantark.backtest.replay import ReplayBacktestEngine
+
+        engine = get_backtest_engine(fixtures.make_book_config())
+        assert isinstance(engine, ReplayBacktestEngine)
+
+    def test_factory_dispatches_single_autocallable_config(self):
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).parent))
+        from replay_golden import fixtures
+
+        from quantark.backtest import get_backtest_engine
+        from quantark.backtest.replay.single import AutocallableBacktestEngine
+
+        engine = get_backtest_engine(fixtures.make_scalar_bsm_config())
+        assert isinstance(engine, AutocallableBacktestEngine)

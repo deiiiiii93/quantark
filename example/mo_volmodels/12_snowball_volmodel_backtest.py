@@ -68,7 +68,7 @@ from quantark.asset.equity.product.option.snowball_helpers import (
     create_standard_snowball,
 )
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
-from quantark.backtest.otc import (
+from quantark.backtest.replay import (
     AutocallableBacktestConfig,
     AutocallableBacktestEngine,
     AutocallableEngineConfig,
@@ -77,9 +77,9 @@ from quantark.backtest.otc import (
     SurfaceGridConfig,
     create_pricing_engine,
 )
-from quantark.backtest.otc.config import VolModelCalibrationConfig
-from quantark.backtest.otc.market import derive_implied_dividend_yield
-from quantark.backtest.otc.state import AutocallableDeltaHedgeStrategy
+from quantark.backtest.replay.config import VolModelCalibrationConfig
+from quantark.backtest.replay.market import derive_implied_dividend_yield
+from quantark.backtest.replay.strategy_state import AutocallableDeltaHedgeStrategy
 from quantark.param.vol.surface_history import VolSurfaceHistory
 from quantark.backtest.transaction_costs import CompleteCostModel, ZeroCostModel
 from quantark.param import FlatRateCurve, FlatVolSurface, SpotQuote
