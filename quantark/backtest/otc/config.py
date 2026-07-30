@@ -4,7 +4,7 @@ Configuration objects for OTC autocallable backtests.
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 import math
 from typing import Any, Literal, Optional
 
@@ -17,47 +17,8 @@ from .market import AutocallableMarketDataSet
 from quantark.volmodels.calibration import HESTON_PRESETS
 
 
-@dataclass
-class FuturesRollPolicy:
-    """
-    Rule for selecting and rolling Chinese equity index futures contracts.
-    """
-
-    roll_days_before_expiry: int = 5
-
-    def __post_init__(self) -> None:
-        if self.roll_days_before_expiry < 0:
-            raise ValidationError("roll_days_before_expiry must be non-negative")
-
-    def select_contract(
-        self, futures_slice, valuation_date, current_contract: Optional[str] = None
-    ):
-        """
-        Select the active contract from a daily futures-chain slice.
-        """
-        valuation_date = valuation_date.normalize()
-        rows = futures_slice.copy()
-        rows = rows[rows["expiry_date"] > valuation_date]
-        if rows.empty:
-            raise ValidationError(
-                f"No non-expired futures contract on {valuation_date.date()}"
-            )
-
-        if current_contract is not None:
-            current = rows[rows["contract"] == current_contract]
-            if not current.empty:
-                current_row = current.sort_values("expiry_date").iloc[0]
-                days_to_expiry = (
-                    current_row["expiry_date"] - valuation_date
-                ).days
-                if days_to_expiry > self.roll_days_before_expiry:
-                    return current_row
-
-        min_expiry = valuation_date + timedelta(days=self.roll_days_before_expiry)
-        candidates = rows[rows["expiry_date"] > min_expiry]
-        if candidates.empty:
-            candidates = rows
-        return candidates.sort_values(["expiry_date", "contract"]).iloc[0]
+# Canonical home: quantark.backtest.futures_ledger (re-exported here).
+from quantark.backtest.futures_ledger import FuturesRollPolicy  # noqa: F401,E402
 
 
 @dataclass
