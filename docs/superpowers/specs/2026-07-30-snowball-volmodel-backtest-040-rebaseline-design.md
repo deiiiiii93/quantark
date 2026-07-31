@@ -758,6 +758,70 @@ against that list. `test_vol_pde_v0_boundary.py::test_session_clone_preserves_v0
 guards this one; the general case wants the clone derived from the signature
 rather than transcribed, which is recorded here as a follow-up, not done.
 
+### 7A.11 Is `degenerate_pde` enough on its own? — measured, and no
+
+The last assumption in §7A's chain was that `enforce_feller=True` is *needed*:
+the +0.33/+0.55% residual that justified it came from one synthetic control, so
+"drop enforcement and rely on the boundary fix" was never actually tested. It is
+now, on the production configuration — the gate's own product, environment,
+engines and tolerance — with both policies run on the **same** dates, so the
+comparison is paired. Full 3Y case, medium grid 200×60×`ceil(400·T)`, QE-M
+reference at 4 substeps, tolerance the 0.25% floor throughout (`mc_se` 0.033 …
+0.092% of notional).
+
+| date | unconstrained ratio | diff | | enforced ratio | diff | |
+|---|---|---|---|---|---|---|
+| 2024-01-12 | 0.197 | **+0.579%** | FAIL | 7.194 | **+0.277%** | **FAIL** |
+| 2023-11-17 | 0.392 | **+0.486%** | FAIL | 1.0001 | +0.227% | PASS |
+| 2023-05-04 | 0.477 | +0.205% | PASS | 1.0001 | +0.115% | PASS |
+| 2026-07-17 | 0.493 | **+0.317%** | FAIL | 1.0000 | +0.163% | PASS |
+| 2023-06-29 | 0.504 | +0.226% | PASS | 1.0001 | +0.105% | PASS |
+| 2023-08-22 | 0.794 | +0.105% | PASS | 1.0001 | +0.078% | PASS |
+| 2024-06-26 | 0.805 | +0.179% | PASS | 1.0001 | +0.163% | PASS |
+| 2025-09-02 | 0.930 | +0.125% | PASS | 1.0000 | +0.108% | PASS |
+| 2025-11-03 | 0.972 | +0.069% | PASS | 1.0000 | +0.060% | PASS |
+| 2024-08-19 | 0.991 | +0.128% | PASS | 1.0000 | +0.113% | PASS |
+| 2026-04-23 | 1.144 | +0.022% | PASS | 1.0000 | +0.000% | PASS |
+| 2025-09-29 | 1.262 | +0.040% | PASS | 1.1062 | +0.065% | PASS |
+| 2026-05-25 | 1.557 | +0.112% | PASS | 1.7729 | +0.122% | PASS |
+
+**Decision: `enforce_feller=True` stays.** Four findings support it.
+
+1. **The synthetic control was right.** It predicted +0.33/+0.55% at deep
+   violation; real unconstrained fits give **+0.486% at ratio 0.392** and
+   **+0.579% at 0.197**. §7A.3's reasoning survives contact with production data.
+2. **The error is monotone in violation depth** — +0.02% at ratio 1.14 rising
+   smoothly to +0.58% at 0.197 — so the ratio is a genuine predictor of PDE
+   error, which is what makes the §7A.4(3) conditioning meaningful.
+3. **Enforcement is load-bearing, and only for the tail.** Unconstrained fails
+   3/13, all at ratio ≤ 0.50; enforced passes 12/13, and is strictly closer to MC
+   on 11/13. But from ratio ~0.5 upward the boundary fix alone already passes.
+   **16.4% of the cohort sits below 0.50** (7.2% below 0.35) — a minority, but far
+   too large to leave failing.
+4. **This does not rescue the σ-collapse dates.** 2024-01-12 fails *both* ways
+   (+0.579% → +0.277%). Enforcement halves its error and still misses the
+   tolerance. Those 6.6% need their own treatment (§7A.10(3)); no calibration
+   flag fixes them.
+
+**Two cautions for G2, both new.**
+
+- **Every one of the 26 cells has the PDE above MC — sign fraction 1.0.** Run
+  through the gate's own `detect_systematic_bias`, the unconstrained set flags
+  biased (median 0.128% ≥ the 0.125% threshold) and the enforced set does *not*
+  (median 0.113%) — by 0.012 points. A unanimous sign with a median just under
+  the bar is not "unbiased"; it is "biased but currently small". G2 should read
+  that verdict as marginal, not clean, and the bias is one-directional so it
+  accumulates rather than cancels over a hedging run.
+- **These are medium-grid verdicts.** The gate escalates a medium failure to the
+  fine ladder, so "FAIL" here means "fails at 200×60", not "route rejected".
+  The fine level may clear 2026-07-17 and 2023-11-17; it is unlikely to clear a
+  degenerate-σ date, where the problem is the model rather than the grid.
+
+Reproduction: `unconstrained_pde_vs_mc.py` (scratchpad), which imports
+`11_pde_convergence_gate.py` and calls its helpers rather than re-implementing
+them — the same discipline that the per-day cost model needed after two failed
+attempts to model the call sequence instead of replicating it.
+
 ---
 
 ## 8. Outcome concentration — a stronger caveat than the plan carried
@@ -882,7 +946,8 @@ minutes single-core, once (§7A.10).
 | Heston weakly identified on CFFEX settlement data (κ/σ bound hits ~half of sampled dates) | **Escalated.** §7A shows this has a pricing consequence, not only a parameter-stability one: bound-pinned κ/σ violate Feller and drive a 2.5%-of-notional PDE–MC gap. Mitigated by `enforce_feller=True` (§7A.4), per-date Feller ratio and bound-hit flags in the calibration records, and a G2 verdict conditioned on regime |
 | `enforce_feller=True` degrades the smile fit on previously-violating dates | **Quantified (§7A.10):** median 8.4 bp, p90 29.3 bp, max 217 bp of IV across all 762 surfaces. Report per-date. This changes the model being tested and must be stated as such, not buried — a constrained Heston is a different model from a free one |
 | ~~The `degenerate_pde` boundary is belt-and-braces once `enforce_feller` lands~~ **This was wrong.** | Retracted on measurement. §7A.10: **80% of constrained fits land in `2κθ/σ² ∈ [0.999, 1.001]`** — precisely the regime where `neumann` mis-prices by −0.540% of notional. The two fixes are complementary, and shipping (1) without (2) would have been worse than shipping neither, because it *concentrates* the cohort on the failing point |
-| **NEW — `enforce_feller` satisfies the constraint by collapsing vol-of-vol on 50 dates (6.6%)** | σ driven to its lower bound (`σ < 0.01`, ratio up to 1.7e5), i.e. deterministic-variance Heston with no smile dynamics; these carry the worst fit degradations (212–217 bp). Detect via the new `feller_ratio` record field; stage 13 must flag or exclude them, never average them into a `heston` result. Not fixable by tuning — it is what a hard constraint does when the data wants an infeasible smile |
+| **NEW — `enforce_feller` satisfies the constraint by collapsing vol-of-vol on 50 dates (6.6%)** | σ driven to its lower bound (`σ < 0.01`, ratio up to 1.7e5), i.e. deterministic-variance Heston with no smile dynamics; these carry the worst fit degradations (212–217 bp). **§7A.11 shows such a date fails the PDE gate under *both* calibration policies** (+0.579% unconstrained, +0.277% enforced), so no calibration flag fixes them. Detect via `feller_ratio`; stage 13 must flag or exclude them, never average them into a `heston` result |
+| **NEW — the 2D PDE sits above the MC reference on every cell measured (sign fraction 1.0, n=26)** | §7A.11. The enforced set escapes the gate's bias detector by 0.012 points of median, not by a clean margin. One-directional error accumulates over ~700 rebalances rather than cancelling, so §5.3's delta bias bound (0.1 IM contract) is the binding check, not the PV bias flag. G2 must read a narrow `biased: false` as marginal |
 | MO surface ends ~1 y against a 3 y trade | Explicit flat-total-variance extrapolation, stated in the report. *Carried forward.* |
 | `backtest.otc` shim is removed in 0.5.0, breaking the study mid-flight | Stages 11/12/13 already import canonical `quantark.backtest.replay` and `quantark.param.vol.surface_history` (§1.2) — verified, no shim dependency |
 | Stage 13's hand-copied column lists drift from what the replay writer emits | Derive `REQUIRED_CATEGORIES` from `replay/schema.py` (§1.2) rather than maintaining a parallel list |
