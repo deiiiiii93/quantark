@@ -60,6 +60,39 @@ def test_hard_feller_calibration_uses_real_constraint_and_preserves_cost():
     assert result.cost == pytest.approx(result.data_cost)
 
 
+def test_hard_feller_margin_survives_a_loose_optimizer_tolerance():
+    """The feasibility buffer must scale with ``ftol``, not be a fixed 1e-8.
+
+    SLSQP satisfies constraints only to about its own accuracy tolerance, so a
+    constant buffer is only large enough for tight tolerances.  At ``ftol=1e-6``
+    this case came back at ``2*kappa*theta-sigma^2 = -1.58e-07`` and tripped the
+    strict post-check; the frozen ``mo_frozen`` preset (same tolerance) hit the
+    identical wall on real CFFEX MO settlement surfaces.
+
+    The true parameters violate Feller on purpose: only then is the constraint
+    *active* at the optimum, which is the sole regime where the buffer matters.
+    """
+    true = HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.5)
+    assert true.feller_satisfied() is False
+    spot, rate, carry, options = _options(true)
+
+    result = calibrate_heston(
+        spot,
+        options,
+        rate,
+        carry,
+        HestonParams(v0=0.04, kappa=1.0, theta=0.04, sigma=0.5, rho=-0.2),
+        target="price",
+        regularize_feller=0.0,
+        enforce_feller=True,
+        max_nfev=400,
+        ftol=1e-6,
+    )
+
+    assert result.params.feller_satisfied() is True
+    assert result.feller_margin >= 0.0
+
+
 def test_hard_feller_rejects_constraint_infeasible_bounds():
     true = HestonParams(
         v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5

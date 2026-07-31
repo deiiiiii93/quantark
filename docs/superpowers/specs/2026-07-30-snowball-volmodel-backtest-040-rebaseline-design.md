@@ -87,9 +87,12 @@ resolves three of this spec's requirements and moves several of its citations.
   replacing per-engine hedge bookkeeping.
 - Greeks now **fail closed**: the silent `delta = 0.0` fallback is gone (see §7.1).
 
-**Verified still outstanding:** both §7A.4 engine fixes. `enforce_feller` remains
-`False` (`quantark/volmodels/calibration.py:83`) and `v0_boundary` is still not
-plumbed through the vol PDE solvers. The consolidation did not touch either.
+**Landed 2026-07-31:** all four §7A.4 decisions, with the cohort-wide measurements
+they implied recorded in §7A.10. `enforce_feller=True` and the `v0_boundary`
+plumbing are live; the MC reference runs QE-M at 4 substeps; the calibration
+record now carries `feller_ratio`. Two consequences of the enforcement that were
+*not* anticipated by §7A.4 are recorded in §7A.10 and §12 — they change what the
+`heston`/`heston_slv` rows of the study mean on a minority of dates.
 
 ---
 
@@ -458,7 +461,7 @@ drifts *away* from MC under refinement. The boundary fix removes the dominant
 error, not all of it — which is why §7A.4 constrains the calibration instead of
 relying on the boundary alone.
 
-### 7A.4 Decisions
+### 7A.4 Decisions — all four landed 2026-07-31 (see §7A.10 for measured cost)
 
 1. **`enforce_feller=True`** in the `mo_frozen` Heston preset (owner decision
    2026-07-30; currently `False` with only a soft `regularize_feller=0.05`
@@ -480,9 +483,23 @@ relying on the boundary alone.
 3. **G2 records `2κθ/σ²` and bound-hit flags per date**, and evaluates its verdict
    **conditioned on the Feller ratio** rather than pooling regimes. §7A.3 shows a
    uniform verdict would average a 0.03% regime with a 2.5% one.
+   *Recording half landed:* `feller_ratio` joins `feller_margin`,
+   `feller_satisfied` and `bound_hits` in the calibration record, which the gate
+   already passes through verbatim (`11_pde_convergence_gate.py:_calibration_record`).
+   The margin alone could not support the conditioning — it is a difference, so
+   1e-3 is comfortable at σ=0.03 and vanishing at σ=0.6. *Verdict-conditioning
+   logic is deliberately NOT landed:* it is gate scoring, not an engine fix, and
+   belongs with the G2 re-run so the buckets are chosen against the regimes the
+   re-run actually produces (§7A.10: 80% at ratio ≈ 1.0, 6.6% above 10).
 4. **MC reference upgraded** to `martingale_correction=True` with
    `substeps_per_interval` ≥ 4. The measured reference bias is only 0.078% of
    notional, but it is free to remove and the gate's tolerance is 0.25%.
+   *Landed* as `MC_MARTINGALE = True` and `MC_FULL[substeps_per_interval] = 4`;
+   `mc_reference.scheme` in `gate_decision.json` now reads `QUADEXP_M`. `MC_QUICK`
+   stays at 1 substep — it is a plumbing smoke already marked non-production-valid.
+   **This changes gate cost:** 4 substeps multiply the reference MC time grid
+   fourfold, and §7A.6 measured MC at 40–50 s per case against PDE at ~9 s. The
+   G2 re-run is the expensive step in §10, not the fleet.
 
 ### 7A.6 Feller-boundary sweep
 
@@ -617,6 +634,82 @@ PDE route is viable again — the control reaches +0.034% of notional, inside th
 95% interval — so G2 decides on fresh evidence, per Feller regime, and the 2D cost
 question in §7.3 reopens with it.
 
+### 7A.10 What landing §7A.4 actually cost — measured on all 762 surfaces
+
+All four decisions are implemented (commit below). §7A.4(1) required the fit cost
+be reported; the sweep runs every surface in
+`example/mo_volmodels/data/history/iv_surface/` through both policies, which also
+validates the iteration budget the constrained solver needs.
+
+| quantity | result |
+|---|---|
+| surfaces converging, both policies | **762 / 762** — no date fails closed |
+| soft-policy fits violating Feller | **658 / 762 (86%)** |
+| hard fits landing in `2κθ/σ² ∈ [0.999, 1.001]` | **611 / 762 (80%)** |
+| IV-fit RMSE degradation | median **8.4 bp**, p90 **29.3 bp**, p99 **73.8 bp**, max **217 bp** |
+| hard-path `nfev` | median 94, p99 196, max **344** |
+| one-off cohort calibration cost | 37 min single-core, then cached |
+
+Three things follow, two of them new.
+
+1. **§7A.4(2) is confirmed as mandatory, on production data.** The spec argued
+   from a synthetic sweep that `enforce_feller=True` lands fits *on* the boundary
+   where `neumann` fails at −0.540% of notional. It does: **80% of the cohort now
+   sits within ±0.1% of ratio 1.0.** Had only fix (1) shipped, the 2D PDE route
+   would have been wrong on four dates in five.
+
+2. **The budget is safe, but not for the reason the number suggests.**
+   `heston_max_nfev=200` maps to SLSQP's `maxiter`, i.e. 200 *major iterations* at
+   ~6 function evaluations each — an effective budget ~6× the nominal figure. The
+   worst observed date used 344 evaluations (~57 major iterations, 29% of budget).
+   The fleet will not die on an iteration limit. The same mapping is why
+   `test_otc_vol_calibrators.py`'s fast fixture had to move 15 → 40: it was tuned
+   to the unconstrained `least_squares` branch, where `max_nfev` really does count
+   evaluations.
+
+3. **NEW — vol-of-vol collapse on 50 dates (6.6%).** Not anticipated by §7A.4.
+   On these the optimizer satisfies `2κθ ≥ σ²` not by raising `κθ` but by driving
+   `σ` to its lower bound (`σ < 0.01`, ratio > 10, up to 1.7e5). Heston with
+   `σ ≈ 0` is a *deterministic-variance* model: no vol-of-vol, no smile dynamics,
+   and `heston_slv`'s leverage surface then carries essentially the whole smile.
+   On those dates the `heston` variant is not testing what the study says it
+   tests. This is a reporting obligation, not a bug — `feller_ratio` is in the
+   calibration record precisely so stage 13 can identify and exclude them. The
+   worst RMSE degradations cluster here (2023-12-08 at 217 bp, 2023-07-13 at
+   212 bp): a model that cannot flex its vol-of-vol cannot fit the smile.
+
+The honest summary: the constraint buys a well-posed PDE on 93% of dates and
+substitutes a degenerate model on the remaining 7%. Both must appear in the
+report; neither is visible without the per-date record.
+
+**A defect the flip exposed.** `enforce_feller=True` did not work at all before
+this change. SLSQP satisfies constraints only to about its own accuracy tolerance,
+but the feasibility buffer was a constant `1e-8` — adequate at `ftol=1e-8`
+(observed slack ~1e-9) and too small at the preset's `ftol=1e-6` (observed slack
+~1.6e-7). Every constrained fit tripped the strict post-check and failed closed.
+The buffer now scales as `max(1e-8, 10·ftol)`; the strict check is unchanged, so
+it still fails closed if that is ever insufficient. Fix and regression test:
+`quantark/volmodels/heston/calibration.py`,
+`test_heston_feller_calibration.py::test_hard_feller_margin_survives_a_loose_optimizer_tolerance`.
+
+**A second defect the flip exposed — and a standing hazard for this study.**
+`Heston2DAutocallableSessionAdapter._clone_engine`
+(`pde_execution_adapters.py:444`) rebuilds the 2D autocallable engines from an
+explicit kwargs list. `v0_boundary` was not in it, so a session or
+prepared-adapter run reverted to the default while the direct call honoured the
+constructor — **silently**, with the two paths differing by 0.66% of notional in
+the Feller-violating regime. Caught by `test_matrix_parity`'s direct-vs-session
+equality only because the golden fixtures pin `neumann`; with both paths on the
+default it would have stayed invisible.
+
+The hazard is structural, not specific to this argument: *every* constructor
+argument on these four solvers must be added to that list by hand, and omission
+is silent. Anything the G2 re-run or the fleet configures on a 2D autocallable
+engine — and stage 12 routes through the execution layer — must be checked
+against that list. `test_vol_pde_v0_boundary.py::test_session_clone_preserves_v0_boundary`
+guards this one; the general case wants the clone derived from the signature
+rather than transcribed, which is recorded here as a follow-up, not done.
+
 ---
 
 ## 8. Outcome concentration — a stronger caveat than the plan carried
@@ -668,31 +761,41 @@ decision.
 
 ## 10. Sequencing
 
-*Revised 2026-07-30 after the backtest replay consolidation (§1.2). Two prior
-steps are now complete: "secure the framework" (it is committed and consolidated)
-and "implement §6 termination" (the library delivers it).*
+*Revised 2026-07-31. Three prior steps are complete: "secure the framework" (it is
+committed and consolidated), "implement §6 termination" (the library delivers it),
+and the §7A.4 engine and calibration fixes (landed; §7A.10).*
 
-1. **Apply the §7A.4 engine and calibration fixes.** Both are verified still
-   outstanding as of the consolidation: `enforce_feller` is `False` at
-   `quantark/volmodels/calibration.py:83`, and `v0_boundary` appears nowhere in
-   `snowball_vol_pde_solvers.py` / `phoenix_vol_pde_solvers.py`. Also set the MC
-   reference to `martingale_correction=True` with `substeps_per_interval` ≥ 4.
-   **G2 must not re-run before these land**, or it will certify the configuration
-   §7A disproved.
-2. Re-execute Gate G4 (coupon solve) and Gate G1 (surface admission).
-3. Re-run and re-scope Gate G2 per §5, with the verdict conditioned on the Feller
-   regime and `2κθ/σ²` recorded per date; emit a fresh `gate_decision.json` and
-   evidence hash. The 2D route is genuinely open — §7A.7 shows the *existing*
-   200×60×`ceil(400·T)` grid passing at +0.159% once (1) lands.
-4. Add the `flat_bsm_quad` variant and the §9 pre-flight sweep. (§6 termination
+~~1. Apply the §7A.4 engine and calibration fixes.~~ **DONE 2026-07-31.**
+`enforce_feller=True`; `v0_boundary` plumbed and defaulted to `degenerate_pde` on
+the snowball and phoenix 2D solvers; MC reference on QE-M at 4 substeps;
+`feller_ratio` in the calibration record. Cohort evidence and two unanticipated
+consequences in §7A.10. A latent defect that made `enforce_feller=True` unusable
+at the preset's `ftol` was found and fixed in the same pass.
+
+1. Re-execute Gate G4 (coupon solve) and Gate G1 (surface admission).
+2. Re-run and re-scope Gate G2 per §5. Two things must be built here rather than
+   assumed: the **verdict conditioning** deferred from §7A.4(3) — with buckets
+   chosen against the measured regime split (80% at ratio ≈ 1.0, 6.6% above 10),
+   not invented in advance — and the **within-maturity** bias evaluation of §5.2.
+   Emit a fresh `gate_decision.json` and evidence hash. The 2D route is genuinely
+   open: §7A.7 shows the *existing* 200×60×`ceil(400·T)` grid passing at +0.159%.
+   Budget for this step went up, not down — the QE-M reference at 4 substeps
+   quadruples the reference MC time grid (§7A.4(4)).
+3. Add the `flat_bsm_quad` variant and the §9 pre-flight sweep. (§6 termination
    needs no work — stage 12 inherits `terminate_on_lifecycle_end=True`.)
-5. Gate G3 on one inception.
-6. **Task 6.1 timing run** — measure the per-day cost curve across remaining
+4. Gate G3 on one inception.
+5. **Task 6.1 timing run** — measure the per-day cost curve across remaining
    maturity for every route actually configured, validated against the §7.2
    anchors. The fleet total is set here (§7.3), not before.
-7. Run the 1D block (4 variants × 27 inceptions). Review checkpoint.
-8. Run the 2D block (2 variants × 27 inceptions) per the §5 routing.
-9. Aggregate and report, with §8 caveats.
+6. Run the 1D block (4 variants × 27 inceptions). Review checkpoint.
+7. Run the 2D block (2 variants × 27 inceptions) per the §5 routing.
+8. Aggregate and report, with §8 caveats — including the §7A.10(3) degenerate-σ
+   dates, which must be identified and excluded or flagged, not averaged in.
+
+**Warm-cache note for step 1.** The 552 `localvol-` cache entries stay valid
+(their fingerprint excludes the preset). Every `heston-` and `heston_slv-` entry
+is now a miss, as designed. Recalibrating the full 762-surface cohort costs ~37
+minutes single-core, once (§7A.10).
 
 ---
 
@@ -729,9 +832,11 @@ and "implement §6 termination" (the library delivers it).*
 | Engine-control spread turns out large enough to swamp model edges | That *is* the finding — report it; it invalidates cross-engine comparisons honestly rather than silently |
 | Quadrature cannot price some operating point (unreachable-barrier filtering, dense-KI refinement) | G5 pre-flight covers QUAD routes as well as PDE |
 | Heston weakly identified on CFFEX settlement data (κ/σ bound hits ~half of sampled dates) | **Escalated.** §7A shows this has a pricing consequence, not only a parameter-stability one: bound-pinned κ/σ violate Feller and drive a 2.5%-of-notional PDE–MC gap. Mitigated by `enforce_feller=True` (§7A.4), per-date Feller ratio and bound-hit flags in the calibration records, and a G2 verdict conditioned on regime |
-| `enforce_feller=True` degrades the smile fit on previously-violating dates | Report per-date calibration RMSE before/after. This changes the model being tested and must be stated as such, not buried — a constrained Heston is a different model from a free one |
-| The `degenerate_pde` boundary leaves a +0.33–0.55% residual on violated dates that grows under refinement | `enforce_feller=True` removes the regime entirely; the boundary flag is belt-and-braces. If violated dates somehow persist, they are flagged per date rather than silently priced |
+| `enforce_feller=True` degrades the smile fit on previously-violating dates | **Quantified (§7A.10):** median 8.4 bp, p90 29.3 bp, max 217 bp of IV across all 762 surfaces. Report per-date. This changes the model being tested and must be stated as such, not buried — a constrained Heston is a different model from a free one |
+| ~~The `degenerate_pde` boundary is belt-and-braces once `enforce_feller` lands~~ **This was wrong.** | Retracted on measurement. §7A.10: **80% of constrained fits land in `2κθ/σ² ∈ [0.999, 1.001]`** — precisely the regime where `neumann` mis-prices by −0.540% of notional. The two fixes are complementary, and shipping (1) without (2) would have been worse than shipping neither, because it *concentrates* the cohort on the failing point |
+| **NEW — `enforce_feller` satisfies the constraint by collapsing vol-of-vol on 50 dates (6.6%)** | σ driven to its lower bound (`σ < 0.01`, ratio up to 1.7e5), i.e. deterministic-variance Heston with no smile dynamics; these carry the worst fit degradations (212–217 bp). Detect via the new `feller_ratio` record field; stage 13 must flag or exclude them, never average them into a `heston` result. Not fixable by tuning — it is what a hard constraint does when the data wants an infeasible smile |
 | MO surface ends ~1 y against a 3 y trade | Explicit flat-total-variance extrapolation, stated in the report. *Carried forward.* |
 | `backtest.otc` shim is removed in 0.5.0, breaking the study mid-flight | Stages 11/12/13 already import canonical `quantark.backtest.replay` and `quantark.param.vol.surface_history` (§1.2) — verified, no shim dependency |
 | Stage 13's hand-copied column lists drift from what the replay writer emits | Derive `REQUIRED_CATEGORIES` from `replay/schema.py` (§1.2) rather than maintaining a parallel list |
 | Fleet killed again mid-run | Stop via process group, never `pkill -f`; per-run output isolation means completed runs survive |
+| **NEW — a 2D-autocallable engine setting is silently dropped between the direct and session paths** | `_clone_engine` transcribes constructor arguments by hand (§7A.10). `v0_boundary` was already missing and priced 0.66% of notional apart. Before the fleet, diff the kwargs list against the four solvers' signatures; stage 12 routes through the execution layer, so a dropped setting would mis-price every day of every run without erroring |

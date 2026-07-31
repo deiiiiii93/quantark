@@ -229,10 +229,22 @@ def calibrate_heston(
         return res
 
     if enforce_feller:
-        # A small positive buffer absorbs SLSQP's constraint tolerance while
-        # ensuring the returned HestonParams passes the strict public Feller
-        # predicate.  It is numerical slack, not an economic model margin.
-        hard_buffer = 1e-8
+        # A positive buffer absorbs SLSQP's constraint tolerance while ensuring
+        # the returned HestonParams passes the strict public Feller predicate.
+        # It is numerical slack, not an economic model margin.
+        #
+        # The buffer has to SCALE with ``ftol``: SLSQP satisfies its constraints
+        # only to roughly its own accuracy tolerance, so a fixed value is large
+        # enough for tight tolerances and silently too small for loose ones.
+        # Measured slack at the boundary: ~1e-9 at ftol=1e-8 but ~1.6e-7 at
+        # ftol=1e-6 — the latter is the frozen ``mo_frozen`` preset, whose fits
+        # on real CFFEX MO settlement surfaces failed the strict check below
+        # under the previous constant 1e-8.  The 10x factor is headroom over
+        # the observed slack, and the check still fails closed if it is ever
+        # insufficient.  Economically negligible: at MO scale
+        # (2*kappa*theta ~ 0.16) a 1e-5 buffer perturbs the constraint by ~6e-5
+        # relative, far under the optimizer's own convergence tolerance.
+        hard_buffer = max(1e-8, 10.0 * float(ftol))
         parameter_span = np.maximum(upper - lower, 1.0)
 
         def objective(x: np.ndarray) -> float:

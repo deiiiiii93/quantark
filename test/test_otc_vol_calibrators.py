@@ -120,8 +120,16 @@ def artifact(history_dir):
 
 
 def _fast_calibration_config(**overrides) -> VolModelCalibrationConfig:
+    # heston_max_nfev is a *major-iteration* budget on the hard-Feller path:
+    # mo_frozen enforces Feller, so calibrate_heston runs SLSQP, where
+    # max_nfev maps to maxiter and each major iteration costs ~6 function
+    # evaluations for the 5-parameter gradient.  The old value of 15 was tuned
+    # to the unconstrained least_squares branch and fails closed under SLSQP
+    # ("Iteration limit reached").  Real MO surfaces converge in 8-24 major
+    # iterations; 40 clears the observed maximum with margin and costs nothing
+    # when the solve converges earlier.
     kwargs = dict(
-        heston_max_nfev=15,
+        heston_max_nfev=40,
         slv_n_steps=8,
         slv_n_x=61,
         slv_n_z=31,
@@ -262,10 +270,10 @@ class TestHestonCalibrator:
         cache_dir = str(tmp_path / "calib_cache")
         spy = _KernelSpy(monkeypatch, vol_calibrators, "calibrate_heston")
         VolModelCalibrator(
-            _fast_calibration_config(cache_dir=cache_dir, heston_max_nfev=10)
+            _fast_calibration_config(cache_dir=cache_dir, heston_max_nfev=40)
         ).calibrate("heston", artifact)
         VolModelCalibrator(
-            _fast_calibration_config(cache_dir=cache_dir, heston_max_nfev=12)
+            _fast_calibration_config(cache_dir=cache_dir, heston_max_nfev=41)
         ).calibrate("heston", artifact)
         # Different calibration config -> different cache entry -> recalibrated.
         assert spy.calls == 2

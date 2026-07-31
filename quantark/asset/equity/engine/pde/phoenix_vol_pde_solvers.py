@@ -184,6 +184,13 @@ class LocalVolPhoenixPDESolver(PhoenixPDESolver):
 
 
 class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
+    """Shared 2-D (log-spot, variance) ADI machinery for the Phoenix solvers.
+
+    ``v0_boundary`` defaults to ``"degenerate_pde"`` rather than the ADI core's
+    ``"neumann"`` — see ``_Heston2DSnowballPDEBase`` for the measurements that
+    settled it.  Same contract, same reason: smile-calibrated Heston sits near
+    the Feller boundary, which is where Neumann's ``v = 0`` edge fails.
+    """
 
     engine_type = EngineType.PDE
     _solver_name = "Heston2DPhoenixPDESolver"
@@ -199,6 +206,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         grid_style: str = "concentrated",
         grid_focus: str = "auto",
         pin_critical_spots: bool = False,
+        v0_boundary: str = "degenerate_pde",
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
@@ -213,6 +221,10 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             raise ValidationError(
                 "grid_focus must be one of: auto, ko, ki, coupon, strike, spot"
             )
+        if v0_boundary not in ("neumann", "degenerate_pde"):
+            raise ValidationError(
+                "v0_boundary must be 'neumann' or 'degenerate_pde'"
+            )
         self.model_params = model_params
         self.n_x = int(n_x)
         self.n_v = int(n_v)
@@ -221,6 +233,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         self.grid_style = grid_style
         self.grid_focus = grid_focus
         self.pin_critical_spots = bool(pin_critical_spots)
+        self.v0_boundary = str(v0_boundary)
 
     def representative_vol(self, product, pricing_env) -> float:
         # sqrt(var_eff) ported VERBATIM from the adi_core x-width computation.
@@ -296,6 +309,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             leverage=None,
             eta=1.0,
             grid_style=self.grid_style,
+            v0_boundary=self.v0_boundary,
             barrier_concentrate=self._grid_concentration_spot(product, env),
             critical_spots=(
                 self._grid_critical_spots(product, env)
@@ -1029,6 +1043,7 @@ class HestonSLVPhoenixPDESolver(_Heston2DPhoenixPDEBase):
             leverage=self.leverage_surface,
             eta=self.eta,
             grid_style=self.grid_style,
+            v0_boundary=self.v0_boundary,
             barrier_concentrate=self._grid_concentration_spot(product, env),
             critical_spots=(
                 self._grid_critical_spots(product, env)

@@ -37,6 +37,7 @@ from quantark.param.rrf import LinearRateCurve
 from quantark.param.term_sampling import forward_carry_on_grid, forward_rates_on_grid
 from quantark.util.exceptions import NumericalError, ValidationError
 from quantark.util.io import atomic_write_json
+from quantark.util.numerical import safe_divide
 from quantark.volmodels.black_scholes import implied_vol_call
 from quantark.volmodels.heston import (
     HestonParams,
@@ -63,13 +64,22 @@ HESTON_PARAMETER_NAMES = ("v0", "kappa", "theta", "sigma", "rho")
 # Frozen Heston calibration preset "mo_frozen".
 # Provenance: values copied from the mo_volmodels suite —
 # example/mo_volmodels/04_heston_calibration.py (HESTON_BOUNDS,
-# REGULARIZE_FELLER, SOLVER_TOLERANCES, target="iv", method="lewis",
-# enforce_feller=False, single deterministic shortest-expiry ATM-variance
-# start) and example/mo_volmodels/10_calibration_diagnostics.py (same
-# bounds and soft-Feller policy, frozen 2026-07 for the CFFEX MO cohort).
-# example/ scripts are NOT importable from quantark (canonical-import
-# rule), so the frozen configuration is re-declared here; keep it in sync
-# with the suite.
+# REGULARIZE_FELLER, SOLVER_TOLERANCES, target="iv", method="lewis", single
+# deterministic shortest-expiry ATM-variance start) and
+# example/mo_volmodels/10_calibration_diagnostics.py (same bounds, frozen
+# 2026-07 for the CFFEX MO cohort).  example/ scripts are NOT importable
+# from quantark (canonical-import rule), so the frozen configuration is
+# re-declared here; keep it in sync with the suite.
+#
+# DELIBERATE DIVERGENCE from those scripts: enforce_feller is True here,
+# where they use False with only the soft regularize_feller penalty.  Every
+# MO settlement surface sampled under the soft policy came back with
+# kappa/sigma pinned on the bounds at 2*kappa*theta/sigma^2 ~ 0.29-0.48, and
+# the 0.4.0 re-baseline design (§7A) traced a 2.5%-of-notional 2D-PDE vs
+# QE-M-MC gap to exactly that degeneracy.  Feasibility is bought with smile
+# accuracy on those dates, so runs MUST report per-date fit RMSE — the model
+# under test is not the same one the diagnostics scripts fitted.  The soft
+# penalty is kept: it still shapes the interior of the feasible region.
 HESTON_PRESETS: Dict[str, Dict[str, Any]] = {
     "mo_frozen": {
         "bounds": (
@@ -80,7 +90,7 @@ HESTON_PRESETS: Dict[str, Dict[str, Any]] = {
         "solver_tolerances": {"xtol": 1e-6, "ftol": 1e-6, "gtol": 1e-6},
         "target": "iv",
         "method": "lewis",
-        "enforce_feller": False,
+        "enforce_feller": True,
     }
 }
 
@@ -319,6 +329,14 @@ class VolModelCalibrator:
             "data_cost": float(result.data_cost),
             "feller_penalty_cost": float(result.feller_penalty_cost),
             "feller_margin": float(result.feller_margin),
+            # Scale-free companion to feller_margin.  The margin is a
+            # difference, so it cannot be compared across dates: 1e-3 is
+            # comfortable at sigma=0.03 and vanishing at sigma=0.6.  Gate
+            # verdicts are conditioned on this ratio (re-baseline spec 7A.4),
+            # and constrained fits land on 1.0 rather than inside it.
+            "feller_ratio": float(
+                safe_divide(2.0 * params.kappa * params.theta, params.sigma**2)
+            ),
             "feller_satisfied": bool(params.feller_satisfied()),
             "nfev": int(result.nfev),
             "optimizer": str(result.optimizer),

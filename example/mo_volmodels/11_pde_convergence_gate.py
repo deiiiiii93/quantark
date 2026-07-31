@@ -118,7 +118,16 @@ SPOT_BUMP = 0.01  # delta bump (matches BumpConfig default)
 
 SEED = 20260723
 # Reference RQMC: 16 batches x 8192 paths = 131072 >= 100k, batch-spread SE.
-MC_FULL = {"paths_per_batch": 8192, "batches": 16, "substeps_per_interval": 1}
+#
+# The reference runs QE-M (martingale-corrected QE, MC_MARTINGALE below) with
+# 4 substeps per observation interval.  Plain QE on the raw observation grid
+# carries a measured 0.078% of notional discretization bias against the same
+# engine at 8 substeps -- small next to the 0.25% tolerance floor, but a
+# reference should not spend any of the budget it is meant to measure against,
+# and both corrections are cheap.  QUICK stays at 1 substep: it is a plumbing
+# smoke whose route decision is already marked non-production-valid.
+MC_MARTINGALE = True
+MC_FULL = {"paths_per_batch": 8192, "batches": 16, "substeps_per_interval": 4}
 MC_QUICK = {"paths_per_batch": 512, "batches": 4, "substeps_per_interval": 1}
 
 # PDE ladder (n_x, n_v, n_t).  Coarse mirrors the stage-08 grid (90/36/96 at
@@ -464,6 +473,7 @@ def _make_mc_engine(variant: str, model, mcp: MCParams, substeps: int):
             params=mcp,
             method=MonteCarloMethod.RANDOMIZED_QUASI,
             substeps_per_interval=substeps,
+            martingale_correction=MC_MARTINGALE,
         )
     return HestonSLVQESnowballMCEngine(
         model.heston_params,
@@ -473,6 +483,7 @@ def _make_mc_engine(variant: str, model, mcp: MCParams, substeps: int):
         eta=float(model.slv_eta if model.slv_eta is not None else 1.0),
         local_vol_surface=model.local_vol_surface,
         substeps_per_interval=substeps,
+        martingale_correction=MC_MARTINGALE,
     )
 
 
@@ -1339,6 +1350,8 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
                 "rqmc_max_batches": cfg["mc"]["batches"],
                 "rqmc_target_std": 1e-12,
                 "substeps_per_interval": cfg["mc"]["substeps_per_interval"],
+                "scheme": "QUADEXP_M" if MC_MARTINGALE else "QUADEXP",
+                "martingale_correction": MC_MARTINGALE,
                 "note": "REFERENCE-quality config used for the gate: RQMC pinned "
                 "(rqmc_min_batches == rqmc_max_batches, rqmc_target_std ~ 0) so "
                 "every batch runs and the batch-spread SE is honest. The "
@@ -1372,7 +1385,8 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
         },
         "mc_reference": {
             "method": "randomized_quasi",
-            "scheme": "QUADEXP",
+            "scheme": "QUADEXP_M" if MC_MARTINGALE else "QUADEXP",
+            "martingale_correction": MC_MARTINGALE,
             "seed": cfg["seed"],
             "paths_per_batch": cfg["mc"]["paths_per_batch"],
             "batches": cfg["mc"]["batches"],

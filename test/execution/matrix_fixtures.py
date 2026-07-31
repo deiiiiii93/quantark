@@ -729,7 +729,18 @@ def _build_equity_pde():
             # 2026-07-23), so pin ers=0 here — _pdep's ers=1 is the 1D legacy.
             # Vanilla/barrier Heston engines have no discrete events (and
             # take engine_params, not params).
-            acgrid = dict(grid, params=_pdep(event_rannacher_steps=0))
+            #
+            # v0_boundary is pinned for the same reason: the snowball/phoenix
+            # 2D solvers moved their default to "degenerate_pde" on 2026-07-31
+            # (Feller-boundary evidence, re-baseline spec 7A.6), and these
+            # goldens were frozen under the ADI core's "neumann". A deliberate
+            # default change is not the seam refactor this oracle exists to
+            # police, so pin the frozen value rather than re-baseline it.
+            acgrid = dict(
+                grid,
+                params=_pdep(event_rannacher_steps=0),
+                v0_boundary="neumann",
+            )
             table = {
                 "HestonPDESolver": lambda: (HestonPDESolver(_hp(), **grid), _euro(), _eq_flat_env()),
                 "HestonSLVPDESolver": lambda: (HestonSLVPDESolver(_hp(), _unit_leverage(), eta=1.0, **grid), _euro(), _eq_grid_env()),

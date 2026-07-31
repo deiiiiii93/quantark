@@ -450,6 +450,7 @@ class Heston2DAutocallableSessionAdapter(_EquityPDESessionBase):
             grid_style=engine.grid_style,
             grid_focus=engine.grid_focus,
             pin_critical_spots=engine.pin_critical_spots,
+            v0_boundary=engine.v0_boundary,
         )
         if hasattr(engine, "leverage_surface"):
             kwargs.update(

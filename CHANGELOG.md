@@ -44,6 +44,40 @@ Backtest replay consolidation
   `_atomic_write_json` -> `quantark.util.io.atomic_write_json`.
 - Replay books with `vol_model != "bsm"` reject non-Snowball products at
   config construction (the vol-model engine factory is snowball-only).
+- **Heston/Heston-SLV Snowball and Phoenix 2D PDE solvers default
+  `v0_boundary="degenerate_pde"`** (was the ADI core's `"neumann"`), and accept
+  it as a constructor argument. Smile-calibrated Heston sits near the Feller
+  boundary, where the Neumann treatment of the `v = 0` edge mis-prices by
+  −0.540% of notional against a QE-M MC reference while the degenerate
+  treatment holds +0.156%. `"neumann"` remains selectable for cross-checks.
+  **Prices change** for these four solvers at default settings.
+- **The `mo_frozen` Heston preset enforces the Feller condition**
+  (`enforce_feller=True`; the soft `regularize_feller` penalty is retained).
+  Deliberate divergence from the `mo_volmodels` diagnostics scripts, which keep
+  the soft-only policy. Feasibility is bought with smile accuracy — measured
+  across 762 CFFEX MO settlement surfaces: median 8.4 bp, p90 29.3 bp, max
+  217 bp of IV. On 6.6% of dates the constraint is met by driving vol-of-vol to
+  its lower bound, which degenerates Heston to deterministic variance; consumers
+  should screen on the new `feller_ratio`. Heston and Heston-SLV calibration
+  cache entries are invalidated automatically (the fingerprint embeds the
+  preset); `localvol` entries are unaffected.
+
+### Fixed
+- `calibrate_heston(enforce_feller=True)` failed closed on any problem where the
+  constraint was active at the optimum and `ftol` was loose. SLSQP satisfies
+  constraints only to about its own accuracy tolerance, but the feasibility
+  buffer was a constant `1e-8` — measured slack is ~1e-9 at `ftol=1e-8` but
+  ~1.6e-7 at `ftol=1e-6`, so the strict post-check rejected every fit. The
+  buffer now scales as `max(1e-8, 10 * ftol)`; the post-check is unchanged and
+  still fails closed.
+- `VolModelCalibrator` Heston records carry `feller_ratio` (`2*kappa*theta /
+  sigma**2`) alongside `feller_margin`. The margin is a difference and so is not
+  comparable across dates; the ratio is.
+- `Heston2DAutocallableSessionAdapter._clone_engine` rebuilds the engine from an
+  explicit kwargs list and dropped `v0_boundary`, so a session or prepared-adapter
+  run silently priced with the default boundary while the direct call honoured the
+  constructor. Any 2D autocallable constructor argument omitted from that list
+  fails this way — silently, with no error.
 
 ## [0.4.0] - 2026-07-27
 
