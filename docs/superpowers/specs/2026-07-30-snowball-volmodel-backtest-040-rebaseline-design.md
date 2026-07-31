@@ -480,6 +480,18 @@ relying on the boundary alone.
    at `2κθ/σ² ≈ 1.0`, which is exactly where `neumann` fails (−0.540% of
    notional). The two fixes are complementary: (1) removes the deep-violation
    regime, (2) is required for the marginal regime that (1) produces.
+
+   **The default is unconditional, and deliberately so** (owner, 2026-07-31).
+   It lives on the *solver*, not on the calibration, so it does not depend on
+   (1) being in force. Feller violation is the normal state of this data —
+   **86% of unconstrained fits violate it** (§7A.10) — and the same is likely on
+   any equity index cohort with a steep short-dated smile. A solver whose
+   correctness is contingent on an upstream calibration flag is one preset
+   change, one hand-supplied `HestonParams`, or one new data cohort away from
+   silently mis-pricing. `degenerate_pde` costs nothing when Feller holds
+   (§7A.6: +0.037% vs +0.034% at ratio 6.617) and is the difference between
+   −0.540% and +0.156% when it does not. There is no regime in which `neumann`
+   is the better default, so it is retained only as an explicit cross-check.
 3. **G2 records `2κθ/σ²` and bound-hit flags per date**, and evaluates its verdict
    **conditioned on the Feller ratio** rather than pooling regimes. §7A.3 shows a
    uniform verdict would average a 0.03% regime with a 2.5% one.
@@ -646,9 +658,45 @@ validates the iteration budget the constrained solver needs.
 | surfaces converging, both policies | **762 / 762** — no date fails closed |
 | soft-policy fits violating Feller | **658 / 762 (86%)** |
 | hard fits landing in `2κθ/σ² ∈ [0.999, 1.001]` | **611 / 762 (80%)** |
-| IV-fit RMSE degradation | median **8.4 bp**, p90 **29.3 bp**, p99 **73.8 bp**, max **217 bp** |
+| fit-RMSE degradation **vs the SABR-smoothed target** | median **8.4 bp**, p90 **29.3 bp**, p99 **73.8 bp**, max **217 bp** |
 | hard-path `nfev` | median 94, p99 196, max **344** |
 | one-off cohort calibration cost | 37 min single-core, then cached |
+
+**What that RMSE is measured against.** Heston is *not* calibrated to raw CFFEX
+quotes. `_heston_nodes` consumes `artifact.per_expiry[*].points`, which are
+already SABR-smoothed — uniformly `method="sabr_calendar_projected"`, `beta=1.0`,
+per-expiry `alpha/rho/nu`, with a calendar-slope projection. Two error layers
+stack, and only the second is what the table above reports:
+
+```
+raw CFFEX quotes ──SABR──► smoothed target ──Heston──► model
+                  median 41.4 bp            median 8.4 bp degradation
+                  p90 79.4, max 236.8       p90 29.3, max 217
+```
+
+Consequences worth stating in the report rather than leaving implicit:
+
+- The Feller constraint's *median* fit cost is roughly **one fifth** of the
+  smoothing residual that every variant already carries. On typical dates it is
+  a minor perturbation of an already-approximated target. In the tail the two
+  are comparable (217 bp vs 237 bp), which is where it stops being minor.
+- This is nonetheless the correct target for the study: G1 admits surfaces
+  *after* SABR smoothing, so the smoothed surface **is** this study's market, and
+  all six variants price against the same one. The figures are fit-to-target, not
+  fit-to-market, and must be labelled that way.
+- Zero of the 762 surfaces required calendar-arbitrage adjustment
+  (`calendar_adjusted_nodes == 0` throughout), so the smoothing is a per-slice
+  SABR fit in practice, not a reshaping of the term structure.
+- No SVI anywhere in this pipeline. The SVI layer in the codebase belongs to the
+  DCN work.
+
+**Weak evidence on the mechanism.** SABR's `nu` is the vol-of-vol analogue, and
+Heston carries a single global `σ` against a term structure of it, so high
+short-dated `nu` is the shape that should push `σ` into Feller violation. The
+data agrees only directionally: `corr(log nu_max, log unconstrained ratio) =
+−0.311` (n=762), median `nu_max` 2.17 on violated dates against 1.64 on
+satisfied ones. Right sign, ~10% of the variance. Recorded as a hypothesis with
+its strength stated, not a finding.
 
 Three things follow, two of them new.
 
