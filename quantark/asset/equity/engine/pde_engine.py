@@ -9,6 +9,7 @@ the product type.
 from typing import Dict, Optional, Type, Union, Sequence
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
+from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option import (
@@ -235,6 +236,39 @@ class PDEEngine(BaseEngine):
         clone = type(self)(params=self.params, method=self.method)
         clone._solver_cache[type(product)] = fixed_solver
         return clone
+
+    def calculate_event_stats(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Optional[AutocallableEventStats]:
+        """
+        Forward to the product's solver, which owns the computation.
+
+        The base class returns None for "unsupported"; that default silently
+        discarded working solver results (SnowballPDESolver et al. implement
+        exact PDE event statistics), and the replay layer's fail-closed
+        event-stats policy turned the discard into a hard failure. A product
+        type outside PRODUCT_SOLVER_MAP still raises ValidationError from
+        _get_solver (same as price()) rather than being swallowed into None:
+        that failure means "PDEEngine cannot handle this product at all",
+        which is a different condition from a supported product whose solver
+        has no event-stats implementation.
+
+        Args:
+            product: The derivative product
+            pricing_env: Pricing environment with market data
+
+        Returns:
+            Event stats, or None if the dispatched solver does not support
+            them for this product.
+
+        Raises:
+            ValidationError: If product is None or unsupported type
+        """
+        if product is None:
+            raise ValidationError("Product cannot be None")
+
+        solver = self._get_solver(product)
+        return solver.calculate_event_stats(product, pricing_env)
 
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
