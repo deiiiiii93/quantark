@@ -155,3 +155,83 @@ def test_seed_dry_run_writes_nothing(tmp_path):
     summary = mod.seed(src, dst, dry_run=True)
     assert summary["n_copied"] == 1
     assert not any(dst.iterdir())
+
+
+def _load_stage12_for_cohort():
+    path = PROJECT_ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py"
+    spec = importlib.util.spec_from_file_location("s12_cohort", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["s12_cohort"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_data_end_pin_governs_the_inception_count():
+    """The pin must reach schedule_inceptions, not only the task windows.
+
+    prepare_inceptions used to re-derive data_end from the spot CSV, so a pin
+    that only touched run_fleet left the fleet size floating -- invisible while
+    the pin and the cache end coincide, and wrong the next weekday.
+    """
+    import pandas as pd
+    s12 = _load_stage12_for_cohort()
+    history_dir = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    spot = pd.read_csv(history_dir / "csi1000_spot.csv")
+    calendar = s12.stage11().TradingCalendar.from_spot_csv(
+        history_dir / "csi1000_spot.csv"
+    )
+    kwargs = dict(
+        calendar=calendar,
+        data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
+        first_admitted_surface=date(2023, 5, 4),
+    )
+    assert len(s12.schedule_inceptions(data_end=date(2026, 7, 31), **kwargs)) == 27
+    assert len(s12.schedule_inceptions(data_end=date(2026, 6, 30), **kwargs)) == 26
+
+
+def test_prepare_inceptions_forwards_the_data_end_pin(monkeypatch):
+    """prepare_inceptions must schedule against the pinned data_end, not the
+    spot cache's last row -- this is the exact wiring the pin exists for.
+
+    Pins to 2024-06-01, which admits only the first two monthly inceptions
+    (2023-05-04, 2023-06-01) under the 12-month observable-horizon default --
+    a value the un-pinned default (2026-07-31, 27 inceptions) could never
+    produce by accident, so a pass here is real evidence of forwarding.
+
+    ``solve_fair_coupon`` is stubbed out: each real solve is ~3 full PDE
+    prices (~14s each, per its own docstring), which would make this
+    regression test take a minute-plus for a fact that has nothing to do
+    with coupon solving. Everything upstream of the solve -- scheduling,
+    surface lookup, pricing-env construction -- still runs for real; only
+    the root-find over the coupon is replaced with a fixed answer.
+    """
+    s12 = _load_stage12_for_cohort()
+    history_dir = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    history = s12.surface_history(history_dir)
+    spot = s12.load_spot_frame(history_dir)
+    futures = s12.load_futures_frame(history_dir)
+    calendar = s12.stage11().TradingCalendar.from_spot_csv(
+        history_dir / "csi1000_spot.csv"
+    )
+    rate = s12.stage11().FLAT_RATE
+    pinned_end = date(2024, 6, 1)
+
+    def _stub_solve_fair_coupon(**kwargs):
+        return s12.CouponSolution(
+            coupon=0.2, pv=0.0, iterations=1,
+            bracket_low=0.0, bracket_high=0.4, pv_tolerance=1.0, solved=True,
+        )
+
+    monkeypatch.setattr(s12, "solve_fair_coupon", _stub_solve_fair_coupon)
+
+    prepared = s12.prepare_inceptions(
+        history=history,
+        spot=spot,
+        futures=futures,
+        calendar=calendar,
+        rate=rate,
+        notional=1.0,
+        min_observable_months=12,
+        data_end=pinned_end,
+    )
+    assert [p["inception"] for p in prepared] == ["2023-05-04", "2023-06-01"]

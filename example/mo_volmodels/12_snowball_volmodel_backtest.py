@@ -973,12 +973,20 @@ def prepare_inceptions(
     rate: float,
     notional: float,
     min_observable_months: int,
+    data_end: Optional[date] = None,
     limit: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """Schedule inceptions and solve each one's fair coupon (Gate G4)."""
+    """Schedule inceptions and solve each one's fair coupon (Gate G4).
+
+    ``data_end`` defaults to the spot cache's last row, matching the
+    pre-pin behaviour.  Callers that pin the replay window (``run_fleet``'s
+    ``--data-end``) must pass the pinned value here too, or the fleet size
+    keeps floating with the spot cache even though task windows are pinned.
+    """
     s11 = stage11()
     data_start = pd.Timestamp(spot["date"].iloc[0]).date()
-    data_end = pd.Timestamp(spot["date"].iloc[-1]).date()
+    if data_end is None:
+        data_end = pd.Timestamp(spot["date"].iloc[-1]).date()
     admitted = history.admitted_dates
 
     inceptions = schedule_inceptions(
@@ -1325,6 +1333,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         rate=rate,
         notional=float(args.notional),
         min_observable_months=int(args.min_observable_months),
+        data_end=data_end,
         limit=limit,
     )
     print(
