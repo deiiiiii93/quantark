@@ -26,6 +26,8 @@
 - Surface admission verdicts live in `surface_manifest.json`, **not** in the artifacts. An artifact's `admission` block records the criteria used (`min_expiries: 2`, `sabr_beta`, …) and carries no per-surface verdict. Never infer admission from an artifact.
 - Commit after every task. Branch: `fix/snowball-rebaseline-7a4-engine-fixes` (or a descendant).
 - This branch's working tree carries an unrelated workstream's **uncommitted** changes (`quantark/backtest/replay/config.py`, `quantark/volmodels/calibration.py`, `quantark/volmodels/heston/calibration.py`, stages 14/15). Stage them deliberately or leave them alone — never `git add -A`.
+- `docs/` is in `.gitignore` but tracked on `main`. Committing a docs file needs `git add -f`; a plain `git add` fails with "paths are ignored".
+- **Do not work in a git worktree for this plan.** It depends on untracked data that exists only in this checkout: `example/mo_volmodels/data/history/` (766 surfaces, 768 artifacts) and `output/mo_daily_calibration/calibration_cache/` (720 entries). A fresh worktree has none of it, and Task 0's real-history test fails immediately.
 
 ---
 
@@ -864,7 +866,7 @@ Add a short table to §2 of the spec: inception, `s0`, solved coupon, `|PV|`. St
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-07-30-snowball-volmodel-backtest-040-rebaseline-design.md
+git add -f docs/superpowers/specs/2026-07-30-snowball-volmodel-backtest-040-rebaseline-design.md
 git commit -m "docs(mo): record the G4 fair-coupon re-solve on 0.4.0"
 ```
 
@@ -874,6 +876,7 @@ git commit -m "docs(mo): record the G4 fair-coupon re-solve on 0.4.0"
 
 **Files:**
 - Modify: `example/mo_volmodels/12_snowball_volmodel_backtest.py:135-141` (`VARIANTS`), `:144-153` (`VariantSpec`), `:158-194` (`VARIANT_SPECS`), `:669-705` (`make_engine_config`)
+- Create: `test/mo_volmodels/test_gate_scope.py` — **this task creates the file**, including the module-loader helpers Tasks 4–7 then reuse.
 
 **Interfaces:**
 - Produces: `"flat_bsm_quad"` in `VARIANTS`; a new `VariantSpec.pricing_engine_type: EngineType = EngineType.PDE` field; and `VARIANT_SPECS["flat_bsm_quad"]` identical to `flat_bsm` except `pricing_engine_type=EngineType.QUADRATURE`.
@@ -887,8 +890,34 @@ git commit -m "docs(mo): record the G4 fair-coupon re-solve on 0.4.0"
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# append to test/mo_volmodels/test_gate_scope.py
+# test/mo_volmodels/test_gate_scope.py  (NEW FILE — Tasks 4-7 append to it)
+import importlib.util
+import sys
+from pathlib import Path
+
+import pytest
+
 from quantark.util.enum.engine_enums import EngineType
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+def _load(stem):
+    """Import a numbered stage script (the stages are not a package)."""
+    path = REPO / "example" / "mo_volmodels" / f"{stem}.py"
+    spec = importlib.util.spec_from_file_location(stem.split("_")[0], path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod        # @dataclass resolves cls.__module__ here
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_gate():
+    return _load("11_pde_convergence_gate")
+
+
+def _load_stage12():
+    return _load("12_snowball_volmodel_backtest")
 
 
 def test_flat_bsm_quad_differs_from_flat_bsm_in_engine_only():
@@ -1009,32 +1038,8 @@ The §5.1 table this encodes:
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# test/mo_volmodels/test_gate_scope.py
-import importlib.util
-import sys
-from pathlib import Path
-
-import pytest
-
-REPO = Path(__file__).resolve().parents[2]
-
-
-def _load(stem):
-    path = REPO / "example" / "mo_volmodels" / f"{stem}.py"
-    spec = importlib.util.spec_from_file_location(stem.split("_")[0], path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _load_gate():
-    return _load("11_pde_convergence_gate")
-
-
-def _load_stage12():
-    return _load("12_snowball_volmodel_backtest")
-
+# append to test/mo_volmodels/test_gate_scope.py
+# (_load / _load_gate / _load_stage12 already exist — Task 3 created them)
 
 EXPECTED = {
     "flat_bsm", "flat_bsm_quad", "ts_bsm", "localvol", "heston", "heston_slv",
@@ -1802,7 +1807,7 @@ Expected: `current`. A `source_pending` is fine (CFFEX has not published yet) �
 - [ ] **Step 8: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-07-30-snowball-volmodel-backtest-040-rebaseline-design.md
+git add -f docs/superpowers/specs/2026-07-30-snowball-volmodel-backtest-040-rebaseline-design.md
 git commit -m "docs(mo): record the re-scoped G2 outcome and per-regime evidence"
 ```
 
