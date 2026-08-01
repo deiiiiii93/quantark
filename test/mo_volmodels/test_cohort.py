@@ -99,3 +99,59 @@ def test_real_history_matches_the_pinned_counts():
     assert admitted[-1] == date(2026, 7, 31)
     assert date(2024, 9, 30) not in admitted
     assert date(2025, 4, 8) not in admitted
+
+
+import importlib.util as _ilu
+
+SEED_MODULE = PROJECT_ROOT / "example/mo_volmodels/seed_calibration_cache.py"
+
+
+def _load_seed():
+    spec = _ilu.spec_from_file_location("mo_seed", SEED_MODULE)
+    module = _ilu.module_from_spec(spec)
+    sys.modules["mo_seed"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _entry(path: Path, variant: str, key: str, fingerprint: str) -> None:
+    (path / f"{variant}-{key}.json").write_text(
+        json.dumps({"variant": variant, "config_fingerprint": fingerprint,
+                    "surface_date": "2026-07-31", "schema_version": 1})
+    )
+
+
+def test_seed_copies_entries_and_reports_by_variant(tmp_path):
+    mod = _load_seed()
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir(); dst.mkdir()
+    _entry(src, "heston", "aaa", "fp1")
+    _entry(src, "localvol", "bbb", "fp2")
+    summary = mod.seed(src, dst)
+    assert summary["n_source"] == 2
+    assert summary["n_copied"] == 2
+    assert summary["by_variant"] == {"heston": 1, "localvol": 1}
+    assert sorted(summary["fingerprints"]) == ["fp1", "fp2"]
+    assert (dst / "heston-aaa.json").is_file()
+
+
+def test_seed_never_overwrites_an_existing_entry(tmp_path):
+    mod = _load_seed()
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir(); dst.mkdir()
+    _entry(src, "heston", "aaa", "fp1")
+    (dst / "heston-aaa.json").write_text('{"mine": true}')
+    summary = mod.seed(src, dst)
+    assert summary["n_copied"] == 0
+    assert summary["n_skipped_existing"] == 1
+    assert json.loads((dst / "heston-aaa.json").read_text()) == {"mine": True}
+
+
+def test_seed_dry_run_writes_nothing(tmp_path):
+    mod = _load_seed()
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir(); dst.mkdir()
+    _entry(src, "heston", "aaa", "fp1")
+    summary = mod.seed(src, dst, dry_run=True)
+    assert summary["n_copied"] == 1
+    assert not any(dst.iterdir())
