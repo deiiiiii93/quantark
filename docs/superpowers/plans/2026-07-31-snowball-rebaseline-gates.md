@@ -341,13 +341,83 @@ and replace the derivation in `run_fleet`:
 
 Fail closed on a pin beyond the data: silently truncating to the cache would make a typo look like a successful pinned run.
 
+**`run_fleet` is not the only derivation.** `prepare_inceptions` (`:981`) independently recomputes `data_end = pd.Timestamp(spot["date"].iloc[-1]).date()` and hands *that* to `schedule_inceptions`. `run_fleet`'s pinned value only reaches `build_tasks`, which uses it for per-trade window censoring. Patching `run_fleet` alone therefore pins the *windows* and leaves the *fleet size* floating — exactly the failure this task exists to prevent, and invisible today because the pin and the cache end on the same date. Thread the pin through:
+
+```python
+def prepare_inceptions(
+    *,
+    history: VolSurfaceHistory,
+    spot: pd.DataFrame,
+    futures: pd.DataFrame,
+    calendar,
+    rate: float,
+    notional: float,
+    min_observable_months: int,
+    data_end: Optional[date] = None,
+    limit: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+```
+
+and inside it:
+
+```python
+    data_start = pd.Timestamp(spot["date"].iloc[0]).date()
+    if data_end is None:
+        data_end = pd.Timestamp(spot["date"].iloc[-1]).date()
+```
+
+then pass `data_end=data_end` at the `run_fleet` call site (`:1319`), below the pin resolution so it receives the pinned value.
+
+Keeping the parameter optional preserves every other caller's behaviour; only the CLI path pins it.
+
 - [ ] **Step 7: Verify the flag pins the fleet**
+
+Two things to prove: that an over-reaching pin fails closed, and that the pin actually governs the inception count.
 
 ```bash
 .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py \
   --gate-g3 --data-end 2026-08-15 2>&1 | tail -3
 ```
 Expected: a `ValidationError` naming the spot-cache end — the pin refuses to invent data.
+
+Then prove the pin reaches `schedule_inceptions`, by pinning to a date that *changes* the answer. `MIN_OBSERVABLE_MONTHS = 12`, so `--data-end 2026-06-30` must drop the 2025-07-01 inception and yield 26:
+
+```python
+# append to test/mo_volmodels/test_cohort.py
+def test_data_end_pin_governs_the_inception_count():
+    """The pin must reach schedule_inceptions, not only the task windows.
+
+    prepare_inceptions used to re-derive data_end from the spot CSV, so a pin
+    that only touched run_fleet left the fleet size floating -- invisible while
+    the pin and the cache end coincide, and wrong the next weekday.
+    """
+    import pandas as pd
+    s12 = _load_stage12_for_cohort()
+    history_dir = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    spot = pd.read_csv(history_dir / "csi1000_spot.csv")
+    calendar = s12.stage11().TradingCalendar.from_spot_csv(
+        history_dir / "csi1000_spot.csv"
+    )
+    kwargs = dict(
+        calendar=calendar,
+        data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
+        first_admitted_surface=date(2023, 5, 4),
+    )
+    assert len(s12.schedule_inceptions(data_end=date(2026, 7, 31), **kwargs)) == 27
+    assert len(s12.schedule_inceptions(data_end=date(2026, 6, 30), **kwargs)) == 26
+```
+
+Add the loader alongside the others in that file:
+
+```python
+def _load_stage12_for_cohort():
+    path = PROJECT_ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py"
+    spec = importlib.util.spec_from_file_location("s12_cohort", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["s12_cohort"] = module
+    spec.loader.exec_module(module)
+    return module
+```
 
 - [ ] **Step 8: Commit**
 
