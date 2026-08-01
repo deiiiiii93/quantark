@@ -1258,6 +1258,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--min-observable-months", type=int, default=MIN_OBSERVABLE_MONTHS
     )
+    parser.add_argument(
+        "--data-end",
+        default=None,
+        help=(
+            "ISO date pinning the replay window end (default: last spot row). "
+            "The daily calibration pipeline extends the spot cache every "
+            "weekday, and data_end crossing 2026-08-01 admits a 28th "
+            "inception, so the gates pin this explicitly."
+        ),
+    )
     parser.add_argument("--notional", type=float, default=NOTIONAL)
     parser.add_argument(
         "--no-costs", action="store_true", help="run with ZeroCostModel"
@@ -1298,6 +1308,13 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         history_dir / "csi1000_spot.csv"
     )
     data_end = pd.Timestamp(spot["date"].iloc[-1]).date()
+    if args.data_end:
+        pinned = date.fromisoformat(str(args.data_end))
+        if pinned > data_end:
+            raise ValidationError(
+                f"--data-end {pinned} is beyond the spot cache ({data_end})"
+            )
+        data_end = pinned
 
     limit = 1 if args.gate_g3 else args.max_inceptions
     prepared = prepare_inceptions(
