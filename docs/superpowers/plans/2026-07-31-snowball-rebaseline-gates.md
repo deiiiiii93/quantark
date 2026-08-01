@@ -4,7 +4,9 @@
 
 **Goal:** Re-run the snowball vol-model study's admission gates on the 0.4.0 engines with the §7A.4 fixes in place, and re-scope Gate G2 from a 2-variant PDE-vs-MC convergence check into a 6-variant engine-admission gate that tests delta as well as PV.
 
-**Architecture:** Three phases against the existing `example/mo_volmodels/` stage scripts. Phase A (Tasks 1–2) re-establishes the study's inputs — surface admission is *verified* over the existing artifacts (never rebuilt), and the fair coupon is re-solved because 0.4.0 repriced the 1D PDE. Phase B (Tasks 3–7) rewrites Gate G2's scope inside `11_pde_convergence_gate.py`: a production-vs-reference pair table replacing the hard-coded 2-variant assumption, maturity-bucketed bias detection, delta admission expressed in IM contracts, and Feller-regime conditioning. Phase C (Task 8) runs the gate and emits a fresh `gate_decision.json` that stage 12 consumes.
+**Architecture:** Four phases against the existing `example/mo_volmodels/` stage scripts. Phase 0 (Tasks 0, 0B) freezes the inputs — a live daily scheduler now extends the surface history, so the cohort is pinned at `COHORT_ASOF` before anything measures against it, and the pipeline's 720 already-computed calibrations are seeded into the fleet cache. Phase A (Tasks 1–2) re-establishes the study's inputs — surface admission is *verified* against the pinned cohort (never rebuilt), and the fair coupon is re-solved because 0.4.0 repriced the 1D PDE. Phase B (Tasks 3–7) rewrites Gate G2's scope inside `11_pde_convergence_gate.py`: a production-vs-reference pair table replacing the hard-coded 2-variant assumption, maturity-bucketed bias detection, delta admission expressed in IM contracts, and Feller-regime conditioning. Phase C (Task 8) runs the gate and emits a fresh `gate_decision.json` that stage 12 consumes.
+
+**Amended 2026-08-01** for a concurrently-landed daily calibration pipeline (spec §7A.12). Three changes carry real risk if skipped: the cohort pin (Task 0), the corrected G1 admission source (Task 1 — the original draft read a verdict key that does not exist in the artifacts), and the `--data-end` pin on G4 (Task 2).
 
 **Tech Stack:** Python 3.11, numpy, pytest (`-n auto` by default; use `-n0` for serial debugging), `quantark.*` canonical imports, the project venv at `.venv/`.
 
@@ -18,8 +20,12 @@
 - Gate tolerance floor: `TOL_ABS_PCT = 0.25` (% of notional); per-cell tolerance is `max(2 * mc_se_pct, 0.25)`.
 - Study term sheet: `NOTIONAL = 50_000_000.0`, `FUTURES_MULTIPLIER = 200.0`, 3Y maturity, `KO_PCT = 1.03`, `KI_PCT = 0.75`, 3-month lockout.
 - The gate prices a **1-unit** product (`contract_multiplier = 1.0`, `notional = s0`). The backtest prices `contract_multiplier = NOTIONAL / s0`. Any tolerance derived from hedge instrument size must convert between the two — see Task 6.
-- Do **not** regenerate `example/mo_volmodels/data/history/`. The Phase-1 builder still uses `min_expiries: 2`, so a rebuild would re-admit the two thin surfaces (2024-09-30, 2025-04-08) that `exclude_thin_surfaces.py` removed.
+- **`COHORT_ASOF = "20260731"`.** A live launchd job (`com.quantark.mo-daily-calibration`, 18:30 + 20:30 Asia/Shanghai, Mon–Fri) extends the surface history every weekday. Every gate filters to `date <= COHORT_ASOF` and passes `data_end = COHORT_ASOF` explicitly — never "the last row of the spot CSV". Task 0 makes this concrete; §7A.12 explains why.
+- The **inception fleet is 27 only while `data_end < 2026-08-01`.** `schedule_inceptions` admits a monthly start when `inception + 12 months <= data_end`; 2025-08-01 needs `data_end >= 2026-08-01`. Measured: 27 at both 2026-07-24 and 2026-07-31, **28 at 2026-08-03**. Any task that hardcodes 27 must instead assert against `len(schedule_inceptions(..., data_end=COHORT_ASOF))`.
+- Do **not** regenerate `example/mo_volmodels/data/history/` as part of this plan — not because a rebuild is unrecoverable (the builder now preserves top-level `study_admission`, derives the manifest window from all records, and `exclude_thin_surfaces.py` is idempotent), but because it would move the pinned cohort mid-flight. If a rebuild ever happens, re-run `exclude_thin_surfaces.py` to restore the per-record exclusions, which the builder *does* overwrite.
+- Surface admission verdicts live in `surface_manifest.json`, **not** in the artifacts. An artifact's `admission` block records the criteria used (`min_expiries: 2`, `sabr_beta`, …) and carries no per-surface verdict. Never infer admission from an artifact.
 - Commit after every task. Branch: `fix/snowball-rebaseline-7a4-engine-fixes` (or a descendant).
+- This branch's working tree carries an unrelated workstream's **uncommitted** changes (`quantark/backtest/replay/config.py`, `quantark/volmodels/calibration.py`, `quantark/volmodels/heston/calibration.py`, stages 14/15). Stage them deliberately or leave them alone — never `git add -A`.
 
 ---
 
@@ -27,13 +33,510 @@
 
 | File | Responsibility | Change |
 |---|---|---|
-| `example/mo_volmodels/13_gate_g1_surface_admission.py` | G1: verify every artifact carries a passing admission record | **create** |
+| `example/mo_volmodels/cohort.py` | The frozen cohort: `COHORT_ASOF` + manifest-driven admitted-date list | **create** |
+| `test/mo_volmodels/test_cohort.py` | Cohort pin unit tests | **create** |
+| `example/mo_volmodels/seed_calibration_cache.py` | Copy the daily pipeline's reusable cache entries into a fleet cache dir | **create** |
+| `example/mo_volmodels/13_gate_g1_surface_admission.py` | G1: verify the manifest's admitted set against the artifacts on disk | **create** |
 | `example/mo_volmodels/12_snowball_volmodel_backtest.py` | G4 coupon solve; adds `flat_bsm_quad` variant; consumes 6-variant routing | modify |
 | `example/mo_volmodels/11_pde_convergence_gate.py` | G2: variant pair table, bucketed bias, delta admission, Feller conditioning | modify |
 | `test/mo_volmodels/test_gate_g1_admission.py` | G1 verifier unit tests | **create** |
 | `test/mo_volmodels/test_gate_scope.py` | G2 re-scope unit tests (pure functions only) | **create** |
 
 `11_pde_convergence_gate.py` is already ~1600 lines. Do not restructure it wholesale — this plan adds pure functions near their existing neighbours and rewires `process_date`. If a task's diff exceeds ~150 lines in that file, stop and flag it rather than improvising a split.
+
+---
+
+## Task 0: Freeze the cohort
+
+**Files:**
+- Create: `example/mo_volmodels/cohort.py`
+- Create: `test/mo_volmodels/test_cohort.py`
+- Modify: `example/mo_volmodels/12_snowball_volmodel_backtest.py` (add `--data-end`; `:1243` argparse block, `:1300` derivation)
+
+**Interfaces:**
+- Consumes: `example/mo_volmodels/data/history/surface_manifest.json` (read-only)
+- Produces: `COHORT_ASOF: date`; `admitted_dates(history_dir: Path | None = None) -> list[date]`; `excluded_records(history_dir: Path | None = None) -> list[dict]` — each `{date, reason, n_expiries}`, sorted by date.
+
+**Why this exists:** the history is under a live scheduler (Global Constraints). Without a pin, G1 counts a different number of surfaces on Monday than on Friday, and — the sharp edge — `data_end` crossing 2026-08-01 admits a 28th inception, which would silently re-open G4 and shift §8's concentration statistics. Everything downstream reads its date list from here.
+
+`cohort.py` deliberately imports nothing from the numbered stages, so stages 11, 12 and 13 can all import it without a cycle.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# test/mo_volmodels/test_cohort.py
+import importlib.util
+import json
+import sys
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+MODULE = PROJECT_ROOT / "example/mo_volmodels/cohort.py"
+
+
+def _load():
+    spec = importlib.util.spec_from_file_location("mo_cohort", MODULE)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["mo_cohort"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_manifest(tmp_path: Path, records, study_admission=None) -> Path:
+    history = tmp_path / "history"
+    history.mkdir()
+    payload = {"records": records}
+    if study_admission is not None:
+        payload["study_admission"] = study_admission
+    (history / "surface_manifest.json").write_text(json.dumps(payload))
+    return history
+
+
+def test_asof_is_the_frozen_pin():
+    assert _load().COHORT_ASOF == date(2026, 7, 31)
+
+
+def test_admitted_dates_drop_records_after_the_asof(tmp_path):
+    mod = _load()
+    history = _write_manifest(
+        tmp_path,
+        [
+            {"date": "20260730", "status": "ok"},
+            {"date": "20260731", "status": "ok"},
+            {"date": "20260803", "status": "ok"},   # next scheduler tick
+        ],
+    )
+    assert mod.admitted_dates(history) == [date(2026, 7, 30), date(2026, 7, 31)]
+
+
+def test_admitted_dates_drop_excluded_records(tmp_path):
+    mod = _load()
+    history = _write_manifest(
+        tmp_path,
+        [
+            {"date": "20240930", "status": "excluded",
+             "reason": "insufficient_expiries_for_dupire", "n_expiries": 2},
+            {"date": "20241008", "status": "ok"},
+        ],
+    )
+    assert mod.admitted_dates(history) == [date(2024, 10, 8)]
+
+
+def test_study_admission_exclusions_are_enforced_even_if_status_says_ok(tmp_path):
+    """A rebuild resets per-record status but preserves study_admission."""
+    mod = _load()
+    history = _write_manifest(
+        tmp_path,
+        [
+            {"date": "20240930", "status": "ok", "n_expiries": 2},
+            {"date": "20241008", "status": "ok"},
+        ],
+        study_admission={
+            "vol_model_backtest": {"excluded_dates": ["20240930"], "min_expiries": 3}
+        },
+    )
+    assert mod.admitted_dates(history) == [date(2024, 10, 8)]
+
+
+def test_excluded_records_are_reported_with_reasons(tmp_path):
+    mod = _load()
+    history = _write_manifest(
+        tmp_path,
+        [
+            {"date": "20240930", "status": "excluded",
+             "reason": "insufficient_expiries_for_dupire", "n_expiries": 2},
+            {"date": "20241008", "status": "ok"},
+        ],
+    )
+    assert mod.excluded_records(history) == [
+        {"date": date(2024, 9, 30),
+         "reason": "insufficient_expiries_for_dupire", "n_expiries": 2}
+    ]
+
+
+def test_real_history_matches_the_pinned_counts():
+    """Regression pin: the numbers §7A.12 froze."""
+    mod = _load()
+    admitted = mod.admitted_dates()
+    assert len(admitted) == 766
+    assert admitted[0] == date(2023, 5, 4)
+    assert admitted[-1] == date(2026, 7, 31)
+    assert date(2024, 9, 30) not in admitted
+    assert date(2025, 4, 8) not in admitted
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `.venv/bin/python -m pytest test/mo_volmodels/test_cohort.py -n0 -q`
+Expected: FAIL — `spec_from_file_location` returns a spec whose loader raises `FileNotFoundError` for the missing `cohort.py`.
+
+- [ ] **Step 3: Write the module**
+
+```python
+# example/mo_volmodels/cohort.py
+"""The frozen surface cohort for the 0.4.0 re-baseline gates.
+
+A launchd job (``com.quantark.mo-daily-calibration``) extends
+``data/history/`` every weekday, so "the cohort" is a moving target unless it
+is pinned.  Crossing 2026-08-01 also admits a 28th snowball inception, which
+would re-open Gate G4.  Every gate reads its date list from here.
+
+Admission verdicts come from ``surface_manifest.json``.  The artifacts
+themselves carry only the *criteria* used to build them (``min_expiries: 2``),
+never a per-surface verdict, so an artifact can never answer "was this
+admitted?".
+"""
+from __future__ import annotations
+
+import json
+from datetime import date
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
+
+# Frozen 2026-08-01 (spec §7A.12).  Raising this is a deliberate re-baseline:
+# it changes the G1 count, and past 2026-08-01 it changes the inception fleet
+# from 27 to 28 and therefore re-opens G4.
+COHORT_ASOF = date(2026, 7, 31)
+
+_STUDY_KEY = "vol_model_backtest"
+
+
+def _parse(tag: str) -> date:
+    return date(int(tag[:4]), int(tag[4:6]), int(tag[6:8]))
+
+
+def _manifest(history_dir: Optional[Path]) -> Dict[str, Any]:
+    path = Path(history_dir or DEFAULT_HISTORY_DIR) / "surface_manifest.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _study_exclusions(manifest: Dict[str, Any]) -> set:
+    study = (manifest.get("study_admission") or {}).get(_STUDY_KEY) or {}
+    return {_parse(tag) for tag in study.get("excluded_dates", [])}
+
+
+def admitted_dates(history_dir: Optional[Path] = None) -> List[date]:
+    """Admitted surface dates at or before ``COHORT_ASOF``, ascending.
+
+    A date is admitted when the manifest record says ``status == "ok"`` AND
+    the date is not in ``study_admission.vol_model_backtest.excluded_dates``.
+    The second check matters because a history rebuild rewrites per-record
+    status from the builder's own ``min_expiries=2`` while preserving the
+    top-level study policy — so status alone would re-admit the thin surfaces.
+    """
+    manifest = _manifest(history_dir)
+    excluded = _study_exclusions(manifest)
+    out = []
+    for record in manifest.get("records", []):
+        day = _parse(str(record["date"]))
+        if day > COHORT_ASOF or day in excluded:
+            continue
+        if record.get("status") != "ok":
+            continue
+        out.append(day)
+    return sorted(out)
+
+
+def excluded_records(history_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Non-admitted records at or before ``COHORT_ASOF``, with their reasons."""
+    manifest = _manifest(history_dir)
+    excluded = _study_exclusions(manifest)
+    out = []
+    for record in manifest.get("records", []):
+        day = _parse(str(record["date"]))
+        if day > COHORT_ASOF:
+            continue
+        if record.get("status") == "ok" and day not in excluded:
+            continue
+        out.append(
+            {
+                "date": day,
+                "reason": record.get("reason"),
+                "n_expiries": record.get("n_expiries"),
+            }
+        )
+    return sorted(out, key=lambda item: item["date"])
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `.venv/bin/python -m pytest test/mo_volmodels/test_cohort.py -n0 -q`
+Expected: PASS. If `test_real_history_matches_the_pinned_counts` reports a count other than 766, **stop** — the scheduler has moved the history past the pin and the whole plan's cell counts need re-deriving before anything else runs.
+
+- [ ] **Step 5: Confirm the inception fleet is still 27 at the pin**
+
+```bash
+.venv/bin/python - <<'PY'
+import importlib.util, sys
+from pathlib import Path
+import pandas as pd
+
+ROOT = Path("/Users/fuxinyao/quant-ark")
+spec = importlib.util.spec_from_file_location(
+    "s12", ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py"
+)
+s12 = importlib.util.module_from_spec(spec); sys.modules["s12"] = s12
+spec.loader.exec_module(s12)
+
+cohort_spec = importlib.util.spec_from_file_location(
+    "mo_cohort", ROOT / "example/mo_volmodels/cohort.py"
+)
+cohort = importlib.util.module_from_spec(cohort_spec)
+cohort_spec.loader.exec_module(cohort)
+
+history = ROOT / "example/mo_volmodels/data/history"
+spot = pd.read_csv(history / "csi1000_spot.csv")
+admitted = cohort.admitted_dates()
+inceptions = s12.schedule_inceptions(
+    calendar=s12.stage11().TradingCalendar.from_spot_csv(history / "csi1000_spot.csv"),
+    data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
+    data_end=cohort.COHORT_ASOF,
+    first_admitted_surface=admitted[0],
+)
+print(f"admitted={len(admitted)} inceptions={len(inceptions)} last={inceptions[-1]}")
+assert len(inceptions) == 27, f"fleet moved to {len(inceptions)} — re-derive the plan"
+print("OK")
+PY
+```
+
+Expected: `admitted=766 inceptions=27 last=2025-07-01` then `OK`.
+
+- [ ] **Step 6: Give stage 12 a `--data-end` so the pin is reachable from the CLI**
+
+`run_fleet` currently derives `data_end` from the last row of the spot CSV (`12_snowball_volmodel_backtest.py:1300`), which is exactly the value the scheduler moves. Tasks 2 and 8 both need to override it. Add the flag next to `--min-observable-months`:
+
+```python
+    parser.add_argument(
+        "--data-end",
+        default=None,
+        help=(
+            "ISO date pinning the replay window end (default: last spot row). "
+            "The daily calibration pipeline extends the spot cache every "
+            "weekday, and data_end crossing 2026-08-01 admits a 28th "
+            "inception, so the gates pin this explicitly."
+        ),
+    )
+```
+
+and replace the derivation in `run_fleet`:
+
+```python
+    data_end = pd.Timestamp(spot["date"].iloc[-1]).date()
+    if args.data_end:
+        pinned = date.fromisoformat(str(args.data_end))
+        if pinned > data_end:
+            raise ValidationError(
+                f"--data-end {pinned} is beyond the spot cache ({data_end})"
+            )
+        data_end = pinned
+```
+
+Fail closed on a pin beyond the data: silently truncating to the cache would make a typo look like a successful pinned run.
+
+- [ ] **Step 7: Verify the flag pins the fleet**
+
+```bash
+.venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py \
+  --gate-g3 --data-end 2026-08-15 2>&1 | tail -3
+```
+Expected: a `ValidationError` naming the spot-cache end — the pin refuses to invent data.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add example/mo_volmodels/cohort.py test/mo_volmodels/test_cohort.py \
+        example/mo_volmodels/12_snowball_volmodel_backtest.py
+git commit -m "feat(mo): pin the re-baseline surface cohort at 2026-07-31"
+```
+
+---
+
+## Task 0B: Seed the fleet calibration cache from the daily pipeline
+
+**Files:**
+- Create: `example/mo_volmodels/seed_calibration_cache.py`
+- Modify: `test/mo_volmodels/test_cohort.py` (append the seed tests)
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks
+- Produces: `seed(src: Path, dst: Path, *, dry_run: bool = False) -> dict` with keys `n_source`, `n_copied`, `n_skipped_existing`, `by_variant` (dict), `fingerprints` (sorted list of distinct `config_fingerprint` values seen).
+
+**Why:** `output/mo_daily_calibration/calibration_cache/` already holds 240 dates × `{localvol, heston, heston_slv}` = 720 entries covering 2025-07-31 → 2026-07-31. Their stored `config_fingerprint` is byte-identical to what stage 12's full-quality `VolModelCalibrationConfig(slv_n_steps=40, slv_n_x=161, slv_n_z=81)` computes — verified `240/240` on every variant. Since the cache key is `sha256(surface_sha | variant | fingerprint)` and the filename is `{variant}-{key}.json`, a plain file copy is a guaranteed hit. This removes the SLV leverage solves — the dominant per-day cost — for the final year of the replay window in Task 8.
+
+This is a copy, not a merge: entries already present in `dst` are left alone, because the fleet's own writes are atomic and authoritative.
+
+**Only seed full-quality runs.** Both consumers build the same config at full quality — stage 12 at `12_snowball_volmodel_backtest.py:684` and the gate's `make_calibrator` at `11_pde_convergence_gate.py:444` — but both drop to `slv_n_steps=12, slv_n_x=61, slv_n_z=31` under `--quick`. That is a different fingerprint, so seeding a quick run copies 720 files that every lookup misses. Harmless, but do not read the copy count as a speedup there.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# append to test/mo_volmodels/test_cohort.py
+import importlib.util as _ilu
+
+SEED_MODULE = PROJECT_ROOT / "example/mo_volmodels/seed_calibration_cache.py"
+
+
+def _load_seed():
+    spec = _ilu.spec_from_file_location("mo_seed", SEED_MODULE)
+    module = _ilu.module_from_spec(spec)
+    sys.modules["mo_seed"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _entry(path: Path, variant: str, key: str, fingerprint: str) -> None:
+    (path / f"{variant}-{key}.json").write_text(
+        json.dumps({"variant": variant, "config_fingerprint": fingerprint,
+                    "surface_date": "2026-07-31", "schema_version": 1})
+    )
+
+
+def test_seed_copies_entries_and_reports_by_variant(tmp_path):
+    mod = _load_seed()
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir(); dst.mkdir()
+    _entry(src, "heston", "aaa", "fp1")
+    _entry(src, "localvol", "bbb", "fp2")
+    summary = mod.seed(src, dst)
+    assert summary["n_source"] == 2
+    assert summary["n_copied"] == 2
+    assert summary["by_variant"] == {"heston": 1, "localvol": 1}
+    assert sorted(summary["fingerprints"]) == ["fp1", "fp2"]
+    assert (dst / "heston-aaa.json").is_file()
+
+
+def test_seed_never_overwrites_an_existing_entry(tmp_path):
+    mod = _load_seed()
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir(); dst.mkdir()
+    _entry(src, "heston", "aaa", "fp1")
+    (dst / "heston-aaa.json").write_text('{"mine": true}')
+    summary = mod.seed(src, dst)
+    assert summary["n_copied"] == 0
+    assert summary["n_skipped_existing"] == 1
+    assert json.loads((dst / "heston-aaa.json").read_text()) == {"mine": True}
+
+
+def test_seed_dry_run_writes_nothing(tmp_path):
+    mod = _load_seed()
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir(); dst.mkdir()
+    _entry(src, "heston", "aaa", "fp1")
+    summary = mod.seed(src, dst, dry_run=True)
+    assert summary["n_copied"] == 1
+    assert not any(dst.iterdir())
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `.venv/bin/python -m pytest test/mo_volmodels/test_cohort.py -n0 -q -k seed`
+Expected: FAIL — `seed_calibration_cache.py` does not exist.
+
+- [ ] **Step 3: Write the script**
+
+```python
+# example/mo_volmodels/seed_calibration_cache.py
+"""Seed a fleet calibration cache from the daily pipeline's cache.
+
+The cache key is ``sha256(surface_sha | variant | config_fingerprint)`` and the
+filename is ``{variant}-{key}.json``, so an entry written under one config is
+reusable by any run that computes the same fingerprint — verified 240/240 per
+variant against stage 12's full-quality config.  Copying is therefore sound and
+needs no re-validation here; the calibrator re-checks schema version and
+surface sha on read and treats a mismatch as a miss.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SRC = PROJECT_ROOT / "output/mo_daily_calibration/calibration_cache"
+
+
+def seed(src: Path, dst: Path, *, dry_run: bool = False) -> Dict[str, Any]:
+    """Copy every cache entry from ``src`` into ``dst`` without overwriting."""
+    src, dst = Path(src), Path(dst)
+    if not src.is_dir():
+        raise FileNotFoundError(f"source cache directory not found: {src}")
+    if not dry_run:
+        dst.mkdir(parents=True, exist_ok=True)
+
+    by_variant: Counter = Counter()
+    fingerprints = set()
+    n_source = n_copied = n_skipped = 0
+    for path in sorted(src.glob("*.json")):
+        n_source += 1
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        fingerprints.add(payload.get("config_fingerprint"))
+        target = dst / path.name
+        if target.exists():
+            n_skipped += 1
+            continue
+        n_copied += 1
+        by_variant[str(payload.get("variant"))] += 1
+        if not dry_run:
+            shutil.copy2(path, target)
+    return {
+        "n_source": n_source,
+        "n_copied": n_copied,
+        "n_skipped_existing": n_skipped,
+        "by_variant": dict(by_variant),
+        "fingerprints": sorted(f for f in fingerprints if f is not None),
+    }
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--src", default=str(DEFAULT_SRC))
+    parser.add_argument("--dst", required=True, help="<out-dir>/calibration_cache")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+
+    summary = seed(Path(args.src), Path(args.dst), dry_run=args.dry_run)
+    print(
+        f"[seed] source {summary['n_source']}, copied {summary['n_copied']}, "
+        f"skipped {summary['n_skipped_existing']} existing"
+    )
+    print(f"[seed] by variant: {summary['by_variant']}")
+    print(f"[seed] distinct fingerprints: {len(summary['fingerprints'])}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `.venv/bin/python -m pytest test/mo_volmodels/test_cohort.py -n0 -q`
+Expected: PASS, all tests from Tasks 0 and 0B.
+
+- [ ] **Step 5: Dry-run against the real cache**
+
+Run:
+```bash
+.venv/bin/python example/mo_volmodels/seed_calibration_cache.py \
+  --dst output/volmodel_backtest/calibration_cache --dry-run
+```
+Expected: `source 720, copied 720, skipped 0 existing`, `by variant: {'heston': 240, 'heston_slv': 240, 'localvol': 240}`, and **`distinct fingerprints: 3`** — one per variant. More than 3 means the daily pipeline's config drifted from stage 12's and the entries will miss; investigate before relying on them.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add example/mo_volmodels/seed_calibration_cache.py test/mo_volmodels/test_cohort.py
+git commit -m "feat(mo): seed the fleet calibration cache from the daily pipeline"
+```
 
 ---
 
@@ -44,17 +547,27 @@
 - Create: `test/mo_volmodels/test_gate_g1_admission.py`
 
 **Interfaces:**
-- Consumes: `quantark.param.vol.surface_history.IvSurfaceArtifact`
-- Produces: `verify_admission(payload: dict) -> tuple[bool, str]` — `(ok, reason)`; `scan_history(iv_dir: Path) -> dict` with keys `n_scanned`, `n_admitted`, `failures` (list of `{date, reason}`), `min_expiries_seen`.
+- Consumes: `cohort.admitted_dates` and `cohort.COHORT_ASOF` from Task 0
+- Produces: `verify_surface(day: date, iv_dir: Path) -> tuple[bool, str]` — `(ok, reason)`, empty reason iff ok; `scan_cohort(iv_dir: Path | None = None, history_dir: Path | None = None) -> dict` with keys `n_admitted`, `n_verified`, `failures` (list of `{date, reason}`), `min_expiries_seen`, `asof`.
 
-**Why this is a verifier and not a rebuild:** the §7A.4 fixes touched calibration and the 2D PDE, neither of which builds surfaces. G1's job here is to confirm the 762 artifacts the fleet will consume each carry a passing admission record, and that none has fewer than 3 expiries (Dupire's requirement). Rebuilding would re-admit the two thin surfaces — see Global Constraints.
+**Why this is a verifier and not a rebuild:** the §7A.4 fixes touched calibration and the 2D PDE, neither of which builds surfaces. G1's job is to confirm every surface the fleet will consume exists on disk and carries at least 3 expiries (Dupire's requirement). See Global Constraints for why the history is not regenerated.
+
+**Two corrections to the original draft of this task, both load-bearing:**
+
+1. **Admission cannot be read from an artifact.** The draft checked `payload["admission"]["admitted"] is True`. That key does not exist — an artifact's `admission` block records the *criteria* the builder used (`min_expiries: 2`, `sabr_beta: 1.0`, `static_arbitrage_validation: …`) and carries no verdict. Every one of the 768 artifacts would have failed. The verdict lives in `surface_manifest.json`, which is what Task 0 reads.
+
+2. **The artifact directory is not the cohort.** `iv_surface/` holds **768** files; only **766** are admitted. The two thin surfaces (2024-09-30, 2025-04-08) still have artifacts on disk — they were excluded in the manifest, not deleted. A directory glob would scan them, fail them on the 3-expiry rule, and halt Phase A on a false alarm. G1 therefore iterates the *admitted date list* and looks up each artifact, rather than walking the directory.
+
+The glob is still worth one assertion in the other direction: every admitted date must have a file. That catches a deleted or unwritten artifact, which is the failure the gate actually exists to find.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # test/mo_volmodels/test_gate_g1_admission.py
 import importlib.util
+import json
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -71,40 +584,67 @@ def _load():
     return mod
 
 
-def test_admitted_surface_with_three_expiries_passes():
-    g1 = _load()
-    ok, reason = g1.verify_admission(
-        {"admission": {"admitted": True}, "maturities": [0.1, 0.3, 0.6]}
+def _artifact(iv_dir: Path, day: date, n_maturities: int) -> None:
+    iv_dir.mkdir(parents=True, exist_ok=True)
+    tag = day.strftime("%Y%m%d")
+    (iv_dir / f"mo_iv_surface_{tag}.json").write_text(
+        json.dumps(
+            {
+                "trade_date": day.isoformat(),
+                "maturities": [0.1 * (i + 1) for i in range(n_maturities)],
+                # The real block: criteria, not a verdict.  Present here so the
+                # test proves G1 does not read a verdict out of it.
+                "admission": {"min_expiries": 2, "sabr_beta": 1.0},
+            }
+        )
     )
+
+
+def test_surface_with_three_expiries_passes(tmp_path):
+    g1 = _load()
+    _artifact(tmp_path, date(2026, 7, 31), 3)
+    ok, reason = g1.verify_surface(date(2026, 7, 31), tmp_path)
     assert ok is True
     assert reason == ""
 
 
-def test_rejected_surface_fails_with_its_recorded_reason():
-    g1 = _load()
-    ok, reason = g1.verify_admission(
-        {"admission": {"admitted": False, "reason": "static_arbitrage"},
-         "maturities": [0.1, 0.3, 0.6]}
-    )
-    assert ok is False
-    assert "static_arbitrage" in reason
-
-
-def test_thin_surface_fails_even_when_marked_admitted():
+def test_thin_surface_fails_the_dupire_rule(tmp_path):
     """The Phase-1 builder admits 2-expiry surfaces; Dupire needs 3."""
     g1 = _load()
-    ok, reason = g1.verify_admission(
-        {"admission": {"admitted": True}, "maturities": [0.1, 0.3]}
-    )
+    _artifact(tmp_path, date(2026, 7, 31), 2)
+    ok, reason = g1.verify_surface(date(2026, 7, 31), tmp_path)
     assert ok is False
     assert "expiries" in reason
 
 
-def test_missing_admission_record_fails_closed():
+def test_missing_artifact_for_an_admitted_date_fails_closed(tmp_path):
+    """The failure G1 exists to catch: the manifest admits it, disk lacks it."""
     g1 = _load()
-    ok, reason = g1.verify_admission({"maturities": [0.1, 0.3, 0.6]})
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    ok, reason = g1.verify_surface(date(2026, 7, 31), tmp_path)
     assert ok is False
-    assert "admission" in reason
+    assert "no artifact" in reason
+
+
+def test_scan_never_walks_the_directory(tmp_path, monkeypatch):
+    """768 artifacts on disk, 766 admitted — the two extra must not be scanned.
+
+    This is the regression that the first draft of this gate would have hit:
+    a glob over iv_surface/ picks up the excluded thin surfaces, fails them on
+    the 3-expiry rule, and halts Phase A on a false alarm.
+    """
+    g1 = _load()
+    admitted = date(2026, 7, 30)
+    excluded = date(2026, 7, 31)
+    _artifact(tmp_path, admitted, 3)
+    _artifact(tmp_path, excluded, 2)      # on disk, but NOT admitted
+    monkeypatch.setattr(g1.cohort, "admitted_dates", lambda *a, **k: [admitted])
+
+    summary = g1.scan_cohort(iv_dir=tmp_path)
+    assert summary["n_admitted"] == 1
+    assert summary["n_verified"] == 1
+    assert summary["failures"] == []
+    assert summary["min_expiries_seen"] == 3
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -116,63 +656,100 @@ Expected: FAIL — `FileNotFoundError` / `spec_from_file_location` returns None 
 
 ```python
 # example/mo_volmodels/13_gate_g1_surface_admission.py
-"""Gate G1: verify surface admission over the EXISTING IV-surface artifacts.
+"""Gate G1: verify the pinned surface cohort against the artifacts on disk.
 
-This is a verifier, not a builder.  The Phase-1 history builder still uses
-min_expiries=2, so regenerating the history would re-admit the two thin
-surfaces (2024-09-30, 2025-04-08) that exclude_thin_surfaces.py removed.
-G1 therefore reads what the fleet will actually consume and fails closed on
-anything that is not admissible.
+This is a verifier, not a builder.  It answers one question per admitted date:
+"is there an artifact the fleet can actually price against?"
+
+Two things it deliberately does NOT do:
+
+* It does not read admission out of an artifact.  An artifact's ``admission``
+  block records the *criteria* the builder used (``min_expiries: 2``,
+  ``sabr_beta``, ...) and carries no per-surface verdict.  The verdict is in
+  ``surface_manifest.json``, which ``cohort.admitted_dates`` reads.
+* It does not walk ``iv_surface/``.  That directory holds 768 files while 766
+  are admitted: the two thin surfaces (2024-09-30, 2025-04-08) were excluded in
+  the manifest, not deleted.  Globbing would fail them on the 3-expiry rule and
+  halt the study on a false alarm.
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
+from datetime import date
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_IV_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history/iv_surface"
 
 # Dupire local vol needs at least three expiries to form dw/dT; the Phase-1
-# builder admits two, so G1 re-checks rather than trusting the flag alone.
+# builder admits two, so G1 re-checks rather than trusting the manifest alone.
 MIN_EXPIRIES = 3
 
 
-def verify_admission(payload: Dict[str, Any]) -> Tuple[bool, str]:
-    """Return (ok, reason) for one artifact payload.  Empty reason iff ok."""
-    admission = payload.get("admission")
-    if not isinstance(admission, dict):
-        return False, "missing 'admission' record"
-    if admission.get("admitted") is not True:
-        return False, f"not admitted: {admission.get('reason', 'no reason recorded')}"
-    maturities = payload.get("maturities") or []
-    if len(maturities) < MIN_EXPIRIES:
+def _load_cohort():
+    """Import the sibling cohort module (the stages are not a package)."""
+    path = Path(__file__).resolve().parent / "cohort.py"
+    spec = importlib.util.spec_from_file_location("mo_cohort", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["mo_cohort"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+cohort = _load_cohort()
+
+
+def artifact_path(day: date, iv_dir: Path) -> Path:
+    return Path(iv_dir) / f"mo_iv_surface_{day.strftime('%Y%m%d')}.json"
+
+
+def verify_surface(day: date, iv_dir: Path) -> Tuple[bool, str]:
+    """Return (ok, reason) for one admitted date.  Empty reason iff ok."""
+    path = artifact_path(day, iv_dir)
+    if not path.is_file():
+        return False, f"no artifact at {path.name}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"artifact unreadable: {exc}"
+    n_expiries = len(payload.get("maturities") or [])
+    if n_expiries < MIN_EXPIRIES:
         return False, (
-            f"{len(maturities)} expiries < {MIN_EXPIRIES} required by Dupire"
+            f"{n_expiries} expiries < {MIN_EXPIRIES} required by Dupire"
         )
     return True, ""
 
 
-def scan_history(iv_dir: Path) -> Dict[str, Any]:
-    """Verify every artifact in ``iv_dir``; returns a JSON-safe summary."""
+def scan_cohort(
+    iv_dir: Optional[Path] = None,
+    history_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Verify every admitted date at or before the pin; JSON-safe summary."""
+    iv_dir = Path(iv_dir or DEFAULT_IV_DIR)
+    admitted = cohort.admitted_dates(history_dir)
+
     failures = []
-    n_scanned = 0
     min_expiries_seen = None
-    for path in sorted(Path(iv_dir).glob("*.json")):
-        payload = json.loads(path.read_text())
-        n_scanned += 1
-        n_exp = len(payload.get("maturities") or [])
-        min_expiries_seen = n_exp if min_expiries_seen is None else min(min_expiries_seen, n_exp)
-        ok, reason = verify_admission(payload)
+    for day in admitted:
+        ok, reason = verify_surface(day, iv_dir)
         if not ok:
-            failures.append({"date": payload.get("trade_date"), "reason": reason})
+            failures.append({"date": day.isoformat(), "reason": reason})
+            continue
+        payload = json.loads(artifact_path(day, iv_dir).read_text(encoding="utf-8"))
+        n_exp = len(payload.get("maturities") or [])
+        min_expiries_seen = (
+            n_exp if min_expiries_seen is None else min(min_expiries_seen, n_exp)
+        )
     return {
         "gate": "G1",
+        "asof": cohort.COHORT_ASOF.isoformat(),
         "iv_dir": str(iv_dir),
-        "n_scanned": n_scanned,
-        "n_admitted": n_scanned - len(failures),
+        "n_admitted": len(admitted),
+        "n_verified": len(admitted) - len(failures),
         "failures": failures,
         "min_expiries_seen": min_expiries_seen,
     }
@@ -181,21 +758,26 @@ def scan_history(iv_dir: Path) -> Dict[str, Any]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--iv-dir", default=str(DEFAULT_IV_DIR))
+    parser.add_argument("--history-dir", default=None)
     parser.add_argument("--out", default="output/gate_g1_admission.json")
     args = parser.parse_args(argv)
 
-    summary = scan_history(Path(args.iv_dir))
+    summary = scan_cohort(
+        Path(args.iv_dir),
+        Path(args.history_dir) if args.history_dir else None,
+    )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=1))
 
-    print(f"[G1] scanned {summary['n_scanned']}, "
+    print(f"[G1] asof {summary['asof']}, "
           f"admitted {summary['n_admitted']}, "
+          f"verified {summary['n_verified']}, "
           f"min expiries {summary['min_expiries_seen']}")
     for f in summary["failures"][:20]:
         print(f"  FAIL {f['date']}: {f['reason']}")
     if summary["failures"]:
-        print(f"[G1] FAILED — {len(summary['failures'])} surface(s) not admissible")
+        print(f"[G1] FAILED — {len(summary['failures'])} surface(s) unusable")
         return 1
     print("[G1] PASSED")
     return 0
@@ -213,9 +795,16 @@ Expected: PASS, 4 tests.
 - [ ] **Step 5: Run G1 for real**
 
 Run: `.venv/bin/python example/mo_volmodels/13_gate_g1_surface_admission.py`
-Expected: `[G1] scanned 762, admitted 762, min expiries 3` then `[G1] PASSED`, exit 0.
+Expected: `[G1] asof 2026-07-31, admitted 766, verified 766, min expiries 3` then `[G1] PASSED`, exit 0.
 
-If any surface fails, **stop and report** — do not edit the history. A failure means the excluded-thin-surface filter has drifted or an artifact was regenerated.
+Interpreting a non-match:
+
+| symptom | meaning | action |
+|---|---|---|
+| `admitted` > 766 | the scheduler advanced the history past the pin, or `COHORT_ASOF` was raised | **stop.** Re-derive the plan's cell counts and check whether the fleet is still 27 (Task 0 Step 5) |
+| `admitted` < 766 | a surface lost its `ok` status, or `study_admission` grew | **stop and report.** Do not edit the history |
+| a `no artifact` failure | the manifest admits a date whose file is missing | **stop and report.** This is the failure G1 exists to catch |
+| a `< 3 expiries` failure | a thin surface leaked into the admitted set | re-run `exclude_thin_surfaces.py`, then re-run G1 |
 
 - [ ] **Step 6: Commit**
 
@@ -229,10 +818,10 @@ git commit -m "feat(mo): add Gate G1 surface-admission verifier over existing ar
 ## Task 2: G4 — re-solve the fair coupon on the 0.4.0 engines
 
 **Files:**
-- Modify: none (uses `12_snowball_volmodel_backtest.py` as-is)
+- Modify: none (uses `12_snowball_volmodel_backtest.py` with Task 0's `--data-end`)
 
 **Interfaces:**
-- Consumes: `solve_fair_coupon` (`12_snowball_volmodel_backtest.py:524`)
+- Consumes: `solve_fair_coupon` (`12_snowball_volmodel_backtest.py:524`); `--data-end` from Task 0
 - Produces: `output/volmodel_backtest/inception_coupons.json` (or whatever the runner's prepare step writes) — the per-inception coupon table every later phase depends on.
 
 **Why re-run:** the coupon is solved on `flat_bsm` — a **1D BSM PDE** (`12_snowball_volmodel_backtest.py:1001`). The §7A.4 fixes touch the Heston preset and the 2D `v0_boundary`, so they do **not** move these roots. 0.4.0's PDE grid rewrite does: the spec records 15.0975% → 15.0707% on the first inception. This is a spec correction — §10 implies G4 re-runs *because of* §7A.4; it re-runs because of 0.4.0, and it has not been run since.
@@ -241,15 +830,18 @@ git commit -m "feat(mo): add Gate G1 surface-admission verifier over existing ar
 
 Run: `.venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py --help`
 
-Identify the flag that stops after the prepare/coupon phase. If none exists, run with `--variants flat_bsm --limit 27` and take the coupon table from the run manifest.
+Identify the flag that stops after the prepare/coupon phase. If none exists, run with `--variants flat_bsm` and take the coupon table from the run manifest.
 
-- [ ] **Step 2: Solve coupons for all 27 inceptions**
+- [ ] **Step 2: Solve coupons for the pinned fleet**
+
+`--data-end` is **mandatory here**, not cosmetic: without it the fleet is whatever the scheduler last wrote, and a run started after 2026-08-01 silently solves a 28th coupon that no other gate covers.
 
 Run (background; ~3 PDE prices × 27 inceptions, expect 20–40 min):
 
 ```bash
 .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py \
-  --variants flat_bsm --workers 4 2>&1 | tee output/g4_coupons.log
+  --variants flat_bsm --data-end 2026-07-31 --workers 4 2>&1 \
+  | tee output/g4_coupons.log
 ```
 
 Expected per line: `[k/27] YYYY-MM-DD s0=… coupon=15.xxxx% |PV|=… (N iters, …s)`.
@@ -262,6 +854,8 @@ Every inception must appear with a converged coupon. `solve_fair_coupon` raises 
 grep -c "coupon=" output/g4_coupons.log     # expect 27
 grep -E "coupon=(0\.0000|80\.0000)%" output/g4_coupons.log   # expect no matches (bounds)
 ```
+
+A count of 28 means the pin did not take — check the `--data-end` argument reached `run_fleet` rather than accepting the extra row.
 
 - [ ] **Step 4: Record the coupon table in the spec**
 
@@ -1071,6 +1665,41 @@ git commit -m "feat(mo): report the G2 verdict per Feller regime, on measured cu
 Run: `.venv/bin/python -m pytest -q`
 Expected: the four known pre-existing failures only — `test_adi_core_tau_exactness.py` (×3) and `test_snowball_pde_knocked_in_grid.py` (×1). Both files are another session's untracked WIP and reproduce against a pristine `git archive HEAD` tree. **Any other failure blocks this task.**
 
+- [ ] **Step 1B: Quiesce the scheduler and record the tree state**
+
+G2 itself is already pinned by construction — it runs the eight fixed `DEFAULT_SAMPLE_DATES` (`11_pde_convergence_gate.py:94`), all at or before 2026-07-15, so a scheduler tick cannot change its cell set. The reason to unload the job is **CPU contention**: this task spends hours across 4 workers, and an 18:30 or 20:30 tick launches its own LV + Heston + SLV calibrations on the same machine, which distorts every timing figure §7.2 depends on and slows the run.
+
+```bash
+launchctl bootout gui/$(id -u)/com.quantark.mo-daily-calibration 2>/dev/null \
+  || echo "already unloaded"
+launchctl list | grep mo-daily-calibration || echo "confirmed: not loaded"
+```
+
+```bash
+launchctl bootout gui/$(id -u)/com.quantark.mo-daily-calibration 2>/dev/null \
+  || echo "already unloaded"
+launchctl list | grep mo-daily-calibration || echo "confirmed: not loaded"
+```
+
+Re-enable afterwards with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.quantark.mo-daily-calibration.plist` — or `install_daily_scheduler.py install`. Note that a missed weekday is recoverable: the pipeline is resumable and its caches are persistent.
+
+Then record what the evidence is keyed to, because §7A.12's third risk row applies — the daily-pipeline workstream is uncommitted:
+
+```bash
+git rev-parse HEAD > output/pde_convergence_gate/tree_state.txt
+git status --porcelain >> output/pde_convergence_gate/tree_state.txt
+```
+
+If that second command prints modifications under `quantark/`, either commit them first or state in §5 of the spec that the G2 evidence was produced against an uncommitted tree. Do not leave it implicit.
+
+- [ ] **Step 1C: Seed the calibration cache**
+
+```bash
+.venv/bin/python example/mo_volmodels/seed_calibration_cache.py \
+  --dst output/pde_convergence_gate/calibration_cache
+```
+Expected: `copied 720` on a cold cache. This is free time back on every gate cell whose date falls in 2025-07-31 → 2026-07-31 (Task 0B).
+
 - [ ] **Step 2: Update `GateRouting` for six variants**
 
 `GateRouting.solver_for` (`12_snowball_volmodel_backtest.py:238`) short-circuits `bsm` and `localvol` to `"pde"` as "outside the 2D-ADI gate's scope". After Task 4 they are inside it. Remove the short-circuit and let every variant read its route from the decision, keeping the fail-closed raise for a missing or unusable route.
@@ -1113,11 +1742,64 @@ Check three things specifically:
 - `feller_buckets.violated` is empty for `heston` / `heston_slv`. If it is not, `enforce_feller` did not take; **stop and investigate** rather than accepting the verdict.
 - Whether `biased` is `false` by a *narrow* median. §7A.11 measured sign fraction 1.0 with the enforced median at 0.113% against a 0.125% threshold — a 0.012-point margin. Record the actual margin; a narrow pass is "biased but small", not "clean".
 
-- [ ] **Step 5: Record the outcome in the spec**
+- [ ] **Step 5: Stamp the calibration policy the evidence covers**
+
+The config now carries a temporal-smoothing option (spec §7A.12) that no gate has evaluated. The decision must say which policy it certifies, so a future reader cannot mistake λ=0 evidence for coverage of λ>0. Add to the decision payload where `mc_reference` is assembled:
+
+```python
+        "calibration_policy": {
+            "heston_preset": "mo_frozen",
+            "enforce_feller": True,
+            "heston_temporal_regularization": 0.0,
+            "slv_heston_override": None,
+            "note": (
+                "Independent daily calibration. This gate does NOT cover "
+                "--temporal-smoothing (heston_temporal_regularization > 0) "
+                "or an explicit slv_heston_override; enabling either is a "
+                "re-gate trigger (spec 7A.12)."
+            ),
+        },
+```
+
+Assert it round-trips:
+
+```bash
+.venv/bin/python -c "
+import json
+d = json.load(open('output/pde_convergence_gate/gate_decision.json'))
+p = d['calibration_policy']
+assert p['heston_temporal_regularization'] == 0.0, p
+assert p['enforce_feller'] is True, p
+print('calibration policy recorded:', p['heston_preset'])
+"
+```
+
+- [ ] **Step 6: Record the outcome in the spec**
 
 Add a §5.5 with: the per-variant routes, the per-Feller-bucket table, the delta admission results in contracts, the bias margin from Step 4, and `evidence_sha256`. State plainly which variants were admitted to PDE and which fell back to MC — including whether §7A.8's recorded *prediction* (both 2D variants admitted at 200×60×`ceil(400·T)`, on delta stability more than speed) held or was falsified.
 
-- [ ] **Step 6: Commit**
+State the cohort pin (`COHORT_ASOF = 2026-07-31`, 766 admitted surfaces, 27 inceptions) and the tree state from Step 1B alongside it, so the run is reproducible.
+
+- [ ] **Step 7: Restore the scheduler**
+
+```bash
+.venv/bin/python example/mo_volmodels/install_daily_scheduler.py status \
+  || launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.quantark.mo-daily-calibration.plist
+launchctl list | grep mo-daily-calibration
+```
+
+Then run the pipeline once by hand to clear whatever backlog accrued while it was unloaded, and confirm it lands on `current`:
+
+```bash
+.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run
+.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py status --json \
+  | .venv/bin/python -c "import json,sys; print(json.load(sys.stdin)['overall_status'])"
+```
+
+Expected: `current`. A `source_pending` is fine (CFFEX has not published yet) — anything else needs the recovery table in `DAILY_PIPELINE.md`.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-07-30-snowball-volmodel-backtest-040-rebaseline-design.md

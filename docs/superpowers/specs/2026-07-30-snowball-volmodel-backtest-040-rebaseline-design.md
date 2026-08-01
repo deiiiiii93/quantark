@@ -94,6 +94,13 @@ record now carries `feller_ratio`. Two consequences of the enforcement that were
 *not* anticipated by §7A.4 are recorded in §7A.10 and §12 — they change what the
 `heston`/`heston_slv` rows of the study mean on a minority of dates.
 
+**Amended 2026-08-01:** a concurrent workstream put the surface history under a
+live daily scheduler and added three calibration fields to the config the replay
+uses. The cohort is no longer frozen and the fleet grows from 27 to 28
+inceptions once `data_end` crosses 2026-08-01. §7A.12 records the drift, pins
+`COHORT_ASOF = "20260731"`, and confirms the gates still cover what production
+runs.
+
 ---
 
 ## 2. Status of the Phase-A fleet output
@@ -653,6 +660,12 @@ be reported; the sweep runs every surface in
 `example/mo_volmodels/data/history/iv_surface/` through both policies, which also
 validates the iteration budget the constrained solver needs.
 
+> **Basis: the 762 surfaces admitted as of 2026-07-24.** A daily calibration
+> pipeline has since extended the history — 766 admitted at 2026-07-31, growing
+> each weekday. Read every denominator below as "of 762 as-of 2026-07-24", not
+> "of the cohort". §7A.12 has the drift, the pin, and why the four added dates
+> change no ratio here.
+
 | quantity | result |
 |---|---|
 | surfaces converging, both policies | **762 / 762** — no date fails closed |
@@ -824,6 +837,116 @@ attempts to model the call sequence instead of replicating it.
 
 ---
 
+### 7A.12 The cohort is no longer frozen — a daily pipeline now extends it
+
+Everything in §7A.10 and §7A.11 was measured against a surface history that a
+concurrent workstream has since put under a **live scheduler**. This section
+records what landed, what it moves, and the one decision it forces on the gates.
+
+#### What landed
+
+Three additions to `VolModelCalibrationConfig`
+(`quantark/backtest/replay/config.py`) — the same config the replay engine and
+stage 12 construct:
+
+| field | default | effect |
+|---|---|---|
+| `heston_temporal_reference` | `None` | prior `(v0,κ,θ,σ,ρ)`; also becomes the solver's initial guess |
+| `heston_temporal_regularization` | `0.0` | weight λ on a structural penalty toward that prior |
+| `slv_heston_override` | `None` | explicit Heston vector for SLV leverage calibration, bypassing the calibrated fit |
+
+Consumed in `quantark/volmodels/calibration.py`; the penalty itself is
+`0.5·λ·Σⱼ((θⱼ − priorⱼ)/bound_spanⱼ)²` over `{κ,θ,σ,ρ}` only — `v0` is never
+penalized. Driven by two new stages, `14_daily_calibration_pipeline.py` and
+`15_calibration_stability_report.py`, documented in `DAILY_PIPELINE.md`.
+
+**All of this is uncommitted working-tree state on
+`fix/snowball-rebaseline-7a4-engine-fixes`.** The 92 tests covering it pass
+alongside the §7A.4 work, but the gates below will execute on top of code that
+has not been reviewed or committed. Land it first, or accept that the gate
+evidence is keyed to an unversioned tree.
+
+#### The gates still cover production — verified, not assumed
+
+The installed launchd job `com.quantark.mo-daily-calibration` runs at 18:30 and
+20:30 Asia/Shanghai, Mon–Fri, and its `ProgramArguments` carry **no
+`--temporal-smoothing`**. Production therefore runs independent daily
+calibration at λ=0 — the identical policy these gates certify. Two consequences:
+
+- No re-gating is needed today.
+- Enabling `--temporal-smoothing` (on the scheduler or by hand) puts production
+  on a calibration policy **no gate in this spec has evaluated**. That switch is
+  a re-gate trigger, not a tuning knob.
+
+Default-valued, the new fields are inert: the temporal keys enter the Heston
+cache fingerprint only when a reference is set, and the SLV fingerprint keeps
+its `"heston"` component unless an override is set. The existing calibration
+cache is not invalidated.
+
+#### Measured drift
+
+| quantity | §7A.10/§7A.11 basis | now (`data_end` 2026-07-31) | next scheduler run (2026-08-03) |
+|---|---|---|---|
+| admitted surfaces | 762 | **766** | 767+ |
+| snowball inceptions | 27 | **27** | **28** |
+
+The inception count is the one that bites. `schedule_inceptions` admits a
+monthly start only when `inception + MIN_OBSERVABLE_MONTHS(12) ≤ data_end`, and
+`data_end` is the last row of the spot CSV the daily job refreshes. The
+2025-08-01 inception needs `data_end ≥ 2026-08-01`; today's 2026-07-31 misses it
+by **one day**. Monday's run clears it and the fleet becomes 28.
+
+Every "27" in this spec and in the gate plan — §8's outcome concentration, the
+KO-date collapse, the G2 cell count — is therefore correct only against a pinned
+window. Measured, not projected: `schedule_inceptions` returns 27 at `data_end`
+2026-07-24 and 2026-07-31, and 28 at 2026-08-03.
+
+#### Decision: pin the cohort, do not chase it
+
+The gates run against a frozen `COHORT_ASOF = "20260731"`:
+
+- G1 scans the manifest records with `date ≤ COHORT_ASOF`, not the directory.
+- G2 and stage 12 pass `data_end = COHORT_ASOF` explicitly rather than reading
+  the last spot row, so a mid-run scheduler tick cannot change the fleet.
+- Re-running any gate later reproduces the same cell set.
+
+762 → 766 does not invalidate §7A.10's ratios: the four additions are
+2026-07-27/29/30/31, all beyond every inception's KO, so they enter no replay.
+They do change the denominator, and §7A.10's table should be read as
+"762 surfaces, as-of 2026-07-24" rather than "the cohort".
+
+Widening the study to 28 inceptions is a legitimate future choice. It is not
+this re-baseline, because it would re-open G4 (a 28th coupon solve) and shift
+§8's concentration statistics.
+
+#### 720 calibrations are already paid for
+
+The daily pipeline's cache at `output/mo_daily_calibration/calibration_cache/`
+holds 240 dates (2025-07-31 → 2026-07-31) × `{localvol, heston, heston_slv}`.
+Verified empirically rather than by inspection: the stored `config_fingerprint`
+on all 720 entries is byte-identical to what stage 12's full-quality
+`VolModelCalibrationConfig(slv_n_steps=40, slv_n_x=161, slv_n_z=81)` computes —
+`240/240` match on every variant. Since the cache key is
+`sha256(surface_sha | variant | fingerprint)`, seeding the fleet's cache from
+this directory is a pure hit, and it covers the final year of the replay window
+where the SLV leverage solves are most of the cost.
+
+#### One thing that is safe, and is not obvious
+
+`enforce_feller=True` parks 80% of fits at `2κθ/σ² ≈ 1.0` (§7A.10), so it is
+worth asking whether the EWMA in the temporal scheme can average two feasible
+vectors into an infeasible one. It cannot. Written as `2κθ − σ² ≥ 0` the
+constraint looks indefinite — that form's Hessian in `(κ,θ)` is `[[0,2],[2,0]]`.
+But the equivalent `√(2κθ) − σ ≥ 0` is a **concave** function on `κ,θ,σ > 0`
+(the geometric mean is concave), so the Feller region is a convex set and any
+convex combination of feasible vectors stays feasible — strictly interior unless
+the two are proportional. A smoothed vector therefore lands at ratio ≥ 1.0:
+still inside the regime where §7A.11 measured `neumann` failing at −0.540% of
+notional. The temporal scheme does not weaken the `degenerate_pde` requirement;
+it lands squarely in the regime that motivated it.
+
+---
+
 ## 8. Outcome concentration — a stronger caveat than the plan carried
 
 The 27 realized KO dates collapse onto ~13 distinct days, and **2024-10-08
@@ -953,3 +1076,6 @@ minutes single-core, once (§7A.10).
 | Stage 13's hand-copied column lists drift from what the replay writer emits | Derive `REQUIRED_CATEGORIES` from `replay/schema.py` (§1.2) rather than maintaining a parallel list |
 | Fleet killed again mid-run | Stop via process group, never `pkill -f`; per-run output isolation means completed runs survive |
 | **NEW — a 2D-autocallable engine setting is silently dropped between the direct and session paths** | `_clone_engine` transcribes constructor arguments by hand (§7A.10). `v0_boundary` was already missing and priced 0.66% of notional apart. Before the fleet, diff the kwargs list against the four solvers' signatures; stage 12 routes through the execution layer, so a dropped setting would mis-price every day of every run without erroring |
+| **NEW — the surface cohort and the inception fleet grow on a schedule** | §7A.12. A live launchd job extends the history every weekday; admitted surfaces went 762 → 766, and `data_end` crossing 2026-08-01 admits a **28th inception**. Unpinned, two runs of the same gate compare different cell sets and §8's concentration statistics silently shift. Mitigated by freezing `COHORT_ASOF = "20260731"` and passing `data_end` explicitly instead of reading the last spot row |
+| **NEW — a calibration policy exists that no gate has evaluated** | §7A.12. `heston_temporal_regularization` > 0 changes the fitted Heston vector, and `slv_heston_override` replaces the Heston that SLV leverage calibrates against. Both default off and the installed scheduler does not enable them, so today's gates do cover production. Enabling `--temporal-smoothing` is a **re-gate trigger** — record it in the run manifest so a future reader cannot mistake the λ=0 evidence for coverage of λ>0 |
+| **NEW — the gates will execute on uncommitted third-party working-tree state** | §7A.12. The daily-pipeline workstream (config fields, calibrator plumbing, stages 14/15) is unversioned on this branch. Its 92 tests pass alongside the §7A.4 work, but gate evidence keyed to an unversioned tree is not reproducible. Land it before Phase C, or stamp the tree hash into `gate_decision.json` and say so |
