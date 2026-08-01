@@ -942,6 +942,136 @@ git commit -m "docs(mo): record the G4 fair-coupon re-solve on 0.4.0"
 
 ---
 
+## Task 2B: `PDEEngine` must forward event stats to its solver
+
+**Files:**
+- Modify: `quantark/asset/equity/engine/pde_engine.py` (add a `calculate_event_stats` override)
+- Create: `test/test_pde_engine_event_stats.py`
+
+**Interfaces:**
+- Produces: `PDEEngine.calculate_event_stats(product, pricing_env) -> Optional[AutocallableEventStats]` — delegates to the product's solver.
+
+**Found by running Task 2.** The G4 coupon solve succeeded (27/27), but the `flat_bsm` fleet replay that followed failed **27/27** with:
+
+```
+event-stats engine PDEEngine returned no stats while event probabilities were
+requested; set event_stats_fallback='mc' to opt into the MC fallback
+```
+
+**Root cause, traced:** `PDEEngine` (`pde_engine.py:43`) is a dispatch facade — `price()` routes to a product-specific solver via `_get_solver`, and `PRODUCT_SOLVER_MAP` sends `SnowballOption` to `SnowballPDESolver`. That solver **does** implement `calculate_event_stats` (`pde/snowball_pde_solver.py:445`), returning exact PDE event statistics. But the facade never overrides `calculate_event_stats`, so it inherits `BaseEngine`'s default (`base_engine.py:232`), which returns `None` meaning "not supported".
+
+That gap was silent until 0.4.0. The replay consolidation changed `event_stats_fallback` to default `"none"` (`replay/config.py:196`), which correctly treats a `None` return as a failure rather than a silent no-op. So a pre-existing plumbing gap became a hard stop for every PDE-priced replay.
+
+**Why the fix is delegation, not `event_stats_fallback="mc"`.** The exact statistics already exist and are cheap — they come out of the same PDE sweep. Switching on an MC fallback would substitute a sampled approximation for an available exact result, in a variant whose entire purpose is to be the deterministic control. Turning off `--event-probabilities` would hide the defect rather than fix it.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# test/test_pde_engine_event_stats.py
+"""PDEEngine must expose the event stats its solvers already compute.
+
+The facade dispatches price() to a product-specific solver but inherited
+BaseEngine.calculate_event_stats, which returns None for "unsupported".
+SnowballPDESolver implements it, so the facade was hiding a working result --
+invisible until the replay layer's fail-closed default turned None into an
+error.
+"""
+from datetime import datetime
+
+import pytest
+
+from quantark.asset.equity.engine.pde_engine import PDEEngine
+from quantark.asset.equity.product.option.snowball_option import SnowballOption
+from quantark.util.exceptions import ValidationError
+
+
+def test_pde_engine_returns_the_solver_event_stats(snowball_product, snowball_env):
+    stats = PDEEngine().calculate_event_stats(snowball_product, snowball_env)
+    assert stats is not None, "facade swallowed the solver's event stats"
+    assert len(stats.observation_dates) > 0
+    total_ko = sum(stats.ko_probabilities)
+    assert 0.0 <= total_ko <= 1.0 + 1e-9
+
+
+def test_pde_engine_event_stats_match_the_solver_directly(
+    snowball_product, snowball_env
+):
+    """Delegation must not transform the result."""
+    from quantark.asset.equity.engine.pde.snowball_pde_solver import (
+        SnowballPDESolver,
+    )
+
+    facade = PDEEngine().calculate_event_stats(snowball_product, snowball_env)
+    direct = SnowballPDESolver().calculate_event_stats(
+        snowball_product, snowball_env
+    )
+    assert facade.ko_probabilities == pytest.approx(direct.ko_probabilities)
+```
+
+Build `snowball_product` / `snowball_env` fixtures from the study's own term sheet so the test exercises a realistic instrument, not a degenerate one. `example/mo_volmodels/11_pde_convergence_gate.py` constructs exactly such a product — read how it does it and follow that shape rather than inventing parameters. Keep the grid coarse enough that the test runs in a couple of seconds.
+
+Add a third test for the unsupported-product path, asserting whichever behaviour you implement in Step 3 — and state your choice in the report.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `.venv/bin/python -m pytest test/test_pde_engine_event_stats.py -n0 -q`
+Expected: FAIL on `assert stats is not None` — the facade returns `None` today.
+
+- [ ] **Step 3: Implement the delegation**
+
+Add to `PDEEngine`, near `price()`:
+
+```python
+    def calculate_event_stats(
+        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+    ) -> Optional[AutocallableEventStats]:
+        """Forward to the product's solver, which owns the computation.
+
+        The base class returns None for "unsupported"; that default silently
+        discarded working solver results, and the replay layer's fail-closed
+        event-stats policy turned the discard into a hard failure.
+        """
+        return self._get_solver(product).calculate_event_stats(product, pricing_env)
+```
+
+One judgement call is yours: `_get_solver` raises `ValidationError` for a product type not in `PRODUCT_SOLVER_MAP`. Decide whether `calculate_event_stats` should propagate that (fail closed — the caller asked for something this engine cannot do) or catch it and return `None` (preserve the base class's "unsupported means None" contract). Both are defensible. Pick one, make the third test assert it, and justify the choice in one sentence in your report.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `.venv/bin/python -m pytest test/test_pde_engine_event_stats.py -n0 -q`
+Expected: PASS.
+
+- [ ] **Step 5: Check for blast radius — this is the risky part**
+
+`calculate_event_stats` now returns real data where it returned `None`. Anything that branched on `None` changes behaviour. Run the full suite:
+
+```bash
+.venv/bin/python -m pytest -q 2>&1 | tail -30
+```
+
+Known pre-existing failures, NOT yours: 3 in `test_adi_core_tau_exactness.py`, 1 in `test_snowball_pde_knocked_in_grid.py`. **Any other failure is caused by this change** — investigate it rather than accepting it. Pay particular attention to golden/oracle tests and to anything asserting `calculate_event_stats(...) is None`.
+
+- [ ] **Step 6: Re-run the fleet phase that exposed this**
+
+```bash
+.venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py \
+  --variants flat_bsm --data-end 2026-07-31 --workers 4 2>&1 \
+  | tee output/g4_fleet_recheck.log
+```
+
+Expected: `[summary] 27/27 runs completed` — previously `0/27 runs completed, 27 failed`. The coupon solve is cached in `inceptions.json`, so this is the replay phase only.
+
+Report the KO / matured / censored split. Per the spec, all 27 realized paths knock out.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add quantark/asset/equity/engine/pde_engine.py test/test_pde_engine_event_stats.py
+git commit -m "fix(equity): PDEEngine forwards event stats to its product solver"
+```
+
+---
+
 ## Task 3: Add the `flat_bsm_quad` engine-control variant
 
 **Files:**
