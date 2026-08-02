@@ -162,7 +162,7 @@ but **cannot** represent Dupire local vol or Heston.
 |---|---|---|---|
 | `flat_bsm` | PDE 1D | ATM IV at remaining maturity | baseline for `localvol` |
 | `flat_bsm_quad` | QUAD | identical to `flat_bsm` | **engine control (new)** |
-| `ts_bsm` | QUAD | ATM pillar term structure | vs `flat_bsm_quad` |
+| `ts_bsm` | PDE 1D | ATM pillar term structure | vs `flat_bsm` |
 | `localvol` | PDE 1D | Dupire off the SABR grid | vs `flat_bsm` |
 | `heston` | gate-decided | per-day Lewis calibration | vs `flat_bsm` |
 | `heston_slv` | gate-decided | + FP leverage surface | vs `flat_bsm` |
@@ -170,7 +170,12 @@ but **cannot** represent Dupire local vol or Heston.
 Every headline comparison is same-engine:
 
 - `localvol − flat_bsm` — both PDE 1D
-- `ts_bsm − flat_bsm_quad` — both QUAD
+- `ts_bsm − flat_bsm` — both PDE 1D (**corrected 2026-08-02**; this pair was
+  previously documented as `ts_bsm − flat_bsm_quad`, both QUAD. `ts_bsm` ships on
+  the PDE default, so the same-engine vol-input comparison runs against
+  `flat_bsm`. Owner decision: keep the landed engine, correct the document. The
+  comparison is unchanged in kind — engine held constant, flat vs term-structure
+  vol isolated — only the partner variant differs.)
 - `heston{,_slv} − flat_bsm` — cross-engine, bounded by the §5 gate tolerance
 
 `flat_bsm − flat_bsm_quad` is a **pure engine difference**: identical inputs,
@@ -194,7 +199,7 @@ same fail-closed refinement ladder, same `gate_decision.json` +
 |---|---|---|
 | `flat_bsm` | PDE 1D | QUAD at high `grid_points` |
 | `flat_bsm_quad` | QUAD | PDE 1D `accuracy="high"` |
-| `ts_bsm` | QUAD | PDE 1D `accuracy="high"` |
+| `ts_bsm` | PDE 1D | QUAD at high `grid_points` |
 | `localvol` | PDE 1D | `LocalVolSnowballMCEngine` (RQMC) |
 | `heston` | gate-decided | `QESnowballMCEngine` (RQMC-QE) |
 | `heston_slv` | gate-decided | `HestonSLVQESnowballMCEngine` |
