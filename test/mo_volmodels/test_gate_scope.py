@@ -44,7 +44,7 @@ def test_flat_bsm_quad_differs_from_flat_bsm_in_engine_only():
 def test_engine_config_honours_the_variant_pricing_engine_type():
     """A new VariantSpec field is inert until make_engine_config reads it."""
     s12 = _load_stage12()
-    routing = s12.GateRouting("p", None, {}, {})
+    routing = s12.GateRouting("p", None, {"flat_bsm": "pde", "flat_bsm_quad": "pde"}, {})
     cfg = s12.make_engine_config("flat_bsm_quad", routing=routing)
     assert cfg.pricing_engine_type == EngineType.QUADRATURE
     assert s12.make_engine_config(
@@ -250,3 +250,14 @@ def test_attach_feller_ratio_is_none_when_heston_model_missing():
     case = {"cells": [{"variant": "heston"}], "deltas": []}
     gate._attach_feller_ratio(case, {})
     assert case["cells"][0]["feller_ratio"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task 8 Step 2: GateRouting no longer short-circuits the 1D/quad variants
+# ---------------------------------------------------------------------------
+
+
+def test_routing_no_longer_short_circuits_one_d_variants():
+    s12 = _load_stage12()
+    routing = s12.GateRouting("p", None, {"localvol": "mc"}, {})
+    assert routing.solver_for("localvol") == "mc"

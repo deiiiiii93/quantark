@@ -17,11 +17,17 @@ fair coupon is solved once at inception under flat BSM (Gate G4), so the
 comparison isolates the pricing/hedging model rather than the term sheet.
 
 Engine routing follows the Gate G2 decision recorded by stage 11
-(``output/pde_convergence_gate/gate_decision.json``): BSM/TS/LV price on the
-1D snowball PDE, Heston and Heston-SLV route to RQMC-QE Monte Carlo because
-their 2D-ADI PDE route failed the convergence gate.  The routing is READ from
-that file, not hardcoded, and the run manifest records which decision file
-(and its evidence hash) was in force.
+(``output/pde_convergence_gate/gate_decision.json``): every one of the six
+study variants -- ``flat_bsm``, ``flat_bsm_quad``, ``ts_bsm``, ``localvol``,
+``heston``, ``heston_slv`` -- reads its own route from that file's
+``variants`` map (keyed by the study variant name, not by ``vol_model``:
+flat_bsm/flat_bsm_quad/ts_bsm all share ``vol_model="bsm"`` but can carry
+independent verdicts).  Historically BSM/TS/LV always passed to the PDE
+route and Heston/Heston-SLV fell back to RQMC-QE Monte Carlo (their 2D-ADI
+route failed the convergence gate), but none of that is hardcoded -- see
+``GateRouting.solver_for``.  The routing is READ from that file, not
+hardcoded, and the run manifest records which decision file (and its
+evidence hash) was in force.
 
 Trade lifecycle per inception: the replay runs from inception until knock-out,
 maturity, or the end of the data window, whichever comes first.  Runs that hit
@@ -252,26 +258,45 @@ class GateRouting:
 
     decision_path: str
     evidence_sha256: Optional[str]
-    routes: Dict[str, str]  # vol_model -> "pde" | "mc"
+    routes: Dict[str, str]  # study variant name -> "pde" | "mc"
     pde_params: Dict[str, Dict[str, Any]]
 
-    def solver_for(self, vol_model: str) -> str:
-        if vol_model in ("bsm", "localvol"):
-            # BSM and LV are 1D solvers, outside the 2D-ADI gate's scope.
-            return "pde"
-        route = self.routes.get(vol_model)
+    def solver_for(self, variant: str) -> str:
+        """Route for one of the six study variants.
+
+        ``self.routes`` is keyed by the study VARIANT name (``flat_bsm``,
+        ``flat_bsm_quad``, ``ts_bsm``, ``localvol``, ``heston``,
+        ``heston_slv``) -- exactly the keys ``build_decision_payload``
+        (stage 11) writes into the decision's ``variants`` map, per
+        ``variant`` in ``GATE_PAIRS`` -- not by ``vol_model``.  That
+        distinction matters because ``flat_bsm``, ``flat_bsm_quad`` and
+        ``ts_bsm`` all share ``vol_model == "bsm"`` yet can carry
+        independent gate verdicts.  There is no fallback for a missing or
+        unrecognised route: after Task 4 every variant, including the four
+        1D/quad ones, is inside the gate's scope, so an absent or malformed
+        entry must raise rather than silently default to PDE.
+        """
+        route = self.routes.get(variant)
         if route not in ("pde", "mc"):
             raise ValidationError(
-                f"gate decision has no usable route for vol_model={vol_model!r} "
+                f"gate decision has no usable route for variant={variant!r} "
                 f"(got {route!r}); rerun stage 11 before the fleet"
             )
         return route
 
-    def engine_options_for(self, vol_model: str) -> Dict[str, Any]:
-        """PDE grid options for a variant the gate admitted to the PDE route."""
-        if self.solver_for(vol_model) != "pde" or vol_model in ("bsm", "localvol"):
+    def engine_options_for(self, variant: str) -> Dict[str, Any]:
+        """PDE grid options for a variant the gate admitted to the PDE route.
+
+        Only the 2D-ADI family (``heston``, ``heston_slv``) records
+        ``n_x``/``n_v``/``n_t`` in its ``pde_params`` block; the four
+        1D/quad variants record their own ladder knob (``accuracy`` /
+        ``grid_points``) instead (see ``_production_params_block`` in stage
+        11), so the dict comprehension below is naturally empty for them --
+        no name-based special case is needed.
+        """
+        if self.solver_for(variant) != "pde":
             return {}
-        params = self.pde_params.get(vol_model, {})
+        params = self.pde_params.get(variant, {})
         return {
             key: int(params[key])
             for key in ("n_x", "n_v", "n_t")
@@ -694,7 +719,11 @@ def make_engine_config(
 ) -> AutocallableEngineConfig:
     """Daily pricing engine configuration for one variant."""
     spec = VARIANT_SPECS[variant]
-    solver = routing.solver_for(spec.vol_model)
+    # Route by the study VARIANT name, not spec.vol_model: the decision's
+    # variants map is keyed by variant (flat_bsm/flat_bsm_quad/ts_bsm all
+    # share vol_model="bsm" but can carry independent verdicts) -- see
+    # GateRouting.solver_for.
+    solver = routing.solver_for(variant)
     mc_paths = QUICK_MC_PATHS_PER_BATCH if quick else MC_PATHS_PER_BATCH
     mc_batches = QUICK_MC_BATCHES if quick else MC_BATCHES
 
@@ -726,7 +755,7 @@ def make_engine_config(
         vol_model=spec.vol_model,
         vol_model_solver=solver,
         vol_model_calibration=calibration,
-        vol_model_engine_options=routing.engine_options_for(spec.vol_model),
+        vol_model_engine_options=routing.engine_options_for(variant),
     )
 
 
@@ -1031,7 +1060,13 @@ def prepare_inceptions(
 
     prepared: List[Dict[str, Any]] = []
     coupon_engine_config = make_engine_config(
-        "flat_bsm", routing=GateRouting("", None, {}, {}), calibration_cache_dir=None
+        "flat_bsm",
+        # Gate G4 solves the coupon under flat BSM on the 1D PDE regardless
+        # of what Gate G2 decides for the fleet's other five variants, so
+        # this pins "flat_bsm" -> "pde" explicitly rather than depending on
+        # the (now removed) GateRouting short-circuit.
+        routing=GateRouting("", None, {"flat_bsm": "pde"}, {}),
+        calibration_cache_dir=None,
     )
     print(
         f"[coupons] solving fair coupons for {len(inceptions)} inceptions "

@@ -215,19 +215,55 @@ def test_schedule_on_the_real_window(calendar):
 # Gate G2 routing
 # ---------------------------------------------------------------------------
 
-def _routing(**routes):
+def _routing(**overrides):
+    """Test double for a gate decision, keyed by study VARIANT name.
+
+    flat_bsm/flat_bsm_quad/ts_bsm/localvol default to "pde" so tests that
+    are not specifically exercising 1D/quad routing don't have to spell out
+    all four every time; heston/heston_slv are left unset unless a test
+    passes them explicitly, since those are what most routing tests vary.
+    """
+    routes = {
+        "flat_bsm": "pde",
+        "flat_bsm_quad": "pde",
+        "ts_bsm": "pde",
+        "localvol": "pde",
+    }
+    routes.update(overrides)
     return s12.GateRouting(
         decision_path="test",
         evidence_sha256="deadbeef",
-        routes=dict(routes),
+        routes=routes,
         pde_params={"heston": {"n_x": 200, "n_v": 60, "n_t": 1202, "scheme": "cs"}},
     )
 
 
-def test_one_dimensional_variants_never_consult_the_2d_gate():
-    routing = _routing(heston="mc", heston_slv="mc")
-    assert routing.solver_for("bsm") == "pde"
-    assert routing.solver_for("localvol") == "pde"
+def test_one_dimensional_variants_now_read_their_own_route_from_the_decision():
+    """After Task 4, flat_bsm/flat_bsm_quad/ts_bsm/localvol are inside the
+    gate's scope too. They share vol_model across the three bsm variants,
+    but the decision keys routes by the STUDY VARIANT name, so each can get
+    an independent verdict -- proven here by giving them different routes."""
+    routing = _routing(flat_bsm="mc", ts_bsm="pde", localvol="mc")
+    assert routing.solver_for("flat_bsm") == "mc"
+    assert routing.solver_for("ts_bsm") == "pde"
+    assert routing.solver_for("localvol") == "mc"
+
+
+def test_one_dimensional_variant_fails_closed_when_its_route_is_missing():
+    """No more short-circuit: an absent 1D/quad entry must raise, never
+    silently default to PDE."""
+    routing = s12.GateRouting("t", None, {"heston": "mc"}, {})
+    with pytest.raises(ValidationError, match="no usable route"):
+        routing.solver_for("flat_bsm")
+    with pytest.raises(ValidationError, match="no usable route"):
+        routing.solver_for("localvol")
+
+
+def test_one_dimensional_variant_fails_closed_on_an_unrecognised_route_string():
+    """Present-but-garbage is just as fatal as absent -- no partial trust."""
+    routing = s12.GateRouting("t", None, {"flat_bsm": "quadrature"}, {})
+    with pytest.raises(ValidationError, match="no usable route"):
+        routing.solver_for("flat_bsm")
 
 
 def test_routing_reads_the_decision_file_not_a_hardcoded_default():
