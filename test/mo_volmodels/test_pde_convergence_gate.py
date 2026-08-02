@@ -58,6 +58,37 @@ def _cell(date_s, case, *, level="medium", passed=True, signed=0.1, pde=10.0, no
     }
 
 
+def _delta_row(date_s, case, *, s0=100.0, signed_diff=0.0, passed=True):
+    """A Task-6 delta row (see gate11.decide_route / detect_delta_bias)."""
+    return {
+        "date": date_s,
+        "case": case,
+        "variant": "heston",
+        "level": "medium",
+        "s0": s0,
+        "signed_diff": signed_diff,
+        "passed": passed,
+    }
+
+
+# Neutral delta evidence for decide_route tests whose PV cells are the thing
+# under test: passes cleanly and carries zero mean bias, so it never itself
+# routes the variant to "mc".
+_PASSING_DELTAS = [_delta_row("2023-05-15", "full"), _delta_row("2024-02-08", "full")]
+
+
+def _all_pass_medium_fine():
+    medium = [_cell("2023-05-15", "full", signed=0.1, pde=10.10),
+              _cell("2023-05-15", "decayed", signed=-0.1, pde=9.90),
+              _cell("2024-02-08", "full", signed=0.12, pde=10.12),
+              _cell("2024-02-08", "decayed", signed=-0.08, pde=9.92)]
+    fine = [_cell("2023-05-15", "full", level="fine", signed=0.05, pde=10.15),
+            _cell("2023-05-15", "decayed", level="fine", signed=-0.05, pde=9.95),
+            _cell("2024-02-08", "full", level="fine", signed=0.06, pde=10.18),
+            _cell("2024-02-08", "decayed", level="fine", signed=-0.04, pde=9.96)]
+    return medium, fine
+
+
 # ---------------------------------------------------------------------------
 # add_months / calendar
 # ---------------------------------------------------------------------------
@@ -254,18 +285,12 @@ def test_detect_systematic_bias_fraction_threshold():
 
 
 def test_decide_route_all_pass():
-    medium = [_cell("2023-05-15", "full", signed=0.1, pde=10.10),
-              _cell("2023-05-15", "decayed", signed=-0.1, pde=9.90),
-              _cell("2024-02-08", "full", signed=0.12, pde=10.12),
-              _cell("2024-02-08", "decayed", signed=-0.08, pde=9.92)]
-    fine = [_cell("2023-05-15", "full", level="fine", signed=0.05, pde=10.15),
-            _cell("2023-05-15", "decayed", level="fine", signed=-0.05, pde=9.95),
-            _cell("2024-02-08", "full", level="fine", signed=0.06, pde=10.18),
-            _cell("2024-02-08", "decayed", level="fine", signed=-0.04, pde=9.96)]
-    out = gate11.decide_route(medium, fine, 0.25)
+    medium, fine = _all_pass_medium_fine()
+    out = gate11.decide_route(medium, fine, _PASSING_DELTAS, 0.25)
     assert out["route"] == "pde"
     assert out["medium_pass"] and out["fine_pass"] and not out["biased"]
     assert out["drift_max_pct"] <= 0.25
+    assert out["delta_pass"] is True and out["delta_biased"] is False
 
 
 def test_decide_route_medium_failure_is_mc():
@@ -275,7 +300,7 @@ def test_decide_route_medium_failure_is_mc():
               _cell("2024-02-08", "decayed")]
     fine = [_cell(d, c, level="fine") for d, c in
             [("2023-05-15", "full"), ("2023-05-15", "decayed"), ("2024-02-08", "full"), ("2024-02-08", "decayed")]]
-    out = gate11.decide_route(medium, fine, 0.25)
+    out = gate11.decide_route(medium, fine, _PASSING_DELTAS, 0.25)
     assert out["route"] == "mc"
     assert "medium" in out["rationale"]
 
@@ -285,7 +310,7 @@ def test_decide_route_bias_is_mc_even_inside_tolerance():
     medium = [_cell(f"2023-0{i}-15", "full", signed=0.13) for i in range(1, 5)] + \
              [_cell(f"2023-0{i}-15", "decayed", signed=0.14) for i in range(1, 5)]
     fine = [_cell(c["date"], c["case"], level="fine", signed=0.13, pde=10.10) for c in medium]
-    out = gate11.decide_route(medium, fine, 0.25)
+    out = gate11.decide_route(medium, fine, _PASSING_DELTAS, 0.25)
     assert out["route"] == "mc"
     assert out["biased"] is True
     assert "bias" in out["rationale"]
@@ -295,7 +320,7 @@ def test_decide_route_fine_drift_is_mc():
     medium = [_cell(f"2023-0{i}-15", "full", signed=0.05 * (1 if i % 2 else -1), pde=10.0) for i in range(1, 5)] + \
              [_cell(f"2023-0{i}-15", "decayed", signed=0.05 * (1 if i % 2 else -1), pde=10.0) for i in range(1, 5)]
     fine = [_cell(c["date"], c["case"], level="fine", signed=0.04, pde=10.4) for c in medium]
-    out = gate11.decide_route(medium, fine, 0.25)
+    out = gate11.decide_route(medium, fine, _PASSING_DELTAS, 0.25)
     assert out["route"] == "mc"
     assert out["drift_max_pct"] > 0.25
     assert "drift" in out["rationale"]
@@ -308,22 +333,60 @@ def test_decide_route_error_cell_is_mc():
               _cell("2024-02-08", "decayed")]
     fine = [_cell(d, c, level="fine") for d, c in
             [("2023-05-15", "full"), ("2023-05-15", "decayed"), ("2024-02-08", "full"), ("2024-02-08", "decayed")]]
-    out = gate11.decide_route(medium, fine, 0.25)
+    out = gate11.decide_route(medium, fine, _PASSING_DELTAS, 0.25)
     assert out["route"] == "mc"
 
 
 def test_decide_route_empty_cells_is_mc():
-    out = gate11.decide_route([], [], 0.25)
+    out = gate11.decide_route([], [], [], 0.25)
     assert out["route"] == "mc"
     assert "no cells evaluated" in out["rationale"]
     assert out["medium_pass"] is False and out["fine_pass"] is False
+    assert out["delta_pass"] is False
     fine_only = [_cell("2023-05-15", "full", level="fine")]
-    out2 = gate11.decide_route([], fine_only, 0.25)
+    out2 = gate11.decide_route([], fine_only, [], 0.25)
     assert out2["route"] == "mc"
     assert "no cells evaluated" in out2["rationale"]
     medium_only = [_cell("2023-05-15", "full")]
-    out3 = gate11.decide_route(medium_only, [], 0.25)
+    out3 = gate11.decide_route(medium_only, [], [], 0.25)
     assert out3["route"] == "mc"
+
+
+def test_decide_route_delta_cell_failure_is_mc():
+    """Every PV cell passes, but one delta row exceeds half a contract."""
+    medium, fine = _all_pass_medium_fine()
+    deltas = [_delta_row("2023-05-15", "full", passed=False),
+              _delta_row("2024-02-08", "full", passed=True)]
+    out = gate11.decide_route(medium, fine, deltas, 0.25)
+    assert out["route"] == "mc"
+    assert out["delta_pass"] is False
+    assert "delta disagreement" in out["rationale"]
+
+
+def test_decide_route_delta_bias_is_mc_even_though_each_cell_passes():
+    """Each delta cell individually passes, but they're all one-sided."""
+    medium, fine = _all_pass_medium_fine()
+    s0 = 6733.97
+    q = gate11.delta_quantum_per_unit(s0)
+    deltas = [
+        _delta_row(f"2023-0{i}-15", "full", s0=s0, signed_diff=0.2 * q, passed=True)
+        for i in range(1, 9)
+    ]
+    assert all(d["passed"] for d in deltas)  # confirms the bias is NOT a cell failure
+    out = gate11.decide_route(medium, fine, deltas, 0.25)
+    assert out["route"] == "mc"
+    assert out["delta_pass"] is True
+    assert out["delta_biased"] is True
+    assert "delta bias" in out["rationale"]
+
+
+def test_decide_route_empty_delta_rows_is_mc_even_when_pv_all_passes():
+    """Empty delta evidence must not admit PDE -- mirrors empty PV evidence."""
+    medium, fine = _all_pass_medium_fine()
+    out = gate11.decide_route(medium, fine, [], 0.25)
+    assert out["route"] == "mc"
+    assert out["delta_pass"] is False
+    assert "no delta evidence" in out["rationale"]
 
 
 # ---------------------------------------------------------------------------

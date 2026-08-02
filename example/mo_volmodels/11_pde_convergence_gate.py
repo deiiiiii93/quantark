@@ -28,12 +28,15 @@ Gate rule (per variant): the production engine is admitted only if the MEDIUM
 grid passes ``|production - reference| <= max(2 * mc_se, TOL_ABS)`` (mc_se = 0
 for a deterministic reference; TOL_ABS = 0.25% of notional) on EVERY sampled
 date/case, shows no systematic sign bias (a biased production engine fails
-even inside tolerance), the FINE grid also passes, and |fine - medium| <=
-TOL_ABS everywhere (no drift).  Any other outcome routes the variant away from
-its production engine, with the ladder reported honestly.  For heston/
-heston_slv, deltas (2D-ADI bumped vs MC CRN-bumped) are secondary evidence,
-reported but not gated; the other four variants don't carry this check (see
-``GATE_PAIRS`` and the guards in ``_evaluate_case``/``_extras_first_date``).
+even inside tolerance), the FINE grid also passes, |fine - medium| <=
+TOL_ABS everywhere (no drift), AND the production engine's bumped delta
+agrees with the reference's within half a futures contract's worth of
+per-unit delta on every sampled date, with no systematic one-sided delta
+bias across them (spec §5.3) -- a snowball is delta-hedged daily, so a
+PV-only gate would admit an engine that manufactures spurious hedge trades
+on every rebalance.  Any other outcome routes the variant away from its
+production engine, with the ladder reported honestly.  See ``GATE_PAIRS``,
+``delta_quantum_per_unit``, ``delta_cell_passed`` and ``detect_delta_bias``.
 
 Determinism: fixed seeds and fixed Sobol batches everywhere; rerunning the
 study reproduces identical JSON modulo ``"timings"`` fields (excluded from the
@@ -92,6 +95,7 @@ from quantark.param import FlatRateCurve, GridVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import MonteCarloMethod
+from quantark.util.numerical import safe_divide
 from quantark.volmodels.localvol import build_dupire_local_vol
 
 # ---------------------------------------------------------------------------
@@ -752,6 +756,66 @@ def detect_systematic_bias_bucketed(
     return any_biased, {"buckets": buckets, "pooled_not_used": True}
 
 
+# ---------------------------------------------------------------------------
+# Hedge-derived delta admission (spec §5.3).  The gate prices a 1-unit
+# product; the backtest holds NOTIONAL/s0 index units.  One IM futures
+# contract covers FUTURES_MULTIPLIER index points, so it moves
+# FUTURES_MULTIPLIER * s0 / STUDY_NOTIONAL of per-unit delta.  s0 varies
+# 1.49x across the 27 inceptions, so this is computed per date, never fixed.
+# ---------------------------------------------------------------------------
+
+FUTURES_MULTIPLIER = 200.0
+STUDY_NOTIONAL = 50_000_000.0
+DELTA_CELL_CONTRACTS = 0.5    # rounding provably absorbs less than this
+DELTA_BIAS_CONTRACTS = 0.1    # accumulates over ~700 rebalances
+
+
+def delta_quantum_per_unit(
+    s0: float,
+    notional: float = STUDY_NOTIONAL,
+    multiplier: float = FUTURES_MULTIPLIER,
+) -> float:
+    """Per-unit delta moved by exactly one IM futures contract.
+
+    A degenerate s0/notional collapses the quantum to 0.0 (safe_divide's
+    fallback) rather than raising -- that makes delta_cell_passed
+    unattainable except at exact agreement, i.e. it fails closed, never
+    lenient.
+    """
+    return float(safe_divide(float(multiplier) * float(s0), float(notional)))
+
+
+def delta_cell_passed(abs_diff: float, s0: float, **kw) -> bool:
+    """Delta agreement within half a futures contract's worth of per-unit delta."""
+    return abs(float(abs_diff)) <= DELTA_CELL_CONTRACTS * delta_quantum_per_unit(s0, **kw)
+
+
+def detect_delta_bias(rows: Sequence[Dict[str, Any]]) -> Tuple[bool, Dict[str, Any]]:
+    """Mean SIGNED delta difference in contracts, against the bias bound.
+
+    Signed, not absolute: contract rounding kills symmetric noise but lets a
+    one-sided bias accumulate over the rebalance schedule.  Rows missing
+    ``signed_diff``/``s0`` (an unevaluable delta cell, already recorded as
+    ``passed: False`` at the row level) are excluded from the mean -- exactly
+    like detect_systematic_bias_bucketed's thin buckets, they can neither
+    flag bias nor mask it.
+    """
+    contracts = [
+        float(safe_divide(float(r["signed_diff"]), delta_quantum_per_unit(float(r["s0"]))))
+        for r in rows
+        if r.get("signed_diff") is not None and r.get("s0")
+    ]
+    if not contracts:
+        return False, {"n_rows": 0, "mean_signed_contracts": None}
+    mean_signed = float(np.mean(contracts))
+    return abs(mean_signed) > DELTA_BIAS_CONTRACTS, {
+        "n_rows": len(contracts),
+        "mean_signed_contracts": mean_signed,
+        "max_abs_contracts": max(abs(c) for c in contracts),
+        "bound_contracts": DELTA_BIAS_CONTRACTS,
+    }
+
+
 def _finite_or_error(value: Any, what: str) -> Optional[str]:
     """Return None when ``value`` is a finite float, else an error string.
 
@@ -770,15 +834,23 @@ def _finite_or_error(value: Any, what: str) -> Optional[str]:
 def decide_route(
     medium_cells: Sequence[Dict[str, Any]],
     fine_cells: Sequence[Dict[str, Any]],
+    delta_rows: Sequence[Dict[str, Any]],
     tol_abs_pct: float = TOL_ABS_PCT,
 ) -> Dict[str, Any]:
     """Route decision for one variant from its medium/fine gate cells.
 
     PDE is admitted only if: every medium cell passes, no systematic bias at
-    medium, every fine cell passes, and |fine - medium| <= TOL_ABS on every
-    paired cell (no drift).  Any cell carrying an ``error`` counts as failed.
-    Zero evaluable cells never admits PDE (``all([])`` is vacuously True).
+    medium, every fine cell passes, |fine - medium| <= TOL_ABS on every paired
+    cell (no drift), AND the production engine's delta agrees with the
+    reference's within half a futures contract on every sampled date with no
+    systematic one-sided delta bias (spec §5.3) -- a snowball is delta-hedged
+    daily, so PV agreement alone is not sufficient evidence.  Any cell
+    carrying an ``error`` counts as failed.  Zero evaluable cells never
+    admits PDE (``all([])`` is vacuously True; ``delta_pass`` is explicitly
+    forced False on empty ``delta_rows`` to mirror this).
     """
+    delta_pass = all(r.get("passed") is True for r in delta_rows) if delta_rows else False
+    delta_biased, delta_info = detect_delta_bias(delta_rows)
     if not medium_cells or not fine_cells:
         return {
             "route": "mc",
@@ -788,6 +860,9 @@ def decide_route(
             "bias": {"n_cells": 0, "note": "empty ladder"},
             "drift_max_pct": 0.0,
             "drift_location": None,
+            "delta_pass": delta_pass,
+            "delta_biased": bool(delta_biased),
+            "delta_info": delta_info,
             "rationale": (
                 "no cells evaluated for this variant "
                 f"({len(medium_cells)} medium / {len(fine_cells)} fine) - "
@@ -839,11 +914,36 @@ def decide_route(
             f"medium->fine drift {drift_max:.3f}% of notional at {drift_where} "
             f"exceeds TOL_ABS {tol_abs_pct:.3f}%"
         )
-    route = "pde" if (medium_pass and not biased and fine_pass and drift_ok) else "mc"
+    if not delta_pass:
+        if not delta_rows:
+            reasons.append(
+                "no delta evidence for this variant - refusing to admit PDE on "
+                "empty evidence"
+            )
+        else:
+            failing = [
+                f"{r['date']}/{r.get('case', '?')}" for r in delta_rows if r.get("passed") is not True
+            ]
+            reasons.append(
+                f"delta disagreement exceeds half a futures contract on "
+                f"{len(failing)} cell(s): {', '.join(failing)}"
+            )
+    if delta_biased:
+        reasons.append(
+            f"systematic one-sided delta bias: mean "
+            f"{delta_info['mean_signed_contracts']:+.3f} contracts exceeds the "
+            f"{delta_info['bound_contracts']} contract bound"
+        )
+    route = "pde" if (
+        medium_pass and not biased and fine_pass and drift_ok
+        and delta_pass and not delta_biased
+    ) else "mc"
     if route == "pde":
         rationale = (
             "medium grid inside tolerance on all sampled dates/cases, no sign "
-            "bias, fine grid confirms (pass + no drift)"
+            "bias, fine grid confirms (pass + no drift), and delta agrees "
+            "with the reference within half a futures contract with no "
+            "systematic bias"
         )
     else:
         rationale = "; ".join(reasons) if reasons else "route mc by default"
@@ -855,6 +955,9 @@ def decide_route(
         "bias": bias_info,
         "drift_max_pct": drift_max,
         "drift_location": drift_where,
+        "delta_pass": bool(delta_pass),
+        "delta_biased": bool(delta_biased),
+        "delta_info": delta_info,
         "rationale": rationale,
     }
 
@@ -984,7 +1087,13 @@ def validate_decision_payload(payload: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 def _bumped_pde_delta(engine, product, env, bump: float = SPOT_BUMP) -> float:
-    """Central bumped delta (same formula as BaseEngine.calculate_greeks)."""
+    """Central bumped delta (same formula as BaseEngine.calculate_greeks).
+
+    Works for any DETERMINISTIC engine (1D PDE, 2D-ADI PDE, QUAD): built
+    once by the caller, priced twice here.  Used for both the production
+    engine and a deterministic reference (spec §5.3) -- a deterministic
+    reference has no CRN to arrange, so it reuses this same central bump.
+    """
     s0 = float(env.spot)
     env_up = deepcopy(env)
     env_up.spot_quote.spot = s0 * (1.0 + bump)
@@ -995,15 +1104,23 @@ def _bumped_pde_delta(engine, product, env, bump: float = SPOT_BUMP) -> float:
     )
 
 
-def _bumped_mc_delta(variant, model, product, env, mcp, mc_cfg, bump: float = SPOT_BUMP) -> float:
-    """Central bumped MC delta with common random numbers (same fixed seed)."""
+def _bumped_mc_delta(build_reference, model, product, env, bump: float = SPOT_BUMP) -> float:
+    """Central bumped MC delta with common random numbers (same fixed seed).
+
+    ``build_reference`` is ``GATE_PAIRS[variant].build_reference`` -- called
+    here with ``grid=None`` (the reference is never laddered), driving this
+    off the pair table instead of assuming a Heston/Heston-SLV engine.  Each
+    reference builder bakes in the fixed module-level SEED, so rebuilding it
+    fresh for each bump reproduces identical random draws (CRN) with no
+    extra seed plumbing.
+    """
     s0 = float(env.spot)
     env_up = deepcopy(env)
     env_up.spot_quote.spot = s0 * (1.0 + bump)
     env_dn = deepcopy(env)
     env_dn.spot_quote.spot = s0 * (1.0 - bump)
-    eng_up = _make_mc_engine(variant, model, mcp, mc_cfg["substeps_per_interval"])
-    eng_dn = _make_mc_engine(variant, model, mcp, mc_cfg["substeps_per_interval"])
+    eng_up = build_reference(model, None)
+    eng_dn = build_reference(model, None)
     return (float(eng_up.price(product, env_up)) - float(eng_dn.price(product, env_dn))) / (
         2.0 * s0 * bump
     )
@@ -1023,9 +1140,6 @@ def _evaluate_case(
     product = build_snowball_product(terms, s0_inception)
     notional = float(s0_inception)  # initial_price x contract_multiplier(=1)
     quick = bool(cfg["quick"])
-    mcp = _make_mc_params(cfg["mc"], cfg["seed"])
-    pdep = PDEParams()  # remediated defaults: cell_average projection, 2 event-Rannacher steps
-    ladder = pde_ladder(terms.maturity_years, quick)  # 2D-ADI ladder; secondary-evidence use only
 
     mc_refs: Dict[str, Any] = {}
     cells: List[Dict[str, Any]] = []
@@ -1155,56 +1269,71 @@ def _evaluate_case(
                 )
             cells.append(cell)
 
-        # Secondary evidence: model-consistent delta agreement (full case only,
-        # medium grid; PDE bumped vs MC CRN-bumped at the reference config).
-        # Scoped to the 2D-ADI pair (heston/heston_slv): it is the only family
-        # where both _make_pde_engine and the CRN-paired _make_mc_engine apply.
-        if case_name == "full" and pair.production.startswith("pde_2d"):
-            medium_grid = next((g for g in ladder if g[0] == "medium"), None)
-            if medium_grid is not None:
-                _, n_x, n_v, n_t = medium_grid
-                solver = _make_pde_engine(variant, model, pdep, (n_x, n_v, n_t))
-                delta_row = {
-                    "date": date_iso,
-                    "case": case_name,
-                    "variant": variant,
-                    "level": "medium",
-                    "delta_pde": None,
-                    "delta_mc": None,
-                    "abs_diff": None,
-                    "error": None,
-                    "timings": {},
-                }
-                try:
-                    t1 = time.perf_counter()
-                    delta_row["delta_pde"] = _bumped_pde_delta(solver, product, env)
-                    delta_row["timings"]["pde_delta_seconds"] = time.perf_counter() - t1
-                except Exception as exc:
-                    delta_row["error"] = f"pde delta: {type(exc).__name__}: {exc}"
-                try:
-                    t1 = time.perf_counter()
-                    delta_row["delta_mc"] = _bumped_mc_delta(
-                        variant, model, product, env, mcp, cfg["mc"]
+        # Gate G2 delta admission (spec §5.3): production engine bumped
+        # centrally against the reference, built from GATE_PAIRS[variant]
+        # the same way the PV cells above are -- not special-cased to any
+        # one engine family.  Every variant carries this now; it drives
+        # decide_route, it is not a report footnote.
+        if case_name == "full":
+            medium_grid = _production_grid(variant, "medium", terms.maturity_years, quick)
+            delta_row = {
+                "date": date_iso,
+                "case": case_name,
+                "variant": variant,
+                "level": "medium",
+                "s0": float(s0_inception),
+                "delta_production": None,
+                "delta_reference": None,
+                "signed_diff": None,
+                "abs_diff": None,
+                "diff_contracts": None,
+                "passed": False,        # fail closed until proven otherwise
+                "error": None,
+                "timings": {},
+            }
+            try:
+                t1 = time.perf_counter()
+                prod_engine = pair.build_production(model, medium_grid)
+                delta_row["delta_production"] = _bumped_pde_delta(prod_engine, product, env)
+                delta_row["timings"]["production_delta_seconds"] = time.perf_counter() - t1
+            except Exception as exc:
+                delta_row["error"] = f"production delta: {type(exc).__name__}: {exc}"
+            try:
+                t1 = time.perf_counter()
+                if pair.reference_is_mc:
+                    delta_row["delta_reference"] = _bumped_mc_delta(
+                        pair.build_reference, model, product, env
                     )
-                    delta_row["timings"]["mc_delta_seconds"] = time.perf_counter() - t1
-                except Exception as exc:
+                else:
+                    ref_engine = pair.build_reference(model, None)
+                    delta_row["delta_reference"] = _bumped_pde_delta(ref_engine, product, env)
+                delta_row["timings"]["reference_delta_seconds"] = time.perf_counter() - t1
+            except Exception as exc:
+                delta_row["error"] = (
+                    f"{delta_row['error']}; reference delta: {type(exc).__name__}: {exc}"
+                    if delta_row["error"]
+                    else f"reference delta: {type(exc).__name__}: {exc}"
+                )
+            for key in ("delta_production", "delta_reference"):
+                err = _finite_or_error(delta_row[key], key)
+                if err is not None:
                     delta_row["error"] = (
-                        f"{delta_row['error']}; mc delta: {type(exc).__name__}: {exc}"
-                        if delta_row["error"]
-                        else f"mc delta: {type(exc).__name__}: {exc}"
+                        f"{delta_row['error']}; {err}" if delta_row["error"] else err
                     )
-                for key in ("delta_pde", "delta_mc"):
-                    err = _finite_or_error(delta_row[key], key)
-                    if err is not None:
-                        delta_row["error"] = (
-                            f"{delta_row['error']}; {err}" if delta_row["error"] else err
-                        )
-                        delta_row[key] = None
-                if delta_row["delta_pde"] is not None and delta_row["delta_mc"] is not None:
-                    delta_row["abs_diff"] = abs(
-                        delta_row["delta_pde"] - delta_row["delta_mc"]
-                    )
-                deltas.append(delta_row)
+                    delta_row[key] = None
+            if delta_row["delta_production"] is not None and delta_row["delta_reference"] is not None:
+                signed = delta_row["delta_production"] - delta_row["delta_reference"]
+                delta_row["signed_diff"] = signed
+                delta_row["abs_diff"] = abs(signed)
+                delta_row["diff_contracts"] = float(
+                    safe_divide(signed, delta_quantum_per_unit(float(s0_inception)))
+                )
+                delta_row["passed"] = delta_cell_passed(abs(signed), float(s0_inception))
+            else:
+                delta_row["signed_diff"] = None
+                delta_row["diff_contracts"] = None
+                delta_row["passed"] = False        # fail closed
+            deltas.append(delta_row)
 
     return {"mc_refs": mc_refs, "cells": cells, "deltas": deltas}
 
@@ -1231,8 +1360,9 @@ def _extras_first_date(
     substeps_rows = []
     for variant in VARIANTS:
         # QE substeps_per_interval is a Heston/Heston-SLV discretization knob;
-        # _make_mc_engine only builds those two engines, so scope this check
-        # to the 2D-ADI pair the same way the delta secondary evidence is.
+        # _make_mc_engine only builds those two engines, so (unlike the Gate
+        # G2 delta check, which now runs for all six variants) this stays
+        # scoped to the 2D-ADI pair.
         if not GATE_PAIRS[variant].production.startswith("pde_2d"):
             continue
         row = {
@@ -1616,7 +1746,8 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
         v_cells = [c for c in cells if c["variant"] == variant]
         medium = [c for c in v_cells if c["level"] == "medium"]
         fine = [c for c in v_cells if c["level"] == "fine"]
-        decision = decide_route(medium, fine, cfg["tol_abs_pct"])
+        v_deltas = [d for d in gate.get("deltas", []) if d["variant"] == variant]
+        decision = decide_route(medium, fine, v_deltas, cfg["tol_abs_pct"])
         medium_grid = next(
             (c["grid"] for c in medium if c["case"] == "full"),
             medium[0]["grid"] if medium else None,
@@ -1644,6 +1775,9 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
                 "bias": decision["bias"],
                 "drift_max_pct": decision["drift_max_pct"],
                 "drift_location": decision["drift_location"],
+                "delta_pass": decision["delta_pass"],
+                "delta_biased": decision["delta_biased"],
+                "delta_info": decision["delta_info"],
             },
             "rationale": decision["rationale"],
         }
@@ -1701,13 +1835,17 @@ def build_report(cfg: Dict[str, Any], gate: Dict[str, Any], decision: Dict[str, 
 
     lines.append("## Route decision")
     lines.append("")
-    lines.append("| variant | route | medium pass | fine pass | bias | max drift % | rationale |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append(
+        "| variant | route | medium pass | fine pass | bias | max drift % | "
+        "delta pass | delta bias | rationale |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for variant, row in decision["variants"].items():
         g = row["gate"]
         lines.append(
             f"| {variant} | **{row['route']}** | {g['medium_pass']} | {g['fine_pass']} | "
-            f"{g['biased']} | {g['drift_max_pct']:.3f} | {row['rationale']} |"
+            f"{g['biased']} | {g['drift_max_pct']:.3f} | {g['delta_pass']} | "
+            f"{g['delta_biased']} | {row['rationale']} |"
         )
     lines.append("")
 
@@ -1785,21 +1923,26 @@ def build_report(cfg: Dict[str, Any], gate: Dict[str, Any], decision: Dict[str, 
             )
         lines.append("")
 
-    lines.append("## Secondary evidence")
+    lines.append("## Delta agreement (Gate G2 criterion, spec §5.3)")
     lines.append("")
     deltas = gate.get("deltas") or []
     if deltas:
-        lines.append("| date | variant | delta PDE | delta MC (CRN) | abs diff |")
-        lines.append("|---|---|---|---|---|")
+        lines.append(
+            "| date | variant | delta production | delta reference | abs diff | "
+            "diff (contracts) | pass |"
+        )
+        lines.append("|---|---|---|---|---|---|---|")
         for d in deltas:
-            if d["delta_pde"] is None or d["delta_mc"] is None:
+            if d["delta_production"] is None or d["delta_reference"] is None:
                 lines.append(
-                    f"| {d['date']} | {d['variant']} | n/a ({d.get('error')}) | | |"
+                    f"| {d['date']} | {d['variant']} | n/a ({d.get('error')}) | | | | "
+                    f"{d['passed']} |"
                 )
             else:
                 lines.append(
-                    f"| {d['date']} | {d['variant']} | {d['delta_pde']:+.4f} | "
-                    f"{d['delta_mc']:+.4f} | {d['abs_diff']:.4f} |"
+                    f"| {d['date']} | {d['variant']} | {d['delta_production']:+.4f} | "
+                    f"{d['delta_reference']:+.4f} | {d['abs_diff']:.4f} | "
+                    f"{d['diff_contracts']:+.3f} | {d['passed']} |"
                 )
         lines.append("")
     sanity = gate["sanity"]

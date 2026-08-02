@@ -144,3 +144,45 @@ def test_a_bucket_below_the_minimum_cell_count_cannot_flag_bias():
     biased, info = gate.detect_systematic_bias_bucketed(cells)
     assert biased is False
     assert info["buckets"]["decayed"]["skipped"] is True
+
+
+# ---------------------------------------------------------------------------
+# Task 6: delta as a Gate G2 admission criterion, in IM futures contracts
+# (spec §5.3).  The gate prices a 1-unit product; the backtest holds
+# NOTIONAL/s0 index units, so the per-unit delta quantum of one futures
+# contract is s0-dependent and must be computed per inception.
+# ---------------------------------------------------------------------------
+
+
+def test_delta_quantum_matches_the_worked_example():
+    """Spec §5.3, 2023-05-04: s0=6733.97, multiplier=7425.5 -> 0.02694."""
+    gate = _load_gate()
+    q = gate.delta_quantum_per_unit(6733.97, notional=50_000_000.0)
+    assert q == pytest.approx(0.026936, abs=1e-6)
+
+
+def test_delta_quantum_scales_with_inception_spot():
+    """A fixed threshold would be 1.49x wrong across the 27 inceptions."""
+    gate = _load_gate()
+    lo = gate.delta_quantum_per_unit(4532.52, notional=50_000_000.0)
+    hi = gate.delta_quantum_per_unit(6733.97, notional=50_000_000.0)
+    assert hi / lo == pytest.approx(6733.97 / 4532.52, rel=1e-9)
+
+
+def test_disagreement_under_half_a_contract_passes():
+    gate = _load_gate()
+    q = gate.delta_quantum_per_unit(6733.97)
+    assert gate.delta_cell_passed(0.49 * q, 6733.97) is True
+    assert gate.delta_cell_passed(0.51 * q, 6733.97) is False
+
+
+def test_small_one_sided_delta_bias_is_caught_even_though_each_cell_passes():
+    """Rounding absorbs a single cell; 700 rebalances accumulate the mean."""
+    gate = _load_gate()
+    s0 = 6733.97
+    q = gate.delta_quantum_per_unit(s0)
+    rows = [{"s0": s0, "signed_diff": 0.2 * q} for _ in range(8)]
+    assert all(gate.delta_cell_passed(abs(r["signed_diff"]), s0) for r in rows)
+    biased, info = gate.detect_delta_bias(rows)
+    assert biased is True
+    assert info["mean_signed_contracts"] == pytest.approx(0.2, rel=1e-9)
