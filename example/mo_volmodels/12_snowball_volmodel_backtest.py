@@ -1,14 +1,16 @@
 """Stage 12 - Multi-inception snowball vol-model backtest runner (Phase 4).
 
 Runs the production 3Y 000852.SH snowball (short, delta-hedged with IM
-futures) over a fleet of monthly inceptions, pricing each day under five
+futures) over a fleet of monthly inceptions, pricing each day under six
 model variants:
 
-    flat_bsm    ATM IV at the product's REMAINING maturity, refreshed daily
-    ts_bsm      ATM pillar term structure (TermStructureVolSurface)
-    localvol    Dupire local vol off the full SABR-smoothed smile grid
-    heston      Heston, per-day calibrated (Lewis, frozen mo_volmodels bounds)
-    heston_slv  Heston-SLV, per-day calibrated leverage surface
+    flat_bsm       ATM IV at the product's REMAINING maturity, refreshed daily
+    flat_bsm_quad  Engine control: flat_bsm's market data on the quadrature
+                   engine instead of the 1D PDE (isolates engine from model)
+    ts_bsm         ATM pillar term structure (TermStructureVolSurface)
+    localvol       Dupire local vol off the full SABR-smoothed smile grid
+    heston         Heston, per-day calibrated (Lewis, frozen mo_volmodels bounds)
+    heston_slv     Heston-SLV, per-day calibrated leverage surface
 
 Every variant of a given inception shares ONE set of contractual terms: the
 fair coupon is solved once at inception under flat BSM (Gate G4), so the
@@ -63,7 +65,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option.snowball_helpers import (
     create_standard_snowball,
 )
@@ -134,6 +136,7 @@ SCHEMA_VERSION = 1
 
 VARIANTS: Tuple[str, ...] = (
     "flat_bsm",
+    "flat_bsm_quad",
     "ts_bsm",
     "localvol",
     "heston",
@@ -150,6 +153,11 @@ class VariantSpec:
     surface_vol_mode: str
     vol_model: str
     description: str
+    # Engine family for the DAILY PRICING engine.  Defaults to PDE so the
+    # five original variants are untouched; flat_bsm_quad overrides it to
+    # make an engine control that differs from flat_bsm in engine only.
+    # The surface and event-stats engines stay 1D PDE for every variant.
+    pricing_engine_type: EngineType = EngineType.PDE
 
     def uses_calibration(self) -> bool:
         return self.vol_model != "bsm"
@@ -162,6 +170,17 @@ VARIANT_SPECS: Dict[str, VariantSpec] = {
         surface_vol_mode="flat_atm_remaining",
         vol_model="bsm",
         description="Flat BSM at the ATM IV of the product's remaining maturity",
+    ),
+    "flat_bsm_quad": VariantSpec(
+        name="flat_bsm_quad",
+        vol_source="surface",
+        surface_vol_mode="flat_atm_remaining",
+        vol_model="bsm",
+        description=(
+            "Engine control: flat_bsm's market data priced by FFT "
+            "regime-switching quadrature instead of the 1D PDE"
+        ),
+        pricing_engine_type=EngineType.QUADRATURE,
     ),
     "ts_bsm": VariantSpec(
         name="ts_bsm",
@@ -691,9 +710,15 @@ def make_engine_config(
     return AutocallableEngineConfig(
         # Every variant keeps the SAME deterministic 1D snowball PDE for the
         # surface and event-stats engines, so those outputs stay comparable
-        # across variants; only the daily pricing engine differs.
-        pricing_engine_type=EngineType.PDE,
+        # across variants; only the daily pricing engine differs.  Pinned
+        # explicitly (not left to fall back from pricing_engine_type) because
+        # flat_bsm_quad routes its DAILY pricing engine to QUADRATURE while
+        # keeping the reporting engines on PDE like every other variant.
+        pricing_engine_type=spec.pricing_engine_type,
+        surface_engine_type=EngineType.PDE,
+        event_stats_engine_type=EngineType.PDE,
         pde_params=PDEParams(),
+        quad_params=QuadParams(),
         mc_params=make_mc_params(mc_paths, mc_batches, MC_SEED),
         vol_model_mc_method=MonteCarloMethod.RANDOMIZED_QUASI,
         vol_source=spec.vol_source,
