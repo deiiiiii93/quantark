@@ -49,3 +49,56 @@ def test_engine_config_honours_the_variant_pricing_engine_type():
     assert s12.make_engine_config(
         "flat_bsm", routing=routing
     ).pricing_engine_type == EngineType.PDE
+
+
+EXPECTED = {
+    "flat_bsm", "flat_bsm_quad", "ts_bsm", "localvol", "heston", "heston_slv",
+}
+
+
+def test_gate_covers_every_study_variant():
+    gate = _load_gate()
+    assert set(gate.GATE_PAIRS) == EXPECTED
+    assert set(gate.VARIANTS) == EXPECTED
+
+
+def test_gate_variants_match_the_backtest_variants():
+    """A variant the fleet runs but the gate never admitted is unrouted."""
+    assert set(_load_gate().VARIANTS) == set(_load_stage12().VARIANTS)
+
+
+def test_every_pair_uses_two_distinct_numerical_methods():
+    gate = _load_gate()
+    for name, pair in gate.GATE_PAIRS.items():
+        assert pair.production != pair.reference, name
+
+
+def test_mc_referenced_variants_are_exactly_the_ones_needing_std_error():
+    """Only these three get a 2*mc_se tolerance term; the rest get the floor."""
+    gate = _load_gate()
+    mc_refs = {n for n, p in gate.GATE_PAIRS.items() if p.reference_is_mc}
+    assert mc_refs == {"localvol", "heston", "heston_slv"}
+
+
+def test_gate_prices_the_same_engine_family_the_fleet_will_run():
+    """Stage 11 cannot import stage 12 (cycle), so assert the pairing instead."""
+    gate, s12 = _load_gate(), _load_stage12()
+    for name, spec in s12.VARIANT_SPECS.items():
+        pair = gate.GATE_PAIRS[name]
+        if spec.vol_model == "bsm":
+            expected = "quad" if spec.pricing_engine_type.name == "QUADRATURE" else "pde_1d"
+            assert pair.production.startswith(expected), name
+
+
+def test_every_production_family_ladders_monotonically():
+    gate = _load_gate()
+    for variant in gate.VARIANTS:
+        grids = [gate._production_grid(variant, lvl, 3.0, False)
+                 for lvl in ("coarse", "medium", "fine")]
+        kinds = {g["kind"] for g in grids}
+        assert len(kinds) == 1, variant
+        if grids[0]["kind"] == "quad":
+            pts = [g["grid_points"] for g in grids]
+            assert pts == sorted(pts) and len(set(pts)) == 3, variant
+        elif grids[0]["kind"] == "adi_2d":
+            assert [g["n_x"] for g in grids] == sorted(g["n_x"] for g in grids), variant

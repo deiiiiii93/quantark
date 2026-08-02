@@ -1,16 +1,22 @@
-"""Stage 11 - PDE convergence gate for Heston / Heston-SLV snowball pricing.
+"""Stage 11 - engine-admission gate (G2) for the six snowball study variants.
 
-Decides whether the production OTC backtest may route ``vol_model="heston"`` /
-``"heston_slv"`` snowball pricing through the 2D-ADI PDE solvers
-(``HestonSnowballPDESolver`` / ``HestonSLVSnowballPDESolver``) or must fall back
-to the QE Monte-Carlo engines (``QESnowballMCEngine`` /
-``HestonSLVQESnowballMCEngine``).  It prices the production 3Y snowball
-(KO 103% monthly with a 3-month lockout -> 34 observations, KI 75% with
-daily-discrete monitoring from the trading calendar, principal excluded,
-ko_rate = rebate_rate = 15%, r = 2% flat, q from the artifact's parity forward
-pillars) on a sample of admitted IV-surface dates spanning market regimes,
-compares a PDE refinement ladder (coarse/medium/fine) against a high-quality
-RQMC reference with reported standard errors, and emits:
+Decides, per study variant (``flat_bsm``, ``flat_bsm_quad``, ``ts_bsm``,
+``localvol``, ``heston``, ``heston_slv``), whether the production OTC backtest
+may route pricing through its production engine or must fall back to an
+independent reference method -- see ``GATE_PAIRS`` for the production/reference
+pair table (§5.1).  For ``heston``/``heston_slv`` this is literally PDE-vs-MC
+admission, as it always was: the 2D-ADI solvers (``HestonSnowballPDESolver`` /
+``HestonSLVSnowballPDESolver``) against the QE Monte-Carlo engines
+(``QESnowballMCEngine`` / ``HestonSLVQESnowballMCEngine``).  The other four
+variants gate a 1D-PDE-vs-QUAD or PDE-vs-LV-MC pair the same way.  It prices
+the production 3Y snowball (KO 103% monthly with a 3-month lockout -> 34
+observations, KI 75% with daily-discrete monitoring from the trading calendar,
+principal excluded, ko_rate = rebate_rate = 15%, r = 2% flat, q from the
+artifact's parity forward pillars) on a sample of admitted IV-surface dates
+spanning market regimes, compares each variant's production refinement ladder
+(coarse/medium/fine) against its reference (RQMC with reported standard errors
+for the three MC-referenced variants, a fixed finer deterministic config for
+the other three), and emits:
 
 - ``pde_convergence_gate.json`` : per date x case(full/decayed) x variant x
   level cell results (prices, diffs, tolerances, pass/fail, timings).
@@ -18,13 +24,16 @@ RQMC reference with reported standard errors, and emits:
   tolerance + sha256 evidence hash of the gate JSON (timings stripped).
 - ``gate_report.md``            : readable summary tables + rationale.
 
-Gate rule (per variant): PDE is admitted only if the MEDIUM grid passes
-``|PDE - MC_ref| <= max(2 * MC_SE, TOL_ABS)`` (TOL_ABS = 0.25% of notional) on
-EVERY sampled date/case, shows no systematic sign bias (a biased PDE fails even
-inside tolerance), the FINE grid also passes, and |fine - medium| <= TOL_ABS
-everywhere (no drift).  Any other outcome routes the variant to MC, with the
-ladder reported honestly.  Deltas (PDE bumped vs MC CRN-bumped) are secondary
-evidence, reported but not gated.
+Gate rule (per variant): the production engine is admitted only if the MEDIUM
+grid passes ``|production - reference| <= max(2 * mc_se, TOL_ABS)`` (mc_se = 0
+for a deterministic reference; TOL_ABS = 0.25% of notional) on EVERY sampled
+date/case, shows no systematic sign bias (a biased production engine fails
+even inside tolerance), the FINE grid also passes, and |fine - medium| <=
+TOL_ABS everywhere (no drift).  Any other outcome routes the variant away from
+its production engine, with the ladder reported honestly.  For heston/
+heston_slv, deltas (2D-ADI bumped vs MC CRN-bumped) are secondary evidence,
+reported but not gated; the other four variants don't carry this check (see
+``GATE_PAIRS`` and the guards in ``_evaluate_case``/``_extras_first_date``).
 
 Determinism: fixed seeds and fixed Sobol batches everywhere; rerunning the
 study reproduces identical JSON modulo ``"timings"`` fields (excluded from the
@@ -50,7 +59,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -60,11 +69,14 @@ from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
     LocalVolSnowballMCEngine,
     QESnowballMCEngine,
 )
+from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
     HestonSLVSnowballPDESolver,
     HestonSnowballPDESolver,
+    LocalVolSnowballPDESolver,
 )
-from quantark.asset.equity.param import MCParams, PDEParams
+from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
+from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option.snowball_helpers import (
     create_standard_snowball,
 )
@@ -72,6 +84,7 @@ from quantark.backtest.replay.config import VolModelCalibrationConfig
 from quantark.volmodels.calibration import (
     VOL_MODEL_HESTON,
     VOL_MODEL_HESTON_SLV,
+    VOL_MODEL_LOCALVOL,
     VolModelCalibrator,
 )
 from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
@@ -85,9 +98,15 @@ from quantark.volmodels.localvol import build_dupire_local_vol
 # Frozen study configuration
 # ---------------------------------------------------------------------------
 
-VARIANTS = (VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV)
+# VARIANTS is derived from GATE_PAIRS (defined below, near the engine
+# factories) so the study can never drift from the pair table -- see §5.1.
 CASES = ("full", "decayed")
 LEVELS = ("coarse", "medium", "fine")
+
+# vol_model names the calibrator actually fits (the flat/term-structure BSM
+# variants price directly off the environment's vol surface -- no per-day
+# calibration, model=None).
+_CALIBRATED_VARIANTS = (VOL_MODEL_LOCALVOL, VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV)
 
 # Sample dates spanning regimes (YYYYMMDD).  Excluded dates are substituted
 # with the nearest admitted date (and the substitution is logged).
@@ -504,6 +523,115 @@ def _make_pde_engine(variant: str, model, pdep: PDEParams, grid: Tuple[int, int,
     )
 
 
+# QUAD ladder over grid_points, and the 1D-PDE ladder over accuracy profiles.
+# Both mirror the 2D ladder's shape: coarse -> medium -> fine, with 'medium'
+# the level the fleet would actually run.  QUAD_REFERENCE_POINTS is a fixed
+# reference config (>= 4x the QUAD production default of 1001) so a QUAD
+# reference is genuinely finer than anything on the QUAD production ladder.
+QUAD_LADDER = {"coarse": 2048, "medium": 4096, "fine": 8192}
+QUAD_REFERENCE_POINTS = 16384          # >= 4x the QUAD production default
+PDE1D_LADDER = {"coarse": "fast", "medium": "standard", "fine": "high"}
+
+
+@dataclass(frozen=True)
+class GatePair:
+    """One variant's production engine and its independent reference.
+
+    ``production`` / ``reference`` are labels recorded in the evidence; the
+    builders are what actually run.  The two must be different numerical
+    methods, or the cell is a common-mode comparison and proves nothing.
+
+    Builder signature: ``(model, grid) -> engine``.  ``model`` is the
+    CalibratedVolModel for calibrated variants and ``None`` for the BSM ones;
+    ``grid`` is the ladder level's knob dict (see _production_grid below) for
+    the production builder, and ``None`` for the reference builder (the
+    reference is priced once at a fixed, finer configuration -- it is never
+    laddered).  ``reference_is_mc`` drives whether a std error is expected: a
+    deterministic reference has ``mc_se = None`` and the flat TOL_ABS floor.
+    """
+
+    production: str
+    reference: str
+    build_production: Callable[..., Any]
+    build_reference: Callable[..., Any]
+    reference_is_mc: bool
+
+
+def _bsm_pde(accuracy: str = "standard"):
+    """1D BSM PDE builder.  ``grid`` (production) overrides ``accuracy``;
+    ``grid=None`` (reference) keeps the factory-bound fixed profile."""
+    def build(model, grid):
+        acc = accuracy if grid is None else grid["accuracy"]
+        return SnowballPDESolver(PDEParams(accuracy=acc))
+    return build
+
+
+def _bsm_quad(grid_points: Optional[int] = None):
+    """BSM quadrature builder.  ``grid`` (production) overrides ``grid_points``;
+    ``grid=None`` (reference) keeps the factory-bound fixed count."""
+    def build(model, grid):
+        gp = grid_points if grid is None else grid["grid_points"]
+        params = QuadParams() if gp is None else QuadParams(grid_points=gp)
+        return SnowballQuadEngine(params=params)
+    return build
+
+
+GATE_PAIRS: Dict[str, GatePair] = {
+    "flat_bsm": GatePair(
+        production="pde_1d", reference="quad_high",
+        build_production=_bsm_pde("standard"),
+        build_reference=_bsm_quad(grid_points=QUAD_REFERENCE_POINTS),
+        reference_is_mc=False,
+    ),
+    "flat_bsm_quad": GatePair(
+        production="quad", reference="pde_1d_high",
+        build_production=_bsm_quad(),
+        build_reference=_bsm_pde("high"),
+        reference_is_mc=False,
+    ),
+    "ts_bsm": GatePair(
+        # Mirrors flat_bsm, not flat_bsm_quad: stage 12's VARIANT_SPECS["ts_bsm"]
+        # keeps the PDE default (only flat_bsm_quad overrides pricing_engine_type
+        # to QUADRATURE) -- see test_gate_prices_the_same_engine_family_the_fleet_will_run.
+        production="pde_1d", reference="quad_high",
+        build_production=_bsm_pde("standard"),
+        build_reference=_bsm_quad(grid_points=QUAD_REFERENCE_POINTS),
+        reference_is_mc=False,
+    ),
+    "localvol": GatePair(
+        production="pde_1d_lv", reference="lv_mc_rqmc",
+        build_production=lambda model, grid: LocalVolSnowballPDESolver(
+            params=PDEParams(accuracy=grid["accuracy"]),
+            local_vol_surface=model.local_vol_surface),
+        build_reference=lambda model, grid: LocalVolSnowballMCEngine(
+            local_vol_surface=model.local_vol_surface,
+            params=_make_mc_params(MC_FULL, SEED),
+            method=MonteCarloMethod.RANDOMIZED_QUASI),
+        reference_is_mc=True,
+    ),
+    "heston": GatePair(
+        production="pde_2d_adi", reference="qe_m_rqmc",
+        build_production=lambda model, grid: _make_pde_engine(
+            VOL_MODEL_HESTON, model, PDEParams(), (grid["n_x"], grid["n_v"], grid["n_t"])),
+        build_reference=lambda model, grid: _make_mc_engine(
+            VOL_MODEL_HESTON, model, _make_mc_params(MC_FULL, SEED),
+            MC_FULL["substeps_per_interval"]),
+        reference_is_mc=True,
+    ),
+    "heston_slv": GatePair(
+        production="pde_2d_adi_slv", reference="slv_qe_m_rqmc",
+        build_production=lambda model, grid: _make_pde_engine(
+            VOL_MODEL_HESTON_SLV, model, PDEParams(), (grid["n_x"], grid["n_v"], grid["n_t"])),
+        build_reference=lambda model, grid: _make_mc_engine(
+            VOL_MODEL_HESTON_SLV, model, _make_mc_params(MC_FULL, SEED),
+            MC_FULL["substeps_per_interval"]),
+        reference_is_mc=True,
+    ),
+}
+
+VARIANTS = tuple(GATE_PAIRS)
+
+
 def pde_ladder(T: float, quick: bool = False) -> List[Tuple[str, int, int, int]]:
     """Refinement ladder [(level, n_x, n_v, n_t)] for a case of maturity ``T``.
 
@@ -519,6 +647,23 @@ def pde_ladder(T: float, quick: bool = False) -> List[Tuple[str, int, int, int]]
         ("medium", LADDER_MEDIUM[0], LADDER_MEDIUM[1], n_t_medium),
         ("fine", LADDER_FINE[0], LADDER_FINE[1], 2 * n_t_medium),
     ]
+
+
+def _production_grid(variant: str, level: str, T: float, quick: bool) -> Dict[str, Any]:
+    """Ladder knob for the PRODUCTION engine of ``variant`` at ``level``.
+
+    2D ADI ladders over (n_x, n_v, n_t); QUAD over grid_points; the 1D PDE
+    over its accuracy profile.  Returns a JSON-safe dict stored unchanged in
+    ``cell["grid"]``, so the evidence keeps ONE schema across families and a
+    reader can always see which knob moved.
+    """
+    pair = GATE_PAIRS[variant]
+    if pair.production.startswith("pde_2d"):
+        entry = next(g for g in pde_ladder(T, quick) if g[0] == level)
+        return {"kind": "adi_2d", "n_x": entry[1], "n_v": entry[2], "n_t": entry[3]}
+    if pair.production.startswith("quad"):
+        return {"kind": "quad", "grid_points": QUAD_LADDER[level]}
+    return {"kind": "pde_1d", "accuracy": PDE1D_LADDER[level]}
 
 
 def event_key_collision_count(times: Sequence[float], T: float, n_t: int) -> int:
@@ -540,12 +685,20 @@ def event_key_collision_count(times: Sequence[float], T: float, n_t: int) -> int
 # Gate logic (pure functions; unit-tested)
 # ---------------------------------------------------------------------------
 
-def gate_tolerance_pct(mc_se_pct: float, tol_abs_pct: float = TOL_ABS_PCT) -> float:
-    """Per-cell tolerance in % of notional: max(2 x MC SE, TOL_ABS)."""
+def gate_tolerance_pct(mc_se_pct: Optional[float], tol_abs_pct: float = TOL_ABS_PCT) -> float:
+    """Per-cell tolerance in % of notional: max(2 x MC SE, TOL_ABS).
+
+    ``mc_se_pct=None`` means the reference is DETERMINISTIC (QUAD or a finer
+    PDE), not that its error is zero -- the tolerance is then the flat floor.
+    """
+    if mc_se_pct is None:
+        return float(tol_abs_pct)
     return max(MC_SE_FACTOR * float(mc_se_pct), float(tol_abs_pct))
 
 
-def gate_cell_passed(signed_diff_pct: float, mc_se_pct: float, tol_abs_pct: float = TOL_ABS_PCT) -> bool:
+def gate_cell_passed(
+    signed_diff_pct: float, mc_se_pct: Optional[float], tol_abs_pct: float = TOL_ABS_PCT
+) -> bool:
     return abs(float(signed_diff_pct)) <= gate_tolerance_pct(mc_se_pct, tol_abs_pct)
 
 
@@ -768,7 +921,12 @@ def validate_gate_payload(payload: Dict[str, Any]) -> None:
         if cell["case"] not in CASES:
             raise ValueError(f"gate cell with unknown case {cell['case']!r}")
         if cell["error"] is None:
-            for key in ("pde_price", "mc_ref", "mc_se", "signed_diff_pct"):
+            required_finite = ["pde_price", "mc_ref", "signed_diff_pct"]
+            # A deterministic reference (QUAD / finer PDE) has no std error by
+            # construction -- only MC-referenced variants must report a finite one.
+            if GATE_PAIRS[cell["variant"]].reference_is_mc:
+                required_finite.append("mc_se")
+            for key in required_finite:
                 if cell[key] is None or not math.isfinite(float(cell[key])):
                     raise ValueError(f"gate cell {key} not finite without an error tag")
 
@@ -835,110 +993,130 @@ def _evaluate_case(
     quick = bool(cfg["quick"])
     mcp = _make_mc_params(cfg["mc"], cfg["seed"])
     pdep = PDEParams()  # remediated defaults: cell_average projection, 2 event-Rannacher steps
-    ladder = pde_ladder(terms.maturity_years, quick)
+    ladder = pde_ladder(terms.maturity_years, quick)  # 2D-ADI ladder; secondary-evidence use only
 
     mc_refs: Dict[str, Any] = {}
     cells: List[Dict[str, Any]] = []
     deltas: List[Dict[str, Any]] = []
 
     for variant in VARIANTS:
+        pair = GATE_PAIRS[variant]
         model = models[variant]
-        # A broken/non-finite MC reference must not kill the run: the variant's
+        # A broken/non-finite reference must not kill the run: the variant's
         # cells are recorded as error cells (which count as gate failures).
-        mc_err: Optional[str] = None
-        mc_price: Optional[float] = None
-        mc_se: Optional[float] = None
-        mc_seconds: Optional[float] = None
+        ref_err: Optional[str] = None
+        ref_price: Optional[float] = None
+        ref_se: Optional[float] = None
+        ref_seconds: Optional[float] = None
         num_paths: Optional[int] = None
         batches_used: Optional[int] = None
         try:
             t0 = time.perf_counter()
-            engine = _make_mc_engine(variant, model, mcp, cfg["mc"]["substeps_per_interval"])
-            raw_price = float(engine.price(product, env))
-            mc_seconds = time.perf_counter() - t0
-            result = engine.get_last_result()
-            raw_se = engine.get_last_std_error()
-            raw_se = float(raw_se) if raw_se is not None else float("nan")
-            num_paths = int(result.num_paths)
-            batches_used = int(result.batches_used)
-            mc_err = _finite_or_error(raw_price, "mc reference price") or _finite_or_error(
-                raw_se, "mc reference std error"
-            )
-            if mc_err is None:
-                mc_price, mc_se = raw_price, raw_se
+            # Reference is priced once at its own fixed, finer configuration
+            # (grid=None): it is never laddered, unlike the production engine.
+            ref_engine = pair.build_reference(model, None)
+            raw_price = float(ref_engine.price(product, env))
+            ref_seconds = time.perf_counter() - t0
+            if pair.reference_is_mc:
+                result = ref_engine.get_last_result()
+                raw_se = ref_engine.get_last_std_error()
+                raw_se = float(raw_se) if raw_se is not None else float("nan")
+                num_paths = int(result.num_paths)
+                batches_used = int(result.batches_used)
+                ref_err = _finite_or_error(raw_price, "reference price") or _finite_or_error(
+                    raw_se, "reference std error"
+                )
+                if ref_err is None:
+                    ref_price, ref_se = raw_price, raw_se
+            else:
+                ref_err = _finite_or_error(raw_price, "reference price")
+                if ref_err is None:
+                    ref_price = raw_price
         except Exception as exc:
-            mc_err = f"{type(exc).__name__}: {exc}"
+            ref_err = f"{type(exc).__name__}: {exc}"
         mc_refs[variant] = {
-            "price": mc_price,
-            "std_error": mc_se,
+            "price": ref_price,
+            "std_error": ref_se,
             "num_paths": num_paths,
             "batches_used": batches_used,
-            "price_pct_notional": (100.0 * mc_price / notional) if mc_price is not None else None,
-            "se_pct_notional": (100.0 * mc_se / notional) if mc_se is not None else None,
-            "error": mc_err,
-            "timings": {"seconds": mc_seconds},
+            "price_pct_notional": (100.0 * ref_price / notional) if ref_price is not None else None,
+            "se_pct_notional": (100.0 * ref_se / notional) if ref_se is not None else None,
+            "error": ref_err,
+            "timings": {"seconds": ref_seconds},
         }
-        mc_se_pct = (100.0 * mc_se / notional) if mc_se is not None else None
+        ref_se_pct = (100.0 * ref_se / notional) if ref_se is not None else None
 
-        for level, n_x, n_v, n_t in ladder:
-            ki_collisions = event_key_collision_count(terms.ki_times, terms.maturity_years, n_t)
-            ko_collisions = event_key_collision_count(terms.ko_times, terms.maturity_years, n_t)
+        for level in LEVELS:
+            grid = _production_grid(variant, level, terms.maturity_years, quick)
+            # Event/step-key collisions are only meaningful where the gate
+            # itself picks n_t (the 2D-ADI ladder); QUAD and the 1D PDE derive
+            # their own internal time-stepping from grid_points/accuracy.
+            n_t = grid.get("n_t")
+            if n_t is not None:
+                ki_collisions = event_key_collision_count(terms.ki_times, terms.maturity_years, n_t)
+                ko_collisions = event_key_collision_count(terms.ko_times, terms.maturity_years, n_t)
+            else:
+                ki_collisions = ko_collisions = None
             cell = {
                 "date": date_iso,
                 "case": case_name,
                 "variant": variant,
                 "level": level,
-                "grid": {"n_x": n_x, "n_v": n_v, "n_t": n_t},
+                "grid": grid,
                 "pde_price": None,
-                "mc_ref": mc_price,
-                "mc_se": mc_se,
+                "mc_ref": ref_price,
+                "mc_se": ref_se,
                 "mc_paths": num_paths,
                 "notional": notional,
                 "signed_diff_pct": None,
                 "abs_diff_pct": None,
                 "rel_diff_pct": None,
+                # A deterministic reference's tolerance is the floor whether
+                # or not it errored (TOL_ABS_PCT doesn't depend on it running).
+                # A broken MC reference leaves the true tolerance unknown --
+                # None, not a floor value that would misreport confidence.
                 "tol_pct": (
-                    gate_tolerance_pct(mc_se_pct, cfg["tol_abs_pct"])
-                    if mc_se_pct is not None
+                    gate_tolerance_pct(ref_se_pct, cfg["tol_abs_pct"])
+                    if (not pair.reference_is_mc) or ref_se_pct is not None
                     else None
                 ),
                 "passed": False,
                 "ki_event_key_collisions": ki_collisions,
                 "ko_event_key_collisions": ko_collisions,
-                "error": mc_err,  # broken reference: every cell fails closed
-                "timings": {"pde_seconds": None, "mc_seconds": mc_seconds},
+                "error": ref_err,  # broken reference: every cell fails closed
+                "timings": {"pde_seconds": None, "mc_seconds": ref_seconds},
             }
-            solver = _make_pde_engine(variant, model, pdep, (n_x, n_v, n_t))
             try:
+                solver = pair.build_production(model, grid)
                 t1 = time.perf_counter()
                 raw_pde = float(solver.price(product, env))
                 pde_seconds = time.perf_counter() - t1
                 cell["timings"]["pde_seconds"] = pde_seconds
-                pde_err = _finite_or_error(raw_pde, "pde price")
+                pde_err = _finite_or_error(raw_pde, "production price")
                 if pde_err is not None:
                     cell["error"] = (
                         pde_err if cell["error"] is None else f"{cell['error']}; {pde_err}"
                     )
-                elif mc_err is None:
+                elif ref_err is None:
                     pde_price = raw_pde
-                    signed = 100.0 * (pde_price - mc_price) / notional
+                    signed = 100.0 * (pde_price - ref_price) / notional
                     cell.update(
                         {
                             "pde_price": pde_price,
                             "signed_diff_pct": signed,
                             "abs_diff_pct": abs(signed),
                             "rel_diff_pct": (
-                                100.0 * abs(pde_price - mc_price) / abs(mc_price)
-                                if mc_price
+                                100.0 * abs(pde_price - ref_price) / abs(ref_price)
+                                if ref_price
                                 else None
                             ),
-                            "passed": gate_cell_passed(signed, mc_se_pct, cfg["tol_abs_pct"]),
+                            "passed": gate_cell_passed(signed, ref_se_pct, cfg["tol_abs_pct"]),
                         }
                     )
                 else:
-                    # Broken reference, finite PDE: keep the price as evidence.
+                    # Broken reference, finite production price: keep it as evidence.
                     cell["pde_price"] = raw_pde
-            except Exception as exc:  # PDE failure is evidence against the PDE route
+            except Exception as exc:  # production failure is evidence against admission
                 pde_msg = f"{type(exc).__name__}: {exc}"
                 cell["error"] = (
                     pde_msg if cell["error"] is None else f"{cell['error']}; {pde_msg}"
@@ -947,7 +1125,9 @@ def _evaluate_case(
 
         # Secondary evidence: model-consistent delta agreement (full case only,
         # medium grid; PDE bumped vs MC CRN-bumped at the reference config).
-        if case_name == "full":
+        # Scoped to the 2D-ADI pair (heston/heston_slv): it is the only family
+        # where both _make_pde_engine and the CRN-paired _make_mc_engine apply.
+        if case_name == "full" and pair.production.startswith("pde_2d"):
             medium_grid = next((g for g in ladder if g[0] == "medium"), None)
             if medium_grid is not None:
                 _, n_x, n_v, n_t = medium_grid
@@ -1018,6 +1198,11 @@ def _extras_first_date(
     # sensitivity of the QE discretization at one business day spacing.
     substeps_rows = []
     for variant in VARIANTS:
+        # QE substeps_per_interval is a Heston/Heston-SLV discretization knob;
+        # _make_mc_engine only builds those two engines, so scope this check
+        # to the 2D-ADI pair the same way the delta secondary evidence is.
+        if not GATE_PAIRS[variant].production.startswith("pde_2d"):
+            continue
         row = {
             "date": date_iso,
             "case": "full",
@@ -1129,8 +1314,22 @@ def _extras_first_date(
     return {"substeps_sensitivity": substeps_rows, "bsm_lv_identity": identity}
 
 
-def _calibration_record(model) -> Dict[str, Any]:
-    """Deterministic calibration record: drop volatile cache/timing fields."""
+def _calibrate_models(calibrator: VolModelCalibrator, artifact: IvSurfaceArtifact) -> Dict[str, Any]:
+    """One CalibratedVolModel per variant that needs one; ``None`` for BSM."""
+    return {
+        variant: (calibrator.calibrate(variant, artifact) if variant in _CALIBRATED_VARIANTS else None)
+        for variant in VARIANTS
+    }
+
+
+def _calibration_record(model) -> Optional[Dict[str, Any]]:
+    """Deterministic calibration record: drop volatile cache/timing fields.
+
+    ``None`` for the BSM variants, which skip calibration entirely -- there
+    is no record to report, not an empty one.
+    """
+    if model is None:
+        return None
     volatile = {"cache_hit", "calibration_seconds", "per_expiry_rmse"}
     return {k: v for k, v in model.record.items() if k not in volatile}
 
@@ -1147,7 +1346,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
 
     terms = build_snowball_terms(inception, calendar)
     env = build_pricing_env(artifact, cfg["flat_rate"])
-    models = {variant: calibrator.calibrate(variant, artifact) for variant in VARIANTS}
+    models = _calibrate_models(calibrator, artifact)
 
     record: Dict[str, Any] = {
         "requested": date_info["requested"],
@@ -1186,7 +1385,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
         decay_artifact = history.surface_for(decay_date)
         dterms = decay_terms(terms, decay_date)
         denv = build_pricing_env(decay_artifact, cfg["flat_rate"])
-        dmodels = {variant: calibrator.calibrate(variant, decay_artifact) for variant in VARIANTS}
+        dmodels = _calibrate_models(calibrator, decay_artifact)
         record["terms"]["decayed"] = dterms.summary()
         record["decayed_calibration"] = {
             variant: _calibration_record(dmodels[variant]) for variant in VARIANTS
@@ -1273,9 +1472,15 @@ def assemble_gate_payload(cfg: Dict[str, Any], date_records: List[Dict[str, Any]
                 "median_fraction_of_tol": BIAS_MEDIAN_FRACTION,
             },
             "pde_ladder_rule": (
-                "coarse=(90,36,round(32T)); medium=(200,60,ceil(400T)) - dt <= 1/400y "
-                "so daily KI events cannot share an ADI step; fine=(300,90,2x medium)"
+                "2D-ADI variants (heston/heston_slv): coarse=(90,36,round(32T)); "
+                "medium=(200,60,ceil(400T)) - dt <= 1/400y so daily KI events cannot "
+                "share an ADI step; fine=(300,90,2x medium). QUAD variants ladder over "
+                "grid_points (quad_ladder); 1D-PDE variants ladder over accuracy "
+                "(pde1d_ladder)."
             ),
+            "quad_ladder": dict(QUAD_LADDER),
+            "quad_reference_points": QUAD_REFERENCE_POINTS,
+            "pde1d_ladder": dict(PDE1D_LADDER),
             "term_sheet": {
                 "maturity_months": MATURITY_MONTHS,
                 "lockout_months": LOCKOUT_MONTHS,
@@ -1308,10 +1513,74 @@ def assemble_gate_payload(cfg: Dict[str, Any], date_records: List[Dict[str, Any]
     return payload
 
 
+_MC_ENGINE_NAME = {
+    VOL_MODEL_HESTON: "QESnowballMCEngine",
+    VOL_MODEL_HESTON_SLV: "HestonSLVQESnowballMCEngine",
+    VOL_MODEL_LOCALVOL: "LocalVolSnowballMCEngine",
+}
+
+
+def _production_params_block(pair: GatePair, medium_grid: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Route-agnostic production-engine params for the decision payload.
+
+    Only the 2D-ADI family maps onto ``AutocallableEngineConfig.vol_model_engine_options``
+    (n_x/n_v/n_t); QUAD and 1D-PDE variants record their own ladder knob honestly
+    instead of forcing them into that grid shape.
+    """
+    if medium_grid is not None and medium_grid.get("kind") == "adi_2d":
+        return {
+            "kind": "adi_2d",
+            "label": pair.production,
+            "n_x": medium_grid["n_x"],
+            "n_v": medium_grid["n_v"],
+            "n_t": medium_grid["n_t"],
+            "n_t_rule": "ceil(400 * remaining_maturity_years)",
+            "scheme": "craig_sneyd",
+            "grid_style": "concentrated",
+            "grid_focus": "auto",
+            "event_projection": "cell_average",
+            "event_rannacher_steps": 2,
+            "theta": 0.5,
+            "note": "maps to AutocallableEngineConfig.vol_model_engine_options "
+            "(n_x/n_v/n_t) + PDEParams defaults; n_t is per-case: recompute as "
+            "ceil(400 * remaining maturity in years) at each reprice - the "
+            "emitted n_t is the full-3Y inception value",
+        }
+    return {"label": pair.production, **(medium_grid or {"kind": None})}
+
+
+def _reference_params_block(pair: GatePair, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Route-agnostic reference-engine params for the decision payload."""
+    if not pair.reference_is_mc:
+        return {
+            "kind": "deterministic",
+            "label": pair.reference,
+            "note": "no MC standard error; tolerance is the flat TOL_ABS floor",
+        }
+    params: Dict[str, Any] = {
+        "kind": "mc",
+        "label": pair.reference,
+        "method": "randomized_quasi",
+        "seed": cfg["seed"],
+        "paths_per_batch": cfg["mc"]["paths_per_batch"],
+        "batches": cfg["mc"]["batches"],
+        "rqmc_min_batches": cfg["mc"]["batches"],
+        "rqmc_max_batches": cfg["mc"]["batches"],
+        "rqmc_target_std": 1e-12,
+        "note": "REFERENCE-quality config used for the gate: RQMC pinned "
+        "(rqmc_min_batches == rqmc_max_batches, rqmc_target_std ~ 0) so "
+        "every batch runs and the batch-spread SE is honest. The "
+        "production backtest runner (Phase 4) may reduce path counts "
+        "under a documented SE budget, recorded in the run manifest.",
+    }
+    return params
+
+
 def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[str, Any]:
     cells = gate["cells"]
     variants: Dict[str, Any] = {}
     for variant in VARIANTS:
+        pair = GATE_PAIRS[variant]
         v_cells = [c for c in cells if c["variant"] == variant]
         medium = [c for c in v_cells if c["level"] == "medium"]
         fine = [c for c in v_cells if c["level"] == "fine"]
@@ -1320,44 +1589,21 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
             (c["grid"] for c in medium if c["case"] == "full"),
             medium[0]["grid"] if medium else None,
         )
+        mc_params = _reference_params_block(pair, cfg)
+        if pair.reference_is_mc:
+            mc_params["engine"] = _MC_ENGINE_NAME.get(variant, pair.reference)
+            if variant in (VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV):
+                mc_params.update(
+                    {
+                        "substeps_per_interval": cfg["mc"]["substeps_per_interval"],
+                        "scheme": "QUADEXP_M" if MC_MARTINGALE else "QUADEXP",
+                        "martingale_correction": MC_MARTINGALE,
+                    }
+                )
         variants[variant] = {
             "route": decision["route"],
-            "pde_params": {
-                "n_x": medium_grid["n_x"] if medium_grid else None,
-                "n_v": medium_grid["n_v"] if medium_grid else None,
-                "n_t": medium_grid["n_t"] if medium_grid else None,
-                "n_t_rule": "ceil(400 * remaining_maturity_years)",
-                "scheme": "craig_sneyd",
-                "grid_style": "concentrated",
-                "grid_focus": "auto",
-                "event_projection": "cell_average",
-                "event_rannacher_steps": 2,
-                "theta": 0.5,
-                "note": "maps to AutocallableEngineConfig.vol_model_engine_options "
-                "(n_x/n_v/n_t) + PDEParams defaults; n_t is per-case: recompute as "
-                "ceil(400 * remaining maturity in years) at each reprice - the "
-                "emitted n_t is the full-3Y inception value",
-            },
-            "mc_params": {
-                "engine": "QESnowballMCEngine"
-                if variant == VOL_MODEL_HESTON
-                else "HestonSLVQESnowballMCEngine",
-                "method": "randomized_quasi",
-                "seed": cfg["seed"],
-                "paths_per_batch": cfg["mc"]["paths_per_batch"],
-                "batches": cfg["mc"]["batches"],
-                "rqmc_min_batches": cfg["mc"]["batches"],
-                "rqmc_max_batches": cfg["mc"]["batches"],
-                "rqmc_target_std": 1e-12,
-                "substeps_per_interval": cfg["mc"]["substeps_per_interval"],
-                "scheme": "QUADEXP_M" if MC_MARTINGALE else "QUADEXP",
-                "martingale_correction": MC_MARTINGALE,
-                "note": "REFERENCE-quality config used for the gate: RQMC pinned "
-                "(rqmc_min_batches == rqmc_max_batches, rqmc_target_std ~ 0) so "
-                "every batch runs and the batch-spread SE is honest. The "
-                "production backtest runner (Phase 4) may reduce path counts "
-                "under a documented SE budget, recorded in the run manifest.",
-            },
+            "pde_params": _production_params_block(pair, medium_grid),
+            "mc_params": mc_params,
             "ladder": ladder_summary(v_cells),
             "gate": {
                 "medium_pass": decision["medium_pass"],

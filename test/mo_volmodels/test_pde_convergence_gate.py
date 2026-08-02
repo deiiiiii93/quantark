@@ -370,9 +370,22 @@ def _tiny_cfg():
     }
 
 
+def _stub_gate_pairs(mc_price, pde_price):
+    """Two variants, both fully stubbed -- exercises _evaluate_case's error
+    handling without needing a real PricingEnvironment or calibrated model."""
+    pair = gate11.GatePair(
+        production="pde_2d_stub", reference="mc_stub",
+        build_production=lambda model, grid: _StubPDEEngine(pde_price),
+        build_reference=lambda model, grid: _StubMCEngine(mc_price),
+        reference_is_mc=True,
+    )
+    return {"heston": pair, "heston_slv": pair}
+
+
 def _evaluate_with_stubs(monkeypatch, mc_price, pde_price):
-    monkeypatch.setattr(gate11, "_make_mc_engine", lambda *a, **k: _StubMCEngine(mc_price))
-    monkeypatch.setattr(gate11, "_make_pde_engine", lambda *a, **k: _StubPDEEngine(pde_price))
+    pairs = _stub_gate_pairs(mc_price, pde_price)
+    monkeypatch.setattr(gate11, "GATE_PAIRS", pairs)
+    monkeypatch.setattr(gate11, "VARIANTS", tuple(pairs))
     return gate11._evaluate_case(
         date_iso="2023-05-15",
         case_name="decayed",  # skips the delta path (needs a real env)
@@ -406,7 +419,7 @@ def test_non_finite_pde_price_becomes_error_cells(monkeypatch, bad):
         assert c["passed"] is False
         assert c["pde_price"] is None
         assert c["signed_diff_pct"] is None
-        assert c["error"] and "non-finite pde price" in c["error"]
+        assert c["error"] and "non-finite production price" in c["error"]
         assert c["mc_ref"] == 1.0  # reference itself is fine here
     _assert_cells_survive_assembly(cells)
 
@@ -417,11 +430,11 @@ def test_non_finite_mc_reference_becomes_error_cells(monkeypatch):
         assert c["passed"] is False
         assert c["mc_ref"] is None and c["mc_se"] is None and c["tol_pct"] is None
         assert c["signed_diff_pct"] is None
-        assert c["error"] and "non-finite mc reference price" in c["error"]
+        assert c["error"] and "non-finite reference price" in c["error"]
         assert c["pde_price"] == 0.9  # finite PDE price kept as evidence
     for ref in out["mc_refs"].values():
         assert ref["price"] is None and ref["std_error"] is None
-        assert ref["error"] and "non-finite mc reference price" in ref["error"]
+        assert ref["error"] and "non-finite reference price" in ref["error"]
     _assert_cells_survive_assembly(out["cells"])
 
 
@@ -472,7 +485,10 @@ def test_validate_gate_payload_roundtrip_and_failures():
         gate11.validate_gate_payload(bad)
 
 
-def test_validate_decision_payload():
+def test_validate_decision_payload(monkeypatch):
+    # Scope VARIANTS to the two used here; the schema rules under test
+    # (route enum, params-key presence, rationale) don't depend on the count.
+    monkeypatch.setattr(gate11, "VARIANTS", ("heston", "heston_slv"))
     good = {
         "schema_version": 1,
         "study": "pde_convergence_gate_decision",
@@ -554,35 +570,51 @@ def test_quick_end_to_end(tmp_path):
     gate11.validate_gate_payload(gate)
     gate11.validate_decision_payload(decision)
 
-    # one quick date, both cases present, 3 levels x 2 variants x 2 cases
+    # one quick date, both cases present, 3 levels x every study variant x 2 cases
     assert [d["date"] for d in gate["dates"]] == ["2023-05-15"]
     assert gate["dates"][0]["substituted"] is False
     full = gate["dates"][0]["terms"]["full"]
     assert full["n_ko"] == 34 and full["n_ki"] > 600
     assert gate["dates"][0]["terms"]["decayed"] is not None
+    n_variants = len(gate11.VARIANTS)
+    assert n_variants == 6  # the six-variant pair table this gate now covers
     combos = {(c["case"], c["variant"], c["level"]) for c in gate["cells"]}
-    assert len(combos) == 2 * 2 * 3
-    assert len(gate["cells"]) == 12
+    assert len(combos) == 2 * n_variants * 3
+    assert len(gate["cells"]) == 2 * n_variants * 3
     for c in gate["cells"]:
-        assert c["mc_se"] > 0.0
+        if gate11.GATE_PAIRS[c["variant"]].reference_is_mc:
+            assert c["mc_se"] > 0.0
+        else:
+            assert c["mc_se"] is None  # deterministic reference (QUAD / finer PDE)
         assert c["tol_pct"] >= 0.25
-    # calibrated params recorded per date
-    assert set(gate["dates"][0]["calibration"]) == {"heston", "heston_slv"}
+    # calibrated params recorded per date -- present for every variant, but
+    # only the vol models the calibrator fits (heston/heston_slv/localvol)
+    # carry a non-None record; the BSM variants price off the raw surface.
+    assert set(gate["dates"][0]["calibration"]) == set(gate11.VARIANTS)
+    for variant in gate11.VARIANTS:
+        record = gate["dates"][0]["calibration"][variant]
+        if variant in gate11._CALIBRATED_VARIANTS:
+            assert record is not None, variant
+        else:
+            assert record is None, variant
     assert {"v0", "kappa", "theta", "sigma", "rho"} <= set(
         gate["dates"][0]["calibration"]["heston"]
     )
     # decision sanity
-    assert set(decision["variants"]) == {"heston", "heston_slv"}
-    for row in decision["variants"].values():
+    assert set(decision["variants"]) == set(gate11.VARIANTS)
+    for variant, row in decision["variants"].items():
         assert row["route"] in ("pde", "mc")
         assert row["rationale"]
         mc = row["mc_params"]
-        # RQMC pinning keys are part of the emitted decision contract
-        assert {"rqmc_min_batches", "rqmc_max_batches", "rqmc_target_std", "note"} <= set(mc)
-        assert mc["rqmc_min_batches"] == mc["batches"]
-        assert mc["rqmc_max_batches"] == mc["batches"]
-        assert mc["rqmc_target_std"] > 0.0
-        assert "REFERENCE" in mc["note"] and "Phase 4" in mc["note"]
+        if gate11.GATE_PAIRS[variant].reference_is_mc:
+            # RQMC pinning keys are part of the emitted decision contract
+            assert {"rqmc_min_batches", "rqmc_max_batches", "rqmc_target_std", "note"} <= set(mc)
+            assert mc["rqmc_min_batches"] == mc["batches"]
+            assert mc["rqmc_max_batches"] == mc["batches"]
+            assert mc["rqmc_target_std"] > 0.0
+            assert "REFERENCE" in mc["note"] and "Phase 4" in mc["note"]
+        else:
+            assert mc["kind"] == "deterministic"
     assert decision["quick_mode"] is True
     # evidence hash matches the canonical hash of the gate payload
     assert decision["evidence_sha256"] == gate11.canonical_sha256(gate)
