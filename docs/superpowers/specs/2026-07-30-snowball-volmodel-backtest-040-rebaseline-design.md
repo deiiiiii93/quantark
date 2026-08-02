@@ -344,12 +344,13 @@ an MC-priced day is **3 MC prices**. Measured confirmation: 29.56 s/day for
 Two hypotheses were tested and falsified, and are recorded so they are not
 re-proposed:
 
-- **Auxiliary engines are a major cost.** They are not. Measured with daily event
+- ~~**Auxiliary engines are a major cost.** They are not. Measured with daily event
   probabilities ON: 29.56 s/day; OFF: 29.60 s/day — **−0.2%, zero within noise**.
   The event-stats engine rides the cached layout. Consequently the option of
   re-routing the auxiliary engines to quadrature is void: there is nothing to
   save. **Daily event probabilities stay ON** (owner decision 2026-07-30,
-  confirming the 2026-07-25 decision on measured evidence).
+  confirming the 2026-07-25 decision on measured evidence).~~
+  **RETRACTED 2026-08-02 — the measurement was void.** See §7.4.
 - **Per-day cost follows a power law in `T`.** It does not, because per-day fixed
   overhead (surface load, calibration cache read, hedge accounting, CSV writes)
   floors the cost at short remaining maturity while the KI schedule shrinks more
@@ -390,6 +391,59 @@ anchors in §7.2.
 split existed to manage a 39 h+ run. Whatever Task 6.1 measures, the checkpoint
 after the 1D block stays — inspect the engine-control spread and the 1D results
 before committing to the 2D block.
+
+---
+
+### 7.4 Event statistics cost +55%, not −0.2% — the earlier measurement was void
+
+§7.1 recorded "auxiliary engines are a major cost" as a *falsified* hypothesis on
+measured evidence, and an owner decision to keep daily event probabilities ON
+rested on it. Both are withdrawn.
+
+**Why the measurement was void.** `PDEEngine` is a dispatch facade that never
+overrode `calculate_event_stats`, so it inherited `BaseEngine`'s `return None`
+("unsupported") and silently discarded the exact statistics `SnowballPDESolver`
+computes. Every ON-vs-OFF comparison therefore compared *doing nothing* against
+*doing nothing*, and −0.2% is exactly the null result that produces. The
+supporting claim that "the event-stats engine rides the cached layout" described
+an engine that was never invoked. Fixed in `b6b97f0`; see §7A.13.
+
+**Re-measured on an idle machine**, one inception (2023-05-04), `flat_bsm`,
+`--quick`, `--max-inceptions 1`, both arms sharing an identical 44 s coupon solve
+that is excluded below:
+
+| daily event probabilities | replay wall-clock |
+|---|---|
+| OFF | 711.3 s |
+| ON | 1102.9 s |
+| **marginal cost** | **+391.6 s = +55%** |
+
+**What this does and does not explain.** The `flat_bsm` fleet re-run reached
+4/27 in 19 h 47 m across 4 workers — roughly 17 h per replay against §7.2's
+measured 5.67–5.81 h. A +55% uplift takes 5.7 h to about 8.8 h, so it accounts
+for well under half the overrun. The remainder is most likely CPU contention:
+two full pytest suites and a large review agent ran concurrently on the same
+machine. That is a hypothesis, not a measurement, and it is recorded as such.
+
+**Consequences.**
+
+1. §7.2's `5.67–5.81 h` PDE-priced fleet-run figure was measured on the same
+   inert path and is a **lower bound**, not a current estimate. Any fleet
+   scheduling built on it under-provisions by at least 55%.
+2. Keeping event probabilities ON is now a real cost decision rather than a free
+   one, and it should be re-taken by the owner on this evidence. Note that
+   nothing in stage 13's reporting consumes them — `13_aggregate_and_report.py`
+   contains no reference to KO/KI probability columns — so `--no-event-probabilities`
+   is available at no loss to the study's published output. The counter-argument
+   is that the frames are the study's only per-day record of barrier proximity,
+   which is diagnostic value the aggregate report does not capture.
+3. The re-routing-auxiliary-engines-to-quadrature option, closed in §7.1 as
+   having "nothing to save", is **reopened**. There is now 55% to save.
+
+This is a second-order lesson worth stating plainly: a silent no-op does not
+merely produce absent output, it produces confident measurements *of itself*
+that then enter planning documents as settled facts. §7.1 read as one of this
+spec's better-supported claims precisely because someone did run the experiment.
 
 ---
 
