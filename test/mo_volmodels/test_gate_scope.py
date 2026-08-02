@@ -102,3 +102,45 @@ def test_every_production_family_ladders_monotonically():
             assert pts == sorted(pts) and len(set(pts)) == 3, variant
         elif grids[0]["kind"] == "adi_2d":
             assert [g["n_x"] for g in grids] == sorted(g["n_x"] for g in grids), variant
+
+
+# ---------------------------------------------------------------------------
+# Task 5: bias detection within maturity buckets (spec §5.2)
+# ---------------------------------------------------------------------------
+
+
+def test_pooled_bias_hides_a_sign_flip_that_buckets_expose():
+    """The exact failure mode from the original G2 run."""
+    gate = _load_gate()
+    cells = (
+        [{"case": "full", "signed_diff_pct": +0.20} for _ in range(6)]
+        + [{"case": "decayed", "signed_diff_pct": -0.20} for _ in range(6)]
+    )
+    pooled, _ = gate.detect_systematic_bias([c["signed_diff_pct"] for c in cells])
+    bucketed, info = gate.detect_systematic_bias_bucketed(cells)
+
+    assert pooled is False        # 0.5 sign fraction: reads as unbiased
+    assert bucketed is True       # each bucket is unanimous
+    assert set(info["buckets"]) == {"full", "decayed"}
+
+
+def test_unbiased_cells_stay_unbiased_under_bucketing():
+    gate = _load_gate()
+    cells = [
+        {"case": "full", "signed_diff_pct": v}
+        for v in (+0.20, -0.18, +0.02, -0.21, +0.19, -0.05)
+    ]
+    biased, _ = gate.detect_systematic_bias_bucketed(cells)
+    assert biased is False
+
+
+def test_a_bucket_below_the_minimum_cell_count_cannot_flag_bias():
+    """detect_systematic_bias needs >= 4 cells; a thin bucket must not vote."""
+    gate = _load_gate()
+    cells = (
+        [{"case": "full", "signed_diff_pct": +0.02} for _ in range(6)]
+        + [{"case": "decayed", "signed_diff_pct": +0.30} for _ in range(2)]
+    )
+    biased, info = gate.detect_systematic_bias_bucketed(cells)
+    assert biased is False
+    assert info["buckets"]["decayed"]["skipped"] is True

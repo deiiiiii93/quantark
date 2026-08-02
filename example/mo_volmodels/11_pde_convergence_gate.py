@@ -725,6 +725,33 @@ def detect_systematic_bias(
     return biased, info
 
 
+def detect_systematic_bias_bucketed(
+    cells: Sequence[Dict[str, Any]],
+    tol_abs_pct: float = TOL_ABS_PCT,
+) -> Tuple[bool, Dict[str, Any]]:
+    """Bias detection WITHIN maturity buckets, never pooled across them.
+
+    The 2D PDE error changes sign with remaining maturity (spec §5.2), so a
+    pooled sign fraction averages the two regimes and reads as unbiased while
+    each bucket is unanimous.  A variant is biased if ANY bucket with enough
+    cells is biased.  Buckets below detect_systematic_bias's 4-cell minimum
+    are recorded and skipped -- they cannot flag, and they cannot mask.
+    """
+    buckets: Dict[str, Any] = {}
+    any_biased = False
+    for case in CASES:
+        rows = [c for c in cells if c.get("case") == case]
+        diffs = [c.get("signed_diff_pct") for c in rows]
+        usable = [d for d in diffs if d is not None and math.isfinite(float(d))]
+        if len(usable) < 4:
+            buckets[case] = {"n_cells": len(usable), "skipped": True}
+            continue
+        biased, info = detect_systematic_bias(usable, tol_abs_pct)
+        buckets[case] = {**info, "skipped": False, "biased": bool(biased)}
+        any_biased = any_biased or bool(biased)
+    return any_biased, {"buckets": buckets, "pooled_not_used": True}
+
+
 def _finite_or_error(value: Any, what: str) -> Optional[str]:
     """Return None when ``value`` is a finite float, else an error string.
 
@@ -776,14 +803,19 @@ def decide_route(
             if c.get("passed") is not True
         ]
         reasons.append(f"medium grid fails on {len(failing)} cell(s): {', '.join(failing)}")
-    biased, bias_info = detect_systematic_bias(
-        [c.get("signed_diff_pct") for c in medium_cells], tol_abs_pct
-    )
+    biased, bias_info = detect_systematic_bias_bucketed(medium_cells, tol_abs_pct)
     if biased:
+        offending = [
+            case for case, b in bias_info["buckets"].items()
+            if not b.get("skipped") and b.get("biased")
+        ]
+        detail = "; ".join(
+            f"{case} (sign fraction {bias_info['buckets'][case]['sign_fraction']:.2f}, "
+            f"median |diff| {bias_info['buckets'][case]['median_abs_pct']:.3f}% of notional)"
+            for case in offending
+        )
         reasons.append(
-            "systematic sign bias at medium grid "
-            f"(sign fraction {bias_info['sign_fraction']:.2f}, "
-            f"median |diff| {bias_info['median_abs_pct']:.3f}% of notional)"
+            f"systematic sign bias at medium grid within bucket(s): {detail}"
         )
     fine_pass = all(c.get("passed") is True for c in fine_cells)
     if not fine_pass:
