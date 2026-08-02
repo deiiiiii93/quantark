@@ -59,19 +59,39 @@ sits inside that same bucket:
 The third row is the clearest tell: MC's 10,000 paths never sampled that
 1-in-250,000-ish knockout and reported a flat `0.0`; the PDE resolves it.
 
-**KI rows differ in date attribution and count — this is a known,
-pre-existing gap, not a new bug.** The MC engine emits two dated KI rows per
-scalar_bsm/localvol case (e.g. `0.004` at 2024-01-03 and `0.0646` at
-2024-01-05); the PDE emits one (`0.065123` at 2024-01-08). The magnitudes
-agree to three digits (0.004 + 0.0646 = 0.0686 vs. the single PDE row's
-0.065123), so this is aggregation/date-attribution, not a numerical
-disagreement. It is the documented KI-probability definitional split between
-engine families: deterministic (PDE/QUAD) engines report
-`P(KI without prior KO)` per the engine's own discrete monitoring/report date,
-while the MC analyzer reports `P(KI ever)` attributed to each barrier-crossing
-date along the path. This gap predates this fix and is explicitly out of
-scope here (see the KI-probability-definitions project notes); it is not to
-be "fixed" as part of a golden re-baseline.
+**KI rows differ in date attribution and count — this is the documented
+`ki_probability` definition split between engine families, not a new bug.**
+The MC engine emits two dated KI rows per scalar_bsm/localvol case (`0.004`
+at 2024-01-03 and `0.0646` at 2024-01-05, summing to `0.0686`); the PDE
+emits one row (`0.065123` at 2024-01-08).
+
+`ki_probability` is documented in `event_stats.py` as a **legacy** field
+whose definition differs by engine, kept only for backward compatibility:
+MC reports `P(KI ever)` — every path that ever breaches the KI barrier,
+counted regardless of what happens to it afterward — while QUAD/PDE report
+`P(KI ever AND never KO)`, with the KI indicator absorbed to 0 on **any**
+KO the path experiences, order-agnostic (see the `KI_indicator` /
+`KI_ever_indicator` surface-column comment in
+`SnowballPDESolver._compute_event_stats`, and the `ki_probability`
+docstring in `event_stats.py`). `AutocallableEventStats` also carries two
+unambiguous, cross-engine-consistent alternatives —
+`ki_ever_probability` and `ki_survive_knocked_in_probability` — that the
+docstring says to prefer over `ki_probability`. The KI column in these
+goldens is the legacy field; a reader comparing this frame across engine
+families should not treat it as directly comparable without accounting
+for that.
+
+Concretely: MC's `P(KI ever)` = 0.0686 counts every path that ever breached
+the KI barrier; the PDE's `P(KI ever AND never KO)` = 0.065123 excludes
+those that breached KI and subsequently knocked out. The 0.0035 delta is
+paths that knocked in and then knocked out — predominantly KI first, KO
+second, given this barrier geometry (KO barely above spot, KI far below:
+see the `_ref_phoenix` comment in `test_ki_probability_definitions.py`,
+where the dominant contributor to this same gap shape is paths that knock
+in at the lower barrier, later recover, and autocall). This gap predates
+this fix and is explicitly out of scope here (see the
+KI-probability-definitions project notes); it is not to be "fixed" as part
+of a golden re-baseline.
 
 Row counts: `scalar_bsm_event_probabilities.csv` and
 `localvol_event_probabilities.csv` went from 7 data rows to 6 (the two dated

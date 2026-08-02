@@ -14,6 +14,7 @@ The PDE grid is deliberately coarse (GridConfig override) so the test runs
 in a couple of seconds rather than the ~45s a default-resolution snowball
 solve takes.
 """
+import dataclasses
 from datetime import datetime
 
 import pytest
@@ -98,9 +99,14 @@ def test_pde_engine_event_stats_match_the_solver_directly(
 ):
     """Delegation must not transform or truncate the result.
 
-    Compares every array/scalar field the dataclass carries (not just one),
-    so a facade that mangled or dropped part of the payload would be caught
-    here even if a single-field check happened to still line up.
+    Compares all 13 fields ``AutocallableEventStats`` carries, including the
+    five KI-breakdown fields (``ki_times``, ``ki_event_probability``,
+    ``ki_survival_probability``, ``ki_ever_probability``,
+    ``ki_survive_knocked_in_probability``) that drive the per-date KI row
+    structure the 2026-08-01 PDE event-stats re-baseline changed most (7 rows
+    -> 6 in the affected goldens). A facade that mangled or dropped only the
+    KI breakdown -- while leaving ``pv``/KO fields intact -- would slip past
+    a check limited to those; it will not slip past this one.
     """
     facade = PDEEngine(params=coarse_pde_params).calculate_event_stats(
         snowball_product, snowball_env
@@ -109,6 +115,23 @@ def test_pde_engine_event_stats_match_the_solver_directly(
         snowball_product, snowball_env
     )
     assert facade is not None and direct is not None
+
+    field_names = {f.name for f in dataclasses.fields(direct)}
+    assert field_names == {
+        "pv",
+        "ko_times",
+        "ko_probability",
+        "survival_probability",
+        "expected_discounted_ko_cashflow",
+        "ki_probability",
+        "expected_discounted_maturity_cashflow",
+        "reconciliation_error",
+        "ki_times",
+        "ki_event_probability",
+        "ki_survival_probability",
+        "ki_ever_probability",
+        "ki_survive_knocked_in_probability",
+    }, "AutocallableEventStats field set changed -- update this test's coverage"
 
     assert facade.pv == pytest.approx(direct.pv)
     assert facade.ko_times == pytest.approx(direct.ko_times)
@@ -124,6 +147,39 @@ def test_pde_engine_event_stats_match_the_solver_directly(
     assert facade.reconciliation_error == pytest.approx(
         direct.reconciliation_error, abs=1e-8
     )
+
+    # KI breakdown fields (ki_times/ki_event_probability/ki_survival_probability
+    # are empty arrays here since this fixture uses continuous KI monitoring,
+    # which populates no per-date KI rows -- still worth comparing, since a
+    # facade that fabricated or dropped rows would show up as a shape/content
+    # mismatch here, empty or not).
+    assert facade.ki_times == pytest.approx(direct.ki_times)
+    assert facade.ki_event_probability == pytest.approx(direct.ki_event_probability)
+    assert facade.ki_survival_probability == pytest.approx(
+        direct.ki_survival_probability
+    )
+
+    # ki_ever_probability / ki_survive_knocked_in_probability are
+    # Optional[float] -- None if an engine does not compute them for a given
+    # product. Assert None-ness matches either way (a facade that silently
+    # dropped a computed value to None would be caught), and compare values
+    # when present.
+    assert (facade.ki_ever_probability is None) == (
+        direct.ki_ever_probability is None
+    ), (facade.ki_ever_probability, direct.ki_ever_probability)
+    if facade.ki_ever_probability is not None:
+        assert facade.ki_ever_probability == pytest.approx(direct.ki_ever_probability)
+
+    assert (facade.ki_survive_knocked_in_probability is None) == (
+        direct.ki_survive_knocked_in_probability is None
+    ), (
+        facade.ki_survive_knocked_in_probability,
+        direct.ki_survive_knocked_in_probability,
+    )
+    if facade.ki_survive_knocked_in_probability is not None:
+        assert facade.ki_survive_knocked_in_probability == pytest.approx(
+            direct.ki_survive_knocked_in_probability
+        )
 
 
 def test_pde_engine_calculate_event_stats_propagates_unsupported_product_type(
