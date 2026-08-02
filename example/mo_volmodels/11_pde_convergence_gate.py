@@ -757,6 +757,71 @@ def detect_systematic_bias_bucketed(
 
 
 # ---------------------------------------------------------------------------
+# Feller-regime buckets (spec §7A.4(3), §7A.11).  A pooled Gate G2 verdict
+# averages every regime the enforce_feller-constrained calibration produces
+# into a number that describes no actual date -- 80% of dates sit right on
+# the constraint boundary (ratio ~= 1.0) while a further 6.6% satisfy Feller
+# by driving sigma to its bound (ratios up to 1.7e5), a deterministic-
+# variance model with no smile dynamics.  Cut points are measured, not
+# chosen:
+#   0.5  -- section 7A.11's measured failure boundary: unconstrained fits
+#           fail the gate at ratio <= 0.50 and pass above it (16.4% of the
+#           cohort sits below 0.50).
+#   10   -- section 7A.10(3)'s sigma-collapse marker: 6.6% of enforced fits
+#           satisfy Feller by driving sigma to its lower bound, giving a
+#           deterministic-variance model that fails the gate under BOTH
+#           calibration policies.
+# ---------------------------------------------------------------------------
+
+FELLER_VIOLATED_BELOW = 0.5
+FELLER_DEGENERATE_ABOVE = 10.0
+FELLER_BUCKETS = ("violated", "boundary", "degenerate", "unknown")
+FELLER_BUCKET_MIN_CELLS = 4  # same statistical floor as detect_systematic_bias
+
+
+def feller_bucket(ratio: Optional[float]) -> str:
+    """Bucket a Heston Feller ratio (2*kappa*theta/sigma**2) into a regime.
+
+    ``None`` or non-finite -- an uncomputable ratio, or a non-Heston variant
+    that never carries one -- buckets as "unknown", never as "boundary": a
+    date whose regime cannot be determined must not read as the common,
+    passing case.
+    """
+    if ratio is None or not math.isfinite(float(ratio)):
+        return "unknown"
+    ratio = float(ratio)
+    if ratio < FELLER_VIOLATED_BELOW:
+        return "violated"
+    if ratio > FELLER_DEGENERATE_ABOVE:
+        return "degenerate"
+    return "boundary"
+
+
+def _feller_bucket_summary(medium_cells: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Per-Feller-regime cell counts at the medium grid.
+
+    Reporting only -- decide_route stays all-cells-must-pass regardless of
+    bucket population; this exposes WHERE a variant fails, it does not
+    license failure in an unpopular regime.  A bucket below
+    FELLER_BUCKET_MIN_CELLS is flagged ``skipped`` (same precedent as
+    detect_systematic_bias_bucketed's thin maturity buckets), but its real
+    counts are reported regardless -- a thin bucket must not read as
+    "clean" by having its numbers hidden.
+    """
+    out: Dict[str, Any] = {}
+    for bucket in FELLER_BUCKETS:
+        rows = [c for c in medium_cells if feller_bucket(c.get("feller_ratio")) == bucket]
+        diffs = [c["abs_diff_pct"] for c in rows if c.get("abs_diff_pct") is not None]
+        out[bucket] = {
+            "n_cells": len(rows),
+            "n_passed": sum(1 for c in rows if c.get("passed") is True),
+            "max_abs_diff_pct": max(diffs) if diffs else None,
+            "skipped": len(rows) < FELLER_BUCKET_MIN_CELLS,
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Hedge-derived delta admission (spec §5.3).  The gate prices a 1-unit
 # product; the backtest holds NOTIONAL/s0 index units.  One IM futures
 # contract covers FUTURES_MULTIPLIER index points, so it moves
@@ -851,6 +916,7 @@ def decide_route(
     """
     delta_pass = all(r.get("passed") is True for r in delta_rows) if delta_rows else False
     delta_biased, delta_info = detect_delta_bias(delta_rows)
+    feller_buckets = _feller_bucket_summary(medium_cells)
     if not medium_cells or not fine_cells:
         return {
             "route": "mc",
@@ -863,6 +929,7 @@ def decide_route(
             "delta_pass": delta_pass,
             "delta_biased": bool(delta_biased),
             "delta_info": delta_info,
+            "feller_buckets": feller_buckets,
             "rationale": (
                 "no cells evaluated for this variant "
                 f"({len(medium_cells)} medium / {len(fine_cells)} fine) - "
@@ -958,6 +1025,7 @@ def decide_route(
         "delta_pass": bool(delta_pass),
         "delta_biased": bool(delta_biased),
         "delta_info": delta_info,
+        "feller_buckets": feller_buckets,
         "rationale": rationale,
     }
 
@@ -1496,6 +1564,25 @@ def _calibration_record(model) -> Optional[Dict[str, Any]]:
     return {k: v for k, v in model.record.items() if k not in volatile}
 
 
+_FELLER_TRACKED_VARIANTS = (VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV)
+
+
+def _attach_feller_ratio(case: Dict[str, Any], models: Dict[str, Any]) -> None:
+    """Copy the Heston-fit Feller ratio onto every heston/heston_slv cell and
+    delta row (spec §7A.4/§7A.11), keyed off the SAME record
+    ``_calibration_record`` reports -- no separate computation, so no
+    separate safe_divide (the ratio is already produced by safe_divide in
+    quantark.volmodels.calibration).  heston_slv shares the ratio because it
+    is built ON TOP OF the calibrated Heston params, never refit on its own;
+    every other variant, and a missing/uncalibrated Heston model, is
+    explicitly None ("unknown" once bucketed) -- never silently omitted.
+    """
+    heston_model = models.get(VOL_MODEL_HESTON)
+    ratio = heston_model.record.get("feller_ratio") if heston_model is not None else None
+    for row in (*case["cells"], *case["deltas"]):
+        row["feller_ratio"] = ratio if row["variant"] in _FELLER_TRACKED_VARIANTS else None
+
+
 def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, Any]:
     """Worker: full study for one inception date.  Returns a JSON-safe record."""
     inception = _parse_yyyymmdd(date_info["date"])
@@ -1538,6 +1625,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
         cfg=cfg,
     )
     record["timings"]["full_seconds"] = time.perf_counter() - t_case
+    _attach_feller_ratio(record["cases"]["full"], models)
 
     decay_date = pick_decay_date(history.admitted_dates, terms)
     if decay_date is None:
@@ -1563,6 +1651,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
             cfg=cfg,
         )
         record["timings"]["decayed_seconds"] = time.perf_counter() - t_case
+        _attach_feller_ratio(record["cases"]["decayed"], dmodels)
 
     if cfg.get("extras_date") == inception.isoformat():
         record["extras"] = _extras_first_date(
@@ -1778,6 +1867,7 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
                 "delta_pass": decision["delta_pass"],
                 "delta_biased": decision["delta_biased"],
                 "delta_info": decision["delta_info"],
+                "feller_buckets": decision["feller_buckets"],
             },
             "rationale": decision["rationale"],
         }

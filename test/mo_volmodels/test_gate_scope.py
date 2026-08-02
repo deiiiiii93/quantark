@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -186,3 +187,66 @@ def test_small_one_sided_delta_bias_is_caught_even_though_each_cell_passes():
     biased, info = gate.detect_delta_bias(rows)
     assert biased is True
     assert info["mean_signed_contracts"] == pytest.approx(0.2, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Task 7: condition the G2 verdict on the Feller regime (spec §7A.4(3), §7A.11)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ratio,expected", [
+    (0.197, "violated"), (0.493, "violated"), (0.5, "boundary"),
+    (1.0001, "boundary"), (7.1945, "boundary"), (10.0, "boundary"),
+    (172224.1, "degenerate"), (None, "unknown"),
+])
+def test_feller_buckets_use_the_measured_cut_points(ratio, expected):
+    assert _load_gate().feller_bucket(ratio) == expected
+
+
+def test_route_records_a_verdict_per_feller_bucket():
+    """A pooled verdict averages a 0.03% regime with a 2.5% one (§7A.3)."""
+    gate = _load_gate()
+    cells = (
+        [{"date": "2024-01-12", "case": "full", "signed_diff_pct": +0.58,
+          "passed": False, "feller_ratio": 0.197, "pde_price": 1.0, "notional": 1.0}]
+        + [{"date": f"d{i}", "case": "full", "signed_diff_pct": +0.10,
+            "passed": True, "feller_ratio": 1.0001, "pde_price": 1.0, "notional": 1.0}
+           for i in range(6)]
+    )
+    out = gate.decide_route(cells, cells, delta_rows=[])
+    assert out["feller_buckets"]["violated"]["n_cells"] == 1
+    assert out["feller_buckets"]["violated"]["n_passed"] == 0
+    assert out["feller_buckets"]["boundary"]["n_passed"] == 6
+
+
+def test_attach_feller_ratio_copies_from_heston_onto_heston_and_slv_only():
+    """process_date's plumbing step: heston_slv shares the Heston fit's
+    ratio (it is built on top of the calibrated Heston params, never
+    refit); every other variant is explicitly None, never silently
+    omitted -- a missing key would be indistinguishable from "unknown"."""
+    gate = _load_gate()
+    heston_model = types.SimpleNamespace(record={"feller_ratio": 3.4})
+    models = {"heston": heston_model, "localvol": None}
+    case = {
+        "cells": [
+            {"variant": "heston"},
+            {"variant": "heston_slv"},
+            {"variant": "localvol"},
+        ],
+        "deltas": [{"variant": "heston"}, {"variant": "localvol"}],
+    }
+    gate._attach_feller_ratio(case, models)
+    assert case["cells"][0]["feller_ratio"] == 3.4
+    assert case["cells"][1]["feller_ratio"] == 3.4
+    assert case["cells"][2]["feller_ratio"] is None
+    assert case["deltas"][0]["feller_ratio"] == 3.4
+    assert case["deltas"][1]["feller_ratio"] is None
+
+
+def test_attach_feller_ratio_is_none_when_heston_model_missing():
+    """A missing/uncalibrated Heston model fails closed to None (-> "unknown"),
+    never to a value that would bucket as a passing regime."""
+    gate = _load_gate()
+    case = {"cells": [{"variant": "heston"}], "deltas": []}
+    gate._attach_feller_ratio(case, {})
+    assert case["cells"][0]["feller_ratio"] is None
