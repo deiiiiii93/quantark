@@ -714,3 +714,120 @@ def test_read_json_separates_missing_from_corrupt(tmp_path):
     read = results.read_json(bad)
     assert read.state == "unreadable"
     assert "JSONDecodeError" in read.message or "Expecting" in read.message
+
+
+# ---------------------------------------------------------------------------
+# Task 6: payload, chain, and the integration fixture
+# ---------------------------------------------------------------------------
+
+payload_mod = importlib.import_module("mo_dashboard.payload")
+
+
+def _row(gid, satisfied=True, freshness="fresh", status="ok"):
+    return {"id": gid, "status": status, "freshness": freshness,
+            "headline": {"satisfied": satisfied},
+            "facets": {"all": {"freshness": freshness, "mode": "inferred",
+                               "invalidated_by": "3fbbf21" if freshness == "void" else None}}}
+
+
+def test_chain_includes_g5_before_fleet():
+    """Study section 9 requires a grid-resolution sweep over every operating
+    point before fleet work, and fdf3a70 made under-resolution a fail-closed
+    ValidationError."""
+    assert payload_mod.CHAIN == ("G1", "G4", "G2", "G5", "fleet", "aggregate")
+    assert payload_mod.CHAIN.index("G5") < payload_mod.CHAIN.index("fleet")
+
+
+def test_next_action_is_the_first_unsatisfied_node(tmp_path):
+    rows = [_row("G1"), _row("G4"), _row("G2", satisfied=False, freshness="void"),
+            _row("G5", satisfied=False, status="missing")]
+    action = payload_mod.next_action(rows, {"admitted": 27, "expected_cells": 162}, tmp_path)
+    assert action["node"] == "G2"
+    assert "void" in action["why"].lower()
+
+
+def test_next_action_carries_the_confidence_of_its_evidence(tmp_path):
+    rows = [_row("G1"), _row("G4"), _row("G2", satisfied=False)]
+    action = payload_mod.next_action(rows, {"admitted": 0, "expected_cells": 162}, tmp_path)
+    assert action["confidence"] in {"exact", "inferred"}
+
+
+def test_fleet_node_needs_every_expected_cell(tmp_path):
+    rows = [_row(g) for g in ("G1", "G4", "G2", "G5")]
+    partial = payload_mod.next_action(rows, {"admitted": 27, "expected_cells": 162}, tmp_path)
+    assert partial["node"] == "fleet"
+    full = payload_mod.next_action(rows, {"admitted": 162, "expected_cells": 162}, tmp_path)
+    assert full["node"] == "aggregate"
+
+
+def test_payload_carries_the_schema_version_and_required_keys(tmp_path):
+    (tmp_path / "output").mkdir()
+    doc = payload_mod.collect(tmp_path, registry_path=tmp_path / "absent.yaml")
+    for key in ("schema_version", "generated_at", "mode", "git", "cohort",
+                "gates", "chain", "fleet", "results", "errors"):
+        assert key in doc, key
+    assert doc["schema_version"] == payload_mod.SCHEMA_VERSION
+    assert doc["mode"] == "snapshot"
+    assert "live" not in doc
+
+
+def test_serve_mode_adds_a_live_block(tmp_path):
+    (tmp_path / "output").mkdir()
+    doc = payload_mod.collect(tmp_path, registry_path=tmp_path / "absent.yaml",
+                              mode="serve", poll_window_seconds=30)
+    assert doc["mode"] == "serve"
+    assert "live" in doc
+
+
+REAL_OUTPUT = PROJECT_ROOT / "output"
+REAL_HISTORY = PROJECT_ROOT / "example/mo_volmodels/data/history"
+
+pytestmark_real = pytest.mark.skipif(
+    not (REAL_OUTPUT.is_dir() and REAL_HISTORY.is_dir()),
+    reason="needs the uncommitted output/ and data/history/ caches",
+)
+
+
+@pytestmark_real
+def test_real_artifacts_produce_the_expected_dashboard_state():
+    """Pins the whole expected state as of 2026-08-03.
+
+    Every number here is a claim the design makes.  If scoping regresses,
+    this fails rather than the page quietly lying.
+    """
+    doc = payload_mod.collect(PROJECT_ROOT)
+
+    g2 = next(r for r in doc["gates"] if r["id"] == "G2")
+    assert g2["facets"]["delta"]["freshness"] == "void"
+    assert g2["facets"]["delta"]["invalidated_by"] == "3fbbf21"
+    assert g2["facets"]["pv"]["freshness"] != "void"
+
+    g1 = next(r for r in doc["gates"] if r["id"] == "G1")
+    assert g1["freshness"] != "void", "f97fba3 must not reach G1"
+
+    assert doc["fleet"]["expected_cells"] == 162
+    # 27 STALE, not fresh: every flat_bsm cell is dated no later than
+    # 2026-08-03 01:55 while f97fba3 (13:39), 3fbbf21 (15:17) and ec20db9
+    # (15:45) all touch declared FLEET dependencies.  Coverage counts
+    # fresh + stale precisely so this reads 27 rather than 0.
+    assert doc["fleet"]["counts"]["stale"] == 27
+    assert doc["fleet"]["counts"]["fresh"] == 0
+    assert doc["fleet"]["counts"]["void"] == 8
+    assert doc["fleet"]["admitted"] == 27
+    assert doc["chain"]["next_action"]["node"] == "G2"
+
+
+@pytestmark_real
+def test_no_run_dir_on_disk_is_unclassified():
+    doc = payload_mod.collect(PROJECT_ROOT)
+    stragglers = [d for d in doc["fleet"]["run_dirs"] if d["role"] == "unclassified"]
+    assert stragglers == [], f"add these to mo_dashboard.yaml: {stragglers}"
+
+
+@pytestmark_real
+def test_rendering_the_real_page_imports_no_pricing_code():
+    """Spec criterion 9: the collector must stay out of the pricing stack."""
+    before = {m for m in sys.modules if m.startswith("quantark.asset")}
+    payload_mod.collect(PROJECT_ROOT)
+    after = {m for m in sys.modules if m.startswith("quantark.asset")}
+    assert after == before
