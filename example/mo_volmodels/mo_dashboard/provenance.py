@@ -160,6 +160,12 @@ def mtime_of(path: Path) -> Optional[datetime]:
     return datetime.fromtimestamp(path.stat().st_mtime).astimezone()
 
 
+def at_or_below(reported: str, dep: str) -> bool:
+    """Is ``reported`` the dep itself, or a leaf inside it?"""
+    rep, d = reported.rstrip("/"), dep.rstrip("/")
+    return rep == d or rep.startswith(d + "/")
+
+
 def dep_touched_by(reported: str, dep: str) -> bool:
     """Does a path reported by ``git status`` bear on declared dep ``dep``?
 
@@ -168,9 +174,24 @@ def dep_touched_by(reported: str, dep: str) -> bool:
     the ``surface_manifest.json`` inside it (verified against this repo) --
     so a one-way test misses every change to a declared untracked dependency.
     """
-    rep = reported.rstrip("/")
-    d = dep.rstrip("/")
-    return rep == d or d.startswith(rep + "/") or rep.startswith(d + "/")
+    rep, d = reported.rstrip("/"), dep.rstrip("/")
+    return at_or_below(reported, dep) or d.startswith(rep + "/")
+
+
+def changed_path(reported: str, dep: str) -> str:
+    """Which path is the evidence of change -- the leaf, or the dep?
+
+    Every broad pricing dependency is a DIRECTORY, and editing a file does
+    not change its parent directory's mtime (only adding, removing or
+    renaming an entry does -- verified).  Stat'ing the declared directory
+    when git reported a changed child therefore reads the directory's old
+    timestamp, which ``freshness`` then filters out as "older than the
+    artifact" -- and an uncommitted engine edit goes undetected.
+
+    So: a reported leaf at or below the dep IS the change.  Only when git
+    reported a collapsed parent *above* the dep do we fall back to the dep.
+    """
+    return reported.rstrip("/") if at_or_below(reported, dep) else dep
 
 
 def _git(project_root: Path, *args: str) -> str:
@@ -215,9 +236,10 @@ def collect_git_facts(
             continue
         for dep in present:
             if dep_touched_by(rel, dep):
-                when = mtime_of(project_root / dep)
+                target = changed_path(rel, dep)
+                when = mtime_of(project_root / target)
                 if when is not None:
-                    dirty[dep] = when
+                    dirty[target] = when
 
     # Untracked deps are stat'ed DIRECTLY, never discovered through git
     # status.  git collapses untracked trees to a parent, and an entry in

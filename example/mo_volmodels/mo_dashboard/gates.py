@@ -22,6 +22,34 @@ def worst_freshness(values: Sequence[str]) -> str:
     return max(values, key=lambda v: _ORDER.get(v, 0)) if values else P.FRESH
 
 
+def gate_verdict(row: Dict[str, Any]) -> Tuple[bool, str, str]:
+    """(ok, label, why) -- the SINGLE predicate for both chain and display.
+
+    The renderer previously derived PASS from ``headline.satisfied`` alone,
+    so G2 printed "PASS (inferred)" while its own delta facet badge, one
+    cell to the right, read "void" -- and next_action correctly stopped at
+    G2.  The most prominent verdict on the page contradicted the page.
+    """
+    gid = row.get("id", "?")
+    status = row.get("status")
+    if status in ("missing", "unreadable"):
+        return False, status.upper(), f"{gid}: artifact {status}"
+
+    facets = row.get("facets") or {}
+    voided = [name for name, f in facets.items() if f.get("freshness") == P.VOID]
+    if voided:
+        by = facets[voided[0]].get("invalidated_by")
+        return False, "VOID", f"{gid}: {'/'.join(voided)} facet void by {by}"
+
+    if not (row.get("headline") or {}).get("satisfied"):
+        return False, "FAIL (inferred)", f"{gid}: gate criteria not met"
+
+    stale = [name for name, f in facets.items() if f.get("freshness") == P.STALE]
+    if stale:
+        return True, "PASS (stale, inferred)", f"{gid}: pass, {'/'.join(stale)} stale"
+    return True, "PASS (inferred)", f"{gid}: pass"
+
+
 def headline_g1(doc: Any) -> Dict[str, Any]:
     failures = doc.get("failures") or []
     n_admitted = int(doc.get("n_admitted") or 0)
@@ -37,6 +65,18 @@ def headline_g1(doc: Any) -> Dict[str, Any]:
 
 
 def headline_g4(doc: Any) -> Dict[str, Any]:
+    """G4 *defines* the inception universe, so it cannot be validated against
+    it -- there is no render-time source for "how many inceptions should
+    there be" that does not mean executing stage 12's ``schedule_inceptions``
+    and with it the whole pricing stack (spec 5.3).
+
+    So this checks internal completeness only, and says so.  The size of the
+    universe is asserted in
+    ``test_the_artifact_matches_stage12s_schedule``, which pays the import
+    cost once in the suite rather than on every page render.  A silently
+    shrunken G4 run would move the fleet denominator, so ``n_inceptions`` is
+    rendered prominently and ``universe_verified`` is False by construction.
+    """
     records = list(doc or [])
     solved = [r for r in records if (r.get("coupon_solution") or {}).get("solved")]
     coupons = [float(r["coupon"]) for r in solved if r.get("coupon") is not None]
@@ -45,11 +85,23 @@ def headline_g4(doc: Any) -> Dict[str, Any]:
         "n_solved": len(solved),
         "coupon_min": min(coupons) if coupons else None,
         "coupon_max": max(coupons) if coupons else None,
+        "universe_verified": False,
+        "universe_note": (
+            "G4 defines the inception set; its size is asserted in the test "
+            "suite, not at render time (spec 5.3)."
+        ),
         "satisfied": bool(records) and len(solved) == len(records),
     }
 
 
-def headline_g2(doc: Any) -> Dict[str, Any]:
+def headline_g2(doc: Any, expected_variants: Sequence[str] = ()) -> Dict[str, Any]:
+    """G2 must decide the WHOLE study universe, not whatever it contains.
+
+    Without an expected set, an artifact holding two variants passes because
+    both have routes -- and the per-variant provenance roll-up then iterates
+    that same short list, so a missing variant's invalidation is never even
+    evaluated.  Incompleteness must be a failure, not an empty loop.
+    """
     out: Dict[str, Any] = {}
     for name, block in (doc.get("variants") or {}).items():
         gate = block.get("gate") or {}
@@ -70,8 +122,15 @@ def headline_g2(doc: Any) -> Dict[str, Any]:
                 "bound_contracts": info.get("bound_contracts"),
             },
         }
+    expected = tuple(expected_variants)
+    missing = [v for v in expected if v not in out]
+    extra = [v for v in out if expected and v not in expected]
     return {
         "variants": out,
+        "expected_variants": list(expected),
+        "missing_variants": missing,
+        "extra_variants": extra,
+        "complete": bool(out) and not missing and not extra,
         "tolerance": doc.get("tolerance"),
         "mc_reference": doc.get("mc_reference"),
         "calibration_policy": doc.get("calibration_policy"),
@@ -80,7 +139,12 @@ def headline_g2(doc: Any) -> Dict[str, Any]:
         # pde.  Reading delta_pass as the predicate leaves G2 permanently
         # unsatisfiable, because the routes that exist are exactly the ones
         # chosen when a comparison did not pass.
-        "satisfied": bool(out) and all(v.get("route") for v in out.values()),
+        "satisfied": (
+            bool(out)
+            and not missing
+            and not extra
+            and all(v.get("route") for v in out.values())
+        ),
     }
 
 
@@ -143,7 +207,7 @@ GATE_SPECS: Tuple[GateSpec, ...] = (
 
 
 def collect_gates(
-    project_root: Path, reg: Registry
+    project_root: Path, reg: Registry, *, expected_variants: Sequence[str] = ()
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     project_root = Path(project_root)
     rows: List[Dict[str, Any]] = []
@@ -172,7 +236,11 @@ def collect_gates(
 
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
-            row["headline"] = spec.headline_fn(doc)
+            row["headline"] = (
+                headline_g2(doc, expected_variants)
+                if spec.id == "G2"
+                else spec.headline_fn(doc)
+            )
         except Exception as exc:  # noqa: BLE001
             row["status"] = "unreadable"
             row["headline"] = {
@@ -195,8 +263,11 @@ def collect_gates(
         # heston_slv).  Evaluating with variant=None makes every one of them
         # unreachable -- the scoping mechanism would be dead code for the one
         # gate it was written for.
+        # Iterate the canonical universe, not the artifact's keys: a
+        # variant absent from the artifact must still be evaluated, or its
+        # scoped invalidation is silently skipped.
         variants = (
-            sorted((row["headline"].get("variants") or {}).keys())
+            sorted(set(expected_variants) | set(row["headline"].get("variants") or {}))
             if spec.id == "G2"
             else []
         )
@@ -239,5 +310,16 @@ def collect_gates(
             [f["freshness"] for f in row["facets"].values()]
         )
         rows.append(row)
+
+    for row in rows:
+        ok, label, why = gate_verdict(row)
+        row["verdict"] = {"ok": ok, "label": label, "why": why}
+        missing_variants = (row.get("headline") or {}).get("missing_variants") or []
+        if missing_variants:
+            errors.append({
+                "source": f"gate.{row['id']}",
+                "path": row["artifact_path"],
+                "message": f"artifact omits study variants: {', '.join(missing_variants)}",
+            })
 
     return rows, errors

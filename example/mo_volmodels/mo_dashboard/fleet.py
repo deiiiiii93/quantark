@@ -212,7 +212,8 @@ def collect_fleet(
     grid: Dict[str, Dict[str, Any]] = {}
     for variant in variants:
         grid[variant] = {
-            tag: {"state": "missing", "run_dir": None, "provenance": None}
+            tag: {"state": "missing", "run_dir": None, "mtime": None,
+                  "provenance": None}
             for tag in inception_tag_list
         }
 
@@ -258,6 +259,7 @@ def collect_fleet(
                 grid[variant][tag] = {
                     "state": state,
                     "run_dir": _shown(run_dir, project_root),
+                    "mtime": facts.summary_mtime.isoformat() if facts.summary_mtime else None,
                     "provenance": prov.as_dict(),
                 }
             else:
@@ -277,6 +279,16 @@ def collect_fleet(
     ]
     counts = count_states(states)
 
+    # Newest admitted cell -- an aggregate older than this is summarising
+    # results it predates (spec 4.1).
+    admitted_mtimes = [
+        cell["mtime"]
+        for variant in variants
+        for tag in inception_tag_list
+        for cell in [grid[variant][tag]]
+        if cell.get("mtime") and cell["state"] in ("fresh", "stale")
+    ]
+
     run_dirs = []
     for path, role in sorted(roles.items()):
         run_dirs.append(
@@ -294,6 +306,7 @@ def collect_fleet(
         "grid": grid,
         "counts": counts,
         "admitted": admitted(counts),
+        "newest_cell_mtime": max(admitted_mtimes) if admitted_mtimes else None,
         "run_dirs": run_dirs,
         "errors": errors,
     }

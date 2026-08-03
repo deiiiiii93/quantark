@@ -752,12 +752,128 @@ def test_next_action_carries_the_confidence_of_its_evidence(tmp_path):
     assert action["confidence"] in {"exact", "inferred"}
 
 
-def test_fleet_node_needs_every_expected_cell(tmp_path):
+def test_fleet_readiness_needs_fresh_cells_not_merely_admitted(tmp_path):
+    """`admitted` (fresh + stale) is the DISPLAY metric; readiness is
+    stricter.  162 stale cells are 162 cells whose dependencies moved -- not
+    a finished fleet.  Conflating the two let the chain advance past a fleet
+    that entirely needed re-running."""
     rows = [_row(g) for g in ("G1", "G4", "G2", "G5")]
-    partial = payload_mod.next_action(rows, {"admitted": 27, "expected_cells": 162}, tmp_path)
+
+    partial = payload_mod.next_action(
+        rows,
+        {"admitted": 27, "expected_cells": 162, "counts": {"fresh": 0, "stale": 27}},
+        tmp_path,
+    )
     assert partial["node"] == "fleet"
-    full = payload_mod.next_action(rows, {"admitted": 162, "expected_cells": 162}, tmp_path)
+    assert "0/162 fresh" in partial["why"]
+    assert "27 stale" in partial["why"]
+
+    # Fully admitted but entirely stale: still NOT ready.
+    all_stale = payload_mod.next_action(
+        rows,
+        {"admitted": 162, "expected_cells": 162, "counts": {"fresh": 0, "stale": 162}},
+        tmp_path,
+    )
+    assert all_stale["node"] == "fleet"
+
+    # Fully fresh: ready, chain moves on.
+    full = payload_mod.next_action(
+        rows,
+        {"admitted": 162, "expected_cells": 162, "counts": {"fresh": 162, "stale": 0}},
+        tmp_path,
+    )
     assert full["node"] == "aggregate"
+
+
+def test_aggregate_node_rejects_a_conclusion_that_predates_its_cells(tmp_path):
+    """An aggregate older than the newest cell it summarises is a stale
+    conclusion, not a satisfied node."""
+    rows = [_row(g) for g in ("G1", "G4", "G2", "G5")]
+    fleet_ready = {"admitted": 162, "expected_cells": 162,
+                   "counts": {"fresh": 162, "stale": 0},
+                   "newest_cell_mtime": "2026-08-03T18:00:00+08:00"}
+
+    (tmp_path / "output/volmodel_backtest").mkdir(parents=True)
+    agg = tmp_path / "output/volmodel_backtest/aggregate.json"
+    agg.write_text("{}", encoding="utf-8")
+    import os
+    old = datetime(2026, 8, 3, 12, 0, tzinfo=CST).timestamp()
+    os.utime(agg, (old, old))
+
+    stale_agg = payload_mod.next_action(rows, fleet_ready, tmp_path)
+    assert stale_agg["node"] == "aggregate"
+    assert "predates" in stale_agg["why"]
+
+    new = datetime(2026, 8, 3, 20, 0, tzinfo=CST).timestamp()
+    os.utime(agg, (new, new))
+    assert payload_mod.next_action(rows, fleet_ready, tmp_path)["node"] is None
+
+
+def test_a_void_gate_never_renders_as_pass():
+    """The page printed 'PASS (inferred)' for G2 while the badge one cell to
+    the right read 'void', because display and chain used two predicates."""
+    row = {"id": "G2", "status": "ok", "headline": {"satisfied": True},
+           "facets": {"pv": {"freshness": "stale"},
+                      "delta": {"freshness": "void", "invalidated_by": "3fbbf21"}}}
+    ok, label, why = gates.gate_verdict(row)
+    assert ok is False
+    assert label == "VOID"
+    assert "3fbbf21" in why
+
+
+def test_a_stale_pass_is_labelled_as_such():
+    row = {"id": "G1", "status": "ok", "headline": {"satisfied": True},
+           "facets": {"all": {"freshness": "stale"}}}
+    ok, label, _ = gates.gate_verdict(row)
+    assert ok is True
+    assert label == "PASS (stale, inferred)"
+
+
+def test_g2_is_incomplete_when_the_artifact_omits_study_variants():
+    """A two-variant artifact previously passed because both had routes --
+    and the provenance roll-up then iterated that same short list, so the
+    missing variants' invalidations were never evaluated."""
+    doc = {"variants": {
+        "flat_bsm": {"route": "pde", "gate": {"delta_info": {}}},
+        "heston": {"route": "mc", "gate": {"delta_info": {}}},
+    }}
+    h = gates.headline_g2(doc, fleet.VARIANTS)
+    assert h["satisfied"] is False
+    assert h["complete"] is False
+    assert set(h["missing_variants"]) == set(fleet.VARIANTS) - {"flat_bsm", "heston"}
+
+    whole = {"variants": {v: {"route": "pde", "gate": {"delta_info": {}}}
+                          for v in fleet.VARIANTS}}
+    assert gates.headline_g2(whole, fleet.VARIANTS)["satisfied"] is True
+
+
+def test_a_changed_child_under_a_directory_dep_is_detected(tmp_path):
+    """Editing a file does not change its parent directory's mtime (verified),
+    so stat'ing the declared DIRECTORY read an old timestamp and freshness
+    filtered it out -- an uncommitted engine edit went undetected."""
+    import os, subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    pkg = tmp_path / "quantark/volmodels"
+    pkg.mkdir(parents=True)
+    child = pkg / "calibration.py"
+    child.write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=tmp_path, check=True)
+
+    # Directory predates the artifact; the edited child does not.
+    old = datetime(2026, 1, 1, tzinfo=CST).timestamp()
+    os.utime(pkg, (old, old))
+    child.write_text("x = 2\n", encoding="utf-8")
+
+    dep = "quantark/volmodels/"
+    _, dirty, _ = provenance.collect_git_facts(tmp_path, [dep])
+    assert dirty, "a changed child under a directory dep must be detected"
+    newest = max(dirty.values())
+    assert newest > datetime(2026, 6, 1, tzinfo=CST), (
+        "the LEAF mtime must be recorded, not the stale directory mtime"
+    )
 
 
 def test_payload_carries_the_schema_version_and_required_keys(tmp_path):
@@ -826,11 +942,49 @@ def test_no_run_dir_on_disk_is_unclassified():
 
 @pytestmark_real
 def test_rendering_the_real_page_imports_no_pricing_code():
-    """Spec criterion 9: the collector must stay out of the pricing stack."""
-    before = {m for m in sys.modules if m.startswith("quantark.asset")}
-    payload_mod.collect(PROJECT_ROOT)
-    after = {m for m in sys.modules if m.startswith("quantark.asset")}
-    assert after == before
+    """Spec criterion 9: the collector must stay out of the pricing stack.
+
+    Run in a CLEAN SUBPROCESS with a real import hook.  A sys.modules delta
+    in this interpreter proves nothing: it cannot see an already-cached
+    pricing module, it covered only quantark.asset (not volmodels or
+    backtest), and this very test module runs a stage-12 test that imports
+    the whole stack -- so ordering alone could make it green.
+    """
+    import subprocess, textwrap
+    probe = textwrap.dedent(f"""
+        import sys
+        FORBIDDEN = ("quantark.asset", "quantark.volmodels",
+                     "quantark.backtest", "quantark.montecarlo", "quantark.priceenv")
+
+        class Guard:
+            def find_module(self, name, path=None):
+                if name.startswith(FORBIDDEN):
+                    raise AssertionError("render-time import of " + name)
+                return None
+
+            def find_spec(self, name, path=None, target=None):
+                if name.startswith(FORBIDDEN):
+                    raise AssertionError("render-time import of " + name)
+                return None
+
+        sys.meta_path.insert(0, Guard())
+        sys.path.insert(0, {str(MO_DIR)!r})
+        from mo_dashboard.payload import collect
+        from mo_dashboard.render import render
+        doc = collect({str(PROJECT_ROOT)!r})
+        html = render(doc)
+        assert html.startswith("<!doctype html>")
+        leaked = [m for m in sys.modules if m.startswith(FORBIDDEN)]
+        assert not leaked, leaked
+        print("CLEAN")
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True,
+        cwd=str(PROJECT_ROOT), env={"PYTHONPATH": str(PROJECT_ROOT), "PATH": "/usr/bin:/bin"},
+    )
+    assert "CLEAN" in result.stdout, (
+        f"rc={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr[-2000:]}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -944,18 +1098,52 @@ def test_cli_writes_a_snapshot(tmp_path):
     assert out.read_text(encoding="utf-8").startswith("<!doctype html>")
 
 
-def test_cli_writes_nothing_else_under_output(tmp_path):
-    """Read-only contract: the only write is the HTML file named by --out."""
-    (tmp_path / "output").mkdir()
-    before = {p.name for p in (tmp_path / "output").iterdir()}
+def _tree_state(root: Path):
+    """Recursive (path -> mtime_ns, size) over the whole tree."""
+    out = {}
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            st = p.stat()
+            out[str(p.relative_to(root))] = (st.st_mtime_ns, st.st_size)
+    return out
+
+
+def test_cli_writes_exactly_one_file_and_touches_nothing_else(tmp_path):
+    """Read-only contract, checked RECURSIVELY.
+
+    Comparing immediate filenames in output/ still passes if the run
+    overwrites an existing artifact, writes inside a run directory, or
+    writes elsewhere in the tree.  Snapshot every file's mtime and size.
+    """
+    project = tmp_path / "proj"
+    (project / "output/volmodel_backtest/runs/2023-05-04/flat_bsm").mkdir(parents=True)
+    (project / "output/volmodel_backtest/runs/2023-05-04/flat_bsm/run_summary.json").write_text(
+        "{}", encoding="utf-8")
+    (project / "output/volmodel_backtest/inceptions.json").write_text(
+        json.dumps([{"inception": "2023-05-04", "coupon": 0.15,
+                     "coupon_solution": {"solved": True}}]), encoding="utf-8")
+    (project / "output/gate_g1_admission.json").write_text(
+        json.dumps({"n_admitted": 1, "n_verified": 1, "failures": []}), encoding="utf-8")
+
+    target = project / "output/snowball_dashboard_latest.html"
+    before = _tree_state(project)
+    assert str(target.relative_to(project)) not in before
+
     module = _load_cli("mo_dash_cli2")
     module.main([
-        "--project-root", str(tmp_path),
-        "--registry", str(tmp_path / "absent.yaml"),
-        "--out", str(tmp_path / "output/snowball_dashboard_latest.html"),
+        "--project-root", str(project),
+        "--registry", str(project / "absent.yaml"),
+        "--out", str(target),
     ])
-    after = {p.name for p in (tmp_path / "output").iterdir()}
-    assert after - before == {"snowball_dashboard_latest.html"}
+
+    after = _tree_state(project)
+    created = set(after) - set(before)
+    removed = set(before) - set(after)
+    modified = {k for k in set(before) & set(after) if before[k] != after[k]}
+
+    assert created == {str(target.relative_to(project))}, created
+    assert removed == set(), removed
+    assert modified == set(), f"the dashboard modified existing files: {modified}"
 
 
 # ---------------------------------------------------------------------------

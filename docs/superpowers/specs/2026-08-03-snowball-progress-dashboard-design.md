@@ -220,11 +220,32 @@ Node predicates, all enumerated so two implementers cannot differ:
 | Node | Satisfied when |
 |---|---|
 | G1 | artifact readable, `failures == []`, `n_verified == n_admitted`, every facet non-void |
-| G4 | every cohort inception has `coupon_solution.solved == true`, every facet non-void |
+| G4 | every record has `coupon_solution.solved == true`, every facet non-void — **universe unverified at render time**, see below |
 | G2 | every study variant has a route, **and both `pv` and `delta` facets non-void** |
 | G5 | artifact readable **and schema-complete** (positive `n_operating_points` and an explicit `under_resolved` list) with zero under-resolved points |
 | fleet | `fresh` cells == `expected_cells` |
 | aggregate | aggregate artifact exists and is newer than the last fresh cell |
+
+**G4's universe cannot be checked at render time.** G4 *defines* the inception set, so it has
+nothing to be validated against: the only independent source is stage 12's
+`schedule_inceptions`, and reaching it means importing the pricing stack (§5.3). The gate
+therefore checks internal completeness only — every record solved — and reports
+`universe_verified: false` with `n_inceptions` shown prominently. The size of the universe is
+asserted in the test suite, which pays the import cost once rather than on every render. A
+silently shrunken G4 run would move the fleet denominator, so this limit is stated on the page
+rather than papered over.
+
+**One predicate, shared.** The rendered verdict and the chain's readiness test are the same
+function. Two predicates is how the page came to print `PASS (inferred)` for G2 while the badge
+one cell to its right read `void` and `next_action` correctly stopped at G2 — the most prominent
+element on the page contradicting the page. A void facet renders `VOID`; a passing gate with a
+stale facet renders `PASS (stale, inferred)`, never a bare pass.
+
+**Coverage is not readiness.** `admitted` (`fresh + stale`) is the display metric — work that
+exists. The chain's fleet node requires `fresh == expected_cells`, because a stale cell is one
+whose dependencies moved and 162 stale cells are not a finished fleet. The aggregate node
+likewise requires a *readable* artifact newer than the newest admitted cell; existence alone
+would let a conclusion that predates its own inputs satisfy the chain.
 
 `next_action` is the first unsatisfied node, reported with the reason and the confidence of the
 evidence behind it (`exact` / `inferred`). It is labelled **next action**, not "blocker" — the

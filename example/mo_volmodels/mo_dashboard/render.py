@@ -90,15 +90,15 @@ def _panel_status(doc: Dict[str, Any]) -> str:
             f"{esc(name)}: {_badge(f.get('freshness', '?'), f.get('mode', '?'))}"
             for name, f in facets.items()
         ) or esc(row.get("status"))
-        satisfied = (row.get("headline") or {}).get("satisfied")
-        conf = (
-            "exact"
-            if facets and all(f.get("mode") == "exact" for f in facets.values())
-            else "inferred"
-        )
+        # The SHARED verdict, identical to the chain's predicate.  Deriving
+        # it here from headline.satisfied alone is how G2 came to print
+        # "PASS (inferred)" beside its own void badge.
+        verdict = row.get("verdict") or {}
+        label = verdict.get("label", "?")
+        color = "var(--pos)" if verdict.get("ok") else "var(--neg)"
         rows.append(
             f"<tr><td>{esc(row.get('id'))}</td><td>{esc(row.get('title'))}</td>"
-            f"<td>{esc(verdict_label(bool(satisfied), conf))}</td>"
+            f'<td style="color:{color}">{esc(label)}</td>' 
             f"<td>{cells}</td>"
             f"<td>{esc(row.get('artifact_mtime') or '—')}</td></tr>"
         )

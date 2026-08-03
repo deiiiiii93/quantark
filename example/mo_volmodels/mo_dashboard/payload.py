@@ -98,31 +98,43 @@ def node_satisfied(
         row = _gate(gate_rows, node)
         if row is None:
             return False, f"{node}: no row", "inferred"
-        if row.get("status") in ("missing", "unreadable"):
-            return False, f"{node}: artifact {row['status']}", "inferred"
         facets = row.get("facets") or {}
         modes = {f.get("mode", "inferred") for f in facets.values()}
-        confidence = "exact" if modes == {"exact"} else "inferred"
-        voided = [name for name, f in facets.items() if f.get("freshness") == P.VOID]
-        if voided:
-            by = facets[voided[0]].get("invalidated_by")
-            return False, f"{node}: {'/'.join(voided)} facet void by {by}", confidence
-        if not (row.get("headline") or {}).get("satisfied"):
-            return False, f"{node}: gate criteria not met", confidence
-        return True, f"{node}: pass", confidence
+        confidence = "exact" if modes and modes == {"exact"} else "inferred"
+        # ONE predicate, shared with the rendered verdict.  Two predicates
+        # is how the page came to print "PASS (inferred)" for a gate whose
+        # next_action was itself.
+        ok, _label, why = gates_mod.gate_verdict(row)
+        return ok, why, confidence
 
     if node == "fleet":
-        admitted = int(fleet_block.get("admitted") or 0)
+        # `admitted` (fresh + stale) is the DISPLAY metric -- work that
+        # exists.  Readiness is stricter: a stale cell is one whose
+        # dependencies moved, so 162 stale cells are not a finished fleet.
+        counts = fleet_block.get("counts") or {}
+        fresh = int(counts.get("fresh") or 0)
+        stale = int(counts.get("stale") or 0)
         expected = int(fleet_block.get("expected_cells") or 0)
-        if expected and admitted >= expected:
+        if expected and fresh >= expected:
             return True, "fleet: complete", "inferred"
-        return False, f"fleet: {admitted}/{expected} admitted cells", "inferred"
+        detail = f"fleet: {fresh}/{expected} fresh"
+        if stale:
+            detail += f" ({stale} stale need re-running)"
+        return False, detail, "inferred"
 
     if node == "aggregate":
-        path = Path(project_root) / AGGREGATE_ARTIFACT
-        if path.exists():
-            return True, "aggregate: present", "inferred"
-        return False, "aggregate: not produced", "inferred"
+        read = results_mod.read_json(Path(project_root) / AGGREGATE_ARTIFACT)
+        if read.state == "missing":
+            return False, "aggregate: not produced", "inferred"
+        if read.state == "unreadable":
+            return False, f"aggregate: unreadable ({read.message})", "inferred"
+        # An aggregate older than the newest cell it claims to summarise is
+        # a stale conclusion, not a satisfied node.
+        agg_mtime = P.mtime_of(Path(project_root) / AGGREGATE_ARTIFACT)
+        newest = fleet_block.get("newest_cell_mtime")
+        if newest and agg_mtime and agg_mtime.isoformat() < newest:
+            return False, f"aggregate: predates the newest cell ({newest})", "inferred"
+        return True, "aggregate: present", "inferred"
 
     return False, f"{node}: unknown node", "inferred"
 
@@ -167,7 +179,9 @@ def collect(
     reg = load_registry(registry_path, project_root)
 
     errors: List[Dict[str, str]] = list(reg.errors)
-    gate_rows, gate_errors = gates_mod.collect_gates(project_root, reg)
+    gate_rows, gate_errors = gates_mod.collect_gates(
+        project_root, reg, expected_variants=fleet_mod.VARIANTS
+    )
     errors.extend(gate_errors)
 
     fleet_block = fleet_mod.collect_fleet(
