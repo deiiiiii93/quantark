@@ -629,6 +629,124 @@ an unmeasured one.
 
 ---
 
+### 5.9 σ-collapse dates fail on DISCRETISATION, not calibration — root cause 2026-08-03
+
+Root-caused by Codex (gpt-5.6-sol, max effort) on the `2025-04-09/full` cell.
+Full transcript `output/codex_rootcause.log`.
+
+**This supersedes §7A.11's attribution.** §7A.11 observed that a σ-collapse date
+fails the PDE gate under *both* calibration policies (+0.579% unconstrained,
++0.277% enforced) and concluded "no calibration flag fixes them", implying the
+model itself is unusable there. The observation is right and the inference is
+wrong: it is not a calibration problem. It is a **numerical** one, and it is
+fixable.
+
+#### Root cause
+
+The variance operator is `A_v U = ½σ²v·U_vv + κ(θ−v)·U_v`. At σ-collapse
+(2025-04-09: σ = 0.00311, κ = 3.0, θ = 0.00306, v0 = 0.14027) diffusion is
+negligible while drift is O(0.4) — a **convection-dominated** equation
+discretised with a **centered** stencil (`adi_core.py:380`, `:523`).
+
+| forward time | variance | Pe medium | Pe fine |
+|---|---|---|---|
+| 0 | 0.14027 | **5,872** | 4,031 |
+| 0.5y | 0.03368 | 2,358 | 1,547 |
+| 2.0y+ | ≈0.0034 | 62 | 35 |
+
+Monotonicity needs `Pe ≤ 2`. Every one of the 28 medium / 42 fine interior
+nodes between θ and v0 carries a **negative generator off-diagonal**: the
+discrete operator is not an M-matrix and has no maximum principle.
+
+#### Why refining time diverges
+
+Two fully-implicit Douglas/Rannacher steps are marked after each event
+(`snowball_vol_pde_solvers.py:28`). With 760 KI + 34 KO observations:
+
+| | medium `n_t=1203` | fine `n_t=2406` |
+|---|---|---|
+| damped steps | 972 | 1518 |
+| **damped fraction** | **80.8%** | **63.1%** |
+
+**The medium grid only looks acceptable because 81% of its steps accidentally
+suppress the bad modes.** Refining time dilutes that damping and exposes the
+defect — the crutch is removed faster than resolution is added. Per-axis:
+`n_v` 60→90 *improves* (−0.2336 → −0.1436), `n_x` is neutral (−0.2423), `n_t`
+alone is −0.5581.
+
+Proven three ways: fine-time with **four** event steps (restoring 80.8%
+coverage) recovers −765.45; events disabled is stable but badly wrong
+(−846.82 → −846.70); events disabled **plus a monotone donor-cell v stencil**
+is stable *and* correct (−748.72 → −748.50).
+
+#### The true value, and the verdict on both ladders
+
+Four independent methods agree on ≈ **−750**:
+
+| method | price |
+|---|---|
+| QE-M RQMC, 524,288 paths / 64 batches | −749.984 ± 1.104 (95% CI [−752.15, −747.82]) |
+| high 1D PDE (σ→0 deterministic limit) | −750.038 |
+| QUAD 8,192 / 16,384 | −750.313 / −750.266 |
+
+| ladder | medium err | fine err |
+|---|---|---|
+| legacy `v_grid_power=0` | +0.289% | **+0.183%** |
+| graded default 2.5 | −0.257% | **−0.404%** |
+| monotone donor-cell (diagnostic) | +0.051% | **+0.024%** |
+
+**Neither centered-drift ladder is admissible.** The pre-fix apparent
+convergence was compensating error. `v_grid_power` did not introduce the
+defect — it changed the error's sign and magnitude, which made a long-standing
+problem visible. The monotone stencil prices the *same calibration* to
++0.024%, so these dates are perfectly priceable; the scheme was the problem.
+
+#### Cleared, and incidental findings
+
+- **`create_bump_context` is exonerated for PV**: base price bitwise identical
+  (−764.5382710535866 both ways). It touches only the delta path.
+- **`V_max` is not collapsing**: `max(5θ, 0.5, 2v0) = 0.5`. The stochastic tube
+  is [0.00279, 0.14027]; at maturity variance is 0.003081 ± 0.0000706, so zero
+  is **44σ** away. The power mesh targets a near-zero singularity that does not
+  exist here — it spends 8/60 nodes below θ and makes the v0 cell *wider* than
+  legacy (0.00989 vs 0.00698). Mismatched to this regime, but not the root
+  defect.
+- **Latent landmine**: `v_grid_power=2.5` with `v0_boundary="neumann"` blew up
+  to −7.55e12. Not the default, but `neumann` stays selectable for cross-checks.
+- **The `coarse` nulls are unrelated**: the S-axis binder reaches 1.063% local
+  spacing against a 0.6% guard (`space.py:295`), and 760 KI dates collapse into
+  97 time keys — 663 collisions.
+- **Correction to §5.5's reading of the `decayed` case**: that row *recalibrates*
+  on the decay surface (gate line 1711) — σ = 0.5785, Feller 1.00003,
+  T = 1.6959y. Its stability isolates the *calibration regime*, not maturity.
+
+#### Recommended fix (designed, NOT applied)
+
+1. Monotone v-generator when local Pe is large: use centered drift only when
+   both neighbour generator coefficients stay non-negative, else an
+   M-matrix-preserving upwind or, preferably, exponentially fitted
+   (Scharfetter–Gummel).
+2. Use identical fitted coefficients in `_A2` **and** `_tri_V` — changing one
+   alone breaks ADI consistency.
+3. Regime-aware variance grid: power grading for low-Feller cases,
+   CIR-quantile / path-focused nodes with θ and v0 explicitly represented for
+   σ-collapse.
+4. Retain `degenerate_pde`. Do **not** paper over this by scaling Rannacher
+   steps or by reverting `v_grid_power` — both merely restore compensating
+   damping.
+5. Add a σ-collapse gate requiring monotone v coefficients plus **separate**
+   `n_x` / `n_v` / `n_t` refinement, since the pooled ladder hid this.
+
+#### Consequence for the study
+
+The risk table's line on the 50 σ-collapse dates (6.6%) should be re-read:
+"stage 13 must flag or exclude them" was the right mitigation for a defect
+believed to be unfixable. It is fixable. Exclusion remains the correct
+*interim* posture, but the durable answer is the monotone stencil, after which
+those dates become ordinary.
+
+---
+
 ## 6. Replay termination at knock-out — **DELIVERED by the library**
 
 *Status changed 2026-07-30: this section specified a requirement; the backtest
