@@ -536,6 +536,99 @@ regenerating artifact metadata needs to be coordinated with it.
 
 ---
 
+### 5.8 G2's delta criterion cannot resolve its own bound — measured 2026-08-03
+
+**This invalidates the delta half of every §5.5 route decision.** The criterion
+is sound in its economics and unusable as implemented: it polices a
+0.1-contract bias bound with a reference carrying ~0.46 contracts of noise.
+
+#### What prompted it
+
+The owner's 2D PDE delta fix (`f97fba3`, merged `ae7e06c`) cut the measured
+bias by 46% (`heston`, −0.4715 → −0.2561) and 66% (`heston_slv`, −0.3379 →
+−0.1160), removed the one-sided tilt (residuals went from 7/8 negative to
+mixed-sign), and tightened the BSM variants 24×. **No route changed.** A fix
+that large moving no verdict is itself evidence about the instrument.
+
+#### The attribution experiment
+
+G2 reports `|delta_PDE − delta_MC|`, which is a *disagreement* and cannot say
+which side is wrong. Perturb each estimator in a way that must not change the
+answer — re-draw the MC path set (vary the seed), refine the PDE grid — and
+the noisier one is the one that moves.
+
+| variant | date | gate score | MC σ (5 seeds) | PDE medium→fine | **PDE − MC(mean)** |
+|---|---|---|---|---|---|
+| `heston` | 2023-05-15 | −0.932 | 0.438 | 0.036 | **−0.218** |
+| `heston` | 2024-02-08 | +0.844 | 0.510 | 0.001 | **+0.166** |
+| `heston_slv` | 2023-11-15 | −0.717 | 0.409 | 0.026 | **−0.083** |
+| `localvol` | 2024-06-14 | −0.601 | 0.478 | 0.001 | **+0.173** |
+
+All in futures contracts. **Every cell G2 failed is inside the 0.5-contract
+bound once the reference is de-noised.**
+
+#### The finding
+
+The MC reference's delta noise is **σ = 0.41–0.51 contracts**, remarkably
+stable across variants and dates — the intrinsic floor of a bumped RQMC delta
+at 8192×16 paths for this product, not date-specific bad luck. Against
+Task 6's bounds:
+
+- vs the **0.5** per-cell bound: the reference alone fails cells at roughly
+  coin-flip odds, whatever the engine does
+- vs the **0.1** bias bound: **4.6×** over — unresolvable in principle
+- averaged over 8 dates: σ/√8 ≈ 0.16, still **1.6×** the bias bound
+
+In all four cells the fixed seed 20260723 drew an extreme value (highest of
+five, lowest, highest, highest). That is not luck; it is what one draw from a
+σ=0.46 distribution does against a 0.5 threshold.
+
+Meanwhile the PDE moves **0.001–0.036 contracts** under refinement. On two
+cells the reference is over **1000×** less stable than the engine it judges.
+
+`localvol` is the control that closes the argument: a **1D** LV PDE, untouched
+by `f97fba3`, whose failure signature was dispersion rather than bias — a
+different mechanism from the Heston pair. It shows the identical pattern. The
+common factor across all four cells is the reference, not any engine.
+
+#### What is and is not established
+
+Established: the PDE delta is *converged* and is statistically consistent with
+the MC mean (|PDE − MC(mean)| ≤ 0.218, against an SE of the 5-seed mean of
+≈0.20). G2's delta verdicts for `localvol`, `heston` and `heston_slv` are
+artifacts of reference noise.
+
+NOT established: that the PDE is *correct*. Convergence under refinement shows
+stability, not accuracy — both grids can share a systematic error. Bounding
+accuracy properly needs a reference materially better than the current one.
+
+#### The corrective
+
+Fix the reference, not the bounds. Task 6's thresholds are derived from the
+hedge instrument — half a futures contract genuinely is where two hedges
+diverge, and 0.1 contracts of persistent drift genuinely does accumulate over
+~750 rebalances — so they should stand. Average the MC reference delta over N
+seeds: N=16 gives σ ≈ 0.115 contracts, at last commensurate with the bias
+bound. Cost is N× the reference delta only, which is a small part of the gate.
+
+Consequential for the fleet: §5.5's MC routes carry a ~6× cost penalty
+(§5.9) *and* inject engine-artifact churn into the hedge P&L the study
+measures — a σ=0.46-contract delta driving daily `round_contracts`
+rebalancing crosses integer boundaries constantly, and only for the MC-routed
+variants. That is a confound in a study whose question is which vol model
+hedges better.
+
+**Not acted on yet.** A separate signal is unresolved: after `f97fba3` both
+Heston variants' PV at `2025-04-09/full` (the Feller-degenerate cell, ratio
+1901) *diverges* under refinement — medium −0.2336 (pass), fine −0.3801
+(fail), where before the fix it converged (+0.3132 → +0.2071). A convergent
+scheme cannot do that, so it may be a real engine defect confined to the
+σ-collapse regime. Root-cause investigation in flight. Routing the Heston pair
+to PDE on delta grounds while that is open would trade a measured problem for
+an unmeasured one.
+
+---
+
 ## 6. Replay termination at knock-out — **DELIVERED by the library**
 
 *Status changed 2026-07-30: this section specified a requirement; the backtest
