@@ -41,7 +41,12 @@ def run_date(iso):
     inception = art.trade_date
     calendar = gate.TradingCalendar.from_spot_csv(HIST / "csi1000_spot.csv")
     terms = gate.build_snowball_terms(inception, calendar)
-    env = gate.build_pricing_env(art, gate.FLAT_RATE)
+    # full_grid is what this script has always priced (build_pricing_env used
+    # to hardcode grid_vol_surface) and what the heston variant uses in the
+    # fleet -- the mode is explicit now that the gate honours it per variant.
+    env = gate.build_pricing_env(
+        art, gate.FLAT_RATE, surface_vol_mode="full_grid"
+    )
     product = gate.build_snowball_product(terms, float(art.s0))
     notional = float(art.s0)
     T = terms.maturity_years
