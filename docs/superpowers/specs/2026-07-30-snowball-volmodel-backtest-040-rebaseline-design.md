@@ -324,6 +324,33 @@ persistent −0.47-contract gap is ~1.3% of the 50M notional left unhedged at ev
 one of ~750 daily rebalances, one-signed — and the backtest's P&L *is* accumulated
 hedge error.
 
+#### The delta criterion covers only the ~3Y regime
+
+`_evaluate_case` gates the whole delta block on `if case_name == "full":`
+(line 1416), so the `decayed` (~1Y) case never produces a delta row. Measured
+in the evidence: **48 delta rows, every one `full`; zero `decayed`** — against
+126 `decayed` PV cells. Every failing cell listed above is therefore `/full`
+by construction, not by outcome.
+
+This is pre-existing and was not introduced by §5.3's criterion, but it is
+conceptually the *same* blind spot §5.2 just closed for PV bias: maturity-
+dependent error hiding in an unrepresentative sample. And it is not obviously
+benign in the conservative direction. On PV the decayed regime is far easier
+(`heston` median 0.003% decayed vs 0.101% full), which invites the assumption
+that delta follows — but a snowball's delta is most violent near a barrier as
+T → 0, where gamma steepens, so the 1Y regime could plausibly be *worse* on
+delta rather than better. It is simply unmeasured.
+
+Consequence for the routes: the three MC routes are conservative — they can
+only become more justified if the ungated regime is worse. The three **PDE**
+routes are the exposure, since `flat_bsm`, `flat_bsm_quad` and `ts_bsm` were
+admitted partly on a delta criterion that never examined half the maturity
+range they will be priced over. Their measured `full`-case margins are large
+(max 0.0210 contracts against a 0.5 bound, ~24×), which is reassuring but not
+a substitute for measurement. Extending the delta block to the `decayed` case
+is the natural follow-up and is cheap — the decayed envs and models are
+already built.
+
 **§7A.8 is falsified.** It predicted both 2D variants would be admitted to PDE at
 200×60 "on delta stability more than speed". Delta stability is precisely what
 rejected them, at 4.7× and 3.4× the bias bound.
