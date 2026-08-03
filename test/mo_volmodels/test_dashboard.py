@@ -456,3 +456,178 @@ def test_g2_provenance_is_keyed_by_variant(tmp_path):
     assert g2["by_variant"]["heston"]["pv"]["freshness"] == "void"
     assert g2["by_variant"]["flat_bsm"]["pv"]["freshness"] != "void"
     assert g2["facets"]["pv"]["freshness"] == "void"   # worst across variants
+
+
+# ---------------------------------------------------------------------------
+# Task 4: fleet dimensions, tree walk, cell state machine
+# ---------------------------------------------------------------------------
+
+fleet = importlib.import_module("mo_dashboard.fleet")
+
+FRESH_PROV = provenance.Provenance(freshness="fresh")
+STALE_PROV = provenance.Provenance(freshness="stale")
+VOID_PROV = provenance.Provenance(freshness="void", invalidated_by="41f2117")
+
+
+def _facts(**kw):
+    base = dict(inception="2023-05-04", variant="flat_bsm", run_dir=Path("/x"),
+                summary_mtime=datetime(2026, 8, 3, 1, 55, tzinfo=CST),
+                dir_exists=True, summary_readable=True)
+    base.update(kw)
+    return fleet.CellFacts(**base)
+
+
+def test_variants_come_from_stage12_not_stage13():
+    """Stage 13's VARIANT_ORDER lists five and omits flat_bsm_quad, the
+    engine control added by gate-plan Task 3 (spec section 1.3)."""
+    assert fleet.VARIANTS == (
+        "flat_bsm", "flat_bsm_quad", "ts_bsm", "localvol", "heston", "heston_slv",
+    )
+
+
+def test_cell_state_precedence_is_total():
+    assert fleet.cell_state(facts=_facts(summary_readable=False),
+                            in_failures=True, prov=VOID_PROV) == "unreadable"
+    assert fleet.cell_state(facts=_facts(), in_failures=True, prov=VOID_PROV) == "failed"
+    assert fleet.cell_state(facts=_facts(), in_failures=False, prov=VOID_PROV) == "void"
+    assert fleet.cell_state(facts=_facts(), in_failures=False, prov=STALE_PROV) == "stale"
+    assert fleet.cell_state(facts=_facts(), in_failures=False, prov=FRESH_PROV) == "fresh"
+    assert fleet.cell_state(facts=_facts(dir_exists=False, summary_mtime=None),
+                            in_failures=False, prov=FRESH_PROV) == "missing"
+
+
+def test_a_failed_attempt_without_a_directory_is_failed_not_missing():
+    state = fleet.cell_state(facts=_facts(dir_exists=False, summary_mtime=None),
+                             in_failures=True, prov=FRESH_PROV)
+    assert state == "failed"
+
+
+def test_running_only_when_a_poll_window_is_supplied():
+    facts = _facts(summary_mtime=None, dir_exists=True)
+    now = datetime(2026, 8, 3, 16, 0, tzinfo=CST)
+    assert fleet.cell_state(facts=facts, in_failures=False, prov=FRESH_PROV) == "missing"
+    facts_live = _facts(summary_mtime=None, dir_exists=True,
+                        dir_mtime=datetime(2026, 8, 3, 15, 59, 55, tzinfo=CST))
+    assert fleet.cell_state(facts=facts_live, in_failures=False, prov=FRESH_PROV,
+                            poll_window_seconds=30, now=now) == "running"
+
+
+def test_walk_cells_finds_what_the_manifest_omits(tmp_path):
+    """Spec section 1.2: the manifest records only its last invocation."""
+    runs = tmp_path / "runs"
+    for inception in ("2023-05-04", "2023-06-01"):
+        for variant in ("flat_bsm", "ts_bsm"):
+            cell = runs / inception / variant
+            cell.mkdir(parents=True)
+            (cell / "run_summary.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "run_manifest.json").write_text(json.dumps({
+        "config": {"variants": ["flat_bsm"]},
+        "counts": {"runs_completed": 2},
+        "runs": [{"inception": "2023-05-04", "variant": "flat_bsm"},
+                 {"inception": "2023-06-01", "variant": "flat_bsm"}],
+        "failures": [],
+    }), encoding="utf-8")
+
+    cells = fleet.walk_cells(tmp_path)
+    assert len(cells) == 4
+    assert ("2023-05-04", "ts_bsm") in cells
+
+
+def test_manifest_failures_are_keyed_by_pair(tmp_path):
+    (tmp_path / "run_manifest.json").write_text(json.dumps({
+        "failures": [{"inception": "2025-07-01", "variant": "flat_bsm",
+                      "error": "event-stats engine returned no stats"}],
+    }), encoding="utf-8")
+    assert fleet.manifest_failures(tmp_path) == {("2025-07-01", "flat_bsm")}
+
+
+def test_coverage_counts_fresh_plus_stale_not_fresh_alone():
+    """Stale means 're-run to be certain', not 'absent'.  Counting fresh
+    alone reads 0/162 on the live tree."""
+    counts = fleet.count_states([
+        "fresh", "fresh", "void", "void", "stale", "failed", "missing",
+    ])
+    assert counts["fresh"] == 2
+    assert counts["stale"] == 1
+    assert counts["void"] == 2
+    assert fleet.admitted(counts) == 3
+
+
+def _seed_g4(tmp_path, tags):
+    d = tmp_path / "output/volmodel_backtest"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "inceptions.json").write_text(json.dumps(
+        [{"inception": t, "coupon": 0.15, "coupon_solution": {"solved": True}}
+         for t in tags]), encoding="utf-8")
+    return d
+
+
+def test_a_manifest_failure_with_no_directory_still_renders_failed(tmp_path):
+    """Collector-level, not a hand-built cell_state call."""
+    run_dir = _seed_g4(tmp_path, ["2023-05-04"])
+    (run_dir / "runs").mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_manifest.json").write_text(json.dumps({
+        "failures": [{"inception": "2023-05-04", "variant": "flat_bsm",
+                      "error": "event-stats engine returned no stats"}],
+    }), encoding="utf-8")
+
+    reg = registry.Registry(fleet_dirs=(registry.norm(run_dir.absolute()),))
+    block = fleet.collect_fleet(tmp_path, reg)
+    assert block["grid"]["flat_bsm"]["2023-05-04"]["state"] == "failed"
+    assert block["counts"]["failed"] == 1
+
+
+def test_dimensions_come_from_the_g4_artifact_not_from_running_stage12(tmp_path):
+    """Rendering must not import the pricing stack (spec section 5.3)."""
+    _seed_g4(tmp_path, ["2023-05-04", "2023-06-01"])
+
+    before = {m for m in sys.modules if m.startswith("quantark.asset")}
+    variants, tags = fleet.fleet_dimensions(tmp_path)
+    after = {m for m in sys.modules if m.startswith("quantark.asset")}
+
+    assert tags == ["2023-05-04", "2023-06-01"]
+    assert len(variants) == 6
+    assert after == before, "collecting dimensions imported pricing code"
+
+
+def test_no_g4_artifact_means_no_defined_fleet(tmp_path):
+    (tmp_path / "output").mkdir()
+    block = fleet.collect_fleet(tmp_path, registry.Registry())
+    assert block["inceptions"] == []
+    assert block["expected_cells"] == 0
+    assert any(e["source"] == "fleet.dimensions" for e in block["errors"])
+
+
+def test_collect_fleet_accepts_a_relative_project_root(tmp_path, monkeypatch):
+    """load_registry stores absolute dirs; a relative root made
+    relative_to() raise ValueError on the first on-grid cell."""
+    run_dir = _seed_g4(tmp_path, ["2023-05-04"])
+    (run_dir / "runs/2023-05-04/flat_bsm").mkdir(parents=True)
+    (run_dir / "runs/2023-05-04/flat_bsm/run_summary.json").write_text("{}")
+    monkeypatch.chdir(tmp_path)
+    reg = registry.Registry(fleet_dirs=(registry.norm(run_dir.absolute()),))
+    block = fleet.collect_fleet(Path("."), reg)
+    assert block["grid"]["flat_bsm"]["2023-05-04"]["state"] in {"fresh", "stale"}
+
+
+@pytest.mark.skipif(
+    not (PROJECT_ROOT / "example/mo_volmodels/data/history").is_dir(),
+    reason="needs the uncommitted history cache",
+)
+def test_the_artifact_matches_stage12s_schedule():
+    """The definition is still enforced -- here, in the test, where paying to
+    import stage 12 is fine, rather than on every page render."""
+    import pandas as pd
+    s12 = fleet._stage12()
+    cohort = fleet._cohort()
+    history = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    spot_csv = history / "csi1000_spot.csv"
+    spot = pd.read_csv(spot_csv)
+    scheduled = s12.schedule_inceptions(
+        calendar=s12.stage11().TradingCalendar.from_spot_csv(spot_csv),
+        data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
+        data_end=cohort.COHORT_ASOF,
+        first_admitted_surface=cohort.admitted_dates(history)[0],
+    )
+    assert fleet.inception_tags(PROJECT_ROOT) == [d.isoformat() for d in scheduled]
+    assert len(scheduled) == 27
