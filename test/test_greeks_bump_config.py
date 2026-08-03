@@ -363,6 +363,20 @@ class _MarketRecordingEngine(BaseEngine):
         return (s / 100.0) ** 3
 
 
+class _BumpContextRecordingEngine(_MarketRecordingEngine):
+    """Engine whose finite-difference prices must run on a distinct context."""
+
+    def __init__(self, params=None):
+        super().__init__(params)
+        self.bump_context_calls = 0
+        self.bump_context = None
+
+    def create_bump_context(self, product, pricing_env):
+        self.bump_context_calls += 1
+        self.bump_context = _MarketRecordingEngine(self.params)
+        return self.bump_context
+
+
 def _contains(values, target):
     return any(math.isclose(v, target, rel_tol=1e-12) for v in values)
 
@@ -409,6 +423,20 @@ class TestBumpSizeShimRetirement:
         engine.calculate_greeks(call_option, pricing_env)
         assert _contains(engine.spots, 100.0 * 1.01)
         assert _contains(engine.spots, 100.0 * 0.99)
+
+    def test_base_engine_bump_greeks_use_the_resolved_bump_context(
+        self, call_option, pricing_env
+    ):
+        engine = _BumpContextRecordingEngine()
+
+        greeks = engine.calculate_greeks(call_option, pricing_env)
+
+        assert engine.bump_context_calls == 1
+        assert engine.spots == []
+        assert engine.bump_context is not None
+        assert engine.bump_context.spots == pytest.approx([100.0, 101.0, 99.0])
+        assert greeks["price"] == pytest.approx(1.0)
+        assert greeks["delta"] == pytest.approx(0.03, rel=1e-4)
 
     def test_numerical_delta_default_bump_comes_from_bump_config(
         self, call_option, pricing_env

@@ -741,13 +741,18 @@ def _build_equity_pde():
                 params=_pdep(event_rannacher_steps=0),
                 v0_boundary="neumann",
             )
+            # Snowball Heston/SLV moved their concentrated variance-grid
+            # default to power grading on 2026-08-03. These pre-refactor
+            # goldens intentionally preserve the old numerical configuration,
+            # just like the v0 boundary pin above.
+            snowball_acgrid = dict(acgrid, v_grid_power=0.0)
             table = {
                 "HestonPDESolver": lambda: (HestonPDESolver(_hp(), **grid), _euro(), _eq_flat_env()),
                 "HestonSLVPDESolver": lambda: (HestonSLVPDESolver(_hp(), _unit_leverage(), eta=1.0, **grid), _euro(), _eq_grid_env()),
                 "HestonBarrierPDESolver": lambda: (HestonBarrierPDESolver(_hp(), **grid), _barrier(), _eq_grid_env()),
                 "HestonSLVBarrierPDESolver": lambda: (HestonSLVBarrierPDESolver(_hp(), _unit_leverage(), **grid), _barrier(), _eq_grid_env()),
-                "HestonSnowballPDESolver": lambda: (HestonSnowballPDESolver(_hp(), **acgrid), _snowball(), _eq_grid_env()),
-                "HestonSLVSnowballPDESolver": lambda: (HestonSLVSnowballPDESolver(_hp(), _unit_leverage(), **acgrid), _snowball(), _eq_grid_env()),
+                "HestonSnowballPDESolver": lambda: (HestonSnowballPDESolver(_hp(), **snowball_acgrid), _snowball(), _eq_grid_env()),
+                "HestonSLVSnowballPDESolver": lambda: (HestonSLVSnowballPDESolver(_hp(), _unit_leverage(), **snowball_acgrid), _snowball(), _eq_grid_env()),
                 "HestonPhoenixPDESolver": lambda: (HestonPhoenixPDESolver(_hp(), grid_style="uniform", **acgrid), _phoenix(), _eq_grid_env()),
                 "HestonSLVPhoenixPDESolver": lambda: (HestonSLVPhoenixPDESolver(_hp(), _unit_leverage(), grid_style="uniform", **acgrid), _phoenix(), _eq_grid_env()),
             }

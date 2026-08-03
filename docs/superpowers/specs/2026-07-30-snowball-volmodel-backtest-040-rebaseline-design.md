@@ -555,11 +555,14 @@ Per-solve timings do **not** compose into per-day cost, for two measured reasons
 1. **Layout reuse.** 0.4.0's `GridBinder` caches spatial layouts (LRU,
    `bind_shared`) and bump contexts reuse the base layout by object identity, so
    a warm solve costs far less than the cold single-solve figure.
-2. **The greeks path differs per engine.** Every PDE solver overrides
-   `BaseEngine.calculate_greeks` (`snowball_pde_solver.py:1067`), so it takes the
-   **native** path — one extra `self._solve()` with delta/gamma read off the grid.
-   MC engines inherit the base method and take the **central-bump** path — two
-   extra full prices.
+2. **The greeks path differs per engine.** The 1D BSM/LocalVol Snowball PDE
+   solvers take the **native** path (`snowball_pde_solver.py:1067`) and read
+   delta/gamma from one solved surface. The 2D Heston/Heston-SLV Snowball PDE
+   solvers explicitly delegate to `BaseEngine.calculate_greeks`, so they take a
+   deterministic **central-bump** path. As of 2026-08-03 that base method resolves
+   `create_bump_context` once, and all base/up/down prices reuse the base-market
+   spatial layout. MC engines also take a central-bump path, but each reprice is a
+   full simulation.
 
    *Updated 2026-07-30 for the replay consolidation.* The branch used to live in
    the replay layer (`otc/_replay.py:264–267`, which hand-rolled the bumps).

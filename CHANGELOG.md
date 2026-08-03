@@ -51,6 +51,11 @@ Backtest replay consolidation
   −0.540% of notional against a QE-M MC reference while the degenerate
   treatment holds +0.156%. `"neumann"` remains selectable for cross-checks.
   **Prices change** for these four solvers at default settings.
+- **Heston/Heston-SLV Snowball concentrated PDE grids default to a power-graded
+  variance axis** (`v_grid_power=2.5`) to resolve the near-zero layer around the
+  Feller boundary. `v_grid_power=0.0` retains the legacy concentrated mesh for
+  explicit cross-checks; uniform grids remain ungraded. **Snowball Heston/SLV
+  prices and finite-difference Greeks change** at default settings.
 - **The `mo_frozen` Heston preset enforces the Feller condition**
   (`enforce_feller=True`; the soft `regularize_feller` penalty is retained).
   Deliberate divergence from the `mo_volmodels` diagnostics scripts, which keep
@@ -63,6 +68,14 @@ Backtest replay consolidation
   preset); `localvol` entries are unaffected.
 
 ### Fixed
+- `BaseEngine.calculate_greeks` and Gate G2's deterministic delta helper bypassed
+  `create_bump_context`, so Heston/SLV central spot bumps rebuilt their S grids even
+  though the solvers already provided a frozen-layout context. Base, up, down, and
+  separate gamma reprices now all use the resolved base-market context.
+- `Heston2DAutocallableSessionAdapter` now preserves the Snowball solver's
+  `v_grid_power`; an explicit grading or legacy opt-out no longer disappears when
+  the execution session clones the engine. Gate metadata records the selected
+  value and Stage 12 forwards it into the production engine options.
 - `calibrate_heston(enforce_feller=True)` failed closed on any problem where the
   constraint was active at the optimum and `ftol` was loose. SLSQP satisfies
   constraints only to about its own accuracy tolerance, but the feasibility

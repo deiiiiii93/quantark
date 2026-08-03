@@ -1229,15 +1229,22 @@ def _bumped_pde_delta(engine, product, env, bump: float = SPOT_BUMP) -> float:
     once by the caller, priced twice here.  Used for both the production
     engine and a deterministic reference (spec §5.3) -- a deterministic
     reference has no CRN to arrange, so it reuses this same central bump.
+    Engines with market-dependent numerical domains resolve their base-market
+    bump context once so both reprices reuse the same grid.
     """
     s0 = float(env.spot)
+    create_context = getattr(engine, "create_bump_context", None)
+    bump_engine = create_context(product, env) if callable(create_context) else engine
+    if bump_engine is None:
+        bump_engine = engine
     env_up = deepcopy(env)
     env_up.spot_quote.spot = s0 * (1.0 + bump)
     env_dn = deepcopy(env)
     env_dn.spot_quote.spot = s0 * (1.0 - bump)
-    return (float(engine.price(product, env_up)) - float(engine.price(product, env_dn))) / (
-        2.0 * s0 * bump
-    )
+    return (
+        float(bump_engine.price(product, env_up))
+        - float(bump_engine.price(product, env_dn))
+    ) / (2.0 * s0 * bump)
 
 
 def _bumped_mc_delta(build_reference, model, product, env, bump: float = SPOT_BUMP) -> float:
@@ -1864,6 +1871,7 @@ def _production_params_block(pair: GatePair, medium_grid: Optional[Dict[str, Any
             "n_t_rule": "ceil(400 * remaining_maturity_years)",
             "scheme": "craig_sneyd",
             "grid_style": "concentrated",
+            "v_grid_power": HestonSnowballPDESolver.DEFAULT_V_GRID_POWER,
             "grid_focus": "auto",
             "event_projection": "cell_average",
             "event_rannacher_steps": 2,

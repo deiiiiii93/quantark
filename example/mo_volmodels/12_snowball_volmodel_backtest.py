@@ -295,8 +295,9 @@ class GateRouting:
         """PDE grid options for a variant the gate admitted to the PDE route.
 
         Only the 2D-ADI family (``heston``, ``heston_slv``) records
-        ``n_x``/``n_v``/``n_t`` in its ``pde_params`` block; the four
-        1D/quad variants record their own ladder knob (``accuracy`` /
+        ``n_x``/``n_v``/``n_t`` and ``v_grid_power`` in its
+        ``pde_params`` block; the four 1D/quad variants record their own
+        ladder knob (``accuracy`` /
         ``grid_points``) instead (see ``_production_params_block`` in stage
         11), so the dict comprehension below is naturally empty for them --
         no name-based special case is needed.
@@ -304,11 +305,14 @@ class GateRouting:
         if self.solver_for(variant) != "pde":
             return {}
         params = self.pde_params.get(variant, {})
-        return {
+        options = {
             key: int(params[key])
             for key in ("n_x", "n_v", "n_t")
             if key in params
         }
+        if "v_grid_power" in params:
+            options["v_grid_power"] = float(params["v_grid_power"])
+        return options
 
 
 def load_gate_routing(path: Path) -> GateRouting:

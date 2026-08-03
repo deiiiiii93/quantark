@@ -198,7 +198,10 @@ def test_v0_boundary_changes_the_price_when_feller_is_violated():
     rather than a formality.
     """
     product, env = _snowball(), _env()
-    grid = dict(n_x=80, n_v=40, n_t=60)
+    # Isolate the boundary-row treatment from the Snowball solver's graded
+    # variance-grid default; that grading independently reduces the coarse-grid
+    # near-zero error this test is designed to expose.
+    grid = dict(n_x=80, n_v=40, n_t=60, v_grid_power=0.0)
 
     degenerate = _heston_snowball(**grid).price(product, env)
     neumann = _heston_snowball(v0_boundary="neumann", **grid).price(product, env)

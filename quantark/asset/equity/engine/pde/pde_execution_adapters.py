@@ -452,6 +452,10 @@ class Heston2DAutocallableSessionAdapter(_EquityPDESessionBase):
             pin_critical_spots=engine.pin_critical_spots,
             v0_boundary=engine.v0_boundary,
         )
+        if hasattr(engine, "v_grid_power"):
+            # Snowball Heston/SLV exposes variance-axis grading. Phoenix does
+            # not yet, so preserve its constructor contract unchanged.
+            kwargs["v_grid_power"] = engine.v_grid_power
         if hasattr(engine, "leverage_surface"):
             kwargs.update(
                 leverage_surface=engine.leverage_surface, eta=engine.eta
