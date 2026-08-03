@@ -414,7 +414,10 @@ def test_dividend_curve_is_independent_of_the_vol_mode():
 
 _GATED_MC = {
     "paths_per_batch": 8192, "batches": 16, "seed": 20260723,
+    # Mirrors what stage 11 writes: "scheme" is a descriptive label, and
+    # "martingale_correction" is the kwarg the QE engines actually take.
     "substeps_per_interval": 4, "scheme": "QUADEXP_M",
+    "martingale_correction": True,
 }
 
 
@@ -434,11 +437,15 @@ def test_gate_routing_carries_mc_params():
 
 
 def test_heston_engine_options_come_from_the_gate_not_the_engine_default():
-    """The whole defect: substeps defaulted to 1 while the gate certified 4."""
+    """The whole defect: substeps defaulted to 1 while the gate certified 4.
+
+    The QE scheme travels as ``martingale_correction``, not ``scheme`` --
+    see test_mc_engine_options_use_martingale_correction_not_scheme.
+    """
     s12 = _load_stage12()
     cfg = s12.make_engine_config("heston", routing=_routing_with_mc(s12, "heston"))
     assert cfg.vol_model_engine_options["substeps_per_interval"] == 4
-    assert cfg.vol_model_engine_options["scheme"] == "QUADEXP_M"
+    assert cfg.vol_model_engine_options["martingale_correction"] is True
 
 
 def test_mc_paths_and_seed_come_from_the_gate_decision():
@@ -494,3 +501,41 @@ def test_parse_reads_mc_params_from_a_real_decision():
     routing = s12.load_gate_routing(path)     # use the real parser's name
     assert routing.mc_params["heston"]["scheme"] == "QUADEXP_M"
     assert routing.mc_params["heston"]["substeps_per_interval"] == 4
+
+
+def test_mc_engine_options_use_martingale_correction_not_scheme():
+    """The decision records scheme="QUADEXP_M" as a human-readable LABEL, but
+    the QE engines fix the scheme internally and expose it as the boolean
+    martingale_correction -- QESnowballMCEngine raises ValidationError if
+    "scheme" reaches its kwargs, and HestonSLVQESnowballMCEngine TypeErrors.
+    Stage 11's own _make_mc_engine passes martingale_correction, so the fleet
+    must too or it cannot construct the engine the gate certified at all."""
+    s12 = _load_stage12()
+    routing = s12.GateRouting(
+        "p", None, {"heston": "mc"}, {"heston": {}},
+        mc_params={"heston": {
+            "paths_per_batch": 8192, "batches": 16, "seed": 20260723,
+            "substeps_per_interval": 4, "scheme": "QUADEXP_M",
+            "martingale_correction": True,
+        }},
+    )
+    opts = s12.make_engine_config("heston", routing=routing).vol_model_engine_options
+    assert opts["substeps_per_interval"] == 4
+    assert opts["martingale_correction"] is True
+    assert "scheme" not in opts, "scheme is rejected by both QE engine constructors"
+
+
+def test_gated_mc_options_actually_construct_both_heston_engines():
+    """A unit test on the options dict cannot catch a kwarg the engine
+    rejects -- that is exactly how the first attempt shipped broken.  Build
+    the real engines with the real option set."""
+    from quantark.asset.equity.engine.mc.snowball_vol_mc_engines import (
+        HestonSLVQESnowballMCEngine, QESnowballMCEngine,
+    )
+    from quantark.volmodels.heston import HestonParams
+    hp = HestonParams(v0=0.09, kappa=2.0, theta=0.06, sigma=0.3, rho=-0.7)
+    opts = {"substeps_per_interval": 4, "martingale_correction": True}
+    e1 = QESnowballMCEngine(hp, **opts)
+    assert e1.martingale_correction is True and e1.substeps_per_interval == 4
+    e2 = HestonSLVQESnowballMCEngine(hp, leverage_surface=None, eta=1.0, **opts)
+    assert e2.martingale_correction is True and e2.substeps_per_interval == 4

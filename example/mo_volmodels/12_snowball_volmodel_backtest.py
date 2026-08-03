@@ -765,14 +765,23 @@ def make_engine_config(
         mc_paths = int(gated["paths_per_batch"])
         mc_batches = int(gated["batches"])
         mc_seed = int(gated["seed"])
-        # scheme/substeps_per_interval are Heston-only QE knobs; the gate's
-        # localvol entry has neither (LocalVolSnowballMCEngine accepts
-        # neither kwarg), so only forward keys the decision actually set --
-        # passing substeps_per_interval=None would TypeError inside the
-        # engine rather than falling back to its default.
+        # Heston-only QE knobs; the gate's localvol entry has neither
+        # (LocalVolSnowballMCEngine accepts neither kwarg), so only forward
+        # keys the decision actually set -- passing substeps_per_interval=None
+        # would TypeError inside the engine rather than falling back to its
+        # default.
+        #
+        # NOT "scheme": the decision records scheme="QUADEXP_M" as a
+        # human-readable label, but both QE engines FIX the scheme internally
+        # and expose it as the boolean martingale_correction --
+        # QESnowballMCEngine raises ValidationError if "scheme" reaches its
+        # kwargs (snowball_vol_mc_engines.py:516) and
+        # HestonSLVQESnowballMCEngine TypeErrors on it.  Stage 11's
+        # _make_mc_engine passes martingale_correction, so forwarding
+        # "scheme" here could not construct the gate's engine at all.
         mc_engine_options = {
             key: gated[key]
-            for key in ("scheme", "substeps_per_interval")
+            for key in ("martingale_correction", "substeps_per_interval")
             if gated.get(key) is not None
         }
 
