@@ -179,8 +179,9 @@ def _panel_results(doc: Dict[str, Any]) -> str:
     as of {esc(calib.get('as_of_date') or '—')}</h3>
   <table><tr><th>band</th><th>n</th><th>%</th><th>label</th><th>citation</th></tr>
   {band_rows}</table>
-  <div class="caveat">fit cost (IV): median {esc(cost.get('median'))} ·
-    p90 {esc(cost.get('p90'))} · max {esc(cost.get('max'))}</div>
+  <div class="caveat">calibration objective (record <code>cost</code>, not bp of IV):
+    median {esc(cost.get('median'))} · p90 {esc(cost.get('p90'))} ·
+    max {esc(cost.get('max'))}</div>
 </section>"""
 
 

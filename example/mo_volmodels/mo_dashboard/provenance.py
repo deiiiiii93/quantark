@@ -218,4 +218,25 @@ def collect_git_facts(
                 when = mtime_of(project_root / dep)
                 if when is not None:
                     dirty[dep] = when
+
+    # Untracked deps are stat'ed DIRECTLY, never discovered through git
+    # status.  git collapses untracked trees to a parent, and an entry in
+    # .git/info/exclude suppresses the report entirely -- either way a
+    # declared dependency like surface_manifest.json becomes invisible.  It
+    # has no commit history, so its mtime is the only evidence there is.
+    for dep in _untracked(project_root, present):
+        when = mtime_of(project_root / dep)
+        if when is not None:
+            dirty.setdefault(dep, when)
+
     return commits, dirty, missing
+
+
+def _untracked(project_root: Path, deps: Sequence[str]) -> List[str]:
+    """Declared deps that git does not track (so have no commit history)."""
+    out: List[str] = []
+    for dep in deps:
+        tracked = _git(project_root, "ls-files", "--", dep).strip()
+        if not tracked:
+            out.append(dep)
+    return out

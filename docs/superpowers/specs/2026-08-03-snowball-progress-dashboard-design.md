@@ -258,10 +258,19 @@ difference as an explicit reconciliation line rather than leaving two numbers to
 eye. Carries §8's caveat inline: KO dates collapse onto ~13 days, 2024-10-08 kills 7, so
 effective sample size is far below 27.
 
-**Calibration health** — from `output/mo_daily_calibration/status.json` and
-`calibration_manifest.json`: Feller-ratio distribution, the 6.6 % sigma-collapse band, fit cost in
-bp of IV (§7A.10: median 8.4 / p90 29.3 / max 217), bound-hits, and whether the launchd job
+**Calibration health** — from `output/mo_daily_calibration/status.json` **and**
+`calibration_manifest.json`. Both are required: `status.json` carries only the latest date (3
+records), while the manifest carries the 240-date history (720 records), so reading status alone
+would compute the Feller distribution from a single day.
+
+Rendered: the Feller-ratio distribution across the pooled records, the σ-collapse band (§4.2
+label), the per-record calibration objective, bound-hits, and whether the launchd job
 (`com.quantark.mo-daily-calibration`) last completed.
+
+The objective is rendered as the record's own `cost` field and labelled as such. It is **not**
+§7A.10's "bp of IV" (median 8.4 / p90 29.3 / max 217) — measured on the live records the pooled
+median `cost` is ≈0.0039, a different quantity on a different scale. Presenting one under the
+other's label would be a fabricated unit.
 
 ### 4.3 Panel 3 — Fleet coverage and monitor
 

@@ -114,13 +114,33 @@ def feller_bands(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _calibration_records(status: Any) -> List[Dict[str, Any]]:
+def _records_from(entries: Any) -> List[Dict[str, Any]]:
+    """Flatten date entries -> per-variant calibration records.
+
+    Both sources nest the same way: a date entry carries a ``variants`` map
+    whose values each hold a ``record``.
+    """
     out: List[Dict[str, Any]] = []
-    for entry in (status or {}).get("expected_date_records", {}).values():
+    if isinstance(entries, dict):
+        entries = list(entries.values())
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
         for variant in (entry.get("variants") or {}).values():
             record = variant.get("record")
             if isinstance(record, dict):
                 out.append(record)
+    return out
+
+
+def _calibration_records(status: Any, manifest: Any) -> List[Dict[str, Any]]:
+    """status.json holds the latest date only; the manifest holds the history.
+
+    Reading status alone reports 3 records where 240 date records exist, so
+    the Feller distribution would be computed from a single day.
+    """
+    out = _records_from((status or {}).get("expected_date_records"))
+    out.extend(_records_from((manifest or {}).get("records")))
     return out
 
 
@@ -169,7 +189,19 @@ def calibration_block(
             }
         )
     status = read.doc if read.state == "ok" else None
-    records = _calibration_records(status)
+
+    man = read_json(project_root / "output/mo_daily_calibration/calibration_manifest.json")
+    if man.state == "unreadable":
+        errors.append(
+            {
+                "source": "results.calibration_manifest",
+                "path": man.path,
+                "message": man.message,
+            }
+        )
+    manifest = man.doc if man.state == "ok" else None
+
+    records = _calibration_records(status, manifest)
     costs = sorted(float(r["cost"]) for r in records if r.get("cost") is not None)
 
     def pct(fraction: float) -> Optional[float]:
@@ -179,6 +211,7 @@ def calibration_block(
 
     return {
         "status_state": read.state,
+        "manifest_state": man.state,
         "as_of_date": (status or {}).get("as_of_date"),
         "n_records": len(records),
         "feller": feller_bands(records),

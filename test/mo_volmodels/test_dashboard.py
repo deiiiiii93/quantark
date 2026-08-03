@@ -956,3 +956,57 @@ def test_cli_writes_nothing_else_under_output(tmp_path):
     ])
     after = {p.name for p in (tmp_path / "output").iterdir()}
     assert after - before == {"snowball_dashboard_latest.html"}
+
+
+# ---------------------------------------------------------------------------
+# Gaps found by running the real page: untracked deps, calibration history
+# ---------------------------------------------------------------------------
+
+def test_untracked_declared_deps_are_stated_directly(tmp_path):
+    """git collapses untracked trees to a parent, and .git/info/exclude
+    suppresses the report entirely -- either way a declared dep like
+    surface_manifest.json is invisible through git status.  It has no commit
+    history, so its mtime is the only evidence there is."""
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    dep = "data/surface_manifest.json"
+    target = tmp_path / dep
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    # Suppress it from git status exactly as the real repo does.
+    (tmp_path / ".git/info").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".git/info/exclude").write_text("/data\n", encoding="utf-8")
+    assert subprocess.run(["git", "status", "--porcelain"], cwd=tmp_path,
+                          capture_output=True, text=True).stdout.strip() == ""
+
+    _, dirty, missing = provenance.collect_git_facts(tmp_path, [dep])
+    assert dep in dirty, "an untracked dep must be stat'ed, not looked for in git status"
+    assert missing == []
+
+
+def test_calibration_reads_the_manifest_history_not_only_todays_status(tmp_path):
+    """status.json holds the latest date only.  Reading it alone computes the
+    Feller distribution from a single day."""
+    d = tmp_path / "output/mo_daily_calibration"
+    d.mkdir(parents=True)
+    (d / "status.json").write_text(json.dumps({
+        "as_of_date": "2026-08-03",
+        "expected_date_records": {"20260731": {"variants": {
+            "heston": {"record": {"feller_ratio": 1.0, "cost": 0.001}}}}},
+    }), encoding="utf-8")
+    (d / "calibration_manifest.json").write_text(json.dumps({
+        "records": [
+            {"date": "20250731", "variants": {
+                "heston": {"record": {"feller_ratio": 0.2, "cost": 0.002}}}},
+            {"date": "20250801", "variants": {
+                "heston": {"record": {"feller_ratio": 50.0, "cost": 0.003}}}},
+        ],
+    }), encoding="utf-8")
+
+    errors = []
+    block = results.calibration_block(tmp_path, errors)
+    assert block["n_records"] == 3, "status-only would report 1"
+    assert block["manifest_state"] == "ok"
+    assert block["feller"]["violated"]["n"] == 1
+    assert block["feller"]["usable"]["n"] == 1
+    assert block["feller"]["sigma_collapsed"]["n"] == 1
