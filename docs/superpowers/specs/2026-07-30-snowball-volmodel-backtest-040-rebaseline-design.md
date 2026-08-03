@@ -441,6 +441,71 @@ not as engine agreement.
 
 ---
 
+### 5.7 The far-end vol is an extrapolation convention, not market data
+
+Found 2026-08-03 while explaining why `ts_bsm` tracks `flat_bsm`. This
+conditions every number in §5.5 and §5.6 and every result the fleet will
+produce, so it is recorded here rather than in a gate section.
+
+**CSI 1000 lists 11 months of options; the product is 3 years.** At
+2026-07-15 the artifact carries five ATM pillars and
+`max_listed_T = 0.9260y`:
+
+| T (y) | expiry | ATM vol | implied q |
+|---|---|---|---|
+| 0.1014 | 2026-08-21 | 0.29720 | 0.06144 |
+| 0.1781 | 2026-09-18 | 0.29573 | 0.08193 |
+| 0.4274 | 2026-12-18 | 0.28650 | 0.10762 |
+| 0.6767 | 2027-03-19 | 0.26965 | 0.10392 |
+| 0.9260 | 2027-06-18 | 0.26448 | 0.09872 |
+
+Both curves are genuinely sloped — 3.3 vol points and ~470 bp of q across
+11 months. Beyond 0.9260y both clamp to the last pillar. **69% of the
+maturity axis is extrapolated at inception**, and the product's own maturity
+exceeds `max_listed_T` for roughly 91% of the replay days.
+
+That also explains why `ts_bsm` tracks `flat_bsm` so closely (§5.6):
+`flat_atm_remaining` samples the ATM curve at the *remaining* maturity, which
+at inception is 3.0y — already in the clamped zone — so it returns 0.26448 and
+wraps it flat. The two differ only below 0.9260y.
+
+**The declared policy misdescribes the behaviour.**
+`03_build_iv_surface_history.py:104` hardcodes
+`EXTRAPOLATION_POLICY = "flat_total_variance"`, stamped into all 768 artifacts.
+Measured, the surfaces extrapolate **flat volatility**:
+
+| T | measured | flat-vol predicts | flat-total-variance predicts |
+|---|---|---|---|
+| 1.5 | 0.264476 | **0.264476** | 0.207803 |
+| 3.0 | 0.264476 | **0.264476** | 0.146939 |
+
+The string is never branched on. Its only consumer is
+`product_replay.py:242`, which copies it into
+`last_surface_provenance["surface_extrapolation"]` — so it is a pure label,
+and it is recorded into every run's provenance as a description of what that
+run did. `product_replay.py:206` repeats the error in prose ("the vol surfaces
+clamp flat (matching the artifact's `flat_total_variance` policy)"); clamping
+flat in vol is the *opposite* claim about forward variance.
+
+**The behaviour is the defensible one and should not change.** Flat total
+variance would assert that no further variance accrues after 11 months — the
+index frozen for the last two years of a three-year trade — and would price
+the far end at 0.147 instead of 0.264. The label is what is wrong.
+
+**Consequences for reading this study.** The gate is unaffected: both sides of
+every G2 pair see the same extrapolation, so §5.5's and §5.6's comparisons
+stand. What is affected is interpretation — the single most consequential vol
+assumption for a 3Y snowball here was not chosen, it is the native edge
+behaviour of the surface classes. Any conclusion about long-dated snowball
+hedging inherits it, and a sensitivity run against an alternative convention
+would be the honest way to bound that. Deliberately not attempted here.
+
+**Not fixed in this branch.** `03_build_iv_surface_history.py` belongs to the
+concurrently-landed daily-pipeline workstream; renaming the constant and
+regenerating artifact metadata needs to be coordinated with it.
+
+---
+
 ## 6. Replay termination at knock-out — **DELIVERED by the library**
 
 *Status changed 2026-07-30: this section specified a requirement; the backtest
