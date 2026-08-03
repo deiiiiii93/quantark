@@ -261,3 +261,50 @@ def test_routing_no_longer_short_circuits_one_d_variants():
     s12 = _load_stage12()
     routing = s12.GateRouting("p", None, {"localvol": "mc"}, {})
     assert routing.solver_for("localvol") == "mc"
+
+
+# ---------------------------------------------------------------------------
+# Timing smoke: a short window must be selectable WITHOUT --quick, which also
+# shrinks the MC config and would corrupt the very cost it is measuring.
+# ---------------------------------------------------------------------------
+
+
+def _one_task(s12, **kw):
+    routing = s12.GateRouting("p", None, {"heston": "mc"}, {})
+    tasks = s12.build_tasks(
+        prepared=[{
+            "inception": "2023-05-04", "maturity_date": "2026-05-06",
+            "initial_spot": 6733.97, "coupon": 0.15,
+        }],
+        variants=["heston"], routing=routing,
+        history_dir=REPO / "example" / "mo_volmodels" / "data" / "history",
+        out_dir=REPO / "output", data_end=__import__("datetime").date(2026, 7, 31),
+        rate=0.02, notional=50_000_000.0, costs_enabled=True,
+        calculate_surfaces=False, calculate_event_probabilities=True,
+        **kw,
+    )
+    assert len(tasks) == 1
+    return tasks[0]
+
+
+def test_max_days_truncates_the_window_without_shrinking_mc():
+    """The whole point of the timing smoke: production MC, 25 days."""
+    t = _one_task(_load_stage12(), quick=False, max_days=25)
+    assert t["max_days"] == 25
+    assert t["quick"] is False
+
+
+def test_quick_still_supplies_its_own_default_window():
+    s12 = _load_stage12()
+    t = _one_task(s12, quick=True, max_days=None)
+    assert t["max_days"] == s12.QUICK_MAX_DAYS
+
+
+def test_explicit_max_days_overrides_the_quick_default():
+    t = _one_task(_load_stage12(), quick=True, max_days=5)
+    assert t["max_days"] == 5
+
+
+def test_no_window_cap_by_default():
+    t = _one_task(_load_stage12(), quick=False, max_days=None)
+    assert t["max_days"] is None

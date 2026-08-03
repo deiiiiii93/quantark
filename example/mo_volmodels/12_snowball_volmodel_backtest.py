@@ -1158,6 +1158,7 @@ def build_tasks(
     quick: bool,
     calculate_surfaces: bool,
     calculate_event_probabilities: bool,
+    max_days: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     gate_payload = {
         "decision_path": routing.decision_path,
@@ -1185,7 +1186,15 @@ def build_tasks(
                     "product_quantity": PRODUCT_QUANTITY,
                     "costs_enabled": bool(costs_enabled),
                     "quick": bool(quick),
-                    "max_days": QUICK_MAX_DAYS if quick else None,
+                    # An explicit cap wins over --quick's default, so a timing
+                    # smoke can shorten the window while keeping the PRODUCTION
+                    # MC config -- --quick also shrinks paths/batches, which
+                    # would corrupt the per-day cost it is meant to measure.
+                    "max_days": (
+                        int(max_days)
+                        if max_days is not None
+                        else (QUICK_MAX_DAYS if quick else None)
+                    ),
                     "calculate_surfaces": bool(calculate_surfaces),
                     "calculate_event_probabilities": bool(
                         calculate_event_probabilities
@@ -1348,6 +1357,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="small MC + short window (Gate G3 smoke / CI)",
     )
     parser.add_argument(
+        "--max-days",
+        type=int,
+        default=None,
+        help="cap replay days per run, WITHOUT shrinking the MC config the way "
+        "--quick does. This is the timing-smoke knob: it measures the "
+        "production per-replay-day cost on a short window. Overrides "
+        f"--quick's default of {QUICK_MAX_DAYS} days when both are given.",
+    )
+    parser.add_argument(
         "--gate-g3",
         action="store_true",
         help="Gate G3: one inception x flat_bsm end-to-end sanity check",
@@ -1413,6 +1431,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         notional=float(args.notional),
         costs_enabled=not args.no_costs,
         quick=bool(args.quick),
+        max_days=args.max_days,
         calculate_surfaces=bool(args.surfaces),
         calculate_event_probabilities=not args.no_event_probabilities,
     )
