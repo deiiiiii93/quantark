@@ -223,7 +223,12 @@ set it included.
 (`pde`/`quad`/`mc`), the coarse/medium/fine ladder, and **PV and delta reported as separate
 columns with separate provenance**. Per study spec §5.8 the delta column currently renders
 `VOID — reference noise σ≈0.46 ct vs a 0.1 ct bound (§5.8)`. Feller-regime conditioning per
-§7A.11; the `ratio > 10` band labelled **EXCLUDE — never average** (§7A.10(3)).
+§7A.11; the `ratio > 10` band labelled **EXCLUDE (provisional)**. The label is deliberately not
+"never average": §7A.10(3) established the exclusion, but §5.9 (`ec20db9`, 2026-08-03) supersedes
+§7A.11's attribution — those dates fail on *discretisation*, not calibration (Péclet ≈ 5,872
+against a monotonicity bound of 2, with 81 % of medium-grid steps accidentally damping the bad
+modes), and are fixable. The panel renders the citation alongside the band so the exclusion reads
+as a current numerical limitation rather than a property of the model.
 
 **Backtest outcomes** — from `13_aggregate_and_report.py aggregate()`, which is
 **manifest-scoped** (§1.2). The block states its denominator explicitly — "27 runs listed in
@@ -332,10 +337,20 @@ invalidations:
 **documentation** commit invalidate a **numeric** artifact, which §1.1 shows is a live
 requirement, not a hypothetical.
 
-`b6b97f0` is deliberately absent. Before it, `PDEEngine` failed closed and produced no output, so
-no surviving pricing summary contains numbers it changed. It is nonetheless covered by the
-dependency table (§6.5), which includes the engine facade files it touched, so an artifact
-predating it reads `stale` — flagged for a re-run — rather than being silently certified.
+Two commits are deliberately absent, and the reasons are recorded so a later reader does not
+mistake omission for oversight.
+
+`b6b97f0` — before it, `PDEEngine` failed closed and produced no output, so no surviving pricing
+summary contains numbers it changed. It is nonetheless covered by the dependency table (§6.5),
+which includes the engine facade files it touched, so an artifact predating it reads `stale` —
+flagged for a re-run — rather than being silently certified.
+
+`ec20db9` (§5.9) — a **reattribution**, not an invalidation. It supersedes §7A.11's *explanation*
+of why σ-collapse dates fail the PDE gate (discretisation, not calibration) while leaving the
+measured failures themselves intact. No artifact's numbers become non-comparable, so voiding
+would be wrong. Its consequence is a label change in Panel 2 (§4.2), not a freshness verdict.
+It does reach freshness by another route: `STUDY_SPEC` is a declared dependency of G2, G4 and
+FLEET (§6.5), so artifacts predating it read `stale`.
 
 ### 5.3 Fleet dimensions
 
