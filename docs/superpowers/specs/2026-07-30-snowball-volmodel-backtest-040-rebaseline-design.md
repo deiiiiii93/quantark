@@ -343,7 +343,10 @@ is doing its job.
 one-sidedness. It is not disqualifying today; it would become so under any
 tolerance tightening.
 
-#### Caveat: `ts_bsm` was not independently gated
+#### Caveat: `ts_bsm` was not independently gated — **RESOLVED 2026-08-03**
+
+*Fixed by Task 9 (`7109868`) and re-gated. The finding below is kept because it
+is the evidence that motivated the fix; the resolution follows it in §5.6.*
 
 `ts_bsm` and `flat_bsm` returned **bitwise identical** results — all 15 PV cells
 and every delta, to 16 significant digits. Cause: stage 12 distinguishes them by
@@ -361,6 +364,53 @@ three calibrated variants genuinely use `full_grid`, so the three that *failed*
 are gated on the data the fleet will use. But that conservatism is incidental, not
 designed, and `ts_bsm`'s `route=pde` currently rests on no independent evidence.
 Resolving this is a prerequisite for admitting `ts_bsm` to the fleet.
+
+---
+
+### 5.6 Re-gate on the corrected surfaces — measured 2026-08-03
+
+Task 9 made `build_pricing_env` honour `surface_vol_mode`, mirroring
+`ProductReplay._vol_and_dividend`. G2 was then re-run in full: 2442.4 s, same
+cohort pin, same warm cache,
+`evidence_sha256 = bbfa8f5543c2a3fc6dd0af37ef255989e603ad96ddb016a1eee17763880a238a`.
+
+**The re-run carries its own control.** The three `full_grid` variants already
+priced the right surface, so Task 9 must not have moved them; the three BSM
+variants must move. Measured, comparing every cell across all three ladder
+levels:
+
+| group | variants | cells | moved |
+|---|---|---|---|
+| control (`full_grid`) | `localvol`, `heston`, `heston_slv` | 135 | **0** |
+| treatment (BSM) | `flat_bsm`, `flat_bsm_quad`, `ts_bsm` | 135 | **135** |
+
+And the defect itself: `ts_bsm` vs `flat_bsm` went from **45/45 cells identical**
+to **0/45**. The two are now separate computations.
+
+**All six routes are unchanged**, and every rationale string is identical to
+§5.5's. The BSM variants' delta agreement improved slightly on their correct
+surfaces:
+
+| variant | mean signed (before → after) | max abs (before → after) |
+|---|---|---|
+| `flat_bsm` | 0.0058 → **0.0047** | 0.0286 → **0.0185** |
+| `flat_bsm_quad` | 0.0008 → **0.0014** | 0.0208 → **0.0210** |
+| `ts_bsm` | 0.0058 → **0.0044** | 0.0286 → **0.0184** |
+
+All still two orders of magnitude inside the 0.5-contract bound. §5.5's
+substantive findings — the delta criterion deciding `localvol`, the −0.471 and
+−0.338 contract Heston biases, the Feller localisation of the single PV failure
+— are untouched, because they belong to the control group.
+
+**`ts_bsm` discriminates less than the study design assumed.** The corrected
+surfaces differ, but not by much: at 2026-07-15 the ATM term structure reads
+0.279979 at T=0.5 and 0.264476 at both T=1.0 and T=3.0 — identical to
+`flat_bsm`'s single flat value. CSI 1000 options are short-dated and the
+artifact clamps flat total variance beyond the last listed expiry, so a
+three-year snowball reads a term structure the market barely prices. `ts_bsm`
+is a legitimate variant now, but it tests a feature this data mostly lacks;
+interpret a small `ts_bsm` − `flat_bsm` difference as thin market structure,
+not as engine agreement.
 
 ---
 
