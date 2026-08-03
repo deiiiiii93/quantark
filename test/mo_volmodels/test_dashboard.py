@@ -301,3 +301,158 @@ def test_a_collapsed_untracked_parent_still_marks_its_declared_child_dirty():
     )
     assert provenance.dep_touched_by(dep, dep)
     assert not provenance.dep_touched_by("quantark/volmodels/calibration.py", dep)
+
+
+# ---------------------------------------------------------------------------
+# Task 3: gate rows
+# ---------------------------------------------------------------------------
+
+gates = importlib.import_module("mo_dashboard.gates")
+
+
+def test_headline_g1_counts_verified_against_admitted():
+    doc = {"n_admitted": 766, "n_verified": 766, "failures": [],
+           "min_expiries_seen": 3, "asof": "2026-07-31"}
+    h = gates.headline_g1(doc)
+    assert h["n_admitted"] == 766
+    assert h["n_verified"] == 766
+    assert h["n_failures"] == 0
+    assert h["satisfied"] is True
+
+
+def test_headline_g1_is_unsatisfied_when_a_surface_failed():
+    doc = {"n_admitted": 766, "n_verified": 765, "failures": [{"date": "20240101"}],
+           "min_expiries_seen": 3}
+    assert gates.headline_g1(doc)["satisfied"] is False
+
+
+def test_headline_g4_reports_the_coupon_range_and_solved_count():
+    doc = [
+        {"inception": "2023-05-04", "coupon": 0.1507, "coupon_solution": {"solved": True}},
+        {"inception": "2023-06-01", "coupon": 0.1153, "coupon_solution": {"solved": True}},
+    ]
+    h = gates.headline_g4(doc)
+    assert h["n_solved"] == 2
+    assert h["n_inceptions"] == 2
+    assert h["coupon_min"] == pytest.approx(0.1153)
+    assert h["coupon_max"] == pytest.approx(0.1507)
+    assert h["satisfied"] is True
+
+
+def test_headline_g4_is_unsatisfied_when_one_solve_failed():
+    doc = [
+        {"inception": "2023-05-04", "coupon": 0.15, "coupon_solution": {"solved": True}},
+        {"inception": "2023-06-01", "coupon": None, "coupon_solution": {"solved": False}},
+    ]
+    assert gates.headline_g4(doc)["satisfied"] is False
+
+
+def test_headline_g2_splits_pv_from_delta_per_variant():
+    doc = {"variants": {
+        "flat_bsm": {"route": "pde", "gate": {
+            "medium_pass": True, "fine_pass": True, "biased": False,
+            "delta_pass": True, "delta_biased": False,
+            "delta_info": {"max_abs_contracts": 0.0142, "bound_contracts": 0.1},
+        }},
+        "heston": {"route": "mc", "gate": {
+            "medium_pass": True, "fine_pass": False, "biased": False,
+            "delta_pass": False, "delta_biased": True,
+            "delta_info": {"max_abs_contracts": 0.9319, "bound_contracts": 0.1},
+        }},
+    }}
+    h = gates.headline_g2(doc)
+    assert h["variants"]["flat_bsm"]["pv"]["pass"] is True
+    assert h["variants"]["flat_bsm"]["delta"]["pass"] is True
+    assert h["variants"]["heston"]["route"] == "mc"
+    assert h["variants"]["heston"]["delta"]["pass"] is False
+    assert h["variants"]["heston"]["delta"]["max_abs_contracts"] == pytest.approx(0.9319)
+
+
+def test_g2_is_satisfied_by_routes_not_by_comparison_passes():
+    """The real artifact routes localvol/heston/heston_slv to MC *because*
+    delta_pass is false.  Treating delta_pass as the predicate would leave G2
+    permanently unsatisfiable no matter what the study does."""
+    doc = {"variants": {
+        "flat_bsm": {"route": "pde", "gate": {"medium_pass": True, "delta_pass": True,
+                                              "delta_info": {}}},
+        "heston": {"route": "mc", "gate": {"medium_pass": True, "delta_pass": False,
+                                           "delta_biased": True, "delta_info": {}}},
+    }}
+    assert gates.headline_g2(doc)["satisfied"] is True
+
+    no_route = {"variants": {"heston": {"route": None, "gate": {"delta_info": {}}}}}
+    assert gates.headline_g2(no_route)["satisfied"] is False
+
+
+def test_headline_g5_reports_not_run_when_the_artifact_is_absent():
+    h = gates.headline_g5(None)
+    assert h["satisfied"] is False
+    assert h["state"] == "NOT_RUN"
+
+
+@pytest.mark.parametrize("doc", [
+    {},                                                  # empty
+    {"n_operating_points": 3},                           # no under_resolved list
+    {"under_resolved": []},                              # no point count
+    {"n_operating_points": 0, "under_resolved": []},     # zero points swept
+])
+def test_headline_g5_fails_closed_on_a_partial_document(doc):
+    """A truncated write must not clear a mandatory pre-flight.  An earlier
+    draft returned satisfied=True for {} because `.get(...) or []` made an
+    absent field indistinguishable from an empty one."""
+    assert gates.headline_g5(doc)["satisfied"] is False
+
+
+def test_headline_g5_is_satisfied_only_on_a_complete_clean_sweep():
+    h = gates.headline_g5({"n_operating_points": 12, "under_resolved": []})
+    assert h["satisfied"] is True
+    assert gates.headline_g5(
+        {"n_operating_points": 12, "under_resolved": [{"cell": "x"}]}
+    )["satisfied"] is False
+
+
+def test_collect_gates_marks_an_unreadable_artifact(tmp_path):
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output/gate_g1_admission.json").write_text("{not json", encoding="utf-8")
+    rows, errors = gates.collect_gates(tmp_path, registry.Registry())
+
+    g1 = next(r for r in rows if r["id"] == "G1")
+    assert g1["status"] == "unreadable"
+    assert any("gate_g1_admission" in e["path"] for e in errors)
+
+
+def test_collect_gates_marks_a_missing_artifact_not_run(tmp_path):
+    (tmp_path / "output").mkdir()
+    rows, _ = gates.collect_gates(tmp_path, registry.Registry())
+    g5 = next(r for r in rows if r["id"] == "G5")
+    assert g5["status"] == "missing"
+    assert g5["headline"]["state"] == "NOT_RUN"
+
+
+def test_g2_row_carries_two_facets_and_takes_the_worst():
+    assert gates.worst_freshness(["fresh", "void"]) == "void"
+    assert gates.worst_freshness(["fresh", "stale"]) == "stale"
+    assert gates.worst_freshness(["fresh", "fresh"]) == "fresh"
+
+
+def test_g2_provenance_is_keyed_by_variant(tmp_path):
+    """Without this, f97fba3's heston/heston_slv scope is unreachable and the
+    whole scoping mechanism is dead code for the gate it was written for."""
+    import os
+    out = tmp_path / "output/pde_convergence_gate"
+    out.mkdir(parents=True)
+    artifact = out / "gate_decision.json"
+    artifact.write_text(json.dumps({"variants": {
+        "flat_bsm": {"route": "pde", "gate": {"delta_info": {}}},
+        "heston": {"route": "mc", "gate": {"delta_info": {}}},
+    }}), encoding="utf-8")
+    old = datetime(2026, 8, 3, 1, 0, tzinfo=CST).timestamp()
+    os.utime(artifact, (old, old))
+
+    reg = registry.Registry(invalidations=(INV_PDEFIX,))
+    rows, _ = gates.collect_gates(tmp_path, reg)
+    g2 = next(r for r in rows if r["id"] == "G2")
+
+    assert g2["by_variant"]["heston"]["pv"]["freshness"] == "void"
+    assert g2["by_variant"]["flat_bsm"]["pv"]["freshness"] != "void"
+    assert g2["facets"]["pv"]["freshness"] == "void"   # worst across variants
