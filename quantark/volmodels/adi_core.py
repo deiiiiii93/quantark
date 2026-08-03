@@ -85,6 +85,16 @@ class HestonSLVADICore:
         use_sparse: use per-slice SuperLU in the S/V solves (only valid when L is constant).
         grid_spot: center the log-spot grid here (defaults to s0); pin it across spot
             bumps for clean delta/gamma.
+        v_drift_scheme: variance-drift discretization. ``"adaptive_upwind"``
+            keeps the centered stencil where its two generator off-diagonals
+            are non-negative and otherwise switches that row to a donor-cell
+            stencil. ``"centered"`` is retained only as a diagnostic legacy
+            control.
+        variance_grid_mode: variance-axis geometry. ``"legacy"`` preserves
+            the historical grid, ``"power"`` grades toward zero,
+            ``"path_focused"`` concentrates around the CIR state and pins
+            theta/v0, and ``"auto"`` selects path-focused nodes for
+            sigma-collapse regimes and power grading otherwise.
     """
 
     def __init__(self, s0, strike, T, r, carry, params: HestonParams,
@@ -92,7 +102,9 @@ class HestonSLVADICore:
                  use_sparse=False, grid_spot=None, v0_boundary="neumann",
                  grid_style="uniform", barrier=0.0, barrier_is_up=True,
                  rebate=0.0, pay_at_hit=False, barrier_concentrate=0.0,
-                 critical_spots=None, v_grid_power=0.0, x_nodes=None):
+                 critical_spots=None, v_grid_power=0.0,
+                 variance_grid_mode="legacy", v_drift_scheme="adaptive_upwind",
+                 x_nodes=None):
         self.S0, self.K, self.T, self.r, self.q = s0, strike, T, r, carry
         self.kappa, self.theta, self.sigma, self.rho, self.v0 = (
             params.kappa, params.theta, params.sigma, params.rho, params.v0,
@@ -141,6 +153,57 @@ class HestonSLVADICore:
                 raise ValidationError(
                     "v_grid_power requires grid_style='concentrated'"
                 )
+        if variance_grid_mode not in ("legacy", "power", "path_focused", "auto"):
+            raise ValidationError(
+                "variance_grid_mode must be one of legacy, power, path_focused, auto"
+            )
+        if v_drift_scheme not in ("centered", "adaptive_upwind"):
+            raise ValidationError(
+                "v_drift_scheme must be 'centered' or 'adaptive_upwind'"
+            )
+        self.v_drift_scheme = str(v_drift_scheme)
+
+        # An explicit positive power is an explicit power-grid request.  The
+        # historical zero value remains compatible with every non-power mode.
+        resolved_variance_grid_mode = str(variance_grid_mode)
+        if self._v_grid_power > 0.0:
+            if resolved_variance_grid_mode not in ("legacy", "power", "auto"):
+                raise ValidationError(
+                    "positive v_grid_power conflicts with variance_grid_mode="
+                    f"{resolved_variance_grid_mode!r}"
+                )
+            resolved_variance_grid_mode = "power"
+        elif resolved_variance_grid_mode == "power":
+            self._v_grid_power = 2.5
+
+        if self._uniform:
+            if resolved_variance_grid_mode in ("power", "path_focused"):
+                raise ValidationError(
+                    "variance_grid_mode power/path_focused requires "
+                    "grid_style='concentrated'"
+                )
+            # Auto has no geometry choice on a uniform grid.
+            resolved_variance_grid_mode = "legacy"
+        elif resolved_variance_grid_mode == "auto":
+            if self.sig_eff2 <= 0.0:
+                feller_ratio = float("inf")
+            else:
+                feller_ratio = 2.0 * self.kappa * self.theta / self.sig_eff2
+            state_separation = abs(self.v0 - self.theta) / max(
+                self.theta, self.v0, 1e-12
+            )
+            # A very large Feller ratio plus separated v0/theta is the
+            # sigma-collapse signature: diffusion is negligible while CIR
+            # drift transports the state over a material part of the grid.
+            if feller_ratio >= 25.0 and (
+                state_separation >= 0.10 or abs(self.sig_eff) <= 0.01
+            ):
+                resolved_variance_grid_mode = "path_focused"
+            else:
+                resolved_variance_grid_mode = "power"
+                if self._v_grid_power <= 0.0:
+                    self._v_grid_power = 2.5
+        self.variance_grid_mode = resolved_variance_grid_mode
         # Sparse SuperLU is only valid when the S-operator is time-independent (L constant)
         # AND the grid is uniform (the concentrated path always uses batched-Thomas).
         self.use_sparse = bool(use_sparse) and self._constant_leverage and self._uniform
@@ -244,7 +307,7 @@ class HestonSLVADICore:
                     self.V_max = max(self.V_max, q_hi)
                 except ValidationError:
                     pass  # keep the envelope V_max (degenerate CIR)
-            if self._v_grid_power > 0.0:
+            if self.variance_grid_mode == "power":
                 # Power-graded variance grid v = V_max * u^gamma, clustering
                 # nodes at the v = 0 boundary. When Feller is violated
                 # (2*kappa*theta < sigma_eff^2) the value function behaves
@@ -260,6 +323,11 @@ class HestonSLVADICore:
                 v_center = min(max(v_center, 0.0), self.V_max)
                 self.V_grid = concentrated_grid(0.0, self.V_max, v_center, n_v,
                                                 concentration=max(0.5 * self.V_max, 1e-6))
+                if self.variance_grid_mode == "path_focused":
+                    self.V_grid = _pin_grid_targets(
+                        self.V_grid,
+                        [float(self.theta), float(self.v0)],
+                    )
             # per-node interior stencil coefficients for both directions
             self._xx = fd2_interior_coeffs(self.X_grid)   # (wm, w0, wp) each (n_x-2,)
             self._x1 = fd1_interior_coeffs(self.X_grid)
@@ -279,6 +347,7 @@ class HestonSLVADICore:
         self._V_tri_cache: dict = {}
         self._S_lu_cache: dict = {}
         self._V_lu_cache: dict = {}
+        self._v_operator_cache = None
         self._boundary_hook = None
 
     def _L(self, t):
@@ -377,22 +446,154 @@ class HestonSLVADICore:
                            - r_step * U[1:-1, 1:-1])
         return out
 
+    def _build_v_generator_coefficients(self):
+        """Return one shared three-point variance generator.
+
+        Both the explicit ADI predictor and the implicit V solve consume these
+        exact coefficients.  This prevents the split scheme from silently
+        using different spatial operators in ``_A2`` and ``_tri_V``.
+
+        The adaptive mode retains the second-order centered row whenever both
+        neighbouring generator coefficients are non-negative.  A row that
+        violates that M-matrix prerequisite switches only its drift term to a
+        directionally correct one-sided difference; diffusion remains on the
+        same second-order stencil.
+        """
+        cached = self._v_operator_cache
+        if cached is not None:
+            return cached
+
+        v_int = self.V_grid[1:-1]
+        diffusion = 0.5 * self.sig_eff2 * v_int
+        drift = self.kappa * (self.theta - v_int)
+
+        if self._uniform:
+            inv_h = 1.0 / self.dV
+            inv_h2 = inv_h * inv_h
+            diff_sub = diffusion * inv_h2
+            diff_diag = -2.0 * diffusion * inv_h2
+            diff_sup = diffusion * inv_h2
+            centered_sub = diff_sub - 0.5 * drift * inv_h
+            centered_diag = diff_diag
+            centered_sup = diff_sup + 0.5 * drift * inv_h
+            h_minus = np.full_like(v_int, self.dV)
+            h_plus = np.full_like(v_int, self.dV)
+        else:
+            wm2, w02, wp2 = self._vv
+            wm1, w01, wp1 = self._v1
+            diff_sub = diffusion * wm2
+            diff_diag = diffusion * w02
+            diff_sup = diffusion * wp2
+            centered_sub = diff_sub + drift * wm1
+            centered_diag = diff_diag + drift * w01
+            centered_sup = diff_sup + drift * wp1
+            h_minus = self.V_grid[1:-1] - self.V_grid[:-2]
+            h_plus = self.V_grid[2:] - self.V_grid[1:-1]
+
+        scale = np.maximum.reduce(
+            [
+                np.ones_like(centered_sub),
+                np.abs(centered_sub),
+                np.abs(centered_diag),
+                np.abs(centered_sup),
+            ]
+        )
+        coefficient_tol = 64.0 * np.finfo(float).eps * scale
+        centered_monotone = (
+            (centered_sub >= -coefficient_tol)
+            & (centered_sup >= -coefficient_tol)
+        )
+
+        sub = np.array(centered_sub, copy=True)
+        diag = np.array(centered_diag, copy=True)
+        sup = np.array(centered_sup, copy=True)
+        fallback = np.zeros_like(centered_monotone, dtype=bool)
+
+        if self.v_drift_scheme == "adaptive_upwind":
+            fallback = ~centered_monotone
+            positive = fallback & (drift >= 0.0)
+            negative = fallback & (drift < 0.0)
+
+            # For the backward generator b*d/dv, b>0 couples to the upper
+            # state and b<0 couples to the lower state.  These coefficients
+            # are non-negative by construction, so I - theta*dt*A2 is an
+            # M-matrix in the V direction.
+            sub[positive] = diff_sub[positive]
+            diag[positive] = (
+                diff_diag[positive] - drift[positive] / h_plus[positive]
+            )
+            sup[positive] = (
+                diff_sup[positive] + drift[positive] / h_plus[positive]
+            )
+
+            sub[negative] = (
+                diff_sub[negative] - drift[negative] / h_minus[negative]
+            )
+            diag[negative] = (
+                diff_diag[negative] + drift[negative] / h_minus[negative]
+            )
+            sup[negative] = diff_sup[negative]
+
+        # Values accepted as non-negative by the scale-aware roundoff test
+        # are projected to zero.  Leaving a tiny negative coefficient behind
+        # would make the diagnostic and the algebraic M-matrix claim disagree.
+        sub[(sub < 0.0) & (sub >= -coefficient_tol)] = 0.0
+        sup[(sup < 0.0) & (sup >= -coefficient_tol)] = 0.0
+
+        # Preserve the generator row-sum identity exactly enough for long
+        # event-heavy marches; any non-zero residue here is roundoff only.
+        diag = -(sub + sup)
+        self._v_operator_cache = (sub, diag, sup, centered_monotone, fallback)
+        return self._v_operator_cache
+
+    def variance_operator_diagnostics(self) -> dict:
+        """Machine-readable monotonicity and local-Peclet evidence."""
+        sub, _diag, sup, centered_monotone, fallback = (
+            self._build_v_generator_coefficients()
+        )
+        v_int = self.V_grid[1:-1]
+        diffusion = 0.5 * self.sig_eff2 * v_int
+        drift = self.kappa * (self.theta - v_int)
+        h_local = 0.5 * (self.V_grid[2:] - self.V_grid[:-2])
+        peclet = np.full_like(v_int, np.inf, dtype=float)
+        nonzero_diffusion = diffusion > np.finfo(float).tiny
+        peclet[nonzero_diffusion] = (
+            np.abs(drift[nonzero_diffusion])
+            * h_local[nonzero_diffusion]
+            / diffusion[nonzero_diffusion]
+        )
+        peclet[(~nonzero_diffusion) & (np.abs(drift) <= 1e-15)] = 0.0
+        finite_peclet = peclet[np.isfinite(peclet)]
+        return {
+            "scheme": self.v_drift_scheme,
+            "variance_grid_mode": self.variance_grid_mode,
+            "interior_nodes": int(v_int.size),
+            "centered_non_monotone_nodes": int(np.count_nonzero(~centered_monotone)),
+            "fallback_nodes": int(np.count_nonzero(fallback)),
+            "min_lower_offdiag": float(np.min(sub)) if sub.size else 0.0,
+            "min_upper_offdiag": float(np.min(sup)) if sup.size else 0.0,
+            "monotone": bool(np.all(sub >= -1e-12) and np.all(sup >= -1e-12)),
+            "max_local_peclet": (
+                float(np.max(finite_peclet)) if finite_peclet.size else float("inf")
+            ),
+            "infinite_peclet_nodes": int(np.count_nonzero(~np.isfinite(peclet))),
+            "fallback_variances": [float(v) for v in v_int[fallback]],
+            "theta_is_node": bool(np.any(np.isclose(self.V_grid, self.theta))),
+            "v0_is_node": bool(np.any(np.isclose(self.V_grid, self.v0))),
+        }
+
     def _A2(self, U):
         out = np.zeros_like(U)
         if self.N_S < 3 or self.N_V < 3:
             return out
-        v_int = self.V_grid[1:-1]
-        coef_d2 = 0.5 * self.sig_eff2 * v_int
-        coef_d1 = self.kappa * (self.theta - v_int)
-        if self._uniform:
-            U_VV = (U[1:-1, 2:] - 2.0 * U[1:-1, 1:-1] + U[1:-1, :-2]) / (self.dV * self.dV)
-            U_V = (U[1:-1, 2:] - U[1:-1, :-2]) / (2.0 * self.dV)
-        else:
-            wm2, w02, wp2 = self._vv
-            wm1, w01, wp1 = self._v1
-            U_VV = U[1:-1, :-2] * wm2 + U[1:-1, 1:-1] * w02 + U[1:-1, 2:] * wp2
-            U_V = U[1:-1, :-2] * wm1 + U[1:-1, 1:-1] * w01 + U[1:-1, 2:] * wp1
-        out[1:-1, 1:-1] = coef_d2 * U_VV + coef_d1 * U_V
+        sub, diag, sup, _centered_monotone, _fallback = (
+            self._build_v_generator_coefficients()
+        )
+        out[1:-1, 1:-1] = (
+            U[1:-1, :-2] * sub
+            + U[1:-1, 1:-1] * diag
+            + U[1:-1, 2:] * sup
+        )
         if self._degenerate_v0:
             # v=0 row: only kappa*theta*U_v survives (diffusion vanishes); 2-point forward.
             dV0 = float(self.V_grid[1] - self.V_grid[0])
@@ -526,27 +727,13 @@ class HestonSLVADICore:
         if cached is not None:
             return cached
         N = self.N_V
-        v = np.maximum(self.V_grid, 1e-10)
         a = np.zeros(N); b = np.zeros(N); c = np.zeros(N)
-        if self._uniform:
-            dV = self.dV
-            coef_d2 = 0.5 * self.sig_eff2 * v / (dV * dV)
-            coef_d1 = self.kappa * (self.theta - v) / (2.0 * dV)
-            a[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] - coef_d1[1:-1])
-            b[1:-1] = 1.0 + theta_loc * dt_step * (2.0 * coef_d2[1:-1])
-            c[1:-1] = -theta_loc * dt_step * (coef_d2[1:-1] + coef_d1[1:-1])
-        else:
-            v_int = v[1:-1]
-            d2 = 0.5 * self.sig_eff2 * v_int          # operator diffusion coeff (unscaled)
-            d1 = self.kappa * (self.theta - v_int)    # operator convection coeff
-            wm2, w02, wp2 = self._vv
-            wm1, w01, wp1 = self._v1
-            sub_op = d2 * wm2 + d1 * wm1
-            diag_op = d2 * w02 + d1 * w01             # w02 < 0 (fd2 center weight)
-            sup_op = d2 * wp2 + d1 * wp1
-            a[1:-1] = -theta_loc * dt_step * sub_op
-            b[1:-1] = 1.0 - theta_loc * dt_step * diag_op   # MINUS: I - theta*dt*L
-            c[1:-1] = -theta_loc * dt_step * sup_op
+        sub_op, diag_op, sup_op, _centered_monotone, _fallback = (
+            self._build_v_generator_coefficients()
+        )
+        a[1:-1] = -theta_loc * dt_step * sub_op
+        b[1:-1] = 1.0 - theta_loc * dt_step * diag_op
+        c[1:-1] = -theta_loc * dt_step * sup_op
         dV0 = float(self.V_grid[1] - self.V_grid[0])
         if self._degenerate_v0:
             # degenerate v=0 PDE row: (I - theta*dt * kappa*theta*U_v) with 2-point forward.

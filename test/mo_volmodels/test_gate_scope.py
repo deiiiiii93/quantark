@@ -106,15 +106,17 @@ def test_every_production_family_ladders_monotonically():
             assert [g["n_x"] for g in grids] == sorted(g["n_x"] for g in grids), variant
 
 
-def test_adi_production_params_record_the_variance_grid_default():
+def test_adi_production_params_record_the_certified_variance_controls():
     gate = _load_gate()
     grid = gate._production_grid("heston", "medium", 3.0, False)
 
     block = gate._production_params_block(gate.GATE_PAIRS["heston"], grid)
 
-    assert block["v_grid_power"] == pytest.approx(
-        gate.HestonSnowballPDESolver.DEFAULT_V_GRID_POWER
-    )
+    assert {
+        key: block[key]
+        for key in gate.ADI_2D_PRODUCTION_ENGINE_CONTROLS
+    } == gate.ADI_2D_PRODUCTION_ENGINE_CONTROLS
+    assert "v_grid_power" not in block
 
 
 # ---------------------------------------------------------------------------

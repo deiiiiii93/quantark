@@ -22,12 +22,13 @@ study variants -- ``flat_bsm``, ``flat_bsm_quad``, ``ts_bsm``, ``localvol``,
 ``heston``, ``heston_slv`` -- reads its own route from that file's
 ``variants`` map (keyed by the study variant name, not by ``vol_model``:
 flat_bsm/flat_bsm_quad/ts_bsm all share ``vol_model="bsm"`` but can carry
-independent verdicts).  Historically BSM/TS/LV always passed to the PDE
-route and Heston/Heston-SLV fell back to RQMC-QE Monte Carlo (their 2D-ADI
-route failed the convergence gate), but none of that is hardcoded -- see
-``GateRouting.solver_for``.  The routing is READ from that file, not
-hardcoded, and the run manifest records which decision file (and its
-evidence hash) was in force.
+independent verdicts). The two 2-D variants have an additional fail-closed
+Stage-16 Greek admission (`output/adi_greek_certification/`): they run only
+when Stage 11 admits the PDE PV and Stage 16 admits its delta/gamma. An
+unresolved variant is recorded as `excluded_greek_unresolved`; it is never
+redirected to a noisy daily RQMC hedge. See `GateRouting.solver_for`,
+`ADIGreekRouting`, and `apply_adi_greek_admission`. The run manifest records
+both decision files, both evidence hashes, and every excluded variant.
 
 Trade lifecycle per inception: the replay runs from inception until knock-out,
 maturity, or the end of the data window, whichever comes first.  Runs that hit
@@ -98,6 +99,7 @@ from quantark.util.exceptions import ValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STAGE11_PATH = Path(__file__).resolve().parent / "11_pde_convergence_gate.py"
+STAGE16_PATH = Path(__file__).resolve().parent / "16_adi_greek_certification.py"
 
 # ---------------------------------------------------------------------------
 # Fleet configuration
@@ -105,7 +107,20 @@ STAGE11_PATH = Path(__file__).resolve().parent / "11_pde_convergence_gate.py"
 
 DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
 DEFAULT_GATE_DECISION = PROJECT_ROOT / "output/pde_convergence_gate/gate_decision.json"
+DEFAULT_ADI_GREEK_DECISION = (
+    PROJECT_ROOT
+    / "output/adi_greek_certification/adi_greek_certification_decision.json"
+)
+ADI_GREEK_DECISION_SCHEMA_VERSION = 5
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output/volmodel_backtest"
+
+ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
+    "grid_style": "concentrated",
+    "v0_boundary": "degenerate_pde",
+    "variance_grid_mode": "auto",
+    "v_drift_scheme": "adaptive_upwind",
+    "barrier_greek_steps_per_tick": 8,
+}
 
 UNDERLYING_NAME = "CSI1000"
 NOTIONAL = 50_000_000.0  # design doc term sheet
@@ -224,6 +239,7 @@ VARIANT_SPECS: Dict[str, VariantSpec] = {
 # ---------------------------------------------------------------------------
 
 _STAGE11 = None
+_STAGE16 = None
 
 
 def stage11():
@@ -246,6 +262,22 @@ def stage11():
         spec.loader.exec_module(module)
         _STAGE11 = module
     return _STAGE11
+
+
+def stage16():
+    """Load the certification module for live source/runtime verification."""
+    global _STAGE16
+    if _STAGE16 is None:
+        spec = importlib.util.spec_from_file_location(
+            "mo_adi_greek_certification_16", STAGE16_PATH
+        )
+        if spec is None or spec.loader is None:
+            raise ValidationError(f"cannot load stage 16 module at {STAGE16_PATH}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        _STAGE16 = module
+    return _STAGE16
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +327,9 @@ class GateRouting:
         """PDE grid options for a variant the gate admitted to the PDE route.
 
         Only the 2D-ADI family (``heston``, ``heston_slv``) records
-        ``n_x``/``n_v``/``n_t`` and ``v_grid_power`` in its
-        ``pde_params`` block; the four 1D/quad variants record their own
-        ladder knob (``accuracy`` /
+        ``n_x``/``n_v``/``n_t`` plus the certified variance-grid, V-drift,
+        V=0-boundary, and dense-KI-clock controls in its ``pde_params``
+        block; the four 1D/quad variants record their own ladder knob (``accuracy`` /
         ``grid_points``) instead (see ``_production_params_block`` in stage
         11), so the dict comprehension below is naturally empty for them --
         no name-based special case is needed.
@@ -310,9 +342,44 @@ class GateRouting:
             for key in ("n_x", "n_v", "n_t")
             if key in params
         }
-        if "v_grid_power" in params:
-            options["v_grid_power"] = float(params["v_grid_power"])
+        if variant in {"heston", "heston_slv"}:
+            mismatches = {
+                key: (params.get(key), expected)
+                for key, expected in ADI_2D_PRODUCTION_ENGINE_CONTROLS.items()
+                if params.get(key) != expected
+            }
+            if mismatches:
+                raise ValidationError(
+                    f"gate decision has stale 2-D production controls for "
+                    f"variant={variant!r}: {mismatches}; rerun stage 11"
+                )
+            options.update(ADI_2D_PRODUCTION_ENGINE_CONTROLS)
         return options
+
+
+@dataclass(frozen=True)
+class ADIGreekRouting:
+    """Production-only Greek admission for the two 2-D ADI variants."""
+
+    decision_path: str
+    evidence_sha256: str
+    implementation_sha256: str
+    run_configuration_sha256: str
+    decision_sha256: str
+    runtime_environment: Dict[str, str]
+    production_engine_controls: Dict[str, Any]
+    run_configuration: Dict[str, Any]
+    routes: Dict[str, str]
+    reasons: Dict[str, str]
+
+    def route_for(self, variant: str) -> str:
+        route = self.routes.get(variant)
+        if route not in {"pde", "excluded_greek_unresolved"}:
+            raise ValidationError(
+                f"ADI Greek decision has no usable route for {variant!r}; "
+                "run stage 16 production certification"
+            )
+        return route
 
 
 def load_gate_routing(path: Path) -> GateRouting:
@@ -348,6 +415,187 @@ def load_gate_routing(path: Path) -> GateRouting:
         pde_params=pde_params,
         mc_params=mc_params,
     )
+
+
+def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
+    """Load the hashed, production-sized Stage-16 decision artifact."""
+    try:
+        payload = json.loads(Path(path).read_text())
+    except OSError as exc:
+        raise ValidationError(
+            f"ADI Greek decision not readable at {path}; run "
+            "16_adi_greek_certification.py before any Heston/SLV fleet"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ValidationError(
+            f"ADI Greek decision {path} is not valid JSON: {exc}"
+        ) from exc
+    if payload.get("schema_version") != ADI_GREEK_DECISION_SCHEMA_VERSION:
+        raise ValidationError(
+            "ADI Greek decision uses a stale schema; rerun stage 16 with the "
+            "fine-reference, paired-substep, and normalized economic-scale "
+            "certification contract"
+        )
+    if payload.get("quick") is not False:
+        raise ValidationError(
+            "ADI Greek decision is quick/non-production evidence; rerun stage 16 "
+            "without --quick"
+        )
+    certification = stage16()
+    if certification.SCHEMA_VERSION != ADI_GREEK_DECISION_SCHEMA_VERSION:
+        raise ValidationError(
+            "Stage-12/Stage-16 ADI Greek schema mismatch in this checkout"
+        )
+    evidence_hash = payload.get("evidence_sha256")
+    hashes = {
+        "evidence_sha256": evidence_hash,
+        "implementation_sha256": payload.get("implementation_sha256"),
+        "run_configuration_sha256": payload.get("run_configuration_sha256"),
+        "decision_sha256": payload.get("decision_sha256"),
+    }
+    if not all(
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+        for value in hashes.values()
+    ):
+        raise ValidationError("ADI Greek decision has incomplete hash provenance")
+    unsigned = dict(payload)
+    decision_hash = str(unsigned.pop("decision_sha256"))
+    if certification._canonical_sha256(unsigned) != decision_hash:
+        raise ValidationError("ADI Greek decision hash mismatch")
+    run_configuration = payload.get("run_configuration")
+    if (
+        not isinstance(run_configuration, dict)
+        or certification._canonical_sha256(run_configuration)
+        != hashes["run_configuration_sha256"]
+    ):
+        raise ValidationError("ADI Greek decision run-configuration hash mismatch")
+    live_implementation_hash = certification.implementation_sha256()
+    if hashes["implementation_sha256"] != live_implementation_hash:
+        raise ValidationError(
+            "ADI Greek decision does not match the live certification/routing "
+            "implementation; rerun stage 16"
+        )
+    runtime = payload.get("runtime_environment")
+    if (
+        runtime != certification.runtime_environment()
+        or run_configuration.get("runtime_environment") != runtime
+    ):
+        raise ValidationError(
+            "ADI Greek decision was produced in a different numerical runtime; "
+            "rerun stage 16 here"
+        )
+    production_controls = payload.get("production_engine_controls")
+    if (
+        production_controls != ADI_2D_PRODUCTION_ENGINE_CONTROLS
+        or run_configuration.get("production_engine_controls")
+        != production_controls
+    ):
+        raise ValidationError(
+            "ADI Greek decision does not declare the certified 2-D engine controls"
+        )
+    decisions = payload.get("decisions")
+    if not isinstance(decisions, dict) or not decisions:
+        raise ValidationError("ADI Greek decision has no decisions map")
+    routes: Dict[str, str] = {}
+    reasons: Dict[str, str] = {}
+    for variant, row in decisions.items():
+        if not isinstance(row, dict):
+            raise ValidationError(
+                f"ADI Greek decision entry {variant!r} is not an object"
+            )
+        route = str(row.get("route", ""))
+        if route not in {"pde", "excluded_greek_unresolved"}:
+            raise ValidationError(
+                f"ADI Greek decision entry {variant!r} has invalid route {route!r}"
+            )
+        if route == "pde" and row.get("evidence_complete") is not True:
+            raise ValidationError(
+                f"ADI Greek decision entry {variant!r} admits PDE on incomplete evidence"
+            )
+        if route == "pde":
+            sampling = run_configuration.get("sampling_by_variant", {}).get(
+                variant, {}
+            )
+            minimum_paths = (
+                certification.PRODUCTION_HESTON_PATHS_PER_BATCH
+                if variant == "heston"
+                else certification.PRODUCTION_SLV_PATHS_PER_BATCH
+            )
+            minimum_batches = (
+                certification.PRODUCTION_HESTON_BATCHES
+                if variant == "heston"
+                else certification.PRODUCTION_SLV_BATCHES
+            )
+            if (
+                int(sampling.get("paths_per_batch", 0)) < minimum_paths
+                or int(sampling.get("batches", 0)) < minimum_batches
+            ):
+                raise ValidationError(
+                    f"ADI Greek decision entry {variant!r} uses insufficient "
+                    "production sampling"
+                )
+            if variant == "heston_slv" and (
+                int(run_configuration.get("slv_spot_strata", 0))
+                != certification.SLV_SPOT_STRATA
+                or bool(run_configuration.get("slv_spot_antithetic", False))
+                != certification.SLV_SPOT_ANTITHETIC
+                or int(run_configuration.get("slv_spot_bridge_strata", 0))
+                != certification.SLV_SPOT_BRIDGE_STRATA
+            ):
+                raise ValidationError(
+                    "ADI Greek decision entry 'heston_slv' uses a stale "
+                    "conditional sampling profile"
+                )
+        routes[str(variant)] = route
+        reasons[str(variant)] = str(row.get("reason", ""))
+    return ADIGreekRouting(
+        decision_path=str(path),
+        evidence_sha256=evidence_hash,
+        implementation_sha256=hashes["implementation_sha256"],
+        run_configuration_sha256=hashes["run_configuration_sha256"],
+        decision_sha256=decision_hash,
+        runtime_environment=dict(runtime),
+        production_engine_controls=dict(production_controls),
+        run_configuration=dict(run_configuration),
+        routes=routes,
+        reasons=reasons,
+    )
+
+
+def apply_adi_greek_admission(
+    variants: Sequence[str],
+    gate: GateRouting,
+    greek_gate: ADIGreekRouting,
+) -> Tuple[List[str], Dict[str, str]]:
+    """Exclude unresolved 2-D variants; never substitute daily MC Greeks."""
+    admitted: List[str] = []
+    excluded: Dict[str, str] = {}
+    for variant in variants:
+        if variant not in {"heston", "heston_slv"}:
+            admitted.append(variant)
+            continue
+        pv_route = gate.solver_for(variant)
+        greek_route = greek_gate.route_for(variant)
+        if pv_route == "pde" and greek_route == "pde":
+            try:
+                gate.engine_options_for(variant)
+            except ValidationError as exc:
+                excluded[variant] = str(exc)
+            else:
+                admitted.append(variant)
+            continue
+        reasons = []
+        if pv_route != "pde":
+            reasons.append(f"Stage 11 PV route is {pv_route!r}, not admitted PDE")
+        if greek_route != "pde":
+            reasons.append(
+                greek_gate.reasons.get(variant)
+                or "Stage 16 Greek evidence is unresolved"
+            )
+        excluded[variant] = "; ".join(reasons)
+    return admitted, excluded
 
 
 # ---------------------------------------------------------------------------
@@ -1400,6 +1648,24 @@ def build_run_manifest(
             "evidence_sha256": routing.evidence_sha256,
             "routes": dict(routing.routes),
         },
+        "adi_greek_certification": {
+            "decision_path": cfg.get("adi_greek_decision"),
+            "evidence_sha256": cfg.get("adi_greek_evidence_sha256"),
+            "implementation_sha256": cfg.get(
+                "adi_greek_implementation_sha256"
+            ),
+            "run_configuration_sha256": cfg.get(
+                "adi_greek_run_configuration_sha256"
+            ),
+            "decision_sha256": cfg.get("adi_greek_decision_sha256"),
+            "runtime_environment": cfg.get("adi_greek_runtime_environment"),
+            "production_engine_controls": cfg.get(
+                "adi_greek_production_engine_controls"
+            ),
+            "run_configuration": cfg.get("adi_greek_run_configuration"),
+            "requested_variants": list(cfg.get("requested_variants", cfg["variants"])),
+            "excluded_variants": dict(cfg.get("adi_greek_exclusions", {})),
+        },
         "inceptions": list(prepared),
         "runs": list(summaries),
         "failures": list(failures),
@@ -1425,6 +1691,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--history-dir", default=str(DEFAULT_HISTORY_DIR))
     parser.add_argument("--gate-decision", default=str(DEFAULT_GATE_DECISION))
+    parser.add_argument(
+        "--adi-greek-decision",
+        default=str(DEFAULT_ADI_GREEK_DECISION),
+        help="Stage-16 production Greek decision; required when heston or "
+        "heston_slv is requested",
+    )
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument(
@@ -1489,10 +1761,29 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
     unknown = [v for v in variants if v not in VARIANT_SPECS]
     if unknown:
         raise ValidationError(f"unknown variants: {unknown}; known: {list(VARIANTS)}")
+    routing = load_gate_routing(Path(args.gate_decision))
+    requested_variants = list(variants)
+    adi_greek_routing = None
+    adi_greek_exclusions: Dict[str, str] = {}
     if args.gate_g3:
         variants = ["flat_bsm"]
-
-    routing = load_gate_routing(Path(args.gate_decision))
+        requested_variants = list(variants)
+    elif any(variant in {"heston", "heston_slv"} for variant in variants):
+        adi_greek_routing = load_adi_greek_routing(Path(args.adi_greek_decision))
+        variants, adi_greek_exclusions = apply_adi_greek_admission(
+            variants,
+            routing,
+            adi_greek_routing,
+        )
+        if not variants:
+            detail = "; ".join(
+                f"{variant}: {reason}"
+                for variant, reason in adi_greek_exclusions.items()
+            )
+            raise ValidationError(
+                "all requested variants were excluded by fail-closed ADI Greek "
+                f"admission: {detail}"
+            )
     history = surface_history(history_dir)
     spot = load_spot_frame(history_dir)
     futures = load_futures_frame(history_dir)
@@ -1546,6 +1837,48 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
     cfg = {
         "history_dir": str(history_dir),
         "gate_decision": str(args.gate_decision),
+        "adi_greek_decision": (
+            None
+            if adi_greek_routing is None
+            else adi_greek_routing.decision_path
+        ),
+        "adi_greek_evidence_sha256": (
+            None
+            if adi_greek_routing is None
+            else adi_greek_routing.evidence_sha256
+        ),
+        "adi_greek_implementation_sha256": (
+            None
+            if adi_greek_routing is None
+            else adi_greek_routing.implementation_sha256
+        ),
+        "adi_greek_run_configuration_sha256": (
+            None
+            if adi_greek_routing is None
+            else adi_greek_routing.run_configuration_sha256
+        ),
+        "adi_greek_decision_sha256": (
+            None
+            if adi_greek_routing is None
+            else adi_greek_routing.decision_sha256
+        ),
+        "adi_greek_runtime_environment": (
+            None
+            if adi_greek_routing is None
+            else dict(adi_greek_routing.runtime_environment)
+        ),
+        "adi_greek_production_engine_controls": (
+            None
+            if adi_greek_routing is None
+            else dict(adi_greek_routing.production_engine_controls)
+        ),
+        "adi_greek_run_configuration": (
+            None
+            if adi_greek_routing is None
+            else dict(adi_greek_routing.run_configuration)
+        ),
+        "requested_variants": requested_variants,
+        "adi_greek_exclusions": adi_greek_exclusions,
         "out_dir": str(out_dir),
         "variants": variants,
         "min_observable_months": int(args.min_observable_months),

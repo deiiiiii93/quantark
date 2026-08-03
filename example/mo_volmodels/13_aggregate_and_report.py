@@ -735,6 +735,7 @@ def aggregate(run_dir: Path) -> Dict[str, Any]:
         "term_sheet": manifest.get("term_sheet", {}),
         "hedge_costs": manifest.get("hedge_costs", {}),
         "gate_g2": manifest.get("gate_g2", {}),
+        "adi_greek_certification": manifest.get("adi_greek_certification", {}),
         "inceptions": manifest.get("inceptions", []),
         "variants": variants,
         "per_run": per_run,
@@ -846,6 +847,7 @@ def build_report(agg: Dict[str, Any]) -> str:
     term = agg.get("term_sheet", {})
     costs = agg.get("hedge_costs", {})
     gate = agg.get("gate_g2", {})
+    greek_gate = agg.get("adi_greek_certification", {})
     counts = agg.get("manifest_counts", {})
     variants = agg["variants"]
     summaries = agg["variant_summary"]
@@ -856,12 +858,22 @@ def build_report(agg: Dict[str, Any]) -> str:
     n_expected = counts.get("runs_expected")
     n_done = counts.get("runs_completed")
     missing_variants = [v for v in VARIANT_ORDER if v not in variants]
+    certification_exclusions = greek_gate.get("excluded_variants", {}) or {}
     if missing_variants or (n_expected and n_done and n_done < n_expected):
         bits = []
         if missing_variants:
             bits.append(
                 "variants not in this run: <b>"
                 + ", ".join(VARIANT_LABELS.get(v, v) for v in missing_variants)
+                + "</b>"
+            )
+        if certification_exclusions:
+            bits.append(
+                "fail-closed ADI Greek exclusions: <b>"
+                + ", ".join(
+                    f"{VARIANT_LABELS.get(v, v)} ({reason})"
+                    for v, reason in certification_exclusions.items()
+                )
                 + "</b>"
             )
         if n_expected and n_done and n_done < n_expected:
@@ -1102,10 +1114,14 @@ high-quality RQMC reference before being allowed near this backtest. The gate's 
 this run reads from disk rather than assuming:</p>
 <div class="eq">{json.dumps(gate.get("routes", {}), sort_keys=True)}
 &nbsp;&nbsp;<span class="c">// evidence sha256: {str(gate.get("evidence_sha256"))[:16]}...</span></div>
-<p>Both stochastic-vol variants failed the PDE gate and therefore price on <b>Monte Carlo (QE
-scheme, randomized quasi-random)</b>; flat BSM, TS BSM and local vol price on the deterministic
-1D snowball PDE. This is the study reporting its own numerical limits rather than papering over
-them.</p>
+<p>The 2-D variants also require the independent Stage-16 delta/gamma decision:</p>
+<div class="eq">excluded = {json.dumps(certification_exclusions, sort_keys=True)}
+&nbsp;&nbsp;<span class="c">// Greek evidence sha256:
+{str(greek_gate.get("evidence_sha256"))[:16]}...</span></div>
+<p>A Heston or Heston-SLV run appears only when the PV gate and Greek gate both admit PDE.
+An unresolved 2-D estimator is excluded and shown above; it is never replaced with a noisy
+daily Monte Carlo hedge. The tables below therefore report only variants with complete numerical
+admission evidence.</p>
 
 <h2 id="s3">3 &nbsp; Results: PnL distribution across inceptions</h2>
 <p>All figures are <b>percent of notional</b>, from the seller's perspective, net of hedging costs.

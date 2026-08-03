@@ -30,7 +30,7 @@ the automated tests and lets 02–10 run with no network at all.
 # 1) live fetch — AKShare interpreter (optional; the sample snapshot works offline)
 /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_snapshot.py
 
-# 2-10) replay the snapshot — quantark .venv
+# 2-16) replay and certify — quantark .venv
 .venv/bin/python example/mo_volmodels/02_build_iv_surface.py  --snapshot latest
 .venv/bin/python example/mo_volmodels/03_dupire_localvol.py   --tag latest
 .venv/bin/python example/mo_volmodels/04_heston_calibration.py --tag latest \
@@ -41,6 +41,9 @@ the automated tests and lets 02–10 run with no network at all.
 .venv/bin/python example/mo_volmodels/09_delta_hedging.py      --tag latest
 .venv/bin/python example/mo_volmodels/06_lecture.py           --tag latest
 .venv/bin/python example/mo_volmodels/10_explainer.py         --tag latest
+
+# Self-contained 2-D ADI Snowball Greek certification (no market-history input).
+.venv/bin/python example/mo_volmodels/16_adi_greek_certification.py
 ```
 
 The genuine cross-date study is a separate official-settlement cohort:
@@ -88,6 +91,7 @@ fixture) so the test pipeline and the live pipeline never clobber each other's f
 | `06_lecture.py`           | weave everything into the HTML lecture + comparison CSV |
 | `10_calibration_diagnostics.py` | normalized Heston fits across strictly comparable official CFFEX settlement dates → JSON/CSV/plot |
 | `10_explainer.py`         | fail-closed, artifact-driven eight-section verdict with interactive raw-smile, tenor-error, and official-settlement stability explorers |
+| `16_adi_greek_certification.py` | standalone Heston/Heston-SLV Snowball delta/gamma admission: deterministic anchors, separate ADI-axis ladders, paired QE-M RQMC uncertainty, resumable hash-locked cells, tri-state verdicts, and fail-closed routing |
 | `_heston_diagnostics.py`  | bound-aware finite-difference Jacobian, scaled SVD, and deterministic bootstrap summaries |
 | `_mo_common.py`           | shared helpers (snapshot IO, parity, OTM filter, IV inversion, env build, leverage, plots) |
 
@@ -108,6 +112,39 @@ calibrated LV surface, Heston parameters, and SLV leverage surface fixed while w
 the same deterministic spot path for an ATM European call and rebalancing to delta
 neutral under each model:
 `.venv/bin/python example/mo_volmodels/09_delta_hedging.py --tag latest`.
+
+Stage 16 answers a different question: whether the deterministic 2-D ADI
+central-bump delta and gamma are accurate enough to drive the study's daily hedge.
+The default run uses 8,192 paths × 16 scrambles for Heston and 1,024 paths ×
+128 scrambles for SLV, with a coupled QE-M 4→8 substep reference ladder. Heston
+integrates the independent terminal spot factor exactly. SLV uses an unbiased
+path-frozen-leverage affine control, four terminal strata plus their antithetic
+shifts, and eight strata on the midpoint Brownian-bridge factor. The variance and
+QE-branch Sobol streams are Brownian-bridge ordered as well. These production
+sampling floors and the full conditional profile are checked again by Stage 12;
+a smaller or stale profile cannot admit PDE routing. The fine-reference and substep
+components each use 97.5% intervals, preserving at least 95% simultaneous
+stochastic coverage. The 1% spot bump is the hedge exposure being certified;
+smaller bumps are a semantic diagnostic rather than a numerical-error term. It writes
+`output/adi_greek_certification/{adi_greek_certification.json,adi_greek_certification.md,adi_greek_certification_decision.json}`.
+Long runs can use `--resume`; deterministic anchors and each regime cell are written
+atomically and reused only when both the full run configuration and all numerical
+source inputs have the same SHA-256 fingerprints. Independent RQMC scrambles can be
+run concurrently with `--rqmc-batch-workers` without changing their reduction order
+(the production default is four workers).
+The decision artifact is self-hashed, embeds the full run configuration and
+Python/NumPy/SciPy/platform identity, and Stage 12 verifies it against the live
+certification and routing sources before admitting a 2-D variant.
+Use `--quick` only for plumbing; quick evidence is marked non-production and can
+never emit a PDE admission. A variant that is not proved is recorded as
+`excluded_greek_unresolved`, not silently redirected to a noisy MC hedge.
+Stage 12 reads this decision by default whenever `heston` or `heston_slv` is
+requested and requires both the Stage-11 PV route and Stage-16 Greek route to
+be `pde`; unresolved 2-D variants are excluded from the fleet and recorded in
+its manifest. The Stage-11 decision must carry the certified 2-D controls
+(`variance_grid_mode=auto`, adaptive-upwind V drift, degenerate V=0 boundary,
+and the dense-KI Greek clock); Stage 12 rejects the older fixed-power-grid
+profile instead of silently constructing a different engine.
 
 ## Identification and cross-date evidence
 

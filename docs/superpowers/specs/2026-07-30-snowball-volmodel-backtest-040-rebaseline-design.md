@@ -720,7 +720,7 @@ problem visible. The monotone stencil prices the *same calibration* to
   on the decay surface (gate line 1711) — σ = 0.5785, Feller 1.00003,
   T = 1.6959y. Its stability isolates the *calibration regime*, not maturity.
 
-#### Recommended fix (designed, NOT applied)
+#### Recommended fix (implemented 2026-08-03; production certification pending)
 
 1. Monotone v-generator when local Pe is large: use centered drift only when
    both neighbour generator coefficients stay non-negative, else an
@@ -736,6 +736,103 @@ problem visible. The monotone stencil prices the *same calibration* to
    damping.
 5. Add a σ-collapse gate requiring monotone v coefficients plus **separate**
    `n_x` / `n_v` / `n_t` refinement, since the pooled ladder hid this.
+
+All five implementation requirements now exist on the standalone
+`codex/adi-greek-certification` worktree branch:
+
+- `HestonSLVADICore` builds one cached V-generator coefficient set. Centered
+  drift is retained only where both neighbour coefficients are non-negative;
+  other rows use directionally correct donor-cell drift. `_A2` and `_tri_V`
+  consume that exact set, and roundoff-negative accepted coefficients are
+  projected to zero.
+- `variance_grid_mode="auto"` keeps power grading for ordinary/low-Feller
+  regimes and selects a path-focused grid with exact θ/v0 nodes for
+  sigma-collapse/deterministic-variance regimes. Explicit legacy/power/path
+  modes remain diagnostic controls.
+- `v0_boundary="degenerate_pde"` remains the Snowball default. Event and
+  terminal Rannacher counts are unchanged; neither damping nor a legacy-grid
+  reversion is used as a repair.
+- `variance_operator_diagnostics()` emits the local-Péclet and M-matrix
+  evidence required by the gate. The execution-session clone now preserves
+  both new constructor controls, closing the same explicit-kwargs hazard that
+  previously dropped `v0_boundary`.
+- Stage 11 serializes `variance_grid_mode="auto"`,
+  `v_drift_scheme="adaptive_upwind"`, and `v0_boundary="degenerate_pde"` as
+  explicit production controls. Stage 12 rejects a stale decision that still
+  injects `v_grid_power=2.5`; that legacy override would otherwise disable the
+  path-focused sigma-collapse grid after certification.
+- `16_adi_greek_certification.py` holds `n_x`, `n_v`, and `n_t` fixed in turn,
+  adds a separate 2%/1%/0.5%/0.25% bump ladder, and covers ordinary/full,
+  decayed, near-barrier, low-Feller, sigma-collapse, and near-expiry cases. Each
+  axis must contract (apart from an explicitly immaterial fraction of the
+  economic bound); a non-convergent deterministic ladder fails the cell.
+
+The correctness gate is deliberately stronger than the old G2 point estimate.
+For each QE-M RQMC scramble it prices `S-h`, `S`, and `S+h` using the same Sobol
+point set, forms delta and gamma *inside the batch*, and estimates uncertainty
+across independent scrambles. Heston analytically integrates the independent
+terminal Brownian-bridge spot factor conditional on each QE variance/residual
+path. SLV uses the corresponding exact conditional expectation as a control;
+the closer control freezes the leverage path at the factor-zero proxy while the
+target retains fully state-dependent leverage, so the estimator remains
+unbiased. Target/fine QE draws are projections of one finest Sobol set. The
+production profile is 8,192 paths × 16 scrambles for Heston and 1,024 paths ×
+128 scrambles for SLV. SLV crosses four randomized terminal-factor strata and
+their antithetic shifts with eight randomized midpoint Brownian-bridge strata;
+variance and QE-branch streams are Brownian-bridge ordered too. Equal-cost
+ordinary/full pilots selected this 8×8 allocation over terminal-only and 16×4
+alternatives. The sampling floors and full conditional profile are serialized
+and rechecked by Stage 12 before a `pde` route is accepted.
+
+The equivalence interval is `(PDE-fine-reference) ± fine-reference Student-t
+uncertainty ± paired target-to-fine substep-bias upper bound ± separate PDE
+n_x/n_v/n_t envelopes`. The two stochastic components each use 97.5% coverage,
+giving at least 95% simultaneous coverage by Bonferroni. It is tri-state:
+wholly inside the hedge-derived bound is PASS, wholly outside is FAIL, and
+overlap is INCONCLUSIVE. Delta retains the 0.5-contract cell and 0.1-contract
+mean-signed-bias bounds. For the mean-bias gate, signed axis corrections and
+paired substep batches are aggregated by scramble before uncertainty is taken;
+absolute per-cell envelopes are not incorrectly averaged into a signed bias.
+Gamma is expressed as the change in hedge contracts for a 1% spot move. Near
+discontinuities these are finite-bump hedge exposures, not purported classical
+derivatives. The smaller-bump ladder diagnoses that semantic choice and is not
+counted as PDE discretization error.
+
+Four deterministic reductions precede the stochastic matrix: Heston vanilla
+against the semi-analytical engine; constant-variance Snowball against 1-D BSM
+PDE and QUAD; unit-leverage SLV against Heston; and deterministic variance
+against a time-dependent 1-D local-vol PDE. The JSON preserves raw batch
+estimates and covariance, while the Markdown and decision artifact expose a
+fail-closed route. A quick run is never admissive. A production-sized run may
+emit `pde` only if every required anchor, cell, and signed-bias gate passes;
+otherwise it emits `excluded_greek_unresolved` rather than replacing a stable
+PDE estimator with a noisy daily MC delta. Anchors and individual regime cells
+are atomically checkpointed; `--resume` reuses them only when the complete run
+configuration and every numerical source input match their SHA-256 fingerprints.
+Independent scrambles may execute concurrently, but results are reduced in
+deterministic batch-id order.
+
+The compact routing decision is self-hashed and embeds the full run
+configuration plus Python/NumPy/SciPy/platform identity. Stage 12 recomputes
+the live Stage-16 implementation fingerprint (including the Stage-11/12
+routing seam) and rejects a stale source, runtime, or edited decision before
+constructing a production engine.
+
+Stage 12 consumes that decision for `heston`/`heston_slv`. A 2-D variant enters
+the replay fleet only when Stage 11 admits its PDE PV **and** Stage 16 admits
+its Greeks. A Stage-11 MC route or a Stage-16 unresolved route excludes the
+variant and is written to the fleet manifest; neither condition can select a
+daily MC Greek path.
+
+Implementation smoke command (non-production):
+
+```bash
+.venv/bin/python example/mo_volmodels/16_adi_greek_certification.py --quick
+```
+
+The unqualified command is the production evidence run. Landing the machinery
+does **not** itself claim that either 2-D variant has passed that run; admission
+is carried only by the generated, hashed decision artifact.
 
 #### Consequence for the study
 

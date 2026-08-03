@@ -164,6 +164,20 @@ LADDER_MEDIUM = (200, 60)
 LADDER_FINE = (300, 90)
 LADDER_QUICK = (("coarse", 24, 12, 16), ("medium", 32, 16, 24), ("fine", 40, 20, 32))
 
+# These are part of the admitted 2-D production profile, not incidental
+# constructor defaults.  In particular, serializing v_grid_power=2.5 would
+# override variance_grid_mode="auto" and silently disable the path-focused
+# sigma-collapse grid that this gate actually prices.
+ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
+    "grid_style": "concentrated",
+    "v0_boundary": "degenerate_pde",
+    "variance_grid_mode": "auto",
+    "v_drift_scheme": "adaptive_upwind",
+    "barrier_greek_steps_per_tick": (
+        HestonSnowballPDESolver.DEFAULT_BARRIER_GREEK_STEPS_PER_TICK
+    ),
+}
+
 # Decayed-case eligibility: remaining maturity window (years) at the decayed
 # valuation date; outside this window the case is skipped (and logged).
 DECAY_TARGET_MONTHS = 24
@@ -1858,8 +1872,9 @@ def _production_params_block(pair: GatePair, medium_grid: Optional[Dict[str, Any
     """Route-agnostic production-engine params for the decision payload.
 
     Only the 2D-ADI family maps onto ``AutocallableEngineConfig.vol_model_engine_options``
-    (n_x/n_v/n_t); QUAD and 1D-PDE variants record their own ladder knob honestly
-    instead of forcing them into that grid shape.
+    (n_x/n_v/n_t plus the certified grid/operator controls); QUAD and 1D-PDE
+    variants record their own ladder knob honestly instead of forcing them
+    into that grid shape.
     """
     if medium_grid is not None and medium_grid.get("kind") == "adi_2d":
         return {
@@ -1870,14 +1885,14 @@ def _production_params_block(pair: GatePair, medium_grid: Optional[Dict[str, Any
             "n_t": medium_grid["n_t"],
             "n_t_rule": "ceil(400 * remaining_maturity_years)",
             "scheme": "craig_sneyd",
-            "grid_style": "concentrated",
-            "v_grid_power": HestonSnowballPDESolver.DEFAULT_V_GRID_POWER,
+            **ADI_2D_PRODUCTION_ENGINE_CONTROLS,
             "grid_focus": "auto",
             "event_projection": "cell_average",
             "event_rannacher_steps": 2,
             "theta": 0.5,
             "note": "maps to AutocallableEngineConfig.vol_model_engine_options "
-            "(n_x/n_v/n_t) + PDEParams defaults; n_t is per-case: recompute as "
+            "(n_x/n_v/n_t plus explicit grid/operator controls) + PDEParams "
+            "defaults; n_t is per-case: recompute as "
             "ceil(400 * remaining maturity in years) at each reprice - the "
             "emitted n_t is the full-3Y inception value",
         }

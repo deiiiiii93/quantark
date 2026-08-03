@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Dict, Optional
 
 import numpy as np
@@ -211,17 +212,20 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
     """Shared 2-D (log-spot, variance) ADI machinery for the Snowball solvers.
 
     ``v0_boundary`` defaults to ``"degenerate_pde"``, diverging from the ADI
-    core's own ``"neumann"`` default.  Concentrated grids additionally default
-    to the core's validated ``v = V_max * u**2.5`` variance grading. Real-smile
-    Heston fits routinely land near the Feller boundary, where both the limiting
-    PDE row and extra resolution near ``v = 0`` are required. ``v_grid_power=0``
-    remains an explicit legacy cross-check; uniform grids resolve to that
-    ungraded setting because power grading requires non-uniform stencils.
+    core's own ``"neumann"`` default.  Concentrated grids use a regime-aware
+    variance axis: power grading near ``v=0`` in ordinary/low-Feller regimes,
+    and a path-focused grid with exact theta/v0 nodes when vol-of-vol collapses.
+    ``v_grid_power=0`` remains an explicit legacy cross-check; uniform grids
+    resolve to that ungraded setting because grading requires non-uniform
+    stencils.  The variance drift defaults to an adaptive M-matrix-preserving
+    stencil shared by both halves of the ADI split.
     """
 
     engine_type = EngineType.PDE
     _solver_name = "Heston2DSnowballPDESolver"
     DEFAULT_V_GRID_POWER = 2.5
+    DEFAULT_BARRIER_GREEK_STEPS_PER_TICK = 8
+    DENSE_KI_EVENTS_PER_YEAR = 120.0
 
     def __init__(
         self,
@@ -236,6 +240,9 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         pin_critical_spots: bool = False,
         v0_boundary: str = "degenerate_pde",
         v_grid_power: Optional[float] = None,
+        variance_grid_mode: str = "auto",
+        v_drift_scheme: str = "adaptive_upwind",
+        barrier_greek_steps_per_tick: int = DEFAULT_BARRIER_GREEK_STEPS_PER_TICK,
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
@@ -258,17 +265,33 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             raise ValidationError(
                 "v0_boundary must be 'neumann' or 'degenerate_pde'"
             )
-        if v_grid_power is None:
-            resolved_v_grid_power = (
-                self.DEFAULT_V_GRID_POWER if grid_style == "concentrated" else 0.0
+        if variance_grid_mode not in {"legacy", "power", "path_focused", "auto"}:
+            raise ValidationError(
+                "variance_grid_mode must be one of: legacy, power, "
+                "path_focused, auto"
             )
-        else:
+        if v_drift_scheme not in {"centered", "adaptive_upwind"}:
+            raise ValidationError(
+                "v_drift_scheme must be 'centered' or 'adaptive_upwind'"
+            )
+        if (
+            isinstance(barrier_greek_steps_per_tick, bool)
+            or not isinstance(barrier_greek_steps_per_tick, (int, np.integer))
+            or int(barrier_greek_steps_per_tick) < 0
+        ):
+            raise ValidationError(
+                "barrier_greek_steps_per_tick must be a non-negative integer"
+            )
+        explicit_v_grid_power = v_grid_power is not None
+        if explicit_v_grid_power:
             try:
                 resolved_v_grid_power = float(v_grid_power)
             except (TypeError, ValueError) as exc:
                 raise ValidationError(
                     "v_grid_power must be a finite value >= 1, or 0 to disable"
                 ) from exc
+        else:
+            resolved_v_grid_power = 0.0
         if (
             not np.isfinite(resolved_v_grid_power)
             or resolved_v_grid_power < 0.0
@@ -281,6 +304,52 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             raise ValidationError(
                 "v_grid_power requires grid_style='concentrated'"
             )
+        if grid_style == "uniform" and variance_grid_mode in {
+            "power",
+            "path_focused",
+        }:
+            raise ValidationError(
+                "variance_grid_mode power/path_focused requires "
+                "grid_style='concentrated'"
+            )
+
+        resolved_variance_grid_mode = str(variance_grid_mode)
+        if grid_style == "uniform":
+            resolved_variance_grid_mode = "legacy"
+            resolved_v_grid_power = 0.0
+        elif explicit_v_grid_power and resolved_v_grid_power > 0.0:
+            # Preserve the long-standing explicit power control.
+            resolved_variance_grid_mode = "power"
+        elif (
+            explicit_v_grid_power
+            and resolved_v_grid_power == 0.0
+            and resolved_variance_grid_mode == "auto"
+        ):
+            # Preserve ``v_grid_power=0`` as an explicit legacy opt-out.
+            resolved_variance_grid_mode = "legacy"
+        elif resolved_variance_grid_mode == "auto":
+            sigma_eff = float(getattr(self, "eta", 1.0)) * float(model_params.sigma)
+            if sigma_eff == 0.0:
+                feller_ratio = float("inf")
+            else:
+                feller_ratio = (
+                    2.0
+                    * float(model_params.kappa)
+                    * float(model_params.theta)
+                    / (sigma_eff * sigma_eff)
+                )
+            state_separation = abs(
+                float(model_params.v0) - float(model_params.theta)
+            ) / max(float(model_params.v0), float(model_params.theta), 1e-12)
+            if feller_ratio >= 25.0 and (
+                state_separation >= 0.10 or abs(sigma_eff) <= 0.01
+            ):
+                resolved_variance_grid_mode = "path_focused"
+            else:
+                resolved_variance_grid_mode = "power"
+                resolved_v_grid_power = self.DEFAULT_V_GRID_POWER
+        elif resolved_variance_grid_mode == "power" and resolved_v_grid_power == 0.0:
+            resolved_v_grid_power = self.DEFAULT_V_GRID_POWER
         self.model_params = model_params
         self.n_x = int(n_x)
         self.n_v = int(n_v)
@@ -291,6 +360,11 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         self.pin_critical_spots = bool(pin_critical_spots)
         self.v0_boundary = str(v0_boundary)
         self.v_grid_power = float(resolved_v_grid_power)
+        self.variance_grid_mode = resolved_variance_grid_mode
+        self.v_drift_scheme = str(v_drift_scheme)
+        self.barrier_greek_steps_per_tick = int(
+            barrier_greek_steps_per_tick
+        )
 
     def representative_vol(self, product, pricing_env) -> float:
         # sqrt(var_eff) with var_eff ported VERBATIM from the adi_core x-width
@@ -381,6 +455,8 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             grid_style=self.grid_style,
             v0_boundary=self.v0_boundary,
             v_grid_power=self.v_grid_power,
+            variance_grid_mode=self.variance_grid_mode,
+            v_drift_scheme=self.v_drift_scheme,
             barrier_concentrate=self._grid_concentration_spot(product, env),
             critical_spots=(
                 self._grid_critical_spots(product, env)
@@ -532,7 +608,251 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
     def calculate_greeks(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
     ) -> Dict[str, float]:
-        return BaseEngine.calculate_greeks(self, product, pricing_env)
+        self._check_product_type(product)
+        if pricing_env is None:
+            raise ValidationError(
+                f"PricingEnvironment is required for {self._solver_name}"
+            )
+        self._validate_product(product)
+
+        policy = self.greek_time_grid_policy(product, pricing_env)
+        risk_engine = self
+        if int(policy["resolved_n_t"]) != self.n_t:
+            risk_engine = self._bump_clone()
+            risk_engine.n_t = int(policy["resolved_n_t"])
+
+        bump_config = risk_engine.params.get_effective_bump_config()
+        delta_bump = float(bump_config.spot_bump)
+        gamma_bump = float(
+            bump_config.gamma_spot_bump
+            if bump_config.gamma_spot_bump is not None
+            else delta_bump
+        )
+        spot = float(pricing_env.spot)
+        relative_bumps = sorted({delta_bump, gamma_bump})
+        shifted_envs = {0.0: pricing_env}
+        for bump in relative_bumps:
+            for sign in (-1.0, 1.0):
+                env = deepcopy(pricing_env)
+                env.spot_quote.spot = spot * (1.0 + sign * bump)
+                shifted_envs[sign * bump] = env
+
+        # A frozen Heston/SLV operator and payoff surface are independent of
+        # the readout spot.  Reuse one V0/V1 march only when every stencil
+        # point has the same deterministic valuation-date state.  A t=0 KO,
+        # terminal payoff, or continuous/discrete t=0 KI crossing falls back
+        # to the general bump-and-reprice implementation.
+        signatures = {
+            shift: risk_engine._valuation_state_signature(product, env)
+            for shift, env in shifted_envs.items()
+        }
+        if len(set(signatures.values())) != 1:
+            return BaseEngine.calculate_greeks(
+                risk_engine, product, pricing_env
+            )
+        signature = next(iter(signatures.values()))
+        if signature[0] != "live":
+            return BaseEngine.calculate_greeks(
+                risk_engine, product, pricing_env
+            )
+
+        bump_engine = risk_engine.create_bump_context(product, pricing_env)
+        if bump_engine is None:
+            bump_engine = risk_engine
+        T = float(product.get_maturity(pricing_env))
+        core, surface = bump_engine._solve_live_surface(
+            product,
+            pricing_env,
+            T,
+            knocked_in=bool(signature[1]),
+        )
+        for env in shifted_envs.values():
+            shifted_spot = float(env.spot)
+            if not (core.S_grid[0] <= shifted_spot <= core.S_grid[-1]):
+                raise ValidationError(
+                    "spot Greek stencil falls outside the frozen Heston/SLV "
+                    "Snowball PDE grid"
+                )
+
+        prices = {
+            shift: float(
+                core.interpolate(
+                    surface,
+                    np.log(float(env.spot)),
+                    bump_engine.model_params.v0,
+                )
+            )
+            for shift, env in shifted_envs.items()
+        }
+        base_price = prices[0.0]
+        delta_h = spot * delta_bump
+        gamma_h = spot * gamma_bump
+        result = {
+            "price": base_price,
+            "delta": (
+                prices[delta_bump] - prices[-delta_bump]
+            ) / (2.0 * delta_h),
+            "gamma": (
+                prices[gamma_bump]
+                - 2.0 * base_price
+                + prices[-gamma_bump]
+            ) / (gamma_h * gamma_h),
+        }
+        if not all(np.isfinite(value) for value in result.values()):
+            raise PricingError("Heston/SLV Snowball Greek readout is non-finite")
+        return result
+
+    def _valuation_state_signature(
+        self,
+        product: SnowballOption,
+        pricing_env: PricingEnvironment,
+    ) -> tuple[str, bool]:
+        spot = float(pricing_env.spot)
+        T = float(product.get_maturity(pricing_env))
+        if T <= 0.0 or is_zero(T):
+            return ("terminal", False)
+        if self._is_knocked_out_at_valuation(product, spot, pricing_env):
+            return ("immediate_ko", False)
+        ki_continuous = (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type
+            == ObservationType.CONTINUOUS
+        )
+        return (
+            "live",
+            bool(
+                self._is_knocked_in_at_valuation(
+                    product,
+                    spot,
+                    pricing_env,
+                    ki_continuous=ki_continuous,
+                )
+            ),
+        )
+
+    @staticmethod
+    def _clock_basis(
+        event_times: list[float],
+        maturity: float,
+        preferred_basis: int,
+    ) -> Optional[int]:
+        values = np.asarray([float(maturity), *event_times], dtype=float)
+        candidates = tuple(
+            dict.fromkeys((int(preferred_basis), 365, 252, 360, 366))
+        )
+        for basis in candidates:
+            if basis <= 0:
+                continue
+            ticks = values * float(basis)
+            if np.max(np.abs(ticks - np.rint(ticks))) <= 1e-8:
+                return int(basis)
+        return None
+
+    def greek_time_grid_policy(
+        self,
+        product: SnowballOption,
+        pricing_env: PricingEnvironment,
+    ) -> dict:
+        """Resolve the deterministic time grid used by spot Greeks.
+
+        Dense discrete KI schedules repeatedly inject a state-switch kink.
+        When the declared finite-bump stencil straddles that barrier, use at
+        least eight ADI steps per underlying schedule tick and choose a total
+        step count that exactly aligns the common ACT/365 or 252-day clock.
+        Other states retain the price-certified grid unchanged.
+        """
+        base = {
+            "configured_n_t": int(self.n_t),
+            "resolved_n_t": int(self.n_t),
+            "refined": False,
+            "reason": "production stencil does not straddle a dense discrete KI",
+            "clock_basis": None,
+            "steps_per_tick": int(self.barrier_greek_steps_per_tick),
+        }
+        if self.barrier_greek_steps_per_tick <= 0:
+            base["reason"] = "barrier-adjacent Greek time refinement is disabled"
+            return base
+        if not isinstance(product, SnowballOption) or pricing_env is None:
+            return base
+        bc = product.barrier_config
+        if (
+            bc.ki_continuous
+            or bc.ki_observation_type != ObservationType.DISCRETE
+            or not product.has_ki_barrier
+        ):
+            return base
+        T = float(product.get_maturity(pricing_env))
+        if T <= 0.0 or is_zero(T):
+            return base
+
+        ki_records = [
+            rec
+            for rec in product.resolve_ki_observations(pricing_env)
+            if rec.observation_time is not None
+            and -1e-12 <= float(rec.observation_time) <= T + 1e-12
+        ]
+        ki_times = sorted(
+            {
+                round(float(rec.observation_time), 12)
+                for rec in ki_records
+            }
+        )
+        if len(ki_times) / T < self.DENSE_KI_EVENTS_PER_YEAR:
+            return base
+
+        bump_config = self.params.get_effective_bump_config()
+        relative_bump = max(
+            float(bump_config.spot_bump),
+            float(
+                bump_config.gamma_spot_bump
+                if bump_config.gamma_spot_bump is not None
+                else bump_config.spot_bump
+            ),
+        )
+        spot = float(pricing_env.spot)
+        lo, hi = spot * (1.0 - relative_bump), spot * (1.0 + relative_bump)
+        barriers = [
+            float(rec.barrier)
+            for rec in ki_records
+            if rec.barrier is not None and np.isfinite(float(rec.barrier))
+        ]
+        if not any(lo <= barrier <= hi for barrier in barriers):
+            return base
+
+        event_times = list(ki_times)
+        for rec in product.resolve_ko_observations(pricing_env):
+            if (
+                rec.observation_time is not None
+                and -1e-12 <= float(rec.observation_time) <= T + 1e-12
+            ):
+                event_times.append(round(float(rec.observation_time), 12))
+        basis = self._clock_basis(
+            event_times,
+            T,
+            int(getattr(self.params, "bus_days_in_year", 252)),
+        )
+        if basis is not None:
+            ticks = int(round(T * basis))
+        else:
+            # Unknown clocks still receive the same density floor; without a
+            # provable rational clock the report exposes ``clock_basis=None``.
+            ticks = max(len(ki_times), int(np.ceil(365.0 * T)))
+        resolved = max(
+            int(self.n_t),
+            int(self.barrier_greek_steps_per_tick) * max(ticks, 1),
+        )
+        base.update(
+            {
+                "resolved_n_t": resolved,
+                "refined": resolved > self.n_t,
+                "reason": (
+                    "finite-bump stencil straddles a dense discrete KI; "
+                    "time grid aligned and refined"
+                ),
+                "clock_basis": basis,
+            }
+        )
+        return base
 
     def price(self, product: BaseEquityProduct, pricing_env: PricingEnvironment) -> float:
         self._check_product_type(product)
@@ -557,6 +877,31 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         )
         knocked_in = self._is_knocked_in_at_valuation(
             product, spot, pricing_env, ki_continuous=ki_continuous
+        )
+        core, read_surface = self._solve_live_surface(
+            product, pricing_env, T, knocked_in=knocked_in
+        )
+        return float(
+            core.interpolate(read_surface, np.log(spot), self.model_params.v0)
+        )
+
+    def _solve_live_surface(
+        self,
+        product: SnowballOption,
+        pricing_env: PricingEnvironment,
+        T: float,
+        *,
+        knocked_in: bool,
+    ):
+        """Solve the live V0/V1 system and return its reusable readout surface."""
+        spot = float(pricing_env.spot)
+        # Valuation-date readout state: events at t=0 are deterministic at
+        # the known spot, so the readout uses the smooth 0+ surface captured
+        # by the hooks instead of interpolating across the nodal t=0 jump.
+        self._t0_pre_U = None
+        ki_continuous = (
+            product.barrier_config.ki_continuous
+            or product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
         )
         self._prepare_state(product, pricing_env, T, ki_continuous)
 
@@ -600,7 +945,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             )
 
         read_surface = self._t0_pre_U if self._t0_pre_U is not None else surface
-        return float(core.interpolate(read_surface, np.log(spot), self.model_params.v0))
+        return core, read_surface
 
     def _capture_t0_pre_event_surface(self, U, tau, T, event_maps) -> None:
         """Capture the smooth 0+ surface before valuation-date events land.
@@ -815,9 +1160,11 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
             raise ValidationError("leverage_surface must be a calibrated LeverageSurface")
         if eta < 0:
             raise ValidationError("eta must be non-negative")
+        # Set before the base constructor so its automatic variance-grid
+        # classifier uses the effective SLV vol-of-vol eta*sigma.
+        self.eta = float(eta)
         super().__init__(model_params=model_params, **kwargs)
         self.leverage_surface = leverage_surface
-        self.eta = float(eta)
 
     def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
         t_grid = np.linspace(0.0, float(T), self.n_t + 1)
@@ -843,6 +1190,8 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
             grid_style=self.grid_style,
             v0_boundary=self.v0_boundary,
             v_grid_power=self.v_grid_power,
+            variance_grid_mode=self.variance_grid_mode,
+            v_drift_scheme=self.v_drift_scheme,
             barrier_concentrate=self._grid_concentration_spot(product, env),
             critical_spots=(
                 self._grid_critical_spots(product, env)

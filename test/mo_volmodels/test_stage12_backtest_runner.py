@@ -250,8 +250,15 @@ def _routing(**overrides):
                 "n_x": 200,
                 "n_v": 60,
                 "n_t": 1202,
-                "v_grid_power": 2.5,
                 "scheme": "cs",
+                **s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
+            },
+            "heston_slv": {
+                "n_x": 200,
+                "n_v": 60,
+                "n_t": 1202,
+                "scheme": "cs",
+                **s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
             }
         },
         mc_params={"heston": gated_mc, "heston_slv": gated_mc},
@@ -304,8 +311,17 @@ def test_pde_grid_options_only_flow_on_the_pde_route():
         "n_x": 200,
         "n_v": 60,
         "n_t": 1202,
-        "v_grid_power": 2.5,
+        **s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
     }, "only supported numerical grid controls are forwarded to the solver"
+
+
+def test_pde_route_rejects_the_legacy_power_grid_override():
+    routing = _routing(heston="pde")
+    routing.pde_params["heston"].pop("variance_grid_mode")
+    routing.pde_params["heston"]["v_grid_power"] = 2.5
+
+    with pytest.raises(ValidationError, match="stale 2-D production controls"):
+        routing.engine_options_for("heston")
 
 
 def test_load_gate_routing_is_actionable_when_absent(tmp_path):
@@ -322,6 +338,161 @@ def test_load_gate_routing_rejects_malformed_files(tmp_path):
     empty.write_text(json.dumps({"schema_version": 1}))
     with pytest.raises(ValidationError, match="no 'variants' map"):
         s12.load_gate_routing(empty)
+
+
+def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
+    routes = routes or {
+        "heston": "pde",
+        "heston_slv": "excluded_greek_unresolved",
+    }
+    certification = s12.stage16()
+    run_configuration = {
+        "runtime_environment": certification.runtime_environment(),
+        "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
+        "sampling_by_variant": {
+            "heston": {
+                "paths_per_batch": certification.PRODUCTION_HESTON_PATHS_PER_BATCH,
+                "batches": certification.PRODUCTION_HESTON_BATCHES,
+            },
+            "heston_slv": {
+                "paths_per_batch": certification.PRODUCTION_SLV_PATHS_PER_BATCH,
+                "batches": certification.PRODUCTION_SLV_BATCHES,
+            },
+        },
+        "slv_spot_strata": certification.SLV_SPOT_STRATA,
+        "slv_spot_antithetic": certification.SLV_SPOT_ANTITHETIC,
+        "slv_spot_bridge_strata": certification.SLV_SPOT_BRIDGE_STRATA,
+    }
+    payload = {
+        "schema_version": s12.ADI_GREEK_DECISION_SCHEMA_VERSION,
+        "quick": quick,
+        "evidence_sha256": "a" * 64,
+        "implementation_sha256": certification.implementation_sha256(),
+        "run_configuration_sha256": certification._canonical_sha256(
+            run_configuration
+        ),
+        "run_configuration": run_configuration,
+        "runtime_environment": certification.runtime_environment(),
+        "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
+        "decisions": {
+            variant: {
+                "route": route,
+                "reason": f"{variant} reason",
+                "evidence_complete": route == "pde",
+            }
+            for variant, route in routes.items()
+        },
+    }
+    payload["decision_sha256"] = certification._canonical_sha256(payload)
+    path = tmp_path / "adi_greeks.json"
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def _reseal_adi_greek_decision(path):
+    payload = json.loads(path.read_text())
+    payload.pop("decision_sha256", None)
+    payload["decision_sha256"] = s12.stage16()._canonical_sha256(payload)
+    path.write_text(json.dumps(payload))
+
+
+def test_adi_greek_routing_rejects_stale_slv_sampling_profile(tmp_path):
+    path = _write_adi_greek_decision(
+        tmp_path,
+        routes={"heston_slv": "pde"},
+    )
+    payload = json.loads(path.read_text())
+    payload["run_configuration"]["slv_spot_bridge_strata"] = 1
+    payload["run_configuration_sha256"] = s12.stage16()._canonical_sha256(
+        payload["run_configuration"]
+    )
+    path.write_text(json.dumps(payload))
+    _reseal_adi_greek_decision(path)
+
+    with pytest.raises(ValidationError, match="stale conditional sampling"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_routing_rejects_stale_economic_scale_schema(tmp_path):
+    path = _write_adi_greek_decision(tmp_path)
+    payload = json.loads(path.read_text())
+    payload["schema_version"] = 1
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError, match="stale schema"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_routing_rejects_quick_evidence(tmp_path):
+    path = _write_adi_greek_decision(tmp_path, quick=True)
+
+    with pytest.raises(ValidationError, match="quick/non-production"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_routing_rejects_incomplete_pde_admission(tmp_path):
+    path = _write_adi_greek_decision(tmp_path)
+    payload = json.loads(path.read_text())
+    payload["decisions"]["heston"]["evidence_complete"] = False
+    path.write_text(json.dumps(payload))
+    _reseal_adi_greek_decision(path)
+
+    with pytest.raises(ValidationError, match="incomplete evidence"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_routing_rejects_decision_tampering(tmp_path):
+    path = _write_adi_greek_decision(tmp_path)
+    payload = json.loads(path.read_text())
+    payload["decisions"]["heston_slv"]["route"] = "pde"
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError, match="decision hash mismatch"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_routing_rejects_stale_live_implementation(tmp_path):
+    path = _write_adi_greek_decision(tmp_path)
+    payload = json.loads(path.read_text())
+    payload["implementation_sha256"] = "d" * 64
+    path.write_text(json.dumps(payload))
+    _reseal_adi_greek_decision(path)
+
+    with pytest.raises(ValidationError, match="live certification/routing"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_admission_never_substitutes_an_mc_2d_route(tmp_path):
+    greek_gate = s12.load_adi_greek_routing(_write_adi_greek_decision(tmp_path))
+    pv_gate = _routing(heston="mc", heston_slv="pde")
+
+    admitted, excluded = s12.apply_adi_greek_admission(
+        ["flat_bsm", "heston", "heston_slv"],
+        pv_gate,
+        greek_gate,
+    )
+
+    assert admitted == ["flat_bsm"]
+    assert "Stage 11 PV route is 'mc'" in excluded["heston"]
+    assert excluded["heston_slv"] == "heston_slv reason"
+
+
+def test_adi_greek_admission_requires_both_pv_and_greek_pde_pass(tmp_path):
+    path = _write_adi_greek_decision(
+        tmp_path,
+        routes={"heston": "pde", "heston_slv": "pde"},
+    )
+    greek_gate = s12.load_adi_greek_routing(path)
+    pv_gate = _routing(heston="pde", heston_slv="pde")
+
+    admitted, excluded = s12.apply_adi_greek_admission(
+        ["heston", "heston_slv"],
+        pv_gate,
+        greek_gate,
+    )
+
+    assert admitted == ["heston", "heston_slv"]
+    assert excluded == {}
 
 
 @pytest.mark.skipif(

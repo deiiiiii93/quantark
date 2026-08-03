@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
+from scipy.special import ndtr, ndtri
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.asset.equity.param import MCParams
 from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment
+from quantark.montecarlo.qmc_brownian_bridge import apply_brownian_bridge
 from quantark.montecarlo.qmc_sobol import SobolNormalGenerator
 from quantark.util.enum.engine_enums import (
     EngineType,
@@ -100,8 +102,14 @@ class _ArrayPathGenerator:
 
     def generate_paths(self, seed=None, batch_id=None, return_aux: bool = False):
         effective_batch = self._batch_id if batch_id is None else batch_id
-        paths = self._simulator(batch_id=effective_batch, seed=seed)
-        aux = {"batch_id": 0 if effective_batch is None else int(effective_batch)}
+        generated = self._simulator(batch_id=effective_batch, seed=seed)
+        if isinstance(generated, tuple):
+            paths, simulator_aux = generated
+            aux = dict(simulator_aux or {})
+        else:
+            paths = generated
+            aux = {}
+        aux["batch_id"] = 0 if effective_batch is None else int(effective_batch)
         return paths, aux if return_aux else None
 
 
@@ -133,7 +141,21 @@ class _SubstepRefinementMixin:
             return _ArrayPathGenerator(simulate, n_eff, batch_id=batch_id)
 
         def simulate_contractual(batch_id=None, seed=None):
-            return simulate(batch_id=batch_id, seed=seed)[:, ::n]
+            generated = simulate(batch_id=batch_id, seed=seed)
+            if not isinstance(generated, tuple):
+                return generated[:, ::n]
+            paths, aux = generated
+            aux = dict(aux or {})
+            if aux.pop("_paths_are_contractual", False):
+                return paths, aux
+            control = aux.get("control_paths")
+            if (
+                isinstance(control, np.ndarray)
+                and control.ndim == 2
+                and control.shape[1] == paths.shape[1]
+            ):
+                aux["control_paths"] = control[:, ::n]
+            return paths[:, ::n], aux
 
         return _ArrayPathGenerator(simulate_contractual, n_eff, batch_id=batch_id)
 
@@ -151,10 +173,84 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
         use_dask: bool = False,
         num_batches: int = 4,
         substeps_per_interval: int = 1,
+        rqmc_affine_spot_factor: bool = False,
+        rqmc_heston_conditional_control: bool = False,
+        rqmc_frozen_leverage_conditional_control: bool = False,
+        rqmc_qe_draw_provider=None,
+        rqmc_spot_strata: int = 1,
+        rqmc_spot_antithetic: bool = False,
+        rqmc_spot_bridge_strata: int = 1,
     ):
+        if not isinstance(rqmc_affine_spot_factor, bool):
+            raise ValidationError("rqmc_affine_spot_factor must be bool")
+        if not isinstance(rqmc_heston_conditional_control, bool):
+            raise ValidationError("rqmc_heston_conditional_control must be bool")
+        if not isinstance(rqmc_frozen_leverage_conditional_control, bool):
+            raise ValidationError(
+                "rqmc_frozen_leverage_conditional_control must be bool"
+            )
+        if rqmc_affine_spot_factor and rqmc_heston_conditional_control:
+            raise ValidationError(
+                "exact affine conditioning and the Heston conditional control "
+                "are mutually exclusive"
+            )
+        if (
+            isinstance(rqmc_spot_strata, bool)
+            or not isinstance(rqmc_spot_strata, (int, np.integer))
+            or int(rqmc_spot_strata) < 1
+        ):
+            raise ValidationError("rqmc_spot_strata must be a positive integer")
+        if not isinstance(rqmc_spot_antithetic, bool):
+            raise ValidationError("rqmc_spot_antithetic must be bool")
+        if (
+            isinstance(rqmc_spot_bridge_strata, bool)
+            or not isinstance(rqmc_spot_bridge_strata, (int, np.integer))
+            or int(rqmc_spot_bridge_strata) < 1
+        ):
+            raise ValidationError(
+                "rqmc_spot_bridge_strata must be a positive integer"
+            )
+        if int(rqmc_spot_strata) > 1 and not rqmc_heston_conditional_control:
+            raise ValidationError(
+                "rqmc_spot_strata > 1 requires rqmc_heston_conditional_control"
+            )
+        if rqmc_spot_antithetic and not rqmc_heston_conditional_control:
+            raise ValidationError(
+                "rqmc_spot_antithetic requires rqmc_heston_conditional_control"
+            )
+        if (
+            int(rqmc_spot_bridge_strata) > 1
+            and not rqmc_heston_conditional_control
+        ):
+            raise ValidationError(
+                "rqmc_spot_bridge_strata > 1 requires "
+                "rqmc_heston_conditional_control"
+            )
+        if (
+            rqmc_frozen_leverage_conditional_control
+            and not rqmc_heston_conditional_control
+        ):
+            raise ValidationError(
+                "rqmc_frozen_leverage_conditional_control requires "
+                "rqmc_heston_conditional_control"
+            )
         self.substeps_per_interval = _validate_substeps_per_interval(
             substeps_per_interval
         )
+        self.rqmc_affine_spot_factor = rqmc_affine_spot_factor
+        self.rqmc_heston_conditional_control = rqmc_heston_conditional_control
+        self.rqmc_frozen_leverage_conditional_control = (
+            rqmc_frozen_leverage_conditional_control
+        )
+        self.rqmc_spot_strata = int(rqmc_spot_strata)
+        self.rqmc_spot_antithetic = rqmc_spot_antithetic
+        self.rqmc_spot_bridge_strata = int(rqmc_spot_bridge_strata)
+        if rqmc_qe_draw_provider is not None and not all(
+            hasattr(rqmc_qe_draw_provider, name)
+            for name in ("draws", "dimension", "label", "randomization_key")
+        ):
+            raise ValidationError("invalid rqmc_qe_draw_provider")
+        self.rqmc_qe_draw_provider = rqmc_qe_draw_provider
         super().__init__(
             params=params,
             method=method,
@@ -165,7 +261,71 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
     def _uses_qmc(self) -> bool:
         return self.method in _QMC_METHODS
 
+    def _rqmc_scheme_label(self) -> str:
+        label = super()._rqmc_scheme_label()
+        if self.rqmc_affine_spot_factor:
+            label += "#affine-spot-factor"
+        if self.rqmc_heston_conditional_control:
+            label += "#heston-conditional-control"
+        if self.rqmc_frozen_leverage_conditional_control:
+            label += "#frozen-leverage-proxy"
+        if self.rqmc_spot_strata > 1:
+            label += f"#spot-strata-{self.rqmc_spot_strata}"
+        if self.rqmc_spot_antithetic:
+            label += "#spot-antithetic"
+        if self.rqmc_spot_bridge_strata > 1:
+            label += f"#spot-bridge-strata-{self.rqmc_spot_bridge_strata}"
+        if self.rqmc_qe_draw_provider is not None:
+            label += f"#{self.rqmc_qe_draw_provider.label}"
+        return label
+
+    def _rqmc_dimension(self, contractual_time_steps: int) -> int:
+        if self.rqmc_qe_draw_provider is not None:
+            return int(self.rqmc_qe_draw_provider.dimension)
+        return super()._rqmc_dimension(contractual_time_steps)
+
+    def _rqmc_randomization_key(self, contractual_time_steps: int):
+        if self.rqmc_qe_draw_provider is not None:
+            return self.rqmc_qe_draw_provider.randomization_key
+        return super()._rqmc_randomization_key(contractual_time_steps)
+
+    def _conditioned_spot_normals(
+        self,
+        z_ind: np.ndarray,
+        dt_array: np.ndarray,
+    ) -> Optional[tuple[np.ndarray, np.ndarray]]:
+        """Remove the terminal Brownian factor and expose its affine loading.
+
+        The first Brownian-bridge coordinate is ``W_T / sqrt(T)``.  Setting it
+        to zero leaves a residual chronological normal matrix. The caller
+        records the cumulative log-spot loading ``B_t`` corresponding to
+        ``sqrt(dt / T)`` and an exact conditional payoff integrator then
+        evaluates ``E[payoff | variance, residual spot factors]`` analytically.
+        """
+        if not (
+            self.rqmc_affine_spot_factor
+            or self.rqmc_heston_conditional_control
+        ):
+            return None
+        if not self._uses_qmc():
+            raise ValidationError(
+                "spot-factor conditioning requires QMC or randomized QMC"
+            )
+        dt = np.asarray(dt_array, dtype=float)
+        if np.any(dt <= 0.0):
+            raise ValidationError("spot-factor conditioning requires positive dt")
+        raw = np.array(z_ind, dtype=float, copy=True)
+        raw[:, 0] = 0.0
+        residual_dw = apply_brownian_bridge(raw, np.cumsum(dt))
+        residual_z = residual_dw / np.sqrt(dt)[None, :]
+        loadings = np.sqrt(dt / float(np.sum(dt)))
+        return residual_z, loadings
+
     def _validate_rng_controls(self, use_antithetic: bool) -> None:
+        if self.rqmc_qe_draw_provider is not None and not self._uses_qmc():
+            raise ValidationError(
+                "rqmc_qe_draw_provider requires QMC or randomized QMC"
+            )
         if self._uses_qmc() and use_antithetic:
             raise ValidationError(
                 "QMC/RQMC and use_antithetic are mutually exclusive"
@@ -229,6 +389,10 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        if self.rqmc_qe_draw_provider is not None:
+            raise ValidationError(
+                "rqmc_qe_draw_provider is implemented only for QE/QE-M engines"
+            )
         dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
@@ -292,8 +456,19 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
         super().__init__(params=params, **kwargs)
+        if self.rqmc_heston_conditional_control:
+            raise ValidationError(
+                "rqmc_heston_conditional_control is for Heston-SLV QE only"
+            )
         self.model_params = model_params
         self.scheme = _resolve_heston_scheme(scheme)
+        if self.rqmc_qe_draw_provider is not None and self.scheme not in (
+            HestonMCScheme.QUADEXP,
+            HestonMCScheme.QUADEXP_M,
+        ):
+            raise ValidationError(
+                "rqmc_qe_draw_provider requires the QUADEXP or QUADEXP_M scheme"
+            )
 
     def _create_path_generator(
         self,
@@ -322,6 +497,12 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
 
         def _draws(batch_id=None, seed=None):
             if self._uses_qmc():
+                if self.rqmc_qe_draw_provider is not None:
+                    return self.rqmc_qe_draw_provider.draws(
+                        n_paths=n_eff,
+                        dt_array=dt_array,
+                        batch_id=batch_id,
+                    )
                 if scheme in (HestonMCScheme.QUADEXP, HestonMCScheme.QUADEXP_M):
                     from scipy.special import ndtri
 
@@ -372,8 +553,36 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
 
         def simulate(batch_id=None, seed=None):
             z_var, z_ind, u_var = _draws(batch_id=batch_id, seed=seed)
-            nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
-            log_s = np.full(n_eff, np.log(max(float(S), 1e-12)), dtype=float)
+            conditioning = self._conditioned_spot_normals(z_ind, dt_array)
+            if conditioning is None and self.rqmc_qe_draw_provider is not None:
+                # CoupledQESubstepDrawProvider exposes the independent spot
+                # stream in Brownian-bridge order. Unconditioned consumers
+                # must transform it to chronological normalized increments;
+                # conditioned consumers do this inside _conditioned_spot_normals.
+                z_ind = apply_brownian_bridge(
+                    z_ind, np.cumsum(dt_array)
+                ) / np.sqrt(dt_array)[None, :]
+            if conditioning is None:
+                log_s = np.full(
+                    n_eff, np.log(max(float(S), 1e-12)), dtype=float
+                )
+                nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+            else:
+                residual_z, spot_loadings = conditioning
+                log_s = np.full(
+                    n_eff,
+                    np.log(max(float(S), 1e-12)),
+                    dtype=float,
+                )
+                contractual_steps = len(dt_array) // self.substeps_per_interval
+                nodes = np.empty(
+                    (n_eff, contractual_steps + 1),
+                    dtype=float,
+                )
+                log_spot_factor_loadings = np.zeros(
+                    (n_eff, contractual_steps + 1), dtype=float
+                )
+                factor_loading = np.zeros(n_eff, dtype=float)
             var = np.full(n_eff, max(float(p.v0), 0.0), dtype=float)
             nodes[:, 0] = np.exp(log_s)
             rho = float(np.clip(p.rho, -0.999, 0.999))
@@ -388,6 +597,10 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                     "HestonSnowballMCEngine supports EULERLOG, QUADEXP, and QUADEXP_M"
                 )
             if scheme == HestonMCScheme.EULERLOG:
+                if conditioning is not None:
+                    raise ValidationError(
+                        "spot-factor conditioning is implemented only for Heston QE/QE-M"
+                    )
                 for i, dt in enumerate(dt_array):
                     sqrt_dt = float(np.sqrt(dt))
                     z1 = z_var[:, i] * sqrt_dt
@@ -480,24 +693,46 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                     ln_M = np.log(np.where(quad_mask, m_quad, m_exp))
                     K0 = -ros * p.kappa * p.theta * dt
                     K0_star = -ln_M - (K1 + 0.5 * K3) * var
+                    base_increment = (
+                        (drift - 0.5 * v_bar) * dt + corr - K0 + K0_star
+                    )
+                else:
+                    base_increment = (drift - 0.5 * v_bar) * dt + corr
+                if conditioning is None:
                     log_s = (
                         log_s
-                        + (drift - 0.5 * v_bar) * dt
-                        + corr
-                        - K0
-                        + K0_star
+                        + base_increment
                         + np.sqrt(v_bar) * sqrt_dt * diff_coef * z_ind[:, i]
                     )
                 else:
                     log_s = (
                         log_s
-                        + (drift - 0.5 * v_bar) * dt
-                        + corr
-                        + np.sqrt(v_bar) * sqrt_dt * diff_coef * z_ind[:, i]
+                        + base_increment
+                        + np.sqrt(v_bar)
+                        * sqrt_dt
+                        * diff_coef
+                        * residual_z[:, i]
+                    )
+                    factor_loading += (
+                        np.sqrt(v_bar)
+                        * sqrt_dt
+                        * diff_coef
+                        * spot_loadings[i]
                     )
                 var = v_np
-                nodes[:, i + 1] = np.exp(log_s)
-            return nodes
+                if conditioning is None:
+                    nodes[:, i + 1] = np.exp(log_s)
+                elif (i + 1) % self.substeps_per_interval == 0:
+                    contractual_index = (i + 1) // self.substeps_per_interval
+                    nodes[:, contractual_index] = np.exp(log_s)
+                    log_spot_factor_loadings[:, contractual_index] = factor_loading
+            if conditioning is None:
+                return nodes
+            return nodes, {
+                "affine_spot_factor": "standard_normal",
+                "log_spot_factor_loadings": log_spot_factor_loadings,
+                "_paths_are_contractual": True,
+            }
 
         return self._make_path_generator(simulate, n_eff, batch_id)
 
@@ -558,6 +793,17 @@ class HestonSLVSnowballMCEngine(_VolModelSnowballMCBase):
         if eta < 0:
             raise ValidationError("eta must be non-negative")
         super().__init__(params=params, **kwargs)
+        if (
+            (
+                self.rqmc_frozen_leverage_conditional_control
+                or self.rqmc_spot_bridge_strata > 1
+            )
+            and leverage_surface is None
+        ):
+            raise ValidationError(
+                "frozen-leverage control and bridge stratification require a "
+                "precomputed LeverageSurface"
+            )
         self.model_params = model_params
         self._prebuilt = local_vol_surface
         self.leverage_surface = leverage_surface
@@ -591,6 +837,14 @@ class HestonSLVSnowballMCEngine(_VolModelSnowballMCBase):
         batch_id: Optional[int] = None,
         num_paths: Optional[int] = None,
     ):
+        if (
+            self.rqmc_affine_spot_factor
+            or self.rqmc_heston_conditional_control
+            or self.rqmc_qe_draw_provider is not None
+        ):
+            raise ValidationError(
+                "spot-factor conditioning is implemented only for QE/QE-M engines"
+            )
         dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
@@ -681,6 +935,11 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
         **kwargs,
     ):
         super().__init__(model_params=model_params, params=params, **kwargs)
+        if self.rqmc_affine_spot_factor:
+            raise ValidationError(
+                "exact affine spot conditioning is not valid for state-dependent "
+                "SLV leverage; use rqmc_heston_conditional_control"
+            )
         self.martingale_correction = bool(martingale_correction)
 
     def _create_path_generator(
@@ -712,6 +971,12 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
 
         def _draws(batch_id=None, seed=None):
             if self._uses_qmc():
+                if self.rqmc_qe_draw_provider is not None:
+                    return self.rqmc_qe_draw_provider.draws(
+                        n_paths=n_eff,
+                        dt_array=dt_array,
+                        batch_id=batch_id,
+                    )
                 from scipy.special import ndtri
 
                 block = np.clip(
@@ -744,10 +1009,125 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
 
         def simulate(batch_id=None, seed=None):
             z_var, z_ind, u_var = _draws(batch_id=batch_id, seed=seed)
-            nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
-            log_s = np.full(n_eff, np.log(max(float(S), 1e-12)), dtype=float)
+            conditioning = None
+            conditional_spot_factors = None
+            if self.rqmc_heston_conditional_control:
+                if self.rqmc_spot_strata > 1 and self.leverage_surface is None:
+                    raise ValidationError(
+                        "rqmc_spot_strata > 1 requires a precomputed "
+                        "LeverageSurface"
+                    )
+                terminal_uniform = ndtr(np.asarray(z_ind[:, 0], dtype=float))
+                bridge_strata = int(self.rqmc_spot_bridge_strata)
+                if bridge_strata > 1:
+                    if z_ind.shape[1] < 2:
+                        raise ValidationError(
+                            "spot bridge stratification requires at least two steps"
+                        )
+                    bridge_uniform = ndtr(
+                        np.asarray(z_ind[:, 1], dtype=float)
+                    )
+                    bridge_uniforms = (
+                        bridge_uniform[:, None]
+                        + np.arange(bridge_strata, dtype=float)[None, :]
+                    ) / float(bridge_strata)
+                    bridge_ordered = np.repeat(
+                        np.asarray(z_ind, dtype=float)[:, None, :],
+                        bridge_strata,
+                        axis=1,
+                    )
+                    bridge_ordered[:, :, 0] = 0.0
+                    bridge_ordered[:, :, 1] = ndtri(
+                        np.clip(bridge_uniforms, 1e-12, 1.0 - 1e-12)
+                    )
+                    residual_dw = apply_brownian_bridge(
+                        bridge_ordered.reshape(n_eff * bridge_strata, M),
+                        np.cumsum(dt_array),
+                    )
+                    residual_z = (
+                        residual_dw
+                        / np.sqrt(dt_array)[None, :]
+                    ).reshape(n_eff, bridge_strata, M)
+                    spot_loadings = np.sqrt(
+                        np.asarray(dt_array, dtype=float) / float(np.sum(dt_array))
+                    )
+                else:
+                    conditioning = self._conditioned_spot_normals(z_ind, dt_array)
+                    if conditioning is None:  # defensive: flag and helper must agree
+                        raise PricingError(
+                            "missing Heston conditional-control factors"
+                        )
+                    residual_base, spot_loadings = conditioning
+                    residual_z = residual_base[:, None, :]
+                conditioning = residual_z, spot_loadings
+                strata = int(self.rqmc_spot_strata)
+                primary_uniforms = (
+                    terminal_uniform[:, None]
+                    + np.arange(strata, dtype=float)[None, :]
+                ) / float(strata)
+                if self.rqmc_spot_antithetic:
+                    antithetic_uniforms = (
+                        (1.0 - terminal_uniform[:, None])
+                        + np.arange(strata, dtype=float)[None, :]
+                    ) / float(strata)
+                    stratified_uniforms = np.concatenate(
+                        (primary_uniforms, antithetic_uniforms), axis=1
+                    )
+                else:
+                    stratified_uniforms = primary_uniforms
+                conditional_spot_factors = ndtri(
+                    np.clip(stratified_uniforms, 1e-12, 1.0 - 1e-12)
+                )
+                conditional_group_size = int(conditional_spot_factors.shape[1])
+                conditional_outer_group_size = bridge_strata
+                contractual_steps = len(dt_array) // self.substeps_per_interval
+                nodes = np.empty(
+                    (
+                        n_eff
+                        * conditional_outer_group_size
+                        * conditional_group_size,
+                        contractual_steps + 1,
+                    ),
+                    dtype=float,
+                )
+                control_paths = np.empty_like(nodes)
+                control_base_paths = np.empty(
+                    (
+                        n_eff * conditional_outer_group_size,
+                        contractual_steps + 1,
+                    ),
+                    dtype=float,
+                )
+                control_loadings = np.zeros_like(control_base_paths)
+                control_log_base = np.full(
+                    (n_eff, conditional_outer_group_size),
+                    np.log(max(float(S), 1e-12)),
+                    dtype=float,
+                )
+                control_loading = np.zeros_like(control_log_base)
+                log_s = np.full(
+                    (
+                        n_eff,
+                        conditional_outer_group_size,
+                        conditional_group_size,
+                    ),
+                    np.log(max(float(S), 1e-12)),
+                    dtype=float,
+                )
+            else:
+                if self.rqmc_qe_draw_provider is not None:
+                    z_ind = apply_brownian_bridge(
+                        z_ind, np.cumsum(dt_array)
+                    ) / np.sqrt(dt_array)[None, :]
+                nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+                log_s = np.full(
+                    n_eff, np.log(max(float(S), 1e-12)), dtype=float
+                )
             var = np.full(n_eff, max(float(p.v0), 0.0), dtype=float)
-            nodes[:, 0] = np.exp(log_s)
+            nodes[:, 0] = np.exp(log_s).reshape(-1)
+            if conditioning is not None:
+                control_paths[:, 0] = float(S)
+                control_base_paths[:, 0] = float(S)
             rho = float(np.clip(p.rho, -0.999, 0.999))
             rho_bar = float(np.sqrt(max(1.0 - rho * rho, 0.0)))
             sigma_eff = float(self.eta * p.sigma)
@@ -813,12 +1193,45 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
 
                 v_np = np.maximum(np.where(psi <= psi_c, v_a, v_b), 0.0)
                 v_bar = np.maximum(0.5 * (v_np + np.maximum(var, 0.0)), 0.0)
+                quad_mask = psi <= psi_c
+                if conditioning is None:
+                    v_bar_p = v_bar
+                    var_p = var
+                    a_p = a
+                    b_p = b
+                    beta_p = beta
+                    prob_zero_p = prob_zero
+                    quad_mask_p = quad_mask
+                    variance_residual_p = (
+                        v_np
+                        - var
+                        - p.kappa * (p.theta - v_bar) * dt
+                    )
+                    z_spot = z_ind[:, i]
+                else:
+                    v_bar_p = v_bar[:, None, None]
+                    var_p = var[:, None, None]
+                    a_p = a[:, None, None]
+                    b_p = b[:, None, None]
+                    beta_p = beta[:, None, None]
+                    prob_zero_p = prob_zero[:, None, None]
+                    quad_mask_p = quad_mask[:, None, None]
+                    variance_residual_p = (
+                        v_np
+                        - var
+                        - p.kappa * (p.theta - v_bar) * dt
+                    )[:, None, None]
+                    z_spot = (
+                        residual_z[:, :, i, None]
+                        + spot_loadings[i]
+                        * conditional_spot_factors[:, None, :]
+                    )
                 leverage2 = leverage * leverage
                 if deterministic_vol:
                     corr = 0.0
                 else:
-                    corr = leverage * (rho / sigma_eff) * (
-                        v_np - var - p.kappa * (p.theta - v_bar) * dt
+                    corr = (
+                        leverage * (rho / sigma_eff) * variance_residual_p
                     )
 
                 if martingale:
@@ -827,11 +1240,10 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
                     K1 = 0.5 * dt * (p.kappa * ros - 0.5 * leverage2) - ros
                     K2 = 0.5 * dt * (p.kappa * ros - 0.5 * leverage2) + ros
                     A = K2 + 0.5 * K3
-                    quad_mask = psi <= psi_c
-                    denom_q = 1.0 - 2.0 * A * a
-                    denom_e = beta - A
-                    bad = (quad_mask & (denom_q <= 0.0)) | (
-                        ~quad_mask & (denom_e <= 0.0)
+                    denom_q = 1.0 - 2.0 * A * a_p
+                    denom_e = beta_p - A
+                    bad = (quad_mask_p & (denom_q <= 0.0)) | (
+                        ~quad_mask_p & (denom_e <= 0.0)
                     )
                     if np.any(bad):
                         raise NumericalError(
@@ -841,37 +1253,198 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
                         )
                     safe_q = np.where(denom_q > 0.0, denom_q, 1.0)
                     safe_e = np.where(denom_e > 0.0, denom_e, 1.0)
-                    m_quad = np.exp(A * a * b * b / safe_q) / np.sqrt(safe_q)
-                    m_exp = prob_zero + (1.0 - prob_zero) * beta / safe_e
-                    ln_M = np.log(np.where(quad_mask, m_quad, m_exp))
+                    m_quad = (
+                        np.exp(A * a_p * b_p * b_p / safe_q)
+                        / np.sqrt(safe_q)
+                    )
+                    m_exp = (
+                        prob_zero_p
+                        + (1.0 - prob_zero_p) * beta_p / safe_e
+                    )
+                    ln_M = np.log(np.where(quad_mask_p, m_quad, m_exp))
                     K0 = -ros * p.kappa * p.theta * dt
-                    K0_star = -ln_M - (K1 + 0.5 * K3) * var
+                    K0_star = -ln_M - (K1 + 0.5 * K3) * var_p
                     log_s = (
                         log_s
-                        + (drift - 0.5 * leverage2 * v_bar) * dt
+                        + (drift - 0.5 * leverage2 * v_bar_p) * dt
                         + corr
                         - K0
                         + K0_star
                         + leverage
-                        * np.sqrt(v_bar)
+                        * np.sqrt(v_bar_p)
                         * sqrt_dt
                         * diff_coef
-                        * z_ind[:, i]
+                        * z_spot
                     )
                 else:
                     log_s = (
                         log_s
-                        + (drift - 0.5 * leverage2 * v_bar) * dt
+                        + (drift - 0.5 * leverage2 * v_bar_p) * dt
                         + corr
                         + leverage
-                        * np.sqrt(v_bar)
+                        * np.sqrt(v_bar_p)
                         * sqrt_dt
                         * diff_coef
-                        * z_ind[:, i]
+                        * z_spot
                     )
+
+                if conditioning is not None:
+                    if self.rqmc_frozen_leverage_conditional_control:
+                        control_leverage = np.asarray(
+                            self.leverage_surface.leverage(
+                                np.exp(control_log_base), t
+                            ),
+                            dtype=float,
+                        )
+                        if (
+                            control_leverage.shape
+                            != (n_eff, conditional_outer_group_size)
+                            or not np.all(np.isfinite(control_leverage))
+                        ):
+                            raise ValidationError(
+                                "frozen-leverage control returned invalid values"
+                            )
+                    else:
+                        control_leverage = np.ones_like(control_log_base)
+                    control_leverage2 = control_leverage * control_leverage
+                    if deterministic_vol:
+                        control_corr = 0.0
+                    else:
+                        control_corr = control_leverage * (rho / sigma_eff) * (
+                            v_np - var - p.kappa * (p.theta - v_bar) * dt
+                        )[:, None]
+                    if martingale:
+                        control_ros = control_leverage * rho / sigma_eff
+                        control_K3 = (
+                            0.5
+                            * control_leverage2
+                            * (1.0 - rho * rho)
+                            * dt
+                        )
+                        control_K1 = (
+                            0.5
+                            * dt
+                            * (
+                                p.kappa * control_ros
+                                - 0.5 * control_leverage2
+                            )
+                            - control_ros
+                        )
+                        control_K2 = (
+                            0.5
+                            * dt
+                            * (
+                                p.kappa * control_ros
+                                - 0.5 * control_leverage2
+                            )
+                            + control_ros
+                        )
+                        control_A = control_K2 + 0.5 * control_K3
+                        control_denom_q = 1.0 - 2.0 * control_A * a[:, None]
+                        control_denom_e = beta[:, None] - control_A
+                        control_bad = (
+                            quad_mask[:, None] & (control_denom_q <= 0.0)
+                        ) | (~quad_mask[:, None] & (control_denom_e <= 0.0))
+                        if np.any(control_bad):
+                            raise NumericalError(
+                                "Heston conditional-control MGF is undefined at "
+                                "these parameters; tighten dt"
+                            )
+                        control_safe_q = np.where(
+                            control_denom_q > 0.0, control_denom_q, 1.0
+                        )
+                        control_safe_e = np.where(
+                            control_denom_e > 0.0, control_denom_e, 1.0
+                        )
+                        control_m_quad = (
+                            np.exp(
+                                control_A
+                                * a[:, None]
+                                * b[:, None]
+                                * b[:, None]
+                                / control_safe_q
+                            )
+                            / np.sqrt(control_safe_q)
+                        )
+                        control_m_exp = (
+                            prob_zero[:, None]
+                            + (1.0 - prob_zero[:, None])
+                            * beta[:, None]
+                            / control_safe_e
+                        )
+                        control_ln_M = np.log(
+                            np.where(
+                                quad_mask[:, None],
+                                control_m_quad,
+                                control_m_exp,
+                            )
+                        )
+                        control_K0 = (
+                            -control_ros * p.kappa * p.theta * dt
+                        )
+                        control_K0_star = (
+                            -control_ln_M
+                            - (control_K1 + 0.5 * control_K3) * var[:, None]
+                        )
+                        control_base_increment = (
+                            (
+                                drift
+                                - 0.5 * control_leverage2 * v_bar[:, None]
+                            )
+                            * dt
+                            + control_corr
+                            - control_K0
+                            + control_K0_star
+                        )
+                    else:
+                        control_base_increment = (
+                            (
+                                drift
+                                - 0.5 * control_leverage2 * v_bar[:, None]
+                            )
+                            * dt
+                            + control_corr
+                        )
+                    control_diffusion = (
+                        control_leverage
+                        * np.sqrt(v_bar[:, None])
+                        * sqrt_dt
+                        * diff_coef
+                    )
+                    control_log_base = (
+                        control_log_base
+                        + control_base_increment
+                        + control_diffusion * residual_z[:, :, i]
+                    )
+                    control_loading += control_diffusion * spot_loadings[i]
                 var = v_np
-                nodes[:, i + 1] = np.exp(log_s)
+                if conditioning is None:
+                    nodes[:, i + 1] = np.exp(log_s)
+                elif (i + 1) % self.substeps_per_interval == 0:
+                    contractual_index = (i + 1) // self.substeps_per_interval
+                    nodes[:, contractual_index] = np.exp(log_s).reshape(-1)
+                    control_base_paths[:, contractual_index] = np.exp(
+                        control_log_base
+                    ).reshape(-1)
+                    control_loadings[:, contractual_index] = (
+                        control_loading.reshape(-1)
+                    )
+                    control_paths[:, contractual_index] = np.exp(
+                        control_log_base[:, :, None]
+                        + control_loading[:, :, None]
+                        * conditional_spot_factors[:, None, :]
+                    ).reshape(-1)
                 t += float(dt)
-            return nodes
+            if conditioning is None:
+                return nodes
+            return nodes, {
+                "heston_conditional_control": True,
+                "control_paths": control_paths,
+                "control_base_paths": control_base_paths,
+                "control_log_spot_factor_loadings": control_loadings,
+                "conditional_group_size": conditional_group_size,
+                "conditional_outer_group_size": conditional_outer_group_size,
+                "_paths_are_contractual": True,
+            }
 
         return self._make_path_generator(simulate, n_eff, batch_id)

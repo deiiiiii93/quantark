@@ -9,6 +9,7 @@ from quantark.asset.equity.engine.mc import (
     LocalVolSnowballMCEngine,
     QESnowballMCEngine,
 )
+from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats
 from quantark.asset.equity.engine.pde import (
     HestonSLVSnowballPDESolver,
@@ -86,8 +87,37 @@ def _principal_excluded_snowball():
     )
 
 
+def _discrete_snowball():
+    return SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        contract_multiplier=10_000.0,
+        is_reverse=False,
+        barrier_config=BarrierConfig(
+            ko_barrier=105.0,
+            ko_rate=0.12,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=75.0,
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_dates=[0.25, 0.5, 0.75, 1.0],
+        ),
+    )
+
+
 def _heston():
     return HestonParams(v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5)
+
+
+def _sigma_collapse_heston():
+    return HestonParams(
+        v0=0.14027,
+        kappa=3.0,
+        theta=0.00306,
+        sigma=0.00311,
+        rho=-0.5,
+    )
 
 
 def _unit_leverage(s0=100.0):
@@ -96,6 +126,27 @@ def _unit_leverage(s0=100.0):
         time_grid=np.linspace(0.0, 1.0, 4),
         strike_grid=strikes,
         leverage_grid=np.ones((4, strikes.size)),
+    )
+
+
+def _constant_leverage(value, s0=100.0):
+    strikes = np.array(list(s0 * np.exp(np.linspace(-0.8, 0.8, 11))))
+    return LeverageSurface(
+        time_grid=np.linspace(0.0, 1.0, 4),
+        strike_grid=strikes,
+        leverage_grid=np.full((4, strikes.size), float(value)),
+    )
+
+
+def _smile_leverage(s0=100.0):
+    strikes = np.array(list(s0 * np.exp(np.linspace(-0.8, 0.8, 11))))
+    smile = np.linspace(1.15, 0.90, strikes.size)
+    return LeverageSurface(
+        time_grid=np.linspace(0.0, 1.0, 4),
+        strike_grid=strikes,
+        leverage_grid=np.vstack(
+            [smile, 0.75 * smile + 0.25, 0.5 * smile + 0.5, np.ones_like(smile)]
+        ),
     )
 
 
@@ -271,6 +322,251 @@ def test_snowball_vol_model_mc_rqmc_engines_run():
         assert 0.0 < price < product.initial_price * product.contract_multiplier * 1.2
 
 
+def test_heston_qe_rqmc_integrates_affine_spot_factor_inside_each_sobol_point():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=128,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+    engine = QESnowballMCEngine(
+        _heston(),
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_affine_spot_factor=True,
+    )
+    spec = engine.build_rqmc_session_spec(product, env)
+
+    assert spec is not None
+    paths, aux = spec.path_generator.generate_paths(batch_id=0, return_aux=True)
+    assert aux is not None
+    assert paths.shape[0] == params.num_paths
+    assert paths.shape[1] == spec.time_steps + 1
+    loadings = aux["log_spot_factor_loadings"]
+    assert aux["affine_spot_factor"] == "standard_normal"
+    assert loadings.shape == paths.shape
+    assert np.all(loadings[:, 0] == 0.0)
+    assert np.all(loadings[:, 1:] > 0.0)
+    assert np.all(np.diff(loadings, axis=1) >= 0.0)
+    payoffs = spec.pricer_fn(paths, aux)
+    assert payoffs.shape == (params.num_paths,)
+    assert np.all(np.isfinite(payoffs))
+    assert "#affine-spot-factor" in spec.scheme
+    assert np.isfinite(engine.price(product, env))
+
+
+def test_slv_qe_rqmc_stratifies_spot_factor_and_collapses_to_outer_paths():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=64,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+    engine = HestonSLVQESnowballMCEngine(
+        _heston(),
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        leverage_surface=_unit_leverage(),
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_heston_conditional_control=True,
+        rqmc_spot_strata=4,
+    )
+    spec = engine.build_rqmc_session_spec(product, env)
+
+    paths, aux = spec.path_generator.generate_paths(batch_id=0, return_aux=True)
+    assert paths.shape == (4 * params.num_paths, spec.time_steps + 1)
+    assert aux["control_paths"].shape == paths.shape
+    assert aux["control_base_paths"].shape == (
+        params.num_paths,
+        spec.time_steps + 1,
+    )
+    assert aux["conditional_group_size"] == 4
+    assert spec.path_valuation_multiplier == 4
+    payoffs = spec.pricer_fn(paths, aux)
+    control_payoffs = spec.control_pricer_fn(paths, aux)
+    assert payoffs.shape == (params.num_paths,)
+    assert np.all(np.isfinite(payoffs))
+    # Unit leverage makes the sampled SLV and Heston control paths identical;
+    # the controlled estimator therefore equals exact Heston conditioning.
+    assert np.max(np.abs(paths - aux["control_paths"])) < 2e-10
+    np.testing.assert_allclose(payoffs, control_payoffs, rtol=0.0, atol=1e-9)
+    assert np.isfinite(engine.price(product, env))
+
+
+def test_slv_qe_rqmc_antithetic_strata_are_unbiased_grouped_pairs():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=32,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+    engine = HestonSLVQESnowballMCEngine(
+        _heston(),
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        leverage_surface=_unit_leverage(),
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_heston_conditional_control=True,
+        rqmc_spot_strata=2,
+        rqmc_spot_antithetic=True,
+    )
+    spec = engine.build_rqmc_session_spec(product, env)
+
+    paths, aux = spec.path_generator.generate_paths(batch_id=0, return_aux=True)
+    assert paths.shape == (4 * params.num_paths, spec.time_steps + 1)
+    assert aux["conditional_group_size"] == 4
+    assert "#spot-strata-2#spot-antithetic" in spec.scheme
+    payoffs = spec.pricer_fn(paths, aux)
+    control_payoffs = spec.control_pricer_fn(paths, aux)
+    assert payoffs.shape == (params.num_paths,)
+    np.testing.assert_allclose(payoffs, control_payoffs, rtol=0.0, atol=1e-9)
+
+
+def test_slv_qe_rqmc_stratifies_second_spot_bridge_factor():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=16,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+    engine = HestonSLVQESnowballMCEngine(
+        _heston(),
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        leverage_surface=_unit_leverage(),
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_heston_conditional_control=True,
+        rqmc_spot_strata=2,
+        rqmc_spot_bridge_strata=2,
+    )
+    spec = engine.build_rqmc_session_spec(product, env)
+
+    paths, aux = spec.path_generator.generate_paths(batch_id=0, return_aux=True)
+    assert paths.shape == (4 * params.num_paths, spec.time_steps + 1)
+    assert aux["control_base_paths"].shape == (
+        2 * params.num_paths,
+        spec.time_steps + 1,
+    )
+    assert aux["conditional_group_size"] == 2
+    assert aux["conditional_outer_group_size"] == 2
+    assert spec.path_valuation_multiplier == 4
+    assert "#spot-bridge-strata-2" in spec.scheme
+    payoffs = spec.pricer_fn(paths, aux)
+    control_payoffs = spec.control_pricer_fn(paths, aux)
+    assert payoffs.shape == (params.num_paths,)
+    assert control_payoffs.shape == (params.num_paths,)
+    np.testing.assert_allclose(payoffs, control_payoffs, rtol=0.0, atol=1e-9)
+
+
+def test_slv_frozen_leverage_proxy_is_exact_for_a_constant_surface():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=32,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+    engine = HestonSLVQESnowballMCEngine(
+        _heston(),
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        leverage_surface=_constant_leverage(1.1),
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_heston_conditional_control=True,
+        rqmc_frozen_leverage_conditional_control=True,
+        rqmc_spot_strata=4,
+    )
+    spec = engine.build_rqmc_session_spec(product, env)
+
+    paths, aux = spec.path_generator.generate_paths(batch_id=0, return_aux=True)
+    assert np.max(np.abs(paths - aux["control_paths"])) < 2e-10
+    assert "#frozen-leverage-proxy" in spec.scheme
+    payoffs = spec.pricer_fn(paths, aux)
+    assert payoffs.shape == (params.num_paths,)
+    assert np.all(np.isfinite(payoffs))
+
+
+def test_slv_single_stratum_control_preserves_the_target_paths():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=32,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+
+    class _BridgeOrderedProvider:
+        dimension = 24
+        label = "test-bridge-ordered"
+        randomization_key = ("test-bridge-ordered", 2903)
+
+        def draws(self, *, n_paths, dt_array, batch_id):
+            rng = np.random.default_rng(2903 + int(batch_id or 0))
+            shape = (int(n_paths), len(dt_array))
+            return (
+                rng.standard_normal(shape),
+                rng.standard_normal(shape),
+                rng.random(shape),
+            )
+
+    provider = _BridgeOrderedProvider()
+    common = dict(
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        leverage_surface=_smile_leverage(),
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_qe_draw_provider=provider,
+    )
+    baseline = HestonSLVQESnowballMCEngine(_heston(), **common)
+    controlled = HestonSLVQESnowballMCEngine(
+        _heston(),
+        rqmc_heston_conditional_control=True,
+        rqmc_frozen_leverage_conditional_control=True,
+        rqmc_spot_strata=1,
+        **common,
+    )
+
+    baseline_spec = baseline.build_rqmc_session_spec(product, env)
+    controlled_spec = controlled.build_rqmc_session_spec(product, env)
+    baseline_paths, _ = baseline_spec.path_generator.generate_paths(
+        batch_id=0, return_aux=True
+    )
+    target_paths, _ = controlled_spec.path_generator.generate_paths(
+        batch_id=0, return_aux=True
+    )
+
+    assert np.max(np.abs(baseline_paths - target_paths)) < 2e-10
+
+
 def _assert_snowball_event_stats(stats: AutocallableEventStats, product: SnowballOption):
     assert isinstance(stats, AutocallableEventStats)
     assert stats.ko_times.shape == stats.ko_probability.shape
@@ -435,6 +731,115 @@ def test_heston_2d_calculate_greeks_resolves_the_frozen_context(monkeypatch):
     assert np.isfinite(greeks["gamma"])
 
 
+def test_heston_2d_greeks_reuse_one_solved_surface(monkeypatch):
+    """Spot-only finite bumps do not change a frozen Heston PDE surface.
+
+    The production Greek path should therefore march V0/V1 once and read the
+    three stencil prices from that surface, rather than repeat the full ADI
+    solve for down/base/up.
+    """
+    product = _snowball()
+    env = _env()
+    engine = HestonSnowballPDESolver(_heston(), n_x=48, n_v=18, n_t=16)
+    original = HestonSnowballPDESolver._solve_live_surface
+    calls = []
+
+    def counted(self, *args, **kwargs):
+        calls.append(self)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(HestonSnowballPDESolver, "_solve_live_surface", counted)
+    greeks = engine.calculate_greeks(product, env)
+
+    assert len(calls) == 1
+    assert all(np.isfinite(greeks[key]) for key in ("price", "delta", "gamma"))
+
+
+def test_heston_2d_one_surface_greeks_match_frozen_three_reprices():
+    product = _snowball()
+    env = _env()
+    engine = HestonSnowballPDESolver(_heston(), n_x=48, n_v=18, n_t=16)
+
+    expected = BaseEngine.calculate_greeks(engine, product, env)
+    actual = engine.calculate_greeks(product, env)
+
+    assert actual == pytest.approx(expected, rel=0.0, abs=2e-10)
+
+
+def test_slv_2d_one_surface_greeks_match_frozen_three_reprices():
+    product = _snowball()
+    env = _env()
+    engine = HestonSLVSnowballPDESolver(
+        _heston(), _unit_leverage(), n_x=48, n_v=18, n_t=16
+    )
+
+    expected = BaseEngine.calculate_greeks(engine, product, env)
+    actual = engine.calculate_greeks(product, env)
+
+    assert actual == pytest.approx(expected, rel=0.0, abs=2e-10)
+
+
+def test_heston_2d_greeks_fall_back_when_stencil_changes_valuation_state(
+    monkeypatch,
+):
+    # Continuous KI is live just above 75 but already knocked in at the 1%
+    # down point. A single surface cannot represent both states.
+    product = _snowball()
+    env = _env(s0=75.5)
+    engine = HestonSnowballPDESolver(_heston(), n_x=120, n_v=16, n_t=14)
+    original = HestonSnowballPDESolver._solve_live_surface
+    calls = []
+
+    def counted(self, *args, **kwargs):
+        calls.append(bool(kwargs["knocked_in"]))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(HestonSnowballPDESolver, "_solve_live_surface", counted)
+    greeks = engine.calculate_greeks(product, env)
+
+    assert len(calls) == 3
+    assert set(calls) == {False, True}
+    assert all(np.isfinite(greeks[key]) for key in ("price", "delta", "gamma"))
+
+
+def test_dense_discrete_ki_crossing_selects_aligned_greek_time_grid():
+    """A barrier-straddling 1% stencil gets eight steps per schedule tick.
+
+    The synthetic schedule uses a 252-tick year.  The policy must infer that
+    clock and choose 8 * 252 = 2016 steps, while an ordinary spot remains on
+    the configured production grid.
+    """
+    ki_times = [i / 252.0 for i in range(1, 253)]
+    product = SnowballOption(
+        initial_price=100.0,
+        strike=100.0,
+        maturity=1.0,
+        contract_multiplier=1.0,
+        is_reverse=False,
+        barrier_config=BarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.12,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=75.0,
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_dates=ki_times,
+            ki_continuous=False,
+        ),
+    )
+    engine = HestonSnowballPDESolver(_heston(), n_x=48, n_v=18, n_t=400)
+
+    near = engine.greek_time_grid_policy(product, _env(s0=75.5))
+    ordinary = engine.greek_time_grid_policy(product, _env(s0=100.0))
+
+    assert near["refined"] is True
+    assert near["clock_basis"] == 252
+    assert near["resolved_n_t"] == 2016
+    assert near["steps_per_tick"] == 8
+    assert ordinary["refined"] is False
+    assert ordinary["resolved_n_t"] == 400
+
+
 @pytest.mark.parametrize(
     "make_engine",
     [
@@ -454,12 +859,47 @@ def test_snowball_heston_default_variance_grid_is_power_graded(make_engine):
     engine = make_engine(n_x=48, n_v=18, n_t=16)
 
     assert engine.v_grid_power == pytest.approx(2.5)
+    assert engine.variance_grid_mode == "power"
     core = engine._make_core(_snowball(), _env(), 1.0)
     expected = core.V_max * np.linspace(0.0, 1.0, core.N_V) ** 2.5
 
     assert core._v_grid_power == pytest.approx(2.5)
     assert core.V_grid == pytest.approx(expected)
     assert np.diff(core.V_grid)[0] < np.diff(core.V_grid)[-1] / 10.0
+
+
+@pytest.mark.parametrize(
+    "make_engine",
+    [
+        pytest.param(
+            lambda **kwargs: HestonSnowballPDESolver(
+                _sigma_collapse_heston(), **kwargs
+            ),
+            id="heston",
+        ),
+        pytest.param(
+            lambda **kwargs: HestonSLVSnowballPDESolver(
+                _sigma_collapse_heston(), _unit_leverage(), **kwargs
+            ),
+            id="heston_slv",
+        ),
+    ],
+)
+def test_snowball_sigma_collapse_uses_monotone_path_focused_variance_grid(
+    make_engine,
+):
+    engine = make_engine(n_x=80, n_v=30, n_t=16)
+    core = engine._make_core(_snowball(), _env(), 1.0)
+    diagnostics = core.variance_operator_diagnostics()
+
+    assert engine.variance_grid_mode == "path_focused"
+    assert engine.v_grid_power == 0.0
+    assert core.variance_grid_mode == "path_focused"
+    assert diagnostics["centered_non_monotone_nodes"] > 0
+    assert diagnostics["fallback_nodes"] > 0
+    assert diagnostics["monotone"] is True
+    assert diagnostics["theta_is_node"] is True
+    assert diagnostics["v0_is_node"] is True
 
 
 @pytest.mark.parametrize(
@@ -535,6 +975,22 @@ def test_snowball_heston_session_clone_preserves_variance_grid_power(make_engine
     assert clone.v_grid_power == pytest.approx(3.0)
     core = clone._make_core(_snowball(), _env(), 1.0)
     assert core._v_grid_power == pytest.approx(3.0)
+
+
+def test_snowball_heston_session_clone_preserves_variance_operator_policy():
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        Heston2DAutocallableSessionAdapter,
+    )
+
+    engine = HestonSnowballPDESolver(
+        _sigma_collapse_heston(),
+        variance_grid_mode="path_focused",
+        v_drift_scheme="centered",
+    )
+    clone = Heston2DAutocallableSessionAdapter()._clone_engine(engine)
+
+    assert clone.variance_grid_mode == "path_focused"
+    assert clone.v_drift_scheme == "centered"
 
 
 def test_snowball_heston_pde_auto_grid_focuses_ki():

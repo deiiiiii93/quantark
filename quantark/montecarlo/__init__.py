@@ -25,12 +25,22 @@ from .qmc_variance_reduction import (
     gbm_control_variate,
     apply_variance_reduction_to_normals,
 )
+from .conditional_snowball import (
+    ConditionalSnowballMoments,
+    conditional_standard_snowball_moments,
+)
+from .qmc_qe_coupling import (
+    CoupledQESubstepDrawProvider,
+    invert_brownian_bridge,
+)
 from .qmc_rqmc_driver import (
+    PairedRQMCGreeksResult,
     RQMCCheckpoint,
     RQMCResult,
     RQMCRunSpec,
     run_rqmc,
     run_rqmc_traced,
+    run_paired_rqmc_greeks,
 )
 
 __all__ = [
@@ -48,9 +58,15 @@ __all__ = [
     "importance_sampling_weights",
     "gbm_control_variate",
     "apply_variance_reduction_to_normals",
+    "ConditionalSnowballMoments",
+    "conditional_standard_snowball_moments",
+    "CoupledQESubstepDrawProvider",
+    "invert_brownian_bridge",
     "RQMCCheckpoint",
+    "PairedRQMCGreeksResult",
     "RQMCResult",
     "RQMCRunSpec",
     "run_rqmc",
     "run_rqmc_traced",
+    "run_paired_rqmc_greeks",
 ]

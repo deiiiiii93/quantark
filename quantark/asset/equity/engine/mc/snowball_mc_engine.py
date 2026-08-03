@@ -23,6 +23,9 @@ from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.event_stats import AutocallableEventStats, KOResetEventStats
 from quantark.asset.equity.param import MCParams
 from quantark.asset.equity.process.bsm.qmc_path_generator import GBMPathGenerator
+from quantark.montecarlo.conditional_snowball import (
+    conditional_standard_snowball_moments,
+)
 from quantark.montecarlo.qmc_rqmc_driver import RQMCRunSpec, run_rqmc
 from quantark.asset.equity.process.bsm.qmc_sobol import (
     PseudoRandomNormalGenerator,
@@ -281,6 +284,22 @@ class SnowballMCEngine(BaseEngine):
         sub-observation refinement mixin overrides). Draw dimension scales
         with this factor while path nodes stay contractual."""
         return 1
+
+    def _rqmc_dimension(self, contractual_time_steps: int) -> int:
+        return (
+            self._rqmc_streams_per_step()
+            * int(contractual_time_steps)
+            * self._rqmc_substep_factor()
+        )
+
+    def _rqmc_randomization_key(self, contractual_time_steps: int):
+        return (
+            "scrambled_sobol",
+            int(self.params.seed),
+            self._rqmc_scheme_label(),
+            int(contractual_time_steps),
+            self._rqmc_substep_factor(),
+        )
 
     def _rqmc_scheme_label(self) -> str:
         """Session plan scheme identifier: class plus model scheme, so two
@@ -2039,25 +2058,120 @@ class SnowballMCEngine(BaseEngine):
             product, pricing_env, T
         )
 
+        def affine_moments(paths, aux):
+            if aux is None or aux.get("affine_spot_factor") != "standard_normal":
+                return None
+            loadings = aux.get("log_spot_factor_loadings")
+            if loadings is None:
+                raise PricingError(
+                    "affine spot-factor metadata is missing log-spot loadings"
+                )
+            return conditional_standard_snowball_moments(
+                product=product,
+                pricing_env=pricing_env,
+                base_paths=paths,
+                log_spot_factor_loadings=loadings,
+                ko_indices=ko_indices,
+                ki_indices=ki_indices,
+                maturity=T,
+                discount_factors=self._df,
+            )
+
+        def collapse_conditional_outer(values, aux):
+            values = np.asarray(values, dtype=float)
+            outer_group_size = int(
+                1 if aux is None else aux.get("conditional_outer_group_size", 1)
+            )
+            if outer_group_size > 1:
+                if values.size % outer_group_size:
+                    raise PricingError(
+                        "bridge-stratified control payoff shape is inconsistent"
+                    )
+                values = values.reshape(-1, outer_group_size).mean(axis=1)
+            return values
+
+        def raw_conditional_control_payoffs(paths, aux):
+            if aux is None or not aux.get("heston_conditional_control", False):
+                raise PricingError(
+                    "Heston conditional-control metadata is unavailable"
+                )
+            required = (
+                "control_base_paths",
+                "control_log_spot_factor_loadings",
+            )
+            missing = [name for name in required if aux.get(name) is None]
+            if missing:
+                raise PricingError(
+                    "Heston conditional-control metadata is incomplete: "
+                    + ", ".join(missing)
+                )
+            return conditional_standard_snowball_moments(
+                product=product,
+                pricing_env=pricing_env,
+                base_paths=aux["control_base_paths"],
+                log_spot_factor_loadings=aux[
+                    "control_log_spot_factor_loadings"
+                ],
+                ko_indices=ko_indices,
+                ki_indices=ki_indices,
+                maturity=T,
+                discount_factors=self._df,
+            ).discounted_payoff
+
+        def conditional_control_payoffs(paths, aux):
+            return collapse_conditional_outer(
+                raw_conditional_control_payoffs(paths, aux), aux
+            )
+
         def pricer_fn(paths, aux):
             """Pricer function for RQMC driver."""
+            moments = affine_moments(paths, aux)
+            if moments is not None:
+                return moments.discounted_payoff
             batch_id = 0
             if aux is not None and "batch_id" in aux:
                 batch_id = int(aux["batch_id"])
-            payoffs, settlement_times, _ = self._compute_payoffs(
-                product,
-                pricing_env,
-                paths,
-                all_times,
-                ko_indices,
-                ki_indices,
-                r,
-                T,
-                sigma,
-                rng_seed=int(self.params.seed) + 1337 + batch_id * 1000,
+
+            def native_discounted(candidate_paths):
+                payoffs, settlement_times, _ = self._compute_payoffs(
+                    product,
+                    pricing_env,
+                    candidate_paths,
+                    all_times,
+                    ko_indices,
+                    ki_indices,
+                    r,
+                    T,
+                    sigma,
+                    rng_seed=int(self.params.seed) + 1337 + batch_id * 1000,
+                )
+                return payoffs * self._df(settlement_times)
+
+            discounted = native_discounted(paths)
+            if aux is None or not aux.get("heston_conditional_control", False):
+                return discounted
+            required = (
+                "control_paths",
+                "control_base_paths",
+                "control_log_spot_factor_loadings",
             )
-            discount_factors = self._df(settlement_times)
-            return payoffs * discount_factors
+            missing = [name for name in required if aux.get(name) is None]
+            if missing:
+                raise PricingError(
+                    "Heston conditional-control metadata is incomplete: "
+                    + ", ".join(missing)
+                )
+            sampled_control = native_discounted(aux["control_paths"])
+            exact_control = raw_conditional_control_payoffs(paths, aux)
+            residual = discounted - sampled_control
+            group_size = int(aux.get("conditional_group_size", 1))
+            if group_size > 1:
+                if residual.size != exact_control.size * group_size:
+                    raise PricingError(
+                        "stratified spot-control payoff shape is inconsistent"
+                    )
+                residual = residual.reshape(-1, group_size).mean(axis=1)
+            return collapse_conditional_outer(residual + exact_control, aux)
 
         params = self.params
         max_batches = getattr(
@@ -2086,7 +2200,26 @@ class SnowballMCEngine(BaseEngine):
 
         def finalize(result):
             # Run one more batch to get statistics
-            paths, _ = generator.generate_paths(return_aux=False, batch_id=0)
+            paths, aux = generator.generate_paths(return_aux=True, batch_id=0)
+            moments = affine_moments(paths, aux)
+            if moments is not None:
+                ko_probability = float(np.mean(moments.ko_probability))
+                ko_time_weight = float(np.sum(moments.ko_time_numerator))
+                ko_probability_weight = float(np.sum(moments.ko_probability))
+                return SnowballMCResult(
+                    price=result.price,
+                    std_error=result.std_error,
+                    num_paths=result.total_paths,
+                    ko_probability=ko_probability,
+                    v0_probability=float(np.mean(moments.v0_probability)),
+                    v1_probability=float(np.mean(moments.v1_probability)),
+                    avg_ko_time=(
+                        ko_time_weight / ko_probability_weight
+                        if ko_probability_weight > 0.0
+                        else None
+                    ),
+                    batches_used=result.batches_used,
+                )
             _, _, stats = self._compute_payoffs(
                 product,
                 pricing_env,
@@ -2121,10 +2254,23 @@ class SnowballMCEngine(BaseEngine):
             scheme=self._rqmc_scheme_label(),
             finalize=finalize,
             product=product,
-            dimension=(
-                self._rqmc_streams_per_step()
-                * int(dt_array.size)
-                * self._rqmc_substep_factor()
+            dimension=self._rqmc_dimension(int(dt_array.size)),
+            randomization_key=self._rqmc_randomization_key(int(dt_array.size)),
+            control_pricer_fn=(
+                conditional_control_payoffs
+                if getattr(self, "rqmc_heston_conditional_control", False)
+                else None
+            ),
+            path_valuation_multiplier=(
+                int(getattr(self, "rqmc_spot_strata", 1))
+                * (
+                    2
+                    if getattr(self, "rqmc_spot_antithetic", False)
+                    else 1
+                )
+                * int(getattr(self, "rqmc_spot_bridge_strata", 1))
+                if getattr(self, "rqmc_heston_conditional_control", False)
+                else 1
             ),
         )
 
@@ -2243,6 +2389,13 @@ class SnowballMCEngine(BaseEngine):
                 self._rqmc_streams_per_step()
                 * int(grid["dt_array"].size)
                 * self._rqmc_substep_factor()
+            ),
+            randomization_key=(
+                "scrambled_sobol",
+                int(self.params.seed),
+                self._rqmc_scheme_label() + "#ko-reset",
+                int(grid["dt_array"].size),
+                self._rqmc_substep_factor(),
             ),
         )
 
