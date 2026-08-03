@@ -631,3 +631,86 @@ def test_the_artifact_matches_stage12s_schedule():
     )
     assert fleet.inception_tags(PROJECT_ROOT) == [d.isoformat() for d in scheduled]
     assert len(scheduled) == 27
+
+
+# ---------------------------------------------------------------------------
+# Task 5: results blocks
+# ---------------------------------------------------------------------------
+
+results = importlib.import_module("mo_dashboard.results")
+
+
+def test_gate_evidence_marks_the_delta_column_void_with_its_citation():
+    g2_row = {
+        "id": "G2",
+        "headline": {"variants": {
+            "heston": {"route": "mc", "pv": {"pass": True},
+                       "delta": {"pass": False, "max_abs_contracts": 0.9319,
+                                 "bound_contracts": 0.1}},
+        }},
+        "facets": {
+            "pv": {"freshness": "stale", "invalidated_by": None},
+            "delta": {"freshness": "void", "invalidated_by": "3fbbf21",
+                      "invalidation_reason": "reference noise"},
+        },
+    }
+    block = results.gate_evidence_block(g2_row)
+    assert block["delta"]["freshness"] == "void"
+    assert block["delta"]["invalidated_by"] == "3fbbf21"
+    assert block["pv"]["freshness"] == "stale"
+    assert block["variants"]["heston"]["delta"]["max_abs_contracts"] == pytest.approx(0.9319)
+
+
+def test_backtest_block_reconciles_its_denominator_against_the_tree():
+    """Panel 2 is manifest-scoped, Panel 3 is tree-scoped, and they
+    legitimately differ (spec section 1.2)."""
+    block = results.reconcile(manifest_runs=27, tree_fresh=27, tree_total=35)
+    assert block["manifest_runs"] == 27
+    assert block["tree_total"] == 35
+    assert block["unaccounted"] == 8
+    assert block["agrees"] is False
+
+    same = results.reconcile(manifest_runs=27, tree_fresh=27, tree_total=27)
+    assert same["agrees"] is True
+
+
+def test_calibration_block_bands_the_feller_ratio():
+    records = [
+        {"feller_ratio": 0.3}, {"feller_ratio": 0.49},
+        {"feller_ratio": 1.0}, {"feller_ratio": 9.9},
+        {"feller_ratio": 10.1}, {"feller_ratio": 500.0},
+    ]
+    bands = results.feller_bands(records)
+    assert bands["violated"]["n"] == 2
+    assert bands["usable"]["n"] == 2
+    assert bands["sigma_collapsed"]["n"] == 2
+
+
+def test_sigma_collapse_band_label_is_provisional():
+    """Study 5.9 (ec20db9) supersedes 7A.11's attribution: those dates fail
+    on discretisation, not calibration, and are fixable."""
+    bands = results.feller_bands([{"feller_ratio": 50.0}])
+    assert bands["sigma_collapsed"]["label"] == "EXCLUDE (provisional)"
+    assert "5.9" in bands["sigma_collapsed"]["citation"]
+
+
+def test_a_corrupt_manifest_is_an_error_not_zero_runs(tmp_path):
+    """Fail soft, loud.  A truncated write must not render as a legitimate
+    'runs_completed: 0'."""
+    (tmp_path / "output/volmodel_backtest").mkdir(parents=True)
+    (tmp_path / "output/volmodel_backtest/run_manifest.json").write_text(
+        '{"counts": {"runs_comple', encoding="utf-8")
+
+    errors = []
+    block = results.backtest_block(tmp_path, {"run_dirs": [], "admitted": 0}, errors)
+    assert block["manifest_state"] == "unreadable"
+    assert any(e["source"] == "results.backtest" for e in errors)
+
+
+def test_read_json_separates_missing_from_corrupt(tmp_path):
+    assert results.read_json(tmp_path / "nope.json").state == "missing"
+    bad = tmp_path / "bad.json"
+    bad.write_text("{oops", encoding="utf-8")
+    read = results.read_json(bad)
+    assert read.state == "unreadable"
+    assert "JSONDecodeError" in read.message or "Expecting" in read.message
