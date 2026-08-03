@@ -2013,6 +2013,66 @@ git commit -m "docs(mo): record the re-scoped G2 outcome and per-regime evidence
 
 ---
 
+## Task 9: Gate G2 must price each variant's own `surface_vol_mode`
+
+*Added 2026-08-03, after Task 8's G2 run, with the owner's approval at the
+reassessment point. Not part of the original eight.*
+
+**Why this exists.** Reading the Task 8 evidence turned up that `ts_bsm` and
+`flat_bsm` were **bitwise identical** — all 15 PV cells and every delta agreed
+to 16 significant digits. `build_pricing_env` handed every variant
+`artifact.grid_vol_surface()` and never read `surface_vol_mode`, so the gate ran
+four distinct computations and reported six rows. `ts_bsm`'s `route=pde` rested
+on no independent evidence. `test_gate_covers_every_study_variant` asserts set
+equality of variant *names*, so it could not see this.
+
+Full detail, including why the direction was conservative, is in spec §5.5.
+
+**Files:**
+- Modify: `example/mo_volmodels/11_pde_convergence_gate.py`
+- Test: `test/mo_volmodels/test_gate_scope.py`,
+  `test/mo_volmodels/test_pde_convergence_gate.py` (the new required
+  `GatePair` field and the `_evaluate_case` `env`→`envs` rename break four
+  pre-existing tests there)
+
+**Interfaces:**
+- Consumes: `GATE_PAIRS` (Task 4), `VariantSpec.surface_vol_mode` (stage 12)
+- Produces: `GatePair.surface_vol_mode: str` (no default);
+  `build_pricing_env(artifact, rate, *, surface_vol_mode, remaining_maturity_years=None)`;
+  `_envs_by_mode(artifact, rate, remaining_maturity_years) -> Dict[str, PricingEnvironment]`
+
+**The contract to mirror** is `ProductReplay._vol_and_dividend`
+(`quantark/backtest/replay/product_replay.py:225-238`) — `term_structure` →
+`artifact.term_structure_vol_surface()`; `full_grid` →
+`artifact.grid_vol_surface()`; `flat_atm_remaining` → the ATM term structure
+sampled at the remaining maturity, wrapped in `FlatVolSurface`. `div_yield` is
+mode-independent.
+
+Build **one env per distinct mode** (three), not one per variant (six) — the
+three `full_grid` variants share a single env. `flat_atm_remaining` needs the
+remaining maturity: `terms.maturity_years` for the full case, the decayed
+terms' own already-adjusted `maturity_years` for the decayed case.
+
+Both error paths fail closed with `ValidationError` — unknown mode, and
+`flat_atm_remaining` with no maturity. No default for `surface_vol_mode`
+anywhere: a default is how the next variant silently gets the wrong surface.
+This follows the archetype Tasks 4–7 each hit, where an error path landed on a
+value that read as success.
+
+**Status: DONE** — commit `7109868`. 38/38 in `test_gate_scope.py`, 30/30 in
+`test_pde_convergence_gate.py`. Mutation-checked: forcing `grid_vol_surface()`
+for every mode is caught by four behavioural tests.
+
+**Measured consequence.** `flat_bsm` now gets a `FlatVolSurface` at 0.264476;
+`ts_bsm` a `TermStructureVolSurface` reading 0.279979 at T=0.5. They are no
+longer the same computation. Note the two still agree from T=1 onward — CSI
+1000 options are short-dated and the artifact clamps flat total variance beyond
+the last listed expiry, so a 3-year snowball reads a term structure the market
+barely prices. That is a study finding about `ts_bsm`'s discriminating power,
+not a defect.
+
+---
+
 ## Out of scope for this plan
 
 Deliberately deferred; each needs its own plan.
