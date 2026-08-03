@@ -109,8 +109,8 @@ recreate that problem in a new file.
 ```
 example/mo_volmodels/
   16_dashboard.py            argparse + wiring only (~60 lines)
-  dashboard.yaml             the registry (contract A, §5)
-  dashboard/
+  mo_dashboard.yaml          the registry (contract A, §5)
+  mo_dashboard/
     provenance.py            freshness rule (contract B, §6) — pure
     gates.py                 G1/G4/G2/G5 artifacts → status rows
     fleet.py                 registry + runs/ walk → 6 x 27 cell grid
@@ -124,6 +124,14 @@ test/mo_volmodels/
 
 Each collector is a pure function of (paths, registry) returning a plain dict. No collector
 imports another; `payload.py` is the only composition point.
+
+The package is `mo_dashboard`, not `dashboard`: tests put `example/mo_volmodels/` on `sys.path`,
+where a top-level module named `dashboard` would be a collision hazard.
+
+Paths are absolutised with `os.path.normpath`, never `Path.resolve()`. Resolving follows
+symlinks, and `output/` is a symlink in a worktree checkout — registry entries would resolve into
+the main repository while a scan of the same symlink stays in worktree space, so the two sides
+could never match and every displayed path would be absolute.
 
 ### 3.2 Modes
 
@@ -309,7 +317,7 @@ markup. Cheap to prevent, and the snapshot is a file people forward.
 
 ## 5. Contract A — the registry
 
-`example/mo_volmodels/dashboard.yaml`. Hand-maintained; `pyyaml>=6.0.0` is already declared
+`example/mo_volmodels/mo_dashboard.yaml`. Hand-maintained; `pyyaml>=6.0.0` is already declared
 (`pyproject.toml:39`). It states only what code cannot derive.
 
 ### 5.1 Run dirs
