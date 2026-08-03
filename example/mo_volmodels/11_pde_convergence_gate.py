@@ -1895,6 +1895,24 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
             "total_paths": cfg["mc"]["paths_per_batch"] * cfg["mc"]["batches"],
             "substeps_per_interval": cfg["mc"]["substeps_per_interval"],
         },
+        # Which calibration policy this evidence covers.  The replay config
+        # gained heston_temporal_reference / heston_temporal_regularization /
+        # slv_heston_override (spec §7A.12); they default off and the installed
+        # scheduler does not enable them, so these gates DO cover production
+        # today.  Recorded explicitly so a future reader cannot mistake lambda=0
+        # evidence for coverage of lambda>0.
+        "calibration_policy": {
+            "heston_preset": "mo_frozen",
+            "enforce_feller": True,
+            "heston_temporal_regularization": 0.0,
+            "slv_heston_override": None,
+            "note": (
+                "Independent daily calibration. This gate does NOT cover "
+                "--temporal-smoothing (heston_temporal_regularization > 0) or "
+                "an explicit slv_heston_override; enabling either is a re-gate "
+                "trigger (spec §7A.12)."
+            ),
+        },
         "variants": variants,
         "evidence_file": "pde_convergence_gate.json",
         "evidence_sha256": canonical_sha256(gate),
