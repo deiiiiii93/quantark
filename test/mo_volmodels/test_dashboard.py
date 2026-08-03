@@ -831,3 +831,128 @@ def test_rendering_the_real_page_imports_no_pricing_code():
     payload_mod.collect(PROJECT_ROOT)
     after = {m for m in sys.modules if m.startswith("quantark.asset")}
     assert after == before
+
+
+# ---------------------------------------------------------------------------
+# Tasks 7-8: renderer, server, CLI
+# ---------------------------------------------------------------------------
+
+render_mod = importlib.import_module("mo_dashboard.render")
+serve_mod = importlib.import_module("mo_dashboard.serve")
+
+
+def test_render_produces_all_three_panels(tmp_path):
+    (tmp_path / "output").mkdir()
+    doc = payload_mod.collect(tmp_path, registry_path=tmp_path / "absent.yaml")
+    html = render_mod.render(doc)
+    assert html.startswith("<!doctype html>")
+    for panel_id in render_mod.PANEL_IDS:
+        assert f'id="{panel_id}"' in html
+
+
+def test_render_inlines_the_payload_so_it_works_on_file_urls(tmp_path):
+    """A file:// page cannot fetch() a sibling JSON, so a snapshot must carry
+    its whole payload inline and issue no network calls."""
+    (tmp_path / "output").mkdir()
+    doc = payload_mod.collect(tmp_path, registry_path=tmp_path / "absent.yaml")
+    html = render_mod.render(doc)
+    assert 'id="__DASHBOARD_PAYLOAD__"' in html
+    assert "fetch(" not in html
+    assert "XMLHttpRequest" not in html
+    assert "https://" not in html  # no CDN: the snapshot must render offline
+
+
+def test_render_never_prints_a_bare_pass():
+    assert render_mod.verdict_label(True, "inferred") == "PASS (inferred)"
+    assert render_mod.verdict_label(False, "inferred") == "FAIL (inferred)"
+
+
+def test_render_escapes_artifact_text(tmp_path):
+    doc = {"schema_version": 1, "generated_at": "2026-08-03T16:00:00+08:00",
+           "mode": "snapshot",
+           "git": {"branch": "<script>x</script>", "head": "", "head_subject": "",
+                   "dirty_paths": []},
+           "cohort": {}, "gates": [], "chain": {"nodes": [], "next_action": {}},
+           "fleet": {"grid": {}, "variants": [], "inceptions": [], "counts": {},
+                     "run_dirs": [], "expected_cells": 0, "admitted": 0},
+           "results": {}, "errors": []}
+    html = render_mod.render(doc)
+    assert "<script>x</script>" not in html.split("__DASHBOARD_PAYLOAD__")[0]
+
+
+def test_payload_text_cannot_break_out_of_the_script_element():
+    """json.dumps does not escape </script> (verified against this repo), and
+    the payload carries log tails and exception text."""
+    doc = {"schema_version": 1, "generated_at": "", "mode": "snapshot",
+           "git": {"branch": "", "head": "", "head_subject": "", "dirty_paths": []},
+           "cohort": {}, "gates": [], "chain": {"nodes": [], "next_action": {}},
+           "fleet": {"grid": {}, "variants": [], "inceptions": [], "counts": {},
+                     "run_dirs": [], "expected_cells": 0, "admitted": 0},
+           "results": {},
+           "errors": [{"source": "x", "path": "y",
+                       "message": "</script><script>alert(1)</script>"}]}
+    html = render_mod.render(doc)
+    after_marker = html.split('id="__DASHBOARD_PAYLOAD__"', 1)[1]
+    payload_element = after_marker.split("</script>", 1)[0]
+    assert "</script><script>" not in payload_element
+    assert "\\u003c/script>" in payload_element
+
+
+def test_api_routes_return_json_slices(tmp_path):
+    (tmp_path / "output").mkdir()
+    router = serve_mod.Router(tmp_path, tmp_path / "absent.yaml", poll_seconds=10)
+
+    status, ctype, body = router.handle("/api/fleet")
+    assert status == 200
+    assert ctype == "application/json"
+    assert "expected_cells" in json.loads(body)
+
+    status, ctype, body = router.handle("/")
+    assert status == 200
+    assert ctype == "text/html; charset=utf-8"
+    assert body.startswith("<!doctype html>")
+
+    status, _, _ = router.handle("/nope")
+    assert status == 404
+
+
+def test_serve_mode_payload_has_live_block(tmp_path):
+    (tmp_path / "output").mkdir()
+    router = serve_mod.Router(tmp_path, tmp_path / "absent.yaml", poll_seconds=10)
+    _, _, body = router.handle("/api/live")
+    assert "log_tails" in json.loads(body)
+
+
+def _load_cli(name):
+    spec = importlib.util.spec_from_file_location(name, MO_DIR / "16_dashboard.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_cli_writes_a_snapshot(tmp_path):
+    (tmp_path / "output").mkdir()
+    module = _load_cli("mo_dash_cli")
+    out = tmp_path / "snowball_dashboard_latest.html"
+    rc = module.main([
+        "--project-root", str(tmp_path),
+        "--registry", str(tmp_path / "absent.yaml"),
+        "--out", str(out),
+    ])
+    assert rc == 0
+    assert out.exists()
+    assert out.read_text(encoding="utf-8").startswith("<!doctype html>")
+
+
+def test_cli_writes_nothing_else_under_output(tmp_path):
+    """Read-only contract: the only write is the HTML file named by --out."""
+    (tmp_path / "output").mkdir()
+    before = {p.name for p in (tmp_path / "output").iterdir()}
+    module = _load_cli("mo_dash_cli2")
+    module.main([
+        "--project-root", str(tmp_path),
+        "--registry", str(tmp_path / "absent.yaml"),
+        "--out", str(tmp_path / "output/snowball_dashboard_latest.html"),
+    ])
+    after = {p.name for p in (tmp_path / "output").iterdir()}
+    assert after - before == {"snowball_dashboard_latest.html"}
