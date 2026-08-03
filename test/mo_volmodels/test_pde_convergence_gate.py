@@ -441,6 +441,7 @@ def _stub_gate_pairs(mc_price, pde_price):
         build_production=lambda model, grid: _StubPDEEngine(pde_price),
         build_reference=lambda model, grid: _StubMCEngine(mc_price),
         reference_is_mc=True,
+        surface_vol_mode="full_grid",  # matches heston/heston_slv's real mode
     )
     return {"heston": pair, "heston_slv": pair}
 
@@ -454,7 +455,7 @@ def _evaluate_with_stubs(monkeypatch, mc_price, pde_price):
         case_name="decayed",  # skips the delta path (needs a real env)
         terms=_tiny_terms(),
         s0_inception=100.0,
-        env=None,  # engines are stubbed; env is only passed through
+        envs={"full_grid": None},  # engines are stubbed; env is only passed through
         models={"heston": object(), "heston_slv": object()},
         cfg=_tiny_cfg(),
     )

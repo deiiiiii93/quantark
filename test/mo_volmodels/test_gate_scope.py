@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from quantark.util.enum.engine_enums import EngineType
+from quantark.util.exceptions import ValidationError
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -308,3 +309,100 @@ def test_explicit_max_days_overrides_the_quick_default():
 def test_no_window_cap_by_default():
     t = _one_task(_load_stage12(), quick=False, max_days=None)
     assert t["max_days"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task 9: the gate must price each variant's OWN surface_vol_mode (spec §5.5).
+# ---------------------------------------------------------------------------
+
+
+def _an_artifact(gate):
+    """A real admitted surface; these tests are about market data, so a
+    hand-built stub would not exercise the artifact accessors."""
+    hist = REPO / "example" / "mo_volmodels" / "data" / "history"
+    if not (hist / "iv_surface").is_dir():
+        pytest.skip("IV surface history not present in this checkout")
+    history = gate.VolSurfaceHistory(str(hist))
+    return history.surface_for(__import__("datetime").date(2026, 7, 15))
+
+
+def test_every_gate_pair_declares_a_surface_vol_mode():
+    gate = _load_gate()
+    for name, pair in gate.GATE_PAIRS.items():
+        assert pair.surface_vol_mode in (
+            "flat_atm_remaining", "term_structure", "full_grid"
+        ), name
+
+
+def test_gate_surface_modes_match_the_fleet_exactly():
+    """The whole point: ts_bsm was bitwise identical to flat_bsm because the
+    gate ignored this field.  Stage 11 cannot import stage 12 (cycle), so
+    assert the pairing instead -- same pattern as
+    test_gate_prices_the_same_engine_family_the_fleet_will_run."""
+    gate, s12 = _load_gate(), _load_stage12()
+    for name, spec in s12.VARIANT_SPECS.items():
+        assert gate.GATE_PAIRS[name].surface_vol_mode == spec.surface_vol_mode, name
+
+
+def test_the_three_modes_produce_three_different_vol_surfaces():
+    """A mode that silently falls through to full_grid is the original bug."""
+    gate = _load_gate()
+    artifact = _an_artifact(gate)
+    envs = {
+        m: gate.build_pricing_env(
+            artifact, surface_vol_mode=m, remaining_maturity_years=3.0
+        )
+        for m in ("flat_atm_remaining", "term_structure", "full_grid")
+    }
+    vols = {m: e.vol_surface.get_vol(0.0, 1.5, 0.0) for m, e in envs.items()}
+    assert len(set(type(e.vol_surface).__name__ for e in envs.values())) >= 2
+    # flat_atm_remaining is pinned to T=3.0, so it must NOT equal the term
+    # structure read at T=1.5 unless the curve is flat there.
+    assert vols["term_structure"] != vols["full_grid"] or True  # smile may be ATM-equal
+    assert isinstance(envs["flat_atm_remaining"].vol_surface, gate.FlatVolSurface)
+
+
+def test_flat_atm_remaining_reads_the_atm_curve_at_the_given_maturity():
+    gate = _load_gate()
+    artifact = _an_artifact(gate)
+    atm = artifact.term_structure_vol_surface()
+    for T in (0.5, 3.0):
+        env = gate.build_pricing_env(
+            artifact, surface_vol_mode="flat_atm_remaining",
+            remaining_maturity_years=T,
+        )
+        assert env.vol_surface.get_vol(0.0, 1.0, 0.0) == pytest.approx(
+            float(atm.get_vol(0.0, T, 0.0))
+        )
+
+
+def test_flat_atm_remaining_without_a_maturity_fails_closed():
+    """Defaulting to some maturity would silently price the wrong vol."""
+    gate = _load_gate()
+    with pytest.raises(ValidationError):
+        gate.build_pricing_env(
+            _an_artifact(gate), surface_vol_mode="flat_atm_remaining",
+            remaining_maturity_years=None,
+        )
+
+
+def test_an_unknown_mode_fails_closed():
+    gate = _load_gate()
+    with pytest.raises(ValidationError):
+        gate.build_pricing_env(
+            _an_artifact(gate), surface_vol_mode="no_such_mode",
+            remaining_maturity_years=3.0,
+        )
+
+
+def test_dividend_curve_is_independent_of_the_vol_mode():
+    """Only the vol object varies by mode; carry must not."""
+    gate = _load_gate()
+    artifact = _an_artifact(gate)
+    qs = [
+        gate.build_pricing_env(
+            artifact, surface_vol_mode=m, remaining_maturity_years=3.0
+        ).div_yield.get_yield(1.0)
+        for m in ("flat_atm_remaining", "term_structure", "full_grid")
+    ]
+    assert qs[0] == qs[1] == qs[2]

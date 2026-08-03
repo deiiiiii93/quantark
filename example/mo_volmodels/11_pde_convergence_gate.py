@@ -91,10 +91,11 @@ from quantark.volmodels.calibration import (
     VolModelCalibrator,
 )
 from quantark.param.vol.surface_history import IvSurfaceArtifact, VolSurfaceHistory
-from quantark.param import FlatRateCurve, GridVolSurface, SpotQuote
+from quantark.param import FlatRateCurve, FlatVolSurface, GridVolSurface, SpotQuote
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType
 from quantark.util.enum.engine_enums import MonteCarloMethod
+from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import safe_divide
 from quantark.volmodels.localvol import build_dupire_local_vol
 
@@ -452,16 +453,70 @@ def build_snowball_product(terms: SnowballTerms, s0: float):
 # Pricing environment / calibration
 # ---------------------------------------------------------------------------
 
-def build_pricing_env(artifact: IvSurfaceArtifact, rate: float = FLAT_RATE) -> PricingEnvironment:
+def build_pricing_env(
+    artifact: IvSurfaceArtifact,
+    rate: float = FLAT_RATE,
+    *,
+    surface_vol_mode: str,
+    remaining_maturity_years: Optional[float] = None,
+) -> PricingEnvironment:
     """Production env: flat rate, dividend curve from the artifact's
-    option-parity forward pillars."""
+    option-parity forward pillars.  ``surface_vol_mode`` selects the vol
+    surface exactly as ``ProductReplay._vol_and_dividend`` does (spec §5.5,
+    quantark/backtest/replay/product_replay.py:225-238) -- a variant's route
+    is only independent evidence if it is priced off the SAME market data
+    the fleet will use, and pricing every variant off ``grid_vol_surface()``
+    is what made ``ts_bsm`` and ``flat_bsm`` bitwise identical (Task 9).  No
+    default: a missing mode must fail loudly, not silently fall back to
+    ``full_grid``.
+    """
+    if surface_vol_mode == "term_structure":
+        vol_surface = artifact.term_structure_vol_surface()
+    elif surface_vol_mode == "full_grid":
+        vol_surface = artifact.grid_vol_surface()
+    elif surface_vol_mode == "flat_atm_remaining":
+        if remaining_maturity_years is None:
+            raise ValidationError(
+                "surface_vol_mode='flat_atm_remaining' requires remaining_maturity_years"
+            )
+        atm_term_structure = artifact.term_structure_vol_surface()
+        vol_surface = FlatVolSurface(
+            volatility=float(
+                atm_term_structure.get_vol(0.0, remaining_maturity_years, 0.0)
+            )
+        )
+    else:
+        raise ValidationError(f"Unknown surface_vol_mode: {surface_vol_mode!r}")
     return PricingEnvironment(
         rate_curve=FlatRateCurve(rate=rate),
         valuation_date=datetime.combine(artifact.trade_date, datetime.min.time()),
         spot_quote=SpotQuote(spot=float(artifact.s0)),
-        vol_surface=artifact.grid_vol_surface(),
+        vol_surface=vol_surface,
         div_yield=artifact.term_structure_dividend_yield(rate),
     )
+
+
+def _envs_by_mode(
+    artifact: IvSurfaceArtifact, rate: float, remaining_maturity_years: float
+) -> Dict[str, PricingEnvironment]:
+    """One env per DISTINCT ``surface_vol_mode`` in ``GATE_PAIRS`` (three),
+    not one per variant (six): the three ``full_grid`` variants share a
+    single env, so building per-variant would construct the same full-grid
+    surface three times over.  ``_evaluate_case`` / ``_extras_first_date``
+    look an env up by ``GATE_PAIRS[variant].surface_vol_mode``.
+    """
+    modes = {pair.surface_vol_mode for pair in GATE_PAIRS.values()}
+    return {
+        mode: build_pricing_env(
+            artifact,
+            rate,
+            surface_vol_mode=mode,
+            remaining_maturity_years=(
+                remaining_maturity_years if mode == "flat_atm_remaining" else None
+            ),
+        )
+        for mode in modes
+    }
 
 
 def make_calibrator(out_dir: Path, quick: bool) -> VolModelCalibrator:
@@ -552,6 +607,10 @@ class GatePair:
     reference is priced once at a fixed, finer configuration -- it is never
     laddered).  ``reference_is_mc`` drives whether a std error is expected: a
     deterministic reference has ``mc_se = None`` and the flat TOL_ABS floor.
+
+    ``surface_vol_mode`` must match the fleet's ``VariantSpec.surface_vol_mode``
+    for the same variant (see ``build_pricing_env`` and Task 9) -- no default,
+    since defaulting is how a new variant silently gets the wrong surface.
     """
 
     production: str
@@ -559,6 +618,7 @@ class GatePair:
     build_production: Callable[..., Any]
     build_reference: Callable[..., Any]
     reference_is_mc: bool
+    surface_vol_mode: str
 
 
 def _bsm_pde(accuracy: str = "standard"):
@@ -586,21 +646,26 @@ GATE_PAIRS: Dict[str, GatePair] = {
         build_production=_bsm_pde("standard"),
         build_reference=_bsm_quad(grid_points=QUAD_REFERENCE_POINTS),
         reference_is_mc=False,
+        surface_vol_mode="flat_atm_remaining",
     ),
     "flat_bsm_quad": GatePair(
         production="quad", reference="pde_1d_high",
         build_production=_bsm_quad(),
         build_reference=_bsm_pde("high"),
         reference_is_mc=False,
+        surface_vol_mode="flat_atm_remaining",
     ),
     "ts_bsm": GatePair(
         # Mirrors flat_bsm, not flat_bsm_quad: stage 12's VARIANT_SPECS["ts_bsm"]
         # keeps the PDE default (only flat_bsm_quad overrides pricing_engine_type
         # to QUADRATURE) -- see test_gate_prices_the_same_engine_family_the_fleet_will_run.
+        # surface_vol_mode differs from flat_bsm though (term_structure, not
+        # flat_atm_remaining) -- that's the whole point of Task 9.
         production="pde_1d", reference="quad_high",
         build_production=_bsm_pde("standard"),
         build_reference=_bsm_quad(grid_points=QUAD_REFERENCE_POINTS),
         reference_is_mc=False,
+        surface_vol_mode="term_structure",
     ),
     "localvol": GatePair(
         production="pde_1d_lv", reference="lv_mc_rqmc",
@@ -612,6 +677,7 @@ GATE_PAIRS: Dict[str, GatePair] = {
             params=_make_mc_params(MC_FULL, SEED),
             method=MonteCarloMethod.RANDOMIZED_QUASI),
         reference_is_mc=True,
+        surface_vol_mode="full_grid",
     ),
     "heston": GatePair(
         production="pde_2d_adi", reference="qe_m_rqmc",
@@ -621,6 +687,7 @@ GATE_PAIRS: Dict[str, GatePair] = {
             VOL_MODEL_HESTON, model, _make_mc_params(MC_FULL, SEED),
             MC_FULL["substeps_per_interval"]),
         reference_is_mc=True,
+        surface_vol_mode="full_grid",
     ),
     "heston_slv": GatePair(
         production="pde_2d_adi_slv", reference="slv_qe_m_rqmc",
@@ -630,6 +697,7 @@ GATE_PAIRS: Dict[str, GatePair] = {
             VOL_MODEL_HESTON_SLV, model, _make_mc_params(MC_FULL, SEED),
             MC_FULL["substeps_per_interval"]),
         reference_is_mc=True,
+        surface_vol_mode="full_grid",
     ),
 }
 
@@ -1200,7 +1268,7 @@ def _evaluate_case(
     case_name: str,
     terms: SnowballTerms,
     s0_inception: float,
-    env: PricingEnvironment,
+    envs: Dict[str, PricingEnvironment],
     models: Dict[str, Any],
     cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -1216,6 +1284,9 @@ def _evaluate_case(
     for variant in VARIANTS:
         pair = GATE_PAIRS[variant]
         model = models[variant]
+        # Each variant prices off ITS OWN surface_vol_mode (spec §5.5) -- see
+        # build_pricing_env; envs is keyed by mode, built once per date.
+        env = envs[pair.surface_vol_mode]
         # A broken/non-finite reference must not kill the run: the variant's
         # cells are recorded as error cells (which count as gate failures).
         ref_err: Optional[str] = None
@@ -1411,7 +1482,7 @@ def _extras_first_date(
     date_iso: str,
     terms: SnowballTerms,
     s0_inception: float,
-    env: PricingEnvironment,
+    envs: Dict[str, PricingEnvironment],
     artifact: IvSurfaceArtifact,
     models: Dict[str, Any],
     cfg: Dict[str, Any],
@@ -1433,6 +1504,7 @@ def _extras_first_date(
         # scoped to the 2D-ADI pair.
         if not GATE_PAIRS[variant].production.startswith("pde_2d"):
             continue
+        env = envs[GATE_PAIRS[variant].surface_vol_mode]  # both are full_grid
         row = {
             "date": date_iso,
             "case": "full",
@@ -1483,7 +1555,9 @@ def _extras_first_date(
     )
     flat_env = PricingEnvironment(
         rate_curve=FlatRateCurve(rate=FLAT_RATE),
-        valuation_date=env.valuation_date,
+        # valuation_date is mode-independent (every envs[mode] is built off
+        # the same artifact.trade_date); full_grid always exists in envs.
+        valuation_date=envs["full_grid"].valuation_date,
         spot_quote=SpotQuote(spot=float(artifact.s0)),
         vol_surface=flat_surface,
         div_yield=artifact.term_structure_dividend_yield(FLAT_RATE),
@@ -1594,7 +1668,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
     calibrator = make_calibrator(Path(cfg["out_dir"]), bool(cfg["quick"]))
 
     terms = build_snowball_terms(inception, calendar)
-    env = build_pricing_env(artifact, cfg["flat_rate"])
+    envs = _envs_by_mode(artifact, cfg["flat_rate"], terms.maturity_years)
     models = _calibrate_models(calibrator, artifact)
 
     record: Dict[str, Any] = {
@@ -1620,7 +1694,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
         case_name="full",
         terms=terms,
         s0_inception=float(artifact.s0),
-        env=env,
+        envs=envs,
         models=models,
         cfg=cfg,
     )
@@ -1634,7 +1708,9 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
     else:
         decay_artifact = history.surface_for(decay_date)
         dterms = decay_terms(terms, decay_date)
-        denv = build_pricing_env(decay_artifact, cfg["flat_rate"])
+        # decayed terms' OWN maturity_years (already t_shift-adjusted by
+        # decay_terms), not a recomputed subtraction at this call site.
+        denvs = _envs_by_mode(decay_artifact, cfg["flat_rate"], dterms.maturity_years)
         dmodels = _calibrate_models(calibrator, decay_artifact)
         record["terms"]["decayed"] = dterms.summary()
         record["decayed_calibration"] = {
@@ -1646,7 +1722,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
             case_name="decayed",
             terms=dterms,
             s0_inception=float(artifact.s0),  # contract notional fixed at inception
-            env=denv,
+            envs=denvs,
             models=dmodels,
             cfg=cfg,
         )
@@ -1658,7 +1734,7 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
             date_iso=inception.isoformat(),
             terms=terms,
             s0_inception=float(artifact.s0),
-            env=env,
+            envs=envs,
             artifact=artifact,
             models=models,
             cfg=cfg,
