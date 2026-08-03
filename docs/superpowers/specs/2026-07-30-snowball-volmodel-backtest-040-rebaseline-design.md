@@ -276,6 +276,94 @@ the relative component is disabled. The existing G2 already respects this
 
 ---
 
+### 5.5 G2 outcome — measured 2026-08-02
+
+Run: 8 sample dates × 2 cases × 6 variants × 3 ladder levels, cohort pinned at
+`COHORT_ASOF = 2026-07-31`, warm calibration cache (715 entries seeded from the
+daily pipeline, 3 distinct fingerprints). Wall clock **2397.8 s**.
+Evidence `output/pde_convergence_gate/pde_convergence_gate.json`,
+`evidence_sha256 = 4ac62ab4d820cbba57807c5edbe68f94f5fc5562b19c9d244f1a0988726df9d1`.
+Calibration policy stamped into the decision: `heston_preset="mo_frozen"`,
+`enforce_feller=true`, `heston_temporal_regularization=0.0`,
+`slv_heston_override=null`.
+
+| variant | route | production params | decided by |
+|---|---|---|---|
+| `flat_bsm` | **pde** | `pde_1d`, accuracy=standard | clean on all four criteria |
+| `flat_bsm_quad` | **pde** | `quad`, grid_points=4096 | clean on all four criteria |
+| `ts_bsm` | **pde** | `pde_1d`, accuracy=standard | clean — but see the caveat below |
+| `localvol` | **mc** | `lv_mc_rqmc`, 8192×16 RQMC | **delta alone** |
+| `heston` | **mc** | `qe_m_rqmc`, QUADEXP_M, 4 substeps | PV (1 cell) + delta + delta bias |
+| `heston_slv` | **mc** | `qe_m_rqmc`, QUADEXP_M, 4 substeps | PV (1 cell) + delta + delta bias |
+
+**PV vs delta diverge sharply.** Median |diff| in the `full` bucket against the
+0.25% notional tolerance: `flat_bsm` 0.0005%, `localvol` 0.021%, `heston` 0.101%,
+`heston_slv` 0.103% — every one comfortably inside. Delta, in IM futures
+contracts (production − reference), against a 0.5-contract per-cell bound and a
+0.1-contract bias bound:
+
+| variant | mean signed | max abs | cells > 0.5 | biased |
+|---|---|---|---|---|
+| `flat_bsm` / `ts_bsm` | +0.006 | 0.029 | 0 | no |
+| `localvol` | −0.050 | **1.272** | 3 | no |
+| `heston` | **−0.471** | 1.209 | 5 | yes |
+| `heston_slv` | **−0.338** | 1.145 | 4 | yes |
+
+`localvol`'s PV agrees to 0.021% while its delta (~0.6 per unit) is off by ~0.034
+— about 5%, a **200–300× amplification** of the relative error. Differentiating
+the O(h²) grid-error field costs roughly a factor of the length scale over which
+it varies, and for a snowball that scale is set by barrier proximity
+(KO 1.03·S₀, KI 0.75·S₀), not by the domain width. **A PV tolerance cannot see
+this**, which is why §5.3's delta criterion is load-bearing rather than
+confirmatory: it is the sole reason `localvol` routes to MC.
+
+Two distinct delta failure modes, and the pair of criteria separates them:
+`localvol` is **dispersion without drift** (mean inside the bias bound, individual
+cells at 1.27 contracts); `heston`/`heston_slv` are **genuinely one-signed**. A
+persistent −0.47-contract gap is ~1.3% of the 50M notional left unhedged at every
+one of ~750 daily rebalances, one-signed — and the backtest's P&L *is* accumulated
+hedge error.
+
+**§7A.8 is falsified.** It predicted both 2D variants would be admitted to PDE at
+200×60 "on delta stability more than speed". Delta stability is precisely what
+rejected them, at 4.7× and 3.4× the bias bound.
+
+**Feller conditioning localises the PV failure.** For both Heston variants the
+`boundary` bucket is 13/13 passing at max 0.18%, and the single failing cell
+(`2025-04-09/full`, |diff| 0.313% / 0.329%) carries Feller ratio **1901.4** — the
+`degenerate` bucket. PV degrades exactly where the calibration collapses, as
+§7A.10 predicted from the calibration side. That bucket holds 2 cells, below the
+4-cell floor, so it is marked `skipped=true` and cannot formally flag: visible
+ignorance rather than a false clean bill. `violated` is empty (n=0) — `enforce_feller`
+is doing its job.
+
+**`heston_slv`'s `full` PV bucket has sign fraction 1.0** (8/8 same direction) yet
+`biased=false`, because the median stays under the 0.5×TOL threshold. This is
+§7A.11's "biased but currently small" caveat, now observed at maximum
+one-sidedness. It is not disqualifying today; it would become so under any
+tolerance tightening.
+
+#### Caveat: `ts_bsm` was not independently gated
+
+`ts_bsm` and `flat_bsm` returned **bitwise identical** results — all 15 PV cells
+and every delta, to 16 significant digits. Cause: stage 12 distinguishes them by
+`surface_vol_mode` (`flat_atm_remaining` vs `term_structure`), but stage 11's
+`build_pricing_env` hands every variant `artifact.grid_vol_surface()` — i.e.
+`full_grid` — and never reads `surface_vol_mode`. The gate ran four distinct
+computations and reported six rows.
+`test_gate_covers_every_study_variant` asserts set equality of variant names, so
+it cannot detect that two of them are the same computation.
+
+Impact is bounded and in the conservative direction: `full_grid` carries more
+structure (smile *and* term) than either `flat_atm_remaining` or `term_structure`,
+so PDE-vs-QUAD agreement on the simpler surface should be at least as good. The
+three calibrated variants genuinely use `full_grid`, so the three that *failed*
+are gated on the data the fleet will use. But that conservatism is incidental, not
+designed, and `ts_bsm`'s `route=pde` currently rests on no independent evidence.
+Resolving this is a prerequisite for admitting `ts_bsm` to the fleet.
+
+---
+
 ## 6. Replay termination at knock-out — **DELIVERED by the library**
 
 *Status changed 2026-07-30: this section specified a requirement; the backtest
