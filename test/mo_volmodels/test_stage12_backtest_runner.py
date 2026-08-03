@@ -222,6 +222,13 @@ def _routing(**overrides):
     are not specifically exercising 1D/quad routing don't have to spell out
     all four every time; heston/heston_slv are left unset unless a test
     passes them explicitly, since those are what most routing tests vary.
+
+    mc_params carries a representative gate-certified MC config for
+    heston/heston_slv regardless of whether a given test actually routes
+    them to "mc" -- make_engine_config now fails closed (Task 10) when an
+    MC-routed variant has no entry here, so every test that reprices heston
+    or heston_slv needs one available even if routing to MC isn't the point
+    of that particular test.
     """
     routes = {
         "flat_bsm": "pde",
@@ -230,11 +237,16 @@ def _routing(**overrides):
         "localvol": "pde",
     }
     routes.update(overrides)
+    gated_mc = {
+        "paths_per_batch": 8192, "batches": 16, "seed": 20260723,
+        "substeps_per_interval": 4, "scheme": "QUADEXP_M",
+    }
     return s12.GateRouting(
         decision_path="test",
         evidence_sha256="deadbeef",
         routes=routes,
         pde_params={"heston": {"n_x": 200, "n_v": 60, "n_t": 1202, "scheme": "cs"}},
+        mc_params={"heston": gated_mc, "heston_slv": gated_mc},
     )
 
 

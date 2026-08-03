@@ -64,7 +64,7 @@ import tempfile
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -260,6 +260,13 @@ class GateRouting:
     evidence_sha256: Optional[str]
     routes: Dict[str, str]  # study variant name -> "pde" | "mc"
     pde_params: Dict[str, Dict[str, Any]]
+    # Per-variant MC config the gate certified (paths_per_batch/batches/seed/
+    # scheme/substeps_per_interval -- see _reference_params_block in stage
+    # 11).  Defaults to {} so the several existing 4-positional-arg
+    # GateRouting(...) constructions in the test suite keep working; the
+    # fail-closed check for an MC-routed variant with no entry here lives in
+    # make_engine_config, not here (mirrors solver_for's fail-closed style).
+    mc_params: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def solver_for(self, variant: str) -> str:
         """Route for one of the six study variants.
@@ -319,6 +326,7 @@ def load_gate_routing(path: Path) -> GateRouting:
         raise ValidationError(f"gate decision {path} has no 'variants' map")
     routes: Dict[str, str] = {}
     pde_params: Dict[str, Dict[str, Any]] = {}
+    mc_params: Dict[str, Dict[str, Any]] = {}
     for name, entry in variants.items():
         if not isinstance(entry, dict):
             raise ValidationError(f"gate decision {path}: variant {name!r} is not an object")
@@ -326,11 +334,15 @@ def load_gate_routing(path: Path) -> GateRouting:
         params = entry.get("pde_params")
         if isinstance(params, dict):
             pde_params[str(name)] = params
+        mc = entry.get("mc_params")
+        if isinstance(mc, dict):
+            mc_params[str(name)] = mc
     return GateRouting(
         decision_path=str(path),
         evidence_sha256=payload.get("evidence_sha256"),
         routes=routes,
         pde_params=pde_params,
+        mc_params=mc_params,
     )
 
 
@@ -724,8 +736,45 @@ def make_engine_config(
     # share vol_model="bsm" but can carry independent verdicts) -- see
     # GateRouting.solver_for.
     solver = routing.solver_for(variant)
+
+    # --quick is the G3 smoke / CI knob: a short window on a deliberately
+    # tiny MC budget.  It is NOT Gate G2's certified configuration and must
+    # never be used for a study run, so it keeps its own module-constant
+    # paths/batches/seed rather than reading the gate's, and the engine
+    # falls back to its own scheme/substeps defaults.
     mc_paths = QUICK_MC_PATHS_PER_BATCH if quick else MC_PATHS_PER_BATCH
     mc_batches = QUICK_MC_BATCHES if quick else MC_BATCHES
+    mc_seed = MC_SEED
+    mc_engine_options: Dict[str, Any] = {}
+
+    if solver == "mc" and not quick:
+        # G2 routed this variant to MC because its production engine's price
+        # (and delta) disagreed with the reference computed under THIS exact
+        # config -- paths/batches/seed AND scheme/substeps_per_interval.
+        # Running the fleet on any other config computes a delta the gate
+        # never certified, which is the whole defect this fixes. An absent
+        # entry must raise, never silently fall back to this module's
+        # constants or the engine's own defaults -- same fail-closed
+        # principle as GateRouting.solver_for's missing-route check.
+        gated = routing.mc_params.get(variant)
+        if gated is None:
+            raise ValidationError(
+                f"gate decision has no mc_params for MC-routed variant={variant!r}; "
+                "rerun stage 11 (11_pde_convergence_gate.py) before the fleet"
+            )
+        mc_paths = int(gated["paths_per_batch"])
+        mc_batches = int(gated["batches"])
+        mc_seed = int(gated["seed"])
+        # scheme/substeps_per_interval are Heston-only QE knobs; the gate's
+        # localvol entry has neither (LocalVolSnowballMCEngine accepts
+        # neither kwarg), so only forward keys the decision actually set --
+        # passing substeps_per_interval=None would TypeError inside the
+        # engine rather than falling back to its default.
+        mc_engine_options = {
+            key: gated[key]
+            for key in ("scheme", "substeps_per_interval")
+            if gated.get(key) is not None
+        }
 
     calibration = None
     if spec.uses_calibration():
@@ -748,15 +797,43 @@ def make_engine_config(
         event_stats_engine_type=EngineType.PDE,
         pde_params=PDEParams(),
         quad_params=QuadParams(),
-        mc_params=make_mc_params(mc_paths, mc_batches, MC_SEED),
+        mc_params=make_mc_params(mc_paths, mc_batches, mc_seed),
         vol_model_mc_method=MonteCarloMethod.RANDOMIZED_QUASI,
         vol_source=spec.vol_source,
         surface_vol_mode=spec.surface_vol_mode,
         vol_model=spec.vol_model,
         vol_model_solver=solver,
         vol_model_calibration=calibration,
-        vol_model_engine_options=routing.engine_options_for(variant),
+        # engine_options_for is non-empty only on the PDE route (n_x/n_v/n_t)
+        # and mc_engine_options only on the gated MC route (scheme/substeps),
+        # so exactly one side of this merge is ever non-empty.
+        vol_model_engine_options={
+            **routing.engine_options_for(variant),
+            **mc_engine_options,
+        },
     )
+
+
+def resolved_mc_engine_options(
+    routing: GateRouting, variants: Sequence[str], *, quick: bool
+) -> Dict[str, Dict[str, Any]]:
+    """Per-MC-routed-variant ``vol_model_engine_options`` that actually ran.
+
+    The gate decision's own payload note says production "may reduce path
+    counts under a documented SE budget, recorded in the run manifest" --
+    this is that record for the scheme/substeps half of the config (paths/
+    batches/seed are already recorded as mc_paths_per_batch/mc_batches/
+    mc_seed).  Built by calling make_engine_config itself rather than
+    re-deriving the logic, so the manifest can never drift from what the
+    fleet actually configured.
+    """
+    return {
+        variant: make_engine_config(
+            variant, routing=routing, quick=quick
+        ).vol_model_engine_options
+        for variant in variants
+        if routing.solver_for(variant) == "mc"
+    }
 
 
 def make_cost_model(enabled: bool):
@@ -858,6 +935,7 @@ def run_one(task: Dict[str, Any]) -> Dict[str, Any]:
         evidence_sha256=task["gate"]["evidence_sha256"],
         routes=task["gate"]["routes"],
         pde_params=task["gate"]["pde_params"],
+        mc_params=task["gate"]["mc_params"],
     )
     engine_config = make_engine_config(
         variant,
@@ -1165,6 +1243,7 @@ def build_tasks(
         "evidence_sha256": routing.evidence_sha256,
         "routes": dict(routing.routes),
         "pde_params": dict(routing.pde_params),
+        "mc_params": dict(routing.mc_params),
     }
     tasks: List[Dict[str, Any]] = []
     for entry in prepared:
@@ -1452,6 +1531,14 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         "mc_paths_per_batch": QUICK_MC_PATHS_PER_BATCH if args.quick else MC_PATHS_PER_BATCH,
         "mc_batches": QUICK_MC_BATCHES if args.quick else MC_BATCHES,
         "mc_seed": MC_SEED,
+        # Per-variant scheme/substeps_per_interval actually resolved for the
+        # MC-routed variants (Task 10, spec §5.5); {} for a run with no MC
+        # route.  mc_paths_per_batch/mc_batches/mc_seed above stay as the
+        # module-wide fallback -- see make_engine_config for how an
+        # MC-routed variant's own gate values override them.
+        "mc_engine_options": resolved_mc_engine_options(
+            routing, variants, quick=bool(args.quick)
+        ),
     }
     manifest = build_run_manifest(
         cfg=cfg,

@@ -406,3 +406,91 @@ def test_dividend_curve_is_independent_of_the_vol_mode():
         for m in ("flat_atm_remaining", "term_structure", "full_grid")
     ]
     assert qs[0] == qs[1] == qs[2]
+
+
+# ---------------------------------------------------------------------------
+# Task 10: the fleet must run the MC configuration G2 certified (spec §5.5).
+# ---------------------------------------------------------------------------
+
+_GATED_MC = {
+    "paths_per_batch": 8192, "batches": 16, "seed": 20260723,
+    "substeps_per_interval": 4, "scheme": "QUADEXP_M",
+}
+
+
+def _routing_with_mc(s12, variant, route="mc", **overrides):
+    mc = dict(_GATED_MC); mc.update(overrides)
+    return s12.GateRouting(
+        "p", None, {variant: route}, {variant: {"accuracy": "standard"}},
+        mc_params={variant: mc},
+    )
+
+
+def test_gate_routing_carries_mc_params():
+    """Without this field the gate's MC config cannot reach the fleet."""
+    s12 = _load_stage12()
+    r = _routing_with_mc(s12, "heston")
+    assert r.mc_params["heston"]["substeps_per_interval"] == 4
+
+
+def test_heston_engine_options_come_from_the_gate_not_the_engine_default():
+    """The whole defect: substeps defaulted to 1 while the gate certified 4."""
+    s12 = _load_stage12()
+    cfg = s12.make_engine_config("heston", routing=_routing_with_mc(s12, "heston"))
+    assert cfg.vol_model_engine_options["substeps_per_interval"] == 4
+    assert cfg.vol_model_engine_options["scheme"] == "QUADEXP_M"
+
+
+def test_mc_paths_and_seed_come_from_the_gate_decision():
+    """They match today only because both files hardcode the same numbers.
+
+    ``MCParams`` (quantark.asset.equity.param) has no ``paths_per_batch`` /
+    ``batches`` attributes -- those are the gate decision's JSON key names.
+    The Python-side fields are ``num_paths`` and ``rqmc_max_batches``
+    (``make_mc_params`` pins ``rqmc_min_batches == rqmc_max_batches``).
+    """
+    s12 = _load_stage12()
+    routing = _routing_with_mc(s12, "heston", paths_per_batch=4096, batches=8)
+    cfg = s12.make_engine_config("heston", routing=routing)
+    assert cfg.mc_params.num_paths == 4096
+    assert cfg.mc_params.rqmc_max_batches == 8
+
+
+def test_localvol_gets_no_heston_only_options():
+    """scheme/substeps are null for localvol; passing None would TypeError
+    inside LocalVolSnowballMCEngine(**options)."""
+    s12 = _load_stage12()
+    routing = _routing_with_mc(
+        s12, "localvol", substeps_per_interval=None, scheme=None
+    )
+    opts = s12.make_engine_config("localvol", routing=routing).vol_model_engine_options
+    assert "scheme" not in opts
+    assert "substeps_per_interval" not in opts
+
+
+def test_a_pde_routed_variant_gets_no_mc_engine_options():
+    s12 = _load_stage12()
+    routing = _routing_with_mc(s12, "flat_bsm", route="pde")
+    cfg = s12.make_engine_config("flat_bsm", routing=routing)
+    assert cfg.vol_model_engine_options == {}
+
+
+def test_missing_mc_params_for_an_mc_route_fails_closed():
+    """Silently falling back to engine defaults is exactly the bug."""
+    s12 = _load_stage12()
+    routing = s12.GateRouting(
+        "p", None, {"heston": "mc"}, {"heston": {}}, mc_params={}
+    )
+    with pytest.raises(ValidationError):
+        s12.make_engine_config("heston", routing=routing)
+
+
+def test_parse_reads_mc_params_from_a_real_decision():
+    """Guards against the decision schema and the parser drifting apart."""
+    s12 = _load_stage12()
+    path = REPO / "output" / "pde_convergence_gate" / "gate_decision.json"
+    if not path.is_file():
+        pytest.skip("no gate decision in this checkout")
+    routing = s12.load_gate_routing(path)     # use the real parser's name
+    assert routing.mc_params["heston"]["scheme"] == "QUADEXP_M"
+    assert routing.mc_params["heston"]["substeps_per_interval"] == 4
