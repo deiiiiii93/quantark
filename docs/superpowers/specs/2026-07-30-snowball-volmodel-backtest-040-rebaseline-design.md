@@ -429,15 +429,45 @@ substantive findings — the delta criterion deciding `localvol`, the −0.471 a
 −0.338 contract Heston biases, the Feller localisation of the single PV failure
 — are untouched, because they belong to the control group.
 
-**`ts_bsm` discriminates less than the study design assumed.** The corrected
-surfaces differ, but not by much: at 2026-07-15 the ATM term structure reads
-0.279979 at T=0.5 and 0.264476 at both T=1.0 and T=3.0 — identical to
-`flat_bsm`'s single flat value. CSI 1000 options are short-dated and the
-artifact clamps flat total variance beyond the last listed expiry, so a
-three-year snowball reads a term structure the market barely prices. `ts_bsm`
-is a legitimate variant now, but it tests a feature this data mostly lacks;
-interpret a small `ts_bsm` − `flat_bsm` difference as thin market structure,
-not as engine agreement.
+**`ts_bsm` vs `flat_bsm` is a large effect — corrected 2026-08-03.**
+
+*An earlier draft of this paragraph claimed the opposite: that `ts_bsm`
+"tests a feature this data mostly lacks" and that a small difference should be
+read as thin market structure. That was inferred from comparing vol LEVELS at
+T ≥ 1, where the two curves do coincide (§5.7), and wrongly generalised to
+pricing impact. Measured, the pricing impact is large.*
+
+Comparing the two variants' own PV and delta levels in the re-gate evidence —
+a variant-vs-variant comparison, not the gate's engine-vs-reference metric:
+
+| quantity | mean | max abs | n |
+|---|---|---|---|
+| PV diff, `full` (T≈3) | **−0.5403%** of notional | **1.3400%** | 8 |
+| PV diff, `decayed` (T≈1) | −0.0036% | 0.0171% | 7 |
+| delta diff | **−1.143 contracts** | **4.033** | 8, **all negative** |
+
+Against G2's tolerances (0.25% of notional, 0.5 contracts) that is **5.4×** on
+PV and **8.1×** on delta. The two variants are genuinely different products
+from a hedging standpoint.
+
+**Why, despite the curves agreeing above `max_listed_T`.** A snowball's value
+is dominated by early knock-out probability, not terminal vol. The first KO
+observation is at 0.25y and they are monthly thereafter, so ~9 of the 34
+observations fall inside the window where the curves differ — and those early
+observations carry the most probability mass of terminating the trade.
+`ts_bsm` sees up to 3.3 vol points *more* than `flat_bsm` across exactly that
+window (§5.7). The signs agree: higher near-term vol raises both early-KO and
+KI probability, `ts_bsm`'s PV is lower on 6 of 8 dates, and its delta is lower
+on 8 of 8.
+
+The `decayed` near-zeros are a property of that sample, not of maturity —
+those states sit at |PV| ≈ 0.1–0.45% of notional, close to deterministic,
+where no vol assumption moves much.
+
+**This is the study's signal-to-noise check, and it passes.** What the study
+measures between variants (1.34% of notional, 4.03 contracts) is 5–8× what its
+numerics can resolve (0.25%, 0.5 contracts). Had the ordering been reversed the
+design would be unsound.
 
 ---
 
