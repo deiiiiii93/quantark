@@ -771,19 +771,33 @@ def make_engine_config(
         # would TypeError inside the engine rather than falling back to its
         # default.
         #
-        # NOT "scheme": the decision records scheme="QUADEXP_M" as a
-        # human-readable label, but both QE engines FIX the scheme internally
-        # and expose it as the boolean martingale_correction --
-        # QESnowballMCEngine raises ValidationError if "scheme" reaches its
-        # kwargs (snowball_vol_mc_engines.py:516) and
-        # HestonSLVQESnowballMCEngine TypeErrors on it.  Stage 11's
-        # _make_mc_engine passes martingale_correction, so forwarding
-        # "scheme" here could not construct the gate's engine at all.
         mc_engine_options = {
             key: gated[key]
-            for key in ("martingale_correction", "substeps_per_interval")
+            for key in ("substeps_per_interval",)
             if gated.get(key) is not None
         }
+        # The QE scheme knob is ASYMMETRIC across the two Heston engines the
+        # replay factory builds, so it cannot be forwarded under one name:
+        #
+        #   heston     -> HestonSnowballMCEngine      takes scheme=
+        #   heston_slv -> HestonSLVQESnowballMCEngine takes martingale_correction=
+        #
+        # (engine_factory.py:253 and :277).  Passing the wrong one is not a
+        # silent no-op: HestonSnowballMCEngine TypeErrors on
+        # martingale_correction, and QESnowballMCEngine raises ValidationError
+        # if "scheme" reaches its kwargs.  Both spellings mean the same
+        # engine -- QESnowballMCEngine maps martingale_correction onto
+        # scheme=QUADEXP_M internally -- which is why stage 11's
+        # _make_mc_engine can pass martingale_correction to both and still be
+        # the configuration recorded here as scheme="QUADEXP_M".
+        if spec.vol_model == "heston":
+            if gated.get("scheme") is not None:
+                mc_engine_options["scheme"] = gated["scheme"]
+        elif spec.vol_model == "heston_slv":
+            if gated.get("martingale_correction") is not None:
+                mc_engine_options["martingale_correction"] = gated[
+                    "martingale_correction"
+                ]
 
     calibration = None
     if spec.uses_calibration():
