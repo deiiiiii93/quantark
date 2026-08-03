@@ -60,6 +60,22 @@ comparisons. `pin_critical_spots=True` additionally pins KO, KI, strike, spot, i
 price, and optional payoff/airbag levels as exact grid nodes; this is opt-in because
 forcing far-away nodes into a single-center grid can be less stable on coarse meshes.
 
+On the variance axis, concentrated Heston and Heston-SLV Snowball grids default to
+`v_grid_power=2.5`, i.e. `v_i = V_max * (i / (n_v - 1))**2.5`. This is the same
+power grading used by the Heston DCN PDE and resolves the near-zero variance layer
+that becomes important near the Feller boundary. `v_grid_power=0.0` retains the
+legacy concentrated variance mesh for explicit cross-checks. A uniform grid resolves
+to the ungraded setting automatically; an explicit positive power with
+`grid_style="uniform"` is rejected because it requires non-uniform stencils.
+
+Greek estimators are model-specific but share one market-sensitivity contract.
+Local Vol reads delta and gamma from its native one-solve PDE surface. The 2D Heston
+and Heston-SLV solvers use the default central spot bump; `BaseEngine.calculate_greeks`
+now resolves `create_bump_context` once and prices the base/up/down states through that
+context, so every finite-difference price uses the base-market spatial layout. Model
+parameters, Local Vol surfaces, and SLV leverage surfaces remain frozen by the engine
+factory during these spot bumps.
+
 ## Limitations
 
 - Heston/SLV Snowball PDE event stats use delegated one-dimensional event attribution

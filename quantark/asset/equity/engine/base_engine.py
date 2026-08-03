@@ -138,17 +138,24 @@ class BaseEngine(ABC):
             if bump_config.gamma_spot_bump is not None
             else spot_bump
         )
-        base_price = self.price(product, pricing_env)
+        # Resolve the numerical domain once at the base market. PDE engines use
+        # this hook to freeze their spatial layout so delta/gamma measure market
+        # sensitivity rather than a mixture of market and grid movement.
+        bump_engine = self.create_bump_context(product, pricing_env)
+        if bump_engine is None:
+            bump_engine = self
+
+        base_price = bump_engine.price(product, pricing_env)
         greeks = {"price": base_price}
 
         # Delta: dV/dS
         env_up = deepcopy(pricing_env)
         env_up.spot_quote.spot *= 1 + spot_bump
-        price_up = self.price(product, env_up)
+        price_up = bump_engine.price(product, env_up)
 
         env_down = deepcopy(pricing_env)
         env_down.spot_quote.spot *= 1 - spot_bump
-        price_down = self.price(product, env_down)
+        price_down = bump_engine.price(product, env_down)
 
         delta = (price_up - price_down) / (2 * pricing_env.spot * spot_bump)
         greeks["delta"] = delta
@@ -159,11 +166,11 @@ class BaseEngine(ABC):
         else:
             env_gup = deepcopy(pricing_env)
             env_gup.spot_quote.spot *= 1 + gamma_bump
-            gamma_up = self.price(product, env_gup)
+            gamma_up = bump_engine.price(product, env_gup)
 
             env_gdown = deepcopy(pricing_env)
             env_gdown.spot_quote.spot *= 1 - gamma_bump
-            gamma_down = self.price(product, env_gdown)
+            gamma_down = bump_engine.price(product, env_gdown)
         gamma = (gamma_up - 2 * base_price + gamma_down) / (
             pricing_env.spot * gamma_bump
         ) ** 2

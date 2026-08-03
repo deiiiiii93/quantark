@@ -211,18 +211,17 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
     """Shared 2-D (log-spot, variance) ADI machinery for the Snowball solvers.
 
     ``v0_boundary`` defaults to ``"degenerate_pde"``, diverging from the ADI
-    core's own ``"neumann"`` default.  Autocallables are calibrated to real
-    smiles, which routinely land Heston near or on the Feller boundary, and
-    that is exactly where the Neumann treatment of the ``v = 0`` edge breaks
-    down: measured against a QE-M MC reference at ``2*kappa*theta/sigma**2 ==
-    1.0``, Neumann priced −0.540% of notional off while the degenerate PDE
-    treatment held +0.156%.  Across ratios 1.0 → 6.6 the degenerate error stays
-    in +0.10 … +0.16% while Neumann swings; regime-insensitivity is what makes
-    it the right default here.  Neumann stays selectable for cross-checks.
+    core's own ``"neumann"`` default.  Concentrated grids additionally default
+    to the core's validated ``v = V_max * u**2.5`` variance grading. Real-smile
+    Heston fits routinely land near the Feller boundary, where both the limiting
+    PDE row and extra resolution near ``v = 0`` are required. ``v_grid_power=0``
+    remains an explicit legacy cross-check; uniform grids resolve to that
+    ungraded setting because power grading requires non-uniform stencils.
     """
 
     engine_type = EngineType.PDE
     _solver_name = "Heston2DSnowballPDESolver"
+    DEFAULT_V_GRID_POWER = 2.5
 
     def __init__(
         self,
@@ -236,6 +235,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         grid_focus: str = "auto",
         pin_critical_spots: bool = False,
         v0_boundary: str = "degenerate_pde",
+        v_grid_power: Optional[float] = None,
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
@@ -250,9 +250,36 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             raise ValidationError(
                 "grid_focus must be one of: auto, ko, ki, strike, spot"
             )
+        if grid_style not in {"uniform", "concentrated"}:
+            raise ValidationError(
+                "grid_style must be 'uniform' or 'concentrated'"
+            )
         if v0_boundary not in ("neumann", "degenerate_pde"):
             raise ValidationError(
                 "v0_boundary must be 'neumann' or 'degenerate_pde'"
+            )
+        if v_grid_power is None:
+            resolved_v_grid_power = (
+                self.DEFAULT_V_GRID_POWER if grid_style == "concentrated" else 0.0
+            )
+        else:
+            try:
+                resolved_v_grid_power = float(v_grid_power)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    "v_grid_power must be a finite value >= 1, or 0 to disable"
+                ) from exc
+        if (
+            not np.isfinite(resolved_v_grid_power)
+            or resolved_v_grid_power < 0.0
+            or 0.0 < resolved_v_grid_power < 1.0
+        ):
+            raise ValidationError(
+                "v_grid_power must be a finite value >= 1, or 0 to disable"
+            )
+        if grid_style == "uniform" and resolved_v_grid_power > 0.0:
+            raise ValidationError(
+                "v_grid_power requires grid_style='concentrated'"
             )
         self.model_params = model_params
         self.n_x = int(n_x)
@@ -263,6 +290,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         self.grid_focus = grid_focus
         self.pin_critical_spots = bool(pin_critical_spots)
         self.v0_boundary = str(v0_boundary)
+        self.v_grid_power = float(resolved_v_grid_power)
 
     def representative_vol(self, product, pricing_env) -> float:
         # sqrt(var_eff) with var_eff ported VERBATIM from the adi_core x-width
@@ -352,6 +380,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             eta=1.0,
             grid_style=self.grid_style,
             v0_boundary=self.v0_boundary,
+            v_grid_power=self.v_grid_power,
             barrier_concentrate=self._grid_concentration_spot(product, env),
             critical_spots=(
                 self._grid_critical_spots(product, env)
@@ -813,6 +842,7 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
             eta=self.eta,
             grid_style=self.grid_style,
             v0_boundary=self.v0_boundary,
+            v_grid_power=self.v_grid_power,
             barrier_concentrate=self._grid_concentration_spot(product, env),
             critical_spots=(
                 self._grid_critical_spots(product, env)

@@ -413,6 +413,130 @@ def test_heston_2d_bump_context_freezes_s_axis():
     assert np.isfinite(float(ctx.price(product, _env(s0=101.0))))
 
 
+def test_heston_2d_calculate_greeks_resolves_the_frozen_context(monkeypatch):
+    product = _snowball()
+    env = _env()
+    engine = HestonSnowballPDESolver(_heston(), n_x=48, n_v=18, n_t=16)
+    create_context = engine.create_bump_context
+    captured = {}
+
+    def capture_context(product_arg, env_arg):
+        context = create_context(product_arg, env_arg)
+        captured["context"] = context
+        return context
+
+    monkeypatch.setattr(engine, "create_bump_context", capture_context)
+
+    greeks = engine.calculate_greeks(product, env)
+
+    assert captured["context"]._frozen_x_layout is not None
+    assert np.isfinite(greeks["price"])
+    assert np.isfinite(greeks["delta"])
+    assert np.isfinite(greeks["gamma"])
+
+
+@pytest.mark.parametrize(
+    "make_engine",
+    [
+        pytest.param(
+            lambda **kwargs: HestonSnowballPDESolver(_heston(), **kwargs),
+            id="heston",
+        ),
+        pytest.param(
+            lambda **kwargs: HestonSLVSnowballPDESolver(
+                _heston(), _unit_leverage(), **kwargs
+            ),
+            id="heston_slv",
+        ),
+    ],
+)
+def test_snowball_heston_default_variance_grid_is_power_graded(make_engine):
+    engine = make_engine(n_x=48, n_v=18, n_t=16)
+
+    assert engine.v_grid_power == pytest.approx(2.5)
+    core = engine._make_core(_snowball(), _env(), 1.0)
+    expected = core.V_max * np.linspace(0.0, 1.0, core.N_V) ** 2.5
+
+    assert core._v_grid_power == pytest.approx(2.5)
+    assert core.V_grid == pytest.approx(expected)
+    assert np.diff(core.V_grid)[0] < np.diff(core.V_grid)[-1] / 10.0
+
+
+@pytest.mark.parametrize(
+    "make_engine",
+    [
+        pytest.param(
+            lambda **kwargs: HestonSnowballPDESolver(_heston(), **kwargs),
+            id="heston",
+        ),
+        pytest.param(
+            lambda **kwargs: HestonSLVSnowballPDESolver(
+                _heston(), _unit_leverage(), **kwargs
+            ),
+            id="heston_slv",
+        ),
+    ],
+)
+def test_snowball_heston_variance_grid_control_and_legacy_opt_out(make_engine):
+    legacy = make_engine(
+        n_x=48, n_v=18, n_t=16, grid_style="concentrated", v_grid_power=0.0
+    )
+    custom = make_engine(
+        n_x=48, n_v=18, n_t=16, grid_style="concentrated", v_grid_power=3.0
+    )
+    uniform = make_engine(n_x=48, n_v=18, n_t=16, grid_style="uniform")
+
+    assert legacy._make_core(_snowball(), _env(), 1.0)._v_grid_power == 0.0
+    assert custom._make_core(_snowball(), _env(), 1.0)._v_grid_power == 3.0
+    assert uniform.v_grid_power == 0.0
+    assert uniform._make_core(_snowball(), _env(), 1.0)._v_grid_power == 0.0
+
+
+@pytest.mark.parametrize("bad_power", [-1.0, 0.5, float("nan"), float("inf")])
+def test_snowball_heston_variance_grid_power_is_validated(bad_power):
+    with pytest.raises(ValidationError, match="v_grid_power"):
+        HestonSnowballPDESolver(_heston(), v_grid_power=bad_power)
+
+    with pytest.raises(ValidationError, match="v_grid_power"):
+        HestonSLVSnowballPDESolver(
+            _heston(), _unit_leverage(), v_grid_power=bad_power
+        )
+
+
+def test_snowball_heston_uniform_grid_rejects_explicit_power_grading():
+    with pytest.raises(ValidationError, match="v_grid_power"):
+        HestonSnowballPDESolver(
+            _heston(), grid_style="uniform", v_grid_power=2.5
+        )
+
+
+@pytest.mark.parametrize(
+    "make_engine",
+    [
+        pytest.param(
+            lambda: HestonSnowballPDESolver(_heston(), v_grid_power=3.0),
+            id="heston",
+        ),
+        pytest.param(
+            lambda: HestonSLVSnowballPDESolver(
+                _heston(), _unit_leverage(), v_grid_power=3.0
+            ),
+            id="heston_slv",
+        ),
+    ],
+)
+def test_snowball_heston_session_clone_preserves_variance_grid_power(make_engine):
+    from quantark.asset.equity.engine.pde.pde_execution_adapters import (
+        Heston2DAutocallableSessionAdapter,
+    )
+
+    clone = Heston2DAutocallableSessionAdapter()._clone_engine(make_engine())
+
+    assert clone.v_grid_power == pytest.approx(3.0)
+    core = clone._make_core(_snowball(), _env(), 1.0)
+    assert core._v_grid_power == pytest.approx(3.0)
+
+
 def test_snowball_heston_pde_auto_grid_focuses_ki():
     product = _principal_excluded_snowball()
     env = _env()

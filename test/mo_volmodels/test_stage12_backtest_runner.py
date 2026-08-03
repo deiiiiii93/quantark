@@ -245,7 +245,15 @@ def _routing(**overrides):
         decision_path="test",
         evidence_sha256="deadbeef",
         routes=routes,
-        pde_params={"heston": {"n_x": 200, "n_v": 60, "n_t": 1202, "scheme": "cs"}},
+        pde_params={
+            "heston": {
+                "n_x": 200,
+                "n_v": 60,
+                "n_t": 1202,
+                "v_grid_power": 2.5,
+                "scheme": "cs",
+            }
+        },
         mc_params={"heston": gated_mc, "heston_slv": gated_mc},
     )
 
@@ -296,7 +304,8 @@ def test_pde_grid_options_only_flow_on_the_pde_route():
         "n_x": 200,
         "n_v": 60,
         "n_t": 1202,
-    }, "only integer grid dimensions are forwarded to the solver"
+        "v_grid_power": 2.5,
+    }, "only supported numerical grid controls are forwarded to the solver"
 
 
 def test_load_gate_routing_is_actionable_when_absent(tmp_path):

@@ -106,6 +106,17 @@ def test_every_production_family_ladders_monotonically():
             assert [g["n_x"] for g in grids] == sorted(g["n_x"] for g in grids), variant
 
 
+def test_adi_production_params_record_the_variance_grid_default():
+    gate = _load_gate()
+    grid = gate._production_grid("heston", "medium", 3.0, False)
+
+    block = gate._production_params_block(gate.GATE_PAIRS["heston"], grid)
+
+    assert block["v_grid_power"] == pytest.approx(
+        gate.HestonSnowballPDESolver.DEFAULT_V_GRID_POWER
+    )
+
+
 # ---------------------------------------------------------------------------
 # Task 5: bias detection within maturity buckets (spec §5.2)
 # ---------------------------------------------------------------------------
@@ -176,6 +187,43 @@ def test_disagreement_under_half_a_contract_passes():
     q = gate.delta_quantum_per_unit(6733.97)
     assert gate.delta_cell_passed(0.49 * q, 6733.97) is True
     assert gate.delta_cell_passed(0.51 * q, 6733.97) is False
+
+
+def test_pde_delta_repricing_uses_the_engine_bump_context():
+    gate = _load_gate()
+
+    class FrozenContext:
+        def __init__(self):
+            self.spots = []
+
+        def price(self, product, env):
+            spot = float(env.spot_quote.spot)
+            self.spots.append(spot)
+            return spot * spot
+
+    class GridMovingEngine:
+        def __init__(self):
+            self.context_calls = 0
+            self.context = FrozenContext()
+
+        def create_bump_context(self, product, env):
+            self.context_calls += 1
+            return self.context
+
+        def price(self, product, env):
+            raise AssertionError("unfrozen engine must not price finite-difference bumps")
+
+    env = types.SimpleNamespace(
+        spot=100.0,
+        spot_quote=types.SimpleNamespace(spot=100.0),
+    )
+    engine = GridMovingEngine()
+
+    delta = gate._bumped_pde_delta(engine, object(), env, bump=0.01)
+
+    assert delta == pytest.approx(200.0)
+    assert engine.context_calls == 1
+    assert engine.context.spots == pytest.approx([101.0, 99.0])
 
 
 def test_small_one_sided_delta_bias_is_caught_even_though_each_cell_passes():
