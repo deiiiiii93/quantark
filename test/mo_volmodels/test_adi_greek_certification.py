@@ -185,7 +185,12 @@ def test_production_decision_enforces_variant_sampling_profile():
         for name in module.REQUIRED_ANCHOR_NAMES
     ]
     rows = [
-        _passing_cell(module, "heston_slv", case_name=case.name)
+        _passing_cell(
+            module,
+            "heston_slv",
+            batches=module.PRODUCTION_SLV_BATCHES,
+            case_name=case.name,
+        )
         for case in module.certification_cases(quick=False)
     ]
     sampling = {
@@ -228,13 +233,19 @@ def test_production_decision_enforces_heston_bridge_sampling_profile():
         for name in module.REQUIRED_ANCHOR_NAMES
     ]
     rows = [
-        _passing_cell(module, "heston", case_name=case.name)
+        _passing_cell(
+            module,
+            "heston",
+            batches=module.PRODUCTION_HESTON_BATCHES_BY_CASE[case.name],
+            case_name=case.name,
+        )
         for case in module.certification_cases(quick=False)
     ]
     sampling = {
         "heston": {
             "paths_per_batch": module.PRODUCTION_HESTON_PATHS_PER_BATCH,
             "batches": module.PRODUCTION_HESTON_BATCHES,
+            "batches_by_case": module.PRODUCTION_HESTON_BATCHES_BY_CASE,
         }
     }
 
@@ -261,6 +272,78 @@ def test_production_decision_enforces_heston_bridge_sampling_profile():
     )
 
     assert admitted["heston"]["route"] == "pde"
+    assert stale["heston"]["route"] == "excluded_greek_unresolved"
+    assert stale["heston"]["sampling_complete"] is False
+
+
+def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
+    module = _load()
+    anchors = [
+        {"name": name, "status": "PASS"}
+        for name in module.REQUIRED_ANCHOR_NAMES
+    ]
+    rows = [
+        _passing_cell(
+            module,
+            "heston",
+            batches=module.PRODUCTION_HESTON_BATCHES_BY_CASE[case.name],
+            case_name=case.name,
+        )
+        for case in module.certification_cases(quick=False)
+    ]
+    near_ki = next(row for row in rows if row["case"]["name"] == "near_ki")
+    common = module.PRODUCTION_HESTON_BATCHES
+    near_ki["batch_difference_contracts"]["delta"][common:] = [
+        100.0
+    ] * (module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common)
+    near_ki["certifications"]["delta"][
+        "reference_substep_batch_contracts"
+    ][common:] = [100.0] * (
+        module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common
+    )
+    sampling = {
+        "heston": {
+            "paths_per_batch": module.PRODUCTION_HESTON_PATHS_PER_BATCH,
+            "batches": common,
+            "batches_by_case": module.PRODUCTION_HESTON_BATCHES_BY_CASE,
+        }
+    }
+
+    admitted = module.make_decisions(
+        rows,
+        anchors,
+        quick=False,
+        variants=["heston"],
+        sampling_by_variant=sampling,
+        heston_spot_bridge_profile_by_case=(
+            module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
+    )
+    stale_sampling = {
+        "heston": {
+            **sampling["heston"],
+            "batches_by_case": {
+                **module.PRODUCTION_HESTON_BATCHES_BY_CASE,
+                "near_ki": common,
+            },
+        }
+    }
+    stale = module.make_decisions(
+        rows,
+        anchors,
+        quick=False,
+        variants=["heston"],
+        sampling_by_variant=stale_sampling,
+        heston_spot_bridge_profile_by_case=(
+            module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
+    )
+
+    assert admitted["heston"]["route"] == "pde"
+    assert admitted["heston"]["aggregate_common_scrambles"] == common
+    assert admitted["heston"]["delta_bias"][
+        "aggregate_common_scrambles"
+    ] == common
     assert stale["heston"]["route"] == "excluded_greek_unresolved"
     assert stale["heston"]["sampling_complete"] is False
 

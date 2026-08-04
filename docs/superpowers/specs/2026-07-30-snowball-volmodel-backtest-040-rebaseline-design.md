@@ -776,13 +776,18 @@ path. SLV uses the corresponding exact conditional expectation as a control;
 the closer control freezes the leverage path at the factor-zero proxy while the
 target retains fully state-dependent leverage, so the estimator remains
 unbiased. Target/fine QE draws are projections of one finest Sobol set. The
-production profile is 8,192 paths × 16 scrambles for Heston and 1,024 paths ×
-128 scrambles for SLV. SLV crosses four randomized terminal-factor strata and
+production profile is 8,192 paths × 256 common scrambles for Heston, with the
+near-KI cell alone extended to 2,048 scrambles, and 1,024 paths × 128 scrambles
+for SLV. Near KI, Heston also crosses four inner points over the eight leading
+residual Brownian-bridge coordinates after integrating the terminal factor.
+Only the first 256 common scramble IDs enter the cross-regime signed-bias gate.
+SLV crosses four randomized terminal-factor strata and
 their antithetic shifts with eight randomized midpoint Brownian-bridge strata;
 variance and QE-branch streams are Brownian-bridge ordered too. Equal-cost
 ordinary/full pilots selected this 8×8 allocation over terminal-only and 16×4
-alternatives. The sampling floors and full conditional profile are serialized
-and rechecked by Stage 12 before a `pde` route is accepted.
+alternatives. The sampling profiles, including the exact Heston case map, and
+the full conditional profile are serialized and rechecked by Stage 12 before a
+`pde` route is accepted.
 
 The equivalence interval is `(PDE-fine-reference) ± fine-reference Student-t
 uncertainty ± paired target-to-fine substep-bias upper bound ± separate PDE

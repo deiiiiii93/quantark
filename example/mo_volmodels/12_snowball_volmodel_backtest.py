@@ -111,7 +111,7 @@ DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
     / "output/adi_greek_certification/adi_greek_certification_decision.json"
 )
-ADI_GREEK_DECISION_SCHEMA_VERSION = 7
+ADI_GREEK_DECISION_SCHEMA_VERSION = 8
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
 ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
@@ -519,6 +519,18 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
                 f"ADI Greek decision entry {variant!r} admits PDE on incomplete evidence"
             )
         if route == "pde":
+            expected_common_scrambles = (
+                certification.PRODUCTION_HESTON_BATCHES
+                if variant == "heston"
+                else certification.PRODUCTION_SLV_BATCHES
+            )
+            if int(row.get("aggregate_common_scrambles", 0)) != (
+                expected_common_scrambles
+            ):
+                raise ValidationError(
+                    f"ADI Greek decision entry {variant!r} has an invalid "
+                    "aggregate common-scramble count"
+                )
             sampling = run_configuration.get("sampling_by_variant", {}).get(
                 variant, {}
             )
@@ -527,15 +539,24 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
                 if variant == "heston"
                 else certification.PRODUCTION_SLV_PATHS_PER_BATCH
             )
-            minimum_batches = (
-                certification.PRODUCTION_HESTON_BATCHES
-                if variant == "heston"
-                else certification.PRODUCTION_SLV_BATCHES
-            )
-            if (
-                int(sampling.get("paths_per_batch", 0)) < minimum_paths
-                or int(sampling.get("batches", 0)) < minimum_batches
+            if int(sampling.get("paths_per_batch", 0)) < minimum_paths:
+                raise ValidationError(
+                    f"ADI Greek decision entry {variant!r} uses insufficient "
+                    "production sampling"
+                )
+            if variant == "heston" and (
+                int(sampling.get("batches", 0))
+                != certification.PRODUCTION_HESTON_BATCHES
+                or sampling.get("batches_by_case")
+                != certification.PRODUCTION_HESTON_BATCHES_BY_CASE
             ):
+                raise ValidationError(
+                    "ADI Greek decision entry 'heston' uses a stale "
+                    "case-specific batch profile"
+                )
+            if variant == "heston_slv" and int(
+                sampling.get("batches", 0)
+            ) < certification.PRODUCTION_SLV_BATCHES:
                 raise ValidationError(
                     f"ADI Greek decision entry {variant!r} uses insufficient "
                     "production sampling"

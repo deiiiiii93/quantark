@@ -115,14 +115,17 @@ neutral under each model:
 
 Stage 16 answers a different question: whether the deterministic 2-D ADI
 central-bump delta and gamma are accurate enough to drive the study's daily hedge.
-The default run uses 8,192 paths × 16 scrambles for Heston and 1,024 paths ×
-128 scrambles for SLV, with a coupled QE-M 4→8 substep reference ladder. Heston
-integrates the independent terminal spot factor exactly. SLV uses an unbiased
+The default run uses 8,192 paths × 256 common scrambles for Heston, extending
+the near-KI cell alone to 2,048 scrambles, and 1,024 paths × 128 scrambles for
+SLV, with a coupled QE-M 4→8 substep reference ladder. Heston integrates the
+independent terminal spot factor exactly; near KI it also stratifies four inner
+points across the eight leading residual bridge coordinates. Only the first 256
+common scramble IDs enter the cross-regime signed-bias gate. SLV uses an unbiased
 path-frozen-leverage affine control, four terminal strata plus their antithetic
 shifts, and eight strata on the midpoint Brownian-bridge factor. The variance and
 QE-branch Sobol streams are Brownian-bridge ordered as well. These production
-sampling floors and the full conditional profile are checked again by Stage 12;
-a smaller or stale profile cannot admit PDE routing. The fine-reference and substep
+sampling profiles, including the exact Heston case map, are checked again by
+Stage 12; a smaller or stale profile cannot admit PDE routing. The fine-reference and substep
 components each use 97.5% intervals, preserving at least 95% simultaneous
 stochastic coverage. The 1% spot bump is the hedge exposure being certified;
 smaller bumps are a semantic diagnostic rather than a numerical-error term. It writes

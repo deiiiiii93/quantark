@@ -83,11 +83,11 @@ from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-SCHEMA_VERSION = 7
-# The 20260802-20260804 scrambles were used only for estimator-design pilots. Production
-# evidence uses a held-out scramble family so inner-allocation selection cannot
-# bias the reported equivalence intervals.
-SEED = 20260805
+SCHEMA_VERSION = 8
+# The 20260802-20260804 scrambles selected the estimator design, and 20260805
+# exposed the need for the near-KI batch extension. Production evidence uses a
+# fresh held-out scramble family so neither choice can bias its intervals.
+SEED = 20260806
 CONFIDENCE = 0.95
 # Two stochastic components enter each verdict: the fine QE-M confidence
 # interval and the target-to-fine substep-bias upper bound. Bonferroni at
@@ -134,6 +134,20 @@ HESTON_SPOT_BRIDGE_PROFILE_BY_CASE = {
 }
 PRODUCTION_HESTON_PATHS_PER_BATCH = 8192
 PRODUCTION_HESTON_BATCHES = 256
+PRODUCTION_HESTON_BATCHES_BY_CASE = {
+    "ordinary_full": PRODUCTION_HESTON_BATCHES,
+    "ordinary_decayed": PRODUCTION_HESTON_BATCHES,
+    "near_ko": PRODUCTION_HESTON_BATCHES,
+    # Near KI is a discontinuity-dominated gamma regime.  The 256-scramble
+    # held-out pilot passed every deterministic refinement gate but left the
+    # paired target-to-fine QE-M bias interval inconclusive.  Keep the first
+    # 256 scramble ids common with every other regime for the signed-bias gate,
+    # then extend this cell alone until its reference interval is decisive.
+    "near_ki": 2048,
+    "low_feller": PRODUCTION_HESTON_BATCHES,
+    "sigma_collapse": PRODUCTION_HESTON_BATCHES,
+    "near_expiry": PRODUCTION_HESTON_BATCHES,
+}
 PRODUCTION_SLV_PATHS_PER_BATCH = 1024
 PRODUCTION_SLV_BATCHES = 128
 PRODUCTION_RQMC_BATCH_WORKERS = 4
@@ -1537,6 +1551,27 @@ def _combined_status(statuses: Iterable[str]) -> str:
     return EquivalenceStatus.INCONCLUSIVE.value
 
 
+def _sampling_batches_for_case(
+    sampling: dict, variant: str, case_name: str
+) -> int:
+    """Resolve the declared scramble count for one regime cell."""
+    if variant == "heston":
+        batches_by_case = sampling.get("batches_by_case")
+        if isinstance(batches_by_case, dict) and case_name in batches_by_case:
+            return int(batches_by_case[case_name])
+    return int(sampling.get("batches", 0))
+
+
+def _normalized_batches_by_case(sampling: dict) -> dict[str, int]:
+    batches_by_case = sampling.get("batches_by_case")
+    if not isinstance(batches_by_case, dict):
+        return {}
+    try:
+        return {str(name): int(value) for name, value in batches_by_case.items()}
+    except (TypeError, ValueError):
+        return {}
+
+
 def make_decisions(
     rows: Sequence[dict],
     anchors: Sequence[dict],
@@ -1558,13 +1593,15 @@ def make_decisions(
         variant_rows = [row for row in rows if row["variant"] == variant]
         present_cases = {row.get("case", {}).get("name") for row in variant_rows}
         missing_cases = sorted(required_cases - present_cases)
-        batch_counts = {
-            len(row.get("batch_difference_contracts", {}).get("delta", []))
+        batch_counts_by_case = {
+            str(row.get("case", {}).get("name")): len(
+                row.get("batch_difference_contracts", {}).get("delta", [])
+            )
             for row in variant_rows
         }
-        sampling_complete = (
-            len(batch_counts) == 1
-            and next(iter(batch_counts), 0) >= MIN_PRODUCTION_RQMC_BATCHES
+        common_batches = min(batch_counts_by_case.values(), default=0)
+        sampling_complete = bool(variant_rows) and (
+            common_batches >= MIN_PRODUCTION_RQMC_BATCHES
         )
         if sampling_by_variant is not None:
             sampling = sampling_by_variant.get(variant, {})
@@ -1573,19 +1610,26 @@ def make_decisions(
                 if variant == "heston"
                 else PRODUCTION_SLV_PATHS_PER_BATCH
             )
-            minimum_batches = (
-                PRODUCTION_HESTON_BATCHES
-                if variant == "heston"
-                else PRODUCTION_SLV_BATCHES
-            )
-            sampling_complete = sampling_complete and (
-                int(sampling.get("paths_per_batch", 0)) >= minimum_paths
-                and int(sampling.get("batches", 0)) >= minimum_batches
-            )
+            sampling_complete = sampling_complete and int(
+                sampling.get("paths_per_batch", 0)
+            ) >= minimum_paths
             if variant == "heston":
                 declared_profile = heston_spot_bridge_profile_by_case or {}
                 sampling_complete = sampling_complete and (
-                    declared_profile == HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+                    int(sampling.get("batches", 0))
+                    == PRODUCTION_HESTON_BATCHES
+                    and _normalized_batches_by_case(sampling)
+                    == PRODUCTION_HESTON_BATCHES_BY_CASE
+                    and all(
+                        actual_batches
+                        == _sampling_batches_for_case(
+                            sampling, variant, case_name
+                        )
+                        for case_name, actual_batches in (
+                            batch_counts_by_case.items()
+                        )
+                    )
+                    and declared_profile == HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
                     and all(
                         {
                             "strata": int(
@@ -1607,7 +1651,13 @@ def make_decisions(
                 )
             else:
                 sampling_complete = sampling_complete and (
-                    int(slv_spot_strata) == SLV_SPOT_STRATA
+                    int(sampling.get("batches", 0))
+                    >= PRODUCTION_SLV_BATCHES
+                    and all(
+                        actual_batches == int(sampling.get("batches", 0))
+                        for actual_batches in batch_counts_by_case.values()
+                    )
+                    and int(slv_spot_strata) == SLV_SPOT_STRATA
                     and bool(slv_spot_antithetic) == SLV_SPOT_ANTITHETIC
                     and int(slv_spot_bridge_strata)
                     == SLV_SPOT_BRIDGE_STRATA
@@ -1617,7 +1667,10 @@ def make_decisions(
         )
         cell_status = _combined_status(row["status"] for row in variant_rows)
         delta_batches = np.asarray(
-            [row["batch_difference_contracts"]["delta"] for row in variant_rows],
+            [
+                row["batch_difference_contracts"]["delta"][:common_batches]
+                for row in variant_rows
+            ],
             dtype=float,
         )
         if delta_batches.ndim == 2 and delta_batches.shape[0] > 0:
@@ -1644,7 +1697,7 @@ def make_decisions(
                 [
                     row["certifications"]["delta"][
                         "reference_substep_batch_contracts"
-                    ]
+                    ][:common_batches]
                     for row in variant_rows
                 ],
                 dtype=float,
@@ -1682,6 +1735,7 @@ def make_decisions(
                 "absolute_bias_upper_bound": reference_bias_envelope,
                 "component_confidence": STOCHASTIC_COMPONENT_CONFIDENCE,
             }
+            bias["aggregate_common_scrambles"] = common_batches
         else:
             bias = certify_equivalence(
                 float("nan"),
@@ -1710,8 +1764,9 @@ def make_decisions(
                 reasons.append(
                     "production sampling requires at least "
                     f"{PRODUCTION_HESTON_PATHS_PER_BATCH} paths/batch × "
-                    f"{PRODUCTION_HESTON_BATCHES} scrambles with the declared "
-                    "case-specific bridge profile"
+                    f"{PRODUCTION_HESTON_BATCHES} common scrambles, "
+                    f"near_ki={PRODUCTION_HESTON_BATCHES_BY_CASE['near_ki']}, "
+                    "and the declared case-specific bridge profile"
                 )
             else:
                 reasons.append(
@@ -1736,6 +1791,7 @@ def make_decisions(
             "missing_anchors": missing_anchors,
             "missing_cases": missing_cases,
             "sampling_complete": sampling_complete,
+            "aggregate_common_scrambles": common_batches,
             "delta_bias": bias,
             "reason": "; ".join(reasons) if reasons else "all certification gates pass",
         }
@@ -1752,11 +1808,27 @@ def render_markdown(payload: dict) -> str:
 
     sampling = payload.get("sampling_by_variant")
     if sampling:
-        sampling_text = "; ".join(
-            f"{variant}={values['paths_per_batch']} paths/batch × "
-            f"{values['batches']} scrambles"
-            for variant, values in sampling.items()
-        )
+        sampling_parts = []
+        for variant, values in sampling.items():
+            part = (
+                f"{variant}={values['paths_per_batch']} paths/batch × "
+                f"{values['batches']} common scrambles"
+            )
+            batches_by_case = values.get("batches_by_case")
+            if isinstance(batches_by_case, dict):
+                extensions = {
+                    name: int(batches)
+                    for name, batches in batches_by_case.items()
+                    if int(batches) != int(values["batches"])
+                }
+                if extensions:
+                    detail = ", ".join(
+                        f"{name}={batches}"
+                        for name, batches in extensions.items()
+                    )
+                    part += f" ({detail})"
+            sampling_parts.append(part)
+        sampling_text = "; ".join(sampling_parts)
     else:
         sampling_text = (
             f"{payload['paths_per_batch']} paths/batch × "
@@ -2026,6 +2098,18 @@ def validate_payload(payload: dict) -> None:
             raise ValueError(f"{variant}: quick evidence cannot admit PDE")
         if route == "pde" and decision.get("evidence_complete") is not True:
             raise ValueError(f"{variant}: incomplete evidence cannot admit PDE")
+        if route == "pde":
+            expected_common = (
+                PRODUCTION_HESTON_BATCHES
+                if variant == "heston"
+                else PRODUCTION_SLV_BATCHES
+            )
+            if int(decision.get("aggregate_common_scrambles", 0)) != (
+                expected_common
+            ):
+                raise ValueError(
+                    f"{variant}: invalid aggregate common-scramble count"
+                )
 
     for key in ("implementation_sha256", "run_configuration_sha256"):
         value = payload.get(key)
@@ -2080,19 +2164,15 @@ def validate_payload(payload: dict) -> None:
                 if variant == "heston"
                 else PRODUCTION_SLV_PATHS_PER_BATCH
             )
-            minimum_batches = (
-                PRODUCTION_HESTON_BATCHES
-                if variant == "heston"
-                else PRODUCTION_SLV_BATCHES
-            )
-            if (
-                int(sampling["paths_per_batch"]) < minimum_paths
-                or int(sampling["batches"]) < minimum_batches
-            ):
+            if int(sampling["paths_per_batch"]) < minimum_paths:
                 raise ValueError(
                     f"{variant}: insufficient production sampling for PDE admission"
                 )
             if variant == "heston_slv":
+                if int(sampling["batches"]) < PRODUCTION_SLV_BATCHES:
+                    raise ValueError(
+                        f"{variant}: insufficient production sampling for PDE admission"
+                    )
                 policy = payload.get("policy", {})
                 if (
                     int(policy.get("slv_spot_strata", 0))
@@ -2105,15 +2185,24 @@ def validate_payload(payload: dict) -> None:
                     raise ValueError(
                         "heston_slv: stale conditional sampling profile"
                     )
-            elif payload.get("policy", {}).get(
-                "heston_spot_bridge_profile_by_case"
-            ) != HESTON_SPOT_BRIDGE_PROFILE_BY_CASE:
-                raise ValueError("heston: stale conditional sampling profile")
+            else:
+                if (
+                    int(sampling["batches"]) != PRODUCTION_HESTON_BATCHES
+                    or _normalized_batches_by_case(sampling)
+                    != PRODUCTION_HESTON_BATCHES_BY_CASE
+                ):
+                    raise ValueError("heston: stale case-specific batch profile")
+                if payload.get("policy", {}).get(
+                    "heston_spot_bridge_profile_by_case"
+                ) != HESTON_SPOT_BRIDGE_PROFILE_BY_CASE:
+                    raise ValueError("heston: stale conditional sampling profile")
     for cell in payload.get("cells", []):
         variant = cell["variant"]
-        expected_batches = int(sampling_by_variant[variant]["batches"])
+        case_name = str(cell.get("case", {}).get("name"))
+        expected_batches = _sampling_batches_for_case(
+            sampling_by_variant[variant], variant, case_name
+        )
         if variant == "heston":
-            case_name = cell.get("case", {}).get("name")
             declared_profile = run_configuration.get(
                 "heston_spot_bridge_profile_by_case", {}
             ).get(case_name, {})
@@ -2510,6 +2599,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ),
         },
     }
+    heston_batches_overridden = (
+        common_batches is not None or args.heston_batches is not None
+    )
+    if not args.quick and not heston_batches_overridden:
+        heston_batches_by_case = dict(PRODUCTION_HESTON_BATCHES_BY_CASE)
+    else:
+        heston_batches_by_case = {
+            case_name: int(sampling_by_variant["heston"]["batches"])
+            for case_name in PRODUCTION_HESTON_BATCHES_BY_CASE
+        }
+    sampling_by_variant["heston"]["batches_by_case"] = (
+        heston_batches_by_case
+    )
     slv_spot_strata = int(
         (1 if args.quick else SLV_SPOT_STRATA)
         if args.slv_spot_strata is None
@@ -2539,6 +2641,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if paths_per_batch & (paths_per_batch - 1):
             raise ValueError(
                 f"{variant}: Sobol paths-per-batch must be a power of two"
+            )
+        if variant == "heston" and any(
+            int(batches) < 2
+            for batches in sampling["batches_by_case"].values()
+        ):
+            raise ValueError(
+                "heston: every case-specific batch count must be >= 2"
             )
     for name, value in (
         ("heston-spot-bridge-strata", args.heston_spot_bridge_strata),
@@ -2679,7 +2788,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     case,
                     quick=args.quick,
                     paths_per_batch=sampling["paths_per_batch"],
-                    batches=sampling["batches"],
+                    batches=_sampling_batches_for_case(
+                        sampling, variant, case.name
+                    ),
                     seed=args.seed,
                     hedge_inception_spot=args.hedge_inception_spot,
                     heston_spot_bridge_strata=heston_bridge_profile["strata"],

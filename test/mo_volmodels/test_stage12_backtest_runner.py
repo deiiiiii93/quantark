@@ -353,6 +353,9 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
             "heston": {
                 "paths_per_batch": certification.PRODUCTION_HESTON_PATHS_PER_BATCH,
                 "batches": certification.PRODUCTION_HESTON_BATCHES,
+                "batches_by_case": (
+                    certification.PRODUCTION_HESTON_BATCHES_BY_CASE
+                ),
             },
             "heston_slv": {
                 "paths_per_batch": certification.PRODUCTION_SLV_PATHS_PER_BATCH,
@@ -382,6 +385,11 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
                 "route": route,
                 "reason": f"{variant} reason",
                 "evidence_complete": route == "pde",
+                "aggregate_common_scrambles": (
+                    certification.PRODUCTION_HESTON_BATCHES
+                    if variant == "heston"
+                    else certification.PRODUCTION_SLV_BATCHES
+                ),
             }
             for variant, route in routes.items()
         },
@@ -413,6 +421,25 @@ def test_adi_greek_routing_rejects_stale_slv_sampling_profile(tmp_path):
     _reseal_adi_greek_decision(path)
 
     with pytest.raises(ValidationError, match="stale conditional sampling"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_routing_rejects_stale_heston_batch_profile(tmp_path):
+    path = _write_adi_greek_decision(
+        tmp_path,
+        routes={"heston": "pde"},
+    )
+    payload = json.loads(path.read_text())
+    payload["run_configuration"]["sampling_by_variant"]["heston"][
+        "batches_by_case"
+    ]["near_ki"] = s12.stage16().PRODUCTION_HESTON_BATCHES
+    payload["run_configuration_sha256"] = s12.stage16()._canonical_sha256(
+        payload["run_configuration"]
+    )
+    path.write_text(json.dumps(payload))
+    _reseal_adi_greek_decision(path)
+
+    with pytest.raises(ValidationError, match="stale case-specific batch"):
         s12.load_adi_greek_routing(path)
 
 
