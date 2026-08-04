@@ -73,6 +73,107 @@ def _pin_grid_targets(grid: np.ndarray, targets: list[float]) -> np.ndarray:
     return pinned
 
 
+def _path_focused_variance_grid(
+    *,
+    v_max: float,
+    theta: float,
+    v0: float,
+    kappa: float,
+    sigma: float,
+    maturity: float,
+    points: int,
+) -> np.ndarray:
+    """Resolve a variance mesh around the reachable CIR characteristic tube.
+
+    Sigma-collapse is a transport problem: almost all probability travels
+    from ``v0`` toward ``theta`` while the conventional ``[0, V_max]`` mesh
+    spends most of its nodes in an unreachable upper tail. Allocate 85% of
+    the intervals to that deterministic path plus a four-standard-deviation
+    CIR tube, retain explicit lower/upper tail coverage, and pin both model
+    states exactly. This preserves the full PDE domain while making a
+    first-order monotone drift stencil useful at production-sized ``n_v``.
+    """
+
+    points = int(points)
+    if points < 4:
+        raise ValidationError("path-focused variance grid needs at least 4 points")
+    v_max = float(v_max)
+    theta = float(np.clip(theta, 0.0, v_max))
+    v0 = float(np.clip(v0, 0.0, v_max))
+    maturity = max(float(maturity), 0.0)
+    kappa = max(float(kappa), 0.0)
+    sigma = abs(float(sigma))
+
+    state_lo, state_hi = sorted((theta, v0))
+    probe_times = np.asarray(
+        [0.25 * maturity, 0.5 * maturity, maturity], dtype=float
+    )
+    if sigma == 0.0 or maturity == 0.0:
+        cir_std = 0.0
+    elif kappa > 1e-12:
+        exp_kt = np.exp(-kappa * probe_times)
+        one_minus = -np.expm1(-kappa * probe_times)
+        variances = (
+            sigma * sigma * v0 * exp_kt * one_minus / kappa
+            + theta * sigma * sigma * one_minus * one_minus / (2.0 * kappa)
+        )
+        cir_std = float(np.sqrt(max(float(np.max(variances)), 0.0)))
+    else:
+        cir_std = sigma * np.sqrt(max(v0, theta, 1e-16) * maturity)
+
+    state_span = state_hi - state_lo
+    padding = max(
+        4.0 * cir_std,
+        0.05 * state_span,
+        0.005 * v_max,
+    )
+    focus_lo = max(0.0, state_lo - padding)
+    focus_hi = min(v_max, state_hi + padding)
+    if focus_hi - focus_lo <= 1e-14 * max(v_max, 1.0):
+        focus_lo = max(0.0, state_lo - 0.01 * v_max)
+        focus_hi = min(v_max, state_hi + 0.01 * v_max)
+
+    total_gaps = points - 1
+    low_active = focus_lo > 0.0
+    high_active = focus_hi < v_max
+    tail_count = int(low_active) + int(high_active)
+    minimum_tail_gaps = 2
+    focus_gaps = int(round(0.85 * total_gaps))
+    focus_gaps = max(2, focus_gaps)
+    focus_gaps = min(
+        focus_gaps,
+        total_gaps - minimum_tail_gaps * tail_count,
+    )
+    tail_gaps = total_gaps - focus_gaps
+
+    low_gaps = 0
+    high_gaps = 0
+    if tail_count == 1:
+        if low_active:
+            low_gaps = tail_gaps
+        else:
+            high_gaps = tail_gaps
+    elif tail_count == 2:
+        remaining = tail_gaps - 2 * minimum_tail_gaps
+        tail_span = focus_lo + (v_max - focus_hi)
+        low_extra = int(
+            round(remaining * focus_lo / max(tail_span, 1e-16))
+        )
+        low_extra = min(max(low_extra, 0), remaining)
+        low_gaps = minimum_tail_gaps + low_extra
+        high_gaps = minimum_tail_gaps + remaining - low_extra
+
+    segments: list[np.ndarray] = []
+    if low_gaps:
+        segments.append(np.linspace(0.0, focus_lo, low_gaps + 1)[:-1])
+    segments.append(np.linspace(focus_lo, focus_hi, focus_gaps + 1)[:-1])
+    segments.append(np.linspace(focus_hi, v_max, high_gaps + 1))
+    grid = np.concatenate(segments)
+    if grid.size != points or np.any(np.diff(grid) <= 0.0):
+        raise ValidationError("failed to construct path-focused variance grid")
+    return _pin_grid_targets(grid, [theta, v0])
+
+
 class HestonSLVADICore:
     """Shared ADI core for the Heston and Heston-SLV backward PDEs.
 
@@ -318,16 +419,21 @@ class HestonSLVADICore:
                 # alpha ~= 0.36 with gamma ~= 2-3).
                 u = np.linspace(0.0, 1.0, n_v)
                 self.V_grid = self.V_max * u ** self._v_grid_power
+            elif self.variance_grid_mode == "path_focused":
+                self.V_grid = _path_focused_variance_grid(
+                    v_max=self.V_max,
+                    theta=self.theta,
+                    v0=self.v0,
+                    kappa=self.kappa,
+                    sigma=self.sig_eff,
+                    maturity=self.T,
+                    points=n_v,
+                )
             else:
                 v_center = min(max(self.v0, 0.0), self.theta) if self.theta > 0 else self.v0
                 v_center = min(max(v_center, 0.0), self.V_max)
                 self.V_grid = concentrated_grid(0.0, self.V_max, v_center, n_v,
                                                 concentration=max(0.5 * self.V_max, 1e-6))
-                if self.variance_grid_mode == "path_focused":
-                    self.V_grid = _pin_grid_targets(
-                        self.V_grid,
-                        [float(self.theta), float(self.v0)],
-                    )
             # per-node interior stencil coefficients for both directions
             self._xx = fd2_interior_coeffs(self.X_grid)   # (wm, w0, wp) each (n_x-2,)
             self._x1 = fd1_interior_coeffs(self.X_grid)

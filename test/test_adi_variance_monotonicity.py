@@ -89,6 +89,18 @@ def test_path_focused_grid_pins_theta_and_v0():
     assert np.all(np.diff(core.V_grid) > 0.0)
 
 
+def test_path_focused_grid_allocates_most_nodes_to_reachable_characteristic():
+    core = _core(variance_grid_mode="path_focused")
+
+    reachable = (
+        (core.V_grid >= SIGMA_COLLAPSE.theta)
+        & (core.V_grid <= SIGMA_COLLAPSE.v0)
+    )
+    assert np.count_nonzero(reachable) >= 20
+    assert core.V_grid[0] == 0.0
+    assert core.V_grid[-1] == pytest.approx(core.V_max)
+
+
 @pytest.mark.parametrize(
     ("keyword", "value", "message"),
     [

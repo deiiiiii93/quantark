@@ -456,6 +456,14 @@ class Heston2DAutocallableSessionAdapter(_EquityPDESessionBase):
             kwargs["barrier_greek_steps_per_tick"] = (
                 engine.barrier_greek_steps_per_tick
             )
+        for name in (
+            "greek_min_n_x",
+            "greek_min_n_v",
+            "greek_min_steps_per_year",
+            "barrier_greek_min_n_x",
+        ):
+            if hasattr(engine, name):
+                kwargs[name] = getattr(engine, name)
         if hasattr(engine, "v_grid_power"):
             # Snowball Heston/SLV exposes variance-axis grading. Phoenix does
             # not yet, so preserve its constructor contract unchanged.

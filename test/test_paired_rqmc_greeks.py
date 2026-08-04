@@ -18,6 +18,27 @@ class _QuadraticGenerator:
         return paths, aux
 
 
+class _HomogeneousGenerator:
+    def __init__(self, spot, num_paths=8):
+        self.spot = float(spot)
+        self.num_paths = int(num_paths)
+        self.calls = 0
+
+    def generate_paths(self, seed=None, batch_id=None, return_aux=False):
+        self.calls += 1
+        batch = 0 if batch_id is None else int(batch_id)
+        rng = np.random.default_rng(1000 + batch)
+        noise = rng.normal(size=self.num_paths)
+        paths = np.column_stack(
+            [
+                np.full(self.num_paths, self.spot),
+                self.spot * (1.0 + 0.001 * noise),
+            ]
+        )
+        aux = {"batch_id": batch} if return_aux else None
+        return paths, aux
+
+
 def _spec(
     spot,
     *,
@@ -98,6 +119,46 @@ def test_paired_rqmc_batch_parallelism_is_bitwise_reproducible():
         "gamma_std_error",
     ):
         assert getattr(serial, name) == getattr(threaded, name)
+
+
+def test_paired_rqmc_generates_homogeneous_spot_paths_once_per_scramble():
+    specs = []
+    generators = []
+    for shifted_spot in (99.0, 100.0, 101.0):
+        generator = _HomogeneousGenerator(shifted_spot)
+        generators.append(generator)
+
+        def pricer(path_array, aux):
+            return path_array[:, 0] ** 2 + path_array[:, 1] / path_array[:, 0]
+
+        specs.append(
+            RQMCRunSpec(
+                pricer_fn=pricer,
+                path_generator=generator,
+                max_batches=8,
+                min_batches=2,
+                target_std=1e-6,
+                paths_per_batch=8,
+                time_steps=1,
+                scheme="homogeneous/rqmc",
+                finalize=lambda result: result,
+                dimension=2,
+                randomization_key=("fake_scramble", 1000),
+                homogeneous_spot_scaling=True,
+                initial_spot=shifted_spot,
+            )
+        )
+
+    result = run_paired_rqmc_greeks(
+        *specs,
+        spot=100.0,
+        relative_bump=0.01,
+        batches=8,
+    )
+
+    assert result.delta == pytest.approx(200.0, abs=1e-12)
+    assert result.gamma == pytest.approx(2.0, abs=1e-12)
+    assert [generator.calls for generator in generators] == [0, 8, 0]
 
 
 def test_paired_rqmc_preserves_conditional_control_by_scramble():

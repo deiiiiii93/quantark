@@ -83,11 +83,11 @@ from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-SCHEMA_VERSION = 5
-# The 20260803 scrambles were used only for estimator-design pilots. Production
+SCHEMA_VERSION = 7
+# The 20260802-20260804 scrambles were used only for estimator-design pilots. Production
 # evidence uses a held-out scramble family so inner-allocation selection cannot
 # bias the reported equivalence intervals.
-SEED = 20260804
+SEED = 20260805
 CONFIDENCE = 0.95
 # Two stochastic components enter each verdict: the fine QE-M confidence
 # interval and the target-to-fine substep-bias upper bound. Bonferroni at
@@ -113,8 +113,27 @@ GAMMA_CELL_BOUND_CONTRACTS = 0.5
 SLV_SPOT_STRATA = 4
 SLV_SPOT_ANTITHETIC = True
 SLV_SPOT_BRIDGE_STRATA = 8
+# Heston already integrates the terminal Brownian-bridge factor exactly. The
+# near-KI cell additionally uses four inner points across eight leading
+# residual bridge coordinates. Two design seeds selected eight dimensions over
+# four and sixteen at identical runtime; smooth cells retain the exact
+# terminal-factor estimator without multiplying their long path matrices.
+HESTON_SPOT_BRIDGE_STRATA = 4
+HESTON_SPOT_BRIDGE_DIMENSIONS = 8
+HESTON_SPOT_BRIDGE_PROFILE_BY_CASE = {
+    "ordinary_full": {"strata": 1, "dimensions": 1},
+    "ordinary_decayed": {"strata": 1, "dimensions": 1},
+    "near_ko": {"strata": 1, "dimensions": 1},
+    "near_ki": {
+        "strata": HESTON_SPOT_BRIDGE_STRATA,
+        "dimensions": HESTON_SPOT_BRIDGE_DIMENSIONS,
+    },
+    "low_feller": {"strata": 1, "dimensions": 1},
+    "sigma_collapse": {"strata": 1, "dimensions": 1},
+    "near_expiry": {"strata": 1, "dimensions": 1},
+}
 PRODUCTION_HESTON_PATHS_PER_BATCH = 8192
-PRODUCTION_HESTON_BATCHES = 16
+PRODUCTION_HESTON_BATCHES = 256
 PRODUCTION_SLV_PATHS_PER_BATCH = 1024
 PRODUCTION_SLV_BATCHES = 128
 PRODUCTION_RQMC_BATCH_WORKERS = 4
@@ -126,7 +145,11 @@ PRODUCTION_ENGINE_CONTROLS = {
     "v0_boundary": "degenerate_pde",
     "variance_grid_mode": "auto",
     "v_drift_scheme": "adaptive_upwind",
-    "barrier_greek_steps_per_tick": 8,
+    "barrier_greek_steps_per_tick": 16,
+    "greek_min_n_x": 300,
+    "greek_min_n_v": 90,
+    "greek_min_steps_per_year": 800,
+    "barrier_greek_min_n_x": 600,
 }
 REQUIRED_ANCHOR_NAMES = frozenset(
     {
@@ -271,16 +294,19 @@ def grid_ladders(
         target = GridPoint(180, 24, max(20, int(math.ceil(40 * maturity))))
         fine = GridPoint(220, 32, max(28, int(math.ceil(64 * maturity))))
     else:
-        coarse = GridPoint(160, 36, max(80, int(math.ceil(200 * maturity))))
-        target = GridPoint(200, 60, max(120, int(math.ceil(400 * maturity))))
-        fine = GridPoint(300, 90, max(180, int(math.ceil(800 * maturity))))
+        coarse = GridPoint(200, 60, max(80, int(math.ceil(400 * maturity))))
+        target = GridPoint(300, 90, max(120, int(math.ceil(800 * maturity))))
+        fine = GridPoint(450, 135, max(180, int(math.ceil(1600 * maturity))))
         if dense_ki_stencil:
-            # The production Greek policy uses eight ADI steps per 252-clock
-            # KI tick. Certify that policy against a 16-step-per-tick solve.
+            # The production Greek policy uses sixteen ADI steps per 252-clock
+            # KI tick. Certify that policy against a 32-step-per-tick solve.
             schedule_ticks = max(1, int(round(252.0 * maturity)))
-            coarse = replace(coarse, n_t=4 * schedule_ticks)
-            target = replace(target, n_t=8 * schedule_ticks)
-            fine = replace(fine, n_t=16 * schedule_ticks)
+            coarse = replace(coarse, n_t=8 * schedule_ticks)
+            target = replace(target, n_t=16 * schedule_ticks)
+            fine = replace(fine, n_t=32 * schedule_ticks)
+            coarse = replace(coarse, n_x=450)
+            target = replace(target, n_x=600)
+            fine = replace(fine, n_x=750)
     return {
         "target": target,
         "n_x": [
@@ -416,12 +442,25 @@ def make_pde_engine(
     grid: GridPoint,
     leverage: Optional[LeverageSurface],
 ):
+    # Certification ladders must solve the declared grid exactly. Production
+    # constructs the Stage-11 medium PV engine with PRODUCTION_ENGINE_CONTROLS,
+    # whose Greek policy resolves that engine to this ladder's target. Leaving
+    # those floors active on the coarse row would collapse two ladder points
+    # onto one solve and falsely report a non-convergent axis.
+    certification_controls = dict(PRODUCTION_ENGINE_CONTROLS)
+    certification_controls.update(
+        barrier_greek_steps_per_tick=0,
+        greek_min_n_x=0,
+        greek_min_n_v=0,
+        greek_min_steps_per_year=0,
+        barrier_greek_min_n_x=0,
+    )
     kwargs = dict(
         n_x=grid.n_x,
         n_v=grid.n_v,
         n_t=grid.n_t,
         params=PDEParams(cache_enabled=False),
-        **PRODUCTION_ENGINE_CONTROLS,
+        **certification_controls,
     )
     if variant == "heston":
         return HestonSnowballPDESolver(case.params, **kwargs)
@@ -456,6 +495,8 @@ def make_mc_engine(
     seed: int,
     substeps: int,
     qe_draw_provider=None,
+    heston_spot_bridge_strata: int = HESTON_SPOT_BRIDGE_STRATA,
+    heston_spot_bridge_dimensions: int = HESTON_SPOT_BRIDGE_DIMENSIONS,
     slv_spot_strata: int = SLV_SPOT_STRATA,
     slv_spot_antithetic: bool = SLV_SPOT_ANTITHETIC,
     slv_spot_bridge_strata: int = SLV_SPOT_BRIDGE_STRATA,
@@ -474,6 +515,8 @@ def make_mc_engine(
             # factor. Integrate that factor exactly so barrier indicators do
             # not dominate finite-bump delta/gamma uncertainty.
             rqmc_affine_spot_factor=True,
+            rqmc_spot_bridge_strata=int(heston_spot_bridge_strata),
+            rqmc_spot_bridge_dimensions=int(heston_spot_bridge_dimensions),
             **common,
         )
     if variant == "heston_slv":
@@ -515,6 +558,8 @@ def paired_mc_reference(
     substeps: int,
     bump: float,
     qe_draw_provider=None,
+    heston_spot_bridge_strata: int = HESTON_SPOT_BRIDGE_STRATA,
+    heston_spot_bridge_dimensions: int = HESTON_SPOT_BRIDGE_DIMENSIONS,
     slv_spot_strata: int = SLV_SPOT_STRATA,
     slv_spot_antithetic: bool = SLV_SPOT_ANTITHETIC,
     slv_spot_bridge_strata: int = SLV_SPOT_BRIDGE_STRATA,
@@ -533,6 +578,8 @@ def paired_mc_reference(
             seed=seed,
             substeps=substeps,
             qe_draw_provider=qe_draw_provider,
+            heston_spot_bridge_strata=heston_spot_bridge_strata,
+            heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
             slv_spot_strata=slv_spot_strata,
             slv_spot_antithetic=slv_spot_antithetic,
             slv_spot_bridge_strata=slv_spot_bridge_strata,
@@ -617,6 +664,7 @@ def coupled_qe_providers(
     paths_per_batch: int,
     target_dt: np.ndarray,
     fine_dt: np.ndarray,
+    reuse_count: int = 3,
 ) -> tuple[CoupledQESubstepDrawProvider, CoupledQESubstepDrawProvider]:
     target = CoupledQESubstepDrawProvider(
         seed=int(seed),
@@ -624,7 +672,7 @@ def coupled_qe_providers(
         target_dt=target_dt,
         fine_dt=fine_dt,
         role="target",
-        reuse_count=3,
+        reuse_count=int(reuse_count),
     )
     return target, replace(target, role="fine")
 
@@ -764,6 +812,8 @@ def certify_case(
     batches: int,
     seed: int,
     hedge_inception_spot: float,
+    heston_spot_bridge_strata: int = HESTON_SPOT_BRIDGE_STRATA,
+    heston_spot_bridge_dimensions: int = HESTON_SPOT_BRIDGE_DIMENSIONS,
     slv_spot_strata: int = SLV_SPOT_STRATA,
     slv_spot_antithetic: bool = SLV_SPOT_ANTITHETIC,
     slv_spot_bridge_strata: int = SLV_SPOT_BRIDGE_STRATA,
@@ -805,6 +855,8 @@ def certify_case(
         batches=batches,
         seed=seed,
         substeps=1,
+        heston_spot_bridge_strata=heston_spot_bridge_strata,
+        heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
         slv_spot_strata=slv_spot_strata,
         slv_spot_antithetic=slv_spot_antithetic,
         slv_spot_bridge_strata=slv_spot_bridge_strata,
@@ -825,6 +877,7 @@ def certify_case(
         paths_per_batch=paths_per_batch,
         target_dt=target_dt,
         fine_dt=fine_dt,
+        reuse_count=(1 if variant == "heston" else 3),
     )
     reference = paired_mc_reference(
         variant,
@@ -838,6 +891,8 @@ def certify_case(
         substeps=target_substeps,
         bump=SPOT_BUMP,
         qe_draw_provider=target_provider,
+        heston_spot_bridge_strata=heston_spot_bridge_strata,
+        heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
         slv_spot_strata=slv_spot_strata,
         slv_spot_antithetic=slv_spot_antithetic,
         slv_spot_bridge_strata=slv_spot_bridge_strata,
@@ -855,6 +910,8 @@ def certify_case(
         substeps=fine_substeps,
         bump=SPOT_BUMP,
         qe_draw_provider=fine_provider,
+        heston_spot_bridge_strata=heston_spot_bridge_strata,
+        heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
         slv_spot_strata=slv_spot_strata,
         slv_spot_antithetic=slv_spot_antithetic,
         slv_spot_bridge_strata=slv_spot_bridge_strata,
@@ -957,10 +1014,46 @@ def certify_case(
     )
     core = diagnostic_engine._make_core(product, env, case.maturity)
     diagnostics = core.variance_operator_diagnostics()
+    pv_grid = GridPoint(200, 60, max(120, int(math.ceil(400 * case.maturity))))
+    production_grid_policy = None
+    if not quick:
+        production_kwargs = dict(
+            n_x=pv_grid.n_x,
+            n_v=pv_grid.n_v,
+            n_t=pv_grid.n_t,
+            params=PDEParams(cache_enabled=False),
+            **PRODUCTION_ENGINE_CONTROLS,
+        )
+        if variant == "heston":
+            production_engine = HestonSnowballPDESolver(
+                case.params, **production_kwargs
+            )
+        else:
+            production_engine = HestonSLVSnowballPDESolver(
+                case.params,
+                leverage_surface=leverage,
+                **production_kwargs,
+            )
+        production_grid_policy = production_engine.greek_time_grid_policy(
+            product, env
+        )
+        resolved_candidate = GridPoint(
+            int(production_grid_policy["resolved_n_x"]),
+            int(production_grid_policy["resolved_n_v"]),
+            int(production_grid_policy["resolved_n_t"]),
+        )
+        if resolved_candidate != ladders["target"]:
+            raise ValueError(
+                "production Greek policy does not resolve to the certified target "
+                f"grid: {resolved_candidate.as_dict()} != "
+                f"{ladders['target'].as_dict()}"
+            )
     row = {
         "variant": variant,
         "case": case.as_dict(),
         "target_grid": ladders["target"].as_dict(),
+        "production_pv_grid": pv_grid.as_dict(),
+        "production_greek_grid_policy": production_grid_policy,
         "economic_scale": scale.as_dict(),
         "finite_bump_semantics": (
             "barrier-adjacent values are h-width hedge exposures, not a claim "
@@ -980,6 +1073,16 @@ def certify_case(
             "primary": "fine",
             "target_substeps_per_interval": target_substeps,
             "fine_substeps_per_interval": fine_substeps,
+            "heston_spot_bridge_strata": (
+                int(heston_spot_bridge_strata)
+                if variant == "heston"
+                else None
+            ),
+            "heston_spot_bridge_dimensions": (
+                int(heston_spot_bridge_dimensions)
+                if variant == "heston"
+                else None
+            ),
             "slv_spot_strata": (
                 int(slv_spot_strata) if variant == "heston_slv" else None
             ),
@@ -1027,7 +1130,7 @@ def certify_case(
 
 
 def rescore_serialized_cell(cell: dict, hedge_inception_spot: float) -> dict:
-    """Recompute economic verdicts from complete schema-4 evidence."""
+    """Recompute economic verdicts from serialized target/fine evidence."""
     scale = EconomicGreekScale(
         model_spot=float(cell["case"]["spot"]),
         hedge_inception_spot=float(hedge_inception_spot),
@@ -1166,12 +1269,12 @@ def rescore_serialized_cell(cell: dict, hedge_inception_spot: float) -> dict:
 
 
 def rescore_payload(payload: dict, hedge_inception_spot: float) -> dict:
-    """Recompute economics from complete schema-5 numerical evidence."""
+    """Recompute economics from complete schema-7 numerical evidence."""
     if payload.get("study") != "adi_2d_snowball_greek_certification":
         raise ValueError("certification study tag mismatch")
     if int(payload.get("schema_version", 0)) != SCHEMA_VERSION:
         raise ValueError(
-            "schema-5 evidence with saved target and fine batches is required "
+            "schema-7 evidence with saved target and fine batches is required "
             "for rescoring"
         )
     source_hash = payload.get("evidence_sha256")
@@ -1194,6 +1297,9 @@ def rescore_payload(payload: dict, hedge_inception_spot: float) -> dict:
         quick=bool(rescored.get("quick")),
         variants=variants,
         sampling_by_variant=rescored.get("sampling_by_variant"),
+        heston_spot_bridge_profile_by_case=rescored.get("policy", {}).get(
+            "heston_spot_bridge_profile_by_case"
+        ),
         slv_spot_strata=int(
             rescored.get("policy", {}).get("slv_spot_strata", 0)
         ),
@@ -1438,6 +1544,7 @@ def make_decisions(
     quick: bool,
     variants: Sequence[str],
     sampling_by_variant: Optional[dict] = None,
+    heston_spot_bridge_profile_by_case: Optional[dict] = None,
     slv_spot_strata: int = SLV_SPOT_STRATA,
     slv_spot_antithetic: bool = SLV_SPOT_ANTITHETIC,
     slv_spot_bridge_strata: int = SLV_SPOT_BRIDGE_STRATA,
@@ -1475,7 +1582,30 @@ def make_decisions(
                 int(sampling.get("paths_per_batch", 0)) >= minimum_paths
                 and int(sampling.get("batches", 0)) >= minimum_batches
             )
-            if variant == "heston_slv":
+            if variant == "heston":
+                declared_profile = heston_spot_bridge_profile_by_case or {}
+                sampling_complete = sampling_complete and (
+                    declared_profile == HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+                    and all(
+                        {
+                            "strata": int(
+                                row.get("reference", {}).get(
+                                    "heston_spot_bridge_strata", 0
+                                )
+                            ),
+                            "dimensions": int(
+                                row.get("reference", {}).get(
+                                    "heston_spot_bridge_dimensions", 0
+                                )
+                            ),
+                        }
+                        == HESTON_SPOT_BRIDGE_PROFILE_BY_CASE.get(
+                            row.get("case", {}).get("name")
+                        )
+                        for row in variant_rows
+                    )
+                )
+            else:
                 sampling_complete = sampling_complete and (
                     int(slv_spot_strata) == SLV_SPOT_STRATA
                     and bool(slv_spot_antithetic) == SLV_SPOT_ANTITHETIC
@@ -1580,7 +1710,8 @@ def make_decisions(
                 reasons.append(
                     "production sampling requires at least "
                     f"{PRODUCTION_HESTON_PATHS_PER_BATCH} paths/batch × "
-                    f"{PRODUCTION_HESTON_BATCHES} scrambles"
+                    f"{PRODUCTION_HESTON_BATCHES} scrambles with the declared "
+                    "case-specific bridge profile"
                 )
             else:
                 reasons.append(
@@ -1664,6 +1795,11 @@ def render_markdown(payload: dict) -> str:
         "(actual index level; numerical cases are normalized)",
         "- Verdict: fine QE-M 97.5% Student-t CI + paired 4→8-substep "
         "97.5% bias upper bound + separate `n_x`/`n_v`/`n_t` PDE envelopes",
+        (
+            "- Heston oracle: exact terminal spot-factor integration; "
+            "case-specific residual Brownian-bridge profile="
+            f"{payload['policy'].get('heston_spot_bridge_profile_by_case')}"
+        ),
         (
             "- SLV oracle: unbiased path-frozen-leverage conditional control; "
             f"terminal strata={payload['policy'].get('slv_spot_strata')}, "
@@ -1925,6 +2061,10 @@ def validate_payload(payload: dict) -> None:
         != PRODUCTION_ENGINE_CONTROLS
     ):
         raise ValueError("certification uses stale production engine controls")
+    if run_configuration.get(
+        "heston_spot_bridge_profile_by_case"
+    ) != payload.get("policy", {}).get("heston_spot_bridge_profile_by_case"):
+        raise ValueError("certification Heston bridge profile metadata mismatch")
     sampling_by_variant = payload.get("sampling_by_variant")
     if not isinstance(sampling_by_variant, dict) or not sampling_by_variant:
         raise ValueError("certification lacks per-variant RQMC sampling metadata")
@@ -1965,9 +2105,34 @@ def validate_payload(payload: dict) -> None:
                     raise ValueError(
                         "heston_slv: stale conditional sampling profile"
                     )
+            elif payload.get("policy", {}).get(
+                "heston_spot_bridge_profile_by_case"
+            ) != HESTON_SPOT_BRIDGE_PROFILE_BY_CASE:
+                raise ValueError("heston: stale conditional sampling profile")
     for cell in payload.get("cells", []):
         variant = cell["variant"]
         expected_batches = int(sampling_by_variant[variant]["batches"])
+        if variant == "heston":
+            case_name = cell.get("case", {}).get("name")
+            declared_profile = run_configuration.get(
+                "heston_spot_bridge_profile_by_case", {}
+            ).get(case_name, {})
+            actual_profile = {
+                "strata": int(
+                    cell.get("reference", {}).get(
+                        "heston_spot_bridge_strata", 0
+                    )
+                ),
+                "dimensions": int(
+                    cell.get("reference", {}).get(
+                        "heston_spot_bridge_dimensions", 0
+                    )
+                ),
+            }
+            if actual_profile != declared_profile:
+                raise ValueError(
+                    f"heston/{case_name}: conditional sampling profile mismatch"
+                )
         for level in ("target", "fine"):
             level_evidence = cell.get("reference", {}).get(level, {})
             actual_batches = int(level_evidence.get("batches_used", 0))
@@ -2170,6 +2335,22 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--heston-slv-paths-per-batch", type=int)
     parser.add_argument("--heston-slv-batches", type=int)
     parser.add_argument(
+        "--heston-spot-bridge-strata",
+        type=int,
+        help=(
+            "developer override applied to every Heston case; production uses "
+            "the case-specific bridge profile"
+        ),
+    )
+    parser.add_argument(
+        "--heston-spot-bridge-dimensions",
+        type=int,
+        help=(
+            "developer override for the number of leading residual Heston "
+            "bridge coordinates; production uses the case-specific profile"
+        ),
+    )
+    parser.add_argument(
         "--slv-spot-strata",
         type=int,
         help=(
@@ -2248,6 +2429,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             args.heston_batches,
             args.heston_slv_paths_per_batch,
             args.heston_slv_batches,
+            args.heston_spot_bridge_strata,
+            args.heston_spot_bridge_dimensions,
             args.slv_spot_strata,
             args.slv_spot_antithetic,
             args.slv_spot_bridge_strata,
@@ -2357,6 +2540,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise ValueError(
                 f"{variant}: Sobol paths-per-batch must be a power of two"
             )
+    for name, value in (
+        ("heston-spot-bridge-strata", args.heston_spot_bridge_strata),
+        ("heston-spot-bridge-dimensions", args.heston_spot_bridge_dimensions),
+    ):
+        if value is not None and value < 1:
+            raise ValueError(f"{name} must be a positive integer")
     if slv_spot_strata < 1:
         raise ValueError("slv-spot-strata must be a positive integer")
     if slv_spot_bridge_strata < 1:
@@ -2372,6 +2561,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cases = [case for case in certification_cases(quick=False) if case.name in wanted]
     if not cases:
         raise ValueError("no certification cases selected")
+
+    if (
+        args.heston_spot_bridge_strata is None
+        and args.heston_spot_bridge_dimensions is None
+    ):
+        heston_spot_bridge_profile_by_case = {
+            case.name: (
+                {"strata": 1, "dimensions": 1}
+                if args.quick
+                else dict(HESTON_SPOT_BRIDGE_PROFILE_BY_CASE[case.name])
+            )
+            for case in cases
+        }
+    else:
+        override_strata = int(
+            HESTON_SPOT_BRIDGE_STRATA
+            if args.heston_spot_bridge_strata is None
+            else args.heston_spot_bridge_strata
+        )
+        override_dimensions = int(
+            (1 if override_strata == 1 else HESTON_SPOT_BRIDGE_DIMENSIONS)
+            if args.heston_spot_bridge_dimensions is None
+            else args.heston_spot_bridge_dimensions
+        )
+        if override_dimensions > 1 and override_strata == 1:
+            raise ValueError(
+                "heston bridge dimensions > 1 require bridge strata > 1"
+            )
+        heston_spot_bridge_profile_by_case = {
+            case.name: {
+                "strata": override_strata,
+                "dimensions": override_dimensions,
+            }
+            for case in cases
+        }
 
     implementation_hash = implementation_sha256()
     runtime = runtime_environment()
@@ -2393,6 +2617,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "spot_bump": SPOT_BUMP,
         "full_bump_ladder": list(FULL_BUMP_LADDER),
         "stochastic_component_confidence": STOCHASTIC_COMPONENT_CONFIDENCE,
+        "heston_spot_bridge_profile_by_case": (
+            heston_spot_bridge_profile_by_case
+        ),
         "slv_spot_strata": slv_spot_strata,
         "slv_spot_antithetic": slv_spot_antithetic,
         "slv_spot_bridge_strata": slv_spot_bridge_strata,
@@ -2444,6 +2671,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     )
             if cell is None:
                 print(f"[adi-greeks] {variant}/{case.name}", flush=True)
+                heston_bridge_profile = heston_spot_bridge_profile_by_case[
+                    case.name
+                ]
                 cell = certify_case(
                     variant,
                     case,
@@ -2452,6 +2682,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     batches=sampling["batches"],
                     seed=args.seed,
                     hedge_inception_spot=args.hedge_inception_spot,
+                    heston_spot_bridge_strata=heston_bridge_profile["strata"],
+                    heston_spot_bridge_dimensions=heston_bridge_profile[
+                        "dimensions"
+                    ],
                     slv_spot_strata=slv_spot_strata,
                     slv_spot_antithetic=slv_spot_antithetic,
                     slv_spot_bridge_strata=slv_spot_bridge_strata,
@@ -2476,6 +2710,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         quick=(args.quick or args.skip_anchors),
         variants=args.variants,
         sampling_by_variant=selected_sampling,
+        heston_spot_bridge_profile_by_case=(
+            heston_spot_bridge_profile_by_case
+        ),
         slv_spot_strata=slv_spot_strata,
         slv_spot_antithetic=slv_spot_antithetic,
         slv_spot_bridge_strata=slv_spot_bridge_strata,
@@ -2516,6 +2753,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "strictest minimum from the frozen 27-inception MO cohort"
             ),
             "unresolved_route": "excluded_greek_unresolved",
+            "heston_spot_bridge_profile_by_case": (
+                heston_spot_bridge_profile_by_case
+            ),
             "slv_spot_strata": slv_spot_strata,
             "slv_spot_antithetic": slv_spot_antithetic,
             "slv_spot_bridge_strata": slv_spot_bridge_strata,

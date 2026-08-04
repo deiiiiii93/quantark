@@ -225,6 +225,11 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
     _solver_name = "Heston2DSnowballPDESolver"
     DEFAULT_V_GRID_POWER = 2.5
     DEFAULT_BARRIER_GREEK_STEPS_PER_TICK = 8
+    PRODUCTION_BARRIER_GREEK_STEPS_PER_TICK = 16
+    PRODUCTION_GREEK_MIN_N_X = 300
+    PRODUCTION_GREEK_MIN_N_V = 90
+    PRODUCTION_GREEK_MIN_STEPS_PER_YEAR = 800
+    PRODUCTION_BARRIER_GREEK_MIN_N_X = 600
     DENSE_KI_EVENTS_PER_YEAR = 120.0
 
     def __init__(
@@ -243,6 +248,10 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         variance_grid_mode: str = "auto",
         v_drift_scheme: str = "adaptive_upwind",
         barrier_greek_steps_per_tick: int = DEFAULT_BARRIER_GREEK_STEPS_PER_TICK,
+        greek_min_n_x: int = 0,
+        greek_min_n_v: int = 0,
+        greek_min_steps_per_year: int = 0,
+        barrier_greek_min_n_x: int = 0,
     ):
         if not isinstance(model_params, HestonParams):
             raise ValidationError("model_params must be a HestonParams")
@@ -282,6 +291,18 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             raise ValidationError(
                 "barrier_greek_steps_per_tick must be a non-negative integer"
             )
+        for name, value in (
+            ("greek_min_n_x", greek_min_n_x),
+            ("greek_min_n_v", greek_min_n_v),
+            ("greek_min_steps_per_year", greek_min_steps_per_year),
+            ("barrier_greek_min_n_x", barrier_greek_min_n_x),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, np.integer))
+                or int(value) < 0
+            ):
+                raise ValidationError(f"{name} must be a non-negative integer")
         explicit_v_grid_power = v_grid_power is not None
         if explicit_v_grid_power:
             try:
@@ -365,6 +386,10 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         self.barrier_greek_steps_per_tick = int(
             barrier_greek_steps_per_tick
         )
+        self.greek_min_n_x = int(greek_min_n_x)
+        self.greek_min_n_v = int(greek_min_n_v)
+        self.greek_min_steps_per_year = int(greek_min_steps_per_year)
+        self.barrier_greek_min_n_x = int(barrier_greek_min_n_x)
 
     def representative_vol(self, product, pricing_env) -> float:
         # sqrt(var_eff) with var_eff ported VERBATIM from the adi_core x-width
@@ -617,8 +642,13 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
 
         policy = self.greek_time_grid_policy(product, pricing_env)
         risk_engine = self
-        if int(policy["resolved_n_t"]) != self.n_t:
+        if any(
+            int(policy[f"resolved_{axis}"]) != int(getattr(self, axis))
+            for axis in ("n_x", "n_v", "n_t")
+        ):
             risk_engine = self._bump_clone()
+            risk_engine.n_x = int(policy["resolved_n_x"])
+            risk_engine.n_v = int(policy["resolved_n_v"])
             risk_engine.n_t = int(policy["resolved_n_t"])
 
         bump_config = risk_engine.params.get_effective_bump_config()
@@ -753,7 +783,13 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         product: SnowballOption,
         pricing_env: PricingEnvironment,
     ) -> dict:
-        """Resolve the deterministic time grid used by spot Greeks.
+        """Resolve the deterministic production grid used by spot Greeks.
+
+        Generic S/V/time floors let a production engine retain its PV-certified
+        medium grid while its one-surface delta/gamma solve uses the stronger
+        certification candidate. In addition, a dense discrete KI schedule
+        can impose a stricter exactly aligned time mesh when the finite-bump
+        stencil straddles the barrier.
 
         Dense discrete KI schedules repeatedly inject a state-switch kink.
         When the declared finite-bump stencil straddles that barrier, use at
@@ -761,16 +797,45 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         step count that exactly aligns the common ACT/365 or 252-day clock.
         Other states retain the price-certified grid unchanged.
         """
+        T = (
+            float(product.get_maturity(pricing_env))
+            if isinstance(product, SnowballOption) and pricing_env is not None
+            else 0.0
+        )
+        resolved_n_x = max(int(self.n_x), int(self.greek_min_n_x))
+        resolved_n_v = max(int(self.n_v), int(self.greek_min_n_v))
+        resolved_n_t = int(self.n_t)
+        if T > 0.0 and self.greek_min_steps_per_year > 0:
+            resolved_n_t = max(
+                resolved_n_t,
+                int(np.ceil(self.greek_min_steps_per_year * T)),
+            )
+        reasons = []
+        if resolved_n_x > self.n_x or resolved_n_v > self.n_v:
+            reasons.append("production Greek spatial floor")
+        if resolved_n_t > self.n_t:
+            reasons.append("production Greek time-density floor")
         base = {
+            "configured_n_x": int(self.n_x),
+            "configured_n_v": int(self.n_v),
             "configured_n_t": int(self.n_t),
-            "resolved_n_t": int(self.n_t),
-            "refined": False,
-            "reason": "production stencil does not straddle a dense discrete KI",
+            "resolved_n_x": resolved_n_x,
+            "resolved_n_v": resolved_n_v,
+            "resolved_n_t": resolved_n_t,
+            "refined": bool(reasons),
+            "reason": "; ".join(reasons) if reasons else (
+                "production stencil does not require Greek-grid refinement"
+            ),
             "clock_basis": None,
             "steps_per_tick": int(self.barrier_greek_steps_per_tick),
+            "minimum_steps_per_year": int(self.greek_min_steps_per_year),
+            "barrier_minimum_n_x": int(self.barrier_greek_min_n_x),
         }
         if self.barrier_greek_steps_per_tick <= 0:
-            base["reason"] = "barrier-adjacent Greek time refinement is disabled"
+            if not reasons:
+                base["reason"] = (
+                    "barrier-adjacent Greek time refinement is disabled"
+                )
             return base
         if not isinstance(product, SnowballOption) or pricing_env is None:
             return base
@@ -781,7 +846,6 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             or not product.has_ki_barrier
         ):
             return base
-        T = float(product.get_maturity(pricing_env))
         if T <= 0.0 or is_zero(T):
             return base
 
@@ -838,17 +902,26 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
             # provable rational clock the report exposes ``clock_basis=None``.
             ticks = max(len(ki_times), int(np.ceil(365.0 * T)))
         resolved = max(
-            int(self.n_t),
+            int(base["resolved_n_t"]),
             int(self.barrier_greek_steps_per_tick) * max(ticks, 1),
         )
+        resolved_n_x = max(
+            int(base["resolved_n_x"]),
+            int(self.barrier_greek_min_n_x),
+        )
+        if resolved_n_x > int(base["resolved_n_x"]):
+            reasons.append("dense-KI finite-bump spatial floor")
+        if resolved > int(base["resolved_n_t"]):
+            reasons.append(
+                "finite-bump stencil straddles a dense discrete KI; "
+                "time grid aligned and refined"
+            )
         base.update(
             {
                 "resolved_n_t": resolved,
-                "refined": resolved > self.n_t,
-                "reason": (
-                    "finite-bump stencil straddles a dense discrete KI; "
-                    "time grid aligned and refined"
-                ),
+                "resolved_n_x": resolved_n_x,
+                "refined": bool(reasons),
+                "reason": "; ".join(reasons),
                 "clock_basis": basis,
             }
         )

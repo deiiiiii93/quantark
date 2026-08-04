@@ -111,7 +111,7 @@ DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
     / "output/adi_greek_certification/adi_greek_certification_decision.json"
 )
-ADI_GREEK_DECISION_SCHEMA_VERSION = 5
+ADI_GREEK_DECISION_SCHEMA_VERSION = 7
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
 ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
@@ -119,7 +119,11 @@ ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
     "v0_boundary": "degenerate_pde",
     "variance_grid_mode": "auto",
     "v_drift_scheme": "adaptive_upwind",
-    "barrier_greek_steps_per_tick": 8,
+    "barrier_greek_steps_per_tick": 16,
+    "greek_min_n_x": 300,
+    "greek_min_n_v": 90,
+    "greek_min_steps_per_year": 800,
+    "barrier_greek_min_n_x": 600,
 }
 
 UNDERLYING_NAME = "CSI1000"
@@ -546,6 +550,14 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
             ):
                 raise ValidationError(
                     "ADI Greek decision entry 'heston_slv' uses a stale "
+                    "conditional sampling profile"
+                )
+            if variant == "heston" and (
+                run_configuration.get("heston_spot_bridge_profile_by_case")
+                != certification.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+            ):
+                raise ValidationError(
+                    "ADI Greek decision entry 'heston' uses a stale "
                     "conditional sampling profile"
                 )
         routes[str(variant)] = route

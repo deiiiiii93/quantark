@@ -2127,7 +2127,9 @@ class SnowballMCEngine(BaseEngine):
             """Pricer function for RQMC driver."""
             moments = affine_moments(paths, aux)
             if moments is not None:
-                return moments.discounted_payoff
+                return collapse_conditional_outer(
+                    moments.discounted_payoff, aux
+                )
             batch_id = 0
             if aux is not None and "batch_id" in aux:
                 batch_id = int(aux["batch_id"])
@@ -2270,8 +2272,16 @@ class SnowballMCEngine(BaseEngine):
                 )
                 * int(getattr(self, "rqmc_spot_bridge_strata", 1))
                 if getattr(self, "rqmc_heston_conditional_control", False)
-                else 1
+                else (
+                    int(getattr(self, "rqmc_spot_bridge_strata", 1))
+                    if getattr(self, "rqmc_affine_spot_factor", False)
+                    else 1
+                )
             ),
+            homogeneous_spot_scaling=bool(
+                getattr(self, "rqmc_homogeneous_spot_scaling", False)
+            ),
+            initial_spot=float(S),
         )
 
     def _price_rqmc(

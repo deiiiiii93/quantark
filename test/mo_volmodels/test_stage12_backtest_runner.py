@@ -359,6 +359,9 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
                 "batches": certification.PRODUCTION_SLV_BATCHES,
             },
         },
+        "heston_spot_bridge_profile_by_case": (
+            certification.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
         "slv_spot_strata": certification.SLV_SPOT_STRATA,
         "slv_spot_antithetic": certification.SLV_SPOT_ANTITHETIC,
         "slv_spot_bridge_strata": certification.SLV_SPOT_BRIDGE_STRATA,

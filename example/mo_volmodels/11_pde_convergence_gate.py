@@ -174,7 +174,15 @@ ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
     "variance_grid_mode": "auto",
     "v_drift_scheme": "adaptive_upwind",
     "barrier_greek_steps_per_tick": (
-        HestonSnowballPDESolver.DEFAULT_BARRIER_GREEK_STEPS_PER_TICK
+        HestonSnowballPDESolver.PRODUCTION_BARRIER_GREEK_STEPS_PER_TICK
+    ),
+    "greek_min_n_x": HestonSnowballPDESolver.PRODUCTION_GREEK_MIN_N_X,
+    "greek_min_n_v": HestonSnowballPDESolver.PRODUCTION_GREEK_MIN_N_V,
+    "greek_min_steps_per_year": (
+        HestonSnowballPDESolver.PRODUCTION_GREEK_MIN_STEPS_PER_YEAR
+    ),
+    "barrier_greek_min_n_x": (
+        HestonSnowballPDESolver.PRODUCTION_BARRIER_GREEK_MIN_N_X
     ),
 }
 
@@ -1891,10 +1899,12 @@ def _production_params_block(pair: GatePair, medium_grid: Optional[Dict[str, Any
             "event_rannacher_steps": 2,
             "theta": 0.5,
             "note": "maps to AutocallableEngineConfig.vol_model_engine_options "
-            "(n_x/n_v/n_t plus explicit grid/operator controls) + PDEParams "
-            "defaults; n_t is per-case: recompute as "
+            "(PV n_x/n_v/n_t plus explicit operator and Greek-grid floors) + "
+            "PDEParams defaults; PV n_t is per-case: recompute as "
             "ceil(400 * remaining maturity in years) at each reprice - the "
-            "emitted n_t is the full-3Y inception value",
+            "emitted n_t is the full-3Y inception value. The risk solve uses "
+            "at least 300x90 and ceil(800*T); a stencil straddling dense KI "
+            "uses at least 600 S nodes plus the aligned time floor.",
         }
     return {"label": pair.production, **(medium_grid or {"kind": None})}
 

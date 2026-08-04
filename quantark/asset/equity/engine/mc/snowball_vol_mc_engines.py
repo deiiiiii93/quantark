@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import numpy as np
@@ -180,6 +181,7 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
         rqmc_spot_strata: int = 1,
         rqmc_spot_antithetic: bool = False,
         rqmc_spot_bridge_strata: int = 1,
+        rqmc_spot_bridge_dimensions: int = 1,
     ):
         if not isinstance(rqmc_affine_spot_factor, bool):
             raise ValidationError("rqmc_affine_spot_factor must be bool")
@@ -210,6 +212,14 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
             raise ValidationError(
                 "rqmc_spot_bridge_strata must be a positive integer"
             )
+        if (
+            isinstance(rqmc_spot_bridge_dimensions, bool)
+            or not isinstance(rqmc_spot_bridge_dimensions, (int, np.integer))
+            or int(rqmc_spot_bridge_dimensions) < 1
+        ):
+            raise ValidationError(
+                "rqmc_spot_bridge_dimensions must be a positive integer"
+            )
         if int(rqmc_spot_strata) > 1 and not rqmc_heston_conditional_control:
             raise ValidationError(
                 "rqmc_spot_strata > 1 requires rqmc_heston_conditional_control"
@@ -220,11 +230,21 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
             )
         if (
             int(rqmc_spot_bridge_strata) > 1
-            and not rqmc_heston_conditional_control
+            and not (
+                rqmc_heston_conditional_control or rqmc_affine_spot_factor
+            )
         ):
             raise ValidationError(
                 "rqmc_spot_bridge_strata > 1 requires "
-                "rqmc_heston_conditional_control"
+                "exact affine conditioning or rqmc_heston_conditional_control"
+            )
+        if (
+            int(rqmc_spot_bridge_dimensions) > 1
+            and int(rqmc_spot_bridge_strata) == 1
+        ):
+            raise ValidationError(
+                "rqmc_spot_bridge_dimensions > 1 requires "
+                "rqmc_spot_bridge_strata > 1"
             )
         if (
             rqmc_frozen_leverage_conditional_control
@@ -245,6 +265,7 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
         self.rqmc_spot_strata = int(rqmc_spot_strata)
         self.rqmc_spot_antithetic = rqmc_spot_antithetic
         self.rqmc_spot_bridge_strata = int(rqmc_spot_bridge_strata)
+        self.rqmc_spot_bridge_dimensions = int(rqmc_spot_bridge_dimensions)
         if rqmc_qe_draw_provider is not None and not all(
             hasattr(rqmc_qe_draw_provider, name)
             for name in ("draws", "dimension", "label", "randomization_key")
@@ -275,6 +296,7 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
             label += "#spot-antithetic"
         if self.rqmc_spot_bridge_strata > 1:
             label += f"#spot-bridge-strata-{self.rqmc_spot_bridge_strata}"
+            label += f"-dimensions-{self.rqmc_spot_bridge_dimensions}"
         if self.rqmc_qe_draw_provider is not None:
             label += f"#{self.rqmc_qe_draw_provider.label}"
         return label
@@ -318,6 +340,68 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
         raw[:, 0] = 0.0
         residual_dw = apply_brownian_bridge(raw, np.cumsum(dt))
         residual_z = residual_dw / np.sqrt(dt)[None, :]
+        loadings = np.sqrt(dt / float(np.sum(dt)))
+        return residual_z, loadings
+
+    def _bridge_stratified_spot_normals(
+        self,
+        z_ind: np.ndarray,
+        dt_array: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Condition the terminal factor and stratify leading bridge factors.
+
+        The first residual bridge coordinate uses ordinary one-dimensional
+        stratification. Additional coordinates use independently randomized
+        rank-one rotations driven by their original scrambled-Sobol uniforms.
+        Each inner point is therefore marginally uniform and the average is
+        unbiased, while leading Brownian-bridge main effects are integrated at
+        no additional outer-path count.
+        """
+        bridge_ordered_source = np.asarray(z_ind, dtype=float)
+        if bridge_ordered_source.ndim != 2:
+            raise ValidationError("spot bridge normals must be a 2D array")
+        n_outer, steps = bridge_ordered_source.shape
+        strata = int(self.rqmc_spot_bridge_strata)
+        dimensions = int(self.rqmc_spot_bridge_dimensions)
+        if steps <= dimensions:
+            raise ValidationError(
+                "spot bridge stratification dimensions must be smaller than "
+                "the number of time steps"
+            )
+        dt = np.asarray(dt_array, dtype=float)
+        if dt.shape != (steps,) or np.any(dt <= 0.0):
+            raise ValidationError(
+                "spot bridge stratification requires positive aligned dt"
+            )
+
+        bridge_ordered = np.repeat(
+            bridge_ordered_source[:, None, :], strata, axis=1
+        )
+        bridge_ordered[:, :, 0] = 0.0
+        inner_index = np.arange(strata, dtype=float)[None, :]
+        for local_index, bridge_index in enumerate(range(1, dimensions + 1)):
+            base_uniform = ndtr(bridge_ordered_source[:, bridge_index])[:, None]
+            if local_index == 0:
+                uniforms = (base_uniform + inner_index) / float(strata)
+            else:
+                stride = 2 * local_index + 1
+                while math.gcd(stride, strata) != 1:
+                    stride += 2
+                uniforms = np.mod(
+                    base_uniform + inner_index * (stride / float(strata)),
+                    1.0,
+                )
+            bridge_ordered[:, :, bridge_index] = ndtri(
+                np.clip(uniforms, 1e-12, 1.0 - 1e-12)
+            )
+
+        residual_dw = apply_brownian_bridge(
+            bridge_ordered.reshape(n_outer * strata, steps),
+            np.cumsum(dt),
+        )
+        residual_z = (
+            residual_dw / np.sqrt(dt)[None, :]
+        ).reshape(n_outer, strata, steps)
         loadings = np.sqrt(dt / float(np.sum(dt)))
         return residual_z, loadings
 
@@ -438,6 +522,8 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
 
 class HestonSnowballMCEngine(_VolModelSnowballMCBase):
     """Snowball MC under the Heston stochastic-volatility model."""
+
+    rqmc_homogeneous_spot_scaling = True
 
     def _rqmc_streams_per_step(self) -> int:
         from quantark.util.enum.engine_enums import HestonMCScheme
@@ -569,22 +655,31 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                 nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
             else:
                 residual_z, spot_loadings = conditioning
+                bridge_strata = int(self.rqmc_spot_bridge_strata)
+                if bridge_strata > 1:
+                    residual_z, spot_loadings = (
+                        self._bridge_stratified_spot_normals(z_ind, dt_array)
+                    )
+                else:
+                    residual_z = residual_z[:, None, :]
                 log_s = np.full(
-                    n_eff,
+                    (n_eff, bridge_strata),
                     np.log(max(float(S), 1e-12)),
                     dtype=float,
                 )
                 contractual_steps = len(dt_array) // self.substeps_per_interval
                 nodes = np.empty(
-                    (n_eff, contractual_steps + 1),
+                    (n_eff * bridge_strata, contractual_steps + 1),
                     dtype=float,
                 )
                 log_spot_factor_loadings = np.zeros(
-                    (n_eff, contractual_steps + 1), dtype=float
+                    (n_eff * bridge_strata, contractual_steps + 1), dtype=float
                 )
-                factor_loading = np.zeros(n_eff, dtype=float)
+                factor_loading = np.zeros(
+                    (n_eff, bridge_strata), dtype=float
+                )
             var = np.full(n_eff, max(float(p.v0), 0.0), dtype=float)
-            nodes[:, 0] = np.exp(log_s)
+            nodes[:, 0] = np.exp(log_s).reshape(-1)
             rho = float(np.clip(p.rho, -0.999, 0.999))
             rho_bar = float(np.sqrt(max(1.0 - rho * rho, 0.0)))
             sigma2 = float(p.sigma * p.sigma)
@@ -707,14 +802,14 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                 else:
                     log_s = (
                         log_s
-                        + base_increment
-                        + np.sqrt(v_bar)
+                        + base_increment[:, None]
+                        + np.sqrt(v_bar)[:, None]
                         * sqrt_dt
                         * diff_coef
-                        * residual_z[:, i]
+                        * residual_z[:, :, i]
                     )
                     factor_loading += (
-                        np.sqrt(v_bar)
+                        np.sqrt(v_bar)[:, None]
                         * sqrt_dt
                         * diff_coef
                         * spot_loadings[i]
@@ -724,15 +819,20 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                     nodes[:, i + 1] = np.exp(log_s)
                 elif (i + 1) % self.substeps_per_interval == 0:
                     contractual_index = (i + 1) // self.substeps_per_interval
-                    nodes[:, contractual_index] = np.exp(log_s)
-                    log_spot_factor_loadings[:, contractual_index] = factor_loading
+                    nodes[:, contractual_index] = np.exp(log_s).reshape(-1)
+                    log_spot_factor_loadings[:, contractual_index] = (
+                        factor_loading.reshape(-1)
+                    )
             if conditioning is None:
                 return nodes
-            return nodes, {
+            aux = {
                 "affine_spot_factor": "standard_normal",
                 "log_spot_factor_loadings": log_spot_factor_loadings,
                 "_paths_are_contractual": True,
             }
+            if bridge_strata > 1:
+                aux["conditional_outer_group_size"] = bridge_strata
+            return nodes, aux
 
         return self._make_path_generator(simulate, n_eff, batch_id)
 
@@ -1020,36 +1120,8 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
                 terminal_uniform = ndtr(np.asarray(z_ind[:, 0], dtype=float))
                 bridge_strata = int(self.rqmc_spot_bridge_strata)
                 if bridge_strata > 1:
-                    if z_ind.shape[1] < 2:
-                        raise ValidationError(
-                            "spot bridge stratification requires at least two steps"
-                        )
-                    bridge_uniform = ndtr(
-                        np.asarray(z_ind[:, 1], dtype=float)
-                    )
-                    bridge_uniforms = (
-                        bridge_uniform[:, None]
-                        + np.arange(bridge_strata, dtype=float)[None, :]
-                    ) / float(bridge_strata)
-                    bridge_ordered = np.repeat(
-                        np.asarray(z_ind, dtype=float)[:, None, :],
-                        bridge_strata,
-                        axis=1,
-                    )
-                    bridge_ordered[:, :, 0] = 0.0
-                    bridge_ordered[:, :, 1] = ndtri(
-                        np.clip(bridge_uniforms, 1e-12, 1.0 - 1e-12)
-                    )
-                    residual_dw = apply_brownian_bridge(
-                        bridge_ordered.reshape(n_eff * bridge_strata, M),
-                        np.cumsum(dt_array),
-                    )
-                    residual_z = (
-                        residual_dw
-                        / np.sqrt(dt_array)[None, :]
-                    ).reshape(n_eff, bridge_strata, M)
-                    spot_loadings = np.sqrt(
-                        np.asarray(dt_array, dtype=float) / float(np.sum(dt_array))
+                    residual_z, spot_loadings = (
+                        self._bridge_stratified_spot_normals(z_ind, dt_array)
                     )
                 else:
                     conditioning = self._conditioned_spot_normals(z_ind, dt_array)

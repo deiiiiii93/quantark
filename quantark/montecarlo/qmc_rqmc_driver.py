@@ -179,6 +179,12 @@ class RQMCRunSpec:
     # stratification. This affects work accounting, not the independent sample
     # size used for standard errors.
     path_valuation_multiplier: int = 1
+    # Heston paths are exactly homogeneous in initial spot. When all three
+    # finite-difference specs declare this seam, the paired driver generates
+    # the common stochastic path once and rescales its spot-valued arrays for
+    # down/base/up. This changes no payoff arithmetic or sample count.
+    homogeneous_spot_scaling: bool = False
+    initial_spot: Optional[float] = None
 
 
 def run_rqmc_traced(
@@ -304,7 +310,7 @@ def run_rqmc(
 
 def _paired_spec_contract(
     specs: tuple[RQMCRunSpec, RQMCRunSpec, RQMCRunSpec],
-) -> tuple[int, str]:
+) -> tuple[int, str, bool]:
     """Validate that three specs describe one couplable RQMC experiment."""
     labels = ("down", "base", "up")
     paths = []
@@ -342,18 +348,29 @@ def _paired_spec_contract(
         raise ValueError(
             "paired RQMC specs must all provide the conditional control or none"
         )
-    return paths[0], repr(randomization_keys[0])
+    homogeneous_flags = [bool(spec.homogeneous_spot_scaling) for spec in specs]
+    if any(homogeneous_flags) and not all(homogeneous_flags):
+        raise ValueError(
+            "paired RQMC specs must all declare homogeneous spot scaling or none"
+        )
+    homogeneous = all(homogeneous_flags)
+    if homogeneous:
+        initial_spots = np.asarray(
+            [spec.initial_spot for spec in specs], dtype=float
+        )
+        if np.any(~np.isfinite(initial_spots)) or np.any(initial_spots <= 0.0):
+            raise ValueError(
+                "homogeneous paired RQMC specs require positive initial spots"
+            )
+    return paths[0], repr(randomization_keys[0]), homogeneous
 
 
-def _paired_batch_components(
+def _paired_components_from_paths(
     spec: RQMCRunSpec,
-    batch_id: int,
+    paths: np.ndarray,
+    aux: Optional[Dict[str, np.ndarray]],
     expected_paths: int,
 ) -> tuple[float, Optional[float]]:
-    paths, aux = spec.path_generator.generate_paths(
-        batch_id=batch_id,
-        return_aux=True,
-    )
     payoffs = np.asarray(spec.pricer_fn(paths, aux), dtype=float)
     if payoffs.ndim != 1 or payoffs.shape[0] != expected_paths:
         raise ValueError(
@@ -376,6 +393,36 @@ def _paired_batch_components(
             )
         control_mean = float(np.mean(control))
     return float(np.mean(payoffs)), control_mean
+
+
+def _paired_batch_components(
+    spec: RQMCRunSpec,
+    batch_id: int,
+    expected_paths: int,
+) -> tuple[float, Optional[float]]:
+    paths, aux = spec.path_generator.generate_paths(
+        batch_id=batch_id,
+        return_aux=True,
+    )
+    return _paired_components_from_paths(spec, paths, aux, expected_paths)
+
+
+def _scaled_spot_paths(
+    paths: np.ndarray,
+    aux: Optional[Dict[str, np.ndarray]],
+    ratio: float,
+) -> tuple[np.ndarray, Optional[Dict[str, np.ndarray]]]:
+    """Scale only spot-valued path arrays; factor loadings remain unchanged."""
+
+    scaled_paths = paths if ratio == 1.0 else np.asarray(paths) * ratio
+    if aux is None or ratio == 1.0:
+        return scaled_paths, aux
+    scaled_aux = dict(aux)
+    for key in ("control_paths", "control_base_paths"):
+        values = scaled_aux.get(key)
+        if isinstance(values, np.ndarray):
+            scaled_aux[key] = values * ratio
+    return scaled_paths, scaled_aux
 
 
 def run_paired_rqmc_greeks(
@@ -405,7 +452,7 @@ def run_paired_rqmc_greeks(
         raise ValueError("relative_bump must be finite and between 0 and 1")
 
     specs = (down_spec, base_spec, up_spec)
-    paths_per_batch, randomization_key = _paired_spec_contract(specs)
+    paths_per_batch, randomization_key, homogeneous = _paired_spec_contract(specs)
     max_coupled_batches = min(int(spec.max_batches) for spec in specs)
     batches_used = max_coupled_batches if batches is None else int(batches)
     if batches_used < 2:
@@ -426,10 +473,33 @@ def run_paired_rqmc_greeks(
         return down, base, up, delta, gamma
 
     def estimate_batch(batch_id: int):
-        components = [
-            _paired_batch_components(spec, batch_id, paths_per_batch)
-            for spec in specs
-        ]
+        if homogeneous:
+            base_spec = specs[1]
+            paths, aux = base_spec.path_generator.generate_paths(
+                batch_id=batch_id,
+                return_aux=True,
+            )
+            base_spot = float(base_spec.initial_spot)
+            components = []
+            for spec in specs:
+                scaled_paths, scaled_aux = _scaled_spot_paths(
+                    paths,
+                    aux,
+                    float(spec.initial_spot) / base_spot,
+                )
+                components.append(
+                    _paired_components_from_paths(
+                        spec,
+                        scaled_paths,
+                        scaled_aux,
+                        paths_per_batch,
+                    )
+                )
+        else:
+            components = [
+                _paired_batch_components(spec, batch_id, paths_per_batch)
+                for spec in specs
+            ]
         primary = greek_row(*(component[0] for component in components))
         controls = [component[1] for component in components]
         control = (

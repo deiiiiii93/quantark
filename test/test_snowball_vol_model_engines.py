@@ -358,7 +358,57 @@ def test_heston_qe_rqmc_integrates_affine_spot_factor_inside_each_sobol_point():
     assert payoffs.shape == (params.num_paths,)
     assert np.all(np.isfinite(payoffs))
     assert "#affine-spot-factor" in spec.scheme
+    assert spec.homogeneous_spot_scaling is True
+    assert spec.initial_spot == pytest.approx(env.spot)
     assert np.isfinite(engine.price(product, env))
+
+
+def test_heston_qe_rqmc_stratifies_second_bridge_factor_and_collapses_outer_paths():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=16,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+    engine = QESnowballMCEngine(
+        _heston(),
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_affine_spot_factor=True,
+        rqmc_spot_bridge_strata=4,
+        rqmc_spot_bridge_dimensions=4,
+    )
+    spec = engine.build_rqmc_session_spec(product, env)
+
+    paths, aux = spec.path_generator.generate_paths(batch_id=0, return_aux=True)
+    assert paths.shape == (4 * params.num_paths, spec.time_steps + 1)
+    assert aux["log_spot_factor_loadings"].shape == paths.shape
+    assert aux["conditional_outer_group_size"] == 4
+    assert spec.path_valuation_multiplier == 4
+    assert "#spot-bridge-strata-4-dimensions-4" in spec.scheme
+    payoffs = spec.pricer_fn(paths, aux)
+    assert payoffs.shape == (params.num_paths,)
+    assert np.all(np.isfinite(payoffs))
+
+
+def test_bridge_dimensions_require_multiple_strata():
+    with pytest.raises(
+        ValidationError,
+        match="rqmc_spot_bridge_dimensions > 1 requires",
+    ):
+        QESnowballMCEngine(
+            _heston(),
+            params=MCParams(num_paths=16, seed=2903),
+            method=MonteCarloMethod.RANDOMIZED_QUASI,
+            rqmc_affine_spot_factor=True,
+            rqmc_spot_bridge_dimensions=2,
+        )
 
 
 def test_slv_qe_rqmc_stratifies_spot_factor_and_collapses_to_outer_paths():
@@ -827,7 +877,13 @@ def test_dense_discrete_ki_crossing_selects_aligned_greek_time_grid():
             ki_continuous=False,
         ),
     )
-    engine = HestonSnowballPDESolver(_heston(), n_x=48, n_v=18, n_t=400)
+    engine = HestonSnowballPDESolver(
+        _heston(),
+        n_x=48,
+        n_v=18,
+        n_t=400,
+        barrier_greek_min_n_x=600,
+    )
 
     near = engine.greek_time_grid_policy(product, _env(s0=75.5))
     ordinary = engine.greek_time_grid_policy(product, _env(s0=100.0))
@@ -835,9 +891,35 @@ def test_dense_discrete_ki_crossing_selects_aligned_greek_time_grid():
     assert near["refined"] is True
     assert near["clock_basis"] == 252
     assert near["resolved_n_t"] == 2016
+    assert near["resolved_n_x"] == 600
     assert near["steps_per_tick"] == 8
     assert ordinary["refined"] is False
     assert ordinary["resolved_n_t"] == 400
+    assert ordinary["resolved_n_x"] == 48
+
+
+def test_production_greek_grid_floors_refine_risk_without_changing_pv_grid():
+    product = _discrete_snowball()
+    engine = HestonSnowballPDESolver(
+        _heston(),
+        n_x=200,
+        n_v=60,
+        n_t=400,
+        greek_min_n_x=300,
+        greek_min_n_v=90,
+        greek_min_steps_per_year=800,
+        barrier_greek_min_n_x=600,
+    )
+
+    policy = engine.greek_time_grid_policy(product, _env(s0=100.0))
+
+    assert (engine.n_x, engine.n_v, engine.n_t) == (200, 60, 400)
+    assert (
+        policy["resolved_n_x"],
+        policy["resolved_n_v"],
+        policy["resolved_n_t"],
+    ) == (300, 90, 800)
+    assert policy["refined"] is True
 
 
 @pytest.mark.parametrize(
@@ -986,11 +1068,19 @@ def test_snowball_heston_session_clone_preserves_variance_operator_policy():
         _sigma_collapse_heston(),
         variance_grid_mode="path_focused",
         v_drift_scheme="centered",
+        greek_min_n_x=300,
+        greek_min_n_v=90,
+        greek_min_steps_per_year=800,
+        barrier_greek_min_n_x=600,
     )
     clone = Heston2DAutocallableSessionAdapter()._clone_engine(engine)
 
     assert clone.variance_grid_mode == "path_focused"
     assert clone.v_drift_scheme == "centered"
+    assert clone.greek_min_n_x == 300
+    assert clone.greek_min_n_v == 90
+    assert clone.greek_min_steps_per_year == 800
+    assert clone.barrier_greek_min_n_x == 600
 
 
 def test_snowball_heston_pde_auto_grid_focuses_ki():

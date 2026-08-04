@@ -109,10 +109,21 @@ def test_pde_axis_refinement_rejects_material_divergence():
 
 
 def _passing_cell(module, variant, batches=16, case_name="ordinary_full"):
+    bridge_profile = module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE.get(
+        case_name, {"strata": 1, "dimensions": 1}
+    )
     return {
         "variant": variant,
         "case": {"name": case_name},
         "status": "PASS",
+        "reference": {
+            "heston_spot_bridge_strata": (
+                bridge_profile["strata"] if variant == "heston" else None
+            ),
+            "heston_spot_bridge_dimensions": (
+                bridge_profile["dimensions"] if variant == "heston" else None
+            ),
+        },
         "batch_difference_contracts": {
             "delta": [0.01 + 0.001 * ((i % 3) - 1) for i in range(batches)]
         },
@@ -208,6 +219,50 @@ def test_production_decision_enforces_variant_sampling_profile():
     assert admitted["heston_slv"]["route"] == "pde"
     assert stale["heston_slv"]["route"] == "excluded_greek_unresolved"
     assert stale["heston_slv"]["sampling_complete"] is False
+
+
+def test_production_decision_enforces_heston_bridge_sampling_profile():
+    module = _load()
+    anchors = [
+        {"name": name, "status": "PASS"}
+        for name in module.REQUIRED_ANCHOR_NAMES
+    ]
+    rows = [
+        _passing_cell(module, "heston", case_name=case.name)
+        for case in module.certification_cases(quick=False)
+    ]
+    sampling = {
+        "heston": {
+            "paths_per_batch": module.PRODUCTION_HESTON_PATHS_PER_BATCH,
+            "batches": module.PRODUCTION_HESTON_BATCHES,
+        }
+    }
+
+    admitted = module.make_decisions(
+        rows,
+        anchors,
+        quick=False,
+        variants=["heston"],
+        sampling_by_variant=sampling,
+        heston_spot_bridge_profile_by_case=(
+            module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
+    )
+    stale = module.make_decisions(
+        rows,
+        anchors,
+        quick=False,
+        variants=["heston"],
+        sampling_by_variant=sampling,
+        heston_spot_bridge_profile_by_case={
+            name: {"strata": 1, "dimensions": 1}
+            for name in module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+        },
+    )
+
+    assert admitted["heston"]["route"] == "pde"
+    assert stale["heston"]["route"] == "excluded_greek_unresolved"
+    assert stale["heston"]["sampling_complete"] is False
 
 
 def test_production_decision_rejects_an_incomplete_regime_matrix():
