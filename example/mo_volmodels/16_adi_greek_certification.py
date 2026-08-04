@@ -83,11 +83,13 @@ from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-SCHEMA_VERSION = 8
-# The 20260802-20260804 scrambles selected the estimator design, and 20260805
-# exposed the need for the near-KI batch extension. Production evidence uses a
-# fresh held-out scramble family so neither choice can bias its intervals.
-SEED = 20260806
+SCHEMA_VERSION = 9
+# The 20260802-20260804 scrambles selected the estimator design, 20260805
+# exposed the need for the near-KI batch extension, and 20260806 selected the
+# stronger V/time Greek grid plus common-scramble count. Production evidence
+# uses a fresh held-out scramble family so none of those choices can bias its
+# intervals.
+SEED = 20260807
 CONFIDENCE = 0.95
 # Two stochastic components enter each verdict: the fine QE-M confidence
 # interval and the target-to-fine substep-bias upper bound. Bonferroni at
@@ -133,15 +135,15 @@ HESTON_SPOT_BRIDGE_PROFILE_BY_CASE = {
     "near_expiry": {"strata": 1, "dimensions": 1},
 }
 PRODUCTION_HESTON_PATHS_PER_BATCH = 8192
-PRODUCTION_HESTON_BATCHES = 256
+PRODUCTION_HESTON_BATCHES = 1024
 PRODUCTION_HESTON_BATCHES_BY_CASE = {
     "ordinary_full": PRODUCTION_HESTON_BATCHES,
     "ordinary_decayed": PRODUCTION_HESTON_BATCHES,
     "near_ko": PRODUCTION_HESTON_BATCHES,
-    # Near KI is a discontinuity-dominated gamma regime.  The 256-scramble
+    # Near KI is a discontinuity-dominated gamma regime.  The common-scramble
     # held-out pilot passed every deterministic refinement gate but left the
     # paired target-to-fine QE-M bias interval inconclusive.  Keep the first
-    # 256 scramble ids common with every other regime for the signed-bias gate,
+    # 1,024 scramble ids common with every other regime for the signed-bias gate,
     # then extend this cell alone until its reference interval is decisive.
     "near_ki": 2048,
     "low_feller": PRODUCTION_HESTON_BATCHES,
@@ -161,8 +163,8 @@ PRODUCTION_ENGINE_CONTROLS = {
     "v_drift_scheme": "adaptive_upwind",
     "barrier_greek_steps_per_tick": 16,
     "greek_min_n_x": 300,
-    "greek_min_n_v": 90,
-    "greek_min_steps_per_year": 800,
+    "greek_min_n_v": 135,
+    "greek_min_steps_per_year": 1600,
     "barrier_greek_min_n_x": 600,
 }
 REQUIRED_ANCHOR_NAMES = frozenset(
@@ -308,9 +310,9 @@ def grid_ladders(
         target = GridPoint(180, 24, max(20, int(math.ceil(40 * maturity))))
         fine = GridPoint(220, 32, max(28, int(math.ceil(64 * maturity))))
     else:
-        coarse = GridPoint(200, 60, max(80, int(math.ceil(400 * maturity))))
-        target = GridPoint(300, 90, max(120, int(math.ceil(800 * maturity))))
-        fine = GridPoint(450, 135, max(180, int(math.ceil(1600 * maturity))))
+        coarse = GridPoint(200, 90, max(120, int(math.ceil(800 * maturity))))
+        target = GridPoint(300, 135, max(180, int(math.ceil(1600 * maturity))))
+        fine = GridPoint(450, 180, max(240, int(math.ceil(2400 * maturity))))
         if dense_ki_stencil:
             # The production Greek policy uses sixteen ADI steps per 252-clock
             # KI tick. Certify that policy against a 32-step-per-tick solve.

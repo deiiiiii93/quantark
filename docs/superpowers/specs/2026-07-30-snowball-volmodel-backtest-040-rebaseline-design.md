@@ -776,11 +776,17 @@ path. SLV uses the corresponding exact conditional expectation as a control;
 the closer control freezes the leverage path at the factor-zero proxy while the
 target retains fully state-dependent leverage, so the estimator remains
 unbiased. Target/fine QE draws are projections of one finest Sobol set. The
-production profile is 8,192 paths × 256 common scrambles for Heston, with the
+production profile is 8,192 paths × 1,024 common scrambles for Heston, with the
 near-KI cell alone extended to 2,048 scrambles, and 1,024 paths × 128 scrambles
-for SLV. Near KI, Heston also crosses four inner points over the eight leading
-residual Brownian-bridge coordinates after integrating the terminal factor.
-Only the first 256 common scramble IDs enter the cross-regime signed-bias gate.
+for SLV. The Heston production Greek grid uses at least 300 spot nodes, 135
+variance nodes, and 1,600 ADI steps/year; when the finite-bump stencil straddles
+a dense KI schedule it uses at least 600 spot nodes and 16 exactly aligned ADI
+steps per schedule tick. Near KI, Heston also crosses four inner points over
+the eight leading residual Brownian-bridge coordinates after integrating the
+terminal factor. Only the first 1,024 common scramble IDs enter the
+cross-regime signed-bias gate. The stronger grid and common count were selected
+on the 20260806 pilot family; schema 9 production evidence uses the untouched
+20260807 scramble family.
 SLV crosses four randomized terminal-factor strata and
 their antithetic shifts with eight randomized midpoint Brownian-bridge strata;
 variance and QE-branch streams are Brownian-bridge ordered too. Equal-cost

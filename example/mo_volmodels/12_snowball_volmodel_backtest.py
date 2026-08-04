@@ -111,7 +111,7 @@ DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
     / "output/adi_greek_certification/adi_greek_certification_decision.json"
 )
-ADI_GREEK_DECISION_SCHEMA_VERSION = 8
+ADI_GREEK_DECISION_SCHEMA_VERSION = 9
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
 ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
@@ -121,8 +121,8 @@ ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
     "v_drift_scheme": "adaptive_upwind",
     "barrier_greek_steps_per_tick": 16,
     "greek_min_n_x": 300,
-    "greek_min_n_v": 90,
-    "greek_min_steps_per_year": 800,
+    "greek_min_n_v": 135,
+    "greek_min_steps_per_year": 1600,
     "barrier_greek_min_n_x": 600,
 }
 

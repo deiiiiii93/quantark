@@ -45,6 +45,18 @@ def test_refinement_ladders_change_one_axis_at_a_time():
     ladders = module.grid_ladders(3.0, quick=False)
     target = ladders["target"]
 
+    assert (target.n_x, target.n_v, target.n_t) == (300, 135, 4800)
+    assert (
+        ladders["n_x"][0].n_x,
+        ladders["n_v"][0].n_v,
+        ladders["n_t"][0].n_t,
+    ) == (200, 90, 2400)
+    assert (
+        ladders["n_x"][-1].n_x,
+        ladders["n_v"][-1].n_v,
+        ladders["n_t"][-1].n_t,
+    ) == (450, 180, 7200)
+
     for point in ladders["n_x"]:
         assert point.n_v == target.n_v
         assert point.n_t == target.n_t
@@ -63,6 +75,31 @@ def test_refinement_ladders_change_one_axis_at_a_time():
     assert [point.n_t for point in ladders["n_t"]] == sorted(
         point.n_t for point in ladders["n_t"]
     )
+
+
+def test_dense_ki_ladder_matches_production_barrier_policy():
+    module = _load()
+    ladders = module.grid_ladders(
+        1.0,
+        quick=False,
+        dense_ki_stencil=True,
+    )
+
+    assert ladders["target"].as_dict() == {
+        "n_x": 600,
+        "n_v": 135,
+        "n_t": 16 * 252,
+    }
+    assert [point.n_v for point in ladders["n_v"]] == [90, 135, 180]
+
+
+def test_schema9_sampling_profile_is_pinned():
+    module = _load()
+
+    assert module.SCHEMA_VERSION == 9
+    assert module.SEED == 20260807
+    assert module.PRODUCTION_HESTON_BATCHES == 1024
+    assert module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] == 2048
 
 
 def test_dense_ki_and_ko_share_one_exact_integer_clock():
