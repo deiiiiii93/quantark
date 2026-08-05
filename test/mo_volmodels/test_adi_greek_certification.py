@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -93,13 +94,42 @@ def test_dense_ki_ladder_matches_production_barrier_policy():
     assert [point.n_v for point in ladders["n_v"]] == [90, 135, 180]
 
 
-def test_schema9_sampling_profile_is_pinned():
+def test_schema10_sampling_profile_is_pinned():
     module = _load()
 
-    assert module.SCHEMA_VERSION == 9
-    assert module.SEED == 20260807
+    assert module.SCHEMA_VERSION == 10
+    assert module.HESTON_REFERENCE_SEED == 20260808
+    assert module.SLV_PRIMARY_SEED == 20260809
+    assert module.SLV_MID_CONTROL_SEED == 20260810
     assert module.PRODUCTION_HESTON_BATCHES == 1024
     assert module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] == 2048
+    assert module.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE["near_ki"] == 256
+    assert module.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE["low_feller"] == 512
+    assert module.PRODUCTION_SLV_BATCHES_BY_CASE["near_ki"] == 128
+    assert module.PRODUCTION_SLV_BATCHES_BY_CASE["low_feller"] == 512
+    assert module.SLV_MULTILEVEL_CASES == frozenset({"near_ki"})
+    assert module.PRODUCTION_CELL_WORKERS == 2
+    assert module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"][
+        "low_feller"
+    ] == 2
+    assert module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"][
+        "ordinary_full"
+    ] == 2
+    assert module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"][
+        "low_feller"
+    ] == 4
+    assert module.PRODUCTION_HESTON_QE_SUBSTEPS_BY_CASE["near_ki"] == {
+        "target": 8,
+        "fine": 16,
+    }
+    assert module.PRODUCTION_HESTON_QE_SUBSTEPS_BY_CASE["low_feller"] == {
+        "target": 4,
+        "fine": 8,
+    }
+    assert module.PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE["low_feller"] == {
+        "target": 7,
+        "fine": 14,
+    }
 
 
 def test_dense_ki_and_ko_share_one_exact_integer_clock():
@@ -149,6 +179,12 @@ def _passing_cell(module, variant, batches=16, case_name="ordinary_full"):
     bridge_profile = module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE.get(
         case_name, {"strata": 1, "dimensions": 1}
     )
+    slv_bridge_profile = module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE.get(
+        case_name, {"strata": 1, "dimensions": 1}
+    )
+    substeps = module.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE[variant][
+        case_name
+    ]
     return {
         "variant": variant,
         "case": {"name": case_name},
@@ -160,6 +196,26 @@ def _passing_cell(module, variant, batches=16, case_name="ordinary_full"):
             "heston_spot_bridge_dimensions": (
                 bridge_profile["dimensions"] if variant == "heston" else None
             ),
+            "slv_spot_bridge_strata": (
+                slv_bridge_profile["strata"]
+                if variant == "heston_slv"
+                else None
+            ),
+            "slv_spot_bridge_dimensions": (
+                slv_bridge_profile["dimensions"]
+                if variant == "heston_slv"
+                else None
+            ),
+            "target_substeps_per_interval": substeps["target"],
+            "fine_substeps_per_interval": substeps["fine"],
+            "estimator": {
+                "name": (
+                    "three_level_frozen_slv_heston_control"
+                    if variant == "heston_slv"
+                    and case_name in module.SLV_MULTILEVEL_CASES
+                    else "primary_conditional_rqmc"
+                )
+            },
         },
         "batch_difference_contracts": {
             "delta": [0.01 + 0.001 * ((i % 3) - 1) for i in range(batches)]
@@ -225,7 +281,7 @@ def test_production_decision_enforces_variant_sampling_profile():
         _passing_cell(
             module,
             "heston_slv",
-            batches=module.PRODUCTION_SLV_BATCHES,
+            batches=module.PRODUCTION_SLV_BATCHES_BY_CASE[case.name],
             case_name=case.name,
         )
         for case in module.certification_cases(quick=False)
@@ -234,6 +290,10 @@ def test_production_decision_enforces_variant_sampling_profile():
         "heston_slv": {
             "paths_per_batch": module.PRODUCTION_SLV_PATHS_PER_BATCH,
             "batches": module.PRODUCTION_SLV_BATCHES,
+            "batches_by_case": module.PRODUCTION_SLV_BATCHES_BY_CASE,
+            "primary_batches_by_case": (
+                module.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
+            ),
         }
     }
 
@@ -246,6 +306,9 @@ def test_production_decision_enforces_variant_sampling_profile():
         slv_spot_strata=module.SLV_SPOT_STRATA,
         slv_spot_antithetic=module.SLV_SPOT_ANTITHETIC,
         slv_spot_bridge_strata=module.SLV_SPOT_BRIDGE_STRATA,
+        slv_spot_bridge_profile_by_case=(
+            module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
     )
     stale = module.make_decisions(
         rows,
@@ -256,6 +319,9 @@ def test_production_decision_enforces_variant_sampling_profile():
         slv_spot_strata=module.SLV_SPOT_STRATA,
         slv_spot_antithetic=module.SLV_SPOT_ANTITHETIC,
         slv_spot_bridge_strata=1,
+        slv_spot_bridge_profile_by_case=(
+            module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
     )
 
     assert admitted["heston_slv"]["route"] == "pde"
@@ -456,6 +522,8 @@ def test_markdown_exposes_finite_bump_and_exclusion_semantics():
 
     assert "excluded_greek_unresolved" in report
     assert "finite-bump hedge exposures" in report
+    assert "case-specific target→fine" in report
+    assert "case-specific bridge profile" in report
 
 
 def test_evidence_hash_projection_removes_only_run_clock_metadata():
@@ -510,6 +578,184 @@ def test_two_level_control_combines_inside_each_scramble():
     assert combined.gamma == np.mean(expected[:, 4])
 
 
+def test_two_level_control_groups_disjoint_high_scrambles():
+    module = _load()
+
+    def result(rows, key):
+        rows = np.asarray(rows, dtype=float)
+        covariance = np.cov(rows, rowvar=False, ddof=1)
+        return module.PairedRQMCGreeksResult(
+            price=float(rows[:, 1].mean()),
+            price_std_error=0.0,
+            delta=float(rows[:, 3].mean()),
+            delta_std_error=0.0,
+            gamma=float(rows[:, 4].mean()),
+            gamma_std_error=0.0,
+            spot=100.0,
+            relative_bump=0.01,
+            absolute_bump=1.0,
+            paths_per_batch=8,
+            batches_used=rows.shape[0],
+            total_unique_paths=8 * rows.shape[0],
+            total_path_valuations=24 * rows.shape[0],
+            randomization_key=key,
+            batch_estimates=rows,
+            covariance=covariance,
+        )
+
+    primary = result([[1, 2, 3, 1, 2], [2, 3, 4, 2, 3]], "primary")
+    low = result([[0, 1, 2, 0.5, 1], [1, 2, 3, 1, 1.5]], "low")
+    high = result(
+        [
+            [3, 4, 5, 0.2, 0.3],
+            [5, 6, 7, 0.4, 0.5],
+            [4, 5, 6, 0.6, 0.7],
+            [6, 7, 8, 0.8, 0.9],
+        ],
+        "high",
+    )
+
+    combined = module.combine_two_level_control(
+        primary, low, high, high_batches_per_low=2
+    )
+
+    grouped_high = high.batch_estimates.reshape(2, 2, 5).mean(axis=1)
+    expected = primary.batch_estimates - low.batch_estimates + grouped_high
+    np.testing.assert_allclose(combined.batch_estimates, expected)
+    assert combined.batches_used == 2
+
+
+def test_embedded_conditional_control_has_zero_incremental_work():
+    module = _load()
+    rows = np.asarray(
+        [[1, 2, 3, 1, 2], [2, 3, 4, 2, 3]], dtype=float
+    )
+    controls = 0.5 * rows
+    result = module.PairedRQMCGreeksResult(
+        price=float(rows[:, 1].mean()),
+        price_std_error=0.0,
+        delta=float(rows[:, 3].mean()),
+        delta_std_error=0.0,
+        gamma=float(rows[:, 4].mean()),
+        gamma_std_error=0.0,
+        spot=100.0,
+        relative_bump=0.01,
+        absolute_bump=1.0,
+        paths_per_batch=8,
+        batches_used=2,
+        total_unique_paths=16,
+        total_path_valuations=48,
+        randomization_key="primary",
+        batch_estimates=rows,
+        covariance=np.cov(rows, rowvar=False, ddof=1),
+        control_batch_estimates=controls,
+    )
+
+    embedded = module.extract_embedded_conditional_control(result)
+
+    np.testing.assert_array_equal(embedded.batch_estimates, controls)
+    assert embedded.total_unique_paths == 0
+    assert embedded.total_path_valuations == 0
+    assert embedded.control_batch_estimates is None
+
+
+def test_serialized_paired_result_is_recomputed_and_tamper_checked():
+    module = _load()
+    rows = np.asarray(
+        [[1, 2, 3, 1, 2], [2, 3, 4, 2, 3], [3, 4, 5, 3, 4]],
+        dtype=float,
+    )
+    covariance = np.cov(rows, rowvar=False, ddof=1)
+    errors = np.sqrt(np.diag(covariance) / rows.shape[0])
+    payload = {
+        "price": float(rows[:, 1].mean()),
+        "price_std_error": float(errors[1]),
+        "delta": float(rows[:, 3].mean()),
+        "delta_std_error": float(errors[3]),
+        "gamma": float(rows[:, 4].mean()),
+        "gamma_std_error": float(errors[4]),
+        "spot": 100.0,
+        "relative_bump": 0.01,
+        "absolute_bump": 1.0,
+        "paths_per_batch": 8,
+        "batches_used": 3,
+        "total_unique_paths": 24,
+        "total_path_valuations": 72,
+        "randomization_key": "saved",
+        "batch_estimates": rows.tolist(),
+        "covariance": covariance.tolist(),
+    }
+
+    restored = module.paired_result_from_serialized(
+        payload, randomization_label="checkpoint"
+    )
+
+    np.testing.assert_array_equal(restored.batch_estimates, rows)
+    assert restored.randomization_key == "checkpoint(saved)"
+    payload["gamma"] += 0.1
+    with np.testing.assert_raises(ValueError):
+        module.paired_result_from_serialized(
+            payload, randomization_label="checkpoint"
+        )
+
+
+def test_grouped_multilevel_components_preserve_pairing_and_disjoint_rows():
+    module = _load()
+
+    def result(rows, key, *, zero_work=False):
+        rows = np.asarray(rows, dtype=float)
+        covariance = np.cov(rows, rowvar=False, ddof=1)
+        errors = np.sqrt(np.diag(covariance) / rows.shape[0])
+        return module.PairedRQMCGreeksResult(
+            price=float(rows[:, 1].mean()),
+            price_std_error=float(errors[1]),
+            delta=float(rows[:, 3].mean()),
+            delta_std_error=float(errors[3]),
+            gamma=float(rows[:, 4].mean()),
+            gamma_std_error=float(errors[4]),
+            spot=100.0,
+            relative_bump=0.01,
+            absolute_bump=1.0,
+            paths_per_batch=8,
+            batches_used=rows.shape[0],
+            total_unique_paths=0 if zero_work else 8 * rows.shape[0],
+            total_path_valuations=0 if zero_work else 24 * rows.shape[0],
+            randomization_key=key,
+            batch_estimates=rows,
+            covariance=covariance,
+        )
+
+    low = result(
+        [
+            [1, 2, 3, 1, 2],
+            [2, 3, 4, 2, 3],
+            [3, 4, 5, 3, 4],
+            [4, 5, 6, 4, 5],
+        ],
+        "low",
+    )
+    low_control = result(0.5 * low.batch_estimates, "low-control", zero_work=True)
+    high = result(
+        [[10, 20, 30, 4, 6], [20, 30, 40, 6, 8]], "high"
+    )
+
+    combined = module.combine_grouped_rqmc_components(
+        ((1.0, low), (-1.0, low_control), (1.0, high)),
+        output_batches=2,
+        estimator_label="three-level",
+    )
+
+    expected = (
+        low.batch_estimates.reshape(2, 2, 5).mean(axis=1)
+        - low_control.batch_estimates.reshape(2, 2, 5).mean(axis=1)
+        + high.batch_estimates
+    )
+    np.testing.assert_allclose(combined.batch_estimates, expected)
+    assert combined.batches_used == 2
+    assert combined.total_unique_paths == 48
+    assert combined.total_path_valuations == 144
+
+
 def test_stage16_production_controls_match_stage11_and_stage12():
     module = _load()
     import importlib.util
@@ -537,6 +783,7 @@ def test_stage16_production_controls_match_stage11_and_stage12():
     assert module.PRODUCTION_ENGINE_CONTROLS == (
         stage12.ADI_2D_PRODUCTION_ENGINE_CONTROLS
     )
+    assert module.SCHEMA_VERSION == stage12.ADI_GREEK_DECISION_SCHEMA_VERSION
 
 
 def test_payload_validator_rejects_quick_pde_admission():
@@ -557,3 +804,32 @@ def test_payload_validator_rejects_quick_pde_admission():
         assert "quick evidence" in str(exc)
     else:
         raise AssertionError("quick PDE admission must fail closed")
+
+
+def test_payload_validator_binds_variant_before_qe_profile_check():
+    module = _load()
+    payload = {
+        "schema_version": module.SCHEMA_VERSION,
+        "study": "adi_2d_snowball_greek_certification",
+        "batches": 4,
+        "quick": False,
+        "policy": {"hedge_inception_spot": 4_532.52},
+        "cells": [
+            {
+                "variant": "heston_slv",
+                "case": {"name": "low_feller"},
+                "status": module.EquivalenceStatus.PASS.value,
+                "variance_operator": {"monotone": True},
+                "reference": {
+                    "primary": "fine",
+                    "target_substeps_per_interval": 6,
+                    "fine_substeps_per_interval": 12,
+                    "target": {"randomization_key": "test"},
+                },
+            }
+        ],
+        "decisions": {"heston_slv": {"route": "excluded_greek_unresolved"}},
+    }
+
+    with pytest.raises(ValueError, match="invalid QE-M refinement contract"):
+        module.validate_payload(payload)

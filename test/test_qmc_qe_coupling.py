@@ -95,3 +95,20 @@ def test_coupled_qe_draw_cache_is_bounded_to_declared_reuses():
     assert all(left is not right for left, right in zip(first, fourth))
     for left, right in zip(first, fourth):
         assert np.array_equal(left, right)
+
+
+def test_coupled_qe_path_counts_share_an_exact_nested_sobol_prefix():
+    target_dt = np.array([0.10, 0.15, 0.25])
+    fine_dt = np.repeat(target_dt / 2.0, 2)
+    common = dict(seed=20260803, target_dt=target_dt, fine_dt=fine_dt)
+
+    for role, requested_dt in (("target", target_dt), ("fine", fine_dt)):
+        low = CoupledQESubstepDrawProvider(
+            n_paths=16, role=role, **common
+        ).draws(n_paths=16, dt_array=requested_dt, batch_id=11)
+        high = CoupledQESubstepDrawProvider(
+            n_paths=64, role=role, **common
+        ).draws(n_paths=64, dt_array=requested_dt, batch_id=11)
+
+        for low_stream, high_stream in zip(low, high):
+            np.testing.assert_array_equal(low_stream, high_stream[:16])

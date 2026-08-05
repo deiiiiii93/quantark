@@ -823,6 +823,72 @@ configuration and every numerical source input match their SHA-256 fingerprints.
 Independent scrambles may execute concurrently, but results are reduced in
 deterministic batch-id order.
 
+#### Schema-9 outcome and schema-10 SLV reference repair (2026-08-05)
+
+The untouched schema-9 production run certified all seven Heston cells and
+five of seven Heston-SLV cells. Near-KI and low-Feller remained
+`INCONCLUSIVE`, so SLV correctly stayed on `excluded_greek_unresolved`; neither
+cell failed its deterministic PDE axis refinements. The unresolved intervals
+were reference-noise limited: in Near-KI, for example, the fine SLV gamma
+standard error was 0.0149 while the path-frozen SLV residual standard error was
+only 0.00107. Increasing the original estimator to hundreds of millions of
+path valuations is therefore not a production design.
+
+Schema 10 replaces the Near-KI reference with the predeclared, unbiased
+three-level estimator
+
+`Y - a F_low + a F_high - b H_low + b H_high`,
+
+where `Y` is the ordinary state-dependent SLV estimator; `F_low` is its
+embedded path-frozen-leverage conditional control; `F_high` is the same frozen
+control evaluated at the higher middle resolution; `H_low` is a matched
+exact-affine Heston estimator on the same middle Sobol family; and `H_high` is
+the already-required independent Heston certification cell. Since each
+subtracted expectation is added back at another independently randomized
+level, fixed coefficients do not change the expectation. Development family
+20260806 selected `a=0.95`, `b=0.85`; held-out schema-10 families are Heston
+20260808, SLV primary 20260809, and middle control 20260810.
+
+Near-KI's primary allocation is 1,024 paths × 256 scrambles, the middle
+allocation is 8,192 paths × 128 scrambles, and the final Student-t sample has
+128 disjoint outer rows. Frozen-SLV and matched Heston middle rows share Sobol
+coordinates to preserve their high covariance; the high Heston cell remains
+independent. Near-KI uses an 8→16 QE-M substep ladder. On the development
+family, the frozen design projected delta at −0.053995 with total radius
+0.218630 (interval [−0.272625, 0.164635], 0.227375 inside the bound) and gamma
+at 0.006270 with total radius 0.321460 (interval [−0.315190, 0.327730],
+0.172270 inside the bound). These measurements froze the allocation and
+weights before any schema-10 held-out seed was opened; they are design
+evidence, not the production verdict. Low-Feller uses 1,024
+paths × 512 direct scrambles at 7→14: its 6→12 development measurement projected
+inside both economic bounds, while the extra Heston/frozen controls increased
+the gamma substep envelope. An independent 20260805 7→14 confirmation then
+projected delta at −0.053129 with total radius 0.156560 (interval
+[−0.209688, 0.103431], margin 0.290312) and gamma at 0.031152 with total radius
+0.315233 (interval [−0.284081, 0.346385], margin 0.153615). This froze the
+direct 512-scramble profile before held-out execution. The selected 7→14 pair uses 21,168 Sobol
+dimensions; 8→16 would require 24,192 for its 504 contractual intervals, above
+SciPy's 21,201-dimension limit. The already-certified Heston low-Feller cell
+remains at 4→8 because it is not used by this SLV reference. Smooth SLV cells
+keep 4→8 and the schema-9 estimator.
+
+The engine now has an opt-in conditional-control-only RQMC path that emits the
+frozen proxy directly, without allocating or evaluating the unused
+state-dependent SLV lattice. It advances the matched unit-leverage Heston proxy
+on the same QE/residual draws and returns it as a bundled secondary control, so
+the expensive Sobol matrix is generated only once. Coupled QE draw caches
+retain one homogeneous base path set rather than three unused spot-bump copies.
+The evidence stores every
+raw component row, covariance, independent seed, coefficient, Heston-cell
+hash, QE ladder, and work count. Stage 12 pins all of those statistical profile
+controls before accepting `pde`; a changed seed, bridge dimension, batch map,
+QE level, or coefficient fails closed. Smooth cells may run two-at-a-time, but
+the memory-heavy Near-KI middle level is deliberately serialized on the
+48-GiB certification host. Heston inner workers are dimension-aware: two for
+ordinary-full, low-Feller, and sigma-collapse; three for ordinary-decayed; and
+four for the shorter cells. SLV uses four. This case map is serialized and
+Stage 12 rejects a stale memory-unsafe profile.
+
 The compact routing decision is self-hashed and embeds the full run
 configuration plus Python/NumPy/SciPy/platform identity. Stage 12 recomputes
 the live Stage-16 implementation fingerprint (including the Stage-11/12
@@ -834,6 +900,16 @@ the replay fleet only when Stage 11 admits its PDE PV **and** Stage 16 admits
 its Greeks. A Stage-11 MC route or a Stage-16 unresolved route excludes the
 variant and is written to the fleet manifest; neither condition can select a
 daily MC Greek path.
+
+The fresh eight-date Stage-11 rerun on 2026-08-05 admits both ADI PV ladders:
+all 15 medium and 15 fine Heston cells pass (maximum errors 0.10704% and
+0.08325% of notional; maximum medium→fine drift 0.03869%), as do all 15+15 SLV
+cells (0.09243%, 0.08072%, and 0.03844%). Stage 11 still publishes its legacy
+16-scramble bumped-delta rows, including mean differences of −0.296 and
+−0.159 hedge contracts, but labels them diagnostic for the ADI family. They
+cannot authorize Greeks and no longer veto a valid Stage-16 certificate. The
+routing artifact pins `delta_authority="stage16"`; Stage 12 rejects an older
+artifact that still conflates the PV and Greek gates.
 
 Implementation smoke command (non-production):
 

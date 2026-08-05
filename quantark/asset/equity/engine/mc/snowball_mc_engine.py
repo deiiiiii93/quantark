@@ -2245,6 +2245,9 @@ class SnowballMCEngine(BaseEngine):
                 batches_used=result.batches_used,
             )
 
+        conditional_control_only = bool(
+            getattr(self, "rqmc_conditional_control_only", False)
+        )
         return RQMCRunSpec(
             pricer_fn=pricer_fn,
             path_generator=generator,
@@ -2264,18 +2267,22 @@ class SnowballMCEngine(BaseEngine):
                 else None
             ),
             path_valuation_multiplier=(
-                int(getattr(self, "rqmc_spot_strata", 1))
-                * (
-                    2
-                    if getattr(self, "rqmc_spot_antithetic", False)
-                    else 1
-                )
-                * int(getattr(self, "rqmc_spot_bridge_strata", 1))
-                if getattr(self, "rqmc_heston_conditional_control", False)
+                2 * int(getattr(self, "rqmc_spot_bridge_strata", 1))
+                if conditional_control_only
                 else (
-                    int(getattr(self, "rqmc_spot_bridge_strata", 1))
-                    if getattr(self, "rqmc_affine_spot_factor", False)
-                    else 1
+                    int(getattr(self, "rqmc_spot_strata", 1))
+                    * (
+                        2
+                        if getattr(self, "rqmc_spot_antithetic", False)
+                        else 1
+                    )
+                    * int(getattr(self, "rqmc_spot_bridge_strata", 1))
+                    if getattr(self, "rqmc_heston_conditional_control", False)
+                    else (
+                        int(getattr(self, "rqmc_spot_bridge_strata", 1))
+                        if getattr(self, "rqmc_affine_spot_factor", False)
+                        else 1
+                    )
                 )
             ),
             homogeneous_spot_scaling=bool(

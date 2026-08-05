@@ -340,6 +340,34 @@ def test_load_gate_routing_rejects_malformed_files(tmp_path):
         s12.load_gate_routing(empty)
 
 
+def test_load_gate_routing_requires_stage16_as_adi_greek_authority(tmp_path):
+    path = tmp_path / "gate.json"
+    payload = {
+        "evidence_sha256": "abc",
+        "variants": {
+            "heston": {
+                "route": "pde",
+                "pde_params": {},
+                "gate": {
+                    "delta_authority": "stage11",
+                    "delta_required": True,
+                },
+            }
+        },
+    }
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError, match="delegate ADI Greek admission"):
+        s12.load_gate_routing(path)
+
+    payload["variants"]["heston"]["gate"] = {
+        "delta_authority": "stage16",
+        "delta_required": False,
+    }
+    path.write_text(json.dumps(payload))
+    assert s12.load_gate_routing(path).solver_for("heston") == "pde"
+
+
 def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
     routes = routes or {
         "heston": "pde",
@@ -349,6 +377,11 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
     run_configuration = {
         "runtime_environment": certification.runtime_environment(),
         "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
+        "reference_seeds": {
+            "heston": certification.HESTON_REFERENCE_SEED,
+            "heston_slv_primary": certification.SLV_PRIMARY_SEED,
+            "heston_slv_mid_control": certification.SLV_MID_CONTROL_SEED,
+        },
         "sampling_by_variant": {
             "heston": {
                 "paths_per_batch": certification.PRODUCTION_HESTON_PATHS_PER_BATCH,
@@ -360,6 +393,10 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
             "heston_slv": {
                 "paths_per_batch": certification.PRODUCTION_SLV_PATHS_PER_BATCH,
                 "batches": certification.PRODUCTION_SLV_BATCHES,
+                "batches_by_case": certification.PRODUCTION_SLV_BATCHES_BY_CASE,
+                "primary_batches_by_case": (
+                    certification.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
+                ),
             },
         },
         "heston_spot_bridge_profile_by_case": (
@@ -368,6 +405,24 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
         "slv_spot_strata": certification.SLV_SPOT_STRATA,
         "slv_spot_antithetic": certification.SLV_SPOT_ANTITHETIC,
         "slv_spot_bridge_strata": certification.SLV_SPOT_BRIDGE_STRATA,
+        "slv_spot_bridge_profile_by_case": (
+            certification.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
+        "qe_substeps_by_variant_case": (
+            certification.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
+        ),
+        "slv_multilevel_policy": {
+            "cases": sorted(certification.SLV_MULTILEVEL_CASES),
+            "mid_paths_per_batch": (
+                certification.SLV_MID_CONTROL_PATHS_PER_BATCH
+            ),
+            "mid_batches": certification.SLV_MID_CONTROL_BATCHES,
+            "frozen_control_weight": certification.SLV_FROZEN_CONTROL_WEIGHT,
+            "heston_control_weight": certification.SLV_HESTON_CONTROL_WEIGHT,
+        },
+        "rqmc_batch_workers_by_variant_case": (
+            certification.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
+        ),
     }
     payload = {
         "schema_version": s12.ADI_GREEK_DECISION_SCHEMA_VERSION,
@@ -421,6 +476,66 @@ def test_adi_greek_routing_rejects_stale_slv_sampling_profile(tmp_path):
     _reseal_adi_greek_decision(path)
 
     with pytest.raises(ValidationError, match="stale conditional sampling"):
+        s12.load_adi_greek_routing(path)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda config: config["reference_seeds"].__setitem__(
+                "heston_slv_mid_control", 1
+            ),
+            "held-out schema-10 seeds",
+        ),
+        (
+            lambda config: config["qe_substeps_by_variant_case"][
+                "heston_slv"
+            ]["near_ki"].__setitem__("fine", 8),
+            "case-specific QE-M profile",
+        ),
+        (
+            lambda config: config["slv_multilevel_policy"].__setitem__(
+                "heston_control_weight", 1.0
+            ),
+            "multilevel estimator profile",
+        ),
+        (
+            lambda config: config["sampling_by_variant"]["heston_slv"][
+                "primary_batches_by_case"
+            ].__setitem__("near_ki", s12.stage16().PRODUCTION_SLV_BATCHES),
+            "case-specific batch profile",
+        ),
+        (
+            lambda config: config["slv_spot_bridge_profile_by_case"][
+                "near_ki"
+            ].__setitem__("dimensions", 1),
+            "stale conditional sampling",
+        ),
+        (
+            lambda config: config["rqmc_batch_workers_by_variant_case"][
+                "heston"
+            ].__setitem__("low_feller", 4),
+            "memory-safe worker profile",
+        ),
+    ],
+)
+def test_adi_greek_routing_rejects_schema10_profile_tampering(
+    tmp_path, mutate, message
+):
+    path = _write_adi_greek_decision(
+        tmp_path,
+        routes={"heston_slv": "pde"},
+    )
+    payload = json.loads(path.read_text())
+    mutate(payload["run_configuration"])
+    payload["run_configuration_sha256"] = s12.stage16()._canonical_sha256(
+        payload["run_configuration"]
+    )
+    path.write_text(json.dumps(payload))
+    _reseal_adi_greek_decision(path)
+
+    with pytest.raises(ValidationError, match=message):
         s12.load_adi_greek_routing(path)
 
 
@@ -528,10 +643,10 @@ def test_adi_greek_admission_requires_both_pv_and_greek_pde_pass(tmp_path):
 @pytest.mark.skipif(
     not s12.DEFAULT_GATE_DECISION.exists(), reason="gate decision not produced"
 )
-def test_recorded_gate_decision_routes_both_2d_variants_to_mc():
+def test_recorded_gate_decision_admits_both_2d_pv_ladders():
     routing = s12.load_gate_routing(s12.DEFAULT_GATE_DECISION)
-    assert routing.solver_for("heston") == "mc"
-    assert routing.solver_for("heston_slv") == "mc"
+    assert routing.solver_for("heston") == "pde"
+    assert routing.solver_for("heston_slv") == "pde"
     assert routing.evidence_sha256, "run manifest must be able to cite the evidence"
 
 

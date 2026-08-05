@@ -111,7 +111,7 @@ DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
     / "output/adi_greek_certification/adi_greek_certification_decision.json"
 )
-ADI_GREEK_DECISION_SCHEMA_VERSION = 9
+ADI_GREEK_DECISION_SCHEMA_VERSION = 10
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
 ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
@@ -405,6 +405,18 @@ def load_gate_routing(path: Path) -> GateRouting:
     for name, entry in variants.items():
         if not isinstance(entry, dict):
             raise ValidationError(f"gate decision {path}: variant {name!r} is not an object")
+        if str(name) in {"heston", "heston_slv"}:
+            gate = entry.get("gate")
+            if (
+                not isinstance(gate, dict)
+                or gate.get("delta_authority") != "stage16"
+                or gate.get("delta_required") is not False
+            ):
+                raise ValidationError(
+                    f"gate decision {path}: variant {name!r} does not "
+                    "delegate ADI Greek admission to Stage 16; rerun or "
+                    "rescore stage 11"
+                )
         routes[str(name)] = str(entry.get("route", ""))
         params = entry.get("pde_params")
         if isinstance(params, dict):
@@ -475,6 +487,46 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
         != hashes["run_configuration_sha256"]
     ):
         raise ValidationError("ADI Greek decision run-configuration hash mismatch")
+    expected_reference_seeds = {
+        "heston": certification.HESTON_REFERENCE_SEED,
+        "heston_slv_primary": certification.SLV_PRIMARY_SEED,
+        "heston_slv_mid_control": certification.SLV_MID_CONTROL_SEED,
+    }
+    expected_slv_multilevel_policy = {
+        "cases": sorted(certification.SLV_MULTILEVEL_CASES),
+        "mid_paths_per_batch": certification.SLV_MID_CONTROL_PATHS_PER_BATCH,
+        "mid_batches": certification.SLV_MID_CONTROL_BATCHES,
+        "frozen_control_weight": certification.SLV_FROZEN_CONTROL_WEIGHT,
+        "heston_control_weight": certification.SLV_HESTON_CONTROL_WEIGHT,
+    }
+    expected_worker_profile = (
+        certification.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
+    )
+    if run_configuration.get("reference_seeds") != expected_reference_seeds:
+        raise ValidationError(
+            "ADI Greek decision does not use the held-out schema-10 seeds"
+        )
+    if (
+        run_configuration.get("qe_substeps_by_variant_case")
+        != certification.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
+    ):
+        raise ValidationError(
+            "ADI Greek decision uses a stale case-specific QE-M profile"
+        )
+    if (
+        run_configuration.get("slv_multilevel_policy")
+        != expected_slv_multilevel_policy
+    ):
+        raise ValidationError(
+            "ADI Greek decision uses a stale SLV multilevel estimator profile"
+        )
+    if (
+        run_configuration.get("rqmc_batch_workers_by_variant_case")
+        != expected_worker_profile
+    ):
+        raise ValidationError(
+            "ADI Greek decision uses a stale memory-safe worker profile"
+        )
     live_implementation_hash = certification.implementation_sha256()
     if hashes["implementation_sha256"] != live_implementation_hash:
         raise ValidationError(
@@ -554,12 +606,17 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
                     "ADI Greek decision entry 'heston' uses a stale "
                     "case-specific batch profile"
                 )
-            if variant == "heston_slv" and int(
-                sampling.get("batches", 0)
-            ) < certification.PRODUCTION_SLV_BATCHES:
+            if variant == "heston_slv" and (
+                int(sampling.get("batches", 0))
+                != certification.PRODUCTION_SLV_BATCHES
+                or sampling.get("batches_by_case")
+                != certification.PRODUCTION_SLV_BATCHES_BY_CASE
+                or sampling.get("primary_batches_by_case")
+                != certification.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
+            ):
                 raise ValidationError(
-                    f"ADI Greek decision entry {variant!r} uses insufficient "
-                    "production sampling"
+                    "ADI Greek decision entry 'heston_slv' uses a stale "
+                    "case-specific batch profile"
                 )
             if variant == "heston_slv" and (
                 int(run_configuration.get("slv_spot_strata", 0))
@@ -568,6 +625,8 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
                 != certification.SLV_SPOT_ANTITHETIC
                 or int(run_configuration.get("slv_spot_bridge_strata", 0))
                 != certification.SLV_SPOT_BRIDGE_STRATA
+                or run_configuration.get("slv_spot_bridge_profile_by_case")
+                != certification.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
             ):
                 raise ValidationError(
                     "ADI Greek decision entry 'heston_slv' uses a stale "

@@ -561,6 +561,101 @@ def test_slv_frozen_leverage_proxy_is_exact_for_a_constant_surface():
     assert np.all(np.isfinite(payoffs))
 
 
+def test_slv_control_only_rqmc_matches_full_frozen_proxy_pathwise():
+    product = _discrete_snowball()
+    env = _env()
+    params = MCParams(
+        num_paths=16,
+        seed=2903,
+        rqmc_min_batches=2,
+        rqmc_max_batches=2,
+        rqmc_target_std=1e-12,
+        rqmc_paths_mode="per_batch",
+    )
+    common = dict(
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        leverage_surface=_smile_leverage(),
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_heston_conditional_control=True,
+        rqmc_frozen_leverage_conditional_control=True,
+        rqmc_spot_bridge_strata=2,
+    )
+    full = HestonSLVQESnowballMCEngine(
+        _heston(), rqmc_spot_strata=2, **common
+    )
+    control_only = HestonSLVQESnowballMCEngine(
+        _heston(),
+        rqmc_conditional_control_only=True,
+        rqmc_spot_strata=1,
+        **common,
+    )
+    heston = QESnowballMCEngine(
+        _heston(),
+        params=params,
+        method=MonteCarloMethod.RANDOMIZED_QUASI,
+        martingale_correction=True,
+        substeps_per_interval=2,
+        rqmc_affine_spot_factor=True,
+        rqmc_spot_bridge_strata=2,
+    )
+    full_spec = full.build_rqmc_session_spec(product, env)
+    control_spec = control_only.build_rqmc_session_spec(product, env)
+    heston_spec = heston.build_rqmc_session_spec(product, env)
+
+    full_paths, full_aux = full_spec.path_generator.generate_paths(
+        batch_id=0, return_aux=True
+    )
+    control_paths, control_aux = control_spec.path_generator.generate_paths(
+        batch_id=0, return_aux=True
+    )
+    heston_paths, heston_aux = heston_spec.path_generator.generate_paths(
+        batch_id=0, return_aux=True
+    )
+    full_proxy = full_spec.control_pricer_fn(full_paths, full_aux)
+    control_payoffs = control_spec.pricer_fn(control_paths, control_aux)
+    bundled_heston_payoffs = control_spec.control_pricer_fn(
+        control_paths, control_aux
+    )
+    standalone_heston_payoffs = heston_spec.pricer_fn(
+        heston_paths, heston_aux
+    )
+
+    assert control_paths.shape == (
+        2 * params.num_paths,
+        control_spec.time_steps + 1,
+    )
+    assert control_aux["affine_spot_factor"] == "standard_normal"
+    assert control_spec.control_pricer_fn is not None
+    assert control_spec.path_valuation_multiplier == 4
+    assert "#conditional-control-only" in control_spec.scheme
+    np.testing.assert_allclose(control_payoffs, full_proxy, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(
+        bundled_heston_payoffs,
+        standalone_heston_payoffs,
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+def test_slv_control_only_rejects_sampled_terminal_spot_factors():
+    with pytest.raises(
+        ValidationError,
+        match="conditional-control-only RQMC requires one spot stratum",
+    ):
+        HestonSLVQESnowballMCEngine(
+            _heston(),
+            params=MCParams(num_paths=16, seed=2903),
+            method=MonteCarloMethod.RANDOMIZED_QUASI,
+            leverage_surface=_smile_leverage(),
+            rqmc_heston_conditional_control=True,
+            rqmc_frozen_leverage_conditional_control=True,
+            rqmc_conditional_control_only=True,
+            rqmc_spot_strata=2,
+        )
+
+
 def test_slv_single_stratum_control_preserves_the_target_paths():
     product = _discrete_snowball()
     env = _env()

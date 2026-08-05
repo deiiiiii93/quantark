@@ -24,19 +24,19 @@ the other three), and emits:
   tolerance + sha256 evidence hash of the gate JSON (timings stripped).
 - ``gate_report.md``            : readable summary tables + rationale.
 
-Gate rule (per variant): the production engine is admitted only if the MEDIUM
+PV gate rule (per variant): the production engine is admitted only if the MEDIUM
 grid passes ``|production - reference| <= max(2 * mc_se, TOL_ABS)`` (mc_se = 0
 for a deterministic reference; TOL_ABS = 0.25% of notional) on EVERY sampled
 date/case, shows no systematic sign bias (a biased production engine fails
-even inside tolerance), the FINE grid also passes, |fine - medium| <=
-TOL_ABS everywhere (no drift), AND the production engine's bumped delta
-agrees with the reference's within half a futures contract's worth of
-per-unit delta on every sampled date, with no systematic one-sided delta
-bias across them (spec §5.3) -- a snowball is delta-hedged daily, so a
-PV-only gate would admit an engine that manufactures spurious hedge trades
-on every rebalance.  Any other outcome routes the variant away from its
-production engine, with the ladder reported honestly.  See ``GATE_PAIRS``,
-``delta_quantum_per_unit``, ``delta_cell_passed`` and ``detect_delta_bias``.
+even inside tolerance), the FINE grid also passes, and |fine - medium| <=
+TOL_ABS everywhere (no drift). For the four 1-D/QUAD variants, the historical
+bumped-delta criterion remains part of this gate. For ``heston`` and
+``heston_slv``, the 16-scramble point check remains a visible diagnostic but
+Greek admission is owned by Stage 16's paired, uncertainty-aware delta/gamma
+certificate. Stage 12 requires both this PV route and the Stage-16 Greek route,
+so delegating the low-power diagnostic cannot admit an unresolved ADI engine.
+See ``GATE_PAIRS``, ``delta_quantum_per_unit``, ``delta_cell_passed`` and
+``detect_delta_bias``.
 
 Determinism: fixed seeds and fixed Sobol batches everywhere; rerunning the
 study reproduces identical JSON modulo ``"timings"`` fields (excluded from the
@@ -112,6 +112,9 @@ LEVELS = ("coarse", "medium", "fine")
 # variants price directly off the environment's vol surface -- no per-day
 # calibration, model=None).
 _CALIBRATED_VARIANTS = (VOL_MODEL_LOCALVOL, VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV)
+ADI_GREEK_CERTIFICATION_VARIANTS = frozenset(
+    {VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV}
+)
 
 # Sample dates spanning regimes (YYYYMMDD).  Excluded dates are substituted
 # with the nearest admitted date (and the substitution is logged).
@@ -991,19 +994,23 @@ def decide_route(
     fine_cells: Sequence[Dict[str, Any]],
     delta_rows: Sequence[Dict[str, Any]],
     tol_abs_pct: float = TOL_ABS_PCT,
+    *,
+    require_delta: bool = True,
 ) -> Dict[str, Any]:
     """Route decision for one variant from its medium/fine gate cells.
 
     PDE is admitted only if: every medium cell passes, no systematic bias at
-    medium, every fine cell passes, |fine - medium| <= TOL_ABS on every paired
-    cell (no drift), AND the production engine's delta agrees with the
-    reference's within half a futures contract on every sampled date with no
-    systematic one-sided delta bias (spec §5.3) -- a snowball is delta-hedged
-    daily, so PV agreement alone is not sufficient evidence.  Any cell
-    carrying an ``error`` counts as failed.  Zero evaluable cells never
-    admits PDE (``all([])`` is vacuously True; ``delta_pass`` is explicitly
-    forced False on empty ``delta_rows`` to mirror this).
+    medium, every fine cell passes, and |fine - medium| <= TOL_ABS on every
+    paired cell (no drift). When ``require_delta`` is true, the production
+    engine's delta must also agree with the reference within half a futures
+    contract on every sampled date with no systematic one-sided bias. The two
+    2-D ADI variants set ``require_delta=False`` because Stage 16 is their
+    stronger, separately hashed Greek authority; these legacy delta rows stay
+    diagnostic. Any cell carrying an ``error`` counts as failed. Zero
+    evaluable PV cells never admits PDE (``all([])`` is vacuously true).
     """
+    if not isinstance(require_delta, bool):
+        raise TypeError("require_delta must be bool")
     delta_pass = all(r.get("passed") is True for r in delta_rows) if delta_rows else False
     delta_biased, delta_info = detect_delta_bias(delta_rows)
     feller_buckets = _feller_bucket_summary(medium_cells)
@@ -1018,6 +1025,7 @@ def decide_route(
             "drift_location": None,
             "delta_pass": delta_pass,
             "delta_biased": bool(delta_biased),
+            "delta_required": bool(require_delta),
             "delta_info": delta_info,
             "feller_buckets": feller_buckets,
             "rationale": (
@@ -1071,7 +1079,7 @@ def decide_route(
             f"medium->fine drift {drift_max:.3f}% of notional at {drift_where} "
             f"exceeds TOL_ABS {tol_abs_pct:.3f}%"
         )
-    if not delta_pass:
+    if require_delta and not delta_pass:
         if not delta_rows:
             reasons.append(
                 "no delta evidence for this variant - refusing to admit PDE on "
@@ -1085,23 +1093,32 @@ def decide_route(
                 f"delta disagreement exceeds half a futures contract on "
                 f"{len(failing)} cell(s): {', '.join(failing)}"
             )
-    if delta_biased:
+    if require_delta and delta_biased:
         reasons.append(
             f"systematic one-sided delta bias: mean "
             f"{delta_info['mean_signed_contracts']:+.3f} contracts exceeds the "
             f"{delta_info['bound_contracts']} contract bound"
         )
+    pv_admissible = medium_pass and not biased and fine_pass and drift_ok
+    greek_admissible = delta_pass and not delta_biased
     route = "pde" if (
-        medium_pass and not biased and fine_pass and drift_ok
-        and delta_pass and not delta_biased
+        pv_admissible and (greek_admissible or not require_delta)
     ) else "mc"
     if route == "pde":
-        rationale = (
-            "medium grid inside tolerance on all sampled dates/cases, no sign "
-            "bias, fine grid confirms (pass + no drift), and delta agrees "
-            "with the reference within half a futures contract with no "
-            "systematic bias"
-        )
+        if require_delta:
+            rationale = (
+                "medium grid inside tolerance on all sampled dates/cases, no sign "
+                "bias, fine grid confirms (pass + no drift), and delta agrees "
+                "with the reference within half a futures contract with no "
+                "systematic bias"
+            )
+        else:
+            rationale = (
+                "PDE PV admitted: medium grid inside tolerance on all sampled "
+                "dates/cases, no sign bias, and fine grid confirms (pass + no "
+                "drift); ADI delta/gamma admission is delegated to the "
+                "fail-closed Stage-16 certificate"
+            )
     else:
         rationale = "; ".join(reasons) if reasons else "route mc by default"
     return {
@@ -1114,6 +1131,7 @@ def decide_route(
         "drift_location": drift_where,
         "delta_pass": bool(delta_pass),
         "delta_biased": bool(delta_biased),
+        "delta_required": bool(require_delta),
         "delta_info": delta_info,
         "feller_buckets": feller_buckets,
         "rationale": rationale,
@@ -1233,6 +1251,18 @@ def validate_decision_payload(payload: Dict[str, Any]) -> None:
     for variant, row in payload["variants"].items():
         if row["route"] not in ("pde", "mc"):
             raise ValueError(f"variant {variant}: route must be 'pde' or 'mc'")
+        gate = row.get("gate", {})
+        expected_delta_authority = (
+            "stage16"
+            if variant in ADI_GREEK_CERTIFICATION_VARIANTS
+            else "stage11"
+        )
+        if gate.get("delta_authority") != expected_delta_authority or bool(
+            gate.get("delta_required")
+        ) != (expected_delta_authority == "stage11"):
+            raise ValueError(
+                f"variant {variant}: invalid delta-admission authority"
+            )
         params_key = "pde_params" if row["route"] == "pde" else "mc_params"
         if params_key not in row:
             raise ValueError(f"variant {variant}: route params {params_key!r} missing")
@@ -1945,7 +1975,15 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
         medium = [c for c in v_cells if c["level"] == "medium"]
         fine = [c for c in v_cells if c["level"] == "fine"]
         v_deltas = [d for d in gate.get("deltas", []) if d["variant"] == variant]
-        decision = decide_route(medium, fine, v_deltas, cfg["tol_abs_pct"])
+        decision = decide_route(
+            medium,
+            fine,
+            v_deltas,
+            cfg["tol_abs_pct"],
+            require_delta=(
+                variant not in ADI_GREEK_CERTIFICATION_VARIANTS
+            ),
+        )
         medium_grid = next(
             (c["grid"] for c in medium if c["case"] == "full"),
             medium[0]["grid"] if medium else None,
@@ -1975,6 +2013,12 @@ def build_decision_payload(cfg: Dict[str, Any], gate: Dict[str, Any]) -> Dict[st
                 "drift_location": decision["drift_location"],
                 "delta_pass": decision["delta_pass"],
                 "delta_biased": decision["delta_biased"],
+                "delta_required": decision["delta_required"],
+                "delta_authority": (
+                    "stage11"
+                    if decision["delta_required"]
+                    else "stage16"
+                ),
                 "delta_info": decision["delta_info"],
                 "feller_buckets": decision["feller_buckets"],
             },
@@ -2054,15 +2098,16 @@ def build_report(cfg: Dict[str, Any], gate: Dict[str, Any], decision: Dict[str, 
     lines.append("")
     lines.append(
         "| variant | route | medium pass | fine pass | bias | max drift % | "
-        "delta pass | delta bias | rationale |"
+        "delta pass | delta bias | Greek authority | rationale |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for variant, row in decision["variants"].items():
         g = row["gate"]
         lines.append(
             f"| {variant} | **{row['route']}** | {g['medium_pass']} | {g['fine_pass']} | "
             f"{g['biased']} | {g['drift_max_pct']:.3f} | {g['delta_pass']} | "
-            f"{g['delta_biased']} | {row['rationale']} |"
+            f"{g['delta_biased']} | {g['delta_authority']} | "
+            f"{row['rationale']} |"
         )
     lines.append("")
 
@@ -2140,7 +2185,12 @@ def build_report(cfg: Dict[str, Any], gate: Dict[str, Any], decision: Dict[str, 
             )
         lines.append("")
 
-    lines.append("## Delta agreement (Gate G2 criterion, spec §5.3)")
+    lines.append("## Legacy delta agreement diagnostic (spec §5.3)")
+    lines.append("")
+    lines.append(
+        "For Heston and Heston-SLV these 16-scramble point rows are diagnostic; "
+        "Stage 16 is the authoritative, fail-closed delta/gamma admission gate."
+    )
     lines.append("")
     deltas = gate.get("deltas") or []
     if deltas:
@@ -2254,11 +2304,40 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--dates", default=None, help="comma-separated YYYYMMDD list")
     parser.add_argument("--quick", action="store_true", help="coarse everything, 1 date")
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument(
+        "--rescore-evidence",
+        type=Path,
+        help=(
+            "reuse a saved pde_convergence_gate.json and rebuild only the "
+            "decision/report under the current routing contract"
+        ),
+    )
     args = parser.parse_args(argv)
 
-    cfg = _default_cfg(args)
-    out_dir = Path(cfg["out_dir"])
-    gate, decision, report = run_study(cfg)
+    out_dir = Path(args.out_dir)
+    if args.rescore_evidence is not None:
+        if args.quick or args.dates is not None:
+            raise ValueError(
+                "--rescore-evidence cannot be combined with --quick or --dates"
+            )
+        try:
+            gate = json.loads(args.rescore_evidence.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"cannot read saved gate evidence {args.rescore_evidence}"
+            ) from exc
+        validate_gate_payload(gate)
+        cfg = dict(gate.get("config", {}))
+        for required in ("quick", "tol_abs_pct", "seed", "mc"):
+            if required not in cfg:
+                raise ValueError(
+                    f"saved gate evidence lacks config field {required!r}"
+                )
+        decision = build_decision_payload(cfg, gate)
+        report = build_report(cfg, gate, decision)
+    else:
+        cfg = _default_cfg(args)
+        gate, decision, report = run_study(cfg)
     _atomic_write_json(out_dir / "pde_convergence_gate.json", gate)
     _atomic_write_json(out_dir / "gate_decision.json", decision)
     _atomic_write_text(out_dir / "gate_report.md", report)

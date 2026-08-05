@@ -389,6 +389,33 @@ def test_decide_route_empty_delta_rows_is_mc_even_when_pv_all_passes():
     assert "no delta evidence" in out["rationale"]
 
 
+def test_decide_route_delegates_adi_greeks_without_weakening_pv_gate():
+    medium, fine = _all_pass_medium_fine()
+    failing_delta = [_delta_row("2023-05-15", "full", passed=False)]
+
+    delegated = gate11.decide_route(
+        medium,
+        fine,
+        failing_delta,
+        0.25,
+        require_delta=False,
+    )
+    assert delegated["route"] == "pde"
+    assert delegated["delta_pass"] is False
+    assert delegated["delta_required"] is False
+    assert "delegated" in delegated["rationale"]
+
+    failing_medium = list(medium)
+    failing_medium[0] = dict(failing_medium[0], passed=False)
+    assert gate11.decide_route(
+        failing_medium,
+        fine,
+        _PASSING_DELTAS,
+        0.25,
+        require_delta=False,
+    )["route"] == "mc"
+
+
 # ---------------------------------------------------------------------------
 # Non-finite engine prices -> recorded error cells (never a crashed run)
 # ---------------------------------------------------------------------------
@@ -557,9 +584,21 @@ def test_validate_decision_payload(monkeypatch):
         "schema_version": 1,
         "study": "pde_convergence_gate_decision",
         "variants": {
-            "heston": {"route": "pde", "pde_params": {"n_x": 1}, "rationale": "ok"},
+            "heston": {
+                "route": "pde",
+                "pde_params": {"n_x": 1},
+                "gate": {
+                    "delta_authority": "stage16",
+                    "delta_required": False,
+                },
+                "rationale": "ok",
+            },
             "heston_slv": {
                 "route": "mc",
+                "gate": {
+                    "delta_authority": "stage16",
+                    "delta_required": False,
+                },
                 "mc_params": {
                     "engine": "HestonSLVQESnowballMCEngine",
                     "method": "randomized_quasi",
