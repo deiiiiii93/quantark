@@ -111,7 +111,7 @@ DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
     / "output/adi_greek_certification/adi_greek_certification_decision.json"
 )
-ADI_GREEK_DECISION_SCHEMA_VERSION = 10
+ADI_GREEK_DECISION_SCHEMA_VERSION = 11
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
 ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
@@ -288,6 +288,7 @@ def stage16():
 # Gate G2 routing
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class GateRouting:
     """Per-variant solver routing read from the stage 11 gate decision."""
@@ -342,9 +343,7 @@ class GateRouting:
             return {}
         params = self.pde_params.get(variant, {})
         options = {
-            key: int(params[key])
-            for key in ("n_x", "n_v", "n_t")
-            if key in params
+            key: int(params[key]) for key in ("n_x", "n_v", "n_t") if key in params
         }
         if variant in {"heston", "heston_slv"}:
             mismatches = {
@@ -404,7 +403,9 @@ def load_gate_routing(path: Path) -> GateRouting:
     mc_params: Dict[str, Dict[str, Any]] = {}
     for name, entry in variants.items():
         if not isinstance(entry, dict):
-            raise ValidationError(f"gate decision {path}: variant {name!r} is not an object")
+            raise ValidationError(
+                f"gate decision {path}: variant {name!r} is not an object"
+            )
         if str(name) in {"heston", "heston_slv"}:
             gate = entry.get("gate")
             if (
@@ -476,81 +477,39 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
         for value in hashes.values()
     ):
         raise ValidationError("ADI Greek decision has incomplete hash provenance")
-    unsigned = dict(payload)
-    decision_hash = str(unsigned.pop("decision_sha256"))
-    if certification._canonical_sha256(unsigned) != decision_hash:
-        raise ValidationError("ADI Greek decision hash mismatch")
-    run_configuration = payload.get("run_configuration")
-    if (
-        not isinstance(run_configuration, dict)
-        or certification._canonical_sha256(run_configuration)
-        != hashes["run_configuration_sha256"]
-    ):
-        raise ValidationError("ADI Greek decision run-configuration hash mismatch")
-    expected_reference_seeds = {
-        "heston": certification.HESTON_REFERENCE_SEED,
-        "heston_slv_primary": certification.SLV_PRIMARY_SEED,
-        "heston_slv_mid_control": certification.SLV_MID_CONTROL_SEED,
-    }
-    expected_slv_multilevel_policy = {
-        "cases": sorted(certification.SLV_MULTILEVEL_CASES),
-        "mid_paths_per_batch": certification.SLV_MID_CONTROL_PATHS_PER_BATCH,
-        "mid_batches": certification.SLV_MID_CONTROL_BATCHES,
-        "frozen_control_weight": certification.SLV_FROZEN_CONTROL_WEIGHT,
-        "heston_control_weight": certification.SLV_HESTON_CONTROL_WEIGHT,
-    }
-    expected_worker_profile = (
-        certification.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
-    )
-    if run_configuration.get("reference_seeds") != expected_reference_seeds:
+
+    evidence_path = Path(path).with_name("adi_greek_certification.json")
+    try:
+        evidence = json.loads(evidence_path.read_text())
+    except OSError as exc:
         raise ValidationError(
-            "ADI Greek decision does not use the held-out schema-10 seeds"
-        )
-    if (
-        run_configuration.get("qe_substeps_by_variant_case")
-        != certification.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
-    ):
+            "ADI Greek decision lacks its sibling full evidence JSON; Stage 12 "
+            "will not route from a compact decision alone"
+        ) from exc
+    except json.JSONDecodeError as exc:
         raise ValidationError(
-            "ADI Greek decision uses a stale case-specific QE-M profile"
-        )
-    if (
-        run_configuration.get("slv_multilevel_policy")
-        != expected_slv_multilevel_policy
-    ):
+            f"ADI Greek evidence {evidence_path} is not valid JSON: {exc}"
+        ) from exc
+    try:
+        if evidence.get("evidence_sha256") != evidence_hash or (
+            certification._projected_evidence_sha256(evidence) != evidence_hash
+        ):
+            raise ValueError("evidence hash mismatch")
+        certification.validate_payload(evidence)
+        expected_decision = certification.build_decision_payload(evidence)
+    except (KeyError, TypeError, ValueError) as exc:
         raise ValidationError(
-            "ADI Greek decision uses a stale SLV multilevel estimator profile"
-        )
-    if (
-        run_configuration.get("rqmc_batch_workers_by_variant_case")
-        != expected_worker_profile
-    ):
+            f"ADI Greek evidence failed closed validation: {exc}"
+        ) from exc
+    if payload != expected_decision:
         raise ValidationError(
-            "ADI Greek decision uses a stale memory-safe worker profile"
+            "ADI Greek decision does not exactly match its validated sibling evidence"
         )
-    live_implementation_hash = certification.implementation_sha256()
-    if hashes["implementation_sha256"] != live_implementation_hash:
-        raise ValidationError(
-            "ADI Greek decision does not match the live certification/routing "
-            "implementation; rerun stage 16"
-        )
-    runtime = payload.get("runtime_environment")
-    if (
-        runtime != certification.runtime_environment()
-        or run_configuration.get("runtime_environment") != runtime
-    ):
-        raise ValidationError(
-            "ADI Greek decision was produced in a different numerical runtime; "
-            "rerun stage 16 here"
-        )
-    production_controls = payload.get("production_engine_controls")
-    if (
-        production_controls != ADI_2D_PRODUCTION_ENGINE_CONTROLS
-        or run_configuration.get("production_engine_controls")
-        != production_controls
-    ):
-        raise ValidationError(
-            "ADI Greek decision does not declare the certified 2-D engine controls"
-        )
+
+    run_configuration = payload["run_configuration"]
+    runtime = payload["runtime_environment"]
+    production_controls = payload["production_engine_controls"]
+    decision_hash = payload["decision_sha256"]
     decisions = payload.get("decisions")
     if not isinstance(decisions, dict) or not decisions:
         raise ValidationError("ADI Greek decision has no decisions map")
@@ -570,76 +529,6 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
             raise ValidationError(
                 f"ADI Greek decision entry {variant!r} admits PDE on incomplete evidence"
             )
-        if route == "pde":
-            expected_common_scrambles = (
-                certification.PRODUCTION_HESTON_BATCHES
-                if variant == "heston"
-                else certification.PRODUCTION_SLV_BATCHES
-            )
-            if int(row.get("aggregate_common_scrambles", 0)) != (
-                expected_common_scrambles
-            ):
-                raise ValidationError(
-                    f"ADI Greek decision entry {variant!r} has an invalid "
-                    "aggregate common-scramble count"
-                )
-            sampling = run_configuration.get("sampling_by_variant", {}).get(
-                variant, {}
-            )
-            minimum_paths = (
-                certification.PRODUCTION_HESTON_PATHS_PER_BATCH
-                if variant == "heston"
-                else certification.PRODUCTION_SLV_PATHS_PER_BATCH
-            )
-            if int(sampling.get("paths_per_batch", 0)) < minimum_paths:
-                raise ValidationError(
-                    f"ADI Greek decision entry {variant!r} uses insufficient "
-                    "production sampling"
-                )
-            if variant == "heston" and (
-                int(sampling.get("batches", 0))
-                != certification.PRODUCTION_HESTON_BATCHES
-                or sampling.get("batches_by_case")
-                != certification.PRODUCTION_HESTON_BATCHES_BY_CASE
-            ):
-                raise ValidationError(
-                    "ADI Greek decision entry 'heston' uses a stale "
-                    "case-specific batch profile"
-                )
-            if variant == "heston_slv" and (
-                int(sampling.get("batches", 0))
-                != certification.PRODUCTION_SLV_BATCHES
-                or sampling.get("batches_by_case")
-                != certification.PRODUCTION_SLV_BATCHES_BY_CASE
-                or sampling.get("primary_batches_by_case")
-                != certification.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
-            ):
-                raise ValidationError(
-                    "ADI Greek decision entry 'heston_slv' uses a stale "
-                    "case-specific batch profile"
-                )
-            if variant == "heston_slv" and (
-                int(run_configuration.get("slv_spot_strata", 0))
-                != certification.SLV_SPOT_STRATA
-                or bool(run_configuration.get("slv_spot_antithetic", False))
-                != certification.SLV_SPOT_ANTITHETIC
-                or int(run_configuration.get("slv_spot_bridge_strata", 0))
-                != certification.SLV_SPOT_BRIDGE_STRATA
-                or run_configuration.get("slv_spot_bridge_profile_by_case")
-                != certification.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
-            ):
-                raise ValidationError(
-                    "ADI Greek decision entry 'heston_slv' uses a stale "
-                    "conditional sampling profile"
-                )
-            if variant == "heston" and (
-                run_configuration.get("heston_spot_bridge_profile_by_case")
-                != certification.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
-            ):
-                raise ValidationError(
-                    "ADI Greek decision entry 'heston' uses a stale "
-                    "conditional sampling profile"
-                )
         routes[str(variant)] = route
         reasons[str(variant)] = str(row.get("reason", ""))
     return ADIGreekRouting(
@@ -789,6 +678,7 @@ def build_market_dataset(
 # Inception scheduling
 # ---------------------------------------------------------------------------
 
+
 def schedule_inceptions(
     *,
     calendar,
@@ -836,6 +726,7 @@ def schedule_inceptions(
 # Product construction
 # ---------------------------------------------------------------------------
 
+
 def build_backtest_product(
     terms,
     *,
@@ -879,6 +770,7 @@ def build_backtest_product(
 # ---------------------------------------------------------------------------
 # Fair coupon (Gate G4)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CouponSolution:
@@ -1054,6 +946,7 @@ def solve_affine_root(
 # Engine configuration
 # ---------------------------------------------------------------------------
 
+
 def make_mc_params(paths_per_batch: int, batches: int, seed: int) -> MCParams:
     """Fixed-cost fixed-seed RQMC, matching the stage 11 gate reference."""
     return MCParams(
@@ -1218,6 +1111,7 @@ def make_cost_model(enabled: bool):
 # Per-run execution
 # ---------------------------------------------------------------------------
 
+
 def _write_frame(frame: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(path)
@@ -1264,7 +1158,9 @@ def run_one(task: Dict[str, Any]) -> Dict[str, Any]:
     window_start = pd.Timestamp(inception)
     window_end = pd.Timestamp(date.fromisoformat(task["window_end"]))
     spot = spot[(spot["date"] >= window_start) & (spot["date"] <= window_end)]
-    futures = futures[(futures["date"] >= window_start) & (futures["date"] <= window_end)]
+    futures = futures[
+        (futures["date"] >= window_start) & (futures["date"] <= window_end)
+    ]
     if task.get("max_days"):
         keep = list(spot["date"])[: int(task["max_days"])]
         spot = spot[spot["date"].isin(keep)]
@@ -1463,6 +1359,7 @@ def summarize_run(
 # Fleet driver
 # ---------------------------------------------------------------------------
 
+
 def prepare_inceptions(
     *,
     history: VolSurfaceHistory,
@@ -1514,8 +1411,7 @@ def prepare_inceptions(
         calibration_cache_dir=None,
     )
     print(
-        f"[coupons] solving fair coupons for {len(inceptions)} inceptions "
-        "(Gate G4)",
+        f"[coupons] solving fair coupons for {len(inceptions)} inceptions " "(Gate G4)",
         flush=True,
     )
     for index, inception in enumerate(inceptions, start=1):
@@ -1710,9 +1606,7 @@ def build_run_manifest(
     failures: Sequence[Dict[str, Any]],
     elapsed: float,
 ) -> Dict[str, Any]:
-    censored = sum(
-        1 for s in summaries if s["lifecycle"]["censored_at_data_end"]
-    )
+    censored = sum(1 for s in summaries if s["lifecycle"]["censored_at_data_end"])
     knocked_out = sum(1 for s in summaries if s["lifecycle"]["knocked_out"])
     matured = sum(1 for s in summaries if s["lifecycle"]["matured"])
     return {
@@ -1743,12 +1637,8 @@ def build_run_manifest(
         "adi_greek_certification": {
             "decision_path": cfg.get("adi_greek_decision"),
             "evidence_sha256": cfg.get("adi_greek_evidence_sha256"),
-            "implementation_sha256": cfg.get(
-                "adi_greek_implementation_sha256"
-            ),
-            "run_configuration_sha256": cfg.get(
-                "adi_greek_run_configuration_sha256"
-            ),
+            "implementation_sha256": cfg.get("adi_greek_implementation_sha256"),
+            "run_configuration_sha256": cfg.get("adi_greek_run_configuration_sha256"),
             "decision_sha256": cfg.get("adi_greek_decision_sha256"),
             "runtime_environment": cfg.get("adi_greek_runtime_environment"),
             "production_engine_controls": cfg.get(
@@ -1778,6 +1668,7 @@ def build_run_manifest(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -1879,9 +1770,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
     history = surface_history(history_dir)
     spot = load_spot_frame(history_dir)
     futures = load_futures_frame(history_dir)
-    calendar = stage11().TradingCalendar.from_spot_csv(
-        history_dir / "csi1000_spot.csv"
-    )
+    calendar = stage11().TradingCalendar.from_spot_csv(history_dir / "csi1000_spot.csv")
     data_end = pd.Timestamp(spot["date"].iloc[-1]).date()
     if args.data_end:
         pinned = date.fromisoformat(str(args.data_end))
@@ -1930,14 +1819,10 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         "history_dir": str(history_dir),
         "gate_decision": str(args.gate_decision),
         "adi_greek_decision": (
-            None
-            if adi_greek_routing is None
-            else adi_greek_routing.decision_path
+            None if adi_greek_routing is None else adi_greek_routing.decision_path
         ),
         "adi_greek_evidence_sha256": (
-            None
-            if adi_greek_routing is None
-            else adi_greek_routing.evidence_sha256
+            None if adi_greek_routing is None else adi_greek_routing.evidence_sha256
         ),
         "adi_greek_implementation_sha256": (
             None
@@ -1950,9 +1835,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
             else adi_greek_routing.run_configuration_sha256
         ),
         "adi_greek_decision_sha256": (
-            None
-            if adi_greek_routing is None
-            else adi_greek_routing.decision_sha256
+            None if adi_greek_routing is None else adi_greek_routing.decision_sha256
         ),
         "adi_greek_runtime_environment": (
             None
@@ -1980,7 +1863,9 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         "gate_g3": bool(args.gate_g3),
         "rate": float(rate),
         "workers": int(args.workers),
-        "mc_paths_per_batch": QUICK_MC_PATHS_PER_BATCH if args.quick else MC_PATHS_PER_BATCH,
+        "mc_paths_per_batch": QUICK_MC_PATHS_PER_BATCH
+        if args.quick
+        else MC_PATHS_PER_BATCH,
         "mc_batches": QUICK_MC_BATCHES if args.quick else MC_BATCHES,
         "mc_seed": MC_SEED,
         # Per-variant scheme/substeps_per_interval actually resolved for the

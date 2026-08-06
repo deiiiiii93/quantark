@@ -13,9 +13,14 @@ tri-state PASS/FAIL/INCONCLUSIVE equivalence verdict.  An unresolved Greek is
 never converted into an MC route: the decision is
 ``excluded_greek_unresolved`` until a production-sized run proves equivalence.
 
-Production run::
+Production incremental amendment::
 
-    .venv/bin/python example/mo_volmodels/16_adi_greek_certification.py
+    .venv/bin/python example/mo_volmodels/16_adi_greek_certification.py \
+      --amend-parent-evidence output/adi_greek_certification_schema9/adi_greek_certification.json \
+      --amend-parent-decision output/adi_greek_certification_schema9/adi_greek_certification_decision.json
+
+A fresh 14-cell production recertification requires the explicit
+``--full-recertification`` flag.
 
 Fast plumbing run (explicitly non-admissive)::
 
@@ -78,13 +83,79 @@ from quantark.validation import (
     EquivalenceStatus,
     certify_equivalence,
     certify_signed_bias_from_batches,
+    certify_signed_bias_from_independent_cohorts,
+    summarize_independent_cohort_means,
 )
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
+CERTIFICATION_MODE_FULL = "full_recertification"
+CERTIFICATION_MODE_AMENDMENT = "incremental_amendment"
+
+# Schema 11 is a cryptographically bound amendment to the completed schema-9
+# certificate.  The parent already proved every deterministic anchor and all
+# seven Heston cells; rerunning those cells would add compute cost without new
+# information.  Only the two unresolved SLV cells are replaced.  Near-KI also
+# needs one reference-only Heston 8->16 control because its new three-level
+# estimator cannot consume the parent's 4->8 Heston cell.
+PARENT_SCHEMA_VERSION = 9
+PARENT_SOURCE_COMMIT = "426c8dc4864f9684a73e3602b62f99e9a5df1f5a"
+PARENT_SEED = 20260807
+PARENT_EVIDENCE_FILE_SHA256 = (
+    "a0ed3bbdaaaf8e6c60d4fd97b3e17d39b0434107ddd365ea67b1680bcf319457"
+)
+PARENT_DECISION_FILE_SHA256 = (
+    "3fca3ae1af40a733487eac2533408dd1bd5749e1bee1a080680464c470f0cdd1"
+)
+PARENT_EVIDENCE_SHA256 = (
+    "3daf611f2a0b0d16fce94f66c80acf99beec5fe5ad092fb69b211a52537847fa"
+)
+PARENT_DECISION_SHA256 = (
+    "fa23738f02b1ddc1bb83870ac23c4b9f0d4bda22e91911188e0e3af13eb5a3a9"
+)
+PARENT_IMPLEMENTATION_SHA256 = (
+    "240aa9f0824a7b101b0db50f9aa9166f86112cc4ccb3294818e7e8de557cba88"
+)
+PARENT_RUN_CONFIGURATION_SHA256 = (
+    "c6c79eb88a5eb34a1daeec83f3ef6ef159b2406d877198c22f1ed9a0610a06b4"
+)
+PARENT_PRODUCTION_PDE_SHA256 = (
+    "328f9c2daa8e84d055e13ead53a99fc72690030732602c736bf19529a9526b62"
+)
+PARENT_ANCHORS_SHA256 = (
+    "4662f6813dc4fc97318b5bd7b92da6f9310ceb91aa5e3b5d4ee2104c4ed604b7"
+)
+PARENT_HESTON_DECISION_SHA256 = (
+    "c0287e36c336906746bf5756e41b1afc365f363193342aff05174b588b9696ba"
+)
+PARENT_CARRIED_CELL_SHA256 = {
+    "heston/ordinary_full": "d7f7fb42d86296f5c89ef3e5a6525b61af9ec416cff65c4ccf63743281c4506f",
+    "heston/ordinary_decayed": "0876d3225dd77d6ac08598eda32d8dd0dc75aebaf4a7235cd8504b5643fb7016",
+    "heston/near_ko": "87968cceaf13016b23caf077d7ce6017a505281c6fcfd16987a65e0d86a8f7e5",
+    "heston/near_ki": "51001163bf96a7b861839ca328f9f516b15e7f601ceb3452cfcac3ceff33ce70",
+    "heston/low_feller": "bb120c7745fdaf12c5a75f4c4725bed2966b1c3d2509f0ad139e6587ecb30a3f",
+    "heston/sigma_collapse": "e702c7641322307b699423b13ef082c6234a48eab68a1f71ca4f309ccd0c0896",
+    "heston/near_expiry": "cba106f047f46390b62ae22dbf0410ba0bddb357d64cf44f5b7630c990649bfb",
+    "heston_slv/ordinary_full": "4d6f72141fb85894931ed12fb7e2868db2062a691a4b61e23104cb329e18cc23",
+    "heston_slv/ordinary_decayed": "7d7c09af410ae01b55d773ab0c3f583faceddcb3b13aefa06b8524990320fcb0",
+    "heston_slv/near_ko": "7d6ff806f23fbe1aa6742d385c2af932601e2fbe65803ae3b4cd75079bcb06b3",
+    "heston_slv/sigma_collapse": "a7c670f4268bc065482dbc9851670ec6d278c22312fa5091ac23ed515fe0a744",
+    "heston_slv/near_expiry": "e46194c1f2146c9e687132f9ca1d6e8107d2744cdd74b980de0cd903961a8681",
+}
+AMENDMENT_REPLACEMENT_CASES = frozenset({"near_ki", "low_feller"})
+AMENDMENT_CARRIED_SLV_CASES = frozenset(
+    {
+        "ordinary_full",
+        "ordinary_decayed",
+        "near_ko",
+        "sigma_collapse",
+        "near_expiry",
+    }
+)
+AMENDMENT_AGGREGATE_BATCHES = 128
 # Schema 9's untouched 20260807 family certified Heston and isolated the two
 # remaining SLV cells. The 20260806 development family then selected the
 # multilevel estimator, bridge allocation, and QE-M refinement levels. Schema
@@ -179,13 +250,9 @@ PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE = {
 SLV_MULTILEVEL_CASES = frozenset({"near_ki"})
 PRODUCTION_SLV_BATCHES_BY_CASE = {
     case_name: (
-        PRODUCTION_SLV_BATCHES
-        if case_name in SLV_MULTILEVEL_CASES
-        else primary_batches
+        PRODUCTION_SLV_BATCHES if case_name in SLV_MULTILEVEL_CASES else primary_batches
     )
-    for case_name, primary_batches in (
-        PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE.items()
-    )
+    for case_name, primary_batches in (PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE.items())
 }
 SLV_MID_CONTROL_PATHS_PER_BATCH = 8192
 SLV_MID_CONTROL_BATCHES = 128
@@ -240,9 +307,7 @@ PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE = {
         "sigma_collapse": 2,
         "near_expiry": 4,
     },
-    "heston_slv": {
-        case_name: 4 for case_name in PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE
-    },
+    "heston_slv": {case_name: 4 for case_name in PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE},
 }
 # Smooth cells can run two-at-a-time on the 14-core certification host. The
 # high-dimensional Near-KI SLV middle level stays serialized below because a
@@ -278,6 +343,7 @@ IMPLEMENTATION_INPUTS = (
     "example/mo_volmodels/11_pde_convergence_gate.py",
     "example/mo_volmodels/12_snowball_volmodel_backtest.py",
     "example/mo_volmodels/16_adi_greek_certification.py",
+    "quantark/validation/__init__.py",
     "quantark/validation/greek_certification.py",
     "quantark/volmodels/adi_core.py",
     "quantark/asset/equity/engine/pde/snowball_vol_pde_solvers.py",
@@ -288,6 +354,23 @@ IMPLEMENTATION_INPUTS = (
     "quantark/montecarlo/qmc_rqmc_driver.py",
     "quantark/montecarlo/conditional_snowball.py",
     "quantark/montecarlo/qmc_qe_coupling.py",
+)
+
+# This narrower projection binds carried schema-9 results to the live
+# production PDE dependency surface.  Certification-harness and Monte Carlo
+# estimator changes intentionally do not invalidate previously completed PDE
+# cells; a change anywhere in this projection does.
+PRODUCTION_PDE_INPUT_ROOTS = (
+    "quantark/asset/equity/engine/base_engine.py",
+    "quantark/asset/equity/engine/pde",
+    "quantark/asset/equity/param",
+    "quantark/asset/equity/product/option/snowball_option.py",
+    "quantark/asset/equity/product/option/snowball_helpers.py",
+    "quantark/backtest/replay",
+    "quantark/priceenv",
+    "quantark/util/enum",
+    "quantark/util/numerical",
+    "quantark/volmodels",
 )
 
 
@@ -654,9 +737,7 @@ def make_mc_engine(
             rqmc_spot_antithetic=bool(slv_spot_antithetic),
             rqmc_spot_bridge_strata=int(slv_spot_bridge_strata),
             rqmc_spot_bridge_dimensions=int(slv_spot_bridge_dimensions),
-            rqmc_conditional_control_only=bool(
-                slv_conditional_control_only
-            ),
+            rqmc_conditional_control_only=bool(slv_conditional_control_only),
             **common,
         )
     raise ValueError(f"unsupported variant: {variant}")
@@ -736,10 +817,7 @@ def combine_two_level_control(
     averaged into one row before the components are combined. The resulting
     rows remain independent and retain one auditable Student-t sample.
     """
-    if (
-        isinstance(high_batches_per_low, bool)
-        or int(high_batches_per_low) < 1
-    ):
+    if isinstance(high_batches_per_low, bool) or int(high_batches_per_low) < 1:
         raise ValueError("high_batches_per_low must be a positive integer")
     high_batches_per_low = int(high_batches_per_low)
     low_shape = np.asarray(controlled.batch_estimates).shape
@@ -759,17 +837,18 @@ def combine_two_level_control(
     if high_control.batches_used != expected_high_shape[0]:
         raise ValueError("high-control batch count does not match its rows")
     results = (controlled, low_control, high_control)
-    if len({result.spot for result in results}) != 1 or len(
-        {result.relative_bump for result in results}
-    ) != 1:
+    if (
+        len({result.spot for result in results}) != 1
+        or len({result.relative_bump for result in results}) != 1
+    ):
         raise ValueError("two-level Heston control bump semantics do not match")
 
     estimates = (
         np.asarray(controlled.batch_estimates, dtype=float)
         - np.asarray(low_control.batch_estimates, dtype=float)
-        + np.asarray(high_control.batch_estimates, dtype=float).reshape(
-            controlled.batches_used, high_batches_per_low, 5
-        ).mean(axis=1)
+        + np.asarray(high_control.batch_estimates, dtype=float)
+        .reshape(controlled.batches_used, high_batches_per_low, 5)
+        .mean(axis=1)
     )
     batches = int(controlled.batches_used)
     means = np.mean(estimates, axis=0)
@@ -788,9 +867,7 @@ def combine_two_level_control(
         paths_per_batch=int(controlled.paths_per_batch),
         batches_used=batches,
         total_unique_paths=sum(result.total_unique_paths for result in results),
-        total_path_valuations=sum(
-            result.total_path_valuations for result in results
-        ),
+        total_path_valuations=sum(result.total_path_valuations for result in results),
         randomization_key=(
             "two_level_control("
             f"{controlled.randomization_key};"
@@ -848,9 +925,7 @@ def paired_result_from_serialized(
         or not np.all(np.isfinite(expected))
         or not np.allclose(actual, expected, rtol=1e-12, atol=1e-14)
         or serialized_covariance.shape != (5, 5)
-        or not np.allclose(
-            covariance, serialized_covariance, rtol=1e-12, atol=1e-14
-        )
+        or not np.allclose(covariance, serialized_covariance, rtol=1e-12, atol=1e-14)
     ):
         raise ValueError("serialized paired result does not match its raw batches")
     return PairedRQMCGreeksResult(
@@ -897,9 +972,10 @@ def combine_grouped_rqmc_components(
         raise ValueError("output_batches must be an integer >= 2")
     output_batches = int(output_batches)
     results = tuple(result for _, result in components)
-    if len({result.spot for result in results}) != 1 or len(
-        {result.relative_bump for result in results}
-    ) != 1:
+    if (
+        len({result.spot for result in results}) != 1
+        or len({result.relative_bump for result in results}) != 1
+    ):
         raise ValueError("grouped RQMC components use inconsistent bump semantics")
 
     estimates = np.zeros((output_batches, 5), dtype=float)
@@ -922,9 +998,9 @@ def combine_grouped_rqmc_components(
                 "output_batches"
             )
         rows_per_group = int(result.batches_used) // output_batches
-        estimates += coefficient * rows.reshape(
-            output_batches, rows_per_group, 5
-        ).mean(axis=1)
+        estimates += coefficient * rows.reshape(output_batches, rows_per_group, 5).mean(
+            axis=1
+        )
         key_parts.append(
             f"{coefficient:+.17g}*group{rows_per_group}({result.randomization_key})"
         )
@@ -934,9 +1010,7 @@ def combine_grouped_rqmc_components(
 
     covariance = np.asarray(np.cov(estimates, rowvar=False, ddof=1), dtype=float)
     means = np.mean(estimates, axis=0)
-    standard_errors = np.sqrt(
-        np.maximum(np.diag(covariance), 0.0) / output_batches
-    )
+    standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0) / output_batches)
     return PairedRQMCGreeksResult(
         price=float(means[1]),
         price_std_error=float(standard_errors[1]),
@@ -1051,26 +1125,21 @@ def build_slv_multilevel_reference(
     """
     if case.name not in SLV_MULTILEVEL_CASES:
         raise ValueError(f"{case.name}: no production SLV multilevel profile")
-    if heston_high_cell.get("variant") != "heston" or heston_high_cell.get(
-        "case", {}
-    ).get("name") != case.name:
+    if (
+        heston_high_cell.get("variant") != "heston"
+        or heston_high_cell.get("case", {}).get("name") != case.name
+    ):
         raise ValueError("SLV multilevel control requires the matching Heston cell")
     high_reference = heston_high_cell.get("reference", {})
     heston_high_seed = int(high_reference.get("seed", -1))
     if len({int(primary_seed), int(mid_seed), heston_high_seed}) != 3:
-        raise ValueError(
-            "SLV multilevel seed families must be mutually independent"
-        )
-    if (
-        int(high_reference.get("target_substeps_per_interval", 0))
-        != int(target_substeps)
-        or int(high_reference.get("fine_substeps_per_interval", 0))
-        != int(fine_substeps)
-    ):
+        raise ValueError("SLV multilevel seed families must be mutually independent")
+    if int(high_reference.get("target_substeps_per_interval", 0)) != int(
+        target_substeps
+    ) or int(high_reference.get("fine_substeps_per_interval", 0)) != int(fine_substeps):
         raise ValueError("SLV and Heston control substep profiles do not match")
     if (
-        primary_target.batches_used
-        != PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE[case.name]
+        primary_target.batches_used != PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE[case.name]
         or primary_fine.batches_used != primary_target.batches_used
         or primary_target.batches_used % PRODUCTION_SLV_BATCHES != 0
     ):
@@ -1231,11 +1300,7 @@ def _pde_envelope_components(ladders: dict, target: dict) -> dict[str, dict]:
         for axis in ("n_x", "n_v", "n_t"):
             fine = ladders["axes"][axis][-1]
             components[greek][axis] = abs(float(fine[greek]) - float(target[greek]))
-        finer_bumps = [
-            row
-            for row in ladders["bump"]
-            if float(row["bump"]) < SPOT_BUMP
-        ]
+        finer_bumps = [row for row in ladders["bump"] if float(row["bump"]) < SPOT_BUMP]
         bump_ref = max(finer_bumps, key=lambda row: row["bump"])
         components[greek]["spot_bump_semantic_diagnostic"] = abs(
             float(bump_ref[greek]) - float(target[greek])
@@ -1249,15 +1314,12 @@ def _pde_envelope_components(ladders: dict, target: dict) -> dict[str, dict]:
     return components
 
 
-def _pde_signed_refinement_components(
-    ladders: dict, target: dict
-) -> dict[str, dict]:
+def _pde_signed_refinement_components(ladders: dict, target: dict) -> dict[str, dict]:
     components = {"delta": {}, "gamma": {}}
     for greek in components:
         for axis in ("n_x", "n_v", "n_t"):
-            components[greek][axis] = (
-                float(ladders["axes"][axis][-1][greek])
-                - float(target[greek])
+            components[greek][axis] = float(ladders["axes"][axis][-1][greek]) - float(
+                target[greek]
             )
     return components
 
@@ -1275,9 +1337,7 @@ def _pde_refinement_diagnostics(ladders: dict, scale: EconomicGreekScale) -> dic
             rows = ladders["axes"][axis]
             if len(rows) != 3:
                 raise ValueError(f"{axis} refinement ladder must have three points")
-            values = [
-                _economic_value(scale, greek, float(row[greek])) for row in rows
-            ]
+            values = [_economic_value(scale, greek, float(row[greek])) for row in rows]
             coarse_to_target = values[1] - values[0]
             target_to_fine = values[2] - values[1]
             tolerance = max(
@@ -1311,6 +1371,110 @@ def _pde_refinement_diagnostics(ladders: dict, scale: EconomicGreekScale) -> dic
         diagnostics[greek]["status"] for greek in ("delta", "gamma")
     )
     return diagnostics
+
+
+def build_heston_high_control_evidence(
+    case: CaseSpec,
+    *,
+    paths_per_batch: int,
+    batches: int,
+    seed: int,
+    target_substeps: int,
+    fine_substeps: int,
+    heston_spot_bridge_strata: int,
+    heston_spot_bridge_dimensions: int,
+    rqmc_batch_workers: int,
+) -> dict:
+    """Compute reference-only Heston evidence for an SLV control variate.
+
+    This deliberately does not evaluate a PDE grid or issue a Heston routing
+    verdict.  The schema-9 Heston certificate remains the production authority;
+    these rows exist only to provide an independent, resolution-matched high
+    expectation to the schema-11 Near-KI SLV estimator.
+    """
+    product = make_snowball(case, dense_ki=True)
+    env = make_environment(
+        case.spot,
+        math.sqrt(max(case.params.v0, case.params.theta)),
+    )
+    probe_engine = make_mc_engine(
+        "heston",
+        case,
+        None,
+        paths_per_batch=paths_per_batch,
+        batches=batches,
+        seed=seed,
+        substeps=1,
+        heston_spot_bridge_strata=heston_spot_bridge_strata,
+        heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
+        slv_spot_strata=1,
+        slv_spot_antithetic=False,
+        slv_spot_bridge_strata=1,
+        slv_spot_bridge_dimensions=1,
+    )
+    _, contractual_dt, _, _ = probe_engine._build_time_grid(
+        product, env, float(case.maturity)
+    )
+    target_dt = np.repeat(
+        np.asarray(contractual_dt, dtype=float) / target_substeps,
+        target_substeps,
+    )
+    fine_dt = np.repeat(
+        np.asarray(contractual_dt, dtype=float) / fine_substeps,
+        fine_substeps,
+    )
+    target_provider, fine_provider = coupled_qe_providers(
+        seed=seed,
+        paths_per_batch=paths_per_batch,
+        target_dt=target_dt,
+        fine_dt=fine_dt,
+        reuse_count=1,
+    )
+    references = {}
+    for level, substeps, provider in (
+        ("target", target_substeps, target_provider),
+        ("fine", fine_substeps, fine_provider),
+    ):
+        references[level] = paired_mc_reference(
+            "heston",
+            case,
+            product,
+            env,
+            None,
+            paths_per_batch=paths_per_batch,
+            batches=batches,
+            seed=seed,
+            substeps=substeps,
+            bump=SPOT_BUMP,
+            qe_draw_provider=provider,
+            heston_spot_bridge_strata=heston_spot_bridge_strata,
+            heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
+            slv_spot_strata=1,
+            slv_spot_antithetic=False,
+            slv_spot_bridge_strata=1,
+            slv_spot_bridge_dimensions=1,
+            rqmc_batch_workers=rqmc_batch_workers,
+        )
+    return {
+        "variant": "heston",
+        "case": case.as_dict(),
+        "purpose": "reference_only_slv_high_control",
+        "reference": {
+            "scheme": (
+                "QE-M paired randomized Sobol with exact affine spot-factor "
+                "conditioning"
+            ),
+            "seed": int(seed),
+            "primary": "fine",
+            "target_substeps_per_interval": int(target_substeps),
+            "fine_substeps_per_interval": int(fine_substeps),
+            "heston_spot_bridge_strata": int(heston_spot_bridge_strata),
+            "heston_spot_bridge_dimensions": int(heston_spot_bridge_dimensions),
+            "batch_workers": int(rqmc_batch_workers),
+            "target": references["target"].as_dict(include_batches=True),
+            "fine": references["fine"].as_dict(include_batches=True),
+        },
+    }
 
 
 def certify_case(
@@ -1352,16 +1516,12 @@ def certify_case(
     )
     pde_target = cache[target_key]
     raw_pde_envelopes = _pde_envelope_components(ladder_evidence, pde_target)
-    raw_pde_signed = _pde_signed_refinement_components(
-        ladder_evidence, pde_target
-    )
+    raw_pde_signed = _pde_signed_refinement_components(ladder_evidence, pde_target)
 
     if quick:
         target_substeps, fine_substeps = (1, 2)
     else:
-        substep_profile = PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE[variant][
-            case.name
-        ]
+        substep_profile = PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE[variant][case.name]
         target_substeps = int(substep_profile["target"])
         fine_substeps = int(substep_profile["fine"])
     # Both substep levels are projections of the same finest scrambled-Sobol
@@ -1454,25 +1614,23 @@ def certify_case(
             raise ValueError(
                 f"heston_slv/{case.name}: matching Heston evidence is required"
             )
-        reference, reference_fine, estimator_metadata = (
-            build_slv_multilevel_reference(
-                case,
-                product=product,
-                env=env,
-                leverage=leverage,
-                primary_target=reference,
-                primary_fine=reference_fine,
-                target_dt=target_dt,
-                fine_dt=fine_dt,
-                target_substeps=target_substeps,
-                fine_substeps=fine_substeps,
-                heston_high_cell=heston_high_cell,
-                primary_seed=seed,
-                mid_seed=slv_mid_control_seed,
-                slv_spot_bridge_strata=slv_spot_bridge_strata,
-                slv_spot_bridge_dimensions=slv_spot_bridge_dimensions,
-                rqmc_batch_workers=rqmc_batch_workers,
-            )
+        reference, reference_fine, estimator_metadata = build_slv_multilevel_reference(
+            case,
+            product=product,
+            env=env,
+            leverage=leverage,
+            primary_target=reference,
+            primary_fine=reference_fine,
+            target_dt=target_dt,
+            fine_dt=fine_dt,
+            target_substeps=target_substeps,
+            fine_substeps=fine_substeps,
+            heston_high_cell=heston_high_cell,
+            primary_seed=seed,
+            mid_seed=slv_mid_control_seed,
+            slv_spot_bridge_strata=slv_spot_bridge_strata,
+            slv_spot_bridge_dimensions=slv_spot_bridge_dimensions,
+            rqmc_batch_workers=rqmc_batch_workers,
         )
     reference_batches = int(reference.batches_used)
     if reference_fine.batches_used != reference_batches:
@@ -1522,9 +1680,7 @@ def certify_case(
             dtype=float,
         )
         substep_mean = float(np.mean(substep_batches))
-        substep_se = float(
-            np.std(substep_batches, ddof=1) / np.sqrt(reference_batches)
-        )
+        substep_se = float(np.std(substep_batches, ddof=1) / np.sqrt(reference_batches))
         component_critical = float(
             student_t.ppf(
                 0.5 + 0.5 * STOCHASTIC_COMPONENT_CONFIDENCE,
@@ -1571,9 +1727,7 @@ def certify_case(
             ),
         }
 
-    diagnostic_engine = make_pde_engine(
-        variant, case, ladders["target"], leverage
-    )
+    diagnostic_engine = make_pde_engine(variant, case, ladders["target"], leverage)
     core = diagnostic_engine._make_core(product, env, case.maturity)
     diagnostics = core.variance_operator_diagnostics()
     pv_grid = GridPoint(200, 60, max(120, int(math.ceil(400 * case.maturity))))
@@ -1596,9 +1750,7 @@ def certify_case(
                 leverage_surface=leverage,
                 **production_kwargs,
             )
-        production_grid_policy = production_engine.greek_time_grid_policy(
-            product, env
-        )
+        production_grid_policy = production_engine.greek_time_grid_policy(product, env)
         resolved_candidate = GridPoint(
             int(production_grid_policy["resolved_n_x"]),
             int(production_grid_policy["resolved_n_v"]),
@@ -1627,8 +1779,9 @@ def certify_case(
         "reference": {
             "scheme": (
                 "QE-M paired randomized Sobol with exact affine spot-factor "
-                "conditioning" if variant == "heston" else
-                "QE-M paired randomized Sobol with antithetic terminal and "
+                "conditioning"
+                if variant == "heston"
+                else "QE-M paired randomized Sobol with antithetic terminal and "
                 "midpoint Brownian-bridge stratification plus path-frozen "
                 "leverage conditional control"
             ),
@@ -1638,14 +1791,10 @@ def certify_case(
             "target_substeps_per_interval": target_substeps,
             "fine_substeps_per_interval": fine_substeps,
             "heston_spot_bridge_strata": (
-                int(heston_spot_bridge_strata)
-                if variant == "heston"
-                else None
+                int(heston_spot_bridge_strata) if variant == "heston" else None
             ),
             "heston_spot_bridge_dimensions": (
-                int(heston_spot_bridge_dimensions)
-                if variant == "heston"
-                else None
+                int(heston_spot_bridge_dimensions) if variant == "heston" else None
             ),
             "slv_spot_strata": (
                 int(slv_spot_strata) if variant == "heston_slv" else None
@@ -1654,17 +1803,14 @@ def certify_case(
                 bool(slv_spot_antithetic) if variant == "heston_slv" else None
             ),
             "slv_spot_bridge_strata": (
-                int(slv_spot_bridge_strata)
-                if variant == "heston_slv"
-                else None
+                int(slv_spot_bridge_strata) if variant == "heston_slv" else None
             ),
             "slv_spot_bridge_dimensions": (
-                int(slv_spot_bridge_dimensions)
-                if variant == "heston_slv"
-                else None
+                int(slv_spot_bridge_dimensions) if variant == "heston_slv" else None
             ),
             "slv_effective_spot_samples": (
-                int(slv_spot_strata) * (2 if slv_spot_antithetic else 1)
+                int(slv_spot_strata)
+                * (2 if slv_spot_antithetic else 1)
                 * int(slv_spot_bridge_strata)
                 if variant == "heston_slv"
                 else None
@@ -1723,15 +1869,10 @@ def rescore_serialized_cell(cell: dict, hedge_inception_spot: float) -> dict:
         )
     old_certifications = cell.get("certifications", {})
     pde_target = {
-        greek: float(old_certifications[greek]["pde"])
-        for greek in ("delta", "gamma")
+        greek: float(old_certifications[greek]["pde"]) for greek in ("delta", "gamma")
     }
-    raw_pde_envelopes = _pde_envelope_components(
-        cell["pde_ladders"], pde_target
-    )
-    raw_pde_signed = _pde_signed_refinement_components(
-        cell["pde_ladders"], pde_target
-    )
+    raw_pde_envelopes = _pde_envelope_components(cell["pde_ladders"], pde_target)
+    raw_pde_signed = _pde_signed_refinement_components(cell["pde_ladders"], pde_target)
     pde_refinement = _pde_refinement_diagnostics(cell["pde_ladders"], scale)
 
     certifications = {}
@@ -1869,9 +2010,7 @@ def rescore_payload(payload: dict, hedge_inception_spot: float) -> dict:
         heston_spot_bridge_profile_by_case=rescored.get("policy", {}).get(
             "heston_spot_bridge_profile_by_case"
         ),
-        slv_spot_strata=int(
-            rescored.get("policy", {}).get("slv_spot_strata", 0)
-        ),
+        slv_spot_strata=int(rescored.get("policy", {}).get("slv_spot_strata", 0)),
         slv_spot_antithetic=bool(
             rescored.get("policy", {}).get("slv_spot_antithetic", False)
         ),
@@ -1894,17 +2033,15 @@ def rescore_payload(payload: dict, hedge_inception_spot: float) -> dict:
     rescored["policy"] = policy
     run_configuration = dict(rescored.get("run_configuration", {}))
     run_configuration["hedge_inception_spot"] = float(hedge_inception_spot)
-    run_configuration["rescore_source_run_configuration_sha256"] = (
-        source_run_configuration_hash
-    )
+    run_configuration[
+        "rescore_source_run_configuration_sha256"
+    ] = source_run_configuration_hash
     rescored["run_configuration"] = run_configuration
     rescored["run_configuration_sha256"] = _canonical_sha256(run_configuration)
     rescored["rescore_provenance"] = {
         "source_evidence_sha256": source_hash,
         "numerical_evidence_reused": True,
-        "reason": (
-            "separate normalized model spot from actual hedge inception spot"
-        ),
+        "reason": ("separate normalized model spot from actual hedge inception spot"),
     }
     return rescored
 
@@ -1943,7 +2080,9 @@ def deterministic_anchors(*, quick: bool) -> list[dict]:
             "pde": {key: float(pde[key]) for key in vanilla_bounds},
             "reference_values": {key: float(analytic[key]) for key in vanilla_bounds},
             "checks": vanilla_checks,
-            "status": _combined_status(check["status"] for check in vanilla_checks.values()),
+            "status": _combined_status(
+                check["status"] for check in vanilla_checks.values()
+            ),
         }
     )
 
@@ -1993,9 +2132,7 @@ def deterministic_anchors(*, quick: bool) -> list[dict]:
             "reference_values": {"bsm_pde": bsm, "quad": quad},
             "checks": checks,
             "status": _combined_status(
-                check["status"]
-                for group in checks.values()
-                for check in group.values()
+                check["status"] for group in checks.values() for check in group.values()
             ),
         }
     )
@@ -2041,7 +2178,9 @@ def deterministic_anchors(*, quick: bool) -> list[dict]:
             "pde": unit_slv,
             "reference_values": unit_heston,
             "checks": unit_checks,
-            "status": _combined_status(check["status"] for check in unit_checks.values()),
+            "status": _combined_status(
+                check["status"] for check in unit_checks.values()
+            ),
         }
     )
 
@@ -2094,7 +2233,9 @@ def deterministic_anchors(*, quick: bool) -> list[dict]:
             "pde": heston_det,
             "reference_values": lv_det,
             "checks": det_checks,
-            "status": _combined_status(check["status"] for check in det_checks.values()),
+            "status": _combined_status(
+                check["status"] for check in det_checks.values()
+            ),
         }
     )
     return rows
@@ -2109,9 +2250,7 @@ def _combined_status(statuses: Iterable[str]) -> str:
     return EquivalenceStatus.INCONCLUSIVE.value
 
 
-def _sampling_batches_for_case(
-    sampling: dict, variant: str, case_name: str
-) -> int:
+def _sampling_batches_for_case(sampling: dict, variant: str, case_name: str) -> int:
     """Resolve the declared scramble count for one regime cell."""
     batches_by_case = sampling.get("batches_by_case")
     if isinstance(batches_by_case, dict) and case_name in batches_by_case:
@@ -2188,24 +2327,20 @@ def make_decisions(
                 if variant == "heston"
                 else PRODUCTION_SLV_PATHS_PER_BATCH
             )
-            sampling_complete = sampling_complete and int(
-                sampling.get("paths_per_batch", 0)
-            ) >= minimum_paths
+            sampling_complete = (
+                sampling_complete
+                and int(sampling.get("paths_per_batch", 0)) >= minimum_paths
+            )
             if variant == "heston":
                 declared_profile = heston_spot_bridge_profile_by_case or {}
                 sampling_complete = sampling_complete and (
-                    int(sampling.get("batches", 0))
-                    == PRODUCTION_HESTON_BATCHES
+                    int(sampling.get("batches", 0)) == PRODUCTION_HESTON_BATCHES
                     and _normalized_batches_by_case(sampling)
                     == PRODUCTION_HESTON_BATCHES_BY_CASE
                     and all(
                         actual_batches
-                        == _sampling_batches_for_case(
-                            sampling, variant, case_name
-                        )
-                        for case_name, actual_batches in (
-                            batch_counts_by_case.items()
-                        )
+                        == _sampling_batches_for_case(sampling, variant, case_name)
+                        for case_name, actual_batches in (batch_counts_by_case.items())
                     )
                     and declared_profile == HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
                     and all(
@@ -2237,19 +2372,13 @@ def make_decisions(
                     == PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
                     and all(
                         actual_batches
-                        == _sampling_batches_for_case(
-                            sampling, variant, case_name
-                        )
-                        for case_name, actual_batches in (
-                            batch_counts_by_case.items()
-                        )
+                        == _sampling_batches_for_case(sampling, variant, case_name)
+                        for case_name, actual_batches in (batch_counts_by_case.items())
                     )
                     and int(slv_spot_strata) == SLV_SPOT_STRATA
                     and bool(slv_spot_antithetic) == SLV_SPOT_ANTITHETIC
-                    and int(slv_spot_bridge_strata)
-                    == SLV_SPOT_BRIDGE_STRATA
-                    and declared_slv_profile
-                    == SLV_SPOT_BRIDGE_PROFILE_BY_CASE
+                    and int(slv_spot_bridge_strata) == SLV_SPOT_BRIDGE_STRATA
+                    and declared_slv_profile == SLV_SPOT_BRIDGE_PROFILE_BY_CASE
                     and all(
                         {
                             "strata": int(
@@ -2270,9 +2399,7 @@ def make_decisions(
                     )
                     and all(
                         (
-                            row.get("reference", {})
-                            .get("estimator", {})
-                            .get("name")
+                            row.get("reference", {}).get("estimator", {}).get("name")
                             == (
                                 "three_level_frozen_slv_heston_control"
                                 if not quick
@@ -2287,14 +2414,10 @@ def make_decisions(
             sampling_complete = sampling_complete and all(
                 {
                     "target": int(
-                        row.get("reference", {}).get(
-                            "target_substeps_per_interval", 0
-                        )
+                        row.get("reference", {}).get("target_substeps_per_interval", 0)
                     ),
                     "fine": int(
-                        row.get("reference", {}).get(
-                            "fine_substeps_per_interval", 0
-                        )
+                        row.get("reference", {}).get("fine_substeps_per_interval", 0)
                     ),
                 }
                 == PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE[variant].get(
@@ -2335,9 +2458,9 @@ def make_decisions(
             )
             substep_matrix = np.asarray(
                 [
-                    row["certifications"]["delta"][
-                        "reference_substep_batch_contracts"
-                    ][:common_batches]
+                    row["certifications"]["delta"]["reference_substep_batch_contracts"][
+                        :common_batches
+                    ]
                     for row in variant_rows
                 ],
                 dtype=float,
@@ -2356,8 +2479,7 @@ def make_decisions(
                 * aggregate_substep_se
             )
             reference_bias_envelope = (
-                abs(aggregate_substep_mean)
-                + aggregate_substep_half_width
+                abs(aggregate_substep_mean) + aggregate_substep_half_width
             )
             bias = certify_signed_bias_from_batches(
                 bias_batches,
@@ -2440,6 +2562,196 @@ def make_decisions(
     return decisions
 
 
+def make_amendment_decisions(
+    cells: Sequence[dict],
+    anchors: Sequence[dict],
+    parent_decisions: dict,
+) -> tuple[dict, dict]:
+    """Route a schema-11 certificate using two independent SLV cohorts.
+
+    Five carried cells share the schema-9 scramble family and the two
+    replacements share the held-out schema-11 family.  We preserve covariance
+    within each family and add variances, never rows, across the independent
+    families.
+    """
+    cells_by_key = {
+        (cell.get("variant"), cell.get("case", {}).get("name")): cell for cell in cells
+    }
+    required_cases = {case.name for case in certification_cases(quick=False)}
+    expected_keys = {
+        (variant, case_name)
+        for variant in ("heston", "heston_slv")
+        for case_name in required_cases
+    }
+    if len(cells) != len(expected_keys) or set(cells_by_key) != expected_keys:
+        raise ValueError("amendment regime matrix is incomplete or duplicated")
+    if {anchor.get("name") for anchor in anchors} != REQUIRED_ANCHOR_NAMES or any(
+        anchor.get("status") != EquivalenceStatus.PASS.value for anchor in anchors
+    ):
+        raise ValueError("amendment requires all parent anchors to PASS")
+
+    heston_decision = copy.deepcopy(parent_decisions.get("heston", {}))
+    if (
+        heston_decision.get("route") != "pde"
+        or heston_decision.get("evidence_complete") is not True
+    ):
+        raise ValueError("parent Heston decision is not admissible")
+    heston_decision["certification_source"] = "schema9_parent"
+    heston_decision["parent_evidence_sha256"] = PARENT_EVIDENCE_SHA256
+
+    slv_rows = [
+        cells_by_key[("heston_slv", case.name)]
+        for case in certification_cases(quick=False)
+    ]
+    carried_rows = [
+        row for row in slv_rows if row["case"]["name"] in AMENDMENT_CARRIED_SLV_CASES
+    ]
+    replacement_rows = [
+        row for row in slv_rows if row["case"]["name"] in AMENDMENT_REPLACEMENT_CASES
+    ]
+    if len(carried_rows) != len(AMENDMENT_CARRIED_SLV_CASES) or len(
+        replacement_rows
+    ) != len(AMENDMENT_REPLACEMENT_CASES):
+        raise ValueError("amendment SLV cohort membership mismatch")
+    if any(row.get("status") != EquivalenceStatus.PASS.value for row in slv_rows):
+        cell_status = _combined_status(row.get("status", "") for row in slv_rows)
+    else:
+        cell_status = EquivalenceStatus.PASS.value
+
+    def cohort_contribution(
+        rows: Sequence[dict], key_path: tuple[str, ...]
+    ) -> np.ndarray:
+        arrays = []
+        for row in rows:
+            value = row
+            for key in key_path:
+                value = value[key]
+            values = np.asarray(value[:AMENDMENT_AGGREGATE_BATCHES], dtype=float)
+            if values.shape != (AMENDMENT_AGGREGATE_BATCHES,) or not np.all(
+                np.isfinite(values)
+            ):
+                raise ValueError(
+                    f"invalid amendment cohort rows for {row['case']['name']}"
+                )
+            arrays.append(values)
+        # Each cohort contributes its subset's sum divided by the full seven-
+        # case denominator. Summing cohort means therefore equals the fleet
+        # mean while retaining all within-family covariance.
+        return np.sum(np.asarray(arrays), axis=0) / len(slv_rows)
+
+    delta_cohorts = [
+        cohort_contribution(
+            carried_rows,
+            ("batch_difference_contracts", "delta"),
+        ),
+        cohort_contribution(
+            replacement_rows,
+            ("batch_difference_contracts", "delta"),
+        ),
+    ]
+    substep_cohorts = [
+        cohort_contribution(
+            carried_rows,
+            (
+                "certifications",
+                "delta",
+                "reference_substep_batch_contracts",
+            ),
+        ),
+        cohort_contribution(
+            replacement_rows,
+            (
+                "certifications",
+                "delta",
+                "reference_substep_batch_contracts",
+            ),
+        ),
+    ]
+    pde_signed_axes = {
+        axis: float(
+            np.mean(
+                [
+                    row["certifications"]["delta"]["pde_signed_refinement_contracts"][
+                        axis
+                    ]
+                    for row in slv_rows
+                ]
+            )
+        )
+        for axis in ("n_x", "n_v", "n_t")
+    }
+    pde_bias_envelope = float(sum(abs(value) for value in pde_signed_axes.values()))
+    substep_summary = summarize_independent_cohort_means(
+        substep_cohorts,
+        confidence=STOCHASTIC_COMPONENT_CONFIDENCE,
+    )
+    reference_bias_envelope = abs(substep_summary.estimate) + substep_summary.half_width
+    bias = certify_signed_bias_from_independent_cohorts(
+        delta_cohorts,
+        DELTA_BIAS_BOUND_CONTRACTS,
+        pde_discretization_envelope=pde_bias_envelope,
+        reference_bias_envelope=reference_bias_envelope,
+        confidence=STOCHASTIC_COMPONENT_CONFIDENCE,
+        label="heston_slv/mean_signed_delta_bias",
+    ).as_dict()
+    bias["aggregate_pde_signed_refinement_contracts"] = pde_signed_axes
+    bias["aggregate_reference_substep"] = {
+        **substep_summary.as_dict(),
+        "absolute_bias_upper_bound": reference_bias_envelope,
+        "component_confidence": STOCHASTIC_COMPONENT_CONFIDENCE,
+    }
+    bias["aggregate_independent_cohorts"] = [
+        {
+            "name": "schema9_parent",
+            "seed": PARENT_SEED,
+            "cases": sorted(AMENDMENT_CARRIED_SLV_CASES),
+            "batches": AMENDMENT_AGGREGATE_BATCHES,
+            "contribution_denominator": len(slv_rows),
+        },
+        {
+            "name": "schema11_replacements",
+            "seed": SLV_PRIMARY_SEED,
+            "cases": sorted(AMENDMENT_REPLACEMENT_CASES),
+            "batches": AMENDMENT_AGGREGATE_BATCHES,
+            "contribution_denominator": len(slv_rows),
+        },
+    ]
+
+    evidence_complete = cell_status == EquivalenceStatus.PASS.value and all(
+        len(row["batch_difference_contracts"]["delta"]) >= AMENDMENT_AGGREGATE_BATCHES
+        for row in slv_rows
+    )
+    admissible = evidence_complete and bias["status"] == EquivalenceStatus.PASS.value
+    reasons = []
+    if cell_status != EquivalenceStatus.PASS.value:
+        reasons.append(f"one or more regime cells are {cell_status}")
+    if not evidence_complete:
+        reasons.append("amendment cohort evidence is incomplete")
+    if bias["status"] != EquivalenceStatus.PASS.value:
+        reasons.append(f"mean signed delta bias is {bias['status']}")
+    slv_decision = {
+        "route": "pde" if admissible else "excluded_greek_unresolved",
+        "cell_status": cell_status,
+        "anchor_status": EquivalenceStatus.PASS.value,
+        "evidence_complete": evidence_complete,
+        "missing_anchors": [],
+        "missing_cases": [],
+        "sampling_complete": evidence_complete,
+        "aggregate_common_scrambles": AMENDMENT_AGGREGATE_BATCHES,
+        "aggregate_method": "sum_of_independent_cohort_means",
+        "delta_bias": bias,
+        "reason": "; ".join(reasons) if reasons else "all certification gates pass",
+        "certification_source": "schema11_amendment",
+        "parent_evidence_sha256": PARENT_EVIDENCE_SHA256,
+    }
+    cohort_metadata = {
+        "method": "sum_of_independent_cohort_means",
+        "common_batches_per_cohort": AMENDMENT_AGGREGATE_BATCHES,
+        "cohorts": bias["aggregate_independent_cohorts"],
+    }
+    return {"heston": heston_decision, "heston_slv": slv_decision}, cohort_metadata
+
+
 def render_markdown(payload: dict) -> str:
     def interval_text(verdict: dict) -> str:
         interval = verdict.get("interval", [float("nan"), float("nan")])
@@ -2465,8 +2777,7 @@ def render_markdown(payload: dict) -> str:
                 }
                 if extensions:
                     detail = ", ".join(
-                        f"{name}={batches}"
-                        for name, batches in extensions.items()
+                        f"{name}={batches}" for name, batches in extensions.items()
                     )
                     part += f" ({detail})"
             primary_batches_by_case = values.get("primary_batches_by_case")
@@ -2493,13 +2804,16 @@ def render_markdown(payload: dict) -> str:
         "profile", "quick (non-production)" if payload["quick"] else "production"
     )
     runtime = payload.get("runtime_environment", {})
-    controls = payload.get("policy", {}).get(
-        "production_engine_controls", {}
-    )
+    controls = payload.get("policy", {}).get("production_engine_controls", {})
+    provenance_by_key = {
+        (row.get("variant"), row.get("case")): row.get("source", "unknown")
+        for row in payload.get("cell_provenance", [])
+    }
     lines = [
         "# ADI 2-D Snowball Greek certification",
         "",
         f"- Profile: `{profile}`",
+        f"- Certification mode: `{payload.get('certification_mode', 'unknown')}`",
         f"- Held-out seeds: `{payload.get('reference_seeds', payload.get('seed'))}`",
         f"- RQMC: {sampling_text}",
         (
@@ -2511,9 +2825,7 @@ def render_markdown(payload: dict) -> str:
         ),
         (
             "- Certified engine controls: `"
-            + "`, `".join(
-                f"{key}={value}" for key, value in controls.items()
-            )
+            + "`, `".join(f"{key}={value}" for key, value in controls.items())
             + "`"
             if controls
             else "- Certified engine controls: unavailable"
@@ -2521,8 +2833,8 @@ def render_markdown(payload: dict) -> str:
         f"- Hedge inception spot: `{payload['policy']['hedge_inception_spot']}` "
         "(actual index level; numerical cases are normalized)",
         "- Verdict: fine QE-M 97.5% Student-t CI + paired case-specific "
-            "target→fine substep "
-            "97.5% bias upper bound + separate `n_x`/`n_v`/`n_t` PDE envelopes",
+        "target→fine substep "
+        "97.5% bias upper bound + separate `n_x`/`n_v`/`n_t` PDE envelopes",
         (
             "- QE-M target→fine substeps by variant/case: `"
             f"{payload['policy'].get('qe_substeps_by_variant_case')}`"
@@ -2551,12 +2863,28 @@ def render_markdown(payload: dict) -> str:
         "spot-bump ladder is a semantic diagnostic and is not counted as PDE error",
         "- Delta bound: 0.5 hedge contracts per cell; mean signed bias bound: 0.1 contracts",
         "- Gamma bound/unit: 0.5 change in futures hedge contracts under a 1% spot move",
-        "",
-        "## Routing decision",
-        "",
-        "| Variant | Route | Cells | Mean signed delta bias: estimate [interval] | Status | Reason |",
-        "|---|---|---:|---:|---:|---|",
     ]
+    if payload.get("certification_mode") == CERTIFICATION_MODE_AMENDMENT:
+        lines.extend(
+            [
+                "- Parent schema-9 evidence: "
+                f"`{payload['parent_certificate']['evidence_sha256']}`",
+                "- Amendment scope: carry all 7 Heston and 5 passed SLV "
+                "cells; replace only SLV Near-KI and Low-Feller; Heston "
+                "Near-KI 8→16 is reference-only and does not recertify Heston",
+                "- Fleet bias estimator: sum of two independent cohort means; "
+                "within-cohort covariance retained and cross-cohort covariance fixed at zero",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Routing decision",
+            "",
+            "| Variant | Route | Cells | Mean signed delta bias: estimate [interval] | Status | Reason |",
+            "|---|---|---:|---:|---:|---|",
+        ]
+    )
     for variant, decision in payload["decisions"].items():
         lines.append(
             f"| {variant} | `{decision['route']}` | {decision['cell_status']} | "
@@ -2583,8 +2911,8 @@ def render_markdown(payload: dict) -> str:
             "",
             "All differences and intervals below are in their economic hedge units.",
             "",
-            "| Variant | Case | Tags | target grid | v grid | monotone V | fallback rows | QE/reference | Axis refinement | Delta: estimate [interval] | Delta | Gamma: estimate [interval] | Gamma | Cell |",
-            "|---|---|---|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|",
+            "| Variant | Case | Source | Tags | target grid | v grid | monotone V | fallback rows | QE/reference | Axis refinement | Delta: estimate [interval] | Delta | Gamma: estimate [interval] | Gamma | Cell |",
+            "|---|---|---|---|---:|---|---:|---:|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in payload["cells"]:
@@ -2602,6 +2930,7 @@ def render_markdown(payload: dict) -> str:
         )
         lines.append(
             f"| {row['variant']} | {row['case']['name']} | "
+            f"{provenance_by_key.get((row['variant'], row['case']['name']), 'current run')} | "
             f"{', '.join(row['case']['tags'])} | "
             f"{grid['n_x']}×{grid['n_v']}×{grid['n_t']} | "
             f"{diagnostics['variance_grid_mode']} | "
@@ -2628,9 +2957,7 @@ def render_markdown(payload: dict) -> str:
     for row in payload["cells"]:
         for greek in ("delta", "gamma"):
             certification = row["certifications"][greek]
-            component = certification[
-                "reference_substep_components_contracts"
-            ]
+            component = certification["reference_substep_components_contracts"]
             verdict = certification["verdict"]
             lines.append(
                 f"| {row['variant']} | {row['case']['name']} | {greek} | "
@@ -2709,12 +3036,665 @@ def evidence_projection(value):
     return value
 
 
+def _projected_evidence_sha256(payload: dict) -> str:
+    unsigned = copy.deepcopy(payload)
+    unsigned.pop("evidence_sha256", None)
+    canonical = json.dumps(
+        evidence_projection(unsigned),
+        sort_keys=True,
+        default=_json_default,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _cell_evidence_sha256(cell: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            evidence_projection(cell),
+            sort_keys=True,
+            separators=(",", ":"),
+            default=_json_default,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def parent_certificate_manifest() -> dict:
+    """Return the immutable schema-9 parent identity expected by schema 11."""
+    return {
+        "schema_version": PARENT_SCHEMA_VERSION,
+        "source_commit": PARENT_SOURCE_COMMIT,
+        "seed": PARENT_SEED,
+        "evidence_file_sha256": PARENT_EVIDENCE_FILE_SHA256,
+        "decision_file_sha256": PARENT_DECISION_FILE_SHA256,
+        "evidence_sha256": PARENT_EVIDENCE_SHA256,
+        "decision_sha256": PARENT_DECISION_SHA256,
+        "implementation_sha256": PARENT_IMPLEMENTATION_SHA256,
+        "run_configuration_sha256": PARENT_RUN_CONFIGURATION_SHA256,
+        "production_pde_compatibility_sha256": PARENT_PRODUCTION_PDE_SHA256,
+        "anchors_sha256": PARENT_ANCHORS_SHA256,
+        "carried_cell_sha256": PARENT_CARRIED_CELL_SHA256,
+    }
+
+
+def load_and_validate_parent_certificate(
+    evidence_path: Path,
+    decision_path: Path,
+) -> tuple[dict, dict, dict]:
+    """Load the exact schema-9 parent and fail closed on any drift.
+
+    Both whole-file hashes and embedded canonical hashes are checked.  The
+    carried rows are additionally re-audited for matrix completeness and PASS
+    status, while the live production-PDE projection must match the parent.
+    """
+    try:
+        evidence_bytes = Path(evidence_path).read_bytes()
+        decision_bytes = Path(decision_path).read_bytes()
+    except OSError as exc:
+        raise ValueError("schema-9 parent certificate is not readable") from exc
+    if hashlib.sha256(evidence_bytes).hexdigest() != PARENT_EVIDENCE_FILE_SHA256:
+        raise ValueError("schema-9 parent evidence file hash mismatch")
+    if hashlib.sha256(decision_bytes).hexdigest() != PARENT_DECISION_FILE_SHA256:
+        raise ValueError("schema-9 parent decision file hash mismatch")
+    try:
+        evidence = json.loads(evidence_bytes)
+        decision = json.loads(decision_bytes)
+    except json.JSONDecodeError as exc:
+        raise ValueError("schema-9 parent certificate is not valid JSON") from exc
+
+    if (
+        evidence.get("schema_version") != PARENT_SCHEMA_VERSION
+        or evidence.get("study") != "adi_2d_snowball_greek_certification"
+        or evidence.get("quick") is not False
+        or evidence.get("profile") != "production"
+        or int(evidence.get("seed", -1)) != PARENT_SEED
+    ):
+        raise ValueError("schema-9 parent certificate metadata mismatch")
+    if evidence.get("evidence_sha256") != PARENT_EVIDENCE_SHA256 or (
+        _projected_evidence_sha256(evidence) != PARENT_EVIDENCE_SHA256
+    ):
+        raise ValueError("schema-9 parent canonical evidence hash mismatch")
+    if evidence.get("implementation_sha256") != PARENT_IMPLEMENTATION_SHA256:
+        raise ValueError("schema-9 parent implementation hash mismatch")
+    if (
+        evidence.get("run_configuration_sha256") != PARENT_RUN_CONFIGURATION_SHA256
+        or _canonical_sha256(evidence.get("run_configuration", {}))
+        != PARENT_RUN_CONFIGURATION_SHA256
+    ):
+        raise ValueError("schema-9 parent run-configuration hash mismatch")
+
+    unsigned_decision = dict(decision)
+    embedded_decision_hash = unsigned_decision.pop("decision_sha256", None)
+    if (
+        embedded_decision_hash != PARENT_DECISION_SHA256
+        or _canonical_sha256(unsigned_decision) != PARENT_DECISION_SHA256
+        or decision.get("evidence_sha256") != PARENT_EVIDENCE_SHA256
+        or decision.get("implementation_sha256") != PARENT_IMPLEMENTATION_SHA256
+        or decision.get("run_configuration_sha256") != PARENT_RUN_CONFIGURATION_SHA256
+    ):
+        raise ValueError("schema-9 parent decision provenance mismatch")
+    if evidence.get("runtime_environment") != runtime_environment():
+        raise ValueError("schema-9 parent numerical runtime mismatch")
+    if (
+        evidence.get("policy", {}).get("production_engine_controls")
+        != PRODUCTION_ENGINE_CONTROLS
+        or evidence.get("run_configuration", {}).get("production_engine_controls")
+        != PRODUCTION_ENGINE_CONTROLS
+    ):
+        raise ValueError("schema-9 parent production controls mismatch")
+    live_pde_hash = production_pde_compatibility_sha256()
+    if live_pde_hash != PARENT_PRODUCTION_PDE_SHA256:
+        raise ValueError(
+            "live production PDE dependencies differ from the schema-9 parent"
+        )
+
+    expected_cases = {
+        case.name: case.as_dict() for case in certification_cases(quick=False)
+    }
+    anchors = evidence.get("anchors", [])
+    if (
+        {anchor.get("name") for anchor in anchors} != REQUIRED_ANCHOR_NAMES
+        or any(
+            anchor.get("status") != EquivalenceStatus.PASS.value for anchor in anchors
+        )
+        or _canonical_sha256(anchors) != PARENT_ANCHORS_SHA256
+    ):
+        raise ValueError("schema-9 parent deterministic anchors are incomplete")
+    cells = evidence.get("cells", [])
+    cells_by_key = {
+        (cell.get("variant"), cell.get("case", {}).get("name")): cell for cell in cells
+    }
+    expected_keys = {
+        (variant, case_name)
+        for variant in ("heston", "heston_slv")
+        for case_name in expected_cases
+    }
+    if len(cells) != len(expected_keys) or set(cells_by_key) != expected_keys:
+        raise ValueError("schema-9 parent regime matrix is incomplete or duplicated")
+    for (variant, case_name), cell in cells_by_key.items():
+        if cell.get("case") != expected_cases[case_name]:
+            raise ValueError(f"schema-9 parent case drift: {variant}/{case_name}")
+        expected_status = (
+            EquivalenceStatus.INCONCLUSIVE.value
+            if variant == "heston_slv" and case_name in AMENDMENT_REPLACEMENT_CASES
+            else EquivalenceStatus.PASS.value
+        )
+        if cell.get("status") != expected_status:
+            raise ValueError(f"schema-9 parent status mismatch: {variant}/{case_name}")
+        carried_key = f"{variant}/{case_name}"
+        if carried_key in PARENT_CARRIED_CELL_SHA256 and (
+            _cell_evidence_sha256(cell) != PARENT_CARRIED_CELL_SHA256[carried_key]
+        ):
+            raise ValueError(f"schema-9 carried cell hash mismatch: {carried_key}")
+    parent_decisions = evidence.get("decisions", {})
+    if (
+        parent_decisions != decision.get("decisions")
+        or parent_decisions.get("heston", {}).get("route") != "pde"
+        or parent_decisions.get("heston", {}).get("evidence_complete") is not True
+        or parent_decisions.get("heston_slv", {}).get("route")
+        != "excluded_greek_unresolved"
+    ):
+        raise ValueError("schema-9 parent routing decision mismatch")
+    if evidence.get("sampling_by_variant") != {
+        "heston": {
+            "paths_per_batch": PRODUCTION_HESTON_PATHS_PER_BATCH,
+            "batches": PRODUCTION_HESTON_BATCHES,
+            "batches_by_case": PRODUCTION_HESTON_BATCHES_BY_CASE,
+        },
+        "heston_slv": {
+            "paths_per_batch": PRODUCTION_SLV_PATHS_PER_BATCH,
+            "batches": PRODUCTION_SLV_BATCHES,
+        },
+    }:
+        raise ValueError("schema-9 parent sampling profile mismatch")
+    return evidence, decision, parent_certificate_manifest()
+
+
+def amendment_reference_seeds() -> dict:
+    return {
+        "parent_schema9": PARENT_SEED,
+        "heston_near_ki_control": HESTON_REFERENCE_SEED,
+        "heston_slv_primary": SLV_PRIMARY_SEED,
+        "heston_slv_mid_control": SLV_MID_CONTROL_SEED,
+    }
+
+
+def amendment_sampling_by_variant() -> dict:
+    """Describe the carried and replacement sampling as one fleet view."""
+    slv_output = {
+        case.name: (
+            PRODUCTION_SLV_BATCHES_BY_CASE[case.name]
+            if case.name in AMENDMENT_REPLACEMENT_CASES
+            else PRODUCTION_SLV_BATCHES
+        )
+        for case in certification_cases(quick=False)
+    }
+
+
+def amendment_qe_substeps_by_variant_case() -> dict:
+    return {
+        "heston": {
+            case.name: {"target": 4, "fine": 8}
+            for case in certification_cases(quick=False)
+        },
+        "heston_slv": copy.deepcopy(PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE),
+    }
+    slv_primary = {
+        case.name: (
+            PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE[case.name]
+            if case.name in AMENDMENT_REPLACEMENT_CASES
+            else PRODUCTION_SLV_BATCHES
+        )
+        for case in certification_cases(quick=False)
+    }
+    return {
+        "heston": {
+            "source": "schema9_parent",
+            "paths_per_batch": PRODUCTION_HESTON_PATHS_PER_BATCH,
+            "batches": PRODUCTION_HESTON_BATCHES,
+            "batches_by_case": PRODUCTION_HESTON_BATCHES_BY_CASE,
+        },
+        "heston_slv": {
+            "source": "mixed_schema9_schema11",
+            "paths_per_batch": PRODUCTION_SLV_PATHS_PER_BATCH,
+            "batches": PRODUCTION_SLV_BATCHES,
+            "batches_by_case": slv_output,
+            "primary_batches_by_case": slv_primary,
+        },
+    }
+
+
+def amendment_run_configuration(
+    *,
+    implementation_hash: str,
+    runtime: dict,
+    hedge_inception_spot: float,
+) -> dict:
+    cases = certification_cases(quick=False)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "certification_mode": CERTIFICATION_MODE_AMENDMENT,
+        "implementation_sha256": implementation_hash,
+        "runtime_environment": runtime,
+        "production_engine_controls": PRODUCTION_ENGINE_CONTROLS,
+        "production_pde_compatibility_sha256": (production_pde_compatibility_sha256()),
+        "quick": False,
+        "skip_anchors": False,
+        "parent_certificate": parent_certificate_manifest(),
+        "reference_seeds": amendment_reference_seeds(),
+        "hedge_inception_spot": float(hedge_inception_spot),
+        "variants": ["heston", "heston_slv"],
+        "cases": [case.as_dict() for case in cases],
+        "carried_cases": {
+            "heston": [case.name for case in cases],
+            "heston_slv": sorted(AMENDMENT_CARRIED_SLV_CASES),
+        },
+        "replacement_cases": {
+            "heston_slv": sorted(AMENDMENT_REPLACEMENT_CASES),
+        },
+        "auxiliary_controls": {
+            "heston_near_ki_8_16": {
+                "purpose": "reference_only_slv_high_control",
+                "paths_per_batch": PRODUCTION_HESTON_PATHS_PER_BATCH,
+                "batches": PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"],
+                "seed": HESTON_REFERENCE_SEED,
+                "target_substeps_per_interval": 8,
+                "fine_substeps_per_interval": 16,
+                "heston_spot_bridge_profile": (
+                    HESTON_SPOT_BRIDGE_PROFILE_BY_CASE["near_ki"]
+                ),
+                "batch_workers": (
+                    PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"]["near_ki"]
+                ),
+            }
+        },
+        "sampling_by_variant": amendment_sampling_by_variant(),
+        "spot_bump": SPOT_BUMP,
+        "full_bump_ladder": list(FULL_BUMP_LADDER),
+        "stochastic_component_confidence": (STOCHASTIC_COMPONENT_CONFIDENCE),
+        "heston_spot_bridge_profile_by_case": (HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
+        "slv_spot_bridge_profile_by_case": SLV_SPOT_BRIDGE_PROFILE_BY_CASE,
+        "qe_substeps_by_variant_case": amendment_qe_substeps_by_variant_case(),
+        "slv_multilevel_policy": {
+            "cases": sorted(SLV_MULTILEVEL_CASES),
+            "mid_paths_per_batch": SLV_MID_CONTROL_PATHS_PER_BATCH,
+            "mid_batches": SLV_MID_CONTROL_BATCHES,
+            "frozen_control_weight": SLV_FROZEN_CONTROL_WEIGHT,
+            "heston_control_weight": SLV_HESTON_CONTROL_WEIGHT,
+        },
+        "slv_spot_strata": SLV_SPOT_STRATA,
+        "slv_spot_antithetic": SLV_SPOT_ANTITHETIC,
+        "slv_spot_bridge_strata": SLV_SPOT_BRIDGE_STRATA,
+        "rqmc_batch_workers_by_variant_case": {
+            "heston": {
+                "near_ki": PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"][
+                    "near_ki"
+                ]
+            },
+            "heston_slv": {
+                case_name: PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"][
+                    case_name
+                ]
+                for case_name in sorted(AMENDMENT_REPLACEMENT_CASES)
+            },
+        },
+        "aggregate_cohort_policy": {
+            "method": "sum_of_independent_cohort_means",
+            "common_batches_per_cohort": AMENDMENT_AGGREGATE_BATCHES,
+            "preserve_within_cohort_covariance": True,
+            "cross_cohort_covariance": 0.0,
+        },
+    }
+
+
+def amendment_cell_provenance(cells: Sequence[dict]) -> list[dict]:
+    provenance = []
+    for cell in cells:
+        variant = str(cell["variant"])
+        case_name = str(cell["case"]["name"])
+        key = f"{variant}/{case_name}"
+        source = (
+            "schema11_replacement"
+            if variant == "heston_slv" and case_name in AMENDMENT_REPLACEMENT_CASES
+            else "schema9_parent"
+        )
+        row = {
+            "variant": variant,
+            "case": case_name,
+            "source": source,
+            "cell_evidence_sha256": _cell_evidence_sha256(cell),
+        }
+        if source == "schema9_parent":
+            row["parent_evidence_sha256"] = PARENT_EVIDENCE_SHA256
+            row["expected_parent_cell_sha256"] = PARENT_CARRIED_CELL_SHA256[key]
+        provenance.append(row)
+    return provenance
+
+
+def _validate_amendment_payload(payload: dict) -> None:
+    if payload.get("quick") is not False or payload.get("profile") != (
+        "production incremental amendment"
+    ):
+        raise ValueError("schema-11 amendment must be production evidence")
+    if payload.get("parent_certificate") != parent_certificate_manifest():
+        raise ValueError("schema-11 parent manifest mismatch")
+    if payload.get("reference_seeds") != amendment_reference_seeds():
+        raise ValueError("schema-11 amendment seed profile mismatch")
+    if payload.get("sampling_by_variant") != amendment_sampling_by_variant():
+        raise ValueError("schema-11 amendment sampling profile mismatch")
+    if (
+        payload.get("production_pde_compatibility_sha256")
+        != (PARENT_PRODUCTION_PDE_SHA256)
+        or production_pde_compatibility_sha256() != PARENT_PRODUCTION_PDE_SHA256
+    ):
+        raise ValueError("schema-11 amendment production PDE compatibility mismatch")
+
+    hedge_spot = float(
+        payload.get("policy", {}).get("hedge_inception_spot", float("nan"))
+    )
+    if not np.isfinite(hedge_spot) or hedge_spot <= 0.0:
+        raise ValueError("schema-11 amendment lacks a valid hedge inception spot")
+    runtime = runtime_environment()
+    implementation_hash = implementation_sha256()
+    expected_run_configuration = amendment_run_configuration(
+        implementation_hash=implementation_hash,
+        runtime=runtime,
+        hedge_inception_spot=hedge_spot,
+    )
+    if payload.get("runtime_environment") != runtime:
+        raise ValueError("schema-11 amendment numerical runtime mismatch")
+    if payload.get("implementation_sha256") != implementation_hash:
+        raise ValueError("schema-11 amendment does not match the live implementation")
+    if payload.get("run_configuration") != expected_run_configuration or (
+        payload.get("run_configuration_sha256")
+        != _canonical_sha256(expected_run_configuration)
+    ):
+        raise ValueError("schema-11 amendment run configuration mismatch")
+    if payload.get("policy", {}).get("production_engine_controls") != (
+        PRODUCTION_ENGINE_CONTROLS
+    ):
+        raise ValueError("schema-11 amendment production controls mismatch")
+
+    anchors = payload.get("anchors", [])
+    if _canonical_sha256(anchors) != PARENT_ANCHORS_SHA256:
+        raise ValueError("schema-11 amendment parent anchors mismatch")
+    cells = payload.get("cells", [])
+    expected_cases = {
+        case.name: case.as_dict() for case in certification_cases(quick=False)
+    }
+    cells_by_key = {
+        (cell.get("variant"), cell.get("case", {}).get("name")): cell for cell in cells
+    }
+    expected_keys = {
+        (variant, case_name)
+        for variant in ("heston", "heston_slv")
+        for case_name in expected_cases
+    }
+    if len(cells) != len(expected_keys) or set(cells_by_key) != expected_keys:
+        raise ValueError("schema-11 amendment regime matrix mismatch")
+    for (variant, case_name), cell in cells_by_key.items():
+        if cell.get("case") != expected_cases[case_name]:
+            raise ValueError(f"schema-11 amendment case drift: {variant}/{case_name}")
+        key = f"{variant}/{case_name}"
+        carried = not (
+            variant == "heston_slv" and case_name in AMENDMENT_REPLACEMENT_CASES
+        )
+        if carried:
+            if (
+                cell.get("status") != EquivalenceStatus.PASS.value
+                or _cell_evidence_sha256(cell) != PARENT_CARRIED_CELL_SHA256[key]
+            ):
+                raise ValueError(f"schema-11 carried cell mismatch: {key}")
+            continue
+        if cell.get("status") not in {status.value for status in EquivalenceStatus}:
+            raise ValueError(f"schema-11 replacement status invalid: {key}")
+        expected_target = grid_ladders(
+            float(cell["case"]["maturity"]),
+            quick=False,
+            dense_ki_stencil=(case_name == "near_ki"),
+        )["target"].as_dict()
+        grid_policy = cell.get("production_greek_grid_policy", {})
+        if (
+            cell.get("target_grid") != expected_target
+            or {
+                "n_x": int(grid_policy.get("resolved_n_x", 0)),
+                "n_v": int(grid_policy.get("resolved_n_v", 0)),
+                "n_t": int(grid_policy.get("resolved_n_t", 0)),
+            }
+            != expected_target
+        ):
+            raise ValueError(f"schema-11 replacement PDE grid mismatch: {key}")
+        reference = cell.get("reference", {})
+        expected_profile = PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE[case_name]
+        if (
+            int(reference.get("seed", -1)) != SLV_PRIMARY_SEED
+            or reference.get("primary") != "fine"
+            or int(reference.get("target_substeps_per_interval", 0))
+            != expected_profile["target"]
+            or int(reference.get("fine_substeps_per_interval", 0))
+            != expected_profile["fine"]
+            or int(reference.get("slv_spot_strata", 0)) != SLV_SPOT_STRATA
+            or bool(reference.get("slv_spot_antithetic", False)) != SLV_SPOT_ANTITHETIC
+            or int(reference.get("batch_workers", 0))
+            != PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"][case_name]
+            or {
+                "strata": int(reference.get("slv_spot_bridge_strata", 0)),
+                "dimensions": int(reference.get("slv_spot_bridge_dimensions", 0)),
+            }
+            != SLV_SPOT_BRIDGE_PROFILE_BY_CASE[case_name]
+        ):
+            raise ValueError(f"schema-11 replacement profile mismatch: {key}")
+        expected_batches = PRODUCTION_SLV_BATCHES_BY_CASE[case_name]
+        for level in ("target", "fine"):
+            result = paired_result_from_serialized(
+                reference.get(level, {}),
+                randomization_label=f"validation/{key}/{level}",
+            )
+            if result.batches_used != expected_batches:
+                raise ValueError(f"schema-11 replacement batches mismatch: {key}")
+        rescored = rescore_serialized_cell(copy.deepcopy(cell), hedge_spot)
+        if (
+            rescored["economic_scale"] != cell.get("economic_scale")
+            or rescored["certifications"] != cell.get("certifications")
+            or rescored["pde_refinement"] != cell.get("pde_refinement")
+            or rescored["batch_difference_contracts"]
+            != cell.get("batch_difference_contracts")
+            or rescored["status"] != cell.get("status")
+        ):
+            raise ValueError(f"schema-11 replacement verdict mismatch: {key}")
+
+    if payload.get("cell_provenance") != amendment_cell_provenance(cells):
+        raise ValueError("schema-11 cell provenance mismatch")
+    auxiliary = payload.get("auxiliary_controls", {}).get("heston_near_ki_8_16")
+    if not isinstance(auxiliary, dict):
+        raise ValueError("schema-11 Heston Near-KI auxiliary control is missing")
+    auxiliary_reference = auxiliary.get("reference", {})
+    if (
+        auxiliary.get("variant") != "heston"
+        or auxiliary.get("case") != expected_cases["near_ki"]
+        or auxiliary.get("purpose") != "reference_only_slv_high_control"
+        or int(auxiliary_reference.get("seed", -1)) != HESTON_REFERENCE_SEED
+        or int(auxiliary_reference.get("target_substeps_per_interval", 0)) != 8
+        or int(auxiliary_reference.get("fine_substeps_per_interval", 0)) != 16
+        or int(auxiliary_reference.get("heston_spot_bridge_strata", 0))
+        != HESTON_SPOT_BRIDGE_PROFILE_BY_CASE["near_ki"]["strata"]
+        or int(auxiliary_reference.get("heston_spot_bridge_dimensions", 0))
+        != HESTON_SPOT_BRIDGE_PROFILE_BY_CASE["near_ki"]["dimensions"]
+        or int(auxiliary_reference.get("batch_workers", 0))
+        != PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"]["near_ki"]
+    ):
+        raise ValueError("schema-11 Heston auxiliary profile mismatch")
+    for level in ("target", "fine"):
+        result = paired_result_from_serialized(
+            auxiliary_reference.get(level, {}),
+            randomization_label=f"validation/heston-aux/{level}",
+        )
+        if (
+            result.paths_per_batch != PRODUCTION_HESTON_PATHS_PER_BATCH
+            or result.batches_used != PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"]
+        ):
+            raise ValueError("schema-11 Heston auxiliary sampling mismatch")
+    near_ki = cells_by_key[("heston_slv", "near_ki")]
+    estimator = near_ki.get("reference", {}).get("estimator", {})
+    if (
+        estimator.get("name") != "three_level_frozen_slv_heston_control"
+        or estimator.get("identity") != "Y-a*F_low+a*F_high-b*H_low+b*H_high"
+        or estimator.get("weights")
+        != {
+            "frozen_slv": SLV_FROZEN_CONTROL_WEIGHT,
+            "heston": SLV_HESTON_CONTROL_WEIGHT,
+        }
+        or int(estimator.get("primary_seed", -1)) != SLV_PRIMARY_SEED
+        or int(estimator.get("mid_control_seed", -1)) != SLV_MID_CONTROL_SEED
+        or int(estimator.get("heston_high_seed", -1)) != HESTON_REFERENCE_SEED
+        or estimator.get("heston_high_cell_sha256") != _cell_evidence_sha256(auxiliary)
+    ):
+        raise ValueError("schema-11 Near-KI multilevel provenance mismatch")
+    if (
+        int(estimator.get("outer_batches", 0)) != PRODUCTION_SLV_BATCHES
+        or int(estimator.get("primary_paths_per_batch", 0))
+        != PRODUCTION_SLV_PATHS_PER_BATCH
+        or int(estimator.get("primary_batches", 0))
+        != PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE["near_ki"]
+        or int(estimator.get("mid_paths_per_batch", 0))
+        != SLV_MID_CONTROL_PATHS_PER_BATCH
+        or int(estimator.get("mid_batches", 0)) != SLV_MID_CONTROL_BATCHES
+    ):
+        raise ValueError("schema-11 Near-KI multilevel sampling mismatch")
+    for level in ("target", "fine"):
+        components = estimator.get("components", {}).get(level, {})
+        primary_payload = components.get("primary_low", {})
+        frozen_high_payload = components.get("frozen_high", {})
+        heston_low_payload = components.get("heston_low", {})
+        primary = paired_result_from_serialized(
+            primary_payload,
+            randomization_label=f"validation/near-ki/primary/{level}",
+        )
+        frozen_high = paired_result_from_serialized(
+            frozen_high_payload,
+            randomization_label=f"validation/near-ki/frozen-high/{level}",
+        )
+        heston_low = paired_result_from_serialized(
+            heston_low_payload,
+            randomization_label=f"validation/near-ki/heston-low/{level}",
+        )
+        heston_high = paired_result_from_serialized(
+            auxiliary_reference[level],
+            randomization_label=f"heston-high/near_ki/{level}",
+        )
+        primary_controls = np.asarray(
+            primary_payload.get("control_batch_estimates"), dtype=float
+        )
+        frozen_high_controls = np.asarray(
+            frozen_high_payload.get("control_batch_estimates"), dtype=float
+        )
+        if (
+            primary.batches_used != PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE["near_ki"]
+            or primary_controls.shape != (primary.batches_used, 5)
+            or frozen_high.batches_used != SLV_MID_CONTROL_BATCHES
+            or frozen_high_controls.shape != (SLV_MID_CONTROL_BATCHES, 5)
+            or heston_low.batches_used != SLV_MID_CONTROL_BATCHES
+            or not np.all(np.isfinite(primary_controls))
+            or not np.all(np.isfinite(frozen_high_controls))
+            or not np.array_equal(
+                frozen_high_controls,
+                np.asarray(heston_low.batch_estimates),
+            )
+            or frozen_high_payload.get("randomization_key")
+            != heston_low_payload.get("randomization_key")
+        ):
+            raise ValueError("schema-11 Near-KI component coupling mismatch")
+        primary = replace(
+            primary,
+            control_batch_estimates=primary_controls,
+        )
+        frozen_high = replace(
+            frozen_high,
+            control_batch_estimates=frozen_high_controls,
+        )
+        frozen_low = extract_embedded_conditional_control(primary)
+        linked_high = components.get("heston_high_reference", {})
+        if linked_high != {
+            "variant": "heston",
+            "case": "near_ki",
+            "batches": PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"],
+            "randomization_key": (
+                f"heston-high/near_ki/{level}("
+                f"{auxiliary_reference[level]['randomization_key']})"
+            ),
+        }:
+            raise ValueError("schema-11 Near-KI Heston high link mismatch")
+        recombined = combine_grouped_rqmc_components(
+            (
+                (1.0, primary),
+                (-SLV_FROZEN_CONTROL_WEIGHT, frozen_low),
+                (SLV_FROZEN_CONTROL_WEIGHT, frozen_high),
+                (-SLV_HESTON_CONTROL_WEIGHT, heston_low),
+                (SLV_HESTON_CONTROL_WEIGHT, heston_high),
+            ),
+            output_batches=PRODUCTION_SLV_BATCHES,
+            estimator_label=f"validation/near-ki/{level}",
+        )
+        published = near_ki["reference"][level]
+        if (
+            not np.allclose(
+                recombined.batch_estimates,
+                np.asarray(published.get("batch_estimates"), dtype=float),
+                rtol=1e-12,
+                atol=1e-14,
+            )
+            or recombined.total_unique_paths
+            != int(published.get("total_unique_paths", -1))
+            or recombined.total_path_valuations
+            != int(published.get("total_path_valuations", -1))
+        ):
+            raise ValueError("schema-11 Near-KI recombination mismatch")
+    low_feller_estimator = (
+        cells_by_key[("heston_slv", "low_feller")]
+        .get("reference", {})
+        .get("estimator", {})
+    )
+    if low_feller_estimator.get("name") != "primary_conditional_rqmc":
+        raise ValueError("schema-11 Low-Feller estimator mismatch")
+    low_reference = cells_by_key[("heston_slv", "low_feller")]["reference"]
+    for level in ("target", "fine"):
+        controls = np.asarray(
+            low_reference[level].get("control_batch_estimates"), dtype=float
+        )
+        if controls.shape != (
+            PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE["low_feller"],
+            5,
+        ) or not np.all(np.isfinite(controls)):
+            raise ValueError("schema-11 Low-Feller control rows mismatch")
+
+    decisions = payload.get("decisions", {})
+    parent_heston = copy.deepcopy(decisions.get("heston", {}))
+    parent_heston.pop("certification_source", None)
+    parent_heston.pop("parent_evidence_sha256", None)
+    if _canonical_sha256(parent_heston) != PARENT_HESTON_DECISION_SHA256:
+        raise ValueError("schema-11 carried Heston decision mismatch")
+    expected_decisions, expected_cohorts = make_amendment_decisions(
+        cells,
+        anchors,
+        {"heston": parent_heston},
+    )
+    if decisions != expected_decisions:
+        raise ValueError("schema-11 amendment decisions do not match raw evidence")
+    if payload.get("aggregate_cohorts") != expected_cohorts:
+        raise ValueError("schema-11 amendment aggregate cohort metadata mismatch")
+
+
 def validate_payload(payload: dict) -> None:
     """Fail closed before a malformed certification artifact is published."""
     if payload.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("certification schema version mismatch")
     if payload.get("study") != "adi_2d_snowball_greek_certification":
         raise ValueError("certification study tag mismatch")
+    certification_mode = payload.get("certification_mode")
+    if certification_mode == CERTIFICATION_MODE_AMENDMENT:
+        _validate_amendment_payload(payload)
+        return
+    if certification_mode != CERTIFICATION_MODE_FULL:
+        raise ValueError("certification mode must be explicit")
     if int(payload.get("batches", 0)) < 2:
         raise ValueError("certification requires at least two RQMC batches")
     allowed_statuses = {status.value for status in EquivalenceStatus}
@@ -2756,10 +3736,14 @@ def validate_payload(payload: dict) -> None:
             int(reference.get("fine_substeps_per_interval", 0)),
         )
         if actual_substeps != expected_substeps or reference.get("primary") != "fine":
-            raise ValueError("certification cell uses an invalid QE-M refinement contract")
+            raise ValueError(
+                "certification cell uses an invalid QE-M refinement contract"
+            )
         refinement = cell.get("pde_refinement", {})
         if refinement.get("status") not in allowed_statuses:
-            raise ValueError("certification cell lacks valid PDE-axis refinement evidence")
+            raise ValueError(
+                "certification cell lacks valid PDE-axis refinement evidence"
+            )
         economic_scale = cell.get("economic_scale", {})
         if not np.isclose(
             float(economic_scale.get("hedge_inception_spot", float("nan"))),
@@ -2777,7 +3761,9 @@ def validate_payload(payload: dict) -> None:
                 "total_uncertainty",
             ):
                 if not np.isfinite(float(verdict.get(key, float("nan")))):
-                    raise ValueError(f"certification {greek} verdict has non-finite {key}")
+                    raise ValueError(
+                        f"certification {greek} verdict has non-finite {key}"
+                    )
     if not payload.get("decisions"):
         raise ValueError("certification payload has no decisions")
     for variant, decision in payload["decisions"].items():
@@ -2794,12 +3780,8 @@ def validate_payload(payload: dict) -> None:
                 if variant == "heston"
                 else PRODUCTION_SLV_BATCHES
             )
-            if int(decision.get("aggregate_common_scrambles", 0)) != (
-                expected_common
-            ):
-                raise ValueError(
-                    f"{variant}: invalid aggregate common-scramble count"
-                )
+            if int(decision.get("aggregate_common_scrambles", 0)) != (expected_common):
+                raise ValueError(f"{variant}: invalid aggregate common-scramble count")
 
     for key in ("implementation_sha256", "run_configuration_sha256"):
         value = payload.get(key)
@@ -2811,8 +3793,7 @@ def validate_payload(payload: dict) -> None:
             raise ValueError(f"certification lacks a valid {key}")
     run_configuration = payload.get("run_configuration")
     if not isinstance(run_configuration, dict) or (
-        _canonical_sha256(run_configuration)
-        != payload["run_configuration_sha256"]
+        _canonical_sha256(run_configuration) != payload["run_configuration_sha256"]
     ):
         raise ValueError("certification run-configuration hash mismatch")
     if (
@@ -2835,33 +3816,31 @@ def validate_payload(payload: dict) -> None:
         != PRODUCTION_ENGINE_CONTROLS
     ):
         raise ValueError("certification uses stale production engine controls")
-    if run_configuration.get(
-        "heston_spot_bridge_profile_by_case"
-    ) != payload.get("policy", {}).get("heston_spot_bridge_profile_by_case"):
+    if run_configuration.get("heston_spot_bridge_profile_by_case") != payload.get(
+        "policy", {}
+    ).get("heston_spot_bridge_profile_by_case"):
         raise ValueError("certification Heston bridge profile metadata mismatch")
-    if run_configuration.get(
-        "slv_spot_bridge_profile_by_case"
-    ) != payload.get("policy", {}).get("slv_spot_bridge_profile_by_case"):
+    if run_configuration.get("slv_spot_bridge_profile_by_case") != payload.get(
+        "policy", {}
+    ).get("slv_spot_bridge_profile_by_case"):
         raise ValueError("certification SLV bridge profile metadata mismatch")
-    if (
-        run_configuration.get("qe_substeps_by_variant_case")
-        != payload.get("policy", {}).get("qe_substeps_by_variant_case")
-        or run_configuration.get("slv_multilevel_policy")
-        != payload.get("policy", {}).get("slv_multilevel_policy")
+    if run_configuration.get("qe_substeps_by_variant_case") != payload.get(
+        "policy", {}
+    ).get("qe_substeps_by_variant_case") or run_configuration.get(
+        "slv_multilevel_policy"
+    ) != payload.get(
+        "policy", {}
+    ).get(
+        "slv_multilevel_policy"
     ):
         raise ValueError("certification reference-estimator policy mismatch")
-    if (
-        run_configuration.get("reference_seeds")
-        != payload.get("reference_seeds")
-    ):
+    if run_configuration.get("reference_seeds") != payload.get("reference_seeds"):
         raise ValueError("certification reference seed metadata mismatch")
     if (
         run_configuration.get("rqmc_batch_workers")
         != payload.get("policy", {}).get("rqmc_batch_workers")
         or run_configuration.get("rqmc_batch_workers_by_variant_case")
-        != payload.get("policy", {}).get(
-            "rqmc_batch_workers_by_variant_case"
-        )
+        != payload.get("policy", {}).get("rqmc_batch_workers_by_variant_case")
         or run_configuration.get("cell_workers")
         != payload.get("policy", {}).get("cell_workers")
     ):
@@ -2898,8 +3877,7 @@ def validate_payload(payload: dict) -> None:
                     )
                 policy = payload.get("policy", {})
                 if (
-                    int(policy.get("slv_spot_strata", 0))
-                    != SLV_SPOT_STRATA
+                    int(policy.get("slv_spot_strata", 0)) != SLV_SPOT_STRATA
                     or bool(policy.get("slv_spot_antithetic", False))
                     != SLV_SPOT_ANTITHETIC
                     or int(policy.get("slv_spot_bridge_strata", 0))
@@ -2911,17 +3889,13 @@ def validate_payload(payload: dict) -> None:
                     or policy.get("slv_multilevel_policy")
                     != {
                         "cases": sorted(SLV_MULTILEVEL_CASES),
-                        "mid_paths_per_batch": (
-                            SLV_MID_CONTROL_PATHS_PER_BATCH
-                        ),
+                        "mid_paths_per_batch": (SLV_MID_CONTROL_PATHS_PER_BATCH),
                         "mid_batches": SLV_MID_CONTROL_BATCHES,
                         "frozen_control_weight": SLV_FROZEN_CONTROL_WEIGHT,
                         "heston_control_weight": SLV_HESTON_CONTROL_WEIGHT,
                     }
                 ):
-                    raise ValueError(
-                        "heston_slv: stale conditional sampling profile"
-                    )
+                    raise ValueError("heston_slv: stale conditional sampling profile")
             else:
                 if (
                     int(sampling["batches"]) != PRODUCTION_HESTON_BATCHES
@@ -2929,19 +3903,21 @@ def validate_payload(payload: dict) -> None:
                     != PRODUCTION_HESTON_BATCHES_BY_CASE
                 ):
                     raise ValueError("heston: stale case-specific batch profile")
-                if payload.get("policy", {}).get(
-                    "heston_spot_bridge_profile_by_case"
-                ) != HESTON_SPOT_BRIDGE_PROFILE_BY_CASE:
+                if (
+                    payload.get("policy", {}).get("heston_spot_bridge_profile_by_case")
+                    != HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+                ):
                     raise ValueError("heston: stale conditional sampling profile")
     if any(
-        decision.get("route") == "pde"
-        for decision in payload["decisions"].values()
+        decision.get("route") == "pde" for decision in payload["decisions"].values()
     ) and payload.get("reference_seeds") != {
         "heston": HESTON_REFERENCE_SEED,
         "heston_slv_primary": SLV_PRIMARY_SEED,
         "heston_slv_mid_control": SLV_MID_CONTROL_SEED,
     }:
-        raise ValueError("PDE admission requires the held-out schema-10 seeds")
+        raise ValueError(
+            "full PDE recertification requires the declared held-out seed families"
+        )
     cells_by_key = {
         (cell.get("variant"), cell.get("case", {}).get("name")): cell
         for cell in payload.get("cells", [])
@@ -2964,8 +3940,7 @@ def validate_payload(payload: dict) -> None:
         )
         if (
             expected_batch_workers < 1
-            or int(reference.get("batch_workers", 0))
-            != expected_batch_workers
+            or int(reference.get("batch_workers", 0)) != expected_batch_workers
         ):
             raise ValueError(f"{variant}/{case_name}: worker profile mismatch")
         expected_batches = _sampling_batches_for_case(
@@ -2977,14 +3952,10 @@ def validate_payload(payload: dict) -> None:
             ).get(case_name, {})
             actual_profile = {
                 "strata": int(
-                    cell.get("reference", {}).get(
-                        "heston_spot_bridge_strata", 0
-                    )
+                    cell.get("reference", {}).get("heston_spot_bridge_strata", 0)
                 ),
                 "dimensions": int(
-                    cell.get("reference", {}).get(
-                        "heston_spot_bridge_dimensions", 0
-                    )
+                    cell.get("reference", {}).get("heston_spot_bridge_dimensions", 0)
                 ),
             }
             if actual_profile != declared_profile:
@@ -2997,9 +3968,7 @@ def validate_payload(payload: dict) -> None:
             ).get(case_name, {})
             actual_profile = {
                 "strata": int(reference.get("slv_spot_bridge_strata", 0)),
-                "dimensions": int(
-                    reference.get("slv_spot_bridge_dimensions", 0)
-                ),
+                "dimensions": int(reference.get("slv_spot_bridge_dimensions", 0)),
             }
             if actual_profile != declared_profile:
                 raise ValueError(
@@ -3052,38 +4021,30 @@ def validate_payload(payload: dict) -> None:
         if multilevel:
             estimator = reference["estimator"]
             if (
-                estimator.get("identity")
-                != "Y-a*F_low+a*F_high-b*H_low+b*H_high"
+                estimator.get("identity") != "Y-a*F_low+a*F_high-b*H_low+b*H_high"
                 or estimator.get("weights")
                 != {
                     "frozen_slv": SLV_FROZEN_CONTROL_WEIGHT,
                     "heston": SLV_HESTON_CONTROL_WEIGHT,
                 }
-                or int(estimator.get("primary_seed", -1))
-                != SLV_PRIMARY_SEED
-                or int(estimator.get("mid_control_seed", -1))
-                != SLV_MID_CONTROL_SEED
-                or int(estimator.get("heston_high_seed", -1))
-                != HESTON_REFERENCE_SEED
-                or int(estimator.get("outer_batches", 0))
-                != PRODUCTION_SLV_BATCHES
+                or int(estimator.get("primary_seed", -1)) != SLV_PRIMARY_SEED
+                or int(estimator.get("mid_control_seed", -1)) != SLV_MID_CONTROL_SEED
+                or int(estimator.get("heston_high_seed", -1)) != HESTON_REFERENCE_SEED
+                or int(estimator.get("outer_batches", 0)) != PRODUCTION_SLV_BATCHES
                 or int(estimator.get("primary_paths_per_batch", 0))
                 != PRODUCTION_SLV_PATHS_PER_BATCH
                 or int(estimator.get("primary_batches", 0))
                 != PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE[case_name]
                 or int(estimator.get("mid_paths_per_batch", 0))
                 != SLV_MID_CONTROL_PATHS_PER_BATCH
-                or int(estimator.get("mid_batches", 0))
-                != SLV_MID_CONTROL_BATCHES
+                or int(estimator.get("mid_batches", 0)) != SLV_MID_CONTROL_BATCHES
             ):
                 raise ValueError(
                     f"heston_slv/{case_name}: stale multilevel estimator metadata"
                 )
             heston_cell = cells_by_key.get(("heston", case_name))
             if heston_cell is None:
-                raise ValueError(
-                    f"heston_slv/{case_name}: missing Heston control cell"
-                )
+                raise ValueError(f"heston_slv/{case_name}: missing Heston control cell")
             heston_cell_hash = hashlib.sha256(
                 json.dumps(
                     evidence_projection(heston_cell),
@@ -3105,9 +4066,7 @@ def validate_payload(payload: dict) -> None:
                 primary = level_components.get("primary_low", {})
                 frozen_high = level_components.get("frozen_high", {})
                 heston_low = level_components.get("heston_low", {})
-                primary_rows = np.asarray(
-                    primary.get("batch_estimates"), dtype=float
-                )
+                primary_rows = np.asarray(primary.get("batch_estimates"), dtype=float)
                 primary_controls = np.asarray(
                     primary.get("control_batch_estimates"), dtype=float
                 )
@@ -3117,15 +4076,12 @@ def validate_payload(payload: dict) -> None:
                 bundled_heston_rows = np.asarray(
                     frozen_high.get("control_batch_estimates"), dtype=float
                 )
-                heston_rows = np.asarray(
-                    heston_low.get("batch_estimates"), dtype=float
-                )
+                heston_rows = np.asarray(heston_low.get("batch_estimates"), dtype=float)
                 if (
                     primary_rows.shape != (primary_batches, 5)
                     or primary_controls.shape != (primary_batches, 5)
                     or frozen_rows.shape != (SLV_MID_CONTROL_BATCHES, 5)
-                    or bundled_heston_rows.shape
-                    != (SLV_MID_CONTROL_BATCHES, 5)
+                    or bundled_heston_rows.shape != (SLV_MID_CONTROL_BATCHES, 5)
                     or heston_rows.shape != (SLV_MID_CONTROL_BATCHES, 5)
                     or not all(
                         np.all(np.isfinite(rows))
@@ -3151,10 +4107,7 @@ def validate_payload(payload: dict) -> None:
                 if (
                     not np.array_equal(bundled_heston_rows, heston_rows)
                     or int(frozen_high.get("total_unique_paths", -1))
-                    != (
-                        SLV_MID_CONTROL_PATHS_PER_BATCH
-                        * SLV_MID_CONTROL_BATCHES
-                    )
+                    != (SLV_MID_CONTROL_PATHS_PER_BATCH * SLV_MID_CONTROL_BATCHES)
                     or int(frozen_high.get("total_path_valuations", -1))
                     != expected_middle_valuations
                     or int(heston_low.get("total_unique_paths", -1)) != 0
@@ -3163,16 +4116,13 @@ def validate_payload(payload: dict) -> None:
                     raise ValueError(
                         f"heston_slv/{case_name}: invalid bundled Heston control provenance"
                     )
-                if (
-                    frozen_high.get("randomization_key")
-                    != heston_low.get("randomization_key")
+                if frozen_high.get("randomization_key") != heston_low.get(
+                    "randomization_key"
                 ):
                     raise ValueError(
                         f"heston_slv/{case_name}: middle controls are not coupled"
                     )
-                high_link = level_components.get(
-                    "heston_high_reference", {}
-                )
+                high_link = level_components.get("heston_high_reference", {})
                 if (
                     high_link.get("variant") != "heston"
                     or high_link.get("case") != case_name
@@ -3238,17 +4188,11 @@ def validate_payload(payload: dict) -> None:
                     )
         for greek in ("delta", "gamma"):
             batches = np.asarray(
-                cell["certifications"][greek].get(
-                    "reference_substep_batch_contracts"
-                ),
+                cell["certifications"][greek].get("reference_substep_batch_contracts"),
                 dtype=float,
             )
-            if batches.shape != (expected_batches,) or not np.all(
-                np.isfinite(batches)
-            ):
-                raise ValueError(
-                    f"{variant}: invalid {greek} substep batch evidence"
-                )
+            if batches.shape != (expected_batches,) or not np.all(np.isfinite(batches)):
+                raise ValueError(f"{variant}: invalid {greek} substep batch evidence")
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -3275,6 +4219,38 @@ def implementation_sha256() -> str:
             contents = path.read_bytes()
         except OSError as exc:
             raise ValueError(f"cannot hash certification input {path}") from exc
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(contents)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def production_pde_compatibility_sha256() -> str:
+    """Hash the live production-PDE dependency projection.
+
+    The path set is deterministic and intentionally excludes the certification
+    harness and reference estimators.  This lets a schema-11 amendment carry
+    completed PDE evidence only when the production numerical implementation
+    itself is byte-for-byte compatible with its schema-9 parent.
+    """
+    root = Path(__file__).resolve().parents[2]
+    paths: set[Path] = set()
+    for relative in PRODUCTION_PDE_INPUT_ROOTS:
+        path = root / relative
+        if path.is_file():
+            paths.add(path)
+        elif path.is_dir():
+            paths.update(path.rglob("*.py"))
+        else:
+            raise ValueError(f"cannot hash production PDE input {path}")
+    digest = hashlib.sha256()
+    for path in sorted(paths, key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        try:
+            contents = path.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"cannot hash production PDE input {path}") from exc
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
         digest.update(contents)
@@ -3331,8 +4307,7 @@ def _load_checkpoint(
         raise ValueError(f"invalid certification checkpoint {path}") from exc
     if (
         record.get("schema_version") != SCHEMA_VERSION
-        or record.get("study")
-        != "adi_2d_snowball_greek_certification_checkpoint"
+        or record.get("study") != "adi_2d_snowball_greek_certification_checkpoint"
         or record.get("kind") != kind
     ):
         raise ValueError(f"checkpoint metadata mismatch: {path}")
@@ -3348,6 +4323,7 @@ def build_decision_payload(payload: dict) -> dict:
     """Build a self-hashed, standalone routing decision."""
     decision = {
         "schema_version": SCHEMA_VERSION,
+        "certification_mode": payload["certification_mode"],
         "evidence_sha256": payload["evidence_sha256"],
         "implementation_sha256": payload["implementation_sha256"],
         "run_configuration_sha256": payload["run_configuration_sha256"],
@@ -3357,6 +4333,20 @@ def build_decision_payload(payload: dict) -> dict:
         "quick": payload["quick"],
         "decisions": payload["decisions"],
     }
+    if payload["certification_mode"] == CERTIFICATION_MODE_AMENDMENT:
+        decision.update(
+            {
+                "parent_certificate": payload["parent_certificate"],
+                "production_pde_compatibility_sha256": payload[
+                    "production_pde_compatibility_sha256"
+                ],
+                "cell_provenance": payload["cell_provenance"],
+                "aggregate_cohorts": payload["aggregate_cohorts"],
+                "auxiliary_control_sha256": _cell_evidence_sha256(
+                    payload["auxiliary_controls"]["heston_near_ki_8_16"]
+                ),
+            }
+        )
     decision["decision_sha256"] = _canonical_sha256(decision)
     return decision
 
@@ -3370,9 +4360,7 @@ def publish_payload(payload: dict, output_dir: Path) -> None:
         sort_keys=True,
         default=_json_default,
     )
-    payload["evidence_sha256"] = hashlib.sha256(
-        canonical.encode("utf-8")
-    ).hexdigest()
+    payload["evidence_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     json_text = (
         json.dumps(payload, indent=2, sort_keys=True, default=_json_default) + "\n"
     )
@@ -3382,14 +4370,250 @@ def publish_payload(payload: dict, output_dir: Path) -> None:
     _atomic_write(output_dir / "adi_greek_certification.md", report)
     _atomic_write(
         output_dir / "adi_greek_certification_decision.json",
-        json.dumps(decision, indent=2, sort_keys=True, default=_json_default)
-        + "\n",
+        json.dumps(decision, indent=2, sort_keys=True, default=_json_default) + "\n",
     )
+
+
+def run_incremental_amendment(args: argparse.Namespace) -> int:
+    """Execute only the unresolved schema-9 boundary cells and one control."""
+    parent, parent_decision, manifest = load_and_validate_parent_certificate(
+        args.amend_parent_evidence,
+        args.amend_parent_decision,
+    )
+    implementation_hash = implementation_sha256()
+    runtime = runtime_environment()
+    run_configuration = amendment_run_configuration(
+        implementation_hash=implementation_hash,
+        runtime=runtime,
+        hedge_inception_spot=args.hedge_inception_spot,
+    )
+    run_configuration_hash = _canonical_sha256(run_configuration)
+    print(
+        "[adi-greeks] schema-11 incremental amendment: "
+        "carry Heston 7/7 + SLV 5/7; compute Heston Near-KI control and "
+        "replace SLV Near-KI/Low-Feller",
+        flush=True,
+    )
+    print(
+        f"[adi-greeks] implementation={implementation_hash[:16]} "
+        f"configuration={run_configuration_hash[:16]} "
+        f"parent={manifest['evidence_sha256'][:16]}",
+        flush=True,
+    )
+    started = time.perf_counter()
+    case_by_name = {case.name: case for case in certification_cases(quick=False)}
+
+    def checkpointed(name: str, kind: str, compute):
+        evidence = None
+        if args.resume:
+            evidence = _load_checkpoint(
+                args.output_dir,
+                name,
+                run_configuration_sha256=run_configuration_hash,
+                kind=kind,
+            )
+            if evidence is not None:
+                print(f"[adi-greeks] resumed {name}", flush=True)
+        if evidence is None:
+            evidence = compute()
+            _write_checkpoint(
+                args.output_dir,
+                name,
+                run_configuration_sha256=run_configuration_hash,
+                kind=kind,
+                evidence=evidence,
+            )
+            print(f"[adi-greeks] checkpointed {name}", flush=True)
+        return evidence
+
+    def compute_heston_control() -> dict:
+        print("[adi-greeks] control-only heston/near_ki 8->16", flush=True)
+        profile = HESTON_SPOT_BRIDGE_PROFILE_BY_CASE["near_ki"]
+        return build_heston_high_control_evidence(
+            case_by_name["near_ki"],
+            paths_per_batch=PRODUCTION_HESTON_PATHS_PER_BATCH,
+            batches=PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"],
+            seed=HESTON_REFERENCE_SEED,
+            target_substeps=8,
+            fine_substeps=16,
+            heston_spot_bridge_strata=profile["strata"],
+            heston_spot_bridge_dimensions=profile["dimensions"],
+            rqmc_batch_workers=(
+                PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"]["near_ki"]
+            ),
+        )
+
+    def compute_low_feller() -> dict:
+        print("[adi-greeks] replacement heston_slv/low_feller", flush=True)
+        profile = SLV_SPOT_BRIDGE_PROFILE_BY_CASE["low_feller"]
+        return certify_case(
+            "heston_slv",
+            case_by_name["low_feller"],
+            quick=False,
+            paths_per_batch=PRODUCTION_SLV_PATHS_PER_BATCH,
+            batches=PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE["low_feller"],
+            seed=SLV_PRIMARY_SEED,
+            hedge_inception_spot=args.hedge_inception_spot,
+            slv_spot_strata=SLV_SPOT_STRATA,
+            slv_spot_antithetic=SLV_SPOT_ANTITHETIC,
+            slv_spot_bridge_strata=profile["strata"],
+            slv_spot_bridge_dimensions=profile["dimensions"],
+            slv_mid_control_seed=SLV_MID_CONTROL_SEED,
+            rqmc_batch_workers=(
+                PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"][
+                    "low_feller"
+                ]
+            ),
+        )
+
+    # These two computations have independent seed families and fit the host's
+    # memory envelope concurrently. Near-KI SLV waits for the Heston control.
+    with ThreadPoolExecutor(
+        max_workers=2,
+        thread_name_prefix="adi-amendment",
+    ) as pool:
+        control_future = pool.submit(
+            checkpointed,
+            "control__heston__near_ki__8_16",
+            "auxiliary_control",
+            compute_heston_control,
+        )
+        low_feller_future = pool.submit(
+            checkpointed,
+            "replacement__heston_slv__low_feller",
+            "cell",
+            compute_low_feller,
+        )
+        heston_control = control_future.result()
+        low_feller = low_feller_future.result()
+
+    def compute_near_ki() -> dict:
+        print("[adi-greeks] replacement heston_slv/near_ki", flush=True)
+        profile = SLV_SPOT_BRIDGE_PROFILE_BY_CASE["near_ki"]
+        return certify_case(
+            "heston_slv",
+            case_by_name["near_ki"],
+            quick=False,
+            paths_per_batch=PRODUCTION_SLV_PATHS_PER_BATCH,
+            batches=PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE["near_ki"],
+            seed=SLV_PRIMARY_SEED,
+            hedge_inception_spot=args.hedge_inception_spot,
+            slv_spot_strata=SLV_SPOT_STRATA,
+            slv_spot_antithetic=SLV_SPOT_ANTITHETIC,
+            slv_spot_bridge_strata=profile["strata"],
+            slv_spot_bridge_dimensions=profile["dimensions"],
+            slv_mid_control_seed=SLV_MID_CONTROL_SEED,
+            heston_high_cell=heston_control,
+            rqmc_batch_workers=(
+                PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"]["near_ki"]
+            ),
+        )
+
+    near_ki = checkpointed(
+        "replacement__heston_slv__near_ki",
+        "cell",
+        compute_near_ki,
+    )
+    parent_cells = {
+        (cell["variant"], cell["case"]["name"]): cell for cell in parent["cells"]
+    }
+    replacements = {"near_ki": near_ki, "low_feller": low_feller}
+    cases = certification_cases(quick=False)
+    cells = []
+    for variant in ("heston", "heston_slv"):
+        for case in cases:
+            if variant == "heston_slv" and case.name in replacements:
+                cells.append(replacements[case.name])
+            else:
+                cells.append(parent_cells[(variant, case.name)])
+    decisions, aggregate_cohorts = make_amendment_decisions(
+        cells,
+        parent["anchors"],
+        parent_decision["decisions"],
+    )
+    sampling = amendment_sampling_by_variant()
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "study": "adi_2d_snowball_greek_certification",
+        "certification_mode": CERTIFICATION_MODE_AMENDMENT,
+        "created_at": datetime.now().astimezone().isoformat(),
+        "quick": False,
+        "profile": "production incremental amendment",
+        "parent_certificate": manifest,
+        "production_pde_compatibility_sha256": (production_pde_compatibility_sha256()),
+        "reference_seeds": amendment_reference_seeds(),
+        "paths_per_batch": PRODUCTION_SLV_PATHS_PER_BATCH,
+        "batches": PRODUCTION_SLV_BATCHES,
+        "sampling_by_variant": sampling,
+        "confidence": CONFIDENCE,
+        "python": runtime["python_version"],
+        "runtime_environment": runtime,
+        "implementation_sha256": implementation_hash,
+        "run_configuration_sha256": run_configuration_hash,
+        "run_configuration": run_configuration,
+        "elapsed_seconds": time.perf_counter() - started,
+        "policy": {
+            "delta_cell_bound_contracts": DELTA_CELL_BOUND_CONTRACTS,
+            "delta_bias_bound_contracts": DELTA_BIAS_BOUND_CONTRACTS,
+            "gamma_cell_bound_contracts_for_1pct_move": (GAMMA_CELL_BOUND_CONTRACTS),
+            "hedge_inception_spot": float(args.hedge_inception_spot),
+            "hedge_inception_spot_policy": (
+                "strictest minimum from the frozen 27-inception MO cohort"
+            ),
+            "unresolved_route": "excluded_greek_unresolved",
+            "heston_spot_bridge_profile_by_case": (HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
+            "slv_spot_bridge_profile_by_case": (SLV_SPOT_BRIDGE_PROFILE_BY_CASE),
+            "qe_substeps_by_variant_case": (amendment_qe_substeps_by_variant_case()),
+            "slv_multilevel_policy": {
+                "cases": sorted(SLV_MULTILEVEL_CASES),
+                "mid_paths_per_batch": SLV_MID_CONTROL_PATHS_PER_BATCH,
+                "mid_batches": SLV_MID_CONTROL_BATCHES,
+                "frozen_control_weight": SLV_FROZEN_CONTROL_WEIGHT,
+                "heston_control_weight": SLV_HESTON_CONTROL_WEIGHT,
+            },
+            "slv_spot_strata": SLV_SPOT_STRATA,
+            "slv_spot_antithetic": SLV_SPOT_ANTITHETIC,
+            "slv_spot_bridge_strata": SLV_SPOT_BRIDGE_STRATA,
+            "rqmc_batch_workers_by_variant_case": run_configuration[
+                "rqmc_batch_workers_by_variant_case"
+            ],
+            "production_engine_controls": PRODUCTION_ENGINE_CONTROLS,
+        },
+        "anchors": parent["anchors"],
+        "cells": cells,
+        "cell_provenance": amendment_cell_provenance(cells),
+        "auxiliary_controls": {"heston_near_ki_8_16": heston_control},
+        "aggregate_cohorts": aggregate_cohorts,
+        "decisions": decisions,
+    }
+    publish_payload(payload, args.output_dir)
+    print(f"[adi-greeks] wrote {args.output_dir}", flush=True)
+    return 0
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--quick", action="store_true", help="non-production smoke profile")
+    parser.add_argument(
+        "--quick", action="store_true", help="non-production smoke profile"
+    )
+    parser.add_argument(
+        "--full-recertification",
+        action="store_true",
+        help=(
+            "explicitly authorize a fresh production run of all 14 cells; "
+            "without this flag production mode requires a schema-9 amendment"
+        ),
+    )
+    parser.add_argument(
+        "--amend-parent-evidence",
+        type=Path,
+        help="exact schema-9 evidence JSON to carry into a schema-11 amendment",
+    )
+    parser.add_argument(
+        "--amend-parent-decision",
+        type=Path,
+        help="exact schema-9 routing decision paired with --amend-parent-evidence",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -3523,6 +4747,70 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     if not np.isfinite(args.hedge_inception_spot) or args.hedge_inception_spot <= 0.0:
         raise ValueError("hedge-inception-spot must be finite and positive")
+    amendment_requested = (
+        args.amend_parent_evidence is not None or args.amend_parent_decision is not None
+    )
+    if amendment_requested:
+        if args.amend_parent_evidence is None or args.amend_parent_decision is None:
+            raise ValueError(
+                "schema-11 amendment requires both parent evidence and decision"
+            )
+        changed = []
+        if args.quick:
+            changed.append("quick")
+        if args.full_recertification:
+            changed.append("full_recertification")
+        if args.skip_anchors:
+            changed.append("skip_anchors")
+        optional_overrides = {
+            "rescore_evidence": args.rescore_evidence,
+            "paths_per_batch": args.paths_per_batch,
+            "batches": args.batches,
+            "heston_paths_per_batch": args.heston_paths_per_batch,
+            "heston_batches": args.heston_batches,
+            "heston_slv_paths_per_batch": args.heston_slv_paths_per_batch,
+            "heston_slv_batches": args.heston_slv_batches,
+            "heston_spot_bridge_strata": args.heston_spot_bridge_strata,
+            "heston_spot_bridge_dimensions": args.heston_spot_bridge_dimensions,
+            "slv_spot_strata": args.slv_spot_strata,
+            "slv_spot_antithetic": args.slv_spot_antithetic,
+            "slv_spot_bridge_strata": args.slv_spot_bridge_strata,
+            "slv_spot_bridge_dimensions": args.slv_spot_bridge_dimensions,
+            "rqmc_batch_workers": args.rqmc_batch_workers,
+            "cell_workers": args.cell_workers,
+            "seed": args.seed,
+            "heston_seed": args.heston_seed,
+            "heston_slv_seed": args.heston_slv_seed,
+            "slv_mid_control_seed": args.slv_mid_control_seed,
+            "cases": args.cases,
+        }
+        changed.extend(
+            name for name, value in optional_overrides.items() if value is not None
+        )
+        changed.sort()
+        if tuple(args.variants) != ("heston", "heston_slv"):
+            changed.append("variants")
+        if not np.isclose(
+            args.hedge_inception_spot,
+            DEFAULT_HEDGE_INCEPTION_SPOT,
+        ):
+            changed.append("hedge_inception_spot")
+        if changed:
+            raise ValueError(
+                "schema-11 amendment has a frozen production profile; "
+                f"unsupported overrides: {changed}"
+            )
+        return run_incremental_amendment(args)
+    if (
+        not args.quick
+        and args.rescore_evidence is None
+        and not args.full_recertification
+    ):
+        raise ValueError(
+            "production certification is incremental by default: provide the "
+            "schema-9 --amend-parent-evidence/--amend-parent-decision pair; "
+            "use --full-recertification only to explicitly rerun all 14 cells"
+        )
     explicit_seed_controls = (
         args.heston_seed,
         args.heston_slv_seed,
@@ -3543,9 +4831,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         reference_seeds = {
             "heston": int(
-                HESTON_REFERENCE_SEED
-                if args.heston_seed is None
-                else args.heston_seed
+                HESTON_REFERENCE_SEED if args.heston_seed is None else args.heston_seed
             ),
             "heston_slv_primary": int(
                 SLV_PRIMARY_SEED
@@ -3593,61 +4879,48 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ) from exc
         except json.JSONDecodeError as exc:
             raise ValueError("rescore evidence is not valid JSON") from exc
+        if source.get("certification_mode") == CERTIFICATION_MODE_AMENDMENT:
+            raise ValueError(
+                "schema-11 amendment evidence has a frozen economic scale and "
+                "cannot be rescored as a monolithic certificate"
+            )
         payload = rescore_payload(source, args.hedge_inception_spot)
         publish_payload(payload, args.output_dir)
         print(f"[adi-greeks] rescored {args.rescore_evidence}", flush=True)
         print(f"[adi-greeks] wrote {args.output_dir}", flush=True)
         return 0
 
-    heston_default_paths = (
-        256 if args.quick else PRODUCTION_HESTON_PATHS_PER_BATCH
-    )
+    heston_default_paths = 256 if args.quick else PRODUCTION_HESTON_PATHS_PER_BATCH
     heston_default_batches = 4 if args.quick else PRODUCTION_HESTON_BATCHES
     slv_default_paths = 256 if args.quick else PRODUCTION_SLV_PATHS_PER_BATCH
     slv_default_batches = 4 if args.quick else PRODUCTION_SLV_BATCHES
     common_paths = args.paths_per_batch
     common_batches = args.batches
-    default_paths = (
-        heston_default_paths if common_paths is None else common_paths
-    )
+    default_paths = heston_default_paths if common_paths is None else common_paths
     default_batches = (
         heston_default_batches if common_batches is None else common_batches
     )
     sampling_by_variant = {
         "heston": {
             "paths_per_batch": int(
-                (
-                    heston_default_paths
-                    if common_paths is None
-                    else common_paths
-                )
+                (heston_default_paths if common_paths is None else common_paths)
                 if args.heston_paths_per_batch is None
                 else args.heston_paths_per_batch
             ),
             "batches": int(
-                (
-                    heston_default_batches
-                    if common_batches is None
-                    else common_batches
-                )
+                (heston_default_batches if common_batches is None else common_batches)
                 if args.heston_batches is None
                 else args.heston_batches
             ),
         },
         "heston_slv": {
             "paths_per_batch": int(
-                (
-                    slv_default_paths if common_paths is None else common_paths
-                )
+                (slv_default_paths if common_paths is None else common_paths)
                 if args.heston_slv_paths_per_batch is None
                 else args.heston_slv_paths_per_batch
             ),
             "batches": int(
-                (
-                    slv_default_batches
-                    if common_batches is None
-                    else common_batches
-                )
+                (slv_default_batches if common_batches is None else common_batches)
                 if args.heston_slv_batches is None
                 else args.heston_slv_batches
             ),
@@ -3663,16 +4936,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             case_name: int(sampling_by_variant["heston"]["batches"])
             for case_name in PRODUCTION_HESTON_BATCHES_BY_CASE
         }
-    sampling_by_variant["heston"]["batches_by_case"] = (
-        heston_batches_by_case
-    )
+    sampling_by_variant["heston"]["batches_by_case"] = heston_batches_by_case
     slv_batches_overridden = (
         common_batches is not None or args.heston_slv_batches is not None
     )
     if not args.quick and not slv_batches_overridden:
-        slv_primary_batches_by_case = dict(
-            PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
-        )
+        slv_primary_batches_by_case = dict(PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE)
         slv_outer_batches_by_case = dict(PRODUCTION_SLV_BATCHES_BY_CASE)
     else:
         slv_primary_batches_by_case = {
@@ -3680,12 +4949,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for case_name in PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
         }
         slv_outer_batches_by_case = dict(slv_primary_batches_by_case)
-    sampling_by_variant["heston_slv"]["batches_by_case"] = (
-        slv_outer_batches_by_case
-    )
-    sampling_by_variant["heston_slv"]["primary_batches_by_case"] = (
-        slv_primary_batches_by_case
-    )
+    sampling_by_variant["heston_slv"]["batches_by_case"] = slv_outer_batches_by_case
+    sampling_by_variant["heston_slv"][
+        "primary_batches_by_case"
+    ] = slv_primary_batches_by_case
     slv_spot_strata = int(
         (1 if args.quick else SLV_SPOT_STRATA)
         if args.slv_spot_strata is None
@@ -3718,19 +4985,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
         paths_per_batch = sampling["paths_per_batch"]
         if paths_per_batch & (paths_per_batch - 1):
-            raise ValueError(
-                f"{variant}: Sobol paths-per-batch must be a power of two"
-            )
+            raise ValueError(f"{variant}: Sobol paths-per-batch must be a power of two")
         if variant == "heston" and any(
-            int(batches) < 2
-            for batches in sampling["batches_by_case"].values()
+            int(batches) < 2 for batches in sampling["batches_by_case"].values()
         ):
-            raise ValueError(
-                "heston: every case-specific batch count must be >= 2"
-            )
+            raise ValueError("heston: every case-specific batch count must be >= 2")
         if variant == "heston_slv" and any(
-            int(batches) < 2
-            for batches in sampling["primary_batches_by_case"].values()
+            int(batches) < 2 for batches in sampling["primary_batches_by_case"].values()
         ):
             raise ValueError(
                 "heston_slv: every case-specific primary batch count must be >= 2"
@@ -3749,9 +5010,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.slv_spot_bridge_dimensions is not None
         and args.slv_spot_bridge_dimensions < 1
     ):
-        raise ValueError(
-            "slv-spot-bridge-dimensions must be a positive integer"
-        )
+        raise ValueError("slv-spot-bridge-dimensions must be a positive integer")
     if rqmc_batch_workers < 1:
         raise ValueError("rqmc-batch-workers must be a positive integer")
     if cell_workers < 1:
@@ -3762,7 +5021,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         unknown = wanted - {case.name for case in certification_cases(quick=False)}
         if unknown:
             raise ValueError(f"unknown certification cases: {sorted(unknown)}")
-        cases = [case for case in certification_cases(quick=False) if case.name in wanted]
+        cases = [
+            case for case in certification_cases(quick=False) if case.name in wanted
+        ]
     if not cases:
         raise ValueError("no certification cases selected")
 
@@ -3790,9 +5051,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else args.heston_spot_bridge_dimensions
         )
         if override_dimensions > 1 and override_strata == 1:
-            raise ValueError(
-                "heston bridge dimensions > 1 require bridge strata > 1"
-            )
+            raise ValueError("heston bridge dimensions > 1 require bridge strata > 1")
         heston_spot_bridge_profile_by_case = {
             case.name: {
                 "strata": override_strata,
@@ -3801,10 +5060,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for case in cases
         }
 
-    if (
-        args.slv_spot_bridge_strata is None
-        and args.slv_spot_bridge_dimensions is None
-    ):
+    if args.slv_spot_bridge_strata is None and args.slv_spot_bridge_dimensions is None:
         slv_spot_bridge_profile_by_case = {
             case.name: (
                 {"strata": 1, "dimensions": 1}
@@ -3820,9 +5076,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else args.slv_spot_bridge_dimensions
         )
         if slv_override_dimensions > 1 and slv_spot_bridge_strata == 1:
-            raise ValueError(
-                "SLV bridge dimensions > 1 require bridge strata > 1"
-            )
+            raise ValueError("SLV bridge dimensions > 1 require bridge strata > 1")
         slv_spot_bridge_profile_by_case = {
             case.name: {
                 "strata": slv_spot_bridge_strata,
@@ -3834,9 +5088,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     implementation_hash = implementation_sha256()
     runtime = runtime_environment()
     selected_variants = tuple(
-        variant
-        for variant in ("heston", "heston_slv")
-        if variant in args.variants
+        variant for variant in ("heston", "heston_slv") if variant in args.variants
     )
     if (
         not args.quick
@@ -3857,15 +5109,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         rqmc_batch_workers_by_variant_case = {
             variant: {
-                case.name: PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE[
-                    variant
-                ][case.name]
+                case.name: PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE[variant][
+                    case.name
+                ]
                 for case in cases
             }
             for variant in selected_variants
         }
     run_configuration = {
         "schema_version": SCHEMA_VERSION,
+        "certification_mode": CERTIFICATION_MODE_FULL,
         "implementation_sha256": implementation_hash,
         "runtime_environment": runtime,
         "production_engine_controls": PRODUCTION_ENGINE_CONTROLS,
@@ -3879,15 +5132,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "spot_bump": SPOT_BUMP,
         "full_bump_ladder": list(FULL_BUMP_LADDER),
         "stochastic_component_confidence": STOCHASTIC_COMPONENT_CONFIDENCE,
-        "heston_spot_bridge_profile_by_case": (
-            heston_spot_bridge_profile_by_case
-        ),
-        "slv_spot_bridge_profile_by_case": (
-            slv_spot_bridge_profile_by_case
-        ),
-        "qe_substeps_by_variant_case": (
-            PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
-        ),
+        "heston_spot_bridge_profile_by_case": (heston_spot_bridge_profile_by_case),
+        "slv_spot_bridge_profile_by_case": (slv_spot_bridge_profile_by_case),
+        "qe_substeps_by_variant_case": (PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE),
         "slv_multilevel_policy": {
             "cases": sorted(SLV_MULTILEVEL_CASES),
             "mid_paths_per_batch": SLV_MID_CONTROL_PATHS_PER_BATCH,
@@ -3899,9 +5146,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "slv_spot_antithetic": slv_spot_antithetic,
         "slv_spot_bridge_strata": slv_spot_bridge_strata,
         "rqmc_batch_workers": rqmc_batch_workers,
-        "rqmc_batch_workers_by_variant_case": (
-            rqmc_batch_workers_by_variant_case
-        ),
+        "rqmc_batch_workers_by_variant_case": (rqmc_batch_workers_by_variant_case),
         "cell_workers": cell_workers,
     }
     run_configuration_hash = _canonical_sha256(run_configuration)
@@ -3946,9 +5191,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 kind="cell",
             )
             if cell is not None:
-                print(
-                    f"[adi-greeks] resumed {variant}/{case.name}", flush=True
-                )
+                print(f"[adi-greeks] resumed {variant}/{case.name}", flush=True)
         if cell is not None:
             return cell
         print(f"[adi-greeks] {variant}/{case.name}", flush=True)
@@ -3964,9 +5207,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             case,
             quick=args.quick,
             paths_per_batch=sampling["paths_per_batch"],
-            batches=_sampling_primary_batches_for_case(
-                sampling, variant, case.name
-            ),
+            batches=_sampling_primary_batches_for_case(sampling, variant, case.name),
             seed=variant_seed,
             hedge_inception_spot=args.hedge_inception_spot,
             heston_spot_bridge_strata=heston_bridge_profile["strata"],
@@ -3977,9 +5218,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             slv_spot_bridge_dimensions=slv_bridge_profile["dimensions"],
             slv_mid_control_seed=reference_seeds["heston_slv_mid_control"],
             heston_high_cell=heston_cells_by_case.get(case.name),
-            rqmc_batch_workers=(
-                rqmc_batch_workers_by_variant_case[variant][case.name]
-            ),
+            rqmc_batch_workers=(rqmc_batch_workers_by_variant_case[variant][case.name]),
         )
         _write_checkpoint(
             args.output_dir,
@@ -3989,13 +5228,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             evidence=cell,
         )
         print(
-            f"[adi-greeks] checkpointed {variant}/{case.name}: "
-            f"{cell['status']}",
+            f"[adi-greeks] checkpointed {variant}/{case.name}: " f"{cell['status']}",
             flush=True,
         )
         return cell
 
-    def compute_phase(variant: str, phase_cases: Sequence[CaseSpec], workers: int) -> None:
+    def compute_phase(
+        variant: str, phase_cases: Sequence[CaseSpec], workers: int
+    ) -> None:
         if not phase_cases:
             return
         if workers == 1:
@@ -4009,8 +5249,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             thread_name_prefix=f"adi-cell-{variant}",
         ) as pool:
             futures = {
-                pool.submit(compute_cell, variant, case): case
-                for case in phase_cases
+                pool.submit(compute_cell, variant, case): case for case in phase_cases
             }
             for future in as_completed(futures):
                 case = futures[future]
@@ -4036,18 +5275,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ]
         compute_phase("heston", ordered_heston_cases, cell_workers)
         heston_cells_by_case.update(
-            {
-                case.name: cells_by_variant_case[("heston", case.name)]
-                for case in cases
-            }
+            {case.name: cells_by_variant_case[("heston", case.name)] for case in cases}
         )
     if "heston_slv" in selected_variants:
         smooth_slv_cases = [
             case for case in cases if case.name not in SLV_MULTILEVEL_CASES
         ]
-        hard_slv_cases = [
-            case for case in cases if case.name in SLV_MULTILEVEL_CASES
-        ]
+        hard_slv_cases = [case for case in cases if case.name in SLV_MULTILEVEL_CASES]
         compute_phase("heston_slv", smooth_slv_cases, cell_workers)
         compute_phase("heston_slv", hard_slv_cases, 1)
 
@@ -4062,19 +5296,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         quick=(args.quick or args.skip_anchors),
         variants=selected_variants,
         sampling_by_variant=selected_sampling,
-        heston_spot_bridge_profile_by_case=(
-            heston_spot_bridge_profile_by_case
-        ),
+        heston_spot_bridge_profile_by_case=(heston_spot_bridge_profile_by_case),
         slv_spot_strata=slv_spot_strata,
         slv_spot_antithetic=slv_spot_antithetic,
         slv_spot_bridge_strata=slv_spot_bridge_strata,
-        slv_spot_bridge_profile_by_case=(
-            slv_spot_bridge_profile_by_case
-        ),
+        slv_spot_bridge_profile_by_case=(slv_spot_bridge_profile_by_case),
     )
     payload = {
         "schema_version": SCHEMA_VERSION,
         "study": "adi_2d_snowball_greek_certification",
+        "certification_mode": CERTIFICATION_MODE_FULL,
         "created_at": datetime.now().astimezone().isoformat(),
         "quick": bool(args.quick),
         "profile": (
@@ -4108,15 +5339,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "strictest minimum from the frozen 27-inception MO cohort"
             ),
             "unresolved_route": "excluded_greek_unresolved",
-            "heston_spot_bridge_profile_by_case": (
-                heston_spot_bridge_profile_by_case
-            ),
-            "slv_spot_bridge_profile_by_case": (
-                slv_spot_bridge_profile_by_case
-            ),
-            "qe_substeps_by_variant_case": (
-                PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
-            ),
+            "heston_spot_bridge_profile_by_case": (heston_spot_bridge_profile_by_case),
+            "slv_spot_bridge_profile_by_case": (slv_spot_bridge_profile_by_case),
+            "qe_substeps_by_variant_case": (PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE),
             "slv_multilevel_policy": {
                 "cases": sorted(SLV_MULTILEVEL_CASES),
                 "mid_paths_per_batch": SLV_MID_CONTROL_PATHS_PER_BATCH,
@@ -4128,9 +5353,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "slv_spot_antithetic": slv_spot_antithetic,
             "slv_spot_bridge_strata": slv_spot_bridge_strata,
             "rqmc_batch_workers": rqmc_batch_workers,
-            "rqmc_batch_workers_by_variant_case": (
-                rqmc_batch_workers_by_variant_case
-            ),
+            "rqmc_batch_workers_by_variant_case": (rqmc_batch_workers_by_variant_case),
             "cell_workers": cell_workers,
             "production_engine_controls": PRODUCTION_ENGINE_CONTROLS,
         },

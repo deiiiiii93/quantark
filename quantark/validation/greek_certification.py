@@ -57,6 +57,37 @@ class EquivalenceResult:
 
 
 @dataclass(frozen=True)
+class IndependentCohortMean:
+    """Student-t summary for a sum of independent cohort means.
+
+    Each input cohort already represents its additive contribution to the
+    final estimand. Dependence within a cohort is retained in its batch rows;
+    covariance across independently randomized cohorts is correctly zero.
+    """
+
+    estimate: float
+    standard_error: float
+    degrees_of_freedom: Optional[int]
+    half_width: float
+    confidence: float
+    cohort_sizes: tuple[int, ...]
+    cohort_means: tuple[float, ...]
+    cohort_standard_errors: tuple[float, ...]
+
+    def as_dict(self) -> dict:
+        return {
+            "estimate": self.estimate,
+            "standard_error": self.standard_error,
+            "degrees_of_freedom": self.degrees_of_freedom,
+            "half_width": self.half_width,
+            "confidence": self.confidence,
+            "cohort_sizes": list(self.cohort_sizes),
+            "cohort_means": list(self.cohort_means),
+            "cohort_standard_errors": list(self.cohort_standard_errors),
+        }
+
+
+@dataclass(frozen=True)
 class EconomicGreekScale:
     """Convert normalized-model Greeks to hedge-instrument contracts.
 
@@ -284,6 +315,89 @@ def certify_signed_bias_from_batches(
         float(np.std(values, ddof=1) / np.sqrt(values.size)),
         economic_bound,
         reference_degrees_of_freedom=int(values.size - 1),
+        pde_discretization_envelope=pde_discretization_envelope,
+        reference_bias_envelope=reference_bias_envelope,
+        confidence=confidence,
+        label=label,
+    )
+
+
+def summarize_independent_cohort_means(
+    cohort_batches: Sequence[Sequence[float]],
+    *,
+    confidence: float = 0.95,
+) -> IndependentCohortMean:
+    """Summarize a sum of means from mutually independent batch cohorts.
+
+    Welch-Satterthwaite degrees of freedom are conservatively floored because
+    :class:`EquivalenceResult` exposes an integer Student-t sample size. Every
+    cohort must contain at least two finite outer-randomization rows.
+    """
+    if not 0.0 < float(confidence) < 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+    arrays = [np.asarray(values, dtype=float) for values in cohort_batches]
+    if not arrays:
+        raise ValueError("cohort_batches must contain at least one cohort")
+    if any(values.ndim != 1 or values.size < 2 for values in arrays):
+        raise ValueError("each cohort must contain at least two batch values")
+    if any(not np.all(np.isfinite(values)) for values in arrays):
+        raise ValueError("cohort batch values must be finite")
+
+    sizes = tuple(int(values.size) for values in arrays)
+    means = tuple(float(np.mean(values)) for values in arrays)
+    variances_of_means = tuple(
+        float(np.var(values, ddof=1) / values.size) for values in arrays
+    )
+    standard_errors = tuple(float(np.sqrt(value)) for value in variances_of_means)
+    variance = float(sum(variances_of_means))
+    standard_error = float(np.sqrt(variance))
+    if variance == 0.0:
+        degrees_of_freedom = None
+        half_width = 0.0
+    else:
+        denominator = float(
+            sum(
+                component * component / (size - 1)
+                for component, size in zip(variances_of_means, sizes)
+                if component > 0.0
+            )
+        )
+        if denominator <= 0.0:
+            raise ValueError("independent cohort degrees of freedom are undefined")
+        welch = variance * variance / denominator
+        degrees_of_freedom = max(1, int(np.floor(welch)))
+        critical = float(
+            student_t.ppf(0.5 + 0.5 * float(confidence), degrees_of_freedom)
+        )
+        half_width = critical * standard_error
+    return IndependentCohortMean(
+        estimate=float(sum(means)),
+        standard_error=standard_error,
+        degrees_of_freedom=degrees_of_freedom,
+        half_width=float(half_width),
+        confidence=float(confidence),
+        cohort_sizes=sizes,
+        cohort_means=means,
+        cohort_standard_errors=standard_errors,
+    )
+
+
+def certify_signed_bias_from_independent_cohorts(
+    cohort_batches: Sequence[Sequence[float]],
+    economic_bound: float,
+    *,
+    pde_discretization_envelope: float = 0.0,
+    reference_bias_envelope: float = 0.0,
+    confidence: float = 0.95,
+    label: str = "signed_bias",
+) -> EquivalenceResult:
+    """Certify an additive signed-bias estimate from independent cohorts."""
+    summary = summarize_independent_cohort_means(cohort_batches, confidence=confidence)
+    return certify_equivalence(
+        summary.estimate,
+        summary.standard_error,
+        economic_bound,
+        reference_degrees_of_freedom=summary.degrees_of_freedom,
         pde_discretization_envelope=pde_discretization_envelope,
         reference_bias_envelope=reference_bias_envelope,
         confidence=confidence,

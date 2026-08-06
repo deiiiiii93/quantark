@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -94,10 +95,13 @@ def test_dense_ki_ladder_matches_production_barrier_policy():
     assert [point.n_v for point in ladders["n_v"]] == [90, 135, 180]
 
 
-def test_schema10_sampling_profile_is_pinned():
+def test_schema11_amendment_profile_is_pinned():
     module = _load()
 
-    assert module.SCHEMA_VERSION == 10
+    assert module.SCHEMA_VERSION == 11
+    assert module.PARENT_SCHEMA_VERSION == 9
+    assert module.PARENT_SEED == 20260807
+    assert module.AMENDMENT_REPLACEMENT_CASES == frozenset({"near_ki", "low_feller"})
     assert module.HESTON_REFERENCE_SEED == 20260808
     assert module.SLV_PRIMARY_SEED == 20260809
     assert module.SLV_MID_CONTROL_SEED == 20260810
@@ -109,15 +113,215 @@ def test_schema10_sampling_profile_is_pinned():
     assert module.PRODUCTION_SLV_BATCHES_BY_CASE["low_feller"] == 512
     assert module.SLV_MULTILEVEL_CASES == frozenset({"near_ki"})
     assert module.PRODUCTION_CELL_WORKERS == 2
-    assert module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"][
-        "low_feller"
-    ] == 2
-    assert module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"][
-        "ordinary_full"
-    ] == 2
-    assert module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"][
-        "low_feller"
-    ] == 4
+    assert (
+        module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"]["low_feller"]
+        == 2
+    )
+    assert (
+        module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"]["ordinary_full"]
+        == 2
+    )
+    assert (
+        module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"]["low_feller"]
+        == 4
+    )
+
+
+def test_schema11_parent_and_live_pde_projection_are_pinned():
+    module = _load()
+
+    manifest = module.parent_certificate_manifest()
+    assert manifest["schema_version"] == 9
+    assert manifest["evidence_sha256"] == module.PARENT_EVIDENCE_SHA256
+    assert manifest["carried_cell_sha256"] == (module.PARENT_CARRIED_CELL_SHA256)
+    assert len(manifest["carried_cell_sha256"]) == 12
+    assert module.production_pde_compatibility_sha256() == (
+        module.PARENT_PRODUCTION_PDE_SHA256
+    )
+
+
+def test_production_run_cannot_implicitly_launch_all_14_cells(tmp_path):
+    module = _load()
+
+    with pytest.raises(ValueError, match="production certification is incremental"):
+        module.main(["--output-dir", str(tmp_path)])
+
+
+def _amendment_decision_fixture(module, *, replacement_status="PASS"):
+    anchors = [
+        {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
+    ]
+    cells = []
+    for case in module.certification_cases(quick=False):
+        cells.append(
+            {
+                "variant": "heston",
+                "case": case.as_dict(),
+                "status": "PASS",
+            }
+        )
+    for case in module.certification_cases(quick=False):
+        replacement = case.name in module.AMENDMENT_REPLACEMENT_CASES
+        difference = -0.005 if replacement else 0.01
+        cells.append(
+            {
+                "variant": "heston_slv",
+                "case": case.as_dict(),
+                "status": replacement_status if replacement else "PASS",
+                "batch_difference_contracts": {
+                    "delta": [difference] * module.AMENDMENT_AGGREGATE_BATCHES
+                },
+                "certifications": {
+                    "delta": {
+                        "pde_signed_refinement_contracts": {
+                            "n_x": 0.0,
+                            "n_v": 0.0,
+                            "n_t": 0.0,
+                        },
+                        "reference_substep_batch_contracts": [0.0]
+                        * module.AMENDMENT_AGGREGATE_BATCHES,
+                    }
+                },
+            }
+        )
+    parent_decisions = {
+        "heston": {
+            "route": "pde",
+            "evidence_complete": True,
+            "aggregate_common_scrambles": module.PRODUCTION_HESTON_BATCHES,
+        }
+    }
+    return cells, anchors, parent_decisions
+
+
+def test_amendment_bias_sums_independent_cohort_means():
+    module = _load()
+    cells, anchors, parent_decisions = _amendment_decision_fixture(module)
+
+    decisions, cohorts = module.make_amendment_decisions(
+        cells,
+        anchors,
+        parent_decisions,
+    )
+
+    bias = decisions["heston_slv"]["delta_bias"]
+    assert bias["estimate_difference"] == pytest.approx((5 * 0.01 - 2 * 0.005) / 7)
+    assert bias["reference_standard_error"] == pytest.approx(0.0, abs=1e-18)
+    assert bias["status"] == "PASS"
+    assert decisions["heston"]["certification_source"] == "schema9_parent"
+    assert decisions["heston_slv"]["route"] == "pde"
+    assert cohorts["method"] == "sum_of_independent_cohort_means"
+    assert [row["seed"] for row in cohorts["cohorts"]] == [
+        module.PARENT_SEED,
+        module.SLV_PRIMARY_SEED,
+    ]
+
+
+def test_amendment_keeps_slv_excluded_until_both_replacements_pass():
+    module = _load()
+    cells, anchors, parent_decisions = _amendment_decision_fixture(
+        module,
+        replacement_status="INCONCLUSIVE",
+    )
+
+    decisions, _ = module.make_amendment_decisions(
+        cells,
+        anchors,
+        parent_decisions,
+    )
+
+    assert decisions["heston"]["route"] == "pde"
+    assert decisions["heston_slv"]["route"] == "excluded_greek_unresolved"
+
+
+def test_incremental_runner_computes_only_two_replacements_and_one_control(
+    monkeypatch, tmp_path
+):
+    module = _load()
+    cases = module.certification_cases(quick=False)
+    parent_cells = [
+        {
+            "variant": variant,
+            "case": case.as_dict(),
+            "source_marker": "parent",
+        }
+        for variant in ("heston", "heston_slv")
+        for case in cases
+    ]
+    parent = {"anchors": [], "cells": parent_cells}
+    parent_decision = {"decisions": {"heston": {"route": "pde"}}}
+    monkeypatch.setattr(
+        module,
+        "load_and_validate_parent_certificate",
+        lambda *_: (parent, parent_decision, module.parent_certificate_manifest()),
+    )
+    monkeypatch.setattr(module, "_write_checkpoint", lambda *_, **__: None)
+    calls = []
+
+    def fake_control(case, **kwargs):
+        calls.append(("control", case.name))
+        return {
+            "variant": "heston",
+            "case": case.as_dict(),
+            "purpose": "reference_only_slv_high_control",
+        }
+
+    def fake_cell(variant, case, **kwargs):
+        calls.append(("replacement", case.name))
+        return {
+            "variant": variant,
+            "case": case.as_dict(),
+            "source_marker": "replacement",
+        }
+
+    monkeypatch.setattr(module, "build_heston_high_control_evidence", fake_control)
+    monkeypatch.setattr(module, "certify_case", fake_cell)
+    monkeypatch.setattr(
+        module,
+        "make_amendment_decisions",
+        lambda *_: (
+            {
+                "heston": {"route": "pde"},
+                "heston_slv": {"route": "excluded_greek_unresolved"},
+            },
+            {"method": "sum_of_independent_cohort_means"},
+        ),
+    )
+    published = {}
+    monkeypatch.setattr(
+        module,
+        "publish_payload",
+        lambda payload, output_dir: published.update(
+            {"payload": payload, "output_dir": output_dir}
+        ),
+    )
+    args = SimpleNamespace(
+        amend_parent_evidence=Path("parent-evidence.json"),
+        amend_parent_decision=Path("parent-decision.json"),
+        hedge_inception_spot=module.DEFAULT_HEDGE_INCEPTION_SPOT,
+        output_dir=tmp_path,
+        resume=False,
+    )
+
+    assert module.run_incremental_amendment(args) == 0
+
+    assert sorted(calls) == [
+        ("control", "near_ki"),
+        ("replacement", "low_feller"),
+        ("replacement", "near_ki"),
+    ]
+    payload = published["payload"]
+    assert len(payload["cells"]) == 14
+    assert all(
+        cell["source_marker"] == "parent"
+        for cell in payload["cells"]
+        if cell["variant"] == "heston"
+    )
+    assert {
+        cell["case"]["name"]
+        for cell in payload["cells"]
+        if cell.get("source_marker") == "replacement"
+    } == {"near_ki", "low_feller"}
     assert module.PRODUCTION_HESTON_QE_SUBSTEPS_BY_CASE["near_ki"] == {
         "target": 8,
         "fine": 16,
@@ -182,9 +386,7 @@ def _passing_cell(module, variant, batches=16, case_name="ordinary_full"):
     slv_bridge_profile = module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE.get(
         case_name, {"strata": 1, "dimensions": 1}
     )
-    substeps = module.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE[variant][
-        case_name
-    ]
+    substeps = module.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE[variant][case_name]
     return {
         "variant": variant,
         "case": {"name": case_name},
@@ -197,14 +399,10 @@ def _passing_cell(module, variant, batches=16, case_name="ordinary_full"):
                 bridge_profile["dimensions"] if variant == "heston" else None
             ),
             "slv_spot_bridge_strata": (
-                slv_bridge_profile["strata"]
-                if variant == "heston_slv"
-                else None
+                slv_bridge_profile["strata"] if variant == "heston_slv" else None
             ),
             "slv_spot_bridge_dimensions": (
-                slv_bridge_profile["dimensions"]
-                if variant == "heston_slv"
-                else None
+                slv_bridge_profile["dimensions"] if variant == "heston_slv" else None
             ),
             "target_substeps_per_interval": substeps["target"],
             "fine_substeps_per_interval": substeps["fine"],
@@ -257,8 +455,7 @@ def test_production_decision_admits_only_complete_pass_evidence():
         for case in module.certification_cases(quick=False)
     ]
     anchors = [
-        {"name": name, "status": "PASS"}
-        for name in module.REQUIRED_ANCHOR_NAMES
+        {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
     ]
     decisions = module.make_decisions(
         rows,
@@ -274,8 +471,7 @@ def test_production_decision_admits_only_complete_pass_evidence():
 def test_production_decision_enforces_variant_sampling_profile():
     module = _load()
     anchors = [
-        {"name": name, "status": "PASS"}
-        for name in module.REQUIRED_ANCHOR_NAMES
+        {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
     ]
     rows = [
         _passing_cell(
@@ -291,9 +487,7 @@ def test_production_decision_enforces_variant_sampling_profile():
             "paths_per_batch": module.PRODUCTION_SLV_PATHS_PER_BATCH,
             "batches": module.PRODUCTION_SLV_BATCHES,
             "batches_by_case": module.PRODUCTION_SLV_BATCHES_BY_CASE,
-            "primary_batches_by_case": (
-                module.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
-            ),
+            "primary_batches_by_case": (module.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE),
         }
     }
 
@@ -306,9 +500,7 @@ def test_production_decision_enforces_variant_sampling_profile():
         slv_spot_strata=module.SLV_SPOT_STRATA,
         slv_spot_antithetic=module.SLV_SPOT_ANTITHETIC,
         slv_spot_bridge_strata=module.SLV_SPOT_BRIDGE_STRATA,
-        slv_spot_bridge_profile_by_case=(
-            module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
-        ),
+        slv_spot_bridge_profile_by_case=(module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE),
     )
     stale = module.make_decisions(
         rows,
@@ -319,9 +511,7 @@ def test_production_decision_enforces_variant_sampling_profile():
         slv_spot_strata=module.SLV_SPOT_STRATA,
         slv_spot_antithetic=module.SLV_SPOT_ANTITHETIC,
         slv_spot_bridge_strata=1,
-        slv_spot_bridge_profile_by_case=(
-            module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
-        ),
+        slv_spot_bridge_profile_by_case=(module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE),
     )
 
     assert admitted["heston_slv"]["route"] == "pde"
@@ -332,8 +522,7 @@ def test_production_decision_enforces_variant_sampling_profile():
 def test_production_decision_enforces_heston_bridge_sampling_profile():
     module = _load()
     anchors = [
-        {"name": name, "status": "PASS"}
-        for name in module.REQUIRED_ANCHOR_NAMES
+        {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
     ]
     rows = [
         _passing_cell(
@@ -358,9 +547,7 @@ def test_production_decision_enforces_heston_bridge_sampling_profile():
         quick=False,
         variants=["heston"],
         sampling_by_variant=sampling,
-        heston_spot_bridge_profile_by_case=(
-            module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
-        ),
+        heston_spot_bridge_profile_by_case=(module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
     )
     stale = module.make_decisions(
         rows,
@@ -382,8 +569,7 @@ def test_production_decision_enforces_heston_bridge_sampling_profile():
 def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
     module = _load()
     anchors = [
-        {"name": name, "status": "PASS"}
-        for name in module.REQUIRED_ANCHOR_NAMES
+        {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
     ]
     rows = [
         _passing_cell(
@@ -396,14 +582,12 @@ def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
     ]
     near_ki = next(row for row in rows if row["case"]["name"] == "near_ki")
     common = module.PRODUCTION_HESTON_BATCHES
-    near_ki["batch_difference_contracts"]["delta"][common:] = [
-        100.0
-    ] * (module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common)
-    near_ki["certifications"]["delta"][
-        "reference_substep_batch_contracts"
-    ][common:] = [100.0] * (
+    near_ki["batch_difference_contracts"]["delta"][common:] = [100.0] * (
         module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common
     )
+    near_ki["certifications"]["delta"]["reference_substep_batch_contracts"][common:] = [
+        100.0
+    ] * (module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common)
     sampling = {
         "heston": {
             "paths_per_batch": module.PRODUCTION_HESTON_PATHS_PER_BATCH,
@@ -418,9 +602,7 @@ def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
         quick=False,
         variants=["heston"],
         sampling_by_variant=sampling,
-        heston_spot_bridge_profile_by_case=(
-            module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
-        ),
+        heston_spot_bridge_profile_by_case=(module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
     )
     stale_sampling = {
         "heston": {
@@ -437,16 +619,12 @@ def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
         quick=False,
         variants=["heston"],
         sampling_by_variant=stale_sampling,
-        heston_spot_bridge_profile_by_case=(
-            module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
-        ),
+        heston_spot_bridge_profile_by_case=(module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
     )
 
     assert admitted["heston"]["route"] == "pde"
     assert admitted["heston"]["aggregate_common_scrambles"] == common
-    assert admitted["heston"]["delta_bias"][
-        "aggregate_common_scrambles"
-    ] == common
+    assert admitted["heston"]["delta_bias"]["aggregate_common_scrambles"] == common
     assert stale["heston"]["route"] == "excluded_greek_unresolved"
     assert stale["heston"]["sampling_complete"] is False
 
@@ -454,8 +632,7 @@ def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
 def test_production_decision_rejects_an_incomplete_regime_matrix():
     module = _load()
     anchors = [
-        {"name": name, "status": "PASS"}
-        for name in module.REQUIRED_ANCHOR_NAMES
+        {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
     ]
     decisions = module.make_decisions(
         [_passing_cell(module, "heston")],
@@ -627,9 +804,7 @@ def test_two_level_control_groups_disjoint_high_scrambles():
 
 def test_embedded_conditional_control_has_zero_incremental_work():
     module = _load()
-    rows = np.asarray(
-        [[1, 2, 3, 1, 2], [2, 3, 4, 2, 3]], dtype=float
-    )
+    rows = np.asarray([[1, 2, 3, 1, 2], [2, 3, 4, 2, 3]], dtype=float)
     controls = 0.5 * rows
     result = module.PairedRQMCGreeksResult(
         price=float(rows[:, 1].mean()),
@@ -694,9 +869,7 @@ def test_serialized_paired_result_is_recomputed_and_tamper_checked():
     assert restored.randomization_key == "checkpoint(saved)"
     payload["gamma"] += 0.1
     with np.testing.assert_raises(ValueError):
-        module.paired_result_from_serialized(
-            payload, randomization_label="checkpoint"
-        )
+        module.paired_result_from_serialized(payload, randomization_label="checkpoint")
 
 
 def test_grouped_multilevel_components_preserve_pairing_and_disjoint_rows():
@@ -735,9 +908,7 @@ def test_grouped_multilevel_components_preserve_pairing_and_disjoint_rows():
         "low",
     )
     low_control = result(0.5 * low.batch_estimates, "low-control", zero_work=True)
-    high = result(
-        [[10, 20, 30, 4, 6], [20, 30, 40, 6, 8]], "high"
-    )
+    high = result([[10, 20, 30, 4, 6], [20, 30, 40, 6, 8]], "high")
 
     combined = module.combine_grouped_rqmc_components(
         ((1.0, low), (-1.0, low_control), (1.0, high)),
@@ -791,6 +962,7 @@ def test_payload_validator_rejects_quick_pde_admission():
     payload = {
         "schema_version": module.SCHEMA_VERSION,
         "study": "adi_2d_snowball_greek_certification",
+        "certification_mode": module.CERTIFICATION_MODE_FULL,
         "batches": 4,
         "quick": True,
         "policy": {"hedge_inception_spot": 4_532.52},
@@ -811,6 +983,7 @@ def test_payload_validator_binds_variant_before_qe_profile_check():
     payload = {
         "schema_version": module.SCHEMA_VERSION,
         "study": "adi_2d_snowball_greek_certification",
+        "certification_mode": module.CERTIFICATION_MODE_FULL,
         "batches": 4,
         "quick": False,
         "policy": {"hedge_inception_spot": 4_532.52},

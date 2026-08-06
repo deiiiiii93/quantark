@@ -911,15 +911,84 @@ cannot authorize Greeks and no longer veto a valid Stage-16 certificate. The
 routing artifact pins `delta_authority="stage16"`; Stage 12 rejects an older
 artifact that still conflates the PV and Greek gates.
 
+#### Schema-11 scoped amendment certificate (2026-08-06)
+
+Schema 10 was initially implemented as a monolithic replacement certificate,
+which unnecessarily scheduled all fourteen cells even though schema 9 had
+already admitted all seven Heston cells and five Heston-SLV cells. That run was
+terminated before any schema-10 SLV held-out result was observed. Its completed
+Heston checkpoints are diagnostic only and cannot enter the amendment.
+
+Schema 11 is a linked, production-sized amendment. It carries forward the
+exact schema-9 anchors, all seven Heston PASS cells, and the five resolved SLV
+PASS cells. It replaces only `heston_slv/near_ki` and
+`heston_slv/low_feller`. Near-KI additionally computes one reference-only
+Heston `8→16` auxiliary because schema 9's Heston Near-KI reference used
+`4→8`; the auxiliary is a control expectation and is not a second Heston
+production certification. No other Heston cell is recomputed.
+
+The parent is immutable and predeclared:
+
+- Git source state: `426c8dc4864f9684a73e3602b62f99e9a5df1f5a`.
+- Parent evidence file SHA-256:
+  `a0ed3bbdaaaf8e6c60d4fd97b3e17d39b0434107ddd365ea67b1680bcf319457`.
+- Parent decision file SHA-256:
+  `3fca3ae1af40a733487eac2533408dd1bd5749e1bee1a080680464c470f0cdd1`.
+- Parent canonical evidence SHA-256:
+  `3daf611f2a0b0d16fce94f66c80acf99beec5fe5ad092fb69b211a52537847fa`.
+- Parent decision SHA-256:
+  `fa23738f02b1ddc1bb83870ac23c4b9f0d4bda22e91911188e0e3af13eb5a3a9`.
+- Parent implementation SHA-256:
+  `240aa9f0824a7b101b0db50f9aa9166f86112cc4ccb3294818e7e8de557cba88`.
+- Parent run-configuration SHA-256:
+  `c6c79eb88a5eb34a1daeec83f3ef6ef159b2406d877198c22f1ed9a0610a06b4`.
+- The 103-file production PDE dependency projection has SHA-256
+  `328f9c2daa8e84d055e13ead53a99fc72690030732602c736bf19529a9526b62`
+  at both the parent and amendment source states. A mismatch invalidates every
+  carried cell.
+
+The seven-cell SLV signed-delta-bias statistic has two independent scramble
+cohorts. For each parent scramble, the five carried cell differences are
+summed and divided by seven. For each amendment scramble, the two replacement
+cell differences are summed and divided by seven. The aggregate estimate is
+the sum of the two cohort means; its variance is the sum of their mean
+variances. A conservatively floored Welch-Satterthwaite degree of freedom
+controls the Student-t interval. The paired target-to-fine bias component uses
+the same independent-cohort construction before its absolute upper envelope
+is added. Cross-cell covariance is therefore retained within each seed family,
+while nonexistent covariance is never invented across the 20260807 parent and
+20260809 amendment families.
+
+The amendment fails closed unless the parent bytes, embedded hashes, runtime,
+engine controls, carried cell identities/statuses, replacement profiles,
+independent seeds, auxiliary-control hash, mixed-cohort statistics, and live
+certification source all validate. Stage 12 reads and validates the sibling
+full evidence artifact rather than trusting the compact decision alone. A
+missing/tampered parent, omitted replacement, altered cohort membership, or
+stale production-PDE projection yields `excluded_greek_unresolved`.
+
+Production amendment command:
+
+```bash
+.venv/bin/python example/mo_volmodels/16_adi_greek_certification.py \
+  --amend-parent-evidence \
+  output/adi_greek_certification_schema9/adi_greek_certification.json \
+  --amend-parent-decision \
+  output/adi_greek_certification_schema9/adi_greek_certification_decision.json \
+  --output-dir output/adi_greek_certification_schema11
+```
+
 Implementation smoke command (non-production):
 
 ```bash
 .venv/bin/python example/mo_volmodels/16_adi_greek_certification.py --quick
 ```
 
-The unqualified command is the production evidence run. Landing the machinery
-does **not** itself claim that either 2-D variant has passed that run; admission
-is carried only by the generated, hashed decision artifact.
+The unqualified production command now fails closed so it cannot accidentally
+schedule another fourteen-cell campaign. A fresh monolithic run requires the
+explicit `--full-recertification` flag. Landing the machinery does **not**
+itself claim that Heston-SLV has passed the amendment; admission is carried
+only by the generated, hashed decision artifact.
 
 #### Consequence for the study
 

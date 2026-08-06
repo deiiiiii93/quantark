@@ -23,7 +23,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py"
 HISTORY_DIR = ROOT / "example/mo_volmodels/data/history"
 
-spec = importlib.util.spec_from_file_location("snowball_volmodel_backtest_12", MODULE_PATH)
+spec = importlib.util.spec_from_file_location(
+    "snowball_volmodel_backtest_12", MODULE_PATH
+)
 s12 = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = s12  # dataclasses resolve cls.__module__ here
 spec.loader.exec_module(s12)
@@ -37,6 +39,7 @@ from quantark.util.exceptions import ValidationError  # noqa: E402
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _weekday_calendar(start: date, end: date):
     days = []
@@ -61,6 +64,7 @@ def terms(calendar):
 # ---------------------------------------------------------------------------
 # Term-sheet parity with the gate-certified product
 # ---------------------------------------------------------------------------
+
 
 def test_backtest_product_matches_gate_term_sheet(terms):
     """The backtest must price the SAME contract stage 11's gate certified.
@@ -102,7 +106,9 @@ def test_backtest_product_scales_to_notional(terms):
         terms, initial_spot=s0, coupon=0.15, notional=notional
     )
     assert product.contract_multiplier == pytest.approx(notional / s0)
-    assert product.initial_price * product.contract_multiplier == pytest.approx(notional)
+    assert product.initial_price * product.contract_multiplier == pytest.approx(
+        notional
+    )
 
 
 def test_backtest_product_carries_the_solved_coupon(terms):
@@ -119,6 +125,7 @@ def test_backtest_product_sets_initial_date_for_the_lifecycle(terms):
 # ---------------------------------------------------------------------------
 # Inception scheduler
 # ---------------------------------------------------------------------------
+
 
 def test_schedule_is_monthly_and_ordered(calendar):
     out = s12.schedule_inceptions(
@@ -196,9 +203,7 @@ def test_schedule_on_the_real_window(calendar):
     spot = s12.load_spot_frame(HISTORY_DIR)
     import pandas as pd
 
-    real_calendar = s11.TradingCalendar.from_spot_csv(
-        HISTORY_DIR / "csi1000_spot.csv"
-    )
+    real_calendar = s11.TradingCalendar.from_spot_csv(HISTORY_DIR / "csi1000_spot.csv")
     out = s12.schedule_inceptions(
         calendar=real_calendar,
         data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
@@ -214,6 +219,7 @@ def test_schedule_on_the_real_window(calendar):
 # ---------------------------------------------------------------------------
 # Gate G2 routing
 # ---------------------------------------------------------------------------
+
 
 def _routing(**overrides):
     """Test double for a gate decision, keyed by study VARIANT name.
@@ -238,8 +244,11 @@ def _routing(**overrides):
     }
     routes.update(overrides)
     gated_mc = {
-        "paths_per_batch": 8192, "batches": 16, "seed": 20260723,
-        "substeps_per_interval": 4, "scheme": "QUADEXP_M",
+        "paths_per_batch": 8192,
+        "batches": 16,
+        "seed": 20260723,
+        "substeps_per_interval": 4,
+        "scheme": "QUADEXP_M",
     }
     return s12.GateRouting(
         decision_path="test",
@@ -259,7 +268,7 @@ def _routing(**overrides):
                 "n_t": 1202,
                 "scheme": "cs",
                 **s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
-            }
+            },
         },
         mc_params={"heston": gated_mc, "heston_slv": gated_mc},
     )
@@ -374,21 +383,31 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
         "heston_slv": "excluded_greek_unresolved",
     }
     certification = s12.stage16()
+    runtime = certification.runtime_environment()
+    implementation_hash = certification.implementation_sha256()
     run_configuration = {
-        "runtime_environment": certification.runtime_environment(),
+        "schema_version": certification.SCHEMA_VERSION,
+        "certification_mode": certification.CERTIFICATION_MODE_FULL,
+        "implementation_sha256": implementation_hash,
+        "runtime_environment": runtime,
         "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
+        "quick": False,
+        "skip_anchors": False,
         "reference_seeds": {
             "heston": certification.HESTON_REFERENCE_SEED,
             "heston_slv_primary": certification.SLV_PRIMARY_SEED,
             "heston_slv_mid_control": certification.SLV_MID_CONTROL_SEED,
         },
+        "hedge_inception_spot": certification.DEFAULT_HEDGE_INCEPTION_SPOT,
+        "variants": ["heston", "heston_slv"],
+        "cases": [
+            case.as_dict() for case in certification.certification_cases(quick=False)
+        ],
         "sampling_by_variant": {
             "heston": {
                 "paths_per_batch": certification.PRODUCTION_HESTON_PATHS_PER_BATCH,
                 "batches": certification.PRODUCTION_HESTON_BATCHES,
-                "batches_by_case": (
-                    certification.PRODUCTION_HESTON_BATCHES_BY_CASE
-                ),
+                "batches_by_case": (certification.PRODUCTION_HESTON_BATCHES_BY_CASE),
             },
             "heston_slv": {
                 "paths_per_batch": certification.PRODUCTION_SLV_PATHS_PER_BATCH,
@@ -413,9 +432,7 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
         ),
         "slv_multilevel_policy": {
             "cases": sorted(certification.SLV_MULTILEVEL_CASES),
-            "mid_paths_per_batch": (
-                certification.SLV_MID_CONTROL_PATHS_PER_BATCH
-            ),
+            "mid_paths_per_batch": (certification.SLV_MID_CONTROL_PATHS_PER_BATCH),
             "mid_batches": certification.SLV_MID_CONTROL_BATCHES,
             "frozen_control_weight": certification.SLV_FROZEN_CONTROL_WEIGHT,
             "heston_control_weight": certification.SLV_HESTON_CONTROL_WEIGHT,
@@ -423,35 +440,85 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
         "rqmc_batch_workers_by_variant_case": (
             certification.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
         ),
-    }
-    payload = {
-        "schema_version": s12.ADI_GREEK_DECISION_SCHEMA_VERSION,
-        "quick": quick,
-        "evidence_sha256": "a" * 64,
-        "implementation_sha256": certification.implementation_sha256(),
-        "run_configuration_sha256": certification._canonical_sha256(
-            run_configuration
+        "rqmc_batch_workers": certification.PRODUCTION_RQMC_BATCH_WORKERS,
+        "cell_workers": certification.PRODUCTION_CELL_WORKERS,
+        "spot_bump": certification.SPOT_BUMP,
+        "full_bump_ladder": list(certification.FULL_BUMP_LADDER),
+        "stochastic_component_confidence": (
+            certification.STOCHASTIC_COMPONENT_CONFIDENCE
         ),
-        "run_configuration": run_configuration,
-        "runtime_environment": certification.runtime_environment(),
-        "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
-        "decisions": {
-            variant: {
-                "route": route,
-                "reason": f"{variant} reason",
-                "evidence_complete": route == "pde",
-                "aggregate_common_scrambles": (
-                    certification.PRODUCTION_HESTON_BATCHES
-                    if variant == "heston"
-                    else certification.PRODUCTION_SLV_BATCHES
-                ),
-            }
-            for variant, route in routes.items()
-        },
     }
-    payload["decision_sha256"] = certification._canonical_sha256(payload)
-    path = tmp_path / "adi_greeks.json"
-    path.write_text(json.dumps(payload))
+    decisions = {
+        variant: {
+            "route": route,
+            "reason": f"{variant} reason",
+            "cell_status": "PASS",
+            "anchor_status": "PASS",
+            "evidence_complete": route == "pde",
+            "missing_anchors": [],
+            "missing_cases": [],
+            "sampling_complete": True,
+            "aggregate_common_scrambles": (
+                certification.PRODUCTION_HESTON_BATCHES
+                if variant == "heston"
+                else certification.PRODUCTION_SLV_BATCHES
+            ),
+            "delta_bias": {
+                "status": "PASS",
+                "estimate_difference": 0.0,
+                "interval": [0.0, 0.0],
+            },
+        }
+        for variant, route in routes.items()
+    }
+    evidence = {
+        "schema_version": s12.ADI_GREEK_DECISION_SCHEMA_VERSION,
+        "study": "adi_2d_snowball_greek_certification",
+        "certification_mode": certification.CERTIFICATION_MODE_FULL,
+        "profile": "production test fixture",
+        "quick": False,
+        "paths_per_batch": certification.PRODUCTION_HESTON_PATHS_PER_BATCH,
+        "batches": certification.PRODUCTION_HESTON_BATCHES,
+        "sampling_by_variant": run_configuration["sampling_by_variant"],
+        "implementation_sha256": implementation_hash,
+        "run_configuration_sha256": certification._canonical_sha256(run_configuration),
+        "run_configuration": run_configuration,
+        "runtime_environment": runtime,
+        "reference_seeds": run_configuration["reference_seeds"],
+        "policy": {
+            "hedge_inception_spot": certification.DEFAULT_HEDGE_INCEPTION_SPOT,
+            "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
+            "heston_spot_bridge_profile_by_case": (
+                certification.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+            ),
+            "slv_spot_strata": certification.SLV_SPOT_STRATA,
+            "slv_spot_antithetic": certification.SLV_SPOT_ANTITHETIC,
+            "slv_spot_bridge_strata": certification.SLV_SPOT_BRIDGE_STRATA,
+            "slv_spot_bridge_profile_by_case": (
+                certification.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
+            ),
+            "qe_substeps_by_variant_case": (
+                certification.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
+            ),
+            "slv_multilevel_policy": run_configuration["slv_multilevel_policy"],
+            "rqmc_batch_workers": certification.PRODUCTION_RQMC_BATCH_WORKERS,
+            "rqmc_batch_workers_by_variant_case": (
+                certification.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
+            ),
+            "cell_workers": certification.PRODUCTION_CELL_WORKERS,
+        },
+        "anchors": [],
+        "cells": [],
+        "decisions": decisions,
+    }
+    certification.publish_payload(evidence, tmp_path)
+    path = tmp_path / "adi_greek_certification_decision.json"
+    if quick:
+        payload = json.loads(path.read_text())
+        payload["quick"] = True
+        payload.pop("decision_sha256")
+        payload["decision_sha256"] = certification._canonical_sha256(payload)
+        path.write_text(json.dumps(payload))
     return path
 
 
@@ -462,11 +529,18 @@ def _reseal_adi_greek_decision(path):
     path.write_text(json.dumps(payload))
 
 
-def test_adi_greek_routing_rejects_stale_slv_sampling_profile(tmp_path):
-    path = _write_adi_greek_decision(
-        tmp_path,
-        routes={"heston_slv": "pde"},
-    )
+def test_adi_greek_routing_requires_sibling_full_evidence(tmp_path):
+    path = _write_adi_greek_decision(tmp_path)
+    path.with_name("adi_greek_certification.json").unlink()
+
+    with pytest.raises(ValidationError, match="sibling full evidence"):
+        s12.load_adi_greek_routing(path)
+
+
+def test_adi_greek_routing_rejects_resealed_decision_profile_tampering(
+    tmp_path,
+):
+    path = _write_adi_greek_decision(tmp_path)
     payload = json.loads(path.read_text())
     payload["run_configuration"]["slv_spot_bridge_strata"] = 1
     payload["run_configuration_sha256"] = s12.stage16()._canonical_sha256(
@@ -475,86 +549,25 @@ def test_adi_greek_routing_rejects_stale_slv_sampling_profile(tmp_path):
     path.write_text(json.dumps(payload))
     _reseal_adi_greek_decision(path)
 
-    with pytest.raises(ValidationError, match="stale conditional sampling"):
+    with pytest.raises(ValidationError, match="validated sibling evidence"):
         s12.load_adi_greek_routing(path)
 
 
-@pytest.mark.parametrize(
-    ("mutate", "message"),
-    [
-        (
-            lambda config: config["reference_seeds"].__setitem__(
-                "heston_slv_mid_control", 1
-            ),
-            "held-out schema-10 seeds",
-        ),
-        (
-            lambda config: config["qe_substeps_by_variant_case"][
-                "heston_slv"
-            ]["near_ki"].__setitem__("fine", 8),
-            "case-specific QE-M profile",
-        ),
-        (
-            lambda config: config["slv_multilevel_policy"].__setitem__(
-                "heston_control_weight", 1.0
-            ),
-            "multilevel estimator profile",
-        ),
-        (
-            lambda config: config["sampling_by_variant"]["heston_slv"][
-                "primary_batches_by_case"
-            ].__setitem__("near_ki", s12.stage16().PRODUCTION_SLV_BATCHES),
-            "case-specific batch profile",
-        ),
-        (
-            lambda config: config["slv_spot_bridge_profile_by_case"][
-                "near_ki"
-            ].__setitem__("dimensions", 1),
-            "stale conditional sampling",
-        ),
-        (
-            lambda config: config["rqmc_batch_workers_by_variant_case"][
-                "heston"
-            ].__setitem__("low_feller", 4),
-            "memory-safe worker profile",
-        ),
-    ],
-)
-def test_adi_greek_routing_rejects_schema10_profile_tampering(
-    tmp_path, mutate, message
-):
-    path = _write_adi_greek_decision(
-        tmp_path,
-        routes={"heston_slv": "pde"},
+def test_adi_greek_routing_rejects_rehashed_full_evidence_tampering(tmp_path):
+    path = _write_adi_greek_decision(tmp_path)
+    certification = s12.stage16()
+    evidence_path = path.with_name("adi_greek_certification.json")
+    evidence = json.loads(evidence_path.read_text())
+    evidence["run_configuration"]["reference_seeds"]["heston_slv_mid_control"] = 1
+    evidence["run_configuration_sha256"] = certification._canonical_sha256(
+        evidence["run_configuration"]
     )
-    payload = json.loads(path.read_text())
-    mutate(payload["run_configuration"])
-    payload["run_configuration_sha256"] = s12.stage16()._canonical_sha256(
-        payload["run_configuration"]
-    )
-    path.write_text(json.dumps(payload))
-    _reseal_adi_greek_decision(path)
+    evidence.pop("evidence_sha256")
+    evidence["evidence_sha256"] = certification._projected_evidence_sha256(evidence)
+    evidence_path.write_text(json.dumps(evidence))
+    path.write_text(json.dumps(certification.build_decision_payload(evidence)))
 
-    with pytest.raises(ValidationError, match=message):
-        s12.load_adi_greek_routing(path)
-
-
-def test_adi_greek_routing_rejects_stale_heston_batch_profile(tmp_path):
-    path = _write_adi_greek_decision(
-        tmp_path,
-        routes={"heston": "pde"},
-    )
-    payload = json.loads(path.read_text())
-    payload["run_configuration"]["sampling_by_variant"]["heston"][
-        "batches_by_case"
-    ]["near_ki"] = s12.stage16().PRODUCTION_HESTON_BATCHES
-    payload["run_configuration_sha256"] = s12.stage16()._canonical_sha256(
-        payload["run_configuration"]
-    )
-    path.write_text(json.dumps(payload))
-    _reseal_adi_greek_decision(path)
-
-    with pytest.raises(ValidationError, match="stale case-specific batch"):
+    with pytest.raises(ValidationError, match="reference seed metadata"):
         s12.load_adi_greek_routing(path)
 
 
@@ -582,7 +595,7 @@ def test_adi_greek_routing_rejects_incomplete_pde_admission(tmp_path):
     path.write_text(json.dumps(payload))
     _reseal_adi_greek_decision(path)
 
-    with pytest.raises(ValidationError, match="incomplete evidence"):
+    with pytest.raises(ValidationError, match="validated sibling evidence"):
         s12.load_adi_greek_routing(path)
 
 
@@ -592,18 +605,26 @@ def test_adi_greek_routing_rejects_decision_tampering(tmp_path):
     payload["decisions"]["heston_slv"]["route"] = "pde"
     path.write_text(json.dumps(payload))
 
-    with pytest.raises(ValidationError, match="decision hash mismatch"):
+    with pytest.raises(ValidationError, match="validated sibling evidence"):
         s12.load_adi_greek_routing(path)
 
 
 def test_adi_greek_routing_rejects_stale_live_implementation(tmp_path):
     path = _write_adi_greek_decision(tmp_path)
-    payload = json.loads(path.read_text())
-    payload["implementation_sha256"] = "d" * 64
-    path.write_text(json.dumps(payload))
-    _reseal_adi_greek_decision(path)
+    certification = s12.stage16()
+    evidence_path = path.with_name("adi_greek_certification.json")
+    evidence = json.loads(evidence_path.read_text())
+    evidence["implementation_sha256"] = "d" * 64
+    evidence["run_configuration"]["implementation_sha256"] = "d" * 64
+    evidence["run_configuration_sha256"] = certification._canonical_sha256(
+        evidence["run_configuration"]
+    )
+    evidence.pop("evidence_sha256")
+    evidence["evidence_sha256"] = certification._projected_evidence_sha256(evidence)
+    evidence_path.write_text(json.dumps(evidence))
+    path.write_text(json.dumps(certification.build_decision_payload(evidence)))
 
-    with pytest.raises(ValidationError, match="live certification/routing"):
+    with pytest.raises(ValidationError, match="live implementation"):
         s12.load_adi_greek_routing(path)
 
 
@@ -654,6 +675,7 @@ def test_recorded_gate_decision_admits_both_2d_pv_ladders():
 # Fair-coupon root finder (Gate G4)
 # ---------------------------------------------------------------------------
 
+
 def test_affine_root_is_found_in_one_step():
     """PV is affine in the coupon, so false position must land immediately."""
     calls = []
@@ -674,7 +696,7 @@ def test_affine_root_is_found_in_one_step():
 def test_nonlinear_root_still_converges():
     """A non-affine PV must still converge - the method stays bracketing."""
     result = s12.solve_affine_root(
-        lambda x: x ** 3 - 0.02,
+        lambda x: x**3 - 0.02,
         lower=0.0,
         upper=0.8,
         tolerance=1e-9,
@@ -706,7 +728,7 @@ def test_flat_function_raises_instead_of_dividing_by_zero():
 def test_exhausted_budget_raises_and_names_gate_g4():
     with pytest.raises(ValidationError, match="Gate G4"):
         s12.solve_affine_root(
-            lambda x: x ** 3 - 0.02,
+            lambda x: x**3 - 0.02,
             lower=0.0,
             upper=0.8,
             tolerance=1e-18,
@@ -724,6 +746,7 @@ def test_endpoint_root_is_accepted_without_iterating():
 # ---------------------------------------------------------------------------
 # Engine configuration
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("variant", s12.VARIANTS)
 def test_engine_config_matches_the_variant_spec(variant):
@@ -791,6 +814,7 @@ def test_mc_params_are_fixed_cost_and_fixed_seed():
 # Cost model
 # ---------------------------------------------------------------------------
 
+
 def test_cost_model_uses_the_agreed_cffex_parameters():
     model = s12.make_cost_model(True)
     assert model.proportional_rate == pytest.approx(5e-5)
@@ -819,6 +843,7 @@ def test_costs_are_actually_charged_on_a_futures_trade():
 # ---------------------------------------------------------------------------
 # Run classification
 # ---------------------------------------------------------------------------
+
 
 class _StubResults:
     """Mirrors the engine's real frames: lifecycle flags live in states_df.
@@ -854,7 +879,9 @@ def _summarize(actions, last_date, terms, **flags):
         inception=terms.inception,
         variant="flat_bsm",
         engine_config=s12.make_engine_config("flat_bsm", routing=_routing()),
-        dates=pd.DatetimeIndex([pd.Timestamp(terms.inception), pd.Timestamp(last_date)]),
+        dates=pd.DatetimeIndex(
+            [pd.Timestamp(terms.inception), pd.Timestamp(last_date)]
+        ),
         coupon=0.15,
         notional=50_000_000.0,
         calibration_records=[],
@@ -897,7 +924,9 @@ def test_knock_out_date_is_read_from_the_action_log(terms):
         inception=terms.inception,
         variant="flat_bsm",
         engine_config=s12.make_engine_config("flat_bsm", routing=_routing()),
-        dates=pd.DatetimeIndex([pd.Timestamp("2023-05-04"), pd.Timestamp("2023-09-04")]),
+        dates=pd.DatetimeIndex(
+            [pd.Timestamp("2023-05-04"), pd.Timestamp("2023-09-04")]
+        ),
         coupon=0.15,
         notional=50_000_000.0,
         calibration_records=[],
@@ -925,12 +954,21 @@ def test_summary_records_the_routing_actually_used(terms):
 # Task fan-out
 # ---------------------------------------------------------------------------
 
+
 def test_tasks_are_the_full_inception_by_variant_cross_product():
     prepared = [
-        {"inception": "2023-05-04", "initial_spot": 6733.97, "coupon": 0.15,
-         "maturity_date": "2026-05-04"},
-        {"inception": "2023-06-01", "initial_spot": 6500.0, "coupon": 0.16,
-         "maturity_date": "2026-06-01"},
+        {
+            "inception": "2023-05-04",
+            "initial_spot": 6733.97,
+            "coupon": 0.15,
+            "maturity_date": "2026-05-04",
+        },
+        {
+            "inception": "2023-06-01",
+            "initial_spot": 6500.0,
+            "coupon": 0.16,
+            "maturity_date": "2026-06-01",
+        },
     ]
     tasks = s12.build_tasks(
         prepared=prepared,
@@ -948,8 +986,10 @@ def test_tasks_are_the_full_inception_by_variant_cross_product():
     )
     assert len(tasks) == 4
     assert {(t["inception"], t["variant"]) for t in tasks} == {
-        ("2023-05-04", "flat_bsm"), ("2023-05-04", "heston"),
-        ("2023-06-01", "flat_bsm"), ("2023-06-01", "heston"),
+        ("2023-05-04", "flat_bsm"),
+        ("2023-05-04", "heston"),
+        ("2023-06-01", "flat_bsm"),
+        ("2023-06-01", "heston"),
     }
     # Every variant of an inception must share ONE coupon (apples-to-apples).
     by_inception = {}
@@ -959,8 +999,14 @@ def test_tasks_are_the_full_inception_by_variant_cross_product():
 
 
 def test_window_end_is_clipped_to_the_data_end():
-    prepared = [{"inception": "2025-07-01", "initial_spot": 6000.0, "coupon": 0.15,
-                 "maturity_date": "2028-07-03"}]
+    prepared = [
+        {
+            "inception": "2025-07-01",
+            "initial_spot": 6000.0,
+            "coupon": 0.15,
+            "maturity_date": "2028-07-03",
+        }
+    ]
     tasks = s12.build_tasks(
         prepared=prepared,
         variants=["flat_bsm"],
@@ -980,8 +1026,14 @@ def test_window_end_is_clipped_to_the_data_end():
 
 def test_every_task_carries_the_gate_provenance():
     tasks = s12.build_tasks(
-        prepared=[{"inception": "2023-05-04", "initial_spot": 6733.97,
-                   "coupon": 0.15, "maturity_date": "2026-05-04"}],
+        prepared=[
+            {
+                "inception": "2023-05-04",
+                "initial_spot": 6733.97,
+                "coupon": 0.15,
+                "maturity_date": "2026-05-04",
+            }
+        ],
         variants=["heston"],
         routing=_routing(heston="mc"),
         history_dir=HISTORY_DIR,

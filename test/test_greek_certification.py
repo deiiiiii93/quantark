@@ -6,6 +6,8 @@ from quantark.validation import (
     EquivalenceStatus,
     certify_equivalence,
     certify_signed_bias_from_batches,
+    certify_signed_bias_from_independent_cohorts,
+    summarize_independent_cohort_means,
 )
 
 
@@ -87,3 +89,44 @@ def test_signed_bias_uses_outer_batch_distribution():
 
     assert result.status is EquivalenceStatus.PASS
     assert result.estimate_difference == pytest.approx(np.mean(batches))
+
+
+def test_independent_cohort_summary_adds_means_and_mean_variances():
+    parent = np.array([0.01, 0.03, 0.02, 0.04])
+    amendment = np.array([-0.02, 0.00, -0.01, 0.01, -0.03])
+
+    summary = summarize_independent_cohort_means([parent, amendment], confidence=0.975)
+
+    expected_variance = (
+        np.var(parent, ddof=1) / parent.size
+        + np.var(amendment, ddof=1) / amendment.size
+    )
+    assert summary.estimate == pytest.approx(np.mean(parent) + np.mean(amendment))
+    assert summary.standard_error == pytest.approx(np.sqrt(expected_variance))
+    assert summary.degrees_of_freedom is not None
+    assert summary.half_width > 0.0
+
+
+def test_independent_cohort_gate_does_not_invent_cross_cohort_covariance():
+    # Perfectly opposed rows would have zero variance if they were incorrectly
+    # zipped as one common-random-number cohort. They are independent seed
+    # families, so both positive variance contributions must remain.
+    parent = np.array([-0.04, -0.02, 0.02, 0.04])
+    amendment = -parent
+
+    result = certify_signed_bias_from_independent_cohorts(
+        [parent, amendment], economic_bound=0.1, confidence=0.975
+    )
+
+    assert result.estimate_difference == pytest.approx(0.0)
+    assert result.reference_standard_error > 0.0
+    assert result.reference_half_width > 0.0
+
+
+@pytest.mark.parametrize(
+    "cohorts",
+    [[], [[0.1]], [[0.1, np.nan]]],
+)
+def test_independent_cohort_summary_rejects_invalid_evidence(cohorts):
+    with pytest.raises(ValueError):
+        summarize_independent_cohort_means(cohorts)
