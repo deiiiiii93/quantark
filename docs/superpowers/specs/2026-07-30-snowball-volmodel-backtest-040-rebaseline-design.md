@@ -990,6 +990,90 @@ explicit `--full-recertification` flag. Landing the machinery does **not**
 itself claim that Heston-SLV has passed the amendment; admission is carried
 only by the generated, hashed decision artifact.
 
+#### Schema-12 aggregate-only reference amendment (2026-08-07)
+
+The completed schema-11 evidence changes the remaining question materially.
+All four anchors and all fourteen individual Heston/Heston-SLV regime cells are
+`PASS`; Heston is admitted. Heston-SLV remains excluded only because its
+seven-cell mean signed Delta-bias interval is reference-noise limited:
+`-0.052709 [-0.139433, +0.034016]` contracts. Its deterministic PDE envelope is
+only `0.013910` contracts. Schema 12 therefore does not recertify a cell and
+does not execute a PDE solve.
+
+`17_adi_slv_aggregate_certification.py` links the exact schema-11 bytes and
+adds reference evidence for that one fleet statistic. The parent identities
+are predeclared: canonical evidence
+`25110446c9f54c0c91f8992b14e3e0f335b13cd88bb76a2220cfaa2931434721`,
+decision
+`4678cb77b1b467964f63322f451a996dc7fbd8b4a4b32079849c6ca09e82fdc0`,
+implementation
+`d3400f3fa151486aef216a54e9154dd484840be61dc4ae4362dbb4f44f49e8c1`,
+and production-PDE projection
+`328f9c2daa8e84d055e13ead53a99fc72690030732602c736bf19529a9526b62`.
+Whole-file hashes, the anchor/cell projections, all fourteen `PASS` statuses,
+the parent Heston decision, numerical runtime, and the live PDE projection are
+rechecked before any added reference work starts.
+
+The statistical gate is expressed through paired signed endpoints. Let
+`D = PDE - fine` and `S = target - fine`. Under the existing residual-bias
+contract, the limiting signed bias lies between `E[D-S]` and `E[D+S]`.
+Schema 12 therefore forms `D+S` and `D-S` inside every scramble before
+estimating either standard error. Covariance is retained inside each of four
+independent source families (new primary, new middle control, carried Heston
+high, and schema-11 replacements); family variances are then added with a
+floored Welch degree of freedom. New primary, middle, and carried Heston-high
+families retain all of their own raw scrambles; only the 512-row Low-Feller
+source is grouped to the 128 published Near-KI rows inside their shared
+schema-11 replacement family. Two 97.5% Student-t intervals give at least
+95% simultaneous coverage by Bonferroni; the immutable sum-of-absolute-axis
+PDE envelope is then added to their outer limits. This is strictly more
+informative than separately adding the fine-reference half-width and substep
+half-width, while preventing accidental cross-seed covariance from narrowing
+the interval. It does not relax an economic bound or discard uncertainty.
+
+The aggregate estimator reuses schema 11's published Near-KI multilevel rows
+and all 512 Low-Feller primary rows. Five smooth cases receive a fixed-size,
+reference-only primary refresh, and the six non-Near-KI cases receive a
+control-only frozen-SLV expectation. The smooth controls may use the already
+completed, resolution-matched parent Heston rows as their high expectation;
+Low-Feller assigns zero Heston weight because its 7→14 ladder has no matching
+parent Heston expectation. Consequently the amendment has exactly zero PDE
+solves, zero Heston-cell reruns, zero Near-KI reruns, and zero Low-Feller-cell
+reruns. Development seed `20260806` is allocation-only and non-admissive;
+production primary and middle families are `20260811` and `20260812`.
+Production uses fixed batch counts with no precision stopping, and every case
+is checkpointed under the complete implementation/run-configuration hash.
+
+Before the development result is opened, the allocation search is fixed to
+primary batches `{512, 1024, 2048, 4096}`, middle batches
+`{32, 64, 128, 256, 512, 1024}`, and one common smooth-case Heston coefficient on
+`{0.0, 0.1, …, 1.0}`; the frozen-SLV coefficient remains `0.95` and the
+Low-Feller Heston coefficient remains zero. Parent rows proxy the new-primary
+variance, the development rows proxy new-middle variance, and carried rows
+provide their actual fixed-source variance. For each middle batch count, the
+Heston coefficient is first selected using only the pilot's matched `F/H`
+rows: it minimizes the worse `D+S`/`D-S` variance of
+`F-b·H_low+b·H_high`, with `H_high` represented by an independent,
+same-law pilot proxy at the known carried-high count. Thus the coefficient is
+not fitted to the carried Heston mean or variance that enters the final
+estimator. Control expectations cancel in the projection center, so the
+center is the all-available-row schema-11 `D±S` baseline rather than a
+favorable pilot mean. Candidates must keep the projected simultaneous
+interval plus one additional new-family standard error inside `±0.1`
+contracts. Projected new-primary and new-middle standard errors use the 95%
+one-sided chi-square upper bound on their development variance, rather than
+the raw point estimate from 128 and 16 rows respectively. The least-path
+candidate wins; ties use the smaller worst-endpoint
+standard error. This selection rule is allocation-only: the selected counts
+and coefficient are frozen in source before seeds `20260811` or `20260812`
+are opened.
+
+The production allocation remains fail-closed in source until the complete
+development control pilot has been projected through both signed endpoints.
+Only then may its boolean freeze be changed and either held-out seed opened.
+Stage 12 now requires schema 12 and validates the sibling full evidence through
+Stage 17; a schema-11 compact decision cannot route Heston-SLV by itself.
+
 #### Consequence for the study
 
 The risk table's line on the 50 σ-collapse dates (6.6%) should be re-read:

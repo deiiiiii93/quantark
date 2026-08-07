@@ -30,7 +30,7 @@ the automated tests and lets 02–10 run with no network at all.
 # 1) live fetch — AKShare interpreter (optional; the sample snapshot works offline)
 /opt/anaconda3/bin/python example/mo_volmodels/01_fetch_mo_snapshot.py
 
-# 2-16) replay and certify — quantark .venv
+# 2-17) replay and certify — quantark .venv
 .venv/bin/python example/mo_volmodels/02_build_iv_surface.py  --snapshot latest
 .venv/bin/python example/mo_volmodels/03_dupire_localvol.py   --tag latest
 .venv/bin/python example/mo_volmodels/04_heston_calibration.py --tag latest \
@@ -42,8 +42,11 @@ the automated tests and lets 02–10 run with no network at all.
 .venv/bin/python example/mo_volmodels/06_lecture.py           --tag latest
 .venv/bin/python example/mo_volmodels/10_explainer.py         --tag latest
 
-# Self-contained 2-D ADI Snowball Greek certification (no market-history input).
-.venv/bin/python example/mo_volmodels/16_adi_greek_certification.py
+# Aggregate-only amendment of the immutable schema-11 ADI Greek certificate.
+.venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
+  --parent-evidence output/adi_greek_certification_schema11/adi_greek_certification.json \
+  --parent-decision output/adi_greek_certification_schema11/adi_greek_certification_decision.json \
+  --output-dir output/adi_greek_certification
 ```
 
 The genuine cross-date study is a separate official-settlement cohort:
@@ -92,6 +95,7 @@ fixture) so the test pipeline and the live pipeline never clobber each other's f
 | `10_calibration_diagnostics.py` | normalized Heston fits across strictly comparable official CFFEX settlement dates → JSON/CSV/plot |
 | `10_explainer.py`         | fail-closed, artifact-driven eight-section verdict with interactive raw-smile, tenor-error, and official-settlement stability explorers |
 | `16_adi_greek_certification.py` | standalone Heston/Heston-SLV Snowball delta/gamma admission: deterministic anchors, separate ADI-axis ladders, paired QE-M RQMC uncertainty, resumable hash-locked cells, tri-state verdicts, and fail-closed routing |
+| `17_adi_slv_aggregate_certification.py` | schema-12 aggregate-only SLV amendment: carries all 14 schema-11 PASS cells, adds fixed-size reference/control cohorts only, preserves paired fine/substep covariance through joint signed endpoints, and never reruns PDE, Heston cells, or Near-KI |
 | `_heston_diagnostics.py`  | bound-aware finite-difference Jacobian, scaled SVD, and deterministic bootstrap summaries |
 | `_mo_common.py`           | shared helpers (snapshot IO, parity, OTM filter, IV inversion, env build, leverage, plots) |
 
@@ -135,14 +139,14 @@ atomically and reused only when both the full run configuration and all numerica
 source inputs have the same SHA-256 fingerprints. Independent RQMC scrambles can be
 run concurrently with `--rqmc-batch-workers` without changing their reduction order
 (the production default is four workers).
-The decision artifact is self-hashed, embeds the full run configuration and
-Python/NumPy/SciPy/platform identity, and Stage 12 verifies it against the live
-certification and routing sources before admitting a 2-D variant.
+The schema-12 decision artifact is self-hashed, embeds the full run configuration
+and Python/NumPy/SciPy/platform identity, and Stage 12 verifies it against the live
+Stage-17 amendment and routing sources before admitting a 2-D variant.
 Use `--quick` only for plumbing; quick evidence is marked non-production and can
 never emit a PDE admission. A variant that is not proved is recorded as
 `excluded_greek_unresolved`, not silently redirected to a noisy MC hedge.
 Stage 12 reads this decision by default whenever `heston` or `heston_slv` is
-requested and requires both the Stage-11 PV route and Stage-16 Greek route to
+requested and requires both the Stage-11 PV route and Stage-17 Greek route to
 be `pde`; unresolved 2-D variants are excluded from the fleet and recorded in
 its manifest. The Stage-11 decision must carry the certified 2-D controls
 (`variance_grid_mode=auto`, adaptive-upwind V drift, degenerate V=0 boundary,

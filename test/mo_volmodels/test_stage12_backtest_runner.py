@@ -12,6 +12,7 @@ protect are covered here directly.
 """
 
 import importlib.util
+import hashlib
 import json
 import sys
 from datetime import date, timedelta
@@ -382,72 +383,81 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
         "heston": "pde",
         "heston_slv": "excluded_greek_unresolved",
     }
-    certification = s12.stage16()
-    runtime = certification.runtime_environment()
-    implementation_hash = certification.implementation_sha256()
+    runtime = {"python_version": "test", "numpy_version": "test"}
+    implementation_hash = "1" * 64
+    reference_seeds = {
+        "schema11_parent": {"parent_schema9": 20260807},
+        "aggregate_primary_refresh": 20260811,
+        "aggregate_middle_control": 20260812,
+    }
     run_configuration = {
-        "schema_version": certification.SCHEMA_VERSION,
-        "certification_mode": certification.CERTIFICATION_MODE_FULL,
+        "schema_version": s12.ADI_GREEK_DECISION_SCHEMA_VERSION,
+        "certification_mode": "aggregate_only_amendment",
         "implementation_sha256": implementation_hash,
         "runtime_environment": runtime,
-        "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
-        "quick": False,
-        "skip_anchors": False,
-        "reference_seeds": {
-            "heston": certification.HESTON_REFERENCE_SEED,
-            "heston_slv_primary": certification.SLV_PRIMARY_SEED,
-            "heston_slv_mid_control": certification.SLV_MID_CONTROL_SEED,
-        },
-        "hedge_inception_spot": certification.DEFAULT_HEDGE_INCEPTION_SPOT,
-        "variants": ["heston", "heston_slv"],
-        "cases": [
-            case.as_dict() for case in certification.certification_cases(quick=False)
-        ],
-        "sampling_by_variant": {
-            "heston": {
-                "paths_per_batch": certification.PRODUCTION_HESTON_PATHS_PER_BATCH,
-                "batches": certification.PRODUCTION_HESTON_BATCHES,
-                "batches_by_case": (certification.PRODUCTION_HESTON_BATCHES_BY_CASE),
-            },
-            "heston_slv": {
-                "paths_per_batch": certification.PRODUCTION_SLV_PATHS_PER_BATCH,
-                "batches": certification.PRODUCTION_SLV_BATCHES,
-                "batches_by_case": certification.PRODUCTION_SLV_BATCHES_BY_CASE,
-                "primary_batches_by_case": (
-                    certification.PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE
-                ),
-            },
-        },
-        "heston_spot_bridge_profile_by_case": (
-            certification.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
-        ),
-        "slv_spot_strata": certification.SLV_SPOT_STRATA,
-        "slv_spot_antithetic": certification.SLV_SPOT_ANTITHETIC,
-        "slv_spot_bridge_strata": certification.SLV_SPOT_BRIDGE_STRATA,
-        "slv_spot_bridge_profile_by_case": (
-            certification.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
-        ),
-        "qe_substeps_by_variant_case": (
-            certification.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
-        ),
-        "slv_multilevel_policy": {
-            "cases": sorted(certification.SLV_MULTILEVEL_CASES),
-            "mid_paths_per_batch": (certification.SLV_MID_CONTROL_PATHS_PER_BATCH),
-            "mid_batches": certification.SLV_MID_CONTROL_BATCHES,
-            "frozen_control_weight": certification.SLV_FROZEN_CONTROL_WEIGHT,
-            "heston_control_weight": certification.SLV_HESTON_CONTROL_WEIGHT,
-        },
-        "rqmc_batch_workers_by_variant_case": (
-            certification.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
-        ),
-        "rqmc_batch_workers": certification.PRODUCTION_RQMC_BATCH_WORKERS,
-        "cell_workers": certification.PRODUCTION_CELL_WORKERS,
-        "spot_bump": certification.SPOT_BUMP,
-        "full_bump_ladder": list(certification.FULL_BUMP_LADDER),
-        "stochastic_component_confidence": (
-            certification.STOCHASTIC_COMPONENT_CONFIDENCE
-        ),
+        "reference_seeds": reference_seeds,
+        "slv_spot_bridge_strata": 8,
     }
+
+    class TestCertification:
+        SCHEMA_VERSION = s12.ADI_GREEK_DECISION_SCHEMA_VERSION
+
+        @staticmethod
+        def _canonical_sha256(value):
+            text = json.dumps(value, sort_keys=True, separators=(",", ":"))
+            return hashlib.sha256(text.encode()).hexdigest()
+
+        @classmethod
+        def _projected_evidence_sha256(cls, payload):
+            unsigned = dict(payload)
+            unsigned.pop("evidence_sha256", None)
+            return cls._canonical_sha256(unsigned)
+
+        @staticmethod
+        def implementation_sha256():
+            return implementation_hash
+
+        @classmethod
+        def validate_payload(cls, payload):
+            if payload.get("implementation_sha256") != implementation_hash:
+                raise ValueError("evidence does not match the live implementation")
+            if cls._canonical_sha256(payload.get("run_configuration")) != payload.get(
+                "run_configuration_sha256"
+            ):
+                raise ValueError("run configuration hash mismatch")
+            if payload.get("reference_seeds") != reference_seeds or payload.get(
+                "run_configuration", {}
+            ).get("reference_seeds") != reference_seeds:
+                raise ValueError("reference seed metadata mismatch")
+
+        @classmethod
+        def build_decision_payload(cls, payload):
+            cls.validate_payload(payload)
+            decision = {
+                "schema_version": cls.SCHEMA_VERSION,
+                "study": payload["study"],
+                "certification_mode": payload["certification_mode"],
+                "profile": payload["profile"],
+                "quick": payload["quick"],
+                "evidence_sha256": payload["evidence_sha256"],
+                "implementation_sha256": payload["implementation_sha256"],
+                "run_configuration_sha256": payload["run_configuration_sha256"],
+                "run_configuration": payload["run_configuration"],
+                "runtime_environment": payload["runtime_environment"],
+                "production_engine_controls": payload[
+                    "production_engine_controls"
+                ],
+                "parent_certificate": {},
+                "aggregate_reference_sha256": cls._canonical_sha256({}),
+                "aggregate_rows_sha256": cls._canonical_sha256({}),
+                "added_work": payload["added_work"],
+                "decisions": payload["decisions"],
+            }
+            decision["decision_sha256"] = cls._canonical_sha256(decision)
+            return decision
+
+    certification = TestCertification
+    s12._STAGE17 = certification
     decisions = {
         variant: {
             "route": route,
@@ -458,11 +468,7 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
             "missing_anchors": [],
             "missing_cases": [],
             "sampling_complete": True,
-            "aggregate_common_scrambles": (
-                certification.PRODUCTION_HESTON_BATCHES
-                if variant == "heston"
-                else certification.PRODUCTION_SLV_BATCHES
-            ),
+            "aggregate_common_scrambles": 128,
             "delta_bias": {
                 "status": "PASS",
                 "estimate_difference": 0.0,
@@ -474,44 +480,25 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
     evidence = {
         "schema_version": s12.ADI_GREEK_DECISION_SCHEMA_VERSION,
         "study": "adi_2d_snowball_greek_certification",
-        "certification_mode": certification.CERTIFICATION_MODE_FULL,
+        "certification_mode": "aggregate_only_amendment",
         "profile": "production test fixture",
         "quick": False,
-        "paths_per_batch": certification.PRODUCTION_HESTON_PATHS_PER_BATCH,
-        "batches": certification.PRODUCTION_HESTON_BATCHES,
-        "sampling_by_variant": run_configuration["sampling_by_variant"],
         "implementation_sha256": implementation_hash,
         "run_configuration_sha256": certification._canonical_sha256(run_configuration),
         "run_configuration": run_configuration,
         "runtime_environment": runtime,
-        "reference_seeds": run_configuration["reference_seeds"],
-        "policy": {
-            "hedge_inception_spot": certification.DEFAULT_HEDGE_INCEPTION_SPOT,
-            "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
-            "heston_spot_bridge_profile_by_case": (
-                certification.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
-            ),
-            "slv_spot_strata": certification.SLV_SPOT_STRATA,
-            "slv_spot_antithetic": certification.SLV_SPOT_ANTITHETIC,
-            "slv_spot_bridge_strata": certification.SLV_SPOT_BRIDGE_STRATA,
-            "slv_spot_bridge_profile_by_case": (
-                certification.SLV_SPOT_BRIDGE_PROFILE_BY_CASE
-            ),
-            "qe_substeps_by_variant_case": (
-                certification.PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE
-            ),
-            "slv_multilevel_policy": run_configuration["slv_multilevel_policy"],
-            "rqmc_batch_workers": certification.PRODUCTION_RQMC_BATCH_WORKERS,
-            "rqmc_batch_workers_by_variant_case": (
-                certification.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
-            ),
-            "cell_workers": certification.PRODUCTION_CELL_WORKERS,
-        },
-        "anchors": [],
-        "cells": [],
+        "reference_seeds": reference_seeds,
+        "production_engine_controls": s12.ADI_2D_PRODUCTION_ENGINE_CONTROLS,
+        "added_work": {"pde_solves": 0},
         "decisions": decisions,
     }
-    certification.publish_payload(evidence, tmp_path)
+    evidence["evidence_sha256"] = certification._projected_evidence_sha256(evidence)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "adi_greek_certification.json").write_text(json.dumps(evidence))
+    decision = certification.build_decision_payload(evidence)
+    (tmp_path / "adi_greek_certification_decision.json").write_text(
+        json.dumps(decision)
+    )
     path = tmp_path / "adi_greek_certification_decision.json"
     if quick:
         payload = json.loads(path.read_text())
@@ -525,7 +512,7 @@ def _write_adi_greek_decision(tmp_path, *, quick=False, routes=None):
 def _reseal_adi_greek_decision(path):
     payload = json.loads(path.read_text())
     payload.pop("decision_sha256", None)
-    payload["decision_sha256"] = s12.stage16()._canonical_sha256(payload)
+    payload["decision_sha256"] = s12.stage17()._canonical_sha256(payload)
     path.write_text(json.dumps(payload))
 
 
@@ -543,7 +530,7 @@ def test_adi_greek_routing_rejects_resealed_decision_profile_tampering(
     path = _write_adi_greek_decision(tmp_path)
     payload = json.loads(path.read_text())
     payload["run_configuration"]["slv_spot_bridge_strata"] = 1
-    payload["run_configuration_sha256"] = s12.stage16()._canonical_sha256(
+    payload["run_configuration_sha256"] = s12.stage17()._canonical_sha256(
         payload["run_configuration"]
     )
     path.write_text(json.dumps(payload))
@@ -555,17 +542,22 @@ def test_adi_greek_routing_rejects_resealed_decision_profile_tampering(
 
 def test_adi_greek_routing_rejects_rehashed_full_evidence_tampering(tmp_path):
     path = _write_adi_greek_decision(tmp_path)
-    certification = s12.stage16()
+    certification = s12.stage17()
     evidence_path = path.with_name("adi_greek_certification.json")
     evidence = json.loads(evidence_path.read_text())
-    evidence["run_configuration"]["reference_seeds"]["heston_slv_mid_control"] = 1
+    evidence["run_configuration"]["reference_seeds"][
+        "aggregate_middle_control"
+    ] = 1
     evidence["run_configuration_sha256"] = certification._canonical_sha256(
         evidence["run_configuration"]
     )
     evidence.pop("evidence_sha256")
     evidence["evidence_sha256"] = certification._projected_evidence_sha256(evidence)
     evidence_path.write_text(json.dumps(evidence))
-    path.write_text(json.dumps(certification.build_decision_payload(evidence)))
+    decision = json.loads(path.read_text())
+    decision["evidence_sha256"] = evidence["evidence_sha256"]
+    path.write_text(json.dumps(decision))
+    _reseal_adi_greek_decision(path)
 
     with pytest.raises(ValidationError, match="reference seed metadata"):
         s12.load_adi_greek_routing(path)
@@ -611,7 +603,7 @@ def test_adi_greek_routing_rejects_decision_tampering(tmp_path):
 
 def test_adi_greek_routing_rejects_stale_live_implementation(tmp_path):
     path = _write_adi_greek_decision(tmp_path)
-    certification = s12.stage16()
+    certification = s12.stage17()
     evidence_path = path.with_name("adi_greek_certification.json")
     evidence = json.loads(evidence_path.read_text())
     evidence["implementation_sha256"] = "d" * 64
@@ -622,7 +614,10 @@ def test_adi_greek_routing_rejects_stale_live_implementation(tmp_path):
     evidence.pop("evidence_sha256")
     evidence["evidence_sha256"] = certification._projected_evidence_sha256(evidence)
     evidence_path.write_text(json.dumps(evidence))
-    path.write_text(json.dumps(certification.build_decision_payload(evidence)))
+    decision = json.loads(path.read_text())
+    decision["evidence_sha256"] = evidence["evidence_sha256"]
+    path.write_text(json.dumps(decision))
+    _reseal_adi_greek_decision(path)
 
     with pytest.raises(ValidationError, match="live implementation"):
         s12.load_adi_greek_routing(path)

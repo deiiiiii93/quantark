@@ -927,7 +927,7 @@ def test_grouped_multilevel_components_preserve_pairing_and_disjoint_rows():
     assert combined.total_path_valuations == 144
 
 
-def test_stage16_production_controls_match_stage11_and_stage12():
+def test_stage16_parent_controls_match_stage11_and_schema12_router():
     module = _load()
     import importlib.util
 
@@ -947,6 +947,10 @@ def test_stage16_production_controls_match_stage11_and_stage12():
         "mo_snowball_volmodel_backtest_12_controls",
         ROOT / "example/mo_volmodels/12_snowball_volmodel_backtest.py",
     )
+    stage17 = load_path(
+        "mo_adi_slv_aggregate_certification_17_controls",
+        ROOT / "example/mo_volmodels/17_adi_slv_aggregate_certification.py",
+    )
 
     assert module.PRODUCTION_ENGINE_CONTROLS == (
         stage11.ADI_2D_PRODUCTION_ENGINE_CONTROLS
@@ -954,7 +958,8 @@ def test_stage16_production_controls_match_stage11_and_stage12():
     assert module.PRODUCTION_ENGINE_CONTROLS == (
         stage12.ADI_2D_PRODUCTION_ENGINE_CONTROLS
     )
-    assert module.SCHEMA_VERSION == stage12.ADI_GREEK_DECISION_SCHEMA_VERSION
+    assert module.SCHEMA_VERSION == stage17.PARENT_SCHEMA_VERSION
+    assert stage17.SCHEMA_VERSION == stage12.ADI_GREEK_DECISION_SCHEMA_VERSION
 
 
 def test_payload_validator_rejects_quick_pde_admission():

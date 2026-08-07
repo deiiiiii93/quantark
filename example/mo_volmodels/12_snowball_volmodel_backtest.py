@@ -23,7 +23,7 @@ study variants -- ``flat_bsm``, ``flat_bsm_quad``, ``ts_bsm``, ``localvol``,
 ``variants`` map (keyed by the study variant name, not by ``vol_model``:
 flat_bsm/flat_bsm_quad/ts_bsm all share ``vol_model="bsm"`` but can carry
 independent verdicts). The two 2-D variants have an additional fail-closed
-Stage-16 Greek admission (`output/adi_greek_certification/`): they run only
+Stage-17 Greek admission (`output/adi_greek_certification/`): they run only
 when Stage 11 admits the PDE PV and Stage 16 admits its delta/gamma. An
 unresolved variant is recorded as `excluded_greek_unresolved`; it is never
 redirected to a noisy daily RQMC hedge. See `GateRouting.solver_for`,
@@ -100,6 +100,7 @@ from quantark.util.exceptions import ValidationError
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STAGE11_PATH = Path(__file__).resolve().parent / "11_pde_convergence_gate.py"
 STAGE16_PATH = Path(__file__).resolve().parent / "16_adi_greek_certification.py"
+STAGE17_PATH = Path(__file__).resolve().parent / "17_adi_slv_aggregate_certification.py"
 
 # ---------------------------------------------------------------------------
 # Fleet configuration
@@ -111,7 +112,7 @@ DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
     / "output/adi_greek_certification/adi_greek_certification_decision.json"
 )
-ADI_GREEK_DECISION_SCHEMA_VERSION = 11
+ADI_GREEK_DECISION_SCHEMA_VERSION = 12
 DEFAULT_OUT_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
 ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
@@ -244,6 +245,7 @@ VARIANT_SPECS: Dict[str, VariantSpec] = {
 
 _STAGE11 = None
 _STAGE16 = None
+_STAGE17 = None
 
 
 def stage11():
@@ -282,6 +284,22 @@ def stage16():
         spec.loader.exec_module(module)
         _STAGE16 = module
     return _STAGE16
+
+
+def stage17():
+    """Load the aggregate-only Greek amendment for live validation."""
+    global _STAGE17
+    if _STAGE17 is None:
+        spec = importlib.util.spec_from_file_location(
+            "mo_adi_slv_aggregate_certification_17", STAGE17_PATH
+        )
+        if spec is None or spec.loader is None:
+            raise ValidationError(f"cannot load stage 17 module at {STAGE17_PATH}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        _STAGE17 = module
+    return _STAGE17
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +398,7 @@ class ADIGreekRouting:
         if route not in {"pde", "excluded_greek_unresolved"}:
             raise ValidationError(
                 f"ADI Greek decision has no usable route for {variant!r}; "
-                "run stage 16 production certification"
+                "run stage 17 production aggregate certification"
             )
         return route
 
@@ -435,13 +453,13 @@ def load_gate_routing(path: Path) -> GateRouting:
 
 
 def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
-    """Load the hashed, production-sized Stage-16 decision artifact."""
+    """Load the hashed, production-sized Stage-17 amendment artifact."""
     try:
         payload = json.loads(Path(path).read_text())
     except OSError as exc:
         raise ValidationError(
             f"ADI Greek decision not readable at {path}; run "
-            "16_adi_greek_certification.py before any Heston/SLV fleet"
+            "17_adi_slv_aggregate_certification.py before any Heston/SLV fleet"
         ) from exc
     except json.JSONDecodeError as exc:
         raise ValidationError(
@@ -449,19 +467,18 @@ def load_adi_greek_routing(path: Path) -> ADIGreekRouting:
         ) from exc
     if payload.get("schema_version") != ADI_GREEK_DECISION_SCHEMA_VERSION:
         raise ValidationError(
-            "ADI Greek decision uses a stale schema; rerun stage 16 with the "
-            "fine-reference, paired-substep, and normalized economic-scale "
-            "certification contract"
+            "ADI Greek decision uses a stale schema; rerun stage 17 with the "
+            "aggregate-only paired-endpoint certification contract"
         )
     if payload.get("quick") is not False:
         raise ValidationError(
-            "ADI Greek decision is quick/non-production evidence; rerun stage 16 "
+            "ADI Greek decision is quick/non-production evidence; rerun stage 17 "
             "without --quick"
         )
-    certification = stage16()
+    certification = stage17()
     if certification.SCHEMA_VERSION != ADI_GREEK_DECISION_SCHEMA_VERSION:
         raise ValidationError(
-            "Stage-12/Stage-16 ADI Greek schema mismatch in this checkout"
+            "Stage-12/Stage-17 ADI Greek schema mismatch in this checkout"
         )
     evidence_hash = payload.get("evidence_sha256")
     hashes = {
@@ -573,7 +590,7 @@ def apply_adi_greek_admission(
         if greek_route != "pde":
             reasons.append(
                 greek_gate.reasons.get(variant)
-                or "Stage 16 Greek evidence is unresolved"
+                or "Stage 17 Greek evidence is unresolved"
             )
         excluded[variant] = "; ".join(reasons)
     return admitted, excluded
@@ -1677,7 +1694,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--adi-greek-decision",
         default=str(DEFAULT_ADI_GREEK_DECISION),
-        help="Stage-16 production Greek decision; required when heston or "
+        help="Stage-17 production Greek decision; required when heston or "
         "heston_slv is requested",
     )
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
