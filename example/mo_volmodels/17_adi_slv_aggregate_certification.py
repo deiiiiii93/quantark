@@ -21,8 +21,14 @@ The development-only control pilot is intentionally non-admissive::
     .venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
       --development-pilot --output-dir output/adi_slv_aggregate_pilot
 
-The production amendment command is added only after its allocation has been
-frozen from the pilot; an unqualified invocation fails closed meanwhile.
+The allocation is frozen from the complete development family and its
+projection hashes before either held-out seed is opened.  Run the production
+amendment with the exact schema-11 parent::
+
+    .venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
+      --parent-evidence output/adi_greek_certification_schema11/adi_greek_certification.json \
+      --parent-decision output/adi_greek_certification_schema11/adi_greek_certification_decision.json \
+      --resume --output-dir output/adi_greek_certification
 """
 
 from __future__ import annotations
@@ -154,24 +160,68 @@ AGGREGATE_COHORT_NAMES = (
 # Low-Feller deliberately omits the Heston layer: its 7->14 ladder has no
 # matching parent Heston expectation, and this amendment never reruns a
 # completed Heston case.
+FROZEN_SMOOTH_HESTON_WEIGHT = 0.7
 AGGREGATE_CONTROL_WEIGHTS = {
     case_name: {
         "frozen_slv": 0.95,
-        "heston": 0.8 if case_name in PRIMARY_REFRESH_CASES else 0.0,
+        "heston": (
+            FROZEN_SMOOTH_HESTON_WEIGHT
+            if case_name in PRIMARY_REFRESH_CASES
+            else 0.0
+        ),
     }
     for case_name in CONTROL_CASES
 }
 
-# Provisional fixed-size production allocation.  The runner remains disabled
-# until the complete development pilot has been projected through the joint
-# endpoint gate and this flag is changed in the same reviewed source revision.
-PRODUCTION_ALLOCATION_FROZEN = False
+# Frozen before either held-out seed was opened.  The exact development design
+# commit, non-admissive pilot bytes, and allocation projection are retained as
+# provenance; production does not read them or adapt its fixed sample sizes.
+FROZEN_ALLOCATION_DESIGN_COMMIT = (
+    "b5a5243d0335081e18c9c92dfebbb5f1f450f859"
+)
+FROZEN_DEVELOPMENT_IMPLEMENTATION_SHA256 = (
+    "e9d21aa02b9e86a49cdc674ce97a2dd886c06f672344a28a7a8187e68ce3846f"
+)
+FROZEN_ALLOCATION_PROJECTION_SHA256 = (
+    "3e007060710eaba934180c69ffe6579822bfe84a13bca9f8c81751c21bf65bc6"
+)
+FROZEN_ALLOCATION_PROJECTION_FILE_SHA256 = (
+    "3e1327c76b88ce53eb2695f786117fa911579878990690a899a3c6d7b1f18c7e"
+)
+FROZEN_DEVELOPMENT_PILOTS = (
+    (
+        ("ordinary_full",),
+        "9640f0cf4a3eb7f20a7ac2954b36f6458187b4b956a3abfc8eee09794d4f16e8",
+        "c1beb0f4b4383d9941fe09ea1626274a486a76aa2da39da268ad08d99a0a90ff",
+    ),
+    (
+        ("ordinary_decayed", "near_ko", "sigma_collapse", "near_expiry"),
+        "14c6747ef4668c96a82e2f599417fc22926f331397ef9091fe3ce8329527e164",
+        "fbdfa01158dcc7b0380aad23211676ea8e059cfb1585cf18a7d824248efa3208",
+    ),
+    (
+        ("low_feller",),
+        "5199937088502e85299f412f17f8db950171d195bc525ce678bc3114cb9e70ec",
+        "4b158c959463db71857da9bccc3d1d891752eed8b8ebbd06808693a644f82a97",
+    ),
+)
+FROZEN_ALLOCATION_PROJECTED_INTERVAL = (
+    -0.09606341420341855,
+    -0.041846226147214255,
+)
+FROZEN_ALLOCATION_GUARDED_INTERVAL = (
+    -0.09927214226746098,
+    -0.038637498083171816,
+)
+FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS = 67_108_864
+
+PRODUCTION_ALLOCATION_FROZEN = True
 PRODUCTION_PRIMARY_SEED = 20260811
 PRODUCTION_MIDDLE_SEED = 20260812
 PRODUCTION_PRIMARY_PATHS_PER_BATCH = 1024
-PRODUCTION_PRIMARY_BATCHES = 2048
+PRODUCTION_PRIMARY_BATCHES = 4096
 PRODUCTION_MIDDLE_PATHS_PER_BATCH = 8192
-PRODUCTION_MIDDLE_BATCHES = 1024
+PRODUCTION_MIDDLE_BATCHES = 256
 PRODUCTION_PRIMARY_BATCH_WORKERS = 4
 PRODUCTION_MIDDLE_BATCH_WORKERS = 4
 PRODUCTION_PRIMARY_CELL_WORKERS = 3
@@ -237,6 +287,34 @@ def implementation_sha256() -> str:
     return digest.hexdigest()
 
 
+def frozen_allocation_manifest() -> dict:
+    """Return the immutable development-to-production allocation provenance."""
+    return {
+        "design_commit": FROZEN_ALLOCATION_DESIGN_COMMIT,
+        "development_implementation_sha256": (
+            FROZEN_DEVELOPMENT_IMPLEMENTATION_SHA256
+        ),
+        "projection_sha256": FROZEN_ALLOCATION_PROJECTION_SHA256,
+        "projection_file_sha256": FROZEN_ALLOCATION_PROJECTION_FILE_SHA256,
+        "development_pilots": [
+            {
+                "cases": list(cases),
+                "evidence_sha256": evidence_hash,
+                "file_sha256": file_hash,
+            }
+            for cases, evidence_hash, file_hash in FROZEN_DEVELOPMENT_PILOTS
+        ],
+        "recommendation": {
+            "primary_batches": PRODUCTION_PRIMARY_BATCHES,
+            "middle_batches": PRODUCTION_MIDDLE_BATCHES,
+            "smooth_heston_weight": FROZEN_SMOOTH_HESTON_WEIGHT,
+            "total_unique_paths": FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS,
+            "projected_interval": list(FROZEN_ALLOCATION_PROJECTED_INTERVAL),
+            "guarded_interval": list(FROZEN_ALLOCATION_GUARDED_INTERVAL),
+        },
+    }
+
+
 def production_run_configuration(
     *,
     implementation_hash: str,
@@ -249,6 +327,7 @@ def production_run_configuration(
         "runtime_environment": runtime,
         "parent_certificate": parent_certificate_manifest(),
         "production_pde_compatibility_sha256": PARENT_PRODUCTION_PDE_SHA256,
+        "allocation_freeze": frozen_allocation_manifest(),
         "schema11_replacement_batches": AGGREGATE_OUTER_BATCHES,
         "primary_refresh": {
             "cases": list(PRIMARY_REFRESH_CASES),

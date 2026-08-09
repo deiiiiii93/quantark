@@ -49,13 +49,28 @@ def test_schema12_parent_and_development_families_are_pinned():
     }
     assert module.PRODUCTION_PRIMARY_SEED == 20260811
     assert module.PRODUCTION_MIDDLE_SEED == 20260812
-    assert module.PRODUCTION_PRIMARY_BATCHES >= 2
-    assert module.PRODUCTION_MIDDLE_BATCHES >= 2
-    assert module.AGGREGATE_CONTROL_WEIGHTS["low_feller"]["heston"] == 0.0
-    assert (
-        module.AGGREGATE_CONTROL_WEIGHTS["ordinary_full"]["heston"]
-        in module.DEVELOPMENT_HESTON_WEIGHT_GRID
+    assert module.PRODUCTION_ALLOCATION_FROZEN is True
+    assert module.PRODUCTION_PRIMARY_BATCHES == 4096
+    assert module.PRODUCTION_MIDDLE_BATCHES == 256
+    assert module.FROZEN_SMOOTH_HESTON_WEIGHT == 0.7
+    assert module.FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS == 67_108_864
+    assert module.FROZEN_ALLOCATION_PROJECTION_SHA256 == (
+        "3e007060710eaba934180c69ffe6579822bfe84a13bca9f8c81751c21bf65bc6"
     )
+    assert module.FROZEN_ALLOCATION_PROJECTION_FILE_SHA256 == (
+        "3e1327c76b88ce53eb2695f786117fa911579878990690a899a3c6d7b1f18c7e"
+    )
+    assert module.FROZEN_ALLOCATION_GUARDED_INTERVAL == pytest.approx(
+        (-0.09927214226746098, -0.038637498083171816)
+    )
+    assert module.AGGREGATE_CONTROL_WEIGHTS["low_feller"]["heston"] == 0.0
+    assert module.AGGREGATE_CONTROL_WEIGHTS["ordinary_full"]["heston"] == 0.7
+    manifest = module.frozen_allocation_manifest()
+    assert manifest["design_commit"] == (
+        "b5a5243d0335081e18c9c92dfebbb5f1f450f859"
+    )
+    assert manifest["recommendation"]["primary_batches"] == 4096
+    assert manifest["recommendation"]["middle_batches"] == 256
 
 
 def test_exact_schema11_parent_loads_and_all_cells_are_pass():
@@ -762,6 +777,7 @@ def test_schema12_full_payload_recomposes_publishes_and_routes(tmp_path):
 
 def test_production_invocation_fails_closed_before_allocation_is_frozen():
     module = _load()
+    module.PRODUCTION_ALLOCATION_FROZEN = False
 
     with pytest.raises(ValueError, match="production allocation is not frozen"):
         module.main(

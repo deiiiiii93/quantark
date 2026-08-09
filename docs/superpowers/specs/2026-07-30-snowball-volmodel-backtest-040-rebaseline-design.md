@@ -1074,6 +1074,17 @@ Only then may its boolean freeze be changed and either held-out seed opened.
 Stage 12 now requires schema 12 and validates the sibling full evidence through
 Stage 17; a schema-11 compact decision cannot route Heston-SLV by itself.
 
+The complete seed-`20260806` pilot family selected the least-path guarded
+candidate exactly as predeclared: **4,096** primary batches at 1,024 paths,
+**256** middle batches at 8,192 paths, and common smooth-case Heston coefficient
+**0.7**. This adds 67,108,864 unique paths. Its projected simultaneous interval
+is `[-0.096063, -0.041846]`; after the extra one-new-family-SE guard it is
+`[-0.099272, -0.038637]`, still wholly inside the `±0.1` contract. Projection
+SHA-256 `3e007060710eaba934180c69ffe6579822bfe84a13bca9f8c81751c21bf65bc6`
+and the three pilot byte/evidence hashes are frozen in Stage 17 at design commit
+`b5a5243d0335081e18c9c92dfebbb5f1f450f859`, before production seeds
+`20260811` and `20260812` are opened.
+
 #### Consequence for the study
 
 The risk table's line on the 50 σ-collapse dates (6.6%) should be re-read:

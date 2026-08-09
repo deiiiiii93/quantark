@@ -46,8 +46,15 @@ the automated tests and lets 02–10 run with no network at all.
 .venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
   --parent-evidence output/adi_greek_certification_schema11/adi_greek_certification.json \
   --parent-decision output/adi_greek_certification_schema11/adi_greek_certification_decision.json \
+  --resume \
   --output-dir output/adi_greek_certification
 ```
+
+The schema-12 allocation was frozen before its held-out seeds were opened:
+4,096 primary batches, 256 middle-control batches, and smooth-case Heston
+coefficient 0.7. Its development-seed guarded interval was
+`[-0.099272, -0.038637]` against the `±0.1` contract; production remains a
+fixed-size run and never precision-stops.
 
 The genuine cross-date study is a separate official-settlement cohort:
 
