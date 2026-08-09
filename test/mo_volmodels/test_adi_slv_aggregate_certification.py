@@ -52,6 +52,9 @@ def test_schema12_parent_and_development_families_are_pinned():
     assert module.PRODUCTION_ALLOCATION_FROZEN is True
     assert module.PRODUCTION_PRIMARY_BATCHES == 4096
     assert module.PRODUCTION_MIDDLE_BATCHES == 256
+    assert module.PRODUCTION_PRIMARY_BATCH_WORKERS == 4
+    assert module.PRODUCTION_MIDDLE_BATCH_WORKERS == 2
+    assert module.PRODUCTION_MIDDLE_CELL_WORKERS == 2
     assert module.FROZEN_SMOOTH_HESTON_WEIGHT == 0.7
     assert module.FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS == 67_108_864
     assert module.FROZEN_ALLOCATION_PROJECTION_SHA256 == (
