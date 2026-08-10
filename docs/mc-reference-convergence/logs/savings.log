@@ -1,0 +1,18 @@
+frozen design's own recorded target half-width: 0.0303
+
+=== the run as designed before this work ===
+frozen 4096/256, untreated estimators        half-width 0.0163     161.4 h serial    26.9 h wall
+
+=== same precision, with the new work ===
++ bridge8 treatment (flat shape)             half-width 0.0162      82.7 h serial    13.8 h wall
++ treatment + Neyman allocation              half-width 0.0161      34.0 h serial     5.7 h wall
+
+=== our tighter 0.02 target, with the new work ===
++ treatment + Neyman @ 0.02                  half-width 0.0196      23.0 h serial     3.8 h wall
+old machinery @ 0.02 (for scale)             half-width 0.0200      65.2 h serial    10.9 h wall
+
+=== savings at equal precision ===
+  treatment alone       1.95x  (   78.7 h serial saved,  13.1 h wall)
+  treatment + Neyman    4.75x  (  127.4 h serial saved,  21.2 h wall)
+
+  reaching the tighter 0.02 target costs 23.0 h serial (3.8 h wall), versus 65.2 h serial (10.9 h wall) on the old machinery -- a 2.84x reduction.
