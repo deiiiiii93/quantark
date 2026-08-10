@@ -1,0 +1,32 @@
+WS-C semi-Lagrangian v-transport — measured 2026-08-10 (implementation commit 46d8d63)
+One-year Heston put, S=K=100, r=0.03, q=0.01, sigma_collapse params
+(v0=0.14027, kappa=3.0, theta=0.00306, sigma=0.00311, rho=-0.5),
+n_x=61, n_t=240, grid_style=concentrated, variance_grid_mode=path_focused,
+v0_boundary=degenerate_pde, scheme=cs, theta=0.5, rannacher=2.
+
+n_v convergence (value at log-spot=log(100), v=v0):
+  adaptive_upwind  30: 7.37879469
+                   60: 7.39451677   move 1.57e-02
+                  120: 7.40226416   move 7.75e-03   ratio 2.03  <- first order
+                  240: 7.40617946   move 3.92e-03   ratio 1.98  <- first order
+  semi_lagrangian  30: 7.40465782
+                   60: 7.41003257   move 5.37e-03
+                  120: 7.40998485   move 4.77e-05   ratio 112.65
+                  240: 7.40998454   move 3.13e-07   ratio 152.54
+
+Accuracy per second (reference = SL n_v=480):
+  upwind  n_v=120  0.452 s   err 7.72e-03
+  upwind  n_v=240  0.736 s   err 3.81e-03
+  SL      n_v=60   0.285 s   err 4.80e-05   <- 2.6x faster AND 80x more accurate
+  SL      n_v=120  0.603 s   err 3.34e-07      than upwind n_v=240
+
+C-G5 equal-grid overhead at n_v=120: 1.30x (spec bound 1.30x). The lever is not
+"same grid, faster" -- it is a much coarser variance grid at better accuracy,
+which is what the memory-constrained host wants.
+
+Default-path bitwise check: full-march surfaces over
+{adaptive_upwind, centered} x {concentrated/path_focused/degenerate_pde,
+uniform/legacy/neumann} x {douglas, cs} are byte-identical to the pre-change
+code (104,960 bytes compared, sha256 7e98c91409bb067a...).
+Suites: 18 new SL tests; 136 passed in the PDE regression set; 28 replay
+goldens pass.
