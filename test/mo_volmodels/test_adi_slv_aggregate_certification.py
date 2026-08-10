@@ -803,3 +803,97 @@ def test_admissive_validator_rejects_development_payload():
 
     with pytest.raises(ValueError, match="aggregate-only amendment"):
         module.validate_payload(copy.deepcopy(payload))
+
+
+def test_adaptive_flag_default_off_preserves_frozen_allocation():
+    """S-G4: without --adaptive nothing about the frozen allocation moves."""
+    module = _load()
+    config = module.production_run_configuration(
+        implementation_hash=module.implementation_sha256(),
+        runtime=module.runtime_environment(),
+    )
+    recommendation = module.frozen_allocation_manifest()["recommendation"]
+    assert config["primary_refresh"]["batches"] == recommendation["primary_batches"]
+    assert config["middle_control"]["batches"] == recommendation["middle_batches"]
+    assert config["no_optional_stopping"] is True
+    assert config["stopping_rule"] == "fixed_allocation"
+    assert "adaptive_run" not in config
+
+
+def test_adaptive_mode_declares_blind_stopping_rule():
+    """Precision stopping is not optional stopping; both facts must be legible."""
+    module = _load()
+    config = module.production_run_configuration(
+        implementation_hash=module.implementation_sha256(),
+        runtime=module.runtime_environment(),
+        adaptive=True,
+        precision_target=0.02,
+        budget_hours=12.0,
+        pilot_batches=32,
+    )
+    assert config["no_optional_stopping"] is True
+    assert config["stopping_rule"] == "precision_blind"
+    assert config["stopping_rule_reads_estimate"] is False
+    assert config["adaptive_run"]["precision_target"] == 0.02
+    assert config["adaptive_run"]["budget_hours"] == 12.0
+    assert config["adaptive_run"]["pilot_batches"] == 32
+
+
+def test_adaptive_allocation_is_pilot_deterministic():
+    """S-G3: the same pilot statistics must freeze to the same allocation."""
+    module = _load()
+    pilot = {
+        "ordinary_full": {"batches": 32, "batch_sd": 1.07, "seconds_per_batch": 33.4},
+        "ordinary_decayed": {"batches": 32, "batch_sd": 1.08, "seconds_per_batch": 17.4},
+        "sigma_collapse": {"batches": 32, "batch_sd": 0.70, "seconds_per_batch": 33.3},
+    }
+    first = module.freeze_adaptive_allocation(pilot, budget_hours=12.0)
+    second = module.freeze_adaptive_allocation(pilot, budget_hours=12.0)
+    assert first == second
+    assert first["allocation_sha256"] == second["allocation_sha256"]
+    # A different budget must produce a different frozen decision.
+    third = module.freeze_adaptive_allocation(pilot, budget_hours=6.0)
+    assert third["allocation_sha256"] != first["allocation_sha256"]
+    # Noisier-and-cheaper cells earn more batches than quieter-and-dearer ones.
+    assert first["allocation"]["ordinary_decayed"] > first["allocation"]["sigma_collapse"]
+
+
+def test_monitor_hook_is_estimate_blind():
+    """S-G1 at the wiring level: only precision fields reach the stopping path."""
+    module = _load()
+    banked = {
+        "ordinary_full": {
+            "batch_deltas": np.array([0.1, 0.2, 0.15, 0.12]),
+            "seconds_per_batch": 33.4,
+        },
+        "sigma_collapse": {
+            "batch_deltas": np.array([0.30, 0.34, 0.31, 0.33]),
+            "seconds_per_batch": 33.3,
+        },
+    }
+    cells = module.monitor_cells_from_banked(banked)
+    assert [c.name for c in cells] == ["ordinary_full", "sigma_collapse"]
+    assert all(not hasattr(c, "estimate") for c in cells)
+    assert cells[0].n_batches == 4
+    assert cells[0].seconds_per_batch == 33.4
+    # The decision must be reachable from these cells alone.
+    decision = module.precision_stop(
+        cells, target_halfwidth=10.0, elapsed_seconds=1.0, budget_seconds=100.0
+    )
+    assert decision.stop is True and decision.trigger == "target-reached"
+
+
+def test_adaptive_allocation_never_reduces_evidence_below_the_frozen_floor():
+    """An adaptive run may add batches to a cell, never take them away."""
+    module = _load()
+    pilot = {
+        "ordinary_full": {"batches": 32, "batch_sd": 0.001, "seconds_per_batch": 33.4},
+    }
+    frozen = module.freeze_adaptive_allocation(pilot, budget_hours=0.1)
+    batches = module.adaptive_batches_by_case(
+        frozen, default_batches=module.PRODUCTION_PRIMARY_BATCHES
+    )
+    # Every control case is present, and the frozen count is the floor even
+    # where the pilot says the cell is already quiet.
+    assert set(batches) == set(module.CONTROL_CASES)
+    assert min(batches.values()) >= module.PRODUCTION_PRIMARY_BATCHES

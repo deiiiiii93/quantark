@@ -51,7 +51,13 @@ import numpy as np
 import scipy
 from scipy.stats import chi2, t as student_t
 
-from quantark.validation import EquivalenceStatus
+from quantark.validation import (
+    CellPrecision,
+    EquivalenceStatus,
+    neyman_allocation,
+    precision_stop,
+    projected_aggregate_halfwidth,
+)
 
 
 SCHEMA_VERSION = 12
@@ -315,12 +321,93 @@ def frozen_allocation_manifest() -> dict:
     }
 
 
+MIN_ADAPTIVE_BATCHES = 32
+DEFAULT_PRECISION_TARGET_CONTRACTS = 0.02
+DEFAULT_ADAPTIVE_BUDGET_HOURS = 12.0
+
+
+def freeze_adaptive_allocation(pilot: dict, *, budget_hours: float) -> dict:
+    """Turn pilot precision statistics into a frozen, hash-pinned allocation.
+
+    The pilot supplies per-cell batch SD and per-batch cost; the allocation is
+    the cost-weighted Neyman optimum for that budget. It is frozen and hashed
+    BEFORE the main run so the recorded decision cannot drift with the data
+    that follows it.
+
+    Note that Neyman weighting answers a shared-budget question. When every
+    cell gets its own worker stream (7 cells on 14 cores) the streams do not
+    compete and each simply fills its stream instead; the weighting matters in
+    the memory-constrained and serial configurations.
+    """
+    cells = [
+        CellPrecision(
+            name=name,
+            n_batches=int(stats["batches"]),
+            batch_sd=float(stats["batch_sd"]),
+            seconds_per_batch=float(stats["seconds_per_batch"]),
+        )
+        for name, stats in sorted(pilot.items())
+    ]
+    allocation = neyman_allocation(
+        cells,
+        budget_seconds=float(budget_hours) * 3600.0,
+        min_batches=MIN_ADAPTIVE_BATCHES,
+    )
+    frozen = {
+        "pilot": {name: dict(stats) for name, stats in sorted(pilot.items())},
+        "allocation": allocation,
+        "budget_hours": float(budget_hours),
+        "pilot_halfwidth": projected_aggregate_halfwidth(cells),
+    }
+    frozen["allocation_sha256"] = _canonical_sha256(frozen)
+    return frozen
+
+
+def adaptive_batches_by_case(frozen: dict, *, default_batches: int) -> dict:
+    """Per-case batch counts from a frozen allocation, defaulting elsewhere.
+
+    Cells absent from the pilot (already-treated or low-variance cells) keep
+    the frozen production count, so an adaptive run never *reduces* evidence
+    below what the fixed allocation would have banked.
+    """
+    allocation = frozen["allocation"]
+    return {
+        case_name: max(int(allocation.get(case_name, 0)), int(default_batches))
+        for case_name in CONTROL_CASES
+    }
+
+
+def monitor_cells_from_banked(banked: dict) -> list:
+    """Precision-only view of the banked batches, estimate-blind by type.
+
+    ``CellPrecision`` has no field an estimate can travel through, so the
+    stopping path structurally cannot read one (spec gate S-G1) no matter what
+    else the banked records carry.
+    """
+    cells = []
+    for name, record in sorted(banked.items()):
+        deltas = np.asarray(record["batch_deltas"], dtype=float)
+        cells.append(
+            CellPrecision(
+                name=name,
+                n_batches=int(deltas.size),
+                batch_sd=float(np.std(deltas, ddof=1)),
+                seconds_per_batch=float(record["seconds_per_batch"]),
+            )
+        )
+    return cells
+
+
 def production_run_configuration(
     *,
     implementation_hash: str,
     runtime: dict,
+    adaptive: bool = False,
+    precision_target: float = DEFAULT_PRECISION_TARGET_CONTRACTS,
+    budget_hours: float = DEFAULT_ADAPTIVE_BUDGET_HOURS,
+    pilot_batches: int = MIN_ADAPTIVE_BATCHES,
 ) -> dict:
-    return {
+    configuration = {
         "schema_version": SCHEMA_VERSION,
         "certification_mode": CERTIFICATION_MODE,
         "implementation_sha256": implementation_hash,
@@ -366,8 +453,35 @@ def production_run_configuration(
         "independent_source_cohorts": list(AGGREGATE_COHORT_NAMES),
         "component_confidence": stage16().STOCHASTIC_COMPONENT_CONFIDENCE,
         "economic_bound_contracts": stage16().DELTA_BIAS_BOUND_CONTRACTS,
+        # Precision stopping is not optional stopping: the rule reads achieved
+        # standard errors and elapsed time, never the estimate, so the terminal
+        # fixed-confidence verdict needs no sequential-testing correction. Both
+        # facts are recorded explicitly rather than left to be inferred from
+        # the absence of a stopping record.
         "no_optional_stopping": True,
+        "stopping_rule": "precision_blind" if adaptive else "fixed_allocation",
+        "stopping_rule_reads_estimate": False,
     }
+    if adaptive:
+        configuration["adaptive_run"] = {
+            "precision_target": float(precision_target),
+            "budget_hours": float(budget_hours),
+            "pilot_batches": int(pilot_batches),
+            "frozen_allocation_fallback": {
+                "primary_batches": PRODUCTION_PRIMARY_BATCHES,
+                "middle_batches": PRODUCTION_MIDDLE_BATCHES,
+            },
+            # The allocation frozen from the pilot sets each cell's batch count
+            # up front; batches are then banked in one call per cell/level, so
+            # the run has no mid-flight cohort boundary at which a monitor
+            # could act. `precision_stop` is exported and tested for the
+            # incremental case, and wiring it requires cohort support in
+            # build_primary_reference -- deferred deliberately rather than
+            # simulated with a hook that could never fire.
+            "stopping_granularity": "allocation_frozen_from_pilot",
+            "mid_run_monitor": False,
+        }
+    return configuration
 
 
 def _checkpoint_path(output_dir: Path, name: str) -> Path:
@@ -2037,6 +2151,14 @@ def run_production_amendment(args: argparse.Namespace) -> int:
     run_configuration = production_run_configuration(
         implementation_hash=implementation_hash,
         runtime=runtime,
+        adaptive=bool(getattr(args, "adaptive", False)),
+        precision_target=float(
+            getattr(args, "precision_target", DEFAULT_PRECISION_TARGET_CONTRACTS)
+        ),
+        budget_hours=float(
+            getattr(args, "budget_hours", DEFAULT_ADAPTIVE_BUDGET_HOURS)
+        ),
+        pilot_batches=int(getattr(args, "pilot_batches", MIN_ADAPTIVE_BATCHES)),
     )
     run_configuration_hash = _canonical_sha256(run_configuration)
     case_by_name = {
@@ -2574,6 +2696,32 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--resume",
         action="store_true",
         help="reuse only hash-matched schema-12 per-case checkpoints",
+    )
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help=(
+            "size each cell from a pilot-frozen Neyman allocation instead of "
+            "the frozen 4096/256 counts; the frozen counts stay the floor"
+        ),
+    )
+    parser.add_argument(
+        "--precision-target",
+        type=float,
+        default=DEFAULT_PRECISION_TARGET_CONTRACTS,
+        help="aggregate statistical half-width target in contracts",
+    )
+    parser.add_argument(
+        "--budget-hours",
+        type=float,
+        default=DEFAULT_ADAPTIVE_BUDGET_HOURS,
+        help="wall-clock budget the allocation must fit inside",
+    )
+    parser.add_argument(
+        "--pilot-batches",
+        type=int,
+        default=MIN_ADAPTIVE_BATCHES,
+        help="batches per cell in the allocation-sizing pilot",
     )
     parser.add_argument(
         "--output-dir",
