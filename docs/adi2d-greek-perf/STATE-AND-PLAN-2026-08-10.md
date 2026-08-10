@@ -121,14 +121,18 @@ fix first, then regenerate references once, then certify.
 1. **P1.1 `low_feller` attribution probe** (~20 min compute): same row matrix. If it
    also collapses under centered/SL → same fix covers it; if not, it needs its own
    diagnosis (Feller-boundary treatment) before P1.4.
-2. **P1.2 WS-C semi-Lagrangian v-transport** as opt-in `v_drift_scheme="semi_lagrangian"`
-   per `implementation-spec.md` WS-C (prototype `scripts/lever2_sl_vtransport.py`),
-   gates C-G1..C-G5, both families. SL rather than bare `centered` as the *default
-   candidate* because centered loses the M-matrix/monotonicity guarantee the upwind
-   scheme exists for; SL gets flatness-in-n_v with monotone interpolation.
-   *(Interim lever available immediately: `sigma_collapse`-regime runs at n_v 270/540
-   quantify remaining bias by the measured 16/n_v law — useful for any urgent re-run,
-   not the production answer.)*
+2. **P1.2 WS-C semi-Lagrangian v-transport — DONE 2026-08-10** (commit 46d8d63).
+   Shipped as opt-in `v_drift_scheme="semi_lagrangian"` in `adi_core` plus the
+   solver-layer validator; 18 tests; measured evidence in
+   `docs/adi2d-greek-perf/logs/wsc_semi_lagrangian.log`.
+   Measured `n_v` refinement ratios: **2.03 / 1.98** for `adaptive_upwind`
+   (first-order, exactly as the probe predicted) vs **113 / 153** for SL, both
+   schemes agreeing at fine `n_v`. SL at `n_v=60` beats upwind at `n_v=240` on
+   accuracy while running 2.6× faster; equal-grid overhead is 1.30×. Default path
+   bitwise unchanged (104,960 bytes of full-march surfaces; 136 PDE tests + 28
+   replay goldens green).
+   C-G1/C-G2/C-G3 in their *certification* form (against banked MC references) and
+   the C-G6 default-flip decision remain open — they need P1.4's references.
 3. **P1.3 MC variance amendment — BUILT 2026-08-10**, superseded in detail by
    `docs/superpowers/specs/2026-08-10-mc-reference-convergence-design.md` and its plan.
    Delivered: `bridge8` treatment shipped on all three variance-dominant cells

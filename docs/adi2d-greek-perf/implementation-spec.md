@@ -76,7 +76,36 @@ Only if D-1 rejects any compiled artifact *and* 1.3× (A1) is insufficient. Requ
 
 ---
 
-## WS-C Semi-Lagrangian v-transport (opt-in scheme; the one real engine addition)
+## WS-C Semi-Lagrangian v-transport — **IMPLEMENTED 2026-08-10** (commit 46d8d63)
+
+**Status:** shipped as opt-in `v_drift_scheme="semi_lagrangian"` in
+`quantark/volmodels/adi_core.py` (+ the solver-layer validator), 18 tests in
+`test/test_adi_semi_lagrangian.py`, measured evidence in
+`logs/wsc_semi_lagrangian.log`, engine doc updated.
+
+Unit-level gate outcomes:
+- **C-G1 (order)** — met in unit form: `n_v` refinement ratios 2.03 / 1.98 for
+  `adaptive_upwind` (first-order, as the research measured) vs **112.65 / 152.54**
+  for SL. SL at `n_v=60` is closer to the continuum than upwind at `n_v=240`.
+  The certification form (flatness within 0.06 c of banked MC references) needs
+  the crash-destroyed reference data and runs in the Phase-1 regeneration.
+- **C-G4 (no regression)** — both schemes agree at fine `n_v` (7.40998 vs
+  7.40618 still rising), so the transport changed the discretization and not the
+  PDE. Default unchanged and **bitwise** verified over 104,960 bytes of
+  full-march surfaces; 136 PDE-suite tests and 28 replay goldens pass.
+- **C-G5 (cost)** — equal-grid overhead **1.30×**, exactly the bound. The real
+  win is a coarser variance grid: SL `n_v=60` runs 2.6× faster than upwind
+  `n_v=240` at ~80× lower error.
+- **C-G7 (diagnostics)** — `variance_operator_diagnostics()` reports
+  `scheme="semi_lagrangian"`, Peclet 0, zero fallback rows, plus an
+  `"advection"` block (feet interior, cells traversed, max foot displacement).
+- **C-G2 (PV de-biasing) / C-G3 (n_t contraction)** — deferred with C-G1 to the
+  reference regeneration; both are stated against banked MC values.
+- **C-G6 (default flip)** — still a separate decision, unchanged.
+
+Original design text follows.
+
+### Design (as approved)
 
 *(Round 3: the banked SLV ladders show the same first-order n_v signature — fitted p = 1.18 vs Heston's 1.19 — so the motivation carries to SLV; the v-generator is leverage-independent. C-gates run on both families.)*
 
