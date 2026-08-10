@@ -1,0 +1,16 @@
+smoke row (2 batches, workers=1, ordinary_full/heston_slv):
+{
+ "label": "smoke",
+ "cell": "ordinary_full",
+ "variant": "heston_slv",
+ "batches": 2,
+ "bridge_dimensions": 1,
+ "seed": 1,
+ "delta_mean": 0.19908340163288257,
+ "delta_se": 0.013888224336629338,
+ "delta_se_contracts": 0.766032159628051,
+ "batch_sd_contracts": 1.0833330693599417,
+ "seconds_per_batch": 51.766,
+ "elapsed_seconds": 103.5,
+ "peak_rss_gib": 2.4
+}
