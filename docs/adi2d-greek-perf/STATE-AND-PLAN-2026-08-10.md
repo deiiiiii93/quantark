@@ -118,9 +118,11 @@ fix first, then regenerate references once, then certify.
 
 ### Phase 1 — Kill the structural bias (engine work, this branch)
 
-1. **P1.1 `low_feller` attribution probe** (~20 min compute): same row matrix. If it
-   also collapses under centered/SL → same fix covers it; if not, it needs its own
-   diagnosis (Feller-boundary treatment) before P1.4.
+1. **P1.1 `low_feller` attribution probe — DONE, and it is not scheme-driven.**
+   The cell has zero non-monotone centered rows at production grids (max local
+   Péclet 0.543), so `adaptive_upwind` already *is* `centered` there and no
+   v-axis scheme can move it. Demoted to quality item P1.1b; not a P1.4 blocker.
+   See §7.
 2. **P1.2 WS-C semi-Lagrangian v-transport — DONE 2026-08-10** (commit 46d8d63).
    Shipped as opt-in `v_drift_scheme="semi_lagrangian"` in `adi_core` plus the
    solver-layer validator; 18 tests; measured evidence in
@@ -174,11 +176,46 @@ consumer); dashboard reflects admission state.
 
 | ID | Decision | Recommendation | When |
 |---|---|---|---|
-| D-0 | Sequencing: scheme fix before MC regeneration | Yes — probe data (§3) makes this clear-cut | now (this doc) |
+| D-0 | Sequencing: scheme fix before MC regeneration | **RESOLVED yes** — and it had to be, see §7 | done 2026-08-10 |
 | D-1 | WS-A2 packaging: pure wheel + local C build vs platform wheels | pure wheel + local build | before A2 merge |
-| C-G6 | Flip auto classifier to SL for `path_focused` regime (default change) | separate PR after C-G1..G5 + full re-cert | after P1.4 |
+| C-G6 | Flip auto classifier to SL for `path_focused` regime (default change) | **RESOLVED: shipped as `v_drift_scheme="auto"`** (`908588c`), not a blanket SL flip | done 2026-08-10 |
 | D-2 | Ladder API: public `build_greek_ladder` engine method vs serving-side class | public engine method | before G2 |
 | D-3 | Should Stage-17 production run wait for P1.2+P1.3, or run a pilot on the interim n_v-law lever | wait; pilot only if admission is urgent | Phase 1 |
+
+## 7. The scheme decision, resolved 2026-08-10
+
+D-0 and C-G6 turned out to be the **same** decision, not a sequence. The
+certification pins its controls dict equal to stage-11's and stage-12's
+(`test_stage16_parent_controls_match_stage11_and_schema12_router`), so one scheme
+cannot be certified while another ships. And `IMPLEMENTATION_INPUTS` covers both
+`adi_core.py` and the stage-16 script, so any later scheme change invalidates
+every checkpoint and forces a second full MC regeneration. The scheme therefore
+had to be final *before* P1.4, not after it.
+
+The 42-solve cross-scheme matrix and the operator diagnostics
+(`probes/results-2026-08-10/SCHEME-CELL-MATRIX.md`) settled it. Only
+`sigma_collapse` disagrees between schemes (+0.1149 heston, +0.1119 SLV, against
+a recorded bias of −0.112 ± 0.010 — disjoint machinery agreeing to 3%). Every
+other cell moves ≤0.003 contracts, and there `adaptive_upwind` is *already*
+`centered` to every printed digit, so uniform SL would have been slightly
+**less** accurate on 12 of 14 cells.
+
+The reason is that the donor-cell fallback engages for two unrelated causes: a
+coordinate singularity at v→0 (2 nodes at v ≤ 1.4e-05, Péclet diverging at any
+resolution, no probability mass) versus genuine convection dominance across the
+live domain (132/133 nodes, v = 0.00129…0.482, containing θ and v0). Shipped
+`v_drift_scheme="auto"` separates them on *where* the non-monotone rows sit
+relative to `min(v0, θ)` — clearing by 2857× and 158×, so nothing is tuned.
+
+At production grids: **12 of 14 cells bitwise unchanged, both `sigma_collapse`
+cells on transport, 1.00× cost on normal books.**
+
+`low_feller` has **zero** non-monotone rows, so no v-axis scheme can move it.
+That closes P1.1: its −0.107/−0.159 is the v=0 boundary treatment or the MC
+reference side, a quality item (P1.1b), not an admission blocker.
+
+**P1.4 must run `--full-recertification`**: WS-C legitimately moved the PDE
+surface, so the schema-9 carry path is closed (`5884fb2`).
 
 ## 6. Risks
 
