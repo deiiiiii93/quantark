@@ -129,13 +129,31 @@ fix first, then regenerate references once, then certify.
    *(Interim lever available immediately: `sigma_collapse`-regime runs at n_v 270/540
    quantify remaining bias by the measured 16/n_v law — useful for any urgent re-run,
    not the production answer.)*
-3. **P1.3 Schema-12 variance amendment**: extend the proven multilevel Heston-control
-   estimator from `near_ki` to `ordinary_decayed`, `ordinary_full`, `sigma_collapse`
-   (63% of the interval width). Framework exists; this is configuration + banking compute.
+3. **P1.3 MC variance amendment — BUILT 2026-08-10**, superseded in detail by
+   `docs/superpowers/specs/2026-08-10-mc-reference-convergence-design.md` and its plan.
+   Delivered: `bridge8` treatment shipped on all three variance-dominant cells
+   (measured unbiased at 0.28–0.65σ, free, 2.14× / 2.62× / 1.49× in SE²·seconds),
+   schema 11 → 13 with per-cell `reference_treatment` descriptors, cross-fitted control
+   weights (`quantark.montecarlo.control_weights`), estimate-blind Neyman allocation and
+   precision stopping (`quantark.validation.adaptive_allocation`), and stage-17
+   `--adaptive` sizing with the frozen 4096/256 counts retained as a floor.
+   Measured feasibility: the 0.02-contract target needs ~3.8 h wall-clock at measured
+   rates (7.6 h at a pessimistic ×2 contention), 7 cells concurrent at ~33 GiB of 48 —
+   **spec goal G1 holds**.
 4. **P1.4 Regenerate references once, at the corrected scheme** (this also rebuilds the
-   lost banked fixtures for every later re-cert gate): stage-16 full run → schema-12
-   evidence; then **Stage-17 production aggregate run** with the frozen allocation.
-   Target: Heston-SLV aggregate PASS → **both PDE routes admitted**.
+   lost banked fixtures for every later re-cert gate): stage-16 full run → schema-13
+   evidence; then **Stage-17 production aggregate run** (`--adaptive`, target 0.02,
+   cap 12 h). Target: Heston-SLV aggregate PASS → **both PDE routes admitted**.
+
+   **Blocked until this runs** (recorded 2026-08-10): 8 stage-17 tests fail on a clean
+   tree because the crash destroyed `output/adi_greek_certification_schema*/` — they
+   need a parent evidence + decision pair. For the same reason the adaptive path could
+   not be rehearsed end-to-end; `run_production_amendment` refuses without
+   `--parent-evidence`/`--parent-decision`. The adaptive machinery is unit-tested (5
+   tests incl. the S-G1 blindness and S-G3 determinism gates) but has never executed
+   against a real parent. First live use must therefore be treated as a rehearsal:
+   run stage-16 first, then stage-17 with a loose `--precision-target` before the real
+   one.
 
 ### Phase 2 — Perf program to production (WS sequence, per implementation-spec)
 
