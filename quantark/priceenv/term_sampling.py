@@ -97,8 +97,16 @@ def make_df_fn(pricing_env):
         arr = np.asarray(t, dtype=float)
         if arr.ndim == 0:
             return float(pricing_env.get_discount_factor(float(arr)))
-        return np.array(
-            [pricing_env.get_discount_factor(float(x)) for x in arr.ravel()]
-        ).reshape(arr.shape)
+        flat = arr.ravel()
+        if flat.size == 0:
+            return np.empty(arr.shape, dtype=float)
+        # The curve depends on t alone and callers pass path-shaped arrays over a
+        # small set of contractual dates, so query each distinct date once and
+        # scatter. Per-value results are unchanged, so this is exact.
+        unique_times, inverse = np.unique(flat, return_inverse=True)
+        values = np.array(
+            [pricing_env.get_discount_factor(float(x)) for x in unique_times]
+        )
+        return values[inverse].reshape(arr.shape)
 
     return f
