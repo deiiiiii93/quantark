@@ -13,6 +13,7 @@ from quantark.asset.equity.engine.mc.term_inputs import build_mc_term_inputs
 from quantark.asset.equity.param import MCParams
 from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment
+from quantark.montecarlo.qe_kernels import qe_variance_step
 from quantark.montecarlo.qmc_brownian_bridge import apply_brownian_bridge
 from quantark.montecarlo.qmc_sobol import SobolNormalGenerator
 from quantark.util.enum.engine_enums import (
@@ -1376,42 +1377,28 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
 
                 drift = float(term.rrf[i] - term.div[i])
                 sqrt_dt = float(np.sqrt(dt))
-                exp_kdt = np.exp(-p.kappa * dt)
-                omexp = -np.expm1(-p.kappa * dt)
-                m = p.theta + (var - p.theta) * exp_kdt
-                if p.kappa > _QE_KMIN:
-                    inv_k = 1.0 / p.kappa
-                    s2 = (
-                        var * sigma_eff2 * exp_kdt * (omexp * inv_k)
-                        + p.theta * sigma_eff2 * (omexp * omexp * inv_k) / 2.0
-                    )
-                else:
-                    s2 = var * sigma_eff2 * dt
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    psi = np.where(m <= 1e-12, 0.0, s2 / (m * m))
-                psi = np.maximum(psi, 0.0)
-
-                phi = 2.0 / np.maximum(psi, 1e-16)
-                rad = np.maximum(phi * (phi - 1.0), 0.0)
-                b = np.sqrt(np.maximum(phi - 1.0 + np.sqrt(rad), 0.0))
-                a = m / (1.0 + b * b)
-                v_a = a * (b + z_var[:, i]) * (b + z_var[:, i])
-
-                prob_zero = np.clip((psi - 1.0) / (psi + 1.0), 0.0, 0.999999)
-                beta = np.maximum(
-                    (1.0 - prob_zero) / np.maximum(m, _QE_KMIN), _QE_KMIN
+                # Shared QE variance step: identical arithmetic to the block it
+                # replaced, routed through the Numba accelerator when installed
+                # (bit-identical either way -- see quantark/montecarlo/qe_kernels.py).
+                qe_step = qe_variance_step(
+                    var,
+                    z_var[:, i],
+                    u_var[:, i],
+                    kappa=p.kappa,
+                    theta=p.theta,
+                    sigma2=sigma_eff2,
+                    dt=dt,
+                    psi_c=psi_c,
+                    kmin=_QE_KMIN,
                 )
-                u_clip = np.clip(u_var[:, i], 1e-12, 1.0 - 1e-12)
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    v_b = np.where(
-                        u_clip <= prob_zero,
-                        0.0,
-                        np.log((1.0 - prob_zero) / (1.0 - u_clip)) / beta,
-                    )
-
-                v_np = np.maximum(np.where(psi <= psi_c, v_a, v_b), 0.0)
-                v_bar = np.maximum(0.5 * (v_np + np.maximum(var, 0.0)), 0.0)
-                quad_mask = psi <= psi_c
+                m = qe_step.m
+                a = qe_step.a
+                b = qe_step.b
+                beta = qe_step.beta
+                prob_zero = qe_step.prob_zero
+                v_np = qe_step.v_np
+                v_bar = qe_step.v_bar
+                quad_mask = qe_step.quad_mask
                 if not control_only:
                     if conditioning is None:
                         v_bar_p = v_bar
