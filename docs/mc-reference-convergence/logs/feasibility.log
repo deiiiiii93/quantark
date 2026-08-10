@@ -1,0 +1,35 @@
+              cell  var share   sd_base  sd_treat  var gain   sec/b
+  ordinary_decayed      0.375     1.349     0.825      2.67    17.4
+     ordinary_full      0.364     1.329     0.917      2.10    33.4
+    sigma_collapse      0.158     0.875     0.725      1.46    33.3
+        low_feller      0.049     0.487     0.487      1.00    25.0
+           near_ko      0.026     0.355     0.355      1.00    25.0
+       near_expiry      0.017     0.287     0.287      1.00    25.0
+           near_ki      0.011     0.231     0.231      1.00    25.0
+
+reconstructed schema-11 half-width @128: 0.0546 (recorded 0.0545)
+treated half-width @128 batches:        0.0395
+
+Neyman allocation inside 12.0 h (single stream):
+    ordinary_decayed:    433 batches
+       ordinary_full:    347 batches
+      sigma_collapse:    274 batches
+          low_feller:    213 batches
+             near_ko:    155 batches
+         near_expiry:    125 batches
+             near_ki:    101 batches
+  serial cost: 12.0 h; with 6-way cell parallelism: 2.0 h
+  achieved half-width: 0.0266 (target 0.02)
+  VERDICT: target MISSED at this budget
+
+  serial-budget multiple needed for the target: 1.77x  => 21.3 h serial
+
+Wall-clock model (7 cells concurrently, 2 workers each):
+  contention x1.0: half-width 0.0113 in 12 h [MET]; target needs 3.8 h
+  contention x1.5: half-width 0.0138 in 12 h [MET]; target needs 5.7 h
+  contention x2.0: half-width 0.0159 in 12 h [MET]; target needs 7.6 h
+
+  Contention x1.0 assumes the measured 3-cell rates hold at 7 cells;
+  x2.0 is the pessimistic case where doubling the worker count halves
+  per-worker throughput. Peak RSS measured 4.7 GiB per 2-worker cell,
+  so 7 concurrent cells is about 33 GiB of the host's 48 GiB.
