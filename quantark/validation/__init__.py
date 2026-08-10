@@ -1,5 +1,12 @@
 """Reusable numerical-model certification primitives."""
 
+from .adaptive_allocation import (
+    CellPrecision,
+    StopDecision,
+    neyman_allocation,
+    precision_stop,
+    projected_aggregate_halfwidth,
+)
 from .greek_certification import (
     EconomicGreekScale,
     EquivalenceResult,
@@ -12,6 +19,11 @@ from .greek_certification import (
 )
 
 __all__ = [
+    "CellPrecision",
+    "StopDecision",
+    "neyman_allocation",
+    "precision_stop",
+    "projected_aggregate_halfwidth",
     "EconomicGreekScale",
     "EquivalenceResult",
     "EquivalenceStatus",
