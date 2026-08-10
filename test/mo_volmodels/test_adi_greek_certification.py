@@ -127,7 +127,17 @@ def test_schema11_amendment_profile_is_pinned():
     )
 
 
-def test_schema11_parent_and_live_pde_projection_are_pinned():
+def test_schema9_parent_identity_is_pinned_and_its_pde_carry_path_is_closed():
+    """The parent pin is history; WS-C legitimately closed the carry path.
+
+    ``PARENT_PRODUCTION_PDE_SHA256`` records the production-PDE surface of the
+    schema-9 parent.  It is a historical fact, never a value to re-pin: the
+    guard in ``load_and_validate_parent_certificate`` exists precisely so that
+    banked PDE cells cannot be carried once the live numerics move.  WS-C added
+    the ``semi_lagrangian`` v-transport to ``quantark/volmodels/adi_core.py``,
+    which sits inside ``PRODUCTION_PDE_INPUT_ROOTS``, so the surface diverged by
+    design and P1.4 must run as a full recertification rather than an amendment.
+    """
     module = _load()
 
     manifest = module.parent_certificate_manifest()
@@ -135,9 +145,23 @@ def test_schema11_parent_and_live_pde_projection_are_pinned():
     assert manifest["evidence_sha256"] == module.PARENT_EVIDENCE_SHA256
     assert manifest["carried_cell_sha256"] == (module.PARENT_CARRIED_CELL_SHA256)
     assert len(manifest["carried_cell_sha256"]) == 12
-    assert module.production_pde_compatibility_sha256() == (
+    assert manifest["production_pde_compatibility_sha256"] == (
         module.PARENT_PRODUCTION_PDE_SHA256
     )
+
+    live = module.production_pde_compatibility_sha256()
+    assert live != module.PARENT_PRODUCTION_PDE_SHA256
+
+    # The divergence only means something if the digest genuinely tracks the
+    # projected sources, so pin that too: deterministic for a fixed projection,
+    # and different for a different one.
+    assert live == module.production_pde_compatibility_sha256()
+    original_roots = module.PRODUCTION_PDE_INPUT_ROOTS
+    try:
+        module.PRODUCTION_PDE_INPUT_ROOTS = original_roots[:-1]
+        assert module.production_pde_compatibility_sha256() != live
+    finally:
+        module.PRODUCTION_PDE_INPUT_ROOTS = original_roots
 
 
 def test_production_run_cannot_implicitly_launch_all_14_cells(tmp_path):
