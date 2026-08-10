@@ -25,6 +25,10 @@ from .qmc_variance_reduction import (
     gbm_control_variate,
     apply_variance_reduction_to_normals,
 )
+from .control_weights import (
+    CrossFittedControl,
+    cross_fitted_control,
+)
 from .conditional_snowball import (
     ConditionalSnowballMoments,
     conditional_standard_snowball_moments,
@@ -58,6 +62,8 @@ __all__ = [
     "importance_sampling_weights",
     "gbm_control_variate",
     "apply_variance_reduction_to_normals",
+    "CrossFittedControl",
+    "cross_fitted_control",
     "ConditionalSnowballMoments",
     "conditional_standard_snowball_moments",
     "CoupledQESubstepDrawProvider",
