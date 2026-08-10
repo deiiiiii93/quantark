@@ -175,7 +175,7 @@ ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
     "grid_style": "concentrated",
     "v0_boundary": "degenerate_pde",
     "variance_grid_mode": "auto",
-    "v_drift_scheme": "adaptive_upwind",
+    "v_drift_scheme": "auto",
     "barrier_greek_steps_per_tick": (
         HestonSnowballPDESolver.PRODUCTION_BARRIER_GREEK_STEPS_PER_TICK
     ),

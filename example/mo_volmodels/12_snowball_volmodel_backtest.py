@@ -119,7 +119,7 @@ ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
     "grid_style": "concentrated",
     "v0_boundary": "degenerate_pde",
     "variance_grid_mode": "auto",
-    "v_drift_scheme": "adaptive_upwind",
+    "v_drift_scheme": "auto",
     "barrier_greek_steps_per_tick": 16,
     "greek_min_n_x": 300,
     "greek_min_n_v": 135,

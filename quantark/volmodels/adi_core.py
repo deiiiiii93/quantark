@@ -25,7 +25,7 @@ import scipy.sparse.linalg as spla
 from quantark.util.enum.engine_enums import ADIScheme
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import (
-    solve_tridiag_batch, fd1_interior_coeffs, fd2_interior_coeffs,
+    is_zero, solve_tridiag_batch, fd1_interior_coeffs, fd2_interior_coeffs,
 )
 from quantark.volmodels.heston.params import HestonParams
 # NB: concentrated_grid / z_extents are imported lazily inside __init__ (only on the
@@ -211,7 +211,12 @@ class HestonSLVADICore:
             changes numerics, and it exists because the donor-cell fallback is
             measured first-order on the variance axis, which the 2026-08-10
             attribution probe showed to be the entire sigma-collapse delta
-            bias.
+            bias. ``"auto"`` selects between the two per regime, on where the
+            centered row loses monotonicity rather than on how many rows do:
+            see ``_resolve_auto_v_drift_scheme``. It is the most accurate of
+            the four on the certification matrix, because upwind is strictly
+            closer to centered wherever the fallback stays in the degenerate
+            v->0 corner, while only transport is correct where it does not.
         variance_grid_mode: variance-axis geometry. ``"legacy"`` preserves
             the historical grid, ``"power"`` grades toward zero,
             ``"path_focused"`` concentrates around the CIR state and pins
@@ -279,13 +284,25 @@ class HestonSLVADICore:
             raise ValidationError(
                 "variance_grid_mode must be one of legacy, power, path_focused, auto"
             )
-        if v_drift_scheme not in ("centered", "adaptive_upwind", "semi_lagrangian"):
+        if v_drift_scheme not in (
+            "centered", "adaptive_upwind", "semi_lagrangian", "auto"
+        ):
             raise ValidationError(
-                "v_drift_scheme must be 'centered', 'adaptive_upwind', or "
-                "'semi_lagrangian'"
+                "v_drift_scheme must be 'centered', 'adaptive_upwind', "
+                "'semi_lagrangian', or 'auto'"
             )
-        self.v_drift_scheme = str(v_drift_scheme)
+        self.requested_v_drift_scheme = str(v_drift_scheme)
+        # "auto" cannot be resolved yet: the criterion reads the variance grid,
+        # which is built below.  Nothing between here and the end of __init__
+        # consumes the scheme, so a provisional concrete value is safe and the
+        # resolution happens as the last step.
+        self.v_drift_scheme = (
+            "adaptive_upwind"
+            if self.requested_v_drift_scheme == "auto"
+            else self.requested_v_drift_scheme
+        )
         self._semi_lagrangian_v = self.v_drift_scheme == "semi_lagrangian"
+        self._auto_selection: dict | None = None
         self._advection_cache: dict = {}
 
         # An explicit positive power is an explicit power-grid request.  The
@@ -479,6 +496,76 @@ class HestonSLVADICore:
         self._V_lu_cache: dict = {}
         self._v_operator_cache = None
         self._boundary_hook = None
+
+        if self.requested_v_drift_scheme == "auto":
+            self.v_drift_scheme = self._resolve_auto_v_drift_scheme()
+            self._semi_lagrangian_v = self.v_drift_scheme == "semi_lagrangian"
+
+    def _resolve_auto_v_drift_scheme(self) -> str:
+        """Choose the v-axis scheme from where the centered row loses monotonicity.
+
+        The donor-cell fallback engages for two unrelated reasons, and only one
+        of them is a discretization defect worth paying to fix.
+
+        Near v = 0 the diffusion coefficient ``0.5 sig^2 v`` vanishes while the
+        drift ``kappa theta`` does not, so the local Peclet number diverges
+        there at *any* resolution.  That is a coordinate singularity, not an
+        under-resolved grid, and when the process never visits that corner a
+        first-order donor cell there is measurably free: on the 2026-08-10
+        certification matrix ``centered`` and ``adaptive_upwind`` agreed to
+        every printed digit in all five such regimes.
+
+        When the non-monotone region instead reaches the variance scale the
+        process actually occupies, the fallback is first-order across the live
+        domain and costs 0.115 futures contracts against a +/-0.10 bound.  There
+        the drift belongs on exact characteristics (semi-Lagrangian transport).
+
+        So the question is *where* the rows sit, not how many there are.  Taking
+        ``min(v0, theta)`` as the lowest variance level the CIR state
+        meaningfully occupies, the certification matrix separates by 2857x on
+        the corner side (fallback tops out at v = 1.4e-05 against a live scale
+        of 0.04) and 158x on the convection side (v = 0.482 against 0.00306), so
+        the verdict does not depend on a tuned cut.
+        """
+        live_scale = min(float(self.v0), float(self.theta))
+        if is_zero(live_scale):
+            raise ValidationError(
+                "v_drift_scheme='auto' needs a positive live variance scale, but "
+                "min(v0, theta) is zero, so 'the region the process occupies' "
+                "has no meaning here. Choose the scheme explicitly instead."
+            )
+
+        # Borrow the real generator rather than re-deriving monotonicity: a
+        # second copy of that test could drift away from the one the solve uses.
+        previous_scheme = self.v_drift_scheme
+        self.v_drift_scheme = "adaptive_upwind"
+        self._semi_lagrangian_v = False
+        self._v_operator_cache = None
+        try:
+            *_, centered_monotone, _fallback = self._build_v_generator_coefficients()
+        finally:
+            self.v_drift_scheme = previous_scheme
+            self._v_operator_cache = None
+
+        non_monotone = ~centered_monotone
+        non_monotone_variances = self.V_grid[1:-1][non_monotone]
+        reaches_live_scale = bool(np.any(non_monotone_variances >= live_scale))
+        self._auto_selection = {
+            "criterion": (
+                "semi_lagrangian when a non-monotone centered row sits at or "
+                "above min(v0, theta); otherwise the fallback is confined to "
+                "the degenerate v->0 corner and adaptive_upwind is more accurate"
+            ),
+            "live_variance_scale": live_scale,
+            "non_monotone_nodes": int(non_monotone_variances.size),
+            "max_non_monotone_variance": (
+                float(np.max(non_monotone_variances))
+                if non_monotone_variances.size
+                else None
+            ),
+            "fallback_reaches_live_scale": reaches_live_scale,
+        }
+        return "semi_lagrangian" if reaches_live_scale else "adaptive_upwind"
 
     def _L(self, t):
         if self._constant_leverage:
@@ -819,6 +906,8 @@ class HestonSLVADICore:
         finite_peclet = peclet[np.isfinite(peclet)]
         return {
             "scheme": self.v_drift_scheme,
+            "requested_scheme": self.requested_v_drift_scheme,
+            "auto_selection": self._auto_selection,
             "variance_grid_mode": self.variance_grid_mode,
             "interior_nodes": int(v_int.size),
             "centered_non_monotone_nodes": int(np.count_nonzero(~centered_monotone)),
