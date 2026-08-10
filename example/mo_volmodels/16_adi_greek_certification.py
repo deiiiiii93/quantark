@@ -91,7 +91,7 @@ from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 13
 CERTIFICATION_MODE_FULL = "full_recertification"
 CERTIFICATION_MODE_AMENDMENT = "incremental_amendment"
 
@@ -258,15 +258,47 @@ SLV_MID_CONTROL_PATHS_PER_BATCH = 8192
 SLV_MID_CONTROL_BATCHES = 128
 SLV_FROZEN_CONTROL_WEIGHT = 0.95
 SLV_HESTON_CONTROL_WEIGHT = 0.85
+# The three cells that carry 89.7% of the aggregate MC variance were measured
+# on 2026-08-10 (docs/mc-reference-convergence): extending the eight-dimension
+# residual-bridge profile to them is unbiased (0.28-0.65 sigma against an
+# independent seed) and free (per-batch cost flat or slightly lower), worth
+# 2.14x / 2.62x / 1.49x in SE^2*seconds. near_ko and near_expiry contribute
+# 4.3% of the variance between them and stay on the single-factor profile.
 SLV_SPOT_BRIDGE_PROFILE_BY_CASE = {
-    "ordinary_full": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 1},
-    "ordinary_decayed": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 1},
+    "ordinary_full": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 8},
+    "ordinary_decayed": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 8},
     "near_ko": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 1},
     "near_ki": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 8},
     "low_feller": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 8},
-    "sigma_collapse": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 1},
+    "sigma_collapse": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 8},
     "near_expiry": {"strata": SLV_SPOT_BRIDGE_STRATA, "dimensions": 1},
 }
+
+# Schema 13 records, per cell, the estimator treatment its reference was built
+# with, so a later reader can tell a re-run apart from a re-treatment. The
+# control entry names the aggregate control structure in use; cross-fitted
+# weights (spec WS-V2) are deferred to post-regeneration post-processing, so
+# every cell currently declares the frozen-constant structure.
+SCHEMA13_CONTROL_BY_VARIANT_CASE: dict[str, dict[str, str]] = {}
+
+
+def reference_treatment_descriptor(variant: str, case_name: str) -> dict:
+    """The exact estimator treatment this cell's MC reference was built with."""
+    if variant == "heston_slv":
+        profile = SLV_SPOT_BRIDGE_PROFILE_BY_CASE[case_name]
+    elif variant == "heston":
+        profile = HESTON_SPOT_BRIDGE_PROFILE_BY_CASE[case_name]
+    else:
+        raise ValueError(f"unsupported variant: {variant}")
+    control = SCHEMA13_CONTROL_BY_VARIANT_CASE.get(variant, {}).get(
+        case_name, "none"
+    )
+    return {
+        "bridge_strata": int(profile["strata"]),
+        "bridge_dimensions": int(profile["dimensions"]),
+        "control": control,
+        "control_weights": None,
+    }
 # The unresolved SLV cells use finer bias ladders selected on development data.
 # Low Feller stops at the finest valid 7->14 pair: 21,168 dimensions. The next
 # integer refinement, 8->16, would exceed SciPy's 21,201 Sobol-dimension limit

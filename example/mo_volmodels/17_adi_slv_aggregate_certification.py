@@ -26,8 +26,8 @@ projection hashes before either held-out seed is opened.  Run the production
 amendment with the exact schema-11 parent::
 
     .venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
-      --parent-evidence output/adi_greek_certification_schema11/adi_greek_certification.json \
-      --parent-decision output/adi_greek_certification_schema11/adi_greek_certification_decision.json \
+      --parent-evidence output/adi_greek_certification_schema13/adi_greek_certification.json \
+      --parent-decision output/adi_greek_certification_schema13/adi_greek_certification_decision.json \
       --resume --output-dir output/adi_greek_certification
 """
 
@@ -64,7 +64,7 @@ _STAGE16 = None
 # Immutable schema-11 parent.  Both serialized bytes and embedded canonical
 # identities are checked.  The parent remains the authority for anchors,
 # individual cells, Heston admission, and the production PDE implementation.
-PARENT_SCHEMA_VERSION = 11
+PARENT_SCHEMA_VERSION = 13
 PARENT_SOURCE_COMMIT = "b5463093e0725f4f3012a10a358d662d9bc240f6"
 PARENT_EVIDENCE_FILE_SHA256 = (
     "3d4cb66b8fface3a3c83237047098736624b42310d40bf0a74f0054044b311af"

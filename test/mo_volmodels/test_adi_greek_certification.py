@@ -98,7 +98,7 @@ def test_dense_ki_ladder_matches_production_barrier_policy():
 def test_schema11_amendment_profile_is_pinned():
     module = _load()
 
-    assert module.SCHEMA_VERSION == 11
+    assert module.SCHEMA_VERSION == 13
     assert module.PARENT_SCHEMA_VERSION == 9
     assert module.PARENT_SEED == 20260807
     assert module.AMENDMENT_REPLACEMENT_CASES == frozenset({"near_ki", "low_feller"})
@@ -1011,3 +1011,30 @@ def test_payload_validator_binds_variant_before_qe_profile_check():
 
     with pytest.raises(ValueError, match="invalid QE-M refinement contract"):
         module.validate_payload(payload)
+
+
+def test_reference_treatment_descriptor_matches_profiles():
+    """Schema-13: the recorded treatment must match the profile that ran it."""
+    module = _load()
+    for variant, profiles in (
+        ("heston_slv", module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE),
+        ("heston", module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
+    ):
+        for case_name, profile in profiles.items():
+            descriptor = module.reference_treatment_descriptor(variant, case_name)
+            assert descriptor["bridge_strata"] == profile["strata"]
+            assert descriptor["bridge_dimensions"] == profile["dimensions"]
+            assert descriptor["control"] in ("none", "cross_fitted")
+
+
+def test_task7_treatments_are_applied_to_the_three_untreated_cells():
+    """The 2026-08-10 decision matrix: bridge8 ships on exactly these cells."""
+    module = _load()
+    for case_name in ("ordinary_full", "ordinary_decayed", "sigma_collapse"):
+        assert module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE[case_name]["dimensions"] == 8
+    # low_feller keeps its measured direct estimator; near_ki already treated.
+    assert module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE["low_feller"]["dimensions"] == 8
+    assert module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE["near_ki"]["dimensions"] == 8
+    # Untouched cells stay on the single-factor profile.
+    assert module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE["near_ko"]["dimensions"] == 1
+    assert module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE["near_expiry"]["dimensions"] == 1

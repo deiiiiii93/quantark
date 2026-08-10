@@ -38,8 +38,12 @@ cert = importlib.util.module_from_spec(_spec)
 sys.modules["cert16"] = cert
 _spec.loader.exec_module(cert)
 
+# The schema-11 evidence file was destroyed in the 2026-08-10 crash. The banked
+# values this probe gates on survive in the committed recovery record, so point
+# at that rather than at a working directory (which has since been renamed to
+# adi_greek_certification_schema13 to follow the schema bump).
 EVIDENCE_PATH = (
-    ROOT / "output" / "adi_greek_certification_schema11" / "adi_greek_certification.json"
+    ROOT / "docs" / "adi2d-greek-perf" / "recovered" / "schema11_partial_values.json"
 )
 
 

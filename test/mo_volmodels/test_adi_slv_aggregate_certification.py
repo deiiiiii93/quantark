@@ -10,7 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "example/mo_volmodels/17_adi_slv_aggregate_certification.py"
-PARENT_DIR = ROOT / "output/adi_greek_certification_schema11"
+PARENT_DIR = ROOT / "output/adi_greek_certification_schema13"
 
 
 def _load():
@@ -27,7 +27,7 @@ def test_schema12_parent_and_development_families_are_pinned():
     module = _load()
 
     assert module.SCHEMA_VERSION == 12
-    assert module.PARENT_SCHEMA_VERSION == 11
+    assert module.PARENT_SCHEMA_VERSION == 13
     assert module.DEVELOPMENT_SEED == 20260806
     assert module.DEVELOPMENT_PATHS_PER_BATCH == 8192
     assert module.DEVELOPMENT_BATCHES == 16

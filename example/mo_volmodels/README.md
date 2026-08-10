@@ -44,8 +44,8 @@ the automated tests and lets 02–10 run with no network at all.
 
 # Aggregate-only amendment of the immutable schema-11 ADI Greek certificate.
 .venv/bin/python example/mo_volmodels/17_adi_slv_aggregate_certification.py \
-  --parent-evidence output/adi_greek_certification_schema11/adi_greek_certification.json \
-  --parent-decision output/adi_greek_certification_schema11/adi_greek_certification_decision.json \
+  --parent-evidence output/adi_greek_certification_schema13/adi_greek_certification.json \
+  --parent-decision output/adi_greek_certification_schema13/adi_greek_certification_decision.json \
   --resume \
   --output-dir output/adi_greek_certification
 ```
