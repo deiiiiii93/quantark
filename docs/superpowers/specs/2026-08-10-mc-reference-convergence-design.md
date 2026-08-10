@@ -67,9 +67,13 @@ estimator and is reported as such, never silently approximated).
 **Gates**
 - V1-G1 unbiasedness (per cell × variant): |treated − plain| ≤ 2 × combined SE at a
   matched pilot budget; fail-closed guards exercised in the demo.
-- V1-G2 efficiency: measured SD-reduction factor ≥ 4× per treated cell (planning
-  number is 8×; 33× is the measured ceiling on near_ki). Record the factor in the
-  decision matrix whatever it is.
+- V1-G2 efficiency: **`SE²·seconds ≥ 1.25×` per treated cell** (amended 2026-08-10).
+  The original text ("SD-reduction factor ≥ 4×") conflated SD with variance units:
+  the 33× cited for `near_ki` is a *variance* ratio (SD 1.08 → 0.19, SD factor
+  5.7) produced by the full multilevel + 8×8 bridge + 16-substep stack, so as
+  written the gate demanded 16× variance from a single knob. Measured outcome at
+  the amended gate: `ordinary_full` 2.14×, `ordinary_decayed` 2.62×,
+  `sigma_collapse` 1.49× — all pass, all unbiased, all at flat cost.
 - V1-G3 cost honesty: per-batch wall-clock of the treated estimator recorded alongside
   (Rao-Blackwellization adds per-path analytic work; the metric that matters is
   SE² × seconds, not SD alone).
@@ -174,3 +178,16 @@ was achieved — honestly reported, never silently extended.
 - 2026-08-10 target: overnight ≤ 12 h, decisive interval (user).
 - 2026-08-10 focus: variance reduction + adaptive stopping; memory/dtype work descoped (user).
 - 2026-08-10 stopping semantics: precision-based, estimate-blind; no alpha-spending (user).
+- 2026-08-10 Task-7 checkpoint (user): ship `bridge8` on all three cells; amend
+  V1-G2 to `SE²·sec ≥ 1.25×`; stage-16 schema 11 → 13 with stage-17 held at 12.
+- 2026-08-10 V2 deferred: the standalone demo design was invalid (stage-17's
+  control is a three-level telescoping estimator with intra-run control rows,
+  not a cross-run regression control). Corrected design is post-processing over
+  references the production run already builds — see `demo_v2_weights.py`.
+- 2026-08-10 measured feasibility: G1 holds. Treatment alone moves the aggregate
+  half-width 0.0546 → 0.0395 at 128 batches/cell; the 0.02 target then needs
+  3.8 h wall-clock at measured rates (7.6 h at a pessimistic ×2 contention),
+  7 cells concurrent at ~33 GiB of 48. Note that with 14 cores for 7 cells the
+  streams do not compete, so Neyman weighting is near-inert in this
+  configuration — it earns its place in the memory-constrained and serial
+  cases, while precision stopping carries the wall-clock win.

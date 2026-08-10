@@ -82,13 +82,25 @@ paths inside one run. See `demo_v2_weights.py` for the corrected design; it is
 post-processing over references the production run already builds, so it costs
 no extra Monte Carlo and is deferred to after Phase-1 regeneration.
 
-## User decisions (Task 7 checkpoint)
+## User decisions (Task 7 checkpoint, 2026-08-10)
 
-- [ ] `ordinary_full` treatment: _pending_
-- [ ] `ordinary_decayed` treatment: _pending_
-- [ ] `sigma_collapse` treatment: _pending_
-- [ ] V1-G2 gate: replace the mis-specified SD floor with an SE²·sec criterion? _pending_
-- [ ] V2 cross-fitted weights: defer to post-regeneration post-processing? _pending_
+- [x] `ordinary_full` treatment: **bridge8 ships** (2.14× SE²·sec, 0.64σ)
+- [x] `ordinary_decayed` treatment: **bridge8 ships** (2.62× SE²·sec, 0.65σ)
+- [x] `sigma_collapse` treatment: **bridge8 ships** (1.49× SE²·sec, 0.28σ)
+- [x] V1-G2 gate: **replaced** by `SE²·sec ≥ 1.25×` plus the unchanged V1-G1
+      unbiasedness check. Rationale: gate the quantity the decision actually
+      turns on; the old SD-unit floor was unachievable by any single knob.
+- [x] Schema numbering: stage-16 `SCHEMA_VERSION` 11 → **13**, stage-17 stays
+      at 12, stage-17 `PARENT_SCHEMA_VERSION` 11 → 13. Smallest blast radius;
+      the frozen stage-17 pins and cohort labels are untouched.
+- [x] V2 cross-fitted weights: **deferred** to post-regeneration
+      post-processing (design invalidated as standalone; corrected design in
+      `demo_v2_weights.py` costs no extra Monte Carlo once references exist).
+
+Applied in stage-16 as `SLV_SPOT_BRIDGE_PROFILE_BY_CASE[cell]["dimensions"] = 8`
+for the three cells above. `low_feller` is deliberately untouched: its direct
+estimator was selected on measured 2026-08-05/06 evidence recorded in the
+harness, and `near_ki` already runs the full treatment.
 
 Cells left at `baseline` are not failures — WS-S allocation absorbs them by
 sending more batches their way.
