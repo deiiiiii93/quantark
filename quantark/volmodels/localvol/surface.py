@@ -54,21 +54,9 @@ class LocalVolSurface:
         if not np.all(np.isfinite(self.lv_grid)) or np.any(self.lv_grid <= 0):
             raise ValidationError("lv_grid must be finite and strictly positive")
 
-    def local_vol(self, spot: ArrayLike, t: ArrayLike) -> "float | np.ndarray":
-        """Vectorized bilinear (time, strike) interpolation with flat extrapolation.
-
-        Gathers only the surrounding grid nodes (no per-point Python loop), so it is
-        suitable for Monte Carlo path evaluation.
-        """
-        s = np.asarray(spot, dtype=float)
-        tt = np.asarray(t, dtype=float)
-        if not (np.all(np.isfinite(s)) and np.all(np.isfinite(tt))):
-            raise ValidationError("spot and t must be finite")
-        s_b, t_b = np.broadcast_arrays(s, tt)
-        shape = s_b.shape
-
+    def _strike_weights(self, s_flat: np.ndarray):
+        """Bracketing strike indices and linear weights for clamped spots."""
         K = self.strike_grid
-        s_flat = np.clip(s_b.ravel(), K[0], K[-1])
         jK = np.clip(np.searchsorted(K, s_flat, side="right"), 1, K.size - 1)
         j0, j1 = jK - 1, jK
         if self.interp == "linear_logs":
@@ -76,6 +64,58 @@ class LocalVolSurface:
             wK = (np.log(s_flat) - lnK[j0]) / (lnK[j1] - lnK[j0])
         else:
             wK = (s_flat - K[j0]) / (K[j1] - K[j0])
+        return j0, j1, wK
+
+    def _local_vol_scalar_t(self, s: np.ndarray, tt: np.ndarray):
+        """Scalar-t fast path: one time bracket, 1-D row gathers.
+
+        Keeps the general path's arithmetic ORDER (strike interpolation per row
+        first, then the time blend); blending the rows first is not bitwise.
+        """
+        shape = s.shape
+        K = self.strike_grid
+        s_flat = np.clip(s.ravel(), K[0], K[-1])
+        j0, j1, wK = self._strike_weights(s_flat)
+
+        g = self.lv_grid
+        if self.time_grid.size == 1:
+            row = g[0]
+            vals = row[j0] * (1.0 - wK) + row[j1] * wK
+        else:
+            Tg = self.time_grid
+            t_val = float(np.clip(tt, Tg[0], Tg[-1]))
+            iT = int(np.clip(np.searchsorted(Tg, t_val, side="right"), 1, Tg.size - 1))
+            i0, i1 = iT - 1, iT
+            wT = (t_val - Tg[i0]) / (Tg[i1] - Tg[i0])
+            g0, g1 = g[i0], g[i1]  # 1-D row views, not 2-D fancy gathers
+            bottom = g0[j0] * (1.0 - wK) + g0[j1] * wK
+            top = g1[j0] * (1.0 - wK) + g1[j1] * wK
+            vals = bottom * (1.0 - wT) + top * wT
+
+        result = np.asarray(vals, dtype=float).reshape(shape)
+        return result if result.shape else float(result)
+
+    def local_vol(self, spot: ArrayLike, t: ArrayLike) -> "float | np.ndarray":
+        """Vectorized bilinear (time, strike) interpolation with flat extrapolation.
+
+        Gathers only the surrounding grid nodes (no per-point Python loop), so it is
+        suitable for Monte Carlo path evaluation. A scalar ``t`` -- the shape Monte
+        Carlo kernels call with, once per step -- takes a fast path that resolves
+        the time bracket once instead of once per path.
+        """
+        s = np.asarray(spot, dtype=float)
+        tt = np.asarray(t, dtype=float)
+        if not (np.all(np.isfinite(s)) and np.all(np.isfinite(tt))):
+            raise ValidationError("spot and t must be finite")
+        if tt.ndim == 0:
+            return self._local_vol_scalar_t(s, tt)
+
+        s_b, t_b = np.broadcast_arrays(s, tt)
+        shape = s_b.shape
+
+        K = self.strike_grid
+        s_flat = np.clip(s_b.ravel(), K[0], K[-1])
+        j0, j1, wK = self._strike_weights(s_flat)
 
         g = self.lv_grid
         if self.time_grid.size == 1:
