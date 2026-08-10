@@ -16,6 +16,8 @@ optional SuperLU for the constant-``L`` case. Deterministic — never invokes Mo
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
@@ -172,6 +174,19 @@ def _path_focused_variance_grid(
     if grid.size != points or np.any(np.diff(grid) <= 0.0):
         raise ValidationError("failed to construct path-focused variance grid")
     return _pin_grid_targets(grid, [theta, v0])
+
+
+@dataclass(frozen=True)
+class _AdvectionStencil:
+    """Sparse four-point interpolation stencil for the variance transport.
+
+    ``indices``/``weights`` are ``(n_v, 4)``; ``bracket`` is the index of the
+    lower node of each foot's containing cell, used for the monotonicity clip.
+    """
+
+    indices: np.ndarray
+    weights: np.ndarray
+    bracket: np.ndarray
 
 
 class HestonSLVADICore:
@@ -701,13 +716,17 @@ class HestonSLVADICore:
         decay = float(np.exp(-self.kappa * float(dt_sub)))
         return self.theta + (self.V_grid - self.theta) * decay
 
-    def _advection_weights(self, dt_sub):
-        """Interpolation operator for one characteristic step, cached per dt.
+    def _advection_stencil(self, dt_sub):
+        """Sparse interpolation stencil for one characteristic step, cached per dt.
 
         Four-point Lagrange weights on the (generally non-uniform) variance
         grid, dropping to linear in the two edge brackets where the cubic
-        stencil does not fit. Returns the transpose so the transport is one
-        ``U @ W.T`` matmul, plus the bracket index used for clipping.
+        stencil does not fit (the linear rows pad to four slots by repeating an
+        index with zero weight, so the layout stays rectangular).
+
+        Stored as (indices, weights) of shape ``(n_v, 4)`` rather than a dense
+        ``(n_v, n_v)`` matrix: the operator has at most four non-zeros per row,
+        so a gather costs O(n_v) per S-row where a matmul costs O(n_v**2).
         """
         key = round(float(dt_sub), 15)
         cached = self._advection_cache.get(key)
@@ -718,7 +737,8 @@ class HestonSLVADICore:
         n = V.size
         feet = np.clip(self._characteristic_feet(dt_sub), V[0], V[-1])
         bracket = np.clip(np.searchsorted(V, feet) - 1, 0, n - 2)
-        weights = np.zeros((n, n))
+        indices = np.zeros((n, 4), dtype=np.intp)
+        weights = np.zeros((n, 4))
         for i in range(n):
             k = int(bracket[i])
             foot = feet[i]
@@ -729,12 +749,13 @@ class HestonSLVADICore:
                     for b in range(4):
                         if a != b:
                             w *= (foot - nodes[b]) / (nodes[a] - nodes[b])
-                    weights[i, k - 1 + a] = w
+                    indices[i, a] = k - 1 + a
+                    weights[i, a] = w
             else:
                 t = (foot - V[k]) / (V[k + 1] - V[k])
-                weights[i, k] = 1.0 - t
-                weights[i, k + 1] = t
-        cached = (weights.T.copy(), bracket)
+                indices[i] = (k, k + 1, k, k)
+                weights[i] = (1.0 - t, t, 0.0, 0.0)
+        cached = _AdvectionStencil(indices=indices, weights=weights, bracket=bracket)
         self._advection_cache[key] = cached
         return cached
 
@@ -747,8 +768,11 @@ class HestonSLVADICore:
         """
         if dt_sub <= 0.0:
             return U
-        weights_t, bracket = self._advection_weights(dt_sub)
-        transported = U @ weights_t
+        stencil = self._advection_stencil(dt_sub)
+        indices, weights, bracket = stencil.indices, stencil.weights, stencil.bracket
+        transported = np.einsum(
+            "ijk,jk->ij", U[:, indices], weights, optimize=True
+        )
         lower = np.minimum(U[:, bracket], U[:, bracket + 1])
         upper = np.maximum(U[:, bracket], U[:, bracket + 1])
         return np.clip(transported, lower, upper)
@@ -758,8 +782,7 @@ class HestonSLVADICore:
         V = self.V_grid
         feet = self._characteristic_feet(dt_probe)
         interior = bool(feet.min() >= V[0] and feet.max() <= V[-1])
-        _weights_t, bracket = self._advection_weights(dt_probe)
-        cells = np.abs(np.arange(V.size) - bracket)
+        cells = np.abs(np.arange(V.size) - self._advection_stencil(dt_probe).bracket)
         return {
             "scheme": "exact_cir_characteristics",
             "probe_dt": float(dt_probe),

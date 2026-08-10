@@ -132,11 +132,27 @@ class LeverageSurface:
         self._ln_k = np.log(self.strike_grid)
 
     def leverage(self, spot, t) -> "float | np.ndarray":
+        """Bilinear L(S, t) in (t, ln S) with flat extrapolation.
+
+        The Monte Carlo path generators call this once per time step with a
+        path-vector spot and a *scalar* time. That case takes a fast path which
+        resolves the time bracket once instead of once per path, and gathers
+        from two 1-D rows instead of fancy-indexing the 2-D grid. The
+        arithmetic and its order are unchanged, so results stay bit-identical
+        to the general path (pinned by
+        test_leverage_lookup_fastpath.py::test_scalar_time_matches_a_vector_of_the_same_time_bitwise).
+        """
         s = np.asarray(spot, dtype=float)
         tt = np.asarray(t, dtype=float)
-        s_b, t_b = np.broadcast_arrays(s, tt)
-        shape = s_b.shape
-        ln_s = np.log(np.clip(s_b.ravel(), self.strike_grid[0], self.strike_grid[-1]))
+        scalar_time = tt.ndim == 0
+        if scalar_time:
+            shape = s.shape
+            flat_spot = s.ravel()
+        else:
+            s_b, t_b = np.broadcast_arrays(s, tt)
+            shape = s_b.shape
+            flat_spot = s_b.ravel()
+        ln_s = np.log(np.clip(flat_spot, self.strike_grid[0], self.strike_grid[-1]))
         K = self._ln_k
         jK = np.clip(np.searchsorted(K, ln_s, side="right"), 1, K.size - 1)
         j0, j1 = jK - 1, jK
@@ -144,6 +160,16 @@ class LeverageSurface:
         g = self.leverage_grid
         if self.time_grid.size == 1:
             vals = g[0, j0] * (1 - wK) + g[0, j1] * wK
+        elif scalar_time:
+            Tg = self.time_grid
+            tc = np.clip(tt, Tg[0], Tg[-1])
+            iT = int(np.clip(np.searchsorted(Tg, tc, side="right"), 1, Tg.size - 1))
+            i0, i1 = iT - 1, iT
+            wT = (tc - Tg[i0]) / (Tg[i1] - Tg[i0])
+            row_bot, row_top = g[i0], g[i1]
+            bot = row_bot[j0] * (1 - wK) + row_bot[j1] * wK
+            top = row_top[j0] * (1 - wK) + row_top[j1] * wK
+            vals = bot * (1 - wT) + top * wT
         else:
             Tg = self.time_grid
             tc = np.clip(t_b.ravel(), Tg[0], Tg[-1])

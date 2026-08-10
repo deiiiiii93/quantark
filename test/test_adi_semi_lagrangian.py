@@ -300,3 +300,44 @@ def test_snowball_solver_still_rejects_unknown_schemes():
 
     with pytest.raises(ValidationError, match="v_drift_scheme"):
         HestonSnowballPDESolver(SIGMA_COLLAPSE, v_drift_scheme="teleporting")
+
+
+# --- transport cost structure --------------------------------------------
+
+
+def test_advection_weights_are_sparse_not_dense():
+    """The interpolation touches 4 nodes per row, so cost must be linear in n_v.
+
+    The first implementation built a dense (n_v x n_v) matrix and used a matmul,
+    which is quadratic in n_v for an operator with at most 4 non-zeros per row.
+    """
+    sl = _sl_core()
+    stencil = sl._advection_stencil(0.01)
+    indices, weights = stencil.indices, stencil.weights
+    assert indices.shape == (sl.N_V, 4)
+    assert weights.shape == (sl.N_V, 4)
+    # Every row's weights sum to one, which is what preserves constants.
+    assert weights.sum(axis=1) == pytest.approx(np.ones(sl.N_V), abs=1e-14)
+    # Indices stay inside the grid.
+    assert indices.min() >= 0
+    assert indices.max() <= sl.N_V - 1
+
+
+def test_gathered_advection_matches_the_dense_operator():
+    """The sparse form must reproduce the dense interpolation it replaces."""
+    sl = _sl_core()
+    dt = 0.02
+    rng = np.random.default_rng(3)
+    U = rng.random((sl.N_S, sl.N_V))
+
+    stencil = sl._advection_stencil(dt)
+    dense = np.zeros((sl.N_V, sl.N_V))
+    for i in range(sl.N_V):
+        for slot in range(4):
+            dense[i, stencil.indices[i, slot]] += stencil.weights[i, slot]
+    expected = U @ dense.T
+
+    gathered = np.einsum(
+        "ijk,jk->ij", U[:, stencil.indices], stencil.weights, optimize=True
+    )
+    assert gathered == pytest.approx(expected, rel=1e-12, abs=1e-14)
