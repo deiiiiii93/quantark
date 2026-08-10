@@ -994,7 +994,11 @@ git commit -m "feat(cert): schema-12 per-cell treatment profiles + descriptors (
 - Test: `test/mo_volmodels/test_adi_slv_aggregate_certification.py` (extend)
 
 **Interfaces:**
-- Consumes: `CellPrecision`, `neyman_allocation`, `precision_stop`, `StopDecision` (Task 2 exports from `quantark.validation`); existing stage-17 structures: `run_development_pilot`, `production_run_configuration`, `frozen_allocation_manifest`, the banking loop that appends batches per cell, and the evidence dict it publishes.
+- Consumes: `CellPrecision`, `neyman_allocation`, `precision_stop`, `StopDecision` (Task 2 exports from `quantark.validation`); existing stage-17 structures: `run_development_pilot`, `run_allocation_projection`, `run_production_amendment`, `production_run_configuration`, `frozen_allocation_manifest`, and the evidence dict published at ~line 2203.
+
+**CORRECTIONS discovered during execution (2026-08-10) — supersede the sketch below:**
+1. The real signature is `production_run_configuration(*, implementation_hash: str, runtime: dict)`. The `adaptive` switch must be added as a keyword-only arg **with a default of `False`**, and the S-G4 test must pass the two existing required args (build them via `implementation_sha256()` and `runtime_environment()`).
+2. The evidence records **`"no_optional_stopping": True`** in three places (config ~line 369, policy blocks ~2208 and ~2329) and a test pins it (`test_adi_slv_aggregate_certification.py:718`). That flag is an inferential claim, so WS-S must not silently reuse it. Required handling: keep `no_optional_stopping: True` under **both** modes — it stays literally true because `precision_stop` never reads an estimate — and add an explicit sibling field `"stopping_rule": "fixed_allocation"` (adaptive off) or `"precision_blind"` (adaptive on), plus `"stopping_rule_reads_estimate": False`. A reviewer must be able to see *which* rule ran, not infer it. Add a test asserting the pairing for both modes.
 - Produces: CLI flags `--adaptive` (default off → S-G4 fallback = frozen 4096/256 allocation, untouched), `--precision-target 0.02`, `--budget-hours 12.0`, `--pilot-batches 32`; evidence fields
   `adaptive_run = {"pilot": {cell: {"batches": int, "batch_sd": float, "seconds_per_batch": float}}, "allocation": {cell: int}, "allocation_sha256": str, "precision_target": float, "budget_hours": float, "stopping": {"trigger": str, "projected_halfwidth": float, "checks": int}}`.
 
@@ -1006,12 +1010,31 @@ git commit -m "feat(cert): schema-12 per-cell treatment profiles + descriptors (
 
 def test_adaptive_flag_default_off_preserves_frozen_allocation():
     module = _load()
-    # S-G4: without --adaptive the run configuration is bit-identical to the
-    # frozen manifest — the hash pin still binds.
-    config = module.production_run_configuration(adaptive=False)
-    manifest = module.frozen_allocation_manifest()
-    assert config["allocation"]["primary_batches"] == manifest["production"]["primary_batches"]
-    assert config["allocation"]["middle_batches"] == manifest["production"]["middle_batches"]
+    # S-G4: without --adaptive the run configuration keeps the frozen
+    # allocation exactly, and declares the fixed-allocation stopping rule.
+    config = module.production_run_configuration(
+        implementation_hash=module.implementation_sha256(),
+        runtime=module.runtime_environment(),
+    )
+    recommendation = module.frozen_allocation_manifest()["recommendation"]
+    assert config["primary_refresh"]["batches"] == recommendation["primary_batches"]
+    assert config["middle_control"]["batches"] == recommendation["middle_batches"]
+    assert config["no_optional_stopping"] is True
+    assert config["stopping_rule"] == "fixed_allocation"
+
+
+def test_adaptive_mode_declares_blind_stopping_rule():
+    module = _load()
+    config = module.production_run_configuration(
+        implementation_hash=module.implementation_sha256(),
+        runtime=module.runtime_environment(),
+        adaptive=True,
+    )
+    # Precision stopping is not optional stopping: the rule reads SEs, never
+    # the estimate. Both facts must be legible in the evidence.
+    assert config["no_optional_stopping"] is True
+    assert config["stopping_rule"] == "precision_blind"
+    assert config["stopping_rule_reads_estimate"] is False
 
 
 def test_adaptive_allocation_is_pilot_deterministic():
