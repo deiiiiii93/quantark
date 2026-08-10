@@ -10,3 +10,7 @@ dist/
 htmlcov/
 .ipynb_checkpoints/
 .DS_Store
+
+# Locally built optional Thomas accelerator (platform-specific build artifact)
+quantark/util/numerical/libthomas_kernel.*
+quantark/util/numerical/thomas_kernel.dll
