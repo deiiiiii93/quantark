@@ -1,87 +1,50 @@
-"""V2 evidence: cross-fitted Heston-control weights on real cell batch means.
+"""V2 (cross-fitted control weights) -- DESIGN INVALIDATED 2026-08-10, NOT RUN.
 
-For each cell, generate matched-seed heston_slv (primary) and heston (control)
-batch deltas via the harness estimator, feed them to cross_fitted_control with
-an INDEPENDENT high-precision heston run as the control expectation, and
-record the variance ratio plus the agreement against the frozen 0.7 weight.
+The first version of this demo paired two separate harness runs by seed (an
+SLV primary at 1024 paths/batch against a Heston "control" at 8192) and fed
+them to cross_fitted_control. Reading the estimator it was supposed to model
+showed that is not what stage-17 does, so the measurement would have been
+meaningless. It is kept here as a corrected design note rather than deleted,
+because the V2 lever itself is still open.
 
-Both estimators are unbiased for E[primary], so V2-G1 is an agreement check:
-they must not disagree by more than their combined SE.
+What stage-17 actually does
+---------------------------
+`controlled_case_economic_components` builds a three-level TELESCOPING
+estimator, not a regression control across runs:
+
+    primary[level]     = state_dependent - w_frozen * frozen_low
+    middle[level]      = w_frozen * frozen_high - w_heston * heston_low
+    heston_high[level] = w_heston * heston_high
+
+Summing telescopes the control terms away in expectation. Crucially, each
+low/high pair is evaluated on the SAME paths within one run: `frozen_low`
+comes from the primary payload with `control=True` (the frozen-leverage
+control that `rqmc_frozen_leverage_conditional_control=True` emits alongside
+the SLV payoff), and `heston_low` likewise rides the middle run. The weights
+`w_frozen` / `w_heston` are per-case constants in AGGREGATE_CONTROL_WEIGHTS
+(e.g. ordinary_full heston 0.7, low_feller heston 0.0).
+
+Correct V2 experiment (not yet run)
+-----------------------------------
+Cross-fitting must operate on the intra-run rows, not on fresh runs:
+
+1. Build one primary reference per cell via `build_primary_reference` and one
+   control-only reference via `build_control_only_reference` -- these already
+   carry both the state-dependent rows and their matched `control=True` rows.
+2. For each level, cross-fit w_frozen on (state_dependent, frozen_low) and
+   w_heston on (frozen_high, heston_low) using
+   `quantark.montecarlo.control_weights.cross_fitted_control`, with the
+   out-of-fold expectation taken from the independent higher level -- which is
+   exactly the role `heston_high_reference` already plays.
+3. Compare the resulting per-case weights against the frozen constants, and
+   the recomposed row variance against the frozen-weight recomposition, using
+   `controlled_case_economic_rows` for both so the comparison is apples to
+   apples.
+
+Because step 1 reuses references the production run already builds, the
+corrected V2 costs no extra Monte Carlo once a reference set exists -- it is
+post-processing. That is why it is deferred to after the Phase-1 regeneration
+rather than run as a standalone demo now.
 """
 
-from __future__ import annotations
-
-import json
-import sys
-from pathlib import Path
-
-import numpy as np
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from demo_common import batch_deltas, case_fixture, case_scale  # noqa: E402
-
-from quantark.montecarlo.control_weights import cross_fitted_control  # noqa: E402
-
-CELLS = ("ordinary_full", "ordinary_decayed", "sigma_collapse")
-FROZEN_WEIGHT = 0.7
-PRIMARY_SEED = 20260810
-EXPECTATION_SEED = 20260812
-BATCHES = 32
-
-
-def main() -> None:
-    out = Path(__file__).resolve().parent / "logs" / "v2_weights.jsonl"
-    out.parent.mkdir(exist_ok=True)
-    for cell in CELLS:
-        # Matched scrambles: the control must be correlated with the primary.
-        primary, _ = batch_deltas(
-            cell, "heston_slv", batches=BATCHES, seed=PRIMARY_SEED, bridge_dimensions=1
-        )
-        control, _ = batch_deltas(
-            cell, "heston", batches=BATCHES, seed=PRIMARY_SEED, bridge_dimensions=1
-        )
-        # Independent run supplies E[control]; reusing the matched run would
-        # cancel the control term entirely and prove nothing.
-        expectation_sample, _ = batch_deltas(
-            cell,
-            "heston",
-            batches=BATCHES,
-            seed=EXPECTATION_SEED,
-            bridge_dimensions=1,
-        )
-        expectation = float(expectation_sample.mean())
-
-        fitted = cross_fitted_control(primary, control, control_expectation=expectation)
-        fixed = primary - FROZEN_WEIGHT * (control - expectation)
-
-        case, _, _, _ = case_fixture(cell, "heston_slv")
-        scale_factor = abs(case_scale(case).delta_contracts(1.0))
-        combined_se = float(
-            np.sqrt(
-                np.var(fitted.adjusted, ddof=1) / fitted.adjusted.size
-                + np.var(fixed, ddof=1) / fixed.size
-            )
-        )
-        difference = float(abs(fitted.adjusted.mean() - fixed.mean()))
-        record = {
-            "cell": cell,
-            **fitted.as_dict(),
-            "frozen_weight": FROZEN_WEIGHT,
-            "adjusted_mean": float(fitted.adjusted.mean()),
-            "fixed_07_mean": float(fixed.mean()),
-            "difference_contracts": difference * scale_factor,
-            "v2_g1_sigma": round(difference / max(combined_se, 1e-30), 2),
-            "v2_g1_pass": bool(difference <= 2.0 * combined_se),
-            "v2_g2_pass": bool(fitted.variance_ratio <= 1.0),
-            "primary_sd_contracts": float(np.std(primary, ddof=1)) * scale_factor,
-            "adjusted_sd_contracts": float(np.std(fitted.adjusted, ddof=1))
-            * scale_factor,
-        }
-        with out.open("a") as handle:
-            handle.write(json.dumps(record) + "\n")
-        print(json.dumps(record), flush=True)
-
-
-if __name__ == "__main__":
-    main()
+raise SystemExit(__doc__)
