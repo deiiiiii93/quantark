@@ -81,6 +81,29 @@ off-diagonal minima, local Peclet numbers, grid mode, and theta/v0 pins. The leg
 `"centered"` scheme is retained as a diagnostic control, not the production default.
 The degenerate v=0 PDE boundary and existing event Rannacher policy are unchanged.
 
+`v_drift_scheme="semi_lagrangian"` (opt-in, spec WS-C) exists because that
+donor-cell fallback is only **first-order** on the variance axis, and the
+2026-08-10 attribution probe traced the entire `sigma_collapse` delta bias
+(−0.112 contracts, 11σ) to exactly that error. Under this scheme the generator
+keeps diffusion only — unconditionally an M-matrix, local Peclet identically
+zero, no row can need a fallback — and the drift is transported along the exact
+CIR characteristics `v_foot = theta + (v - theta)·exp(-kappa·dt)` by four-point
+Lagrange interpolation clipped into its bracketing linear envelope, so the
+transport cannot manufacture a new extremum at the KI/KO kinks. Mean reversion
+contracts toward theta, so feet are always interior and no inflow boundary is
+needed. Each step is Strang-split (advect `dt/2`, drift-free ADI step, advect
+`dt/2`, re-impose boundaries), and the degenerate v=0 row becomes an implicit
+identity because advection owns its drift. Measured convergence in `n_v` on a
+one-year Heston put at the sigma-collapse parameters: successive-refinement
+ratios of **2.03 / 1.98** for `adaptive_upwind` (first-order) against
+**113 / 153** for `semi_lagrangian`, with both schemes agreeing at fine `n_v`
+— the transport changes the discretization, not the PDE. `n_v=60` under this
+scheme lands closer to the continuum than `n_v=120` under upwind.
+Advection observability lives under the `"advection"` key of
+`variance_operator_diagnostics()` (feet interior, cells traversed, max foot
+displacement). Defaults are untouched: every non-`semi_lagrangian` path is
+bitwise identical to before the scheme was added.
+
 Greek estimators are model-specific but share one market-sensitivity contract.
 Local Vol reads delta and gamma from its native one-solve PDE surface. The 2D Heston
 and Heston-SLV solvers use the default central spot bump; `BaseEngine.calculate_greeks`

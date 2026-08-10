@@ -279,9 +279,10 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                 "variance_grid_mode must be one of: legacy, power, "
                 "path_focused, auto"
             )
-        if v_drift_scheme not in {"centered", "adaptive_upwind"}:
+        if v_drift_scheme not in {"centered", "adaptive_upwind", "semi_lagrangian"}:
             raise ValidationError(
-                "v_drift_scheme must be 'centered' or 'adaptive_upwind'"
+                "v_drift_scheme must be 'centered', 'adaptive_upwind', or "
+                "'semi_lagrangian'"
             )
         if (
             isinstance(barrier_greek_steps_per_tick, bool)

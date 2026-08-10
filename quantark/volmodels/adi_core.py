@@ -187,10 +187,16 @@ class HestonSLVADICore:
         grid_spot: center the log-spot grid here (defaults to s0); pin it across spot
             bumps for clean delta/gamma.
         v_drift_scheme: variance-drift discretization. ``"adaptive_upwind"``
-            keeps the centered stencil where its two generator off-diagonals
-            are non-negative and otherwise switches that row to a donor-cell
-            stencil. ``"centered"`` is retained only as a diagnostic legacy
-            control.
+            (default) keeps the centered stencil where its two generator
+            off-diagonals are non-negative and otherwise switches that row to a
+            donor-cell stencil. ``"centered"`` is retained only as a diagnostic
+            legacy control. ``"semi_lagrangian"`` removes drift from the
+            generator entirely and transports it along the exact CIR
+            characteristics instead (spec WS-C); it is opt-in because it
+            changes numerics, and it exists because the donor-cell fallback is
+            measured first-order on the variance axis, which the 2026-08-10
+            attribution probe showed to be the entire sigma-collapse delta
+            bias.
         variance_grid_mode: variance-axis geometry. ``"legacy"`` preserves
             the historical grid, ``"power"`` grades toward zero,
             ``"path_focused"`` concentrates around the CIR state and pins
@@ -258,11 +264,14 @@ class HestonSLVADICore:
             raise ValidationError(
                 "variance_grid_mode must be one of legacy, power, path_focused, auto"
             )
-        if v_drift_scheme not in ("centered", "adaptive_upwind"):
+        if v_drift_scheme not in ("centered", "adaptive_upwind", "semi_lagrangian"):
             raise ValidationError(
-                "v_drift_scheme must be 'centered' or 'adaptive_upwind'"
+                "v_drift_scheme must be 'centered', 'adaptive_upwind', or "
+                "'semi_lagrangian'"
             )
         self.v_drift_scheme = str(v_drift_scheme)
+        self._semi_lagrangian_v = self.v_drift_scheme == "semi_lagrangian"
+        self._advection_cache: dict = {}
 
         # An explicit positive power is an explicit power-grid request.  The
         # historical zero value remains compatible with every non-power mode.
@@ -573,6 +582,33 @@ class HestonSLVADICore:
         diffusion = 0.5 * self.sig_eff2 * v_int
         drift = self.kappa * (self.theta - v_int)
 
+        if self._semi_lagrangian_v:
+            # Drift is transported by _advect_v along the exact CIR
+            # characteristics, so the generator keeps diffusion only. That
+            # makes it an M-matrix unconditionally: both off-diagonals are
+            # non-negative multiples of a non-negative diffusion coefficient,
+            # local Peclet is identically zero, and no row can need a
+            # donor-cell fallback.
+            if self._uniform:
+                inv_h2 = 1.0 / (self.dV * self.dV)
+                sub = diffusion * inv_h2
+                sup = diffusion * inv_h2
+            else:
+                wm2, _w02, wp2 = self._vv
+                sub = diffusion * wm2
+                sup = diffusion * wp2
+            sub = np.maximum(sub, 0.0)
+            sup = np.maximum(sup, 0.0)
+            monotone = np.ones(sub.shape, dtype=bool)
+            self._v_operator_cache = (
+                sub,
+                -(sub + sup),
+                sup,
+                monotone,
+                np.zeros_like(monotone),
+            )
+            return self._v_operator_cache
+
         if self._uniform:
             inv_h = 1.0 / self.dV
             inv_h2 = inv_h * inv_h
@@ -652,6 +688,89 @@ class HestonSLVADICore:
         self._v_operator_cache = (sub, diag, sup, centered_monotone, fallback)
         return self._v_operator_cache
 
+    def _characteristic_feet(self, dt_sub):
+        """Exact CIR characteristic origins for a backward step of ``dt_sub``.
+
+        The variance drift ``kappa*(theta - v)`` integrates in closed form, so
+        the state that arrives at node ``v`` started at
+        ``theta + (v - theta) * exp(-kappa*dt)``. Mean reversion contracts
+        toward theta, so every foot lies between ``min(v, theta)`` and
+        ``max(v, theta)`` and therefore inside the grid: the transport needs no
+        inflow boundary condition.
+        """
+        decay = float(np.exp(-self.kappa * float(dt_sub)))
+        return self.theta + (self.V_grid - self.theta) * decay
+
+    def _advection_weights(self, dt_sub):
+        """Interpolation operator for one characteristic step, cached per dt.
+
+        Four-point Lagrange weights on the (generally non-uniform) variance
+        grid, dropping to linear in the two edge brackets where the cubic
+        stencil does not fit. Returns the transpose so the transport is one
+        ``U @ W.T`` matmul, plus the bracket index used for clipping.
+        """
+        key = round(float(dt_sub), 15)
+        cached = self._advection_cache.get(key)
+        if cached is not None:
+            return cached
+
+        V = self.V_grid
+        n = V.size
+        feet = np.clip(self._characteristic_feet(dt_sub), V[0], V[-1])
+        bracket = np.clip(np.searchsorted(V, feet) - 1, 0, n - 2)
+        weights = np.zeros((n, n))
+        for i in range(n):
+            k = int(bracket[i])
+            foot = feet[i]
+            if 1 <= k <= n - 3:
+                nodes = V[k - 1 : k + 3]
+                for a in range(4):
+                    w = 1.0
+                    for b in range(4):
+                        if a != b:
+                            w *= (foot - nodes[b]) / (nodes[a] - nodes[b])
+                    weights[i, k - 1 + a] = w
+            else:
+                t = (foot - V[k]) / (V[k + 1] - V[k])
+                weights[i, k] = 1.0 - t
+                weights[i, k + 1] = t
+        cached = (weights.T.copy(), bracket)
+        self._advection_cache[key] = cached
+        return cached
+
+    def _advect_v(self, U, dt_sub):
+        """Transport ``U`` along the variance characteristics by ``dt_sub``.
+
+        The cubic interpolant is clipped into the bracketing linear envelope,
+        which makes the transport monotone: it cannot manufacture a new
+        extremum at the KI/KO kinks where an unclipped cubic would ring.
+        """
+        if dt_sub <= 0.0:
+            return U
+        weights_t, bracket = self._advection_weights(dt_sub)
+        transported = U @ weights_t
+        lower = np.minimum(U[:, bracket], U[:, bracket + 1])
+        upper = np.maximum(U[:, bracket], U[:, bracket + 1])
+        return np.clip(transported, lower, upper)
+
+    def _advection_diagnostics(self, dt_probe: float = 1.0) -> dict:
+        """Observability for the transport: are the feet where theory says?"""
+        V = self.V_grid
+        feet = self._characteristic_feet(dt_probe)
+        interior = bool(feet.min() >= V[0] and feet.max() <= V[-1])
+        _weights_t, bracket = self._advection_weights(dt_probe)
+        cells = np.abs(np.arange(V.size) - bracket)
+        return {
+            "scheme": "exact_cir_characteristics",
+            "probe_dt": float(dt_probe),
+            "feet_interior": interior,
+            "max_cells_traversed": int(cells.max()) if cells.size else 0,
+            "max_foot_displacement": float(np.max(np.abs(feet - V)))
+            if V.size
+            else 0.0,
+            "interpolation": "cubic_lagrange_linear_bracket_clipped",
+        }
+
     def variance_operator_diagnostics(self) -> dict:
         """Machine-readable monotonicity and local-Peclet evidence."""
         sub, _diag, sup, centered_monotone, fallback = (
@@ -660,6 +779,11 @@ class HestonSLVADICore:
         v_int = self.V_grid[1:-1]
         diffusion = 0.5 * self.sig_eff2 * v_int
         drift = self.kappa * (self.theta - v_int)
+        if self._semi_lagrangian_v:
+            # The generator carries no drift, so its local Peclet number is
+            # identically zero however coarse the grid: the advective part
+            # lives in the transport operator, reported under "advection".
+            drift = np.zeros_like(v_int)
         h_local = 0.5 * (self.V_grid[2:] - self.V_grid[:-2])
         peclet = np.full_like(v_int, np.inf, dtype=float)
         nonzero_diffusion = diffusion > np.finfo(float).tiny
@@ -686,6 +810,9 @@ class HestonSLVADICore:
             "fallback_variances": [float(v) for v in v_int[fallback]],
             "theta_is_node": bool(np.any(np.isclose(self.V_grid, self.theta))),
             "v0_is_node": bool(np.any(np.isclose(self.V_grid, self.v0))),
+            "advection": (
+                self._advection_diagnostics() if self._semi_lagrangian_v else None
+            ),
         }
 
     def _A2(self, U):
@@ -700,8 +827,10 @@ class HestonSLVADICore:
             + U[1:-1, 1:-1] * diag
             + U[1:-1, 2:] * sup
         )
-        if self._degenerate_v0:
+        if self._degenerate_v0 and not self._semi_lagrangian_v:
             # v=0 row: only kappa*theta*U_v survives (diffusion vanishes); 2-point forward.
+            # Under semi-Lagrangian transport the advection operator already
+            # carries this drift, so adding it here would double-count it.
             dV0 = float(self.V_grid[1] - self.V_grid[0])
             out[1:-1, 0] = self.kappa * self.theta * (U[1:-1, 1] - U[1:-1, 0]) / dV0
         return out
@@ -841,7 +970,11 @@ class HestonSLVADICore:
         b[1:-1] = 1.0 - theta_loc * dt_step * diag_op
         c[1:-1] = -theta_loc * dt_step * sup_op
         dV0 = float(self.V_grid[1] - self.V_grid[0])
-        if self._degenerate_v0:
+        if self._degenerate_v0 and self._semi_lagrangian_v:
+            # The v=0 row is pure drift, and the transport operator owns it, so
+            # the implicit solve must leave that row alone.
+            b[0] = 1.0
+        elif self._degenerate_v0:
             # degenerate v=0 PDE row: (I - theta*dt * kappa*theta*U_v) with 2-point forward.
             conv = self.kappa * self.theta / dV0
             b[0] = 1.0 + theta_loc * dt_step * conv
@@ -935,7 +1068,35 @@ class HestonSLVADICore:
         return U_out
 
     # ---- ADI steps ----
+    def _strang_advect(self, step, U, dt_step, tau, theta_loc, t_mid):
+        """Wrap one drift-free ADI step in half-step variance transports.
+
+        Strang splitting keeps the composition second-order in time: the
+        advection and the diffusion/ADI operator each see the other's midpoint
+        state. Boundaries are re-imposed after the second half-step because the
+        transport rewrites whole v-rows.
+        """
+        U = self._advect_v(U, 0.5 * dt_step)
+        U = step(U, dt_step, tau, theta_loc, t_mid)
+        U = self._advect_v(U, 0.5 * dt_step)
+        self._bc(U, tau)
+        return U
+
     def _douglas_step(self, U, dt_step, tau, theta_loc, t_mid):
+        if self._semi_lagrangian_v:
+            return self._strang_advect(
+                self._douglas_step_core, U, dt_step, tau, theta_loc, t_mid
+            )
+        return self._douglas_step_core(U, dt_step, tau, theta_loc, t_mid)
+
+    def _cs_step(self, U, dt_step, tau, theta_loc, t_mid):
+        if self._semi_lagrangian_v:
+            return self._strang_advect(
+                self._cs_step_core, U, dt_step, tau, theta_loc, t_mid
+            )
+        return self._cs_step_core(U, dt_step, tau, theta_loc, t_mid)
+
+    def _douglas_step_core(self, U, dt_step, tau, theta_loc, t_mid):
         A1U, A2U = self._A1(U, t_mid), self._A2(U)
         A0U = self._A0(U, t_mid)
         # WS-C1: -rU is inside A1U now, so the predictor drops the explicit - r*U term.
@@ -943,7 +1104,7 @@ class HestonSLVADICore:
         Y1 = self._solve_S(Y0, A1U, dt_step, theta_loc, tau, t_mid)
         return self._solve_V(Y1, A2U, dt_step, theta_loc, tau)
 
-    def _cs_step(self, U, dt_step, tau, theta_loc, t_mid):
+    def _cs_step_core(self, U, dt_step, tau, theta_loc, t_mid):
         A1U, A2U = self._A1(U, t_mid), self._A2(U)
         A0U = self._A0(U, t_mid)
         Y0 = U + dt_step * (A1U + A2U + A0U)
