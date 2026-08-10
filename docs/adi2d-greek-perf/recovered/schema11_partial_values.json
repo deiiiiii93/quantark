@@ -1,0 +1,23 @@
+{
+  "_provenance": "RECOVERED 2026-08-10: minimal reconstruction of the lost schema-11 evidence file. Values for heston/sigma_collapse are exact (recovered from the 3b8441f4 session probe fidelity record of 2026-08-10T01:51; scale verified bitwise). Other cells are NOT present - the full evidence must be regenerated. Do not treat this file as complete certification evidence.",
+  "run_configuration": {
+    "hedge_inception_spot": 4532.52
+  },
+  "cells": [
+    {
+      "variant": "heston",
+      "case": {"name": "sigma_collapse"},
+      "certifications": {
+        "delta": {
+          "pde": 0.32268601473516256,
+          "reference": 0.3247230771781795,
+          "reference_standard_error": 0.00018390682558800569,
+          "difference_economic_contracts": -0.11235816074815635
+        },
+        "gamma": {
+          "pde": -0.033319329144351206
+        }
+      }
+    }
+  ]
+}
