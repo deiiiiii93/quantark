@@ -244,4 +244,10 @@ if __name__ == "__main__":
     gate = fails == 0 and same and prod_speedup >= 2.0
     print(f"\nVERDICT: bitwise={'yes' if fails == 0 and same else 'NO'}, "
           f"transform {prod_speedup:.2f}x @100k x 488, snowball {e2e:.2f}x")
+    if prod_speedup < 1.2:
+        print("NOTE: both arms are ~1.0x because the kernel has LANDED -- "
+              "BrownianBridge.transform now IS the fused path, so this demo "
+              "compares it against itself. That convergence is the "
+              "confirmation; read the absolute times for the gain. The gate "
+              "below is only meaningful before wiring.")
     print(f"GATE (bitwise AND transform >= 2.0x): {'PASS' if gate else 'FAIL'}")
