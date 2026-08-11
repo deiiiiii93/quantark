@@ -386,6 +386,12 @@ IMPLEMENTATION_INPUTS = (
     "quantark/montecarlo/qmc_rqmc_driver.py",
     "quantark/montecarlo/conditional_snowball.py",
     "quantark/montecarlo/qmc_qe_coupling.py",
+    # The SLV reference's QE variance step lives here, not in the engine file:
+    # it was extracted so one definition could carry the optional Numba backend.
+    # Both backends are bitwise equal, so this does not change any value -- but
+    # the arithmetic that produces SLV reference values must stay inside the
+    # fail-closed digest, or editing it would invalidate no checkpoint.
+    "quantark/montecarlo/qe_kernels.py",
 )
 
 # This narrower projection binds carried schema-9 results to the live

@@ -164,6 +164,42 @@ def test_schema9_parent_identity_is_pinned_and_its_pde_carry_path_is_closed():
         module.PRODUCTION_PDE_INPUT_ROOTS = original_roots
 
 
+def test_implementation_hash_covers_the_shared_qe_variance_kernel():
+    """A shared kernel that sets reference values must sit inside the digest.
+
+    The QE variance update was inline in ``snowball_vol_mc_engines.py`` -- which
+    IS an implementation input -- until it was extracted to
+    ``quantark/montecarlo/qe_kernels.py`` so one definition could carry the
+    optional Numba backend.  That refactor preserved every value (the NumPy and
+    Numba paths are asserted bitwise equal), but it moved the arithmetic out of
+    the fail-closed projection, so editing the kernel would no longer invalidate
+    a single banked checkpoint.  Extracting code must not shrink hash coverage.
+    """
+    module = _load()
+
+    from quantark.asset.equity.engine.mc import snowball_vol_mc_engines
+    from quantark.montecarlo import qe_kernels
+
+    # The dependency is real, not hypothetical: the SLV reference engine calls
+    # this exact function object for its variance step.
+    assert snowball_vol_mc_engines.qe_variance_step is qe_kernels.qe_variance_step
+
+    relative = "quantark/montecarlo/qe_kernels.py"
+    assert relative in module.IMPLEMENTATION_INPUTS
+
+    # And the entry is load-bearing rather than decorative: the digest moves
+    # when the kernel leaves the projection.
+    covered = module.implementation_sha256()
+    original_inputs = module.IMPLEMENTATION_INPUTS
+    try:
+        module.IMPLEMENTATION_INPUTS = tuple(
+            path for path in original_inputs if path != relative
+        )
+        assert module.implementation_sha256() != covered
+    finally:
+        module.IMPLEMENTATION_INPUTS = original_inputs
+
+
 def test_production_run_cannot_implicitly_launch_all_14_cells(tmp_path):
     module = _load()
 
