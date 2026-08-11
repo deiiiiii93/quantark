@@ -228,7 +228,9 @@ def size_aggregate(cells: Sequence[dict], variant: str) -> Optional[dict]:
     }
 
 
-def render(cell_rows: Sequence[dict], aggregate: Optional[dict], frozen: int) -> str:
+def render(
+    cell_rows: Sequence[dict], aggregate: Optional[dict], frozen: dict[str, int]
+) -> str:
     variant = aggregate["variant"] if aggregate else cell_rows[0]["variant"]
     lines = [f"\n=== {variant} ===", "", f"per-cell gate (bound {CELL_BOUND}):"]
     per_cell_max = 0
@@ -261,13 +263,27 @@ def render(cell_rows: Sequence[dict], aggregate: Optional[dict], frozen: int) ->
         f"  fixed floor         {aggregate['fixed']:.5f}",
         f"  need                {'INFEASIBLE' if need is None else need}",
     ]
-    binding = max(per_cell_max, need or 1 << 20)
+    # The aggregate consumes min(batches) across cells, so its requirement is a
+    # FLOOR under every case; a case whose own gate needs more just gets more.
+    # That is cheaper than levelling every case up to the worst one.
+    lines += ["", "derived per-case allocation (max of own gate and aggregate floor):"]
+    floor = need or 1 << 20
+    per_case: dict[str, int] = {}
+    for row in cell_rows:
+        want = row["required_batches"] or 1 << 20
+        per_case[row["case"]] = max(per_case.get(row["case"], 0), want, floor)
+    for case, count in sorted(per_case.items(), key=lambda kv: -kv[1]):
+        driver = "own gate" if count > floor else "aggregate floor"
+        lines.append(f"  {case:18s} {count:>6}   ({driver})")
+
+    total = sum(per_case.values())
+    frozen_total = sum(frozen.get(case, 0) for case in per_case)
     lines += [
         "",
-        f"  BINDING             {binding} batches   (aggregate is "
-        f"{'binding' if (need or 0) >= per_cell_max else 'not binding'})",
-        f"  frozen              {frozen} batches",
-        f"  reduction           {frozen / max(binding, 1):.1f}x",
+        f"  aggregate floor     {floor} batches",
+        f"  derived total       {total} batch-cells",
+        f"  frozen total        {frozen_total} batch-cells",
+        f"  reduction           {frozen_total / max(total, 1):.1f}x",
     ]
     return "\n".join(lines)
 
@@ -284,7 +300,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     cells = load_cells(args.evidence)
     rows = size_cells(cells)
-    frozen = {"heston": 1024, "heston_slv": 128}
+    # The frozen counts we are comparing against, per case, from stage 16's
+    # PRODUCTION_HESTON_BATCHES_BY_CASE / PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE.
+    frozen = {
+        "heston": {
+            "ordinary_full": 1024, "ordinary_decayed": 1024, "near_ko": 1024,
+            "near_ki": 2048, "low_feller": 1024, "sigma_collapse": 1024,
+            "near_expiry": 1024,
+        },
+        "heston_slv": {
+            "ordinary_full": 128, "ordinary_decayed": 128, "near_ko": 128,
+            "near_ki": 256, "low_feller": 512, "sigma_collapse": 128,
+            "near_expiry": 128,
+        },
+    }
     report = []
     for variant in ("heston", "heston_slv"):
         variant_rows = [row for row in rows if row["variant"] == variant]
