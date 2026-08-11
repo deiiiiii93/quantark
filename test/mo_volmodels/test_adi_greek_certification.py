@@ -113,17 +113,17 @@ def test_schema11_amendment_profile_is_pinned():
     assert module.PRODUCTION_SLV_BATCHES_BY_CASE["low_feller"] == 512
     assert module.SLV_MULTILEVEL_CASES == frozenset({"near_ki"})
     assert module.PRODUCTION_CELL_WORKERS == 2
-    assert (
-        module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"]["low_feller"]
-        == 2
-    )
-    assert (
-        module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston"]["ordinary_full"]
-        == 2
-    )
+    # Batch workers are a scheduling choice, not part of the numerical profile:
+    # the RQMC reduction is seed-keyed and ordered, so batch estimates are
+    # bitwise identical across worker counts (probe P2).  This test used to
+    # freeze the per-case downgrades (2 / 2 / 4) as though they were numerical,
+    # which made a pure wall-clock decision look load-bearing.  The profile is
+    # now uniform at the measured operating point, and
+    # test_batch_worker_profile_is_uniform_at_the_measured_operating_point owns
+    # that invariant across all fourteen cells rather than three.
     assert (
         module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE["heston_slv"]["low_feller"]
-        == 4
+        == module.PRODUCTION_RQMC_BATCH_WORKERS
     )
 
 
@@ -162,6 +162,41 @@ def test_schema9_parent_identity_is_pinned_and_its_pde_carry_path_is_closed():
         assert module.production_pde_compatibility_sha256() != live
     finally:
         module.PRODUCTION_PDE_INPUT_ROOTS = original_roots
+
+
+def test_batch_worker_profile_is_uniform_at_the_measured_operating_point():
+    """No cell may be downgraded below the measured safe worker count.
+
+    Batch workers are a pure scheduling choice: the RQMC reduction is
+    seed-keyed and ordered, so batch estimates are bitwise identical across
+    worker counts (probe P2 measured 1/4/8 on the real paired reference,
+    max_abs_batch_diff 0.0, 2.04x wall at four workers, saturating by eight).
+    Peak RSS at four workers is 7.85 GB on the heaviest cell -- the three-year
+    ``ordinary_full`` horizon -- so two cells in flight under
+    ``PRODUCTION_CELL_WORKERS`` sit near 15.7 GB against a ~32 GB budget.
+
+    Per-case downgrades therefore buy no accuracy and cost wall-clock, and a
+    silently reintroduced one would be invisible in the evidence.  Pin the
+    uniform profile so it has to be argued for, not merely edited.
+    """
+    module = _load()
+
+    assert module.PRODUCTION_RQMC_BATCH_WORKERS == 4
+
+    expected_cases = {case.name for case in module.certification_cases(quick=False)}
+    profile = module.PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE
+    assert set(profile) == {"heston", "heston_slv"}
+    for variant, by_case in profile.items():
+        assert set(by_case) == expected_cases, variant
+        for case_name, workers in by_case.items():
+            assert workers == module.PRODUCTION_RQMC_BATCH_WORKERS, (
+                variant,
+                case_name,
+            )
+
+    # Two cells in flight at this worker count must stay inside the host budget.
+    measured_peak_gb_heaviest_cell = 7.85
+    assert module.PRODUCTION_CELL_WORKERS * measured_peak_gb_heaviest_cell < 32.0
 
 
 def test_implementation_hash_covers_the_shared_qe_variance_kernel():

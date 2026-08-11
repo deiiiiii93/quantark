@@ -329,17 +329,21 @@ PRODUCTION_QE_SUBSTEPS_BY_VARIANT_CASE = {
     "heston_slv": PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE,
 }
 PRODUCTION_RQMC_BATCH_WORKERS = 4
+# Uniform by measurement, not by taste.  Batch workers only schedule the RQMC
+# reduction, which is seed-keyed and ordered, so batch estimates are bitwise
+# identical across worker counts: probe P2 ran the real paired reference at
+# 1/4/8 workers and recorded max_abs_batch_diff 0.0 with 2.04x wall at four,
+# flat to eight (roughly half the loop is serial or GIL-bound, so more workers
+# is not the lever).  Peak RSS at four workers is 7.85 GB on the heaviest cell,
+# the three-year ordinary_full horizon, leaving two concurrent cells near
+# 15.7 GB against a ~32 GB budget.  The earlier 2-3 worker downgrades on the
+# long-dated cells bought nothing measurable and cost wall-clock.
 PRODUCTION_RQMC_BATCH_WORKERS_BY_VARIANT_CASE = {
-    "heston": {
-        "ordinary_full": 2,
-        "ordinary_decayed": 3,
-        "near_ko": 4,
-        "near_ki": 4,
-        "low_feller": 2,
-        "sigma_collapse": 2,
-        "near_expiry": 4,
-    },
-    "heston_slv": {case_name: 4 for case_name in PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE},
+    variant: {
+        case_name: PRODUCTION_RQMC_BATCH_WORKERS
+        for case_name in PRODUCTION_SLV_QE_SUBSTEPS_BY_CASE
+    }
+    for variant in ("heston", "heston_slv")
 }
 # Smooth cells can run two-at-a-time on the 14-core certification host. The
 # high-dimensional Near-KI SLV middle level stays serialized below because a
