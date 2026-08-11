@@ -381,6 +381,12 @@ IMPLEMENTATION_INPUTS = (
     "example/mo_volmodels/16_adi_greek_certification.py",
     "quantark/validation/__init__.py",
     "quantark/validation/greek_certification.py",
+    # The rest of the certification package, which the file-by-file list had
+    # silently outgrown: adaptive_allocation freezes the adaptive batch
+    # allocation and sequential_admission decides early stops, so both govern
+    # what evidence a run banks.
+    "quantark/validation/adaptive_allocation.py",
+    "quantark/validation/sequential_admission.py",
     "quantark/volmodels/adi_core.py",
     "quantark/asset/equity/engine/pde/snowball_vol_pde_solvers.py",
     "quantark/asset/equity/engine/pde/pde_execution_adapters.py",

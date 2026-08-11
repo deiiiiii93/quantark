@@ -199,6 +199,26 @@ def test_batch_worker_profile_is_uniform_at_the_measured_operating_point():
     assert module.PRODUCTION_CELL_WORKERS * measured_peak_gb_heaviest_cell < 32.0
 
 
+def test_implementation_hash_covers_every_validation_module():
+    """``quantark/validation`` IS the certification logic; none may sit outside.
+
+    ``IMPLEMENTATION_INPUTS`` names files rather than directories, so a module
+    added to the package is covered only if someone remembers to list it.  This
+    closes that gap by construction instead of per file: any new certification
+    primitive is inside the fail-closed digest the moment it lands.
+    """
+    module = _load()
+
+    on_disk = {
+        f"quantark/validation/{path.name}"
+        for path in (ROOT / "quantark" / "validation").glob("*.py")
+    }
+    assert on_disk, "expected to find validation modules on disk"
+    assert on_disk <= set(module.IMPLEMENTATION_INPUTS), sorted(
+        on_disk - set(module.IMPLEMENTATION_INPUTS)
+    )
+
+
 def test_implementation_hash_covers_the_shared_qe_variance_kernel():
     """A shared kernel that sets reference values must sit inside the digest.
 
