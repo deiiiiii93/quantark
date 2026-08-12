@@ -69,6 +69,7 @@ from quantark.asset.equity.product.option.snowball_config import (
 )
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.montecarlo import (
+    concatenate_paired_results,
     CoupledQESubstepDrawProvider,
     PairedRQMCGreeksResult,
     run_paired_rqmc_greeks,
@@ -81,6 +82,9 @@ from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.validation import (
     EconomicGreekScale,
     EquivalenceStatus,
+    SequentialAdmissionPolicy,
+    SequentialAdmissionStatus,
+    sequential_admission,
     certify_equivalence,
     certify_signed_bias_from_batches,
     certify_signed_bias_from_independent_cohorts,
@@ -812,6 +816,7 @@ def paired_mc_reference(
     slv_spot_bridge_dimensions: int = 1,
     slv_conditional_control_only: bool = False,
     rqmc_batch_workers: int = 1,
+    first_batch: int = 0,
 ) -> PairedRQMCGreeksResult:
     spot = float(env.spot)
     specs = []
@@ -846,6 +851,7 @@ def paired_mc_reference(
         relative_bump=bump,
         batches=batches,
         batch_workers=rqmc_batch_workers,
+        first_batch=first_batch,
     )
 
 
@@ -1525,6 +1531,106 @@ def build_heston_high_control_evidence(
     }
 
 
+def gate_driven_reference_levels(
+    *,
+    run_level,
+    policy: SequentialAdmissionPolicy,
+    scale: EconomicGreekScale,
+    pde_target: dict,
+    raw_pde_envelopes: dict,
+    bounds: dict,
+    chunk_batches: int,
+    max_batches: int,
+) -> tuple:
+    """Price a cell in chunks, stopping once every greek's gate is decided.
+
+    The batch stream is prefix-invariant (verified bitwise), so a chunk extends
+    the run rather than perturbing it: batch k is the same batch however the
+    run was segmented, and the accumulated mean stays the mean of a fixed point
+    set.  ``concatenate_paired_results`` recomputes the statistics from the
+    joined rows, so the banked evidence is identical to a single call at the
+    stopping count.
+
+    Stopping is judged against the anytime-valid width, never the fixed-sample
+    standard error: the stop time is data-dependent, and a Student-t interval is
+    valid at one pre-chosen batch count only.
+
+    Returns ``(target, fine, record)``; ``record`` carries the per-greek
+    decisions and the declared policy for the evidence.
+    """
+    target_chunks: list = []
+    fine_chunks: list = []
+    banked = 0
+    decisions: dict = {}
+    while banked < int(max_batches):
+        count = min(int(chunk_batches), int(max_batches) - banked)
+        target_chunks.append(run_level("target", banked, count))
+        fine_chunks.append(run_level("fine", banked, count))
+        banked += count
+        target = concatenate_paired_results(target_chunks)
+        fine = concatenate_paired_results(fine_chunks)
+
+        decisions = {}
+        for greek, cell_bound in bounds.items():
+            attribute = "batch_delta" if greek == "delta" else "batch_gamma"
+            fine_series = np.asarray(
+                [
+                    _economic_value(scale, greek, float(value))
+                    for value in getattr(fine, attribute)
+                ],
+                dtype=float,
+            )
+            target_series = np.asarray(
+                [
+                    _economic_value(scale, greek, float(value))
+                    for value in getattr(target, attribute)
+                ],
+                dtype=float,
+            )
+            substep_series = target_series - fine_series
+            decisions[greek] = sequential_admission(
+                policy=policy,
+                batches_used=banked,
+                reference_gap=_economic_value(
+                    scale, greek, float(pde_target[greek])
+                )
+                - float(np.mean(fine_series)),
+                greek_batch_standard_deviation=float(np.std(fine_series, ddof=1)),
+                pde_discretization_envelope=abs(
+                    _economic_value(
+                        scale, greek, raw_pde_envelopes[greek]["total"]
+                    )
+                ),
+                economic_bound=float(cell_bound),
+                substep_bias_mean=float(np.mean(substep_series)),
+                substep_batch_standard_deviation=float(
+                    np.std(substep_series, ddof=1)
+                ),
+            )
+        if all(
+            decision.status
+            in (
+                SequentialAdmissionStatus.ADMIT,
+                SequentialAdmissionStatus.REJECT,
+            )
+            for decision in decisions.values()
+        ):
+            break
+
+    record = {
+        "stopping_rule": "anytime_valid_sequential",
+        "batches_banked": int(banked),
+        "chunk_batches": int(chunk_batches),
+        "max_batches": int(max_batches),
+        "policy": policy.declaration(),
+        "policy_sha256": policy.sha256(),
+        "decisions": {
+            greek: decision.as_dict() for greek, decision in decisions.items()
+        },
+    }
+    return target, fine, record
+
+
 def certify_case(
     variant: str,
     case: CaseSpec,
@@ -1534,6 +1640,8 @@ def certify_case(
     batches: int,
     seed: int,
     hedge_inception_spot: float,
+    sequential_policy: Optional[SequentialAdmissionPolicy] = None,
+    sequential_chunk_batches: int = 128,
     heston_spot_bridge_strata: int = HESTON_SPOT_BRIDGE_STRATA,
     heston_spot_bridge_dimensions: int = HESTON_SPOT_BRIDGE_DIMENSIONS,
     slv_spot_strata: int = SLV_SPOT_STRATA,
@@ -1612,46 +1720,59 @@ def certify_case(
         # every batch and can exhaust memory in the long-maturity SLV cells.
         reuse_count=1,
     )
-    reference = paired_mc_reference(
-        variant,
-        case,
-        product,
-        env,
-        leverage,
-        paths_per_batch=paths_per_batch,
-        batches=batches,
-        seed=seed,
-        substeps=target_substeps,
-        bump=SPOT_BUMP,
-        qe_draw_provider=target_provider,
-        heston_spot_bridge_strata=heston_spot_bridge_strata,
-        heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
-        slv_spot_strata=slv_spot_strata,
-        slv_spot_antithetic=slv_spot_antithetic,
-        slv_spot_bridge_strata=slv_spot_bridge_strata,
-        slv_spot_bridge_dimensions=slv_spot_bridge_dimensions,
-        rqmc_batch_workers=rqmc_batch_workers,
+    scale = EconomicGreekScale(
+        model_spot=case.spot,
+        hedge_inception_spot=hedge_inception_spot,
+        study_notional=STUDY_NOTIONAL,
+        hedge_multiplier=HEDGE_MULTIPLIER,
     )
-    reference_fine = paired_mc_reference(
-        variant,
-        case,
-        product,
-        env,
-        leverage,
-        paths_per_batch=paths_per_batch,
-        batches=batches,
-        seed=seed,
-        substeps=fine_substeps,
-        bump=SPOT_BUMP,
-        qe_draw_provider=fine_provider,
-        heston_spot_bridge_strata=heston_spot_bridge_strata,
-        heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
-        slv_spot_strata=slv_spot_strata,
-        slv_spot_antithetic=slv_spot_antithetic,
-        slv_spot_bridge_strata=slv_spot_bridge_strata,
-        slv_spot_bridge_dimensions=slv_spot_bridge_dimensions,
-        rqmc_batch_workers=rqmc_batch_workers,
-    )
+
+    def run_level(level: str, first_batch: int, count: int):
+        return paired_mc_reference(
+            variant,
+            case,
+            product,
+            env,
+            leverage,
+            paths_per_batch=paths_per_batch,
+            batches=count,
+            seed=seed,
+            substeps=(target_substeps if level == "target" else fine_substeps),
+            bump=SPOT_BUMP,
+            qe_draw_provider=(
+                target_provider if level == "target" else fine_provider
+            ),
+            heston_spot_bridge_strata=heston_spot_bridge_strata,
+            heston_spot_bridge_dimensions=heston_spot_bridge_dimensions,
+            slv_spot_strata=slv_spot_strata,
+            slv_spot_antithetic=slv_spot_antithetic,
+            slv_spot_bridge_strata=slv_spot_bridge_strata,
+            slv_spot_bridge_dimensions=slv_spot_bridge_dimensions,
+            rqmc_batch_workers=rqmc_batch_workers,
+            first_batch=first_batch,
+        )
+
+    if sequential_policy is None:
+        # Fixed allocation: the declared count, judged once. Retained for the
+        # multilevel SLV cell, whose telescoping weights require exactly the
+        # declared batch count, and for any run that opts out.
+        reference = run_level("target", 0, batches)
+        reference_fine = run_level("fine", 0, batches)
+        sequential_record = None
+    else:
+        reference, reference_fine, sequential_record = gate_driven_reference_levels(
+            run_level=run_level,
+            policy=sequential_policy,
+            scale=scale,
+            pde_target=pde_target,
+            raw_pde_envelopes=raw_pde_envelopes,
+            bounds={
+                "delta": DELTA_CELL_BOUND_CONTRACTS,
+                "gamma": GAMMA_CELL_BOUND_CONTRACTS,
+            },
+            chunk_batches=sequential_chunk_batches,
+            max_batches=batches,
+        )
     estimator_metadata = {
         "name": "primary_conditional_rqmc",
         "primary_seed": int(seed),
@@ -1683,12 +1804,6 @@ def certify_case(
     reference_batches = int(reference.batches_used)
     if reference_fine.batches_used != reference_batches:
         raise ValueError("target and fine reference batch counts do not match")
-    scale = EconomicGreekScale(
-        model_spot=case.spot,
-        hedge_inception_spot=hedge_inception_spot,
-        study_notional=STUDY_NOTIONAL,
-        hedge_multiplier=HEDGE_MULTIPLIER,
-    )
     pde_refinement = _pde_refinement_diagnostics(ladder_evidence, scale)
     certifications = {}
     batch_differences = {}
@@ -1869,6 +1984,11 @@ def certify_case(
         },
         "certifications": certifications,
         "batch_difference_contracts": batch_differences,
+        # Present only when the cell stopped on its gate rather than spending a
+        # declared allocation. It records the policy the stop was judged under,
+        # because a data-dependent stop is interpretable only against the
+        # anytime-valid width that licensed it.
+        "sequential_stopping": sequential_record,
     }
     row["status"] = (
         EquivalenceStatus.PASS.value

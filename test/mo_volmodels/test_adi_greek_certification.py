@@ -1153,3 +1153,158 @@ def test_task7_treatments_are_applied_to_the_three_untreated_cells():
     # Untouched cells stay on the single-factor profile.
     assert module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE["near_ko"]["dimensions"] == 1
     assert module.SLV_SPOT_BRIDGE_PROFILE_BY_CASE["near_expiry"]["dimensions"] == 1
+
+
+def test_gate_driven_levels_stop_early_and_bank_the_prefix_they_stopped_on():
+    """The loop must stop on the gate and keep exactly the batches it judged.
+
+    A chunked run may not bank more evidence than the decision rested on, nor
+    less: the recorded reference has to be the one the verdict was computed
+    from, or the certificate describes a run that never happened.
+    """
+    module = _load()
+
+    calls = []
+
+    class _Level:
+        """Deterministic stand-in whose batch k depends only on k."""
+
+        def __init__(self, first_batch, count, offset):
+            rows = np.array(
+                [
+                    [0.0, 0.0, 0.0, 1.0 + offset, 2.0 + offset]
+                    for _ in range(first_batch, first_batch + count)
+                ],
+                dtype=float,
+            )
+            self.batch_estimates = rows
+            self.batch_delta = rows[:, 3]
+            self.batch_gamma = rows[:, 4]
+            self.batches_used = count
+            self.spot = 100.0
+            self.relative_bump = 0.01
+            self.absolute_bump = 1.0
+            self.paths_per_batch = 8
+            self.randomization_key = "fake"
+            self.control_batch_estimates = None
+            self.covariance = np.zeros((5, 5))
+            self.total_unique_paths = 8 * count
+            self.total_path_valuations = 3 * 8 * count
+
+    def run_level(level, first_batch, count):
+        calls.append((level, first_batch, count))
+        return _Level(first_batch, count, 0.0 if level == "fine" else 1e-9)
+
+    scale = module.EconomicGreekScale(
+        model_spot=100.0,
+        hedge_inception_spot=4532.52,
+        study_notional=50_000_000.0,
+        hedge_multiplier=200.0,
+    )
+    policy = module.SequentialAdmissionPolicy(
+        family_alpha=0.05,
+        tests=28,
+        min_batches=16,
+        aggregate_floor_batches=32,
+        planned_batches=32,
+        max_batches=256,
+    )
+    target, fine, record = module.gate_driven_reference_levels(
+        run_level=run_level,
+        policy=policy,
+        scale=scale,
+        pde_target={"delta": 1.0, "gamma": 2.0},
+        raw_pde_envelopes={"delta": {"total": 0.0}, "gamma": {"total": 0.0}},
+        bounds={"delta": 0.5, "gamma": 0.5},
+        chunk_batches=32,
+        max_batches=256,
+    )
+
+    # A zero-dispersion stream sitting on the PDE decides at the first look.
+    assert record["batches_banked"] == 32
+    assert target.batches_used == fine.batches_used == 32
+    assert calls == [("target", 0, 32), ("fine", 0, 32)]
+    assert record["stopping_rule"] == "anytime_valid_sequential"
+    assert record["policy_sha256"] == policy.sha256()
+    assert set(record["decisions"]) == {"delta", "gamma"}
+    assert all(d["status"] == "ADMIT" for d in record["decisions"].values())
+
+
+def test_gate_driven_levels_extend_by_batch_range_without_recomputing():
+    """An undecided chunk must extend the run, never restart it.
+
+    Restarting would both waste the prefix and, without prefix invariance,
+    silently rewrite banked batches. The call pattern is the observable proof
+    that each chunk asks only for batches the run does not already have.
+    """
+    module = _load()
+    from quantark.montecarlo import PairedRQMCGreeksResult
+
+    calls = []
+
+    def run_level(level, first_batch, count):
+        calls.append((level, first_batch, count))
+        # Dispersed enough that the gate cannot close before the cap.
+        rows = np.array(
+            [
+                [0.0, 0.0, 0.0, 40.0 * ((k % 7) - 3), 40.0 * ((k % 5) - 2)]
+                for k in range(first_batch, first_batch + count)
+            ],
+            dtype=float,
+        )
+        return PairedRQMCGreeksResult(
+            price=0.0,
+            price_std_error=0.0,
+            delta=float(rows[:, 3].mean()),
+            delta_std_error=0.0,
+            gamma=float(rows[:, 4].mean()),
+            gamma_std_error=0.0,
+            spot=100.0,
+            relative_bump=0.01,
+            absolute_bump=1.0,
+            paths_per_batch=8,
+            batches_used=count,
+            total_unique_paths=8 * count,
+            total_path_valuations=3 * 8 * count,
+            randomization_key="fake",
+            batch_estimates=rows,
+            covariance=np.zeros((5, 5)),
+        )
+
+    policy = module.SequentialAdmissionPolicy(
+        family_alpha=0.05,
+        tests=28,
+        min_batches=16,
+        aggregate_floor_batches=32,
+        planned_batches=32,
+        max_batches=96,
+    )
+    scale = module.EconomicGreekScale(
+        model_spot=100.0,
+        hedge_inception_spot=4532.52,
+        study_notional=50_000_000.0,
+        hedge_multiplier=200.0,
+    )
+    target, fine, record = module.gate_driven_reference_levels(
+        run_level=run_level,
+        policy=policy,
+        scale=scale,
+        pde_target={"delta": 0.0, "gamma": 0.0},
+        raw_pde_envelopes={"delta": {"total": 0.0}, "gamma": {"total": 0.0}},
+        bounds={"delta": 0.5, "gamma": 0.5},
+        chunk_batches=32,
+        max_batches=96,
+    )
+
+    # Three consecutive, non-overlapping chunks per level, then the cap.
+    assert calls == [
+        ("target", 0, 32),
+        ("fine", 0, 32),
+        ("target", 32, 32),
+        ("fine", 32, 32),
+        ("target", 64, 32),
+        ("fine", 64, 32),
+    ]
+    assert record["batches_banked"] == 96
+    assert target.batches_used == fine.batches_used == 96
+    assert target.batch_estimates.shape == (96, 5)
