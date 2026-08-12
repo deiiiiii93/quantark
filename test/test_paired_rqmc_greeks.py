@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
 
-from quantark.montecarlo import RQMCRunSpec, run_paired_rqmc_greeks
+from quantark.montecarlo import (
+    RQMCRunSpec,
+    concatenate_paired_results,
+    run_paired_rqmc_greeks,
+)
 
 
 class _QuadraticGenerator:
@@ -225,3 +229,86 @@ def test_paired_rqmc_rejects_unproven_or_different_randomization():
             spot=100.0,
             batches=1,
         )
+
+
+def test_batch_range_chunks_concatenate_into_the_whole_run_bitwise():
+    """A cell priced in chunks must bank exactly what one long run banks.
+
+    This is the property that licenses gate-driven stopping: the loop prices a
+    chunk, evaluates the certification gate, and continues only if undecided.
+    If extending a run perturbed the batches already computed, the accumulated
+    mean would not be the mean of a fixed point set and the banked evidence
+    would be rewritten by the act of continuing.
+    """
+    common = dict(spot=100.0, relative_bump=0.01)
+    whole = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0), batches=8, **common
+    )
+    first = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0),
+        batches=4, first_batch=0, **common,
+    )
+    second = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0),
+        batches=4, first_batch=4, **common,
+    )
+    combined = concatenate_paired_results([first, second])
+
+    assert combined.batch_estimates.tobytes() == whole.batch_estimates.tobytes()
+    assert combined.covariance.tobytes() == whole.covariance.tobytes()
+    assert combined.batches_used == whole.batches_used == 8
+    assert combined.total_unique_paths == whole.total_unique_paths
+    assert combined.total_path_valuations == whole.total_path_valuations
+    for name in (
+        "price",
+        "price_std_error",
+        "delta",
+        "delta_std_error",
+        "gamma",
+        "gamma_std_error",
+    ):
+        assert getattr(combined, name) == getattr(whole, name), name
+
+
+def test_batch_range_offsets_select_genuinely_different_scrambles():
+    """A later chunk must not silently repeat the first chunk's batches."""
+    common = dict(spot=100.0, relative_bump=0.01, batches=4)
+    first = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0), first_batch=0, **common
+    )
+    second = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0), first_batch=4, **common
+    )
+
+    assert not np.array_equal(first.batch_estimates, second.batch_estimates)
+
+
+def test_batch_range_rejects_ranges_the_specs_cannot_cover():
+    common = dict(spot=100.0, relative_bump=0.01)
+    with pytest.raises(ValueError):
+        run_paired_rqmc_greeks(
+            _spec(99.0), _spec(100.0), _spec(101.0),
+            batches=4, first_batch=-1, **common,
+        )
+    with pytest.raises(ValueError):
+        # max_batches is 8, so [6, 10) runs off the end of the coupled stream.
+        run_paired_rqmc_greeks(
+            _spec(99.0), _spec(100.0), _spec(101.0),
+            batches=4, first_batch=6, **common,
+        )
+
+
+def test_concatenating_incompatible_results_is_refused():
+    common = dict(spot=100.0, relative_bump=0.01, batches=4)
+    first = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0), first_batch=0, **common
+    )
+    other_bump = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0),
+        spot=100.0, relative_bump=0.02, batches=4, first_batch=4,
+    )
+
+    with pytest.raises(ValueError):
+        concatenate_paired_results([first, other_bump])
+    with pytest.raises(ValueError):
+        concatenate_paired_results([])

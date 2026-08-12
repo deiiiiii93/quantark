@@ -158,6 +158,12 @@ class SequentialAdmissionPolicy:
         Horizon at which ``rho`` is tuned.
     max_batches:
         Cap.  Reaching it yields ``EXHAUSTED``, never a lenient admission.
+    margin_fraction:
+        Fraction of the economic bound held back as a buffer.  Stopping at the
+        first crossing leaves a margin of essentially zero by construction,
+        which the anytime-valid guarantee covers but a published certificate
+        does not read well as.  Testing against ``(1 - m) * bound`` buys a
+        legible buffer for a little compute.  Zero reproduces the plain rule.
     """
 
     family_alpha: float
@@ -167,6 +173,7 @@ class SequentialAdmissionPolicy:
     planned_batches: int
     max_batches: int
     components_per_test: int = 2
+    margin_fraction: float = 0.0
 
     def __post_init__(self) -> None:
         if not 0.0 < float(self.family_alpha) < 1.0:
@@ -179,6 +186,11 @@ class SequentialAdmissionPolicy:
             raise ValueError("min_batches must be at least two")
         if int(self.aggregate_floor_batches) < 0:
             raise ValueError("aggregate_floor_batches must be non-negative")
+        if not 0.0 <= float(self.margin_fraction) < 1.0:
+            raise ValueError(
+                "margin_fraction must be in [0, 1): a margin of one leaves no "
+                "bound to certify against"
+            )
         if int(self.max_batches) < self.first_decidable_batch:
             raise ValueError("max_batches must not fall below the decision floor")
         if not (
@@ -211,6 +223,10 @@ class SequentialAdmissionPolicy:
         """Shape parameter, tuned at the declared horizon."""
         return tune_rho_squared(int(self.planned_batches), self.alpha_per_component)
 
+    def effective_bound(self, economic_bound: float) -> float:
+        """The bound the rule actually tests against, after the margin."""
+        return float(economic_bound) * (1.0 - float(self.margin_fraction))
+
     def declaration(self) -> dict:
         """Canonical record of the declared policy, for the run evidence."""
         return {
@@ -223,6 +239,7 @@ class SequentialAdmissionPolicy:
             "first_decidable_batch": self.first_decidable_batch,
             "planned_batches": int(self.planned_batches),
             "max_batches": int(self.max_batches),
+            "margin_fraction": float(self.margin_fraction),
             "rho_squared": self.rho_squared,
             "confidence_sequence": "waudby-smith-2024-asymptotic",
         }
@@ -340,7 +357,11 @@ def sequential_admission(
             " batches",
         )
 
-    if gap + total <= bound:
+    # Admission tightens by the declared margin; rejection does not. A margin is
+    # a self-imposed buffer for the certificate's readability, and spending it
+    # on the rejection side would fail cells the contractual bound accepts.
+    admit_bound = policy.effective_bound(bound)
+    if gap + total <= admit_bound:
         return decision(
             SequentialAdmissionStatus.ADMIT,
             "anytime-valid comparison interval lies inside the economic bound",

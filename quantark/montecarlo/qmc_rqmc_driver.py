@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Protocol, Tuple
+from typing import Callable, Dict, Optional, Protocol, Sequence, Tuple
 
 import numpy as np
 
@@ -434,15 +434,27 @@ def run_paired_rqmc_greeks(
     relative_bump: float = 0.01,
     batches: Optional[int] = None,
     batch_workers: int = 1,
+    first_batch: int = 0,
 ) -> PairedRQMCGreeksResult:
     """Estimate price, delta and gamma with paired RQMC batches.
 
     The three engine specs must have matching scheme, draw dimension, time
     discretization and batch size.  Their path generators are called with an
     identical ``batch_id`` so independently constructed bumped engines use the
-    same scrambled Sobol point set.  A fixed number of outer scrambles is used:
-    optional stopping on a noisy Greek would invalidate the reported batch
-    standard error.
+    same scrambled Sobol point set.
+
+    ``first_batch`` selects a half-open range of batch ids ``[first_batch,
+    first_batch + batches)`` so a run can be assembled from chunks and extended
+    without recomputing what it already has.  Each batch is a pure function of
+    its id, so chunks concatenate into exactly the run that would have been
+    produced in one call — see ``concatenate_paired_results``.
+
+    A caller that stops on the estimate must not then quote
+    ``delta_std_error``/``gamma_std_error``: those are fixed-sample statistics,
+    and optional stopping on a noisy Greek invalidates them.  Stopping early is
+    legitimate only against an anytime-valid width, which is what
+    ``quantark.validation.sequential_admission`` supplies; the fixed-sample
+    errors reported here stay descriptive in that setting.
     """
     spot = float(spot)
     relative_bump = float(relative_bump)
@@ -454,13 +466,19 @@ def run_paired_rqmc_greeks(
     specs = (down_spec, base_spec, up_spec)
     paths_per_batch, randomization_key, homogeneous = _paired_spec_contract(specs)
     max_coupled_batches = min(int(spec.max_batches) for spec in specs)
-    batches_used = max_coupled_batches if batches is None else int(batches)
+    first_batch = int(first_batch)
+    if first_batch < 0:
+        raise ValueError("first_batch must be non-negative")
+    batches_used = (
+        max_coupled_batches - first_batch if batches is None else int(batches)
+    )
     if batches_used < 2:
         raise ValueError("paired RQMC Greeks require at least two batches")
-    if batches_used > max_coupled_batches:
+    if first_batch + batches_used > max_coupled_batches:
         raise ValueError(
-            "requested paired RQMC batches exceed an engine spec maximum "
-            f"({batches_used} > {max_coupled_batches})"
+            "requested paired RQMC batch range exceeds an engine spec maximum "
+            f"([{first_batch}, {first_batch + batches_used}) > "
+            f"{max_coupled_batches})"
         )
     if isinstance(batch_workers, bool) or int(batch_workers) < 1:
         raise ValueError("batch_workers must be a positive integer")
@@ -509,8 +527,9 @@ def run_paired_rqmc_greeks(
         )
         return primary, control
 
+    batch_ids = range(first_batch, first_batch + batches_used)
     if batch_workers == 1:
-        rows = [estimate_batch(batch_id) for batch_id in range(batches_used)]
+        rows = [estimate_batch(batch_id) for batch_id in batch_ids]
     else:
         # Each scramble owns independent generators and local path arrays.
         # executor.map preserves batch-id order, so threaded and serial
@@ -527,6 +546,31 @@ def run_paired_rqmc_greeks(
         else np.asarray([row[1] for row in rows], dtype=float)
     )
 
+    return _paired_result_from_estimates(
+        estimates,
+        control_estimates,
+        spot=spot,
+        relative_bump=relative_bump,
+        absolute_bump=absolute_bump,
+        paths_per_batch=paths_per_batch,
+        randomization_key=randomization_key,
+        path_valuation_multiplier=int(down_spec.path_valuation_multiplier),
+    )
+
+
+def _paired_result_from_estimates(
+    estimates: np.ndarray,
+    control_estimates: Optional[np.ndarray],
+    *,
+    spot: float,
+    relative_bump: float,
+    absolute_bump: float,
+    paths_per_batch: int,
+    randomization_key,
+    path_valuation_multiplier: int,
+) -> PairedRQMCGreeksResult:
+    """Build the result from per-batch rows: one definition of the statistics."""
+    batches_used = int(estimates.shape[0])
     means = np.mean(estimates, axis=0)
     covariance = np.asarray(np.cov(estimates, rowvar=False, ddof=1), dtype=float)
     standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0) / batches_used)
@@ -544,10 +588,7 @@ def run_paired_rqmc_greeks(
         batches_used=batches_used,
         total_unique_paths=paths_per_batch * batches_used,
         total_path_valuations=(
-            3
-            * paths_per_batch
-            * batches_used
-            * int(down_spec.path_valuation_multiplier)
+            3 * paths_per_batch * batches_used * int(path_valuation_multiplier)
         ),
         randomization_key=randomization_key,
         batch_estimates=estimates,
@@ -556,8 +597,66 @@ def run_paired_rqmc_greeks(
     )
 
 
+def concatenate_paired_results(
+    results: Sequence[PairedRQMCGreeksResult],
+) -> PairedRQMCGreeksResult:
+    """Join consecutive batch-range chunks into the run they came from.
+
+    Chunks must agree on everything that defines the point set and the estimator
+    — spot, bump, paths per batch, randomization key, and whether a conditional
+    control is carried.  Disagreement means the chunks are not slices of one run,
+    which is a caller error rather than something to average over.
+
+    The statistics are recomputed from the concatenated rows rather than pooled
+    from the chunks, so the outcome is bit-identical to the single call that
+    would have produced the same rows.
+    """
+    ordered = list(results)
+    if not ordered:
+        raise ValueError("cannot concatenate an empty sequence of paired results")
+    head = ordered[0]
+    for other in ordered[1:]:
+        mismatch = (
+            other.spot != head.spot
+            or other.relative_bump != head.relative_bump
+            or other.absolute_bump != head.absolute_bump
+            or other.paths_per_batch != head.paths_per_batch
+            or other.randomization_key != head.randomization_key
+            or (other.control_batch_estimates is None)
+            != (head.control_batch_estimates is None)
+        )
+        if mismatch:
+            raise ValueError(
+                "paired result chunks disagree on the point set or estimator; "
+                "they are not slices of one run"
+            )
+
+    estimates = np.concatenate([r.batch_estimates for r in ordered], axis=0)
+    control_estimates = (
+        None
+        if head.control_batch_estimates is None
+        else np.concatenate([r.control_batch_estimates for r in ordered], axis=0)
+    )
+    # total_path_valuations = 3 * paths_per_batch * batches_used * multiplier,
+    # so the multiplier divides out exactly from any one chunk.
+    divisor = 3 * head.paths_per_batch * head.batches_used
+    return _paired_result_from_estimates(
+        estimates,
+        control_estimates,
+        spot=head.spot,
+        relative_bump=head.relative_bump,
+        absolute_bump=head.absolute_bump,
+        paths_per_batch=head.paths_per_batch,
+        randomization_key=head.randomization_key,
+        path_valuation_multiplier=(
+            head.total_path_valuations // divisor if divisor else 1
+        ),
+    )
+
+
 __all__ = [
     "RQMCCheckpoint",
+    "concatenate_paired_results",
     "PairedRQMCGreeksResult",
     "RQMCResult",
     "RQMCRunSpec",

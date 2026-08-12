@@ -301,3 +301,45 @@ def test_scanning_refuses_a_stream_shorter_than_the_decision_floor():
             pde_discretization_envelope=0.0,
             economic_bound=BOUND,
         )
+
+
+def test_margin_fraction_reserves_a_legible_buffer_under_the_bound():
+    """Stopping at the first crossing leaves ~zero margin by construction.
+
+    That is statistically fine -- the anytime-valid guarantee covers optional
+    stopping -- but a certificate reading "PASS with 0.2% margin" invites
+    questions the statistics do not. The margin is a declared parameter so the
+    buffer is a stated policy rather than an accident of where the walk landed.
+    """
+    strict = _policy(margin_fraction=0.10)
+    assert strict.effective_bound(BOUND) == pytest.approx(0.45)
+    assert _policy().margin_fraction == 0.0
+    assert _policy().effective_bound(BOUND) == BOUND
+
+    # Chosen so gap + uncertainty ~ 0.483: inside the 0.50 bound, outside the
+    # margin-reduced 0.45. Far enough from the gap-only rejection test that
+    # neither call can be a REJECT.
+    common = dict(
+        batches_used=256,
+        reference_gap=0.42,
+        greek_batch_standard_deviation=0.2,
+        pde_discretization_envelope=0.01,
+        economic_bound=BOUND,
+    )
+    lenient = sequential_admission(policy=_policy(), **common)
+    guarded = sequential_admission(policy=strict, **common)
+
+    assert lenient.status is SequentialAdmissionStatus.ADMIT
+    assert guarded.status is SequentialAdmissionStatus.CONTINUE
+    # The reported bound stays the contractual one; only the test tightens.
+    assert guarded.economic_bound == BOUND
+
+
+@pytest.mark.parametrize("bad", [-0.01, 1.0, 1.5])
+def test_margin_fraction_must_leave_a_usable_bound(bad):
+    with pytest.raises(ValueError):
+        _policy(margin_fraction=bad)
+
+
+def test_margin_fraction_enters_the_policy_digest():
+    assert _policy(margin_fraction=0.05).sha256() != _policy().sha256()

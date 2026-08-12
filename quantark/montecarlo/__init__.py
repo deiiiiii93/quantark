@@ -44,6 +44,7 @@ from .qmc_rqmc_driver import (
     RQMCRunSpec,
     run_rqmc,
     run_rqmc_traced,
+    concatenate_paired_results,
     run_paired_rqmc_greeks,
 )
 
@@ -74,5 +75,6 @@ __all__ = [
     "RQMCRunSpec",
     "run_rqmc",
     "run_rqmc_traced",
+    "concatenate_paired_results",
     "run_paired_rqmc_greeks",
 ]
