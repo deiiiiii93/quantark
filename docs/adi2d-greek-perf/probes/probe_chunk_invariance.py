@@ -67,7 +67,9 @@ def heston_batches(s16, case, *, batches: int) -> np.ndarray:
     )
 
 
-def paired_batches(s16, variant: str, case, *, batches: int) -> np.ndarray:
+def paired_batches(
+    s16, variant: str, case, *, batches: int, first_batch: int = 0
+) -> np.ndarray:
     """Per-batch delta/gamma rows from the generic paired reference."""
     product = s16.make_snowball(case, dense_ki=True)
     env = s16.make_environment(
@@ -101,6 +103,7 @@ def paired_batches(s16, variant: str, case, *, batches: int) -> np.ndarray:
             else s16.PRODUCTION_SLV_PATHS_PER_BATCH
         ),
         batches=int(batches),
+        first_batch=int(first_batch),
         seed=(
             s16.HESTON_REFERENCE_SEED if variant == "heston" else s16.SLV_PRIMARY_SEED
         ),
@@ -124,6 +127,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--case", default="ordinary_full")
     parser.add_argument("--ladder", type=int, nargs="+", default=LADDER)
     parser.add_argument(
+        "--first-batch-chunks",
+        action="store_true",
+        help="assemble a run from offset chunks and compare against the whole",
+    )
+    parser.add_argument(
         "--variant",
         default="heston",
         choices=("heston", "heston_slv"),
@@ -140,6 +148,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.variant == "heston":
             return heston_batches(s16, case, batches=count)
         return paired_batches(s16, args.variant, case, batches=count)
+
+    if args.first_batch_chunks:
+        # The stronger claim the gate-driven loop actually relies on: a run
+        # ASSEMBLED from offset chunks equals the whole run. This also tests that
+        # widening the engine spec's max_batches (needed so the later ids exist)
+        # leaves the draws alone -- a real-engine check the synthetic driver test
+        # cannot make.
+        total = max(args.ladder)
+        half = total // 2
+        whole = paired_batches(s16, args.variant, case, batches=total)
+        first = paired_batches(
+            s16, args.variant, case, batches=half, first_batch=0
+        )
+        second = paired_batches(
+            s16, args.variant, case, batches=total - half, first_batch=half
+        )
+        joined = np.concatenate([first, second], axis=0)
+        identical = joined.tobytes() == whole.tobytes()
+        print(
+            f"  assembled [0,{half}) + [{half},{total}) vs whole B={total}: "
+            f"bitwise={identical}  "
+            f"max_abs_diff={float(np.max(np.abs(joined - whole))):.3e}"
+        )
+        verdict = (
+            "offset chunks assemble into the whole run"
+            if identical
+            else "OFFSET CHUNKS DIVERGE -- gate-driven stopping is unsound"
+        )
+        print(f"\nVERDICT: {verdict}")
+        return 0 if identical else 1
 
     runs: dict[int, np.ndarray] = {}
     for batches in sorted(args.ladder):
