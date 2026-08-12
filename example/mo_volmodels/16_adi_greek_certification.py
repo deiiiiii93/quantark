@@ -1635,6 +1635,37 @@ def gate_driven_reference_levels(
     return target, fine, record
 
 
+def build_sequential_policy(
+    args, variant: str, case_name: str, *, cap: int
+) -> Optional[SequentialAdmissionPolicy]:
+    """The declared stopping policy for one cell, or None to spend the cap.
+
+    Returns None -- the fixed-allocation path -- unless ``--sequential`` is set,
+    and always for the multilevel SLV cell, whose telescoping level weights
+    require exactly its declared batch count. That cell is declared, not sized.
+
+    The cap is the cell's frozen allocation, so a gate-driven run can never cost
+    more than the fixed run it replaces. Every parameter is fixed here, before
+    any batch is priced, and the digest travels with the evidence.
+    """
+    if not getattr(args, "sequential", False):
+        return None
+    if variant == "heston_slv" and case_name in SLV_MULTILEVEL_CASES:
+        return None
+    floor = min(int(AMENDMENT_AGGREGATE_BATCHES), int(cap))
+    return SequentialAdmissionPolicy(
+        family_alpha=float(args.sequential_family_alpha),
+        # Declared from the regime matrix, never counted from what ran: a
+        # data-dependent K is not a Bonferroni correction.
+        tests=2 * len(certification_cases(quick=False)) * 2,
+        min_batches=min(int(MIN_PRODUCTION_RQMC_BATCHES), int(cap)),
+        aggregate_floor_batches=floor,
+        planned_batches=min(max(floor, 256), int(cap)),
+        max_batches=int(cap),
+        margin_fraction=float(args.sequential_margin),
+    )
+
+
 def certify_case(
     variant: str,
     case: CaseSpec,
@@ -4912,6 +4943,39 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
             "mismatched source/configuration evidence fails closed"
         ),
     )
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help=(
+            "stop each cell once its certification gate is decided, instead of "
+            "spending the declared allocation; judged against anytime-valid "
+            "widths and capped at that allocation, so it can never cost more"
+        ),
+    )
+    parser.add_argument(
+        "--sequential-chunk-batches",
+        type=int,
+        default=128,
+        help=(
+            "batches priced between gate evaluations; stops land on multiples "
+            "of this, so it bounds the overshoot past the true stop (default 128)"
+        ),
+    )
+    parser.add_argument(
+        "--sequential-margin",
+        type=float,
+        default=0.0,
+        help=(
+            "fraction of the economic bound held back before admitting, so a "
+            "certificate does not read as passing by a hair (default 0.0)"
+        ),
+    )
+    parser.add_argument(
+        "--sequential-family-alpha",
+        type=float,
+        default=0.05,
+        help="family-wise error budget spread across every cell-greek test",
+    )
     return parser.parse_args(argv)
 
 
@@ -5320,6 +5384,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "rqmc_batch_workers": rqmc_batch_workers,
         "rqmc_batch_workers_by_variant_case": (rqmc_batch_workers_by_variant_case),
         "cell_workers": cell_workers,
+        # Whether cells stopped on their gate or spent their allocation changes
+        # what the evidence means, so it belongs in the identity: a resume must
+        # not mix fixed-allocation cells with gate-driven ones under one hash.
+        "sequential_stopping": (
+            {
+                "enabled": True,
+                "chunk_batches": int(args.sequential_chunk_batches),
+                "margin_fraction": float(args.sequential_margin),
+                "family_alpha": float(args.sequential_family_alpha),
+                "excluded_variant_cases": sorted(
+                    f"heston_slv/{name}" for name in SLV_MULTILEVEL_CASES
+                ),
+            }
+            if getattr(args, "sequential", False)
+            else {"enabled": False}
+        ),
     }
     run_configuration_hash = _canonical_sha256(run_configuration)
     print(
@@ -5374,14 +5454,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if variant == "heston"
             else reference_seeds["heston_slv_primary"]
         )
+        cell_batches = _sampling_primary_batches_for_case(
+            sampling, variant, case.name
+        )
         cell = certify_case(
             variant,
             case,
             quick=args.quick,
             paths_per_batch=sampling["paths_per_batch"],
-            batches=_sampling_primary_batches_for_case(sampling, variant, case.name),
+            batches=cell_batches,
             seed=variant_seed,
             hedge_inception_spot=args.hedge_inception_spot,
+            sequential_policy=build_sequential_policy(
+                args, variant, case.name, cap=cell_batches
+            ),
+            sequential_chunk_batches=args.sequential_chunk_batches,
             heston_spot_bridge_strata=heston_bridge_profile["strata"],
             heston_spot_bridge_dimensions=heston_bridge_profile["dimensions"],
             slv_spot_strata=slv_spot_strata,

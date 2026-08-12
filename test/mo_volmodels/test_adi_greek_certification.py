@@ -1308,3 +1308,66 @@ def test_gate_driven_levels_extend_by_batch_range_without_recomputing():
     assert record["batches_banked"] == 96
     assert target.batches_used == fine.batches_used == 96
     assert target.batch_estimates.shape == (96, 5)
+
+
+def test_sequential_policy_is_declared_per_cell_and_capped_by_the_allocation():
+    """The policy is built before any batch is priced, and cannot overspend.
+
+    The cap is the cell's own frozen allocation, which is what makes gate-driven
+    stopping strictly non-regressive on cost: worst case it spends exactly what
+    the fixed run would have.
+    """
+    module = _load()
+    args = SimpleNamespace(
+        sequential=True,
+        sequential_chunk_batches=128,
+        sequential_margin=0.0,
+        sequential_family_alpha=0.05,
+    )
+
+    policy = module.build_sequential_policy(args, "heston", "low_feller", cap=1024)
+    assert policy is not None
+    assert policy.max_batches == 1024
+    assert policy.margin_fraction == 0.0
+    # 7 regimes x 2 variants x 2 greeks, declared from the matrix.
+    assert policy.tests == 28
+    assert policy.aggregate_floor_batches == module.AMENDMENT_AGGREGATE_BATCHES
+    assert policy.first_decidable_batch == module.AMENDMENT_AGGREGATE_BATCHES
+
+    # A cell whose allocation is below the cohort floor cannot be asked for more
+    # batches than it has.
+    small = module.build_sequential_policy(args, "heston_slv", "near_ko", cap=64)
+    assert small is not None
+    assert small.max_batches == 64
+    assert small.first_decidable_batch <= 64
+    assert small.planned_batches <= 64
+
+
+def test_sequential_stopping_is_opt_in_and_never_touches_the_multilevel_cell():
+    """The multilevel SLV cell is declared, not sized.
+
+    ``build_slv_multilevel_reference`` requires exact equality with its declared
+    batch count, so its telescoping level weights cannot survive an early stop.
+    """
+    module = _load()
+    off = SimpleNamespace(
+        sequential=False,
+        sequential_chunk_batches=128,
+        sequential_margin=0.0,
+        sequential_family_alpha=0.05,
+    )
+    on = SimpleNamespace(
+        sequential=True,
+        sequential_chunk_batches=128,
+        sequential_margin=0.05,
+        sequential_family_alpha=0.05,
+    )
+
+    assert module.build_sequential_policy(off, "heston", "low_feller", cap=1024) is None
+    for case_name in module.SLV_MULTILEVEL_CASES:
+        assert (
+            module.build_sequential_policy(on, "heston_slv", case_name, cap=256)
+            is None
+        )
+    # The same case on the Heston side is not excluded.
+    assert module.build_sequential_policy(on, "heston", "near_ki", cap=2048) is not None
