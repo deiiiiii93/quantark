@@ -824,26 +824,6 @@ def paired_mc_reference(
     # many this call runs.  A chunk starting at ``first_batch`` therefore needs a
     # spec that reaches ``first_batch + batches``, not merely the chunk size.
     spec_batches = int(first_batch) + int(batches)
-    if int(first_batch) != 0:
-        # MEASURED 2026-08-12 and unsound: asking this path for batch ids
-        # [4, 8) returns the SAME estimates as [0, 4) -- the vol-model path
-        # generator does not key its scramble off the driver's batch_id the way
-        # the driver's own synthetic generators do, so an offset chunk silently
-        # duplicates the first chunk instead of extending the run.
-        #
-        # Prefix invariance cannot detect this: a generator that restarts from
-        # its own beginning satisfies it trivially. Verifying prefixes and then
-        # assuming offsets was the error.
-        #
-        # Fail closed until the generator's batch keying is fixed. Duplicated
-        # batches would inflate the apparent sample while collapsing its
-        # variance, which is the most dangerous way for this to be wrong.
-        raise NotImplementedError(
-            "offset batch ranges are not sound on the vol-model path "
-            f"generator (requested first_batch={first_batch}); see "
-            "docs/adi2d-greek-perf/probes/probe_chunk_invariance.py "
-            "--first-batch-chunks"
-        )
     for shifted_spot in (spot * (1.0 - bump), spot, spot * (1.0 + bump)):
         shifted_env = bumped_environment(env, shifted_spot)
         engine = make_mc_engine(

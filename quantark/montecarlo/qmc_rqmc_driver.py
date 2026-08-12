@@ -538,7 +538,7 @@ def run_paired_rqmc_greeks(
             max_workers=batch_workers,
             thread_name_prefix="paired-rqmc",
         ) as executor:
-            rows = list(executor.map(estimate_batch, range(batches_used)))
+            rows = list(executor.map(estimate_batch, batch_ids))
     estimates = np.asarray([row[0] for row in rows], dtype=float)
     control_estimates = (
         None

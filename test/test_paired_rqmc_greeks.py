@@ -312,3 +312,27 @@ def test_concatenating_incompatible_results_is_refused():
         concatenate_paired_results([first, other_bump])
     with pytest.raises(ValueError):
         concatenate_paired_results([])
+
+
+@pytest.mark.parametrize("batch_workers", [1, 4])
+def test_batch_range_offset_is_honoured_under_both_schedules(batch_workers):
+    """The offset must survive the threaded path, not just the serial one.
+
+    The first version of this feature updated only the serial branch, so any
+    run with workers > 1 silently recomputed batches [0, n) while reporting
+    them as [first_batch, first_batch + n). Duplicated batches inflate the
+    sample and collapse its variance, so this is parametrised over both
+    schedules rather than trusting the serial one to represent both.
+    """
+    common = dict(spot=100.0, relative_bump=0.01)
+    whole = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0),
+        batches=8, batch_workers=batch_workers, **common,
+    )
+    tail = run_paired_rqmc_greeks(
+        _spec(99.0), _spec(100.0), _spec(101.0),
+        batches=4, first_batch=4, batch_workers=batch_workers, **common,
+    )
+
+    assert tail.batch_estimates.tobytes() == whole.batch_estimates[4:].tobytes()
+    assert tail.batch_estimates.tobytes() != whole.batch_estimates[:4].tobytes()
