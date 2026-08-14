@@ -90,6 +90,16 @@ from quantark.validation import (
     certify_signed_bias_from_independent_cohorts,
     summarize_independent_cohort_means,
 )
+
+# Imported from the module rather than re-exported through
+# `quantark/validation/__init__.py` on purpose: that __init__ is inside
+# IMPLEMENTATION_INPUTS with no exemptions, so widening its `__all__` would move
+# the numerical digest and invalidate banked cells for a change that cannot
+# affect a number.
+from quantark.validation.cell_identity import (
+    cell_identity_sha256,
+    source_projection_sha256,
+)
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface
 from quantark.volmodels.slv.leverage import LeverageSurface
@@ -432,6 +442,83 @@ IMPLEMENTATION_INPUTS = (
     # the arithmetic that produces SLV reference values must stay inside the
     # fail-closed digest, or editing it would invalidate no checkpoint.
     "quantark/montecarlo/qe_kernels.py",
+    # Identity machinery: it decides which banked cells may be reused, so the
+    # full-source digest must cover it. It is excluded from the NUMERICAL
+    # projection below, because it cannot change a number -- and a behaviour
+    # change in it is self-revealing anyway, since it would change the projected
+    # bytes of every file it projects.
+    "quantark/validation/cell_identity.py",
+)
+
+# Inputs hashed for provenance but outside the numerical projection.
+NUMERICAL_EXEMPT_INPUTS = frozenset({"quantark/validation/cell_identity.py"})
+
+# Symbols in THIS file that cannot change any cell's numbers, and are therefore
+# removed before the numerical digest is taken. Everything not listed here is
+# numerical by default, so adding a function invalidates banked cells until it is
+# audited and listed -- the list cannot rot silently, and `project_source`
+# refuses a name that no longer exists.
+#
+# Two kinds qualify:
+#
+# (1) RUNS AFTER THE NUMBERS EXIST -- validation, reporting, publishing, hashing,
+#     checkpoint I/O, and the amendment/parent-certificate paths. These read
+#     evidence; they cannot produce it.
+#
+# (2) REACHES A CELL ONLY THROUGH THE DECLARED PLAN -- argument parsing, the case
+#     table, the sampling and policy builders, `main` itself. Their entire effect
+#     on a cell is the plan they declare, and `cell_plan_projection` hashes that
+#     plan directly, so hashing their bytes as well is double counting. That
+#     double counting is exactly what made the old fleet-wide guard invalidate
+#     fourteen cells whenever one cell's plan moved.
+#
+# Category (2) is sound ONLY while the plan projection stays complete. Anything
+# added here that could influence a cell by a route the plan does not record is a
+# hole, so scrutinise `cell_plan_projection` before extending this list.
+NON_NUMERICAL_SYMBOLS = (
+    # (1) after the fact
+    "validate_payload",
+    "_admissible_batch_count",
+    "render_markdown",
+    "publish_payload",
+    "build_decision_payload",
+    "evidence_projection",
+    "_projected_evidence_sha256",
+    "_cell_evidence_sha256",
+    "_canonical_sha256",
+    "_json_default",
+    "_atomic_write",
+    "_checkpoint_path",
+    "_write_checkpoint",
+    "_load_checkpoint",
+    "implementation_sha256",
+    "numerical_implementation_sha256",
+    "production_pde_compatibility_sha256",
+    "cell_plan_projection",
+    "cell_identity",
+    "runtime_environment",
+    # amendment and parent-certificate handling: a separate, later workflow
+    "_validate_amendment_payload",
+    "load_and_validate_parent_certificate",
+    "parent_certificate_manifest",
+    "make_amendment_decisions",
+    "amendment_run_configuration",
+    "amendment_cell_provenance",
+    "amendment_sampling_by_variant",
+    "amendment_reference_seeds",
+    "amendment_qe_substeps_by_variant_case",
+    "run_incremental_amendment",
+    # (2) mediated entirely by the declared plan
+    "main",
+    "parse_args",
+    "certification_cases",
+    "build_sequential_policy",
+    "stopping_excluded",
+    "stopping_excluded_variant_cases",
+    "_sampling_batches_for_case",
+    "_sampling_primary_batches_for_case",
+    "_normalized_batches_by_case",
+    "_normalized_primary_batches_by_case",
 )
 
 # This narrower projection binds carried schema-9 results to the live
@@ -4139,6 +4226,14 @@ def validate_payload(payload: dict) -> None:
         raise ValueError("certification numerical runtime mismatch")
     if payload["implementation_sha256"] != implementation_sha256():
         raise ValueError("certification does not match the live implementation")
+    if payload.get("numerical_implementation_sha256") != (
+        numerical_implementation_sha256()
+    ):
+        raise ValueError("certification does not match the live numerical projection")
+    if run_configuration.get("numerical_implementation_sha256") != payload.get(
+        "numerical_implementation_sha256"
+    ):
+        raise ValueError("numerical projection disagrees with the run configuration")
     if (
         run_configuration.get("production_engine_controls")
         != PRODUCTION_ENGINE_CONTROLS
@@ -4571,6 +4666,130 @@ def implementation_sha256() -> str:
     return digest.hexdigest()
 
 
+def numerical_implementation_sha256() -> str:
+    """Hash only the inputs that can change a cell's numbers.
+
+    Same file list as `implementation_sha256`, but this file is projected through
+    `NON_NUMERICAL_SYMBOLS` first. `implementation_sha256` is kept alongside and
+    still recorded in the payload, because it remains the honest answer to "what
+    was the whole source state" -- it is simply the wrong question to ask of a
+    banked cell.
+    """
+    root = Path(__file__).resolve().parents[2]
+    here = Path(__file__).resolve().relative_to(root).as_posix()
+    return source_projection_sha256(
+        [
+            (
+                root / relative,
+                NON_NUMERICAL_SYMBOLS if relative == here else (),
+            )
+            for relative in IMPLEMENTATION_INPUTS
+            if relative not in NUMERICAL_EXEMPT_INPUTS
+        ],
+        root=root,
+    )
+
+
+def cell_plan_projection(
+    variant: str, case_name: str, run_configuration: dict
+) -> dict:
+    """The declared plan for ONE cell.
+
+    Everything here can change this cell's numbers; nothing outside it can. The
+    exclusions are as load-bearing as the inclusions:
+
+    * other cells' plans and the fleet's case selection -- a cell does not know
+      what else ran, so `--cases near_ko` must reuse a cell banked by a full run;
+    * `cell_workers` -- pure scheduling across cells;
+    * output paths, timestamps, resume flags.
+
+    `rqmc_batch_workers` IS included even though batch-worker count is proven
+    bitwise-invariant, because that invariance is a property of the current
+    driver rather than of the estimator, and it was briefly false: the threaded
+    branch ignored the batch-range offset until `bbd452e`. Recording it costs a
+    re-run only when someone changes worker counts, which is rare.
+    """
+    sampling = (run_configuration.get("sampling_by_variant", {}) or {}).get(variant, {})
+    cases = {
+        entry.get("name"): entry for entry in run_configuration.get("cases", []) or []
+    }
+    if case_name not in cases:
+        raise ValueError(f"{variant}/{case_name}: case is not in the run configuration")
+    stopping = run_configuration.get("sequential_stopping", {}) or {}
+    excluded = set(stopping.get("excluded_variant_cases", []) or [])
+    label = f"{variant}/{case_name}"
+    bridge_key = (
+        "heston_spot_bridge_profile_by_case"
+        if variant == "heston"
+        else "slv_spot_bridge_profile_by_case"
+    )
+    return {
+        "schema_version": run_configuration.get("schema_version"),
+        "certification_mode": run_configuration.get("certification_mode"),
+        "quick": run_configuration.get("quick"),
+        "skip_anchors": run_configuration.get("skip_anchors"),
+        "variant": variant,
+        "case": cases[case_name],
+        "reference_seeds": run_configuration.get("reference_seeds"),
+        "paths_per_batch": sampling.get("paths_per_batch"),
+        "batches_by_case": (sampling.get("batches_by_case", {}) or {}).get(case_name),
+        "primary_batches_by_case": (
+            sampling.get("primary_batches_by_case", {}) or {}
+        ).get(case_name),
+        "spot_bump": run_configuration.get("spot_bump"),
+        "full_bump_ladder": run_configuration.get("full_bump_ladder"),
+        "stochastic_component_confidence": run_configuration.get(
+            "stochastic_component_confidence"
+        ),
+        "hedge_inception_spot": run_configuration.get("hedge_inception_spot"),
+        "production_engine_controls": run_configuration.get(
+            "production_engine_controls"
+        ),
+        "spot_bridge_profile": (run_configuration.get(bridge_key, {}) or {}).get(
+            case_name
+        ),
+        "qe_substeps": (
+            run_configuration.get("qe_substeps_by_variant_case", {}) or {}
+        ).get(variant, {}).get(case_name),
+        "rqmc_batch_workers": (
+            run_configuration.get("rqmc_batch_workers_by_variant_case", {}) or {}
+        ).get(variant, {}).get(case_name),
+        "slv_spot_strata": run_configuration.get("slv_spot_strata"),
+        "slv_spot_antithetic": run_configuration.get("slv_spot_antithetic"),
+        "slv_spot_bridge_strata": run_configuration.get("slv_spot_bridge_strata"),
+        "slv_multilevel_policy": run_configuration.get("slv_multilevel_policy"),
+        # The cell's OWN stopping rule, not the fleet's: whether it may stop, and
+        # under exactly which declared parameters.
+        "stopping": (
+            {"enabled": False}
+            if not stopping.get("enabled") or label in excluded
+            else {
+                "enabled": True,
+                "chunk_batches": stopping.get("chunk_batches"),
+                "margin_fraction": stopping.get("margin_fraction"),
+                "family_alpha": stopping.get("family_alpha"),
+            }
+        ),
+    }
+
+
+def cell_identity(
+    variant: str,
+    case_name: str,
+    run_configuration: dict,
+    *,
+    numerical_sha256: str,
+    consumed: Optional[dict] = None,
+) -> str:
+    """The identity a banked cell must match to be reusable."""
+    return cell_identity_sha256(
+        numerical_sha256=numerical_sha256,
+        plan=cell_plan_projection(variant, case_name, run_configuration),
+        runtime=run_configuration.get("runtime_environment", {}) or {},
+        consumed=dict(consumed or {}),
+    )
+
+
 def production_pde_compatibility_sha256() -> str:
     """Hash the live production-PDE dependency projection.
 
@@ -4622,11 +4841,15 @@ def _write_checkpoint(
     run_configuration_sha256: str,
     kind: str,
     evidence,
+    identity_sha256: Optional[str] = None,
 ) -> None:
     record = {
         "schema_version": SCHEMA_VERSION,
         "study": "adi_2d_snowball_greek_certification_checkpoint",
+        # Recorded for provenance, no longer used to gate reuse: a fleet-wide
+        # digest cannot say whether ONE cell may be reused.
         "run_configuration_sha256": run_configuration_sha256,
+        "identity_sha256": identity_sha256,
         "kind": kind,
         "evidence": evidence,
     }
@@ -4642,7 +4865,18 @@ def _load_checkpoint(
     *,
     run_configuration_sha256: str,
     kind: str,
+    identity_sha256: Optional[str] = None,
 ):
+    """Reuse a banked artifact only when its identity matches.
+
+    Cells are gated on `identity_sha256` -- the numerical projection, this cell's
+    own declared plan, the runtime, and the identities of the cells it consumes.
+    Artifacts with no per-cell identity (the shared deterministic anchors) keep
+    the fleet-wide configuration hash, because they are genuinely fleet-wide.
+
+    A checkpoint written before identities existed is refused rather than
+    accepted or silently re-stamped: it cannot state what it depended on.
+    """
     path = _checkpoint_path(output_dir, name)
     if not path.exists():
         return None
@@ -4656,10 +4890,24 @@ def _load_checkpoint(
         or record.get("kind") != kind
     ):
         raise ValueError(f"checkpoint metadata mismatch: {path}")
-    if record.get("run_configuration_sha256") != run_configuration_sha256:
+    if identity_sha256 is None:
+        if record.get("run_configuration_sha256") != run_configuration_sha256:
+            raise ValueError(
+                f"checkpoint configuration mismatch: {path}; use a new output "
+                "directory or rerun without --resume"
+            )
+        return record.get("evidence")
+    banked_identity = record.get("identity_sha256")
+    if banked_identity is None:
         raise ValueError(
-            f"checkpoint configuration mismatch: {path}; use a new output "
-            "directory or rerun without --resume"
+            f"checkpoint predates cell identities: {path}; it cannot state what "
+            "it depended on, so it cannot be reused"
+        )
+    if banked_identity != identity_sha256:
+        raise ValueError(
+            f"cell identity mismatch: {path}; banked {banked_identity[:16]} "
+            f"but this run requires {identity_sha256[:16]} -- this cell's "
+            "arithmetic, declared plan, runtime, or a cell it consumes has changed"
         )
     return record.get("evidence")
 
@@ -5464,6 +5712,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         }
 
     implementation_hash = implementation_sha256()
+    # The narrower digest that gates per-cell reuse. Both are recorded: the
+    # whole-file hash still answers "what was the source state", while this one
+    # answers "may this cell be reused", which is the question a checkpoint asks.
+    numerical_hash = numerical_implementation_sha256()
     runtime = runtime_environment()
     selected_variants = tuple(
         variant for variant in ("heston", "heston_slv") if variant in args.variants
@@ -5498,6 +5750,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "schema_version": SCHEMA_VERSION,
         "certification_mode": CERTIFICATION_MODE_FULL,
         "implementation_sha256": implementation_hash,
+        "numerical_implementation_sha256": numerical_hash,
         "runtime_environment": runtime,
         "production_engine_controls": PRODUCTION_ENGINE_CONTROLS,
         "quick": bool(args.quick),
@@ -5571,9 +5824,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     cells_by_variant_case = {}
     heston_cells_by_case = {}
 
+    def cell_identity_for(variant: str, case_name: str) -> str:
+        """This cell's identity, including any cell it consumes as an input.
+
+        The multilevel SLV cell reads the matched Heston cell as its high control,
+        so that Heston cell's identity is part of the SLV cell's. Without the
+        link, a change to the control leaves the consumer looking reusable --
+        which is exactly how the 35.5h fleet banked an SLV cell built on a
+        gate-truncated control.
+        """
+        consumed = {}
+        if (
+            variant == "heston_slv"
+            and case_name in SLV_MULTILEVEL_CASES
+            and not args.quick
+        ):
+            consumed[f"heston/{case_name}"] = cell_identity(
+                "heston",
+                case_name,
+                run_configuration,
+                numerical_sha256=numerical_hash,
+            )
+        return cell_identity(
+            variant,
+            case_name,
+            run_configuration,
+            numerical_sha256=numerical_hash,
+            consumed=consumed,
+        )
+
     def compute_cell(variant: str, case: CaseSpec) -> dict:
         sampling = selected_sampling[variant]
         checkpoint_name = f"{variant}__{case.name}"
+        identity = cell_identity_for(variant, case.name)
         cell = None
         if args.resume:
             cell = _load_checkpoint(
@@ -5581,6 +5864,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 checkpoint_name,
                 run_configuration_sha256=run_configuration_hash,
                 kind="cell",
+                identity_sha256=identity,
             )
             if cell is not None:
                 print(f"[adi-greeks] resumed {variant}/{case.name}", flush=True)
@@ -5625,6 +5909,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             run_configuration_sha256=run_configuration_hash,
             kind="cell",
             evidence=cell,
+            identity_sha256=identity,
         )
         print(
             f"[adi-greeks] checkpointed {variant}/{case.name}: " f"{cell['status']}",
@@ -5726,6 +6011,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "python": runtime["python_version"],
         "runtime_environment": runtime,
         "implementation_sha256": implementation_hash,
+        "numerical_implementation_sha256": numerical_hash,
+        # Per-cell identities, so a reader can see what each cell's reuse was
+        # predicated on. Kept beside the cells rather than inside them, so that
+        # adding this does not perturb `_cell_evidence_sha256`, which the SLV
+        # multilevel estimator uses to pin its Heston control.
+        "cell_identities": {
+            f"{variant}/{case.name}": cell_identity_for(variant, case.name)
+            for variant in selected_variants
+            for case in cases
+        },
         "run_configuration_sha256": run_configuration_hash,
         "run_configuration": run_configuration,
         "elapsed_seconds": time.perf_counter() - started,

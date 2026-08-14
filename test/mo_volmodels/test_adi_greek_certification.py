@@ -1,10 +1,14 @@
+import ast
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+
+from quantark.validation.cell_identity import project_source
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1341,6 +1345,162 @@ def test_sequential_policy_is_declared_per_cell_and_capped_by_the_allocation():
     assert small.max_batches == 64
     assert small.first_decidable_batch <= 64
     assert small.planned_batches <= 64
+
+
+def test_every_exempt_symbol_still_exists():
+    """A renamed non-numerical symbol must break loudly, not widen the digest."""
+    module = _load()
+    source = Path(module.__file__).read_text()
+    top_level = {
+        node.name
+        for node in ast.parse(source).body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    missing = sorted(set(module.NON_NUMERICAL_SYMBOLS) - top_level)
+    assert not missing, f"exempt symbols no longer defined: {missing}"
+    # And the digest itself must be computable, which is where a stale list bites.
+    assert len(module.numerical_implementation_sha256()) == 64
+
+
+def test_the_numerical_projection_ignores_validation_but_not_arithmetic():
+    """The whole point: validation edits are free, arithmetic edits are not."""
+    module = _load()
+    source = Path(module.__file__).read_text()
+    projected = project_source(source, exempt=module.NON_NUMERICAL_SYMBOLS)
+    # Validation bodies are gone...
+    assert "certification does not match the live numerical projection" not in projected
+    assert "def validate_payload" not in projected
+    assert "def main(" not in projected
+    assert "def build_sequential_policy" not in projected
+    # ...while the arithmetic that produces cell numbers remains.
+    for kept in (
+        "def certify_case",
+        "def paired_mc_reference",
+        "def build_slv_multilevel_reference",
+        "def gate_driven_reference_levels",
+        "def deterministic_anchors",
+        "def make_pde_engine",
+    ):
+        assert kept in projected, f"{kept} must stay in the numerical projection"
+    # Module-level plan constants stay, so a changed allocation invalidates.
+    assert "PRODUCTION_HESTON_BATCHES_BY_CASE" in projected
+
+
+def test_cell_plan_projection_isolates_one_cell():
+    """A cell's plan must not carry other cells' plans or the fleet's selection."""
+    module = _load()
+    run_configuration = {
+        "schema_version": module.SCHEMA_VERSION,
+        "certification_mode": module.CERTIFICATION_MODE_FULL,
+        "quick": False,
+        "skip_anchors": False,
+        "runtime_environment": {"numpy_version": "1.26.4"},
+        "production_engine_controls": module.PRODUCTION_ENGINE_CONTROLS,
+        "reference_seeds": {"heston": 11},
+        "cases": [{"name": "near_ko", "spot": 100.0}, {"name": "low_feller"}],
+        "sampling_by_variant": {
+            "heston": {
+                "paths_per_batch": 4096,
+                "batches_by_case": {"near_ko": 1024, "low_feller": 1024},
+                "primary_batches_by_case": {"near_ko": 1024, "low_feller": 1024},
+            }
+        },
+        "spot_bump": module.SPOT_BUMP,
+        "full_bump_ladder": list(module.FULL_BUMP_LADDER),
+        "stochastic_component_confidence": module.STOCHASTIC_COMPONENT_CONFIDENCE,
+        "hedge_inception_spot": 4532.52,
+        "heston_spot_bridge_profile_by_case": {
+            "near_ko": {"strata": 4, "dimensions": 8},
+            "low_feller": {"strata": 1, "dimensions": 1},
+        },
+        "qe_substeps_by_variant_case": {"heston": {"near_ko": {"target": 4}}},
+        "rqmc_batch_workers_by_variant_case": {"heston": {"near_ko": 4}},
+        "sequential_stopping": {
+            "enabled": True,
+            "chunk_batches": 128,
+            "margin_fraction": 0.0,
+            "family_alpha": 0.05,
+            "excluded_variant_cases": ["heston/near_ki", "heston_slv/near_ki"],
+        },
+        "cell_workers": 2,
+    }
+    plan = module.cell_plan_projection("heston", "near_ko", run_configuration)
+    flat = json.dumps(plan, sort_keys=True, default=str)
+    # Its own plan is present.
+    assert plan["case"]["name"] == "near_ko"
+    assert plan["batches_by_case"] == 1024
+    assert plan["spot_bridge_profile"] == {"strata": 4, "dimensions": 8}
+    assert plan["stopping"]["enabled"] is True
+    # Another cell's plan is not, nor is fleet-wide scheduling.
+    assert "low_feller" not in flat
+    assert "cell_workers" not in plan
+
+    # An excluded cell records that it may not stop, with no policy parameters.
+    run_configuration["cases"].append({"name": "near_ki"})
+    run_configuration["sampling_by_variant"]["heston"]["batches_by_case"][
+        "near_ki"
+    ] = 2048
+    excluded = module.cell_plan_projection("heston", "near_ki", run_configuration)
+    assert excluded["stopping"] == {"enabled": False}
+
+    # A case absent from the configuration is refused, not silently defaulted.
+    with pytest.raises(ValueError, match="not in the run configuration"):
+        module.cell_plan_projection("heston", "absent_case", run_configuration)
+
+
+def test_a_checkpoint_without_an_identity_cannot_be_reused(tmp_path):
+    """Pre-identity checkpoints cannot state what they depended on."""
+    module = _load()
+    module._write_checkpoint(
+        tmp_path,
+        "heston__near_ko",
+        run_configuration_sha256="cfg",
+        kind="cell",
+        evidence={"status": "PASS"},
+    )
+    # Fleet-wide artifacts (the shared anchors) still resume on the config hash.
+    assert module._load_checkpoint(
+        tmp_path, "heston__near_ko", run_configuration_sha256="cfg", kind="cell"
+    ) == {"status": "PASS"}
+    # ...but a cell asked for by identity is refused.
+    with pytest.raises(ValueError, match="predates cell identities"):
+        module._load_checkpoint(
+            tmp_path,
+            "heston__near_ko",
+            run_configuration_sha256="cfg",
+            kind="cell",
+            identity_sha256="a" * 64,
+        )
+
+
+def test_a_cell_resumes_on_its_identity_not_the_fleet_configuration(tmp_path):
+    """The whole point: an unrelated fleet change must not invalidate a cell."""
+    module = _load()
+    module._write_checkpoint(
+        tmp_path,
+        "heston__near_ko",
+        run_configuration_sha256="original-fleet-hash",
+        kind="cell",
+        evidence={"status": "PASS"},
+        identity_sha256="a" * 64,
+    )
+    # Different fleet hash, same cell identity -> reused.
+    assert module._load_checkpoint(
+        tmp_path,
+        "heston__near_ko",
+        run_configuration_sha256="a-totally-different-fleet-hash",
+        kind="cell",
+        identity_sha256="a" * 64,
+    ) == {"status": "PASS"}
+    # Same fleet hash, different identity -> refused.
+    with pytest.raises(ValueError, match="cell identity mismatch"):
+        module._load_checkpoint(
+            tmp_path,
+            "heston__near_ko",
+            run_configuration_sha256="original-fleet-hash",
+            kind="cell",
+            identity_sha256="b" * 64,
+        )
 
 
 def test_a_multilevel_high_control_may_not_stop_early():
