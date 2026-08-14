@@ -38,15 +38,18 @@ from quantark.modelvalidation.evidence import (
     SCHEMA_VERSION,
     CheckpointStore,
     atomic_write_json,
+    atomic_write_text,
     identity_hash,
     projected_sha256,
     validate_durable_root,
 )
 from quantark.modelvalidation.gates import evaluate_aggregate_gate, evaluate_cell_gate
 from quantark.modelvalidation.reference import ReferenceEstimate, run_reference
+from quantark.modelvalidation.report import render_markdown
 from quantark.modelvalidation.study import CertificationStudy, SamplingPolicy
 
 CERTIFICATE_NAME = "certificate.json"
+REPORT_NAME = "report.md"
 
 
 @dataclass(frozen=True)
@@ -303,6 +306,7 @@ def certify(
     validate_payload(payload)
     path = root / CERTIFICATE_NAME
     atomic_write_json(path, payload)
+    atomic_write_text(root / REPORT_NAME, render_markdown(payload))
     return Certificate(payload=payload, path=path)
 
 
