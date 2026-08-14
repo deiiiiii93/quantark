@@ -135,6 +135,18 @@ def _quantities(document: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(str(q) for q in raw)
 
 
+def _ensure_builtin_builders() -> None:
+    """Import the builtin builder modules so their registrations exist.
+
+    Imported lazily and from inside the loader rather than at module scope:
+    builder modules import engines from across quantark, and a study file is the
+    only thing that needs them. Doing it here means every entry point (CLI,
+    library call, anchor replay) sees the same registry without callers having
+    to remember an import.
+    """
+    from quantark.modelvalidation import builders  # noqa: F401
+
+
 def load_study_text(text: str) -> CertificationStudy:
     """Parse a YAML study, resolving builders through the registry.
 
@@ -142,6 +154,7 @@ def load_study_text(text: str) -> CertificationStudy:
         ValidationError: malformed YAML, a structural violation (with its path),
             or an unknown builder name.
     """
+    _ensure_builtin_builders()
     try:
         document = yaml.safe_load(text)
     except yaml.YAMLError as exc:

@@ -10,3 +10,6 @@ dist/
 htmlcov/
 .ipynb_checkpoints/
 .DS_Store
+
+# modelvalidation run output (evidence is banked deliberately, not by accident)
+output/modelvalidation/

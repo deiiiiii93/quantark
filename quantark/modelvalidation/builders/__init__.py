@@ -7,4 +7,6 @@ module here, and nothing is registered speculatively.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from quantark.modelvalidation.builders import european_selftest  # noqa: F401
+
+__all__: list[str] = ["european_selftest"]
