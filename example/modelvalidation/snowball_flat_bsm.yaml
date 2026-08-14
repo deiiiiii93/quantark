@@ -1,0 +1,87 @@
+# Snowball under flat Black-Scholes: the module's demonstration study.
+#
+# Two deterministic engines -- the two-surface PDE solver and the quadrature
+# engine -- are certified against one paired-RQMC Monte Carlo benchmark, on PV
+# and both spot Greeks, across five scenarios chosen to stress the parts of the
+# payoff that are hard: sitting just under the knock-out barrier, sitting just
+# above the knock-in barrier, and running into expiry.
+#
+# Economic scale: the trade is 20,000 of notional, and one index-futures
+# contract at multiplier 200 with spot 100 hedges exactly that -- so one
+# "contract" of error is one contract of hedge a desk would have mis-placed.
+#
+# Bounds follow the desk convention: 0.5 contracts per cell, 0.1 contracts of
+# mean signed bias across cells.
+#
+# This is an offline study (minutes, not seconds). Run it with:
+#   python -m quantark.modelvalidation run example/modelvalidation/snowball_flat_bsm.yaml
+# Add --quick for a wiring check that is explicitly not bankable evidence.
+
+study: snowball-flat-bsm
+schema: 1
+
+quantities: [pv, delta, gamma]
+
+bounds:
+  cell: 0.5
+  mean_signed_bias: 0.1
+
+sampling:
+  paths_per_batch: 65536
+  min_batches: 4
+  max_batches: 32
+  seed: 20260814
+  bump: 0.01
+
+economic_scale:
+  builder: hedge_contracts
+  params:
+    hedge_multiplier: 200.0
+    hedge_inception_spot: 100.0
+    notional: 20000.0
+
+environment:
+  builder: flat_bsm
+  params:
+    spot: 100.0
+    vol: 0.22
+    rate: 0.025
+    div_yield: 0.03
+
+product:
+  builder: equity.snowball
+  params:
+    initial_price: 100.0
+    strike: 100.0
+    ko_barrier: 103.0
+    ki_barrier: 85.0
+    ko_rate: 0.15
+    rebate_rate: 0.15
+    months: 12
+    maturity: 1.0
+    contract_multiplier: 1.0
+
+reference:
+  builder: equity.snowball.mc_rqmc
+  params: {}
+
+candidates:
+  - builder: equity.snowball.pde
+    params: {accuracy: standard}
+  - builder: equity.snowball.quad
+    params: {grid_points: 1001}
+
+cases:
+  # At inception, comfortably between the barriers.
+  - {name: ordinary}
+  # Just under the knock-out barrier: the KO discontinuity sits inside the
+  # bump stencil, which is where deterministic gamma usually breaks first.
+  - {name: near_ko, environment: {spot: 102.5}}
+  # Just above the knock-in barrier: the payoff turns over here.
+  - {name: near_ki, environment: {spot: 86.0}}
+  # Low vol: barriers become rarely reached, so the PDE grid resolves a much
+  # narrower region of interest.
+  - {name: low_vol, environment: {vol: 0.12}}
+  # Three months to expiry with a quarterly schedule: few observations left,
+  # and time discretization error has nowhere to average out.
+  - {name: near_expiry, product: {months: 3, maturity: 0.25}}
