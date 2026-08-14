@@ -42,11 +42,27 @@ Quick mode shrinks sampling so the standard error will usually miss its budget,
 leaving cells `UNRESOLVED` and the decision `INCONCLUSIVE`. That is correct
 behaviour, not a failure — quick mode proves the plumbing runs, nothing more.
 
-A run writes three things under `<out>/<study>/`:
+A run writes four things under `<out>/<study>/`:
 
 - `certificate.json` — the machine record, with its projected SHA-256.
-- `report.md` — what a reviewer reads.
+- `report.md` — the terminal- and diff-friendly report.
+- `report.html` — the review copy: a single self-contained file (no scripts, no
+  external requests) that shows how much of each bound every measurement
+  consumed. Open it in a browser, attach it to a review, print it to PDF.
 - `checkpoints/` — resume state. **Never banked**; it is scratch, not evidence.
+
+All three reports are written together from the same validated payload, so a
+banked directory cannot hold a certificate whose reports describe something
+else. Both reports are pure functions of the evidence — no timestamps — so
+re-rendering an unchanged certificate produces byte-identical files.
+
+### Why the HTML report matters for review
+
+A cell that consumed 4% of its bound and one that consumed 96% both print as
+`PASS`. The HTML report puts a gauge on every cell and every aggregate showing
+the fraction of the budget actually used. Scan that column first: a study full
+of passes at 90%+ is one small change away from failing, and it is worth knowing
+that *before* the change lands rather than after.
 
 ## 3. Reading the result
 
@@ -75,11 +91,12 @@ Committed evidence lives at:
 docs/modelvalidation/certificates/<study>/<YYYY-MM-DD>/
 ├── certificate.json
 ├── report.md
+├── report.html
 └── anchors.json
 ```
 
-Copy in `certificate.json` and `report.md` (never `checkpoints/`), then extract
-the anchors:
+Copy in `certificate.json`, `report.md`, and `report.html` (never
+`checkpoints/`), then extract the anchors:
 
 ```bash
 python -m quantark.modelvalidation anchors \
@@ -164,6 +181,8 @@ Before a certification is accepted as backing a release:
 - [ ] The decision in the report matches the decision in `certificate.json`.
 - [ ] No `UNRESOLVED` cells behind an `ADMITTED` claim — every benchmark met its
       standard-error budget.
+- [ ] Margin gauges in `report.html` reviewed: note any cell or aggregate above
+      ~80% of its bound, since those pass without room to spare.
 - [ ] No `ERROR` cells, or each one is explained and the decision reflects it.
 - [ ] Envelope column is populated for grid-based engines (a blank envelope
       means no refinement ladder ran, so the engine's own discretization error

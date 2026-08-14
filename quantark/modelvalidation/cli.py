@@ -88,14 +88,20 @@ def _print_decisions(payload: dict) -> None:
         print(f"  {errored} cell(s) ERROR: see the report for the exceptions.")
 
 
+def _print_artifacts(certificate) -> None:
+    directory = certificate.path.parent
+    print(f"\nCertificate:  {certificate.path}")
+    print(f"Report (md):  {directory / 'report.md'}")
+    print(f"Report (html):{directory / 'report.html'}")
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     study = load_study(args.study)
     certificate = certify(
         study, out_dir=args.out, quick=args.quick, resume=args.resume
     )
     _print_decisions(certificate.payload)
-    print(f"\nCertificate: {certificate.path}")
-    print(f"Report:      {certificate.path.parent / 'report.md'}")
+    _print_artifacts(certificate)
     if certificate.payload["study"]["quick"]:
         print("\nQuick mode: this run is a wiring check, not bankable evidence.")
     return 0
@@ -118,7 +124,7 @@ def _cmd_amend(args: argparse.Namespace) -> int:
         f"{amendment['parent_projected_sha256'][:12]}."
     )
     _print_decisions(certificate.payload)
-    print(f"\nCertificate: {certificate.path}")
+    _print_artifacts(certificate)
     return 0
 
 

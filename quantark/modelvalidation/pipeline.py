@@ -44,12 +44,14 @@ from quantark.modelvalidation.evidence import (
     validate_durable_root,
 )
 from quantark.modelvalidation.gates import evaluate_aggregate_gate, evaluate_cell_gate
+from quantark.modelvalidation.html_report import render_html
 from quantark.modelvalidation.reference import ReferenceEstimate, run_reference
 from quantark.modelvalidation.report import render_markdown
 from quantark.modelvalidation.study import CertificationStudy, SamplingPolicy
 
 CERTIFICATE_NAME = "certificate.json"
 REPORT_NAME = "report.md"
+HTML_REPORT_NAME = "report.html"
 
 
 @dataclass(frozen=True)
@@ -376,11 +378,18 @@ def assemble_payload(
 
 
 def write_certificate(payload: dict, root: Path) -> Certificate:
-    """Validate, then write the certificate and its report."""
+    """Validate, then write the certificate and both reports.
+
+    Three artifacts, one act: the machine record, the markdown report for
+    terminals and diffs, and the self-contained HTML report for review and
+    circulation. They are written together so a banked directory can never
+    contain a certificate whose reports describe something else.
+    """
     validate_payload(payload)
     path = root / CERTIFICATE_NAME
     atomic_write_json(path, payload)
     atomic_write_text(root / REPORT_NAME, render_markdown(payload))
+    atomic_write_text(root / HTML_REPORT_NAME, render_html(payload))
     return Certificate(payload=payload, path=path)
 
 

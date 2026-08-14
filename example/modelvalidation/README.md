@@ -22,8 +22,15 @@ python -m quantark.modelvalidation run example/modelvalidation/snowball_flat_bsm
 python -m quantark.modelvalidation list
 ```
 
-Output lands under `output/modelvalidation/<study>/`: `certificate.json`,
-`report.md`, and a `checkpoints/` directory that is scratch, not evidence.
+Output lands under `output/modelvalidation/<study>/`:
+
+| File | What it is |
+|---|---|
+| `certificate.json` | The machine record, with its projected SHA-256. |
+| `report.md` | Terminal- and diff-friendly report. |
+| `report.html` | Review copy: one self-contained file, no external requests, with a margin gauge on every cell so "passed with room to spare" and "passed by a hair" are distinguishable at a glance. |
+| `checkpoints/` | Resume state. Scratch, not evidence — never banked. |
+
 That path is gitignored — banking evidence is a deliberate act, described in
 [the release procedure](../../docs/modelvalidation/RELEASE_PROCEDURE.md).
 
