@@ -9,6 +9,7 @@ guard the certified behavior in CI afterwards.
 See ``docs/modelvalidation/RELEASE_PROCEDURE.md`` for the release procedure.
 """
 
+from quantark.modelvalidation.amendment import amend, validate_parent
 from quantark.modelvalidation.anchors import assert_anchors, extract_anchors
 from quantark.modelvalidation.pipeline import Certificate, certify, validate_payload
 from quantark.modelvalidation.registry import register_builder
@@ -32,11 +33,13 @@ __all__ = [
     "GateBounds",
     "HedgeContractScale",
     "SamplingPolicy",
+    "amend",
     "assert_anchors",
     "certify",
     "extract_anchors",
     "load_study",
     "load_study_text",
     "register_builder",
+    "validate_parent",
     "validate_payload",
 ]

@@ -105,7 +105,7 @@ def quick_policy(policy: SamplingPolicy) -> SamplingPolicy:
     )
 
 
-def _reference_block(estimate: ReferenceEstimate, identity: Mapping[str, Any]) -> dict:
+def reference_block(estimate: ReferenceEstimate, identity: Mapping[str, Any]) -> dict:
     return {
         "values": dict(estimate.values),
         "std_errors": dict(estimate.std_errors),
@@ -116,7 +116,7 @@ def _reference_block(estimate: ReferenceEstimate, identity: Mapping[str, Any]) -
     }
 
 
-def _evaluate_candidate(
+def evaluate_candidate(
     candidate,
     case,
     store: Optional[CheckpointStore],
@@ -180,7 +180,7 @@ def certify(
                 resume=resume,
             )
             estimates[case.name] = estimate
-            references[case.name] = _reference_block(
+            references[case.name] = reference_block(
                 estimate, study.reference.identity(case)
             )
         except Exception:  # noqa: BLE001 - recorded, not swallowed
@@ -189,13 +189,9 @@ def certify(
             references[case.name] = {"error": reference_errors[case.name]}
 
     cells: List[dict] = []
-    aggregates: List[dict] = []
-    decisions: Dict[str, str] = {}
 
     for candidate in study.candidates:
         name = candidate.name()
-        verdicts: List[Verdict] = []
-        per_quantity: Dict[str, List[dict]] = {q: [] for q in study.quantities}
 
         for case in study.cases:
             estimate = estimates[case.name]
@@ -206,73 +202,145 @@ def certify(
                 error = reference_errors[case.name]
             else:
                 try:
-                    result = _evaluate_candidate(candidate, case, store, resume)
+                    result = evaluate_candidate(candidate, case, store, resume)
                 except Exception:  # noqa: BLE001 - recorded, not swallowed
                     error = traceback.format_exc()
 
-            for quantity in study.quantities:
-                if error is not None or result is None or estimate is None:
-                    verdict = decide_cell(None, error=True)
-                    cells.append(
-                        {
-                            "candidate": name,
-                            "case": case.name,
-                            "quantity": quantity,
-                            "reference": None,
-                            "candidate_value": None,
-                            "gate": None,
-                            "verdict": verdict.value,
-                            "error": error,
-                            "identity_hash": identity_hash(
-                                candidate_identity(candidate, case)
-                            ),
-                        }
-                    )
-                    verdicts.append(verdict)
-                    continue
-
-                gate = evaluate_cell_gate(
-                    candidate_raw=result.values[quantity],
-                    reference_raw=estimate.values[quantity],
-                    reference_se_raw=estimate.std_errors[quantity],
-                    quantity=quantity,
-                    scale=study.scale,
-                    bounds=study.bounds,
-                    envelope_raw=envelope_from_ladders(result.ladders, quantity),
+            cells.extend(
+                build_cells(
+                    study=study,
+                    candidate=candidate,
+                    case=case,
+                    estimate=estimate,
+                    result=result,
+                    error=error,
                 )
-                verdict = decide_cell(gate, error=False)
-                verdicts.append(verdict)
-                cell = {
+            )
+
+    aggregates, decisions = aggregate_and_decide(study, cells)
+    payload = assemble_payload(
+        study=study,
+        sampling=sampling,
+        quick=quick,
+        references=references,
+        cells=cells,
+        aggregates=aggregates,
+        decisions=decisions,
+        started=started,
+    )
+    return write_certificate(payload, root)
+
+
+def build_cells(
+    study: CertificationStudy,
+    candidate,
+    case,
+    estimate: Optional[ReferenceEstimate],
+    result: Optional[CandidateResult],
+    error: Optional[str],
+) -> List[dict]:
+    """Gate one candidate against the benchmark for one case, per quantity."""
+    cells: List[dict] = []
+    name = candidate.name()
+    cell_identity = identity_hash(candidate_identity(candidate, case))
+
+    for quantity in study.quantities:
+        if error is not None or result is None or estimate is None:
+            cells.append(
+                {
                     "candidate": name,
                     "case": case.name,
                     "quantity": quantity,
-                    "reference": {
-                        "value": estimate.values[quantity],
-                        "se": estimate.std_errors[quantity],
-                    },
-                    "candidate_value": result.values[quantity],
-                    "gate": asdict(gate),
-                    "verdict": verdict.value,
-                    "error": None,
-                    "identity_hash": identity_hash(candidate_identity(candidate, case)),
+                    "reference": None,
+                    "candidate_value": None,
+                    "gate": None,
+                    "verdict": decide_cell(None, error=True).value,
+                    "error": error,
+                    "identity_hash": cell_identity,
                 }
-                cells.append(cell)
-                per_quantity[quantity].append(cell)
+            )
+            continue
+
+        gate = evaluate_cell_gate(
+            candidate_raw=result.values[quantity],
+            reference_raw=estimate.values[quantity],
+            reference_se_raw=estimate.std_errors[quantity],
+            quantity=quantity,
+            scale=study.scale,
+            bounds=study.bounds,
+            envelope_raw=envelope_from_ladders(result.ladders, quantity),
+        )
+        cells.append(
+            {
+                "candidate": name,
+                "case": case.name,
+                "quantity": quantity,
+                "reference": {
+                    "value": estimate.values[quantity],
+                    "se": estimate.std_errors[quantity],
+                },
+                "candidate_value": result.values[quantity],
+                "gate": asdict(gate),
+                "verdict": decide_cell(gate, error=False).value,
+                "error": None,
+                "identity_hash": cell_identity,
+            }
+        )
+    return cells
+
+
+def aggregate_and_decide(
+    study: CertificationStudy, cells: List[dict]
+) -> tuple[List[dict], Dict[str, str]]:
+    """Roll cells up into aggregate bias gates and one decision per candidate.
+
+    Operates on cell *dicts* so it works identically for freshly computed cells
+    and for cells carried forward from a parent certificate.
+    """
+    aggregates: List[dict] = []
+    decisions: Dict[str, str] = {}
+
+    for candidate in study.candidates:
+        name = candidate.name()
+        own = [cell for cell in cells if cell["candidate"] == name]
+        verdicts = [Verdict(cell["verdict"]) for cell in own]
 
         candidate_aggregates = []
-        for quantity, quantity_cells in per_quantity.items():
-            if not quantity_cells:
+        for quantity in study.quantities:
+            gated = [
+                cell
+                for cell in own
+                if cell["quantity"] == quantity and cell["gate"] is not None
+            ]
+            if not gated:
                 continue
             aggregate = evaluate_aggregate_gate(
-                [c["gate"]["signed_err_c"] for c in quantity_cells],
-                [c["gate"]["se_c"] for c in quantity_cells],
+                [cell["gate"]["signed_err_c"] for cell in gated],
+                [cell["gate"]["se_c"] for cell in gated],
                 study.bounds,
             )
             candidate_aggregates.append(aggregate)
-            aggregates.append({"candidate": name, "quantity": quantity, **asdict(aggregate)})
+            aggregates.append(
+                {"candidate": name, "quantity": quantity, **asdict(aggregate)}
+            )
 
         decisions[name] = decide_candidate(verdicts, candidate_aggregates).value
 
+    return aggregates, decisions
+
+
+def assemble_payload(
+    study: CertificationStudy,
+    sampling: SamplingPolicy,
+    quick: bool,
+    references: Dict[str, dict],
+    cells: List[dict],
+    aggregates: List[dict],
+    decisions: Dict[str, str],
+    started: float,
+    extra: Optional[Mapping[str, Any]] = None,
+) -> dict:
+    """Build the certificate payload and stamp its digest."""
     payload = {
         "schema": SCHEMA_VERSION,
         "study": {
@@ -301,8 +369,14 @@ def certify(
         "decisions": decisions,
         "wall_clock_seconds": time.time() - started,
     }
+    if extra:
+        payload.update(extra)
     payload["projected_sha256"] = projected_sha256(payload)
+    return payload
 
+
+def write_certificate(payload: dict, root: Path) -> Certificate:
+    """Validate, then write the certificate and its report."""
     validate_payload(payload)
     path = root / CERTIFICATE_NAME
     atomic_write_json(path, payload)
