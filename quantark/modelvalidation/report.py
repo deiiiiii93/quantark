@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+from quantark.modelvalidation.engine_config import flatten
+
 _NA = "--"
 
 
@@ -83,6 +85,23 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
         f"{_fmt(bounds['interval_k'])}."
     )
     parts.append("")
+
+    config_rows = []
+    for candidate in study["candidates"]:
+        for key, value in sorted(flatten(candidate.get("params") or {}).items()):
+            config_rows.append([candidate["name"], key, _fmt(value)])
+    for key, value in sorted(flatten(payload.get("reference_config") or {}).items()):
+        config_rows.append(["(benchmark)", key, _fmt(value)])
+    if config_rows:
+        parts.append("## Engine configuration")
+        parts.append("")
+        parts.append(
+            "Resolved rather than named: a profile such as `standard` is an indirection "
+            "whose meaning can change between releases. These are the requested settings."
+        )
+        parts.append("")
+        parts.append(_table(["engine", "setting", "value"], config_rows))
+        parts.append("")
 
     parts.append("## Benchmark sampling")
     parts.append("")

@@ -64,6 +64,22 @@ the fraction of the budget actually used. Scan that column first: a study full
 of passes at 90%+ is one small change away from failing, and it is worth knowing
 that *before* the change lands rather than after.
 
+It also carries an **Engine configuration** section: the grid each candidate
+actually ran on, and the benchmark's own settings, side by side. Certification
+without the grid is half a record — "the PDE engine" at 400 spatial points and
+"the PDE engine" at 800 are different engines as far as the numbers go.
+
+Those settings are recorded **resolved, not named**. A candidate that declares
+`accuracy: standard` also records what that profile expanded to (400 points,
+4 steps/day, `eps_crit` 0.003, and the rest). This matters for more than
+readability: the resolved configuration feeds the candidate's identity hash, so
+if a future release redefines a profile, the identity changes and stale
+checkpoints and anchors are correctly rejected instead of silently reused.
+
+The recorded values are what was *requested*. Achieved geometry — the node count
+a grid settled on after alignment, or whether a step cap bit — is not exposed by
+the engines through a public API and is deliberately not guessed at.
+
 ## 3. Reading the result
 
 Three decisions are possible per candidate engine:
@@ -183,6 +199,8 @@ Before a certification is accepted as backing a release:
       standard-error budget.
 - [ ] Margin gauges in `report.html` reviewed: note any cell or aggregate above
       ~80% of its bound, since those pass without room to spare.
+- [ ] Engine configuration section matches the engines being released — grid
+      sizes, step densities, and scheme switches are the ones intended to ship.
 - [ ] No `ERROR` cells, or each one is explained and the decision reflects it.
 - [ ] Envelope column is populated for grid-based engines (a blank envelope
       means no refinement ladder ran, so the engine's own discretization error

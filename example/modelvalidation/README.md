@@ -28,7 +28,7 @@ Output lands under `output/modelvalidation/<study>/`:
 |---|---|
 | `certificate.json` | The machine record, with its projected SHA-256. |
 | `report.md` | Terminal- and diff-friendly report. |
-| `report.html` | Review copy: one self-contained file, no external requests, with a margin gauge on every cell so "passed with room to spare" and "passed by a hair" are distinguishable at a glance. |
+| `report.html` | Review copy: one self-contained file, no external requests. Adds a margin gauge on every cell so "passed with room to spare" and "passed by a hair" are distinguishable at a glance, plus an Engine configuration section showing the grid each engine actually ran on. |
 | `checkpoints/` | Resume state. Scratch, not evidence — never banked. |
 
 That path is gitignored — banking evidence is a deliberate act, described in

@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+from quantark.asset.equity.engine.pde.grid.config import resolve_config
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
@@ -37,6 +38,7 @@ from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 
 from quantark.modelvalidation.candidate import CandidateResult, LadderRung
+from quantark.modelvalidation.engine_config import engine_config
 from quantark.modelvalidation.reference import BatchResult
 from quantark.modelvalidation.registry import register_builder
 from quantark.modelvalidation.study import SamplingPolicy
@@ -58,6 +60,12 @@ _PRODUCT_KEYS = (
 
 #: One profile coarser than each target, for the refinement ladder.
 _COARSER_ACCURACY = {"high": "standard", "standard": "fast", "fast": "fast"}
+
+#: Quadrature settings that cannot move the answer, so they stay out of the
+#: recorded configuration and out of the identity hash.
+_QUAD_NON_NUMERIC = ("bump_size", "bump_config", "auto_converge",
+                     "convergence_rel_tol", "convergence_abs_tol",
+                     "max_convergence_grid_points")
 
 
 @register_builder("equity.snowball", kind="product")
@@ -161,6 +169,16 @@ class SnowballMCReference(_SnowballArm):
         super().__init__(**kwargs)
         self.sampling = sampling
 
+    def config(self) -> Mapping[str, Any]:
+        """The benchmark's own settings -- it is half of every comparison."""
+        return {
+            "engine": "SnowballMCEngine",
+            "method": MonteCarloMethod.RANDOMIZED_QUASI.value,
+            "paths_per_batch": self.sampling.paths_per_batch,
+            "substeps_per_interval": int(self._params.get("substeps_per_interval", 1)),
+            "greeks": "paired central difference (common random numbers)",
+        }
+
     def identity(self, case) -> Mapping[str, Any]:
         environment, product = self._specs(case)
         return {
@@ -170,6 +188,7 @@ class SnowballMCReference(_SnowballArm):
             "product": product,
             "quantities": list(self.quantities),
             "params": dict(self._params),
+            "config": dict(self.config()),
             "sampling": {
                 "paths_per_batch": self.sampling.paths_per_batch,
                 "min_batches": self.sampling.min_batches,
@@ -217,7 +236,18 @@ class SnowballPDECandidate(_SnowballArm):
         return "equity.snowball.pde"
 
     def params(self) -> Mapping[str, Any]:
-        return dict(self._params)
+        """Declared settings plus the grid the accuracy profile resolves to.
+
+        Recording the resolved grid rather than just the profile name is what
+        makes the certificate self-describing, and what makes the identity hash
+        move if a future release redefines the profile.
+        """
+        accuracy = str(self._params.get("accuracy", "standard"))
+        return {
+            **self._params,
+            "engine": "SnowballPDESolver",
+            "grid": engine_config(resolve_config(accuracy, None)),
+        }
 
     def _greeks(self, case, accuracy: str) -> dict:
         environment, product_spec = self._specs(case)
@@ -250,7 +280,20 @@ class SnowballQuadCandidate(_SnowballArm):
         return "equity.snowball.quad"
 
     def params(self) -> Mapping[str, Any]:
-        return dict(self._params)
+        """Declared settings plus the full resolved quadrature configuration.
+
+        Every numerically relevant knob is recorded, including the ones taken
+        from defaults: a default that changes in a later release is a numerics
+        change, and the identity hash has to notice.
+        """
+        grid_points = int(self._params.get("grid_points", 1001))
+        return {
+            **self._params,
+            "engine": "SnowballQuadEngine",
+            "grid": engine_config(
+                QuadParams(grid_points=grid_points), exclude=_QUAD_NON_NUMERIC
+            ),
+        }
 
     def _greeks(self, case, grid_points: int) -> dict:
         environment, product_spec = self._specs(case)

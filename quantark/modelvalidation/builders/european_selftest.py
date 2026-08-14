@@ -149,7 +149,12 @@ class EuropeanAnalyticalCandidate(_FlatBsmArm):
         return "equity.european.analytical"
 
     def params(self) -> Mapping[str, Any]:
-        return dict(self._params)
+        """A closed-form engine has no grid; the bump width is its only knob."""
+        return {
+            **self._params,
+            "engine": "BlackScholesEngine",
+            "grid": {"method": "closed_form", "bump": float(self._params.get("bump", 0.01))},
+        }
 
     def evaluate(self, case) -> CandidateResult:
         environment, product_spec = self._specs(case)
@@ -177,6 +182,15 @@ class EuropeanMCReference(_FlatBsmArm):
         super().__init__(**kwargs)
         self.sampling = sampling
 
+    def config(self) -> Mapping[str, Any]:
+        """The benchmark's own settings -- it is half of every comparison."""
+        return {
+            "engine": "EuropeanMCEngine",
+            "method": MonteCarloMethod.RANDOMIZED_QUASI.value,
+            "paths_per_batch": self.sampling.paths_per_batch,
+            "greeks": "paired central difference (common random numbers)",
+        }
+
     def identity(self, case) -> Mapping[str, Any]:
         environment, product_spec = self._specs(case)
         return {
@@ -186,6 +200,7 @@ class EuropeanMCReference(_FlatBsmArm):
             "product": product_spec,
             "quantities": list(self.quantities),
             "params": dict(self._params),
+            "config": dict(self.config()),
             "sampling": {
                 "paths_per_batch": self.sampling.paths_per_batch,
                 "min_batches": self.sampling.min_batches,

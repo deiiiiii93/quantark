@@ -124,6 +124,30 @@ def test_render_is_deterministic_and_non_mutating(tmp_path, study):
     assert payload == before
 
 
+def test_configuration_section_lists_declared_settings(tmp_path, study):
+    html = render_html(certify(study, out_dir=tmp_path).payload)
+    assert "<h2>Engine configuration</h2>" in html
+    # The fakes declare offset_c / envelope_c as their params. Long names carry
+    # soft break hints, so compare the text a reader sees.
+    assert "offset_c" in html.replace("<wbr>", "")
+
+
+def test_long_setting_names_carry_soft_break_points(tmp_path, study):
+    """Otherwise a narrow column breaks them mid-word."""
+    html = render_html(certify(study, out_dir=tmp_path).payload)
+    assert "offset_<wbr>c" in html
+
+
+def test_configuration_section_is_omitted_when_nothing_is_declared(tmp_path):
+    class Bare(OffsetCandidate):
+        def params(self):
+            return {}
+
+    study = make_study(candidates=(Bare(name="fake.bare", means_c=CASE_MEANS_C),))
+    html = render_html(certify(study, out_dir=tmp_path).payload)
+    assert "<h2>Engine configuration</h2>" not in html
+
+
 def test_report_written_next_to_the_certificate(tmp_path, study):
     certificate = certify(study, out_dir=tmp_path)
     report = certificate.path.parent / "report.html"

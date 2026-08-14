@@ -108,3 +108,67 @@ def test_report_is_written(certified):
     assert "snowball-flat-bsm" in report
     for candidate in CANDIDATES:
         assert candidate in report
+
+
+def test_pde_records_the_grid_its_profile_resolves_to(study):
+    """`accuracy: standard` is an indirection; the evidence must record what it means."""
+    pde = next(c for c in study.candidates if c.name() == "equity.snowball.pde")
+    params = pde.params()
+    assert params["accuracy"] == "standard"
+    grid = params["grid"]
+    assert grid["points"] == 400
+    assert grid["steps_per_day"] == 4.0
+    assert grid["max_steps"] == 5000
+    assert grid["day_count"] == 252
+
+
+def test_quad_records_its_full_numerical_configuration(study):
+    quad = next(c for c in study.candidates if c.name() == "equity.snowball.quad")
+    grid = quad.params()["grid"]
+    assert grid["grid_points"] == 1001
+    assert grid["num_std_devs"] == 10.0
+    assert grid["integration_rule"] == "trapezoid"
+    assert grid["event_projection"] == "cell_average"
+    # Convergence knobs cannot move a fixed-grid answer, so they stay out.
+    assert "auto_converge" not in grid
+
+
+def test_grid_settings_reach_both_reports(certified):
+    directory = certified.path.parent
+    markdown = (directory / "report.md").read_text(encoding="utf-8")
+    # The HTML marks soft break points inside long setting names; compare the
+    # text a reader sees, not the markup.
+    html = (directory / "report.html").read_text(encoding="utf-8").replace("<wbr>", "")
+    for text in (markdown, html):
+        assert "grid.points" in text
+        assert "grid.grid_points" in text
+        assert "400" in text and "1001" in text
+
+
+def test_benchmark_configuration_is_recorded(certified):
+    config = certified.payload["reference_config"]
+    assert config["engine"] == "SnowballMCEngine"
+    assert config["method"] == "randomized_quasi"
+    assert "paths_per_batch" in config
+    html = (certified.path.parent / "report.html").read_text(encoding="utf-8")
+    assert "SnowballMCEngine" in html
+
+
+def test_changing_the_grid_changes_the_candidate_identity(study):
+    """Otherwise a re-tuned engine could silently reuse a stale checkpoint."""
+    from quantark.modelvalidation.candidate import candidate_identity
+    from quantark.modelvalidation.evidence import identity_hash
+    from quantark.modelvalidation.registry import get_builder
+
+    build = get_builder("equity.snowball.quad", kind="candidate")
+    common = dict(
+        environment_params={"spot": 100.0, "vol": 0.22, "rate": 0.025, "div_yield": 0.03},
+        product_params={},
+        quantities=("pv",),
+    )
+    coarse = build(params={"grid_points": 501}, **common)
+    fine = build(params={"grid_points": 1001}, **common)
+    case = CaseSpec(name="ordinary")
+    assert identity_hash(candidate_identity(coarse, case)) != identity_hash(
+        candidate_identity(fine, case)
+    )

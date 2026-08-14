@@ -107,6 +107,18 @@ def quick_policy(policy: SamplingPolicy) -> SamplingPolicy:
     )
 
 
+def _reference_config(study: CertificationStudy) -> dict:
+    """The benchmark's own configuration, when it declares one.
+
+    Optional on the protocol: a reference builder that does not describe itself
+    records nothing rather than having something invented on its behalf.
+    """
+    describe = getattr(study.reference, "config", None)
+    if not callable(describe):
+        return {}
+    return dict(describe())
+
+
 def reference_block(estimate: ReferenceEstimate, identity: Mapping[str, Any]) -> dict:
     return {
         "values": dict(estimate.values),
@@ -365,6 +377,7 @@ def assemble_payload(
             ],
         },
         "runtime": runtime_environment(),
+        "reference_config": _reference_config(study),
         "references": references,
         "cells": cells,
         "aggregates": aggregates,

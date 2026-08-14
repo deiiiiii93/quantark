@@ -16,6 +16,8 @@ from __future__ import annotations
 import html
 from typing import Any, Mapping, Optional, Sequence
 
+from quantark.modelvalidation.engine_config import flatten
+
 _NA = "&mdash;"
 
 #: Verdict and decision colours are semantic, not decorative: they encode state
@@ -202,6 +204,31 @@ td.wrap { white-space: normal; }
   font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
   min-width: 38px; text-align: right;
 }
+
+/* Engines side by side: the point is comparing one grid against another. */
+.configs {
+  display: grid; gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  align-items: start;
+}
+.config-block { min-width: 0; }
+h3.cfg-name {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px; font-weight: 600; margin: 0 0 4px;
+  padding-bottom: 5px; border-bottom: 2px solid var(--accent);
+}
+p.cfg-head { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+p.cfg-head strong {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 600; color: var(--ink);
+}
+.configs table { font-size: 12.5px; table-layout: fixed; width: 100%; }
+.configs td { padding: 5px 11px; }
+/* Setting names are long and the columns are narrow: wrap rather than clip,
+   so no reviewer has to scroll a nested box to read a grid setting. */
+.configs td.name { white-space: normal; overflow-wrap: anywhere; width: 62%; }
+.configs td.num { white-space: normal; overflow-wrap: anywhere; }
 
 .meta {
   margin: 44px 0 0; padding-top: 14px; border-top: 1px solid var(--rule);
@@ -459,6 +486,107 @@ def _aggregates_section(payload: Mapping[str, Any]) -> str:
     )
 
 
+#: Config keys worth pulling out of the full dump as a headline, in the order
+#: a reviewer looks for them. Anything not listed still appears in the detail.
+_HEADLINE_CONFIG = (
+    ("grid.points", "spatial points"),
+    ("grid.steps_per_day", "steps/day"),
+    ("grid.grid_points", "quadrature points"),
+    ("grid.num_std_devs", "std devs"),
+    ("grid.num_std", "std devs"),
+    ("grid.eps_crit", "eps_crit"),
+    ("grid.integration_rule", "rule"),
+    ("grid.max_points", "max points"),
+    ("grid.max_steps", "max steps"),
+    ("grid.day_count", "day count"),
+    ("grid.method", "method"),
+)
+
+
+def _config_value(value: Any) -> str:
+    """Render one setting. Returns HTML, so each part is escaped individually --
+    joining first and escaping after would mangle the entity used for None."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:g}"
+    if value is None:
+        return _NA
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return _NA
+        return ", ".join(_NA if v is None else _config_value(v) for v in value)
+    return _esc(value)
+
+
+def _break_key(key: str) -> str:
+    """Escape a setting name and mark where it may wrap.
+
+    These names have no spaces, so a narrow column otherwise breaks them
+    mid-word (``event_damping_s|teps``). ``<wbr>`` after each separator lets the
+    browser break at the joints instead.
+    """
+    return _esc(key).replace(".", ".<wbr>").replace("_", "_<wbr>")
+
+
+def _configuration_section(payload: Mapping[str, Any]) -> str:
+    """What each engine actually ran with.
+
+    Certification without the grid is half a record: two runs of "the PDE
+    engine" at different node counts are different engines as far as the
+    numbers are concerned.
+    """
+    blocks = []
+
+    for candidate in payload["study"]["candidates"]:
+        config = flatten(candidate.get("params") or {})
+        if not config:
+            continue
+
+        headline = [
+            f"<strong>{_esc(label)}</strong> {_config_value(config[key])}"
+            for key, label in _HEADLINE_CONFIG
+            if key in config
+        ]
+        rows = [
+            [f'<td class="name">{_break_key(key)}</td>',
+             f'<td class="num">{_config_value(value)}</td>']
+            for key, value in sorted(config.items())
+        ]
+        blocks.append(
+            '<div class="config-block">'
+            f'<h3 class="cfg-name">{_esc(candidate["name"])}</h3>'
+            + (f'<p class="cfg-head">{" &middot; ".join(headline)}</p>' if headline else "")
+            + _table(["setting", "value"], rows, "No configuration declared.")
+            + "</div>"
+        )
+
+    reference_config = payload.get("reference_config") or {}
+    if reference_config:
+        rows = [
+            [f'<td class="name">{_break_key(key)}</td>',
+             f'<td class="num">{_config_value(value)}</td>']
+            for key, value in sorted(flatten(reference_config).items())
+        ]
+        blocks.append(
+            '<div class="config-block"><h3 class="cfg-name">benchmark</h3>'
+            + _table(["setting", "value"], rows, "")
+            + "</div>"
+        )
+
+    if not blocks:
+        return ""
+
+    return (
+        "<section><h2>Engine configuration</h2>"
+        '<p class="lede">The settings each engine was handed, resolved rather than named: '
+        "a profile like <code>standard</code> is an indirection whose meaning can change "
+        "between releases, so the certificate records what it expanded to. These are the "
+        "<em>requested</em> settings.</p>"
+        f'<div class="configs">{"".join(blocks)}</div></section>'
+    )
+
+
 def _benchmark_section(payload: Mapping[str, Any]) -> str:
     sampling = payload["study"]["sampling"]
     rows = []
@@ -591,6 +719,7 @@ def render_html(payload: Mapping[str, Any]) -> str:
         quick,
         _stats(payload),
         _decisions_section(payload),
+        _configuration_section(payload),
         _benchmark_section(payload),
         _cells_section(payload),
         _aggregates_section(payload),
