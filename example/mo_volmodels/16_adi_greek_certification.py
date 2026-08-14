@@ -252,6 +252,32 @@ PRODUCTION_SLV_PRIMARY_BATCHES_BY_CASE = {
 # It estimates frozen-SLV minus matched Heston on one shared Sobol family; the
 # already-certified Heston cell supplies the final independent expectation.
 SLV_MULTILEVEL_CASES = frozenset({"near_ki"})
+
+
+def stopping_excluded_variant_cases() -> tuple[str, ...]:
+    """Cells whose batch count is declared and may never be stopped early.
+
+    BOTH cells of a multilevel case, not just the SLV one. The telescoping
+    estimator weights a Heston control (``heston_high_reference``) against the
+    SLV levels, so the Heston cell's batch count is as much part of the contract
+    as the SLV cell's own. One definition, because the exclusion is read in three
+    places -- the policy builder, the payload validator, and the run declaration
+    -- and the first version of it disagreed between them.
+    """
+    return tuple(
+        sorted(
+            f"{variant}/{case_name}"
+            for case_name in SLV_MULTILEVEL_CASES
+            for variant in ("heston", "heston_slv")
+        )
+    )
+
+
+def stopping_excluded(variant: str, case_name: str) -> bool:
+    """Whether this cell must spend its declared allocation."""
+    return f"{variant}/{case_name}" in stopping_excluded_variant_cases()
+
+
 PRODUCTION_SLV_BATCHES_BY_CASE = {
     case_name: (
         PRODUCTION_SLV_BATCHES if case_name in SLV_MULTILEVEL_CASES else primary_batches
@@ -1666,9 +1692,7 @@ def _admissible_batch_count(
     label = f"{variant}/{case_name}"
 
     if record is None:
-        if policy_config.get("enabled") and not (
-            variant == "heston_slv" and case_name in SLV_MULTILEVEL_CASES
-        ):
+        if policy_config.get("enabled") and not stopping_excluded(variant, case_name):
             raise ValueError(
                 f"{label}: run declares sequential stopping but the cell "
                 "records no stopping decision"
@@ -1731,8 +1755,21 @@ def build_sequential_policy(
     """The declared stopping policy for one cell, or None to spend the cap.
 
     Returns None -- the fixed-allocation path -- unless ``--sequential`` is set,
-    and always for the multilevel SLV cell, whose telescoping level weights
-    require exactly its declared batch count. That cell is declared, not sized.
+    and always for BOTH cells of a multilevel case, whose telescoping level
+    weights require exactly their declared batch counts. Those cells are
+    declared, not sized.
+
+    The Heston cell is excluded for the same reason as the SLV cell it feeds: it
+    enters that estimator as ``heston_high_reference``, so its batch count is
+    part of the same contract. Excluding only the consumer is not enough, and the
+    35.5h fleet showed why -- it stopped ``heston/near_ki`` at 1664 of 2048 and
+    fed the truncated control into the SLV estimator at weight 0.85. That
+    truncation is SELECTED, not merely short: the cell stopped because its own
+    delta and gamma gate closed, so the stop time is a function of the estimates
+    that become the control, and ``E[H_high(tau)] != E[H_high]``. The
+    anytime-valid sequence keeps a cell's OWN interval honest under optional
+    stopping; it carries no such guarantee into a downstream estimator that
+    consumes the stopped mean at a fixed weight.
 
     The cap is the cell's frozen allocation, so a gate-driven run can never cost
     more than the fixed run it replaces. Every parameter is fixed here, before
@@ -1740,7 +1777,7 @@ def build_sequential_policy(
     """
     if not getattr(args, "sequential", False):
         return None
-    if variant == "heston_slv" and case_name in SLV_MULTILEVEL_CASES:
+    if stopping_excluded(variant, case_name):
         return None
     floor = min(int(AMENDMENT_AGGREGATE_BATCHES), int(cap))
     return SequentialAdmissionPolicy(
@@ -4239,6 +4276,21 @@ def validate_payload(payload: dict) -> None:
         expected_batches = _sampling_batches_for_case(
             sampling_by_variant[variant], variant, case_name
         )
+        # Every per-cell evidence array is sized against the ADMISSIBLE count,
+        # never the declared one: a gate-driven cell banks fewer batches on
+        # purpose, and each array it banked is that much shorter. Bound once per
+        # cell rather than per level, because the first version of this fix bound
+        # it inside the level loop and the two arrays validated after that loop
+        # kept reading `expected_batches` -- one of them only reachable for
+        # heston_slv, so a single-variant replay could not see it. One binding
+        # means a fourth array cannot quietly drift back to the declared count.
+        allowed_batches = _admissible_batch_count(
+            cell,
+            run_configuration,
+            variant=variant,
+            case_name=case_name,
+            declared_batches=expected_batches,
+        )
         if variant == "heston":
             declared_profile = run_configuration.get(
                 "heston_spot_bridge_profile_by_case", {}
@@ -4286,13 +4338,6 @@ def validate_payload(payload: dict) -> None:
                 randomization_label=f"validation/{variant}/{case_name}/{level}",
             )
             actual_batches = int(level_result.batches_used)
-            allowed_batches = _admissible_batch_count(
-                cell,
-                run_configuration,
-                variant=variant,
-                case_name=case_name,
-                declared_batches=expected_batches,
-            )
             if actual_batches != allowed_batches:
                 raise ValueError(
                     f"{variant}: {level} batches do not match sampling metadata"
@@ -4308,7 +4353,7 @@ def validate_payload(payload: dict) -> None:
             control_estimates = level_evidence.get("control_batch_estimates")
             if variant == "heston_slv" and not multilevel:
                 control_estimates = np.asarray(control_estimates, dtype=float)
-                if control_estimates.shape != (expected_batches, 5) or not np.all(
+                if control_estimates.shape != (allowed_batches, 5) or not np.all(
                     np.isfinite(control_estimates)
                 ):
                     raise ValueError(
@@ -4491,7 +4536,7 @@ def validate_payload(payload: dict) -> None:
                 cell["certifications"][greek].get("reference_substep_batch_contracts"),
                 dtype=float,
             )
-            if batches.shape != (expected_batches,) or not np.all(np.isfinite(batches)):
+            if batches.shape != (allowed_batches,) or not np.all(np.isfinite(batches)):
                 raise ValueError(f"{variant}: invalid {greek} substep batch evidence")
 
 
@@ -5490,9 +5535,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "chunk_batches": int(args.sequential_chunk_batches),
                 "margin_fraction": float(args.sequential_margin),
                 "family_alpha": float(args.sequential_family_alpha),
-                "excluded_variant_cases": sorted(
-                    f"heston_slv/{name}" for name in SLV_MULTILEVEL_CASES
-                ),
+                "excluded_variant_cases": list(stopping_excluded_variant_cases()),
             }
             if getattr(args, "sequential", False)
             else {"enabled": False}

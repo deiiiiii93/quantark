@@ -1343,6 +1343,41 @@ def test_sequential_policy_is_declared_per_cell_and_capped_by_the_allocation():
     assert small.planned_batches <= 64
 
 
+def test_a_multilevel_high_control_may_not_stop_early():
+    """The Heston cell feeding the telescoping estimator is declared, not sized.
+
+    The multilevel SLV cell is excluded from stopping because its telescoping
+    weights require exactly its declared batch count. The SAME argument covers
+    the Heston cell of that case, because it enters the very same estimator as
+    ``heston_high_reference``: excluding only the consumer left its control free
+    to stop, and the 35.5h fleet duly stopped ``heston/near_ki`` at 1664 of 2048
+    and fed the truncated mean into the SLV estimator with weight 0.85.
+
+    That truncation is not merely imprecise, it is selected: the cell stopped
+    because ITS OWN delta and gamma gate closed, so the stop time is a function
+    of the estimates that become the control. An anytime-valid sequence keeps
+    that cell's own interval honest under optional stopping; it says nothing
+    about a downstream estimator consuming the stopped mean at a fixed weight.
+    """
+    module = _load()
+    args = SimpleNamespace(
+        sequential=True,
+        sequential_chunk_batches=128,
+        sequential_margin=0.0,
+        sequential_family_alpha=0.05,
+    )
+    for case_name in sorted(module.SLV_MULTILEVEL_CASES):
+        for variant in ("heston", "heston_slv"):
+            assert (
+                module.build_sequential_policy(args, variant, case_name, cap=2048)
+                is None
+            ), f"{variant}/{case_name} must spend its declared allocation"
+
+    # Non-multilevel cases are unaffected: the exclusion must be narrow, or
+    # gate-driven stopping quietly stops being worth anything.
+    assert module.build_sequential_policy(args, "heston", "near_ko", cap=1024)
+
+
 def test_sequential_stopping_is_opt_in_and_never_touches_the_multilevel_cell():
     """The multilevel SLV cell is declared, not sized.
 
@@ -1369,8 +1404,14 @@ def test_sequential_stopping_is_opt_in_and_never_touches_the_multilevel_cell():
             module.build_sequential_policy(on, "heston_slv", case_name, cap=256)
             is None
         )
-    # The same case on the Heston side is not excluded.
-    assert module.build_sequential_policy(on, "heston", "near_ki", cap=2048) is not None
+    # This line previously asserted that the Heston cell of a multilevel case IS
+    # eligible to stop. That was the defect, written down as if intended: the
+    # cell feeds the telescoping estimator as heston_high_reference, so its count
+    # belongs to the same contract. See
+    # test_a_multilevel_high_control_may_not_stop_early.
+    assert module.build_sequential_policy(on, "heston", "near_ki", cap=2048) is None
+    # Ordinary cells are still eligible, so the exclusion stays narrow.
+    assert module.build_sequential_policy(on, "heston", "near_ko", cap=1024)
 
 
 def _stopping_record(*, banked, declared, chunk=128, margin=0.0, alpha=0.05,
