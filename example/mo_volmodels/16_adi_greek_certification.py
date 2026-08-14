@@ -1635,6 +1635,96 @@ def gate_driven_reference_levels(
     return target, fine, record
 
 
+def _admissible_batch_count(
+    cell: dict,
+    run_configuration: dict,
+    *,
+    variant: str,
+    case_name: str,
+    declared_batches: int,
+) -> int:
+    """How many batches this cell is permitted to have banked.
+
+    A fixed-allocation cell must bank exactly its declared count: that equality
+    is what proves nobody quietly ran fewer batches than the configuration says.
+    Gate-driven stopping breaks the equality on purpose, so the invariant becomes
+    strictly more to check rather than less --
+
+      * the shortfall must be EXPLAINED, by a recorded decision on every greek;
+        a cell that banked less without deciding has simply run short,
+      * the cap in the recorded policy must equal the declared allocation, which
+        is what makes gate-driven stopping unable to overspend,
+      * the recorded policy must be the one the run declared, so a cell cannot
+        arrive stopped under some other, looser rule,
+      * and a cell may never bank MORE than declared.
+
+    Returns the count the level arrays must have.
+    """
+    declared = int(declared_batches)
+    record = cell.get("sequential_stopping")
+    policy_config = run_configuration.get("sequential_stopping", {}) or {}
+    label = f"{variant}/{case_name}"
+
+    if record is None:
+        if policy_config.get("enabled") and not (
+            variant == "heston_slv" and case_name in SLV_MULTILEVEL_CASES
+        ):
+            raise ValueError(
+                f"{label}: run declares sequential stopping but the cell "
+                "records no stopping decision"
+            )
+        return declared
+
+    if not policy_config.get("enabled"):
+        raise ValueError(
+            f"{label}: cell stopped sequentially but the run does not declare it"
+        )
+
+    banked = int(record.get("batches_banked", -1))
+    if not 0 < banked <= declared:
+        raise ValueError(
+            f"{label}: banked {banked} batches outside (0, {declared}]"
+        )
+
+    declaration = record.get("policy", {}) or {}
+    if int(declaration.get("max_batches", -1)) != declared:
+        raise ValueError(
+            f"{label}: stopping policy cap {declaration.get('max_batches')} "
+            f"does not equal the declared allocation {declared}"
+        )
+    for key in ("margin_fraction", "family_alpha"):
+        if float(declaration.get(key, float("nan"))) != float(policy_config[key]):
+            raise ValueError(f"{label}: stopping policy {key} is not the declared one")
+    if int(record.get("chunk_batches", -1)) != int(policy_config["chunk_batches"]):
+        raise ValueError(f"{label}: stopping chunk size is not the declared one")
+
+    decisions = record.get("decisions", {}) or {}
+    if set(decisions) != {"delta", "gamma"}:
+        raise ValueError(f"{label}: stopping record does not cover both greeks")
+    if banked < declared:
+        undecided = sorted(
+            greek
+            for greek, decision in decisions.items()
+            if decision.get("status")
+            not in (
+                SequentialAdmissionStatus.ADMIT.value,
+                SequentialAdmissionStatus.REJECT.value,
+            )
+        )
+        if undecided:
+            raise ValueError(
+                f"{label}: banked {banked} of {declared} batches with "
+                f"{', '.join(undecided)} undecided"
+            )
+    for greek, decision in sorted(decisions.items()):
+        if int(decision.get("batches_used", -1)) != banked:
+            raise ValueError(
+                f"{label}/{greek}: decision batch count does not match the "
+                "banked evidence"
+            )
+    return banked
+
+
 def build_sequential_policy(
     args, variant: str, case_name: str, *, cap: int
 ) -> Optional[SequentialAdmissionPolicy]:
@@ -4196,13 +4286,20 @@ def validate_payload(payload: dict) -> None:
                 randomization_label=f"validation/{variant}/{case_name}/{level}",
             )
             actual_batches = int(level_result.batches_used)
-            if actual_batches != expected_batches:
+            allowed_batches = _admissible_batch_count(
+                cell,
+                run_configuration,
+                variant=variant,
+                case_name=case_name,
+                declared_batches=expected_batches,
+            )
+            if actual_batches != allowed_batches:
                 raise ValueError(
                     f"{variant}: {level} batches do not match sampling metadata"
                 )
             estimates = np.asarray(level_evidence.get("batch_estimates"), dtype=float)
             covariance = np.asarray(level_evidence.get("covariance"), dtype=float)
-            if estimates.shape != (expected_batches, 5) or not np.all(
+            if estimates.shape != (allowed_batches, 5) or not np.all(
                 np.isfinite(estimates)
             ):
                 raise ValueError(f"{variant}: invalid {level} paired batch evidence")

@@ -1371,3 +1371,137 @@ def test_sequential_stopping_is_opt_in_and_never_touches_the_multilevel_cell():
         )
     # The same case on the Heston side is not excluded.
     assert module.build_sequential_policy(on, "heston", "near_ki", cap=2048) is not None
+
+
+def _stopping_record(*, banked, declared, chunk=128, margin=0.0, alpha=0.05,
+                     status="ADMIT"):
+    return {
+        "batches_banked": banked,
+        "chunk_batches": chunk,
+        "policy": {"max_batches": declared, "margin_fraction": margin,
+                   "family_alpha": alpha},
+        "decisions": {
+            greek: {"status": status, "batches_used": banked}
+            for greek in ("delta", "gamma")
+        },
+    }
+
+
+def _run_config(enabled=True, chunk=128, margin=0.0, alpha=0.05):
+    return {
+        "sequential_stopping": (
+            {"enabled": True, "chunk_batches": chunk, "margin_fraction": margin,
+             "family_alpha": alpha}
+            if enabled
+            else {"enabled": False}
+        )
+    }
+
+
+def test_a_short_run_is_admissible_only_when_a_decision_explains_it():
+    """Banking fewer batches than declared must be EXPLAINED, not merely allowed.
+
+    The fixed-allocation equality is what proved nobody quietly ran short. Under
+    gate-driven stopping the replacement has to be stronger, not weaker: the
+    shortfall is legitimate only if every greek reached a decision under the
+    policy the run declared, and the policy's cap equals the allocation so the
+    stop could never overspend.
+    """
+    module = _load()
+    common = dict(variant="heston", case_name="low_feller", declared_batches=1024)
+
+    # Decided early: admissible, and the banked count governs the arrays.
+    assert (
+        module._admissible_batch_count(
+            {"sequential_stopping": _stopping_record(banked=256, declared=1024)},
+            _run_config(),
+            **common,
+        )
+        == 256
+    )
+    # Ran short with nothing decided: refused.
+    with pytest.raises(ValueError, match="undecided"):
+        module._admissible_batch_count(
+            {
+                "sequential_stopping": _stopping_record(
+                    banked=256, declared=1024, status="EXHAUSTED"
+                )
+            },
+            _run_config(),
+            **common,
+        )
+    # Exhausting the full allocation is fine whatever the statuses say.
+    assert (
+        module._admissible_batch_count(
+            {
+                "sequential_stopping": _stopping_record(
+                    banked=1024, declared=1024, status="EXHAUSTED"
+                )
+            },
+            _run_config(),
+            **common,
+        )
+        == 1024
+    )
+
+
+@pytest.mark.parametrize(
+    "record,config,match",
+    [
+        # Cap must equal the declared allocation: otherwise a cell could be
+        # stopped under a policy allowed to spend more than the configuration.
+        (_stopping_record(banked=256, declared=4096), _run_config(), "cap"),
+        # The policy must be the declared one, not a looser variant.
+        (_stopping_record(banked=256, declared=1024, margin=0.5), _run_config(),
+         "margin_fraction"),
+        (_stopping_record(banked=256, declared=1024, chunk=64), _run_config(),
+         "chunk size"),
+        # Never more than declared.
+        (_stopping_record(banked=2048, declared=1024), _run_config(), "outside"),
+        # A stopped cell in a run that never declared stopping.
+        (_stopping_record(banked=256, declared=1024), _run_config(enabled=False),
+         "does not declare"),
+    ],
+)
+def test_stopping_records_that_do_not_match_the_declared_run_are_refused(
+    record, config, match
+):
+    module = _load()
+    with pytest.raises(ValueError, match=match):
+        module._admissible_batch_count(
+            {"sequential_stopping": record},
+            config,
+            variant="heston",
+            case_name="low_feller",
+            declared_batches=1024,
+        )
+
+
+def test_a_declared_sequential_run_cannot_bank_a_cell_without_a_decision():
+    """Silence is not consent: a missing record in a sequential run is refused.
+
+    Only the multilevel SLV cell may legitimately carry no record, because it is
+    excluded from stopping by construction.
+    """
+    module = _load()
+    with pytest.raises(ValueError, match="records no stopping decision"):
+        module._admissible_batch_count(
+            {}, _run_config(), variant="heston", case_name="low_feller",
+            declared_batches=1024,
+        )
+    for case_name in module.SLV_MULTILEVEL_CASES:
+        assert (
+            module._admissible_batch_count(
+                {}, _run_config(), variant="heston_slv", case_name=case_name,
+                declared_batches=256,
+            )
+            == 256
+        )
+    # And a fixed-allocation run is unaffected.
+    assert (
+        module._admissible_batch_count(
+            {}, _run_config(enabled=False), variant="heston",
+            case_name="low_feller", declared_batches=1024,
+        )
+        == 1024
+    )
