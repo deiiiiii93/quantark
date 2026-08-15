@@ -150,8 +150,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             str(ROOT / "docs/adi2d-greek-perf/probes/probe_numerical_projection_equivalence.py"),
             "--base",
             BANKING_REVISION,
+            # The working tree, NOT committed HEAD: the source that will consume
+            # these stamps is the tree, and asking for HEAD is what let the
+            # 2026-08-14 migration clear itself against a revision that excluded
+            # the very changes being made.
             "--head",
-            "HEAD",
+            "worktree",
         ],
         cwd=str(ROOT),
         capture_output=True,

@@ -1351,11 +1351,18 @@ def test_every_exempt_symbol_still_exists():
     """A renamed non-numerical symbol must break loudly, not widen the digest."""
     module = _load()
     source = Path(module.__file__).read_text()
-    top_level = {
-        node.name
-        for node in ast.parse(source).body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
+    top_level = set()
+    for node in ast.parse(source).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            top_level.add(node.name)
+        elif isinstance(node, ast.Assign):
+            # Constants count: the provenance bookkeeping lists are exempted so
+            # that extending the exemption list is not itself invalidating.
+            top_level.update(
+                t.id for t in node.targets if isinstance(t, ast.Name)
+            )
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            top_level.add(node.target.id)
     missing = sorted(set(module.NON_NUMERICAL_SYMBOLS) - top_level)
     assert not missing, f"exempt symbols no longer defined: {missing}"
     # And the digest itself must be computable, which is where a stale list bites.

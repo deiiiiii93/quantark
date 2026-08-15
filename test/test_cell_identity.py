@@ -98,6 +98,95 @@ def test_a_new_function_is_numerical_by_default():
     )
 
 
+def test_bookkeeping_constants_can_be_exempted_so_exempting_is_not_self_defeating():
+    """The exemption list must be able to sit outside the projection it governs.
+
+    NON_NUMERICAL_SYMBOLS and the input lists are module-level constants. While
+    they are inside the projection, adding a validator helper and listing it as
+    exempt CHANGES the list, which invalidates every banked cell -- the act of
+    exempting defeats itself, which is how a 36-hour re-run gets charged for a
+    validator tweak.
+
+    Exempting them is sound because their effect stays visible in the projection
+    anyway: exempting a pre-existing function still removes its body, and a
+    newly added exempt function was never present to begin with.
+    """
+    source = (
+        "EXEMPT_LIST = ('reporting',)\n\n"
+        "def arithmetic(x):\n    return x\n\n"
+        "def reporting(p):\n    return p\n"
+    )
+    grown = (
+        "EXEMPT_LIST = ('reporting', 'also_reporting')\n\n"
+        "def arithmetic(x):\n    return x\n\n"
+        "def reporting(p):\n    return p\n\n"
+        "def also_reporting(p):\n    return p\n"
+    )
+    exempt_before = ["EXEMPT_LIST", "reporting"]
+    exempt_after = ["EXEMPT_LIST", "reporting", "also_reporting"]
+    assert project_source(source, exempt=exempt_before) == project_source(
+        grown, exempt=exempt_after
+    )
+
+
+def test_exempting_a_pre_existing_function_still_invalidates():
+    """The other direction: hiding code that WAS numerical must be visible."""
+    source = (
+        "def arithmetic(x):\n    return x * 2\n\n" "def helper(x):\n    return x + 1\n"
+    )
+    assert project_source(source, exempt=["helper"]) != project_source(source, exempt=[])
+
+
+def test_an_annotated_constant_can_be_exempted():
+    source = "LIST: tuple = ('a',)\n\ndef arithmetic(x):\n    return x\n"
+    projected = project_source(source, exempt=["LIST"])
+    assert "LIST" not in projected
+    assert "def arithmetic" in projected
+
+
+def test_comments_never_move_the_projection():
+    """Prose cannot change arithmetic, so it must not cost a re-run.
+
+    This codebase documents its reasoning heavily; if a comment invalidates
+    fourteen cells, the rational response is to stop writing comments, which is
+    a worse outcome than any digest precision gained.
+    """
+    commented = BEFORE.replace(
+        "def arithmetic(x):", "# explain the scaling below\ndef arithmetic(x):"
+    ).replace("return x * CONSTANT", "return x * CONSTANT  # trailing note")
+    assert project_source(BEFORE, exempt=["reporting"]) == project_source(
+        commented, exempt=["reporting"]
+    )
+
+
+def test_a_hash_inside_a_string_is_not_treated_as_a_comment():
+    """Comment stripping must be tokenizer-based, not textual."""
+    source = 'KEY = "value # not a comment"\n\ndef arithmetic(x):\n    return x\n'
+    assert "value # not a comment" in project_source(source, exempt=[])
+    changed = source.replace("value # not a comment", "value # different")
+    assert project_source(source, exempt=[]) != project_source(changed, exempt=[])
+
+
+def test_docstrings_never_move_the_projection():
+    source = (
+        '"""Module docstring."""\n\n'
+        "def arithmetic(x):\n"
+        '    """What it does."""\n'
+        "    return x * 2\n"
+    )
+    reworded = (
+        '"""Rewritten module docstring, much longer than before."""\n\n'
+        "def arithmetic(x):\n"
+        '    """Completely different wording."""\n'
+        "    return x * 2\n"
+    )
+    assert project_source(source, exempt=[]) == project_source(reworded, exempt=[])
+    # ...but the code around them still counts.
+    assert project_source(source, exempt=[]) != project_source(
+        source.replace("return x * 2", "return x * 3"), exempt=[]
+    )
+
+
 def test_an_exemption_naming_a_missing_symbol_is_refused():
     """A renamed exempt function must break the build, not silently widen it."""
     with pytest.raises(ValueError, match="not a top-level"):

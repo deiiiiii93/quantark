@@ -476,6 +476,19 @@ NUMERICAL_EXEMPT_INPUTS = frozenset({"quantark/validation/cell_identity.py"})
 # added here that could influence a cell by a route the plan does not record is a
 # hole, so scrutinise `cell_plan_projection` before extending this list.
 NON_NUMERICAL_SYMBOLS = (
+    # (0) PROVENANCE BOOKKEEPING -- constants that describe the digest rather than
+    #     feed the arithmetic. They must sit outside the projection they govern,
+    #     or exempting is self-defeating: adding a validator helper and listing it
+    #     here would change this tuple and invalidate every banked cell, charging
+    #     a 36-hour re-run for a validator tweak. Nothing is lost, because each
+    #     one's effect stays visible in the projection anyway -- exempting a
+    #     pre-existing function still removes its body, a newly added exempt
+    #     function was never present, and changing the input list changes which
+    #     files' bytes are hashed. Only lists that DESCRIBE the digest belong
+    #     here; an allocation table or a bound the arithmetic reads does not.
+    "IMPLEMENTATION_INPUTS",
+    "NUMERICAL_EXEMPT_INPUTS",
+    "NON_NUMERICAL_SYMBOLS",
     # (1) after the fact
     "validate_payload",
     "_admissible_batch_count",

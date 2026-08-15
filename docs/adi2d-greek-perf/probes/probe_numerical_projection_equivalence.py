@@ -51,7 +51,22 @@ def load_stage16():
     return module
 
 
+WORKTREE = "worktree"
+
+
 def blob_at(revision: str, relative: str) -> Optional[bytes]:
+    """Bytes of one input at a revision, or from the working tree.
+
+    ``worktree`` reads the live files and is the DEFAULT for --head, because the
+    committed HEAD is the wrong thing to compare when the change under test is
+    still uncommitted. Defaulting to HEAD here produced a false clearance: the
+    2026-08-14 migration proved 350d323 == 817bdee while the run that consumed
+    its result was the uncommitted tree, whose projection differed. It stamped
+    anyway; had it compared the right pair it would have refused.
+    """
+    if revision == WORKTREE:
+        path = ROOT / relative
+        return path.read_bytes() if path.exists() else None
     result = subprocess.run(
         ["git", "-C", str(ROOT), "show", f"{revision}:{relative}"],
         capture_output=True,
@@ -60,15 +75,27 @@ def blob_at(revision: str, relative: str) -> Optional[bytes]:
 
 
 def top_level_symbols(source: bytes) -> set[str]:
+    """Every name a revision defines at module level, definitions and constants.
+
+    Constants count because the exemption list names the provenance bookkeeping
+    ones; omitting them here would leave them in the projection on one side and
+    drop them on the other, manufacturing a difference out of the intersection.
+    """
     try:
         tree = ast.parse(source.decode("utf-8"))
     except (UnicodeDecodeError, SyntaxError):
         return set()
-    return {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(
+                target.id for target in node.targets if isinstance(target, ast.Name)
+            )
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
 
 
 def materialize(revision: str, relatives: Sequence[str], destination: Path) -> list[str]:
@@ -100,7 +127,14 @@ def digest(tree: Path, relatives: Sequence[str], exempt: Sequence[str]) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="350d323", help="revision that banked evidence")
-    parser.add_argument("--head", default="HEAD", help="revision that wants to resume")
+    parser.add_argument(
+        "--head",
+        default=WORKTREE,
+        help=(
+            "revision that wants to resume; defaults to the live working tree, "
+            "because comparing committed HEAD silently clears uncommitted changes"
+        ),
+    )
     args = parser.parse_args(argv)
 
     module = load_stage16()

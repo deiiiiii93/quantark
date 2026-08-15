@@ -38,7 +38,9 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import io
 import json
+import tokenize
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -61,38 +63,45 @@ def canonical_sha256(payload: Any) -> str:
 def project_source(source: str, *, exempt: Sequence[str]) -> str:
     """Return ``source`` with the named top-level definitions removed.
 
-    Only top-level functions, async functions and classes may be exempted, and
-    every name in ``exempt`` must resolve to exactly one of them. A name that
-    resolves to nothing is an error rather than a no-op: the common way an
-    exemption list goes wrong is a rename, and a silent no-op would widen the
+    Top-level functions, async functions, classes and simple assignments may be
+    exempted, and every name in ``exempt`` must resolve to exactly one of them. A
+    name that resolves to nothing is an error rather than a no-op: the common way
+    an exemption list goes wrong is a rename, and a silent no-op would widen the
     projection at exactly the moment it should have complained.
+
+    Assignments are exemptable so that the provenance BOOKKEEPING constants -- the
+    exemption list itself, the input lists -- can sit outside the projection they
+    govern. While they were inside it, adding a validator helper and listing it as
+    exempt changed the list and invalidated every banked cell: the act of
+    exempting defeated itself. Doing this loses nothing, because such a list's
+    effect stays visible in the projection regardless -- exempting a pre-existing
+    function still removes its body, and a newly added exempt function was never
+    there to begin with. Exempt only constants that DESCRIBE the digest; a
+    constant the arithmetic reads (an allocation table, a bound) must stay in.
 
     Decorators are removed with the definition they decorate. Module-level
     statements -- imports, constants, dataclass declarations -- always remain,
     because a changed constant is a changed plan.
 
-    Whitespace-only lines are dropped, so the projection is what the file would
-    be if the exempt symbols had never existed rather than what is left after
-    cutting them out. Without this, a removed definition leaves its PEP8 blank
-    separators behind and ADDING an exempt helper shifts the digest -- a diff made
-    entirely of blank lines, forcing a full re-run to pay for a validator tweak.
-    The cost of the normalisation is that blank lines inside a string literal stop
-    counting; no arithmetic in this package depends on them.
+    The result is canonical EXECUTABLE text: blank lines, comments and docstrings
+    are all removed. Each of those was found the hard way to invalidate cells for
+    free -- a removed definition left its PEP8 blank separators behind, and later
+    an added explanatory comment shifted the digest on its own. None of them can
+    change what the code computes, so none may decide whether an expensive banked
+    cell is reusable. The cost is that blank lines and '#' characters inside string
+    literals stop counting; no arithmetic here depends on either.
     """
     wanted = list(dict.fromkeys(exempt))
-    if not wanted:
-        return _without_blank_lines(source)
-
     tree = ast.parse(source)
     spans: dict[str, list[tuple[int, int]]] = {}
     for node in tree.body:
-        if isinstance(node, _EXEMPTABLE) and node.name in wanted:
+        for name in _exemptable_names(node):
+            if name not in wanted:
+                continue
             first = node.lineno
             for decorator in getattr(node, "decorator_list", []) or []:
                 first = min(first, decorator.lineno)
-            spans.setdefault(node.name, []).append(
-                (first, node.end_lineno or node.lineno)
-            )
+            spans.setdefault(name, []).append((first, node.end_lineno or node.lineno))
 
     missing = [name for name in wanted if name not in spans]
     if missing:
@@ -111,18 +120,83 @@ def project_source(source: str, *, exempt: Sequence[str]) -> str:
     for found in spans.values():
         for start, end in found:
             drop.update(range(start, end + 1))
-    lines = source.splitlines(keepends=True)
-    return _without_blank_lines(
-        "".join(
-            line for number, line in enumerate(lines, start=1) if number not in drop
+    for start, end in _docstring_spans(tree):
+        drop.update(range(start, end + 1))
+    return _canonical_code(source, drop_lines=drop)
+
+
+def _docstring_spans(tree: ast.AST) -> list[tuple[int, int]]:
+    """Line spans of every docstring, at module, class and function level.
+
+    A docstring is prose in a string literal, as inert as a comment, and dropped
+    for the same reason. Only the conventional FIRST statement of a scope counts,
+    so a string used as data is untouched.
+    """
+    spans = []
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            spans.append((first.lineno, first.end_lineno or first.lineno))
+    return spans
+
+
+def _canonical_code(source: str, *, drop_lines: set[int]) -> str:
+    """Executable text only: no dropped spans, no comments, no blank lines.
+
+    Comments are found by the tokenizer rather than by searching for '#', so a
+    hash inside a string literal survives. Everything removed here is text that
+    cannot change what the code computes, and so must not decide whether an
+    expensive banked cell may be reused. If a comment costs a 36-hour re-run, the
+    rational response is to stop writing comments -- a worse outcome than any
+    digest precision gained.
+    """
+    comment_columns: dict[int, int] = {}
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT:
+                row, column = token.start
+                comment_columns[row] = min(comment_columns.get(row, column), column)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        # Real Python would already have failed the ast.parse above; keep the
+        # digest deterministic rather than raising a second, less useful error.
+        comment_columns = {}
+
+    kept = []
+    for number, line in enumerate(source.splitlines(), start=1):
+        if number in drop_lines:
+            continue
+        if number in comment_columns:
+            line = line[: comment_columns[number]]
+        line = line.rstrip()
+        if line:
+            kept.append(line)
+    return "\n".join(kept) + ("\n" if kept else "")
+
+
+def _exemptable_names(node: ast.stmt) -> tuple[str, ...]:
+    """Names this top-level statement defines, if it may be exempted at all."""
+    if isinstance(node, _EXEMPTABLE):
+        return (node.name,)
+    if isinstance(node, ast.Assign):
+        return tuple(
+            target.id for target in node.targets if isinstance(target, ast.Name)
         )
-    )
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return (node.target.id,)
+    return ()
 
 
-def _without_blank_lines(source: str) -> str:
-    return "".join(
-        line for line in source.splitlines(keepends=True) if line.strip()
-    )
 
 
 def source_projection_sha256(
