@@ -204,3 +204,59 @@ PYTHONPATH=$PWD .venv/bin/python \
 
 The probe reproduces the published gate bit-for-bit before reporting any
 alternative, and fails if it cannot. Output: `output/aggregate_pooling_headroom/`.
+
+## 7. Resolution (later the same day): strided pooling, re-published
+
+The §5 sequence was executed on 2026-08-17 (commits `258fd7e`, `ae460f8`).
+
+**Estimator decision: strided pooling.** Stage-17's consecutive grouping was
+measured first (`probe_crn_strided_alignment.py`) and found to have its own
+defect: with cross-case CRN coupling, outer row j carries the common cells at
+scramble j while the over-allocated cell's scramble-j row lands in outer row
+floor(j/g), so the coupling straddles outer-row boundaries and the empirical
+SE estimates the variance as if the over-cell covariance were zero. Grouping by
+STRIDE instead — output row j averages scrambles {j, j+m, j+2m, ...} — keeps
+every same-scramble coupling inside one output row, leaves the rows i.i.d.,
+and its empirical variance matches the partial-CRN-overlap plug-in formula.
+Measured on the banked fleet: the coupling is real and negative (corr −0.43 on
+`heston/low_feller × near_ki`, −20.5% of the heston aggregate variance);
+consecutive matches its as-if-zero prediction to 0.4%, strided matches the
+full formula to 2.7%. Same point estimate as pooling; only the SE construction
+differs, and strided is the one that is exactly right.
+
+**Reclassification and re-publish.** `make_decisions` moved into
+`NON_NUMERICAL_SYMBOLS` (category 1 — it reads banked evidence and renders
+verdicts). `probe_numerical_projection_equivalence` proved the base and edited
+trees project identically under the new list; `restamp_p18_strided.py` then
+re-keyed a copy of the fleet after rebuilding all fourteen banked identities
+bit-for-bit and replaying the live configuration. The resume re-publish
+(`output/p18_strided`) took seconds, resumed all 15 checkpoints, and every
+gate component is bitwise-equal to the probe's validated numbers. The
+alignment is declared in the artifact (`aggregate_alignment: strided_pooled`,
+per-case banked counts) and enforced by `validate_payload`.
+
+| variant | estimate | interval | total unc. | margin | route |
+|---|---|---|---|---|---|
+| heston | −0.032170 | [−0.059049, −0.005290] | 0.026879 | 41.0% | **pde** |
+| heston_slv | −0.044701 | [−0.102191, +0.012788] | 0.057489 | −2.2% | **excluded_greek_unresolved** |
+
+**Stage-17 re-pinned.** Parent constants now point at `output/p18_strided`
+(commit `258fd7e`); the full-recertification parent carries pinned per-cell
+identities in place of the amendment-only cell_provenance/auxiliary_controls/
+aggregate_cohorts projections, and `_group_delta_rows` uses the same strided
+grouping as the parent aggregate. Parent validation verified green. The
+parent's unresolved SLV route is now genuinely the gate stage-17 exists to
+flip.
+
+**Still open before a production stage-17 run.**
+
+1. `PRODUCTION_ALLOCATION_FROZEN = True` carries an allocation frozen from a
+   development pilot run against the *lost* parent. The physical variances it
+   measured did not change, but the freeze's lineage did: either re-run the
+   non-admissive development pilot against the new parent, or record an
+   explicit waiver. This is the §5-style decision that gates the production
+   run.
+2. The production run itself (~12 h) with `--precision-target 0.02`; if the
+   true aggregate bias is near the current best estimate (−0.045), it admits
+   SLV at ≈25% margin; if the truth sits near ±0.07, the honest conclusion is
+   exclusion.
