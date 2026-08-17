@@ -67,55 +67,55 @@ STUDY = "adi_2d_snowball_greek_certification"
 STAGE16_PATH = Path(__file__).resolve().parent / "16_adi_greek_certification.py"
 _STAGE16 = None
 
-# Immutable schema-11 parent.  Both serialized bytes and embedded canonical
-# identities are checked.  The parent remains the authority for anchors,
-# individual cells, Heston admission, and the production PDE implementation.
+# Immutable stage-16 parent: the 2026-08-17 strided re-publish
+# (output/p18_strided, commit 258fd7e), a schema-13 full recertification whose
+# aggregate uses the declared strided pooling.  It replaces the lost schema-13
+# incremental amendment b5463093/3d4cb66b as this amendment's pinned parent.
+# Both serialized bytes and embedded canonical identities are checked.  The
+# parent remains the authority for anchors, individual cells, Heston
+# admission, and the production PDE implementation.  A full-recertification
+# parent has no cell_provenance / auxiliary_controls / aggregate_cohorts
+# projections; its per-cell reuse identities are pinned instead.
 PARENT_SCHEMA_VERSION = 13
-PARENT_SOURCE_COMMIT = "b5463093e0725f4f3012a10a358d662d9bc240f6"
+PARENT_SOURCE_COMMIT = "258fd7ec39416335a00e7fad70822c15c8c1294a"
 PARENT_EVIDENCE_FILE_SHA256 = (
-    "3d4cb66b8fface3a3c83237047098736624b42310d40bf0a74f0054044b311af"
+    "9041c3a299bb518d683768ff4c852c7556078786e2b6d0115ed6027a36867ba7"
 )
 PARENT_DECISION_FILE_SHA256 = (
-    "c242045a510b4e3a376acbbc17b5df5c9a0a29cc244a46b8af32c3ad032a0256"
+    "63e959ab274e7816a1f99760b72a2020c87fd63c634fcf888f95f73ec80e89ab"
 )
 PARENT_EVIDENCE_SHA256 = (
-    "25110446c9f54c0c91f8992b14e3e0f335b13cd88bb76a2220cfaa2931434721"
+    "5c2bd5796e42b6c241f534325738227c38077f978dc4de2b2f345b571e907d07"
 )
 PARENT_DECISION_SHA256 = (
-    "4678cb77b1b467964f63322f451a996dc7fbd8b4a4b32079849c6ca09e82fdc0"
+    "55e618eaccf1f4eb97c2620f5b5ee652ac590cc4e8c599a2acf84ed01edc4ef3"
 )
 PARENT_IMPLEMENTATION_SHA256 = (
-    "d3400f3fa151486aef216a54e9154dd484840be61dc4ae4362dbb4f44f49e8c1"
+    "ce027ee25157c30ffd54aedd86032d21ed20a288087f3c82a02cd9b2691c1fba"
 )
 PARENT_RUN_CONFIGURATION_SHA256 = (
-    "54e937175c2613cfc871ceb07fcf93e1abfb82c9d2681511dde2bfab2388e0ef"
+    "ceb69449baa967069b04fa777c067825d1191512aa5c3870fc7c30722e5c235c"
 )
 PARENT_PRODUCTION_PDE_SHA256 = (
-    "328f9c2daa8e84d055e13ead53a99fc72690030732602c736bf19529a9526b62"
+    "f87b5086a3f1d1538a2e346016a15e193cbc6e9de06b949968295a503e75c2ff"
 )
 PARENT_ANCHORS_SHA256 = (
-    "4662f6813dc4fc97318b5bd7b92da6f9310ceb91aa5e3b5d4ee2104c4ed604b7"
+    "4e7e9cdc72f5410f7c42713f802dcf2291d870e0bc65840d5a438a0da814e74a"
 )
 PARENT_CELLS_SHA256 = (
-    "1017cc1e651e381796e3188202002a3456eb7bcb149327adb96b4deb8c3651ff"
+    "06a48c772b20bbcdedb677700958cc71a200ec0d6316cf13c50cbc8b1b52ff30"
 )
-PARENT_CELL_PROVENANCE_SHA256 = (
-    "7f767e3bba2f4998ee1f768aefd16ef0049df9dc51d06de9d8ff45b831ccd8b4"
-)
-PARENT_AUXILIARY_CONTROLS_SHA256 = (
-    "c15857002075cd3adfb732bf3c054d5dc380834cbbd25fd3ea803f56b29a3a58"
-)
-PARENT_AGGREGATE_COHORTS_SHA256 = (
-    "8382f9983cc337e5ddbdee80a7ba1942fd5bc4fc9c5e28cecf4bd8510c6dd414"
+PARENT_CELL_IDENTITIES_SHA256 = (
+    "fe10eecd7509678df2d5112f9dfdf1b33c4bee7f0769bac022727a79cbabbb43"
 )
 PARENT_DECISIONS_SHA256 = (
-    "e82690e9341429a6eee09b2bac3b8b6f2503e563a2d566b253d13681d70c09db"
+    "bc8aa961e3aafb86cf9996bcfe0618e60099678d6ad39ff9a3b33ac08cbd155b"
 )
 PARENT_BASE_HESTON_DECISION_SHA256 = (
-    "c0287e36c336906746bf5756e41b1afc365f363193342aff05174b588b9696ba"
+    "d7a1209ffa82ef0a788486e35f00216332aeffd290e370b95a8c79a2c1cea04b"
 )
 PARENT_SAMPLING_BY_VARIANT_SHA256 = (
-    "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    "5b603d6c1589e384e87462996a056fdf9e9df40a59b3f58a7ec26309420bdac8"
 )
 
 DEVELOPMENT_SEED = 20260806
@@ -551,9 +551,7 @@ def parent_certificate_manifest() -> dict:
         "production_pde_compatibility_sha256": PARENT_PRODUCTION_PDE_SHA256,
         "anchors_sha256": PARENT_ANCHORS_SHA256,
         "cells_sha256": PARENT_CELLS_SHA256,
-        "cell_provenance_sha256": PARENT_CELL_PROVENANCE_SHA256,
-        "auxiliary_controls_sha256": PARENT_AUXILIARY_CONTROLS_SHA256,
-        "aggregate_cohorts_sha256": PARENT_AGGREGATE_COHORTS_SHA256,
+        "cell_identities_sha256": PARENT_CELL_IDENTITIES_SHA256,
         "decisions_sha256": PARENT_DECISIONS_SHA256,
         "base_heston_decision_sha256": PARENT_BASE_HESTON_DECISION_SHA256,
         "sampling_by_variant_sha256": PARENT_SAMPLING_BY_VARIANT_SHA256,
@@ -572,7 +570,13 @@ def load_and_validate_parent_certificate(
     evidence_path: Path,
     decision_path: Path,
 ) -> tuple[dict, dict, dict]:
-    """Load the exact schema-11 artifact and re-audit its immutable identity."""
+    """Load the exact stage-16 parent artifact and re-audit its identity.
+
+    The pinned parent is the 2026-08-17 strided re-publish (schema-13 full
+    recertification, output/p18_strided): Heston admitted at a 41% margin,
+    Heston-SLV honestly unresolved -- the gate this amendment exists to
+    resolve with control variates instead of ~150 h of extra paths.
+    """
     try:
         evidence_bytes = Path(evidence_path).read_bytes()
         decision_bytes = Path(decision_path).read_bytes()
@@ -591,11 +595,14 @@ def load_and_validate_parent_certificate(
     if (
         evidence.get("schema_version") != PARENT_SCHEMA_VERSION
         or evidence.get("study") != STUDY
-        or evidence.get("certification_mode") != "incremental_amendment"
+        or evidence.get("certification_mode") != "full_recertification"
         or evidence.get("quick") is not False
-        or evidence.get("profile") != "production incremental amendment"
+        or evidence.get("profile") != "production"
     ):
-        raise ValueError("schema-11 parent metadata mismatch")
+        raise ValueError("stage-16 parent metadata mismatch")
+    # A full-recertification parent embeds no production-PDE compatibility
+    # digest (that key is amendment-only); the live projection is still pinned
+    # below, which is the check that actually protects the carried cells.
     if (
         evidence.get("evidence_sha256") != PARENT_EVIDENCE_SHA256
         or stage16()._projected_evidence_sha256(evidence) != PARENT_EVIDENCE_SHA256
@@ -604,10 +611,12 @@ def load_and_validate_parent_certificate(
         != PARENT_RUN_CONFIGURATION_SHA256
         or _canonical_sha256(evidence.get("run_configuration"))
         != PARENT_RUN_CONFIGURATION_SHA256
-        or evidence.get("production_pde_compatibility_sha256")
-        != PARENT_PRODUCTION_PDE_SHA256
+        or evidence.get("numerical_implementation_sha256")
+        != evidence.get("run_configuration", {}).get(
+            "numerical_implementation_sha256"
+        )
     ):
-        raise ValueError("schema-11 parent canonical provenance mismatch")
+        raise ValueError("stage-16 parent canonical provenance mismatch")
     if (
         decision.get("decision_sha256") != PARENT_DECISION_SHA256
         or decision.get("evidence_sha256") != PARENT_EVIDENCE_SHA256
@@ -628,14 +637,12 @@ def load_and_validate_parent_certificate(
     projections = {
         "anchors": PARENT_ANCHORS_SHA256,
         "cells": PARENT_CELLS_SHA256,
-        "cell_provenance": PARENT_CELL_PROVENANCE_SHA256,
-        "auxiliary_controls": PARENT_AUXILIARY_CONTROLS_SHA256,
-        "aggregate_cohorts": PARENT_AGGREGATE_COHORTS_SHA256,
+        "cell_identities": PARENT_CELL_IDENTITIES_SHA256,
         "decisions": PARENT_DECISIONS_SHA256,
     }
     for key, expected_hash in projections.items():
         if _canonical_sha256(evidence.get(key)) != expected_hash:
-            raise ValueError(f"schema-11 parent {key} projection mismatch")
+            raise ValueError(f"stage-16 parent {key} projection mismatch")
     if evidence.get("decisions") != decision.get("decisions"):
         raise ValueError("schema-11 parent evidence/decision routing mismatch")
     if _canonical_sha256(evidence.get("sampling_by_variant")) != (
@@ -827,7 +834,17 @@ def _group_delta_rows(
     rows = _serialized_delta_rows(payload, control=control)
     if output_batches < 2 or rows.size % output_batches != 0:
         raise ValueError("paired-RQMC rows are not divisible by outer batches")
-    return rows.reshape(output_batches, rows.size // output_batches).mean(axis=1)
+    # STRIDED grouping: output row j averages scrambles {j, j+m, j+2m, ...}
+    # (m = output_batches), not the consecutive block {gj .. gj+g-1}. Scramble
+    # j of every case therefore lands in output row j, so same-scramble CRN
+    # coupling across cases stays inside one output row and the output rows
+    # remain mutually independent. Consecutive grouping pushes that coupling
+    # across output-row boundaries, where the empirical standard error cannot
+    # see it -- measured on the banked stage-16 fleet in
+    # docs/adi2d-greek-perf/probes/probe_crn_strided_alignment.py, where the
+    # over-cell coupling is real (corr -0.43 on heston low_feller x near_ki).
+    # Identical to the parent stage-16 aggregate's declared alignment.
+    return rows.reshape(rows.size // output_batches, output_batches).mean(axis=0)
 
 
 def controlled_case_economic_rows(
@@ -2333,7 +2350,10 @@ def run_production_amendment(args: argparse.Namespace) -> int:
         },
         "anchors": parent["anchors"],
         "cells": parent["cells"],
-        "cell_provenance": parent["cell_provenance"],
+        # The full-recertification parent states per-cell reuse identities
+        # rather than an amendment's cell_provenance chain; they are carried
+        # under their own name and pinned by validate_payload.
+        "cell_identities": parent["cell_identities"],
         "aggregate_reference": {
             "primary_by_case": primary_by_case,
             "middle_by_case": middle_by_case,
@@ -2410,11 +2430,14 @@ def validate_payload(payload: dict) -> None:
     ):
         raise ValueError("schema-12 production engine controls mismatch")
     expected_reference_seeds = {
+        # The stage-16 strided re-publish parent records exactly these three
+        # seed families; the lost amendment parent's extra families
+        # (parent_schema9, heston_near_ki_control) do not exist in a
+        # full-recertification payload.
         "schema11_parent": {
-            "heston_near_ki_control": 20260808,
+            "heston": 20260808,
             "heston_slv_mid_control": 20260810,
             "heston_slv_primary": 20260809,
-            "parent_schema9": 20260807,
         },
         "aggregate_primary_refresh": PRODUCTION_PRIMARY_SEED,
         "aggregate_middle_control": PRODUCTION_MIDDLE_SEED,
@@ -2427,7 +2450,7 @@ def validate_payload(payload: dict) -> None:
     projections = {
         "anchors": PARENT_ANCHORS_SHA256,
         "cells": PARENT_CELLS_SHA256,
-        "cell_provenance": PARENT_CELL_PROVENANCE_SHA256,
+        "cell_identities": PARENT_CELL_IDENTITIES_SHA256,
     }
     for key, expected_hash in projections.items():
         if _canonical_sha256(payload.get(key)) != expected_hash:
