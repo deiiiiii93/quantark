@@ -166,7 +166,7 @@ AGGREGATE_COHORT_NAMES = (
 # Low-Feller deliberately omits the Heston layer: its 7->14 ladder has no
 # matching parent Heston expectation, and this amendment never reruns a
 # completed Heston case.
-FROZEN_SMOOTH_HESTON_WEIGHT = 0.7
+FROZEN_SMOOTH_HESTON_WEIGHT = 1.0
 AGGREGATE_CONTROL_WEIGHTS = {
     case_name: {
         "frozen_slv": 0.95,
@@ -182,52 +182,59 @@ AGGREGATE_CONTROL_WEIGHTS = {
 # Frozen before either held-out seed was opened.  The exact development design
 # commit, non-admissive pilot bytes, and allocation projection are retained as
 # provenance; production does not read them or adapt its fixed sample sizes.
+# Re-frozen 2026-08-17 from fresh development pilots run at the commit below
+# against the strided p18 parent. The original b5a5243 pilots were lost in the
+# 2026-08-10 crash AND measured pre-bridge8 estimators for ordinary_full /
+# ordinary_decayed / sigma_collapse (bridge dims 1, now 8) -- proven by
+# reconstruction: substituting the old implementation digest into the fresh
+# payloads reproduces the old low_feller evidence hash bit-for-bit (unchanged
+# config) and fails for the two chunks containing re-configured cells.
 FROZEN_ALLOCATION_DESIGN_COMMIT = (
-    "b5a5243d0335081e18c9c92dfebbb5f1f450f859"
+    "acd9f2feb2d86bb8360fb799209c86a55d753280"
 )
 FROZEN_DEVELOPMENT_IMPLEMENTATION_SHA256 = (
-    "e9d21aa02b9e86a49cdc674ce97a2dd886c06f672344a28a7a8187e68ce3846f"
+    "9e78367e74cce9c1affea337c75b5736402cc1af5466edcb70c09bed55829116"
 )
 FROZEN_ALLOCATION_PROJECTION_SHA256 = (
-    "3e007060710eaba934180c69ffe6579822bfe84a13bca9f8c81751c21bf65bc6"
+    "f2a37465317e114f93f6c6c2f1c6f3674275549597c3c8d74077bd8eb3c2733d"
 )
 FROZEN_ALLOCATION_PROJECTION_FILE_SHA256 = (
-    "3e1327c76b88ce53eb2695f786117fa911579878990690a899a3c6d7b1f18c7e"
+    "59b81f6ae0bd7c8d22e8709f4a6ab3c210e263fcbcc15597359bc80975e629b3"
 )
 FROZEN_DEVELOPMENT_PILOTS = (
     (
         ("ordinary_full",),
-        "9640f0cf4a3eb7f20a7ac2954b36f6458187b4b956a3abfc8eee09794d4f16e8",
-        "c1beb0f4b4383d9941fe09ea1626274a486a76aa2da39da268ad08d99a0a90ff",
+        "46fae69a159f4f8efe40ec4db5fc76ea6ff70f4c40a3628706a24017c3c1cc96",
+        "66bdc0507e3837ecca4a96f80f8cf5bc7ce6c4284cf43737d0f462116c0fb63e",
     ),
     (
         ("ordinary_decayed", "near_ko", "sigma_collapse", "near_expiry"),
-        "14c6747ef4668c96a82e2f599417fc22926f331397ef9091fe3ce8329527e164",
-        "fbdfa01158dcc7b0380aad23211676ea8e059cfb1585cf18a7d824248efa3208",
+        "82e34aeaaaffc3e196f5ac4bc764b6ef1eb30808a60f926ace0ba0dee7dc8491",
+        "ebfe2358909f70b093eccdbcd14dd4145c1bf8cd52324df54f8f8eea71da5fe4",
     ),
     (
         ("low_feller",),
-        "5199937088502e85299f412f17f8db950171d195bc525ce678bc3114cb9e70ec",
-        "4b158c959463db71857da9bccc3d1d891752eed8b8ebbd06808693a644f82a97",
+        "ad842df04763aa7a19848d2efcb1013af50df4ba2f4e13d1421b1481756929c1",
+        "6e3ff5696c53946c4b9f6c60eaf128b607f736822154da52a82962ba7e77ee9d",
     ),
 )
 FROZEN_ALLOCATION_PROJECTED_INTERVAL = (
-    -0.09606341420341855,
-    -0.041846226147214255,
+    -0.0813313361025313,
+    -0.008478333640640707,
 )
 FROZEN_ALLOCATION_GUARDED_INTERVAL = (
-    -0.09927214226746098,
-    -0.038637498083171816,
+    -0.09232497576315679,
+    0.0025153060199847935,
 )
-FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS = 67_108_864
+FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS = 8_388_608
 
 PRODUCTION_ALLOCATION_FROZEN = True
 PRODUCTION_PRIMARY_SEED = 20260811
 PRODUCTION_MIDDLE_SEED = 20260812
 PRODUCTION_PRIMARY_PATHS_PER_BATCH = 1024
-PRODUCTION_PRIMARY_BATCHES = 4096
+PRODUCTION_PRIMARY_BATCHES = 512
 PRODUCTION_MIDDLE_PATHS_PER_BATCH = 8192
-PRODUCTION_MIDDLE_BATCHES = 256
+PRODUCTION_MIDDLE_BATCHES = 32
 PRODUCTION_PRIMARY_BATCH_WORKERS = 4
 PRODUCTION_MIDDLE_BATCH_WORKERS = 2
 PRODUCTION_PRIMARY_CELL_WORKERS = 3
