@@ -492,6 +492,12 @@ NON_NUMERICAL_SYMBOLS = (
     # (1) after the fact
     "validate_payload",
     "_admissible_batch_count",
+    # `make_decisions` reads banked cell evidence and renders routing verdicts;
+    # it can decide, but it cannot produce or alter a single banked number.
+    # Reclassified 2026-08-17 so the aggregate-alignment change (truncation ->
+    # strided pooling) re-publishes from banked checkpoints instead of charging
+    # a 51 h fleet re-run for publish-time decision code.
+    "make_decisions",
     "render_markdown",
     "publish_payload",
     "build_decision_payload",
@@ -2859,15 +2865,44 @@ def make_decisions(
             not missing_anchors and not missing_cases and sampling_complete
         )
         cell_status = _combined_status(row["status"] for row in variant_rows)
-        delta_batches = np.asarray(
-            [
-                row["batch_difference_contracts"]["delta"][:common_batches]
-                for row in variant_rows
-            ],
-            dtype=float,
+        def strided_aggregate_rows(values) -> np.ndarray:
+            # Strided pooling: output row j averages an over-allocated cell's
+            # interleaved scrambles {j, j+m, j+2m, ...} (m = common_batches), so
+            # scramble j of EVERY cell lands in output row j. Same-scramble
+            # cross-case CRN covariance therefore stays inside one output row,
+            # the output rows remain mutually independent, and -- unlike the
+            # truncation this replaces -- every banked scramble reaches the
+            # aggregate gate. Non-divisible counts fail closed rather than
+            # silently dropping rows; a run whose stopping produced ragged
+            # counts has no declared alignment and may not publish one.
+            # Measured comparison against truncation and consecutive pooling:
+            # docs/adi2d-greek-perf/probes/probe_crn_strided_alignment.py.
+            banked = np.asarray(values, dtype=float)
+            if banked.size % common_batches:
+                raise ValueError(
+                    f"{variant}: {banked.size} banked scrambles do not divide "
+                    f"into {common_batches} common aggregate rows; strided "
+                    "pooling needs a whole number of interleaved groups"
+                )
+            return banked.reshape(
+                banked.size // common_batches, common_batches
+            ).mean(axis=0)
+
+        delta_batches = (
+            np.asarray(
+                [
+                    strided_aggregate_rows(
+                        row["batch_difference_contracts"]["delta"]
+                    )
+                    for row in variant_rows
+                ],
+                dtype=float,
+            )
+            if common_batches > 0
+            else np.asarray([], dtype=float)
         )
         if delta_batches.ndim == 2 and delta_batches.shape[0] > 0:
-            # Mean across cases *within* each scramble preserves cross-case
+            # Mean across cases *within* each output row preserves cross-case
             # covariance before the outer standard error is measured.
             bias_batches = np.mean(delta_batches, axis=0)
             pde_signed_axes = {
@@ -2888,9 +2923,11 @@ def make_decisions(
             )
             substep_matrix = np.asarray(
                 [
-                    row["certifications"]["delta"]["reference_substep_batch_contracts"][
-                        :common_batches
-                    ]
+                    strided_aggregate_rows(
+                        row["certifications"]["delta"][
+                            "reference_substep_batch_contracts"
+                        ]
+                    )
                     for row in variant_rows
                 ],
                 dtype=float,
@@ -2928,6 +2965,12 @@ def make_decisions(
                 "component_confidence": STOCHASTIC_COMPONENT_CONFIDENCE,
             }
             bias["aggregate_common_scrambles"] = common_batches
+            # The alignment is part of the declared estimator, so it is stated
+            # in the artifact and checked by `validate_payload` -- the published
+            # truncated gate of 2026-08-17 showed an undeclared choice here can
+            # decide admission by itself.
+            bias["aggregate_alignment"] = "strided_pooled"
+            bias["aggregate_batch_counts_by_case"] = batch_counts_by_case
         else:
             bias = certify_equivalence(
                 float("nan"),
@@ -4212,6 +4255,14 @@ def validate_payload(payload: dict) -> None:
             )
             if int(decision.get("aggregate_common_scrambles", 0)) != (expected_common):
                 raise ValueError(f"{variant}: invalid aggregate common-scramble count")
+        delta_bias = decision.get("delta_bias") or {}
+        if "aggregate_common_scrambles" in delta_bias and (
+            delta_bias.get("aggregate_alignment") != "strided_pooled"
+        ):
+            raise ValueError(
+                f"{variant}: aggregate delta-bias alignment must be the "
+                "declared strided pooling"
+            )
 
     for key in ("implementation_sha256", "run_configuration_sha256"):
         value = payload.get(key)
