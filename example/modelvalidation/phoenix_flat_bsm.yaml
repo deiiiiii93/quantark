@@ -1,0 +1,101 @@
+# Phoenix under flat Black-Scholes.
+#
+# The same three arms as the snowball study -- two-surface PDE, quadrature, and
+# one paired-RQMC benchmark -- over a payoff with one extra hard feature: a
+# coupon barrier. A phoenix pays a coupon at every observation where spot sits
+# above 85, knock-out or not, so every observation date carries a digital. That
+# is where a deterministic grid and Monte Carlo tend to part company first,
+# which is why near_coupon parks spot right on the barrier.
+#
+# Economic scale, environment and bounds are identical to snowball_flat_bsm, on
+# purpose: with multiplier 200, inception spot 100 and notional 20,000 the delta
+# quantum and the reference move are both exactly 1.0, so a raw error IS a
+# contract error -- and the two certifications sit on the same axis.
+#
+# Bound calibration (release procedure section 7, step 4). The cell gate needs
+# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this
+# sampling budget (4 batches x 65,536 paths, paired bumps): pv 0.0033, delta
+# 0.0035, gamma 0.0052 -- a 24-38x margin. Desk tolerance and benchmark
+# resolution are compatible, so the bound is not one the sampling cannot cash.
+#
+# Offline study (minutes, not seconds). Run it with:
+#   python -m quantark.modelvalidation run example/modelvalidation/phoenix_flat_bsm.yaml
+# Add --quick for a wiring check that is explicitly not bankable evidence.
+
+study: phoenix-flat-bsm
+schema: 1
+
+quantities: [pv, delta, gamma]
+
+bounds:
+  cell: 0.5
+  mean_signed_bias: 0.1
+
+sampling:
+  paths_per_batch: 65536
+  min_batches: 4
+  max_batches: 32
+  seed: 20260818
+  bump: 0.01
+
+economic_scale:
+  builder: hedge_contracts
+  params:
+    hedge_multiplier: 200.0
+    hedge_inception_spot: 100.0
+    notional: 20000.0
+
+environment:
+  builder: flat_bsm
+  params:
+    spot: 100.0
+    vol: 0.22
+    rate: 0.025
+    div_yield: 0.03
+
+product:
+  builder: equity.phoenix
+  params:
+    initial_price: 100.0
+    strike: 100.0
+    ko_barrier: 103.0
+    ko_rate: 0.0
+    ki_barrier: 75.0
+    coupon_barrier: 85.0
+    coupon_rate: 0.02
+    num_observations: 12
+    memory_coupon: false
+    maturity: 1.0
+    contract_multiplier: 1.0
+
+reference:
+  builder: equity.phoenix.mc_rqmc
+  params: {}
+
+candidates:
+  - builder: equity.phoenix.pde
+    params: {accuracy: standard}
+  - builder: equity.phoenix.quad
+    params: {grid_points: 1001}
+
+cases:
+  # At inception, clear of all three barriers.
+  - {name: ordinary}
+  # Just under the knock-out barrier: the KO discontinuity sits inside the bump
+  # stencil, which is where deterministic gamma usually breaks first.
+  - {name: near_ko, environment: {spot: 102.5}}
+  # Sitting ON the coupon barrier. A phoenix coupon is a digital at 85, so its
+  # sensitivity is maximal here and the whole coupon stream is in play.
+  - {name: near_coupon, environment: {spot: 85.5}}
+  # Just above the knock-in barrier: the terminal payoff turns over here.
+  - {name: near_ki, environment: {spot: 76.0}}
+  # Low vol: barriers are rarely reached, so the grid resolves a much narrower
+  # region of interest and the coupon stream is nearly certain.
+  - {name: low_vol, environment: {vol: 0.12}}
+  # Three months with a quarterly schedule: few observations left, and time
+  # discretization error has nowhere to average out.
+  - {name: near_expiry, product: {num_observations: 3, maturity: 0.25}}
+  # Memory coupons: missed coupons accumulate and pay later. A prior audit found
+  # the PDE paying accrued memory coupons at KO regardless of the coupon-barrier
+  # condition, so this path carries history and must be certified explicitly.
+  - {name: memory, product: {memory_coupon: true}}

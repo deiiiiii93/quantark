@@ -14,6 +14,7 @@ python -m quantark.modelvalidation run example/modelvalidation/european_selftest
 # Real runs
 python -m quantark.modelvalidation run example/modelvalidation/european_selftest.yaml
 python -m quantark.modelvalidation run example/modelvalidation/snowball_flat_bsm.yaml
+python -m quantark.modelvalidation run example/modelvalidation/phoenix_flat_bsm.yaml
 
 # Resume an interrupted run (reuses checkpoints whose configuration still matches)
 python -m quantark.modelvalidation run example/modelvalidation/snowball_flat_bsm.yaml --resume
@@ -40,6 +41,7 @@ That path is gitignored — banking evidence is a deliberate act, described in
 |---|---|---|
 | `european_selftest.yaml` | Closed-form Black-Scholes against a small RQMC benchmark. The candidate is exact by construction, so the framework **must** admit it — this is the machinery's own calibration check, and it runs in CI. | ~3 s |
 | `snowball_flat_bsm.yaml` | Snowball PDE and quadrature engines against one paired-RQMC benchmark, on PV and both spot Greeks, across five scenarios including near-KO, near-KI, low-vol, and near-expiry. | minutes |
+| `phoenix_flat_bsm.yaml` | Phoenix PDE and quadrature engines against one paired-RQMC benchmark, across seven scenarios. Adds what the snowball has not: a coupon barrier, so every observation date carries a digital — `near_coupon` sits right on it — plus a memory-coupon case. | minutes |
 
 ## Writing a new study
 
