@@ -61,6 +61,12 @@ _PRODUCT_KEYS = (
 #: One profile coarser than each target, for the refinement ladder.
 _COARSER_ACCURACY = {"high": "standard", "standard": "fast", "fast": "fast"}
 
+#: Parameters the flat-BSM snowball benchmark can actually honour. It is empty
+#: on purpose: SnowballMCEngine derives its whole time grid from the product's
+#: observation schedule -- a daily grid plus a Brownian-bridge crossing
+#: correction when KI is continuous -- so there is no sampling knob to turn.
+_REFERENCE_KEYS: frozenset = frozenset()
+
 #: Quadrature settings that cannot move the answer, so they stay out of the
 #: recorded configuration and out of the identity hash.
 _QUAD_NON_NUMERIC = ("bump_size", "bump_config", "auto_converge",
@@ -168,6 +174,18 @@ class SnowballMCReference(_SnowballArm):
     def __init__(self, sampling: SamplingPolicy, **kwargs) -> None:
         super().__init__(**kwargs)
         self.sampling = sampling
+        # A knob this engine cannot honour would still be recorded in the
+        # certificate and folded into the benchmark identity hash, so changing
+        # it would invalidate checkpoints while moving no number. Refuse it
+        # rather than ignore it.
+        unsupported = set(self._params) - _REFERENCE_KEYS
+        if unsupported:
+            raise ValidationError(
+                f"equity.snowball.mc_rqmc does not support {sorted(unsupported)}. "
+                "SnowballMCEngine builds its time grid from the observation "
+                "schedule, so these would be banked as benchmark settings but "
+                "never applied."
+            )
 
     def config(self) -> Mapping[str, Any]:
         """The benchmark's own settings -- it is half of every comparison."""
@@ -175,7 +193,6 @@ class SnowballMCReference(_SnowballArm):
             "engine": "SnowballMCEngine",
             "method": MonteCarloMethod.RANDOMIZED_QUASI.value,
             "paths_per_batch": self.sampling.paths_per_batch,
-            "substeps_per_interval": int(self._params.get("substeps_per_interval", 1)),
             "greeks": "paired central difference (common random numbers)",
         }
 
@@ -202,7 +219,6 @@ class SnowballMCReference(_SnowballArm):
         environment, product_spec = self._specs(case)
         product = make_snowball(product_spec)
         seed = self.sampling.seed + batch_index
-        substeps = int(self._params.get("substeps_per_interval", 1))
 
         def price_at(spot: float) -> float:
             # A fresh engine per pricing call: engine instances are not safe to
@@ -219,8 +235,6 @@ class SnowballMCReference(_SnowballArm):
                 ),
                 method=MonteCarloMethod.RANDOMIZED_QUASI,
             )
-            if substeps > 1:
-                engine.substeps_per_interval = substeps
             return engine.price(product, make_environment(environment, spot))
 
         values = _central_difference_greeks(
