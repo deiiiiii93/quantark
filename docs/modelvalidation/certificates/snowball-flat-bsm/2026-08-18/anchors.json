@@ -1,0 +1,103 @@
+{
+  "abs_tol": 1e-15,
+  "anchors": [
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.14469715864190005,
+        "gamma": -0.1350651293863526,
+        "pv": 101.86640536183528
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.07892514795936638,
+        "gamma": -0.10837612072248869,
+        "pv": 103.41322915101524
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.0202955007586874,
+        "gamma": -0.010324336174264571,
+        "pv": 84.28351335327793
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.5105211634515711,
+        "gamma": -0.051576435526742896,
+        "pv": 97.91862524482869
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.6341521273521906,
+        "gamma": -0.04745052346284955,
+        "pv": 96.49611252348434
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.1865870348561458,
+        "gamma": -0.13477750185333548,
+        "pv": 101.73325489333376
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.11526792916770034,
+        "gamma": -0.11266258959005881,
+        "pv": 103.26250908857203
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.0163559776371773,
+        "gamma": -0.009680714266091392,
+        "pv": 84.2671929442917
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.5128896030833531,
+        "gamma": -0.05149422612582154,
+        "pv": 97.89918036874391
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.6371211452131504,
+        "gamma": -0.04428772725894703,
+        "pv": 96.45903094731773
+      }
+    }
+  ],
+  "certificate_sha256": "a3591aa83b0dbc08c2e6202a2d61a6b3bdd3c2b069c2464281384625ee6bfbe4",
+  "fingerprint": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "rel_tol": 1e-12,
+  "schema": 1,
+  "study_source_text": "# Snowball under flat Black-Scholes: the module's demonstration study.\n#\n# Two deterministic engines -- the two-surface PDE solver and the quadrature\n# engine -- are certified against one paired-RQMC Monte Carlo benchmark, on PV\n# and both spot Greeks, across five scenarios chosen to stress the parts of the\n# payoff that are hard: sitting just under the knock-out barrier, sitting just\n# above the knock-in barrier, and running into expiry.\n#\n# Economic scale: the trade is 20,000 of notional, and one index-futures\n# contract at multiplier 200 with spot 100 hedges exactly that -- so one\n# \"contract\" of error is one contract of hedge a desk would have mis-placed.\n#\n# Bounds follow the desk convention: 0.5 contracts per cell, 0.1 contracts of\n# mean signed bias across cells.\n#\n# This is an offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/snowball_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: snowball-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260814\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.snowball\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ki_barrier: 85.0\n    ko_rate: 0.15\n    rebate_rate: 0.15\n    months: 12\n    maturity: 1.0\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.snowball.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.snowball.pde\n    params: {accuracy: standard}\n  - builder: equity.snowball.quad\n    params: {grid_points: 1001}\n\ncases:\n  # At inception, comfortably between the barriers.\n  - {name: ordinary}\n  # Just under the knock-out barrier: the KO discontinuity sits inside the\n  # bump stencil, which is where deterministic gamma usually breaks first.\n  - {name: near_ko, environment: {spot: 102.5}}\n  # Just above the knock-in barrier: the payoff turns over here.\n  - {name: near_ki, environment: {spot: 86.0}}\n  # Low vol: barriers become rarely reached, so the PDE grid resolves a much\n  # narrower region of interest.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Three months to expiry with a quarterly schedule: few observations left,\n  # and time discretization error has nowhere to average out.\n  - {name: near_expiry, product: {months: 3, maturity: 0.25}}\n"
+}
