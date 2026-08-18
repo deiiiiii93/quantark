@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certification: ko-reset-flat-bsm</title>
+<style>
+:root {
+  --ground: #eceff1;
+  --paper: #ffffff;
+  --ink: #16212b;
+  --muted: #5d6d79;
+  --rule: #ccd6dc;
+  --rail: #dfe6ea;
+  --accent: #0f7a56;
+  --pass: #0f7a56;
+  --fail: #b3261e;
+  --warn: #a8690f;
+  --err: #6b5b95;
+  --pass-bg: #e4f1eb;
+  --fail-bg: #fae9e7;
+  --warn-bg: #f8eeda;
+  --err-bg: #ece9f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #10171d;
+    --paper: #18212a;
+    --ink: #e4ecf1;
+    --muted: #93a4b0;
+    --rule: #31404c;
+    --rail: #26323c;
+    --accent: #46c391;
+    --pass: #46c391;
+    --fail: #f08b80;
+    --warn: #dfa445;
+    --err: #a595c9;
+    --pass-bg: #17332a;
+    --fail-bg: #3a211f;
+    --warn-bg: #35291480;
+    --err-bg: #262137;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #10171d;
+  --paper: #18212a;
+  --ink: #e4ecf1;
+  --muted: #93a4b0;
+  --rule: #31404c;
+  --rail: #26323c;
+  --accent: #46c391;
+  --pass: #46c391;
+  --fail: #f08b80;
+  --warn: #dfa445;
+  --err: #a595c9;
+  --pass-bg: #17332a;
+  --fail-bg: #3a211f;
+  --warn-bg: #35291480;
+  --err-bg: #262137;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+.sheet {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+.masthead { border-bottom: 3px solid var(--ink); padding-bottom: 18px; }
+.eyebrow {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 10px;
+}
+h1 {
+  font-size: clamp(26px, 4vw, 36px); line-height: 1.12; margin: 0 0 6px;
+  letter-spacing: -0.01em; text-wrap: balance;
+}
+.subtitle { margin: 0; color: var(--muted); font-size: 16px; }
+
+.banner {
+  display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: baseline;
+  margin: 22px 0 0; padding: 16px 20px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 5px;
+  border-left: 5px solid var(--rule);
+}
+.banner.pass { border-left-color: var(--pass); }
+.banner.fail { border-left-color: var(--fail); }
+.banner.warn { border-left-color: var(--warn); }
+.banner .headline { font-size: 19px; font-weight: 600; }
+.banner .note { color: var(--muted); font-size: 14.5px; }
+
+.quick {
+  margin: 18px 0 0; padding: 12px 18px; border-radius: 5px;
+  background: var(--warn-bg); border-left: 4px solid var(--warn);
+  font-size: 15px;
+}
+
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 22px 0 0; }
+.stat {
+  flex: 1 1 150px; background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 5px; padding: 12px 16px;
+}
+.stat .k {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); display: block; margin-bottom: 4px;
+}
+.stat .v {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 21px; font-variant-numeric: tabular-nums; font-weight: 600;
+}
+.stat .v.small { font-size: 15px; font-weight: 500; }
+
+section { margin: 40px 0 0; }
+h2 {
+  font-size: 19px; margin: 0 0 4px; letter-spacing: -0.005em;
+  border-bottom: 1px solid var(--rule); padding-bottom: 7px;
+}
+.lede { color: var(--muted); font-size: 14.5px; margin: 8px 0 14px; max-width: 74ch; }
+
+.scroll { overflow-x: auto; }
+table {
+  width: 100%; border-collapse: collapse; background: var(--paper);
+  border: 1px solid var(--rule); font-size: 13.5px;
+}
+th, td {
+  text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+th {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600; background: var(--rail);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+td.name { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+td.wrap { white-space: normal; }
+
+.pill {
+  display: inline-block; padding: 1px 9px; border-radius: 999px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+}
+.pill.pass { background: var(--pass-bg); color: var(--pass); }
+.pill.fail { background: var(--fail-bg); color: var(--fail); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.err  { background: var(--err-bg);  color: var(--err); }
+
+.gauge { display: flex; align-items: center; gap: 8px; min-width: 132px; }
+.track {
+  position: relative; flex: 1; height: 7px; border-radius: 4px;
+  background: var(--rail); overflow: hidden; min-width: 74px;
+}
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
+.fill.pass { background: var(--pass); }
+.fill.fail { background: var(--fail); }
+.fill.warn { background: var(--warn); }
+.fill.err  { background: var(--err); }
+.gauge .pct {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  min-width: 38px; text-align: right;
+}
+
+/* Engines side by side: the point is comparing one grid against another. */
+.configs {
+  display: grid; gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  align-items: start;
+}
+.config-block { min-width: 0; }
+h3.cfg-name {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px; font-weight: 600; margin: 0 0 4px;
+  padding-bottom: 5px; border-bottom: 2px solid var(--accent);
+}
+p.cfg-head { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+p.cfg-head strong {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 600; color: var(--ink);
+}
+.configs table { font-size: 12.5px; table-layout: fixed; width: 100%; }
+.configs td { padding: 5px 11px; }
+/* Setting names are long and the columns are narrow: wrap rather than clip,
+   so no reviewer has to scroll a nested box to read a grid setting. */
+.configs td.name { white-space: normal; overflow-wrap: anywhere; width: 62%; }
+.configs td.num { white-space: normal; overflow-wrap: anywhere; }
+
+.meta {
+  margin: 44px 0 0; padding-top: 14px; border-top: 1px solid var(--rule);
+  font-size: 13px; color: var(--muted);
+}
+.meta dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 0; }
+.meta dt {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+}
+.meta dd {
+  margin: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; word-break: break-all; color: var(--ink);
+}
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.empty { color: var(--muted); font-style: italic; font-size: 14px; }
+
+@media print {
+  body { background: #fff; }
+  .sheet { max-width: none; padding: 0; }
+  section { break-inside: avoid; }
+}
+</style>
+</head><body><div class='sheet'>
+<header class="masthead">
+<p class="eyebrow">quantark &middot; engine release certification</p>
+<h1>ko-reset-flat-bsm</h1>
+<p class="subtitle">Deterministic engines measured against a statistically controlled stochastic benchmark, in hedge contracts.</p>
+</header>
+<div class="banner pass"><span class="headline">All candidates admitted</span><span class="note">Every cell was measured against a benchmark that met its budget.</span></div>
+<div class="stats"><div class="stat"><span class="k">cells</span><span class="v">42</span></div><div class="stat"><span class="k">candidates</span><span class="v">2</span></div><div class="stat"><span class="k">worst cell margin</span><span class="v">19%</span></div><div class="stat"><span class="k">benchmark batches</span><span class="v">28</span></div><div class="stat"><span class="k">cell bound</span><span class="v small">0.5 c</span></div><div class="stat"><span class="k">bias bound</span><span class="v small">0.1 c</span></div></div>
+<section><h2>Decisions</h2><p class="lede">One decision per candidate engine. ADMITTED requires every cell to pass against a benchmark sharp enough to discriminate; REJECTED requires confident evidence of disagreement; INCONCLUSIVE means the evidence cannot say.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>decision</th><th>cells</th></tr></thead><tbody><tr><td class="name">equity.ko_reset_snowball.pde</td><td><span class="pill pass">ADMITTED</span></td><td><span class="pill pass">21 PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td><span class="pill pass">ADMITTED</span></td><td><span class="pill pass">21 PASS</span></td></tr></tbody></table></div></section>
+<section><h2>Engine configuration</h2><p class="lede">The settings each engine was handed, resolved rather than named: a profile like <code>standard</code> is an indirection whose meaning can change between releases, so the certificate records what it expanded to. These are the <em>requested</em> settings.</p><div class="configs"><div class="config-block"><h3 class="cfg-name">equity.ko_reset_snowball.pde</h3><p class="cfg-head"><strong>spatial points</strong> 400 &middot; <strong>steps/day</strong> 4 &middot; <strong>std devs</strong> 4 &middot; <strong>eps_crit</strong> 0.003 &middot; <strong>max points</strong> 2000 &middot; <strong>max steps</strong> 5000 &middot; <strong>day count</strong> 252</p><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">accuracy</td><td class="num">standard</td></tr><tr><td class="name">engine</td><td class="num">KOResetSnowballPDESolver</td></tr><tr><td class="name">grid.<wbr>bounds</td><td class="num">&mdash;, &mdash;</td></tr><tr><td class="name">grid.<wbr>day_<wbr>count</td><td class="num">252</td></tr><tr><td class="name">grid.<wbr>eps_<wbr>crit</td><td class="num">0.003</td></tr><tr><td class="name">grid.<wbr>event_<wbr>damping_<wbr>steps</td><td class="num">2</td></tr><tr><td class="name">grid.<wbr>max_<wbr>points</td><td class="num">2000</td></tr><tr><td class="name">grid.<wbr>max_<wbr>steps</td><td class="num">5000</td></tr><tr><td class="name">grid.<wbr>num_<wbr>std</td><td class="num">4</td></tr><tr><td class="name">grid.<wbr>points</td><td class="num">400</td></tr><tr><td class="name">grid.<wbr>steps_<wbr>per_<wbr>day</td><td class="num">4</td></tr><tr><td class="name">grid.<wbr>terminal_<wbr>damping_<wbr>steps</td><td class="num">1</td></tr></tbody></table></div></div><div class="config-block"><h3 class="cfg-name">equity.ko_reset_snowball.quad</h3><p class="cfg-head"><strong>quadrature points</strong> 1001 &middot; <strong>std devs</strong> 10 &middot; <strong>rule</strong> trapezoid</p><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">engine</td><td class="num">KOResetSnowballQuadEngine</td></tr><tr><td class="name">grid.<wbr>align_<wbr>priority</td><td class="num">auto</td></tr><tr><td class="name">grid.<wbr>barrier_<wbr>reach_<wbr>stddevs</td><td class="num">&mdash;</td></tr><tr><td class="name">grid.<wbr>bgk_<wbr>min_<wbr>ki_<wbr>observations</td><td class="num">100</td></tr><tr><td class="name">grid.<wbr>bus_<wbr>days_<wbr>in_<wbr>year</td><td class="num">252</td></tr><tr><td class="name">grid.<wbr>event_<wbr>projection</td><td class="num">cell_average</td></tr><tr><td class="name">grid.<wbr>event_<wbr>smoothing_<wbr>cells</td><td class="num">1</td></tr><tr><td class="name">grid.<wbr>event_<wbr>smoothing_<wbr>kernel</td><td class="num">cosine</td></tr><tr><td class="name">grid.<wbr>event_<wbr>smoothing_<wbr>log_<wbr>width</td><td class="num">0.002</td></tr><tr><td class="name">grid.<wbr>event_<wbr>smoothing_<wbr>mode</td><td class="num">fixed</td></tr><tr><td class="name">grid.<wbr>fft_<wbr>filter_<wbr>alpha</td><td class="num">12</td></tr><tr><td class="name">grid.<wbr>fft_<wbr>filter_<wbr>power</td><td class="num">8</td></tr><tr><td class="name">grid.<wbr>fft_<wbr>padding_<wbr>factor</td><td class="num">2</td></tr><tr><td class="name">grid.<wbr>filter_<wbr>unreachable_<wbr>barriers</td><td class="num">true</td></tr><tr><td class="name">grid.<wbr>grid_<wbr>points</td><td class="num">1001</td></tr><tr><td class="name">grid.<wbr>integration_<wbr>rule</td><td class="num">trapezoid</td></tr><tr><td class="name">grid.<wbr>ki_<wbr>monitoring_<wbr>mode</td><td class="num">exact_discrete</td></tr><tr><td class="name">grid.<wbr>max_<wbr>adaptive_<wbr>grid_<wbr>points</td><td class="num">5001</td></tr><tr><td class="name">grid.<wbr>min_<wbr>diffusion_<wbr>stddev_<wbr>cells</td><td class="num">2.5</td></tr><tr><td class="name">grid.<wbr>num_<wbr>std_<wbr>devs</td><td class="num">10</td></tr><tr><td class="name">grid.<wbr>stability_<wbr>preset</td><td class="num">&mdash;</td></tr><tr><td class="name">grid_<wbr>points</td><td class="num">1001</td></tr></tbody></table></div></div><div class="config-block"><h3 class="cfg-name">benchmark</h3><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">engine</td><td class="num">SnowballMCEngine</td></tr><tr><td class="name">greeks</td><td class="num">paired central difference (common random numbers)</td></tr><tr><td class="name">method</td><td class="num">randomized_quasi</td></tr><tr><td class="name">paths_<wbr>per_<wbr>batch</td><td class="num">65536</td></tr></tbody></table></div></div></div></section>
+<section><h2>Benchmark sampling</h2><p class="lede">Sampling continues until the benchmark is sharp enough for the gate that will judge it. A case that stopped at <code>max_batches</code> never reached that point, and its cells cannot certify anything.</p><div class="scroll"><table><thead><tr><th>case</th><th>batches</th><th>stopped because</th><th>standard errors (raw units)</th></tr></thead><tbody><tr><td>below_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00477, gamma 0.0123, pv 0.0119</td></tr><tr><td>discrete_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00409, gamma 0.00883, pv 0.00999</td></tr><tr><td>low_vol</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00292, gamma 0.0118, pv 0.0116</td></tr><tr><td>near_expiry</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00117, gamma 0.00329, pv 0.00505</td></tr><tr><td>near_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00536, gamma 0.0268, pv 0.00618</td></tr><tr><td>near_pre_ko</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00233, gamma 0.0126, pv 0.0132</td></tr><tr><td>ordinary</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00868, gamma 0.0297, pv 0.011</td></tr></tbody></table></div><p class="lede">Policy: 65,536 paths per batch, 4&ndash;32 batches, seed 20260818, relative bump 0.01.</p></section>
+<section><h2>Cells</h2><p class="lede">One row per candidate &times; case &times; quantity. The gauge shows how much of the 0.5 c cell bound the disagreement interval (|error| + k&middot;SE) consumed &mdash; a pass near 100% is a pass with no room left. Envelope is the candidate's own discretization error from its refinement ladder.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>case</th><th>quantity</th><th>reference</th><th>SE</th><th>candidate</th><th>err (c)</th><th>envelope (c)</th><th>interval vs bound</th><th>verdict</th></tr></thead><tbody><tr><td class="name">equity.ko_reset_snowball.pde</td><td>ordinary</td><td>pv</td><td class="num">96.6613</td><td class="num">0.011</td><td class="num">96.704</td><td class="num">0.04273</td><td class="num">0.0152</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:13.0%"></div></div><span class="pct">13%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>ordinary</td><td>delta</td><td class="num">0.621389</td><td class="num">0.00868</td><td class="num">0.611252</td><td class="num">-0.01014</td><td class="num">0.00507</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.5%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>ordinary</td><td>gamma</td><td class="num">-0.0416238</td><td class="num">0.0297</td><td class="num">-0.046614</td><td class="num">-0.00499</td><td class="num">0.000239</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:12.9%"></div></div><span class="pct">13%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_pre_ko</td><td>pv</td><td class="num">98.0475</td><td class="num">0.0132</td><td class="num">98.0694</td><td class="num">0.02191</td><td class="num">0.00287</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:9.7%"></div></div><span class="pct">10%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_pre_ko</td><td>delta</td><td class="num">0.487059</td><td class="num">0.00233</td><td class="num">0.485599</td><td class="num">-0.00146</td><td class="num">0.00853</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:1.5%"></div></div><span class="pct">1%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_pre_ko</td><td>gamma</td><td class="num">-0.034448</td><td class="num">0.0126</td><td class="num">-0.050137</td><td class="num">-0.01569</td><td class="num">6.74e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.2%"></div></div><span class="pct">8%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_ki</td><td>pv</td><td class="num">79.0154</td><td class="num">0.00618</td><td class="num">79.0133</td><td class="num">-0.002097</td><td class="num">0.00781</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.9%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_ki</td><td>delta</td><td class="num">1.06603</td><td class="num">0.00536</td><td class="num">1.04908</td><td class="num">-0.01695</td><td class="num">0.0043</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.5%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_ki</td><td>gamma</td><td class="num">-0.0382894</td><td class="num">0.0268</td><td class="num">0.00266685</td><td class="num">0.04096</td><td class="num">0.000401</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:18.9%"></div></div><span class="pct">19%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>below_ki</td><td>pv</td><td class="num">74.0373</td><td class="num">0.0119</td><td class="num">74.0367</td><td class="num">-0.0006474</td><td class="num">0.00161</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.9%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>below_ki</td><td>delta</td><td class="num">1.10845</td><td class="num">0.00477</td><td class="num">1.1063</td><td class="num">-0.002142</td><td class="num">0.000501</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.3%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>below_ki</td><td>gamma</td><td class="num">-0.0131948</td><td class="num">0.0123</td><td class="num">0.00544677</td><td class="num">0.01864</td><td class="num">1.7e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.7%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>low_vol</td><td>pv</td><td class="num">100.165</td><td class="num">0.0116</td><td class="num">100.193</td><td class="num">0.02801</td><td class="num">0.0284</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:10.2%"></div></div><span class="pct">10%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>low_vol</td><td>delta</td><td class="num">0.359471</td><td class="num">0.00292</td><td class="num">0.373215</td><td class="num">0.01374</td><td class="num">0.0154</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.9%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>low_vol</td><td>gamma</td><td class="num">-0.0863362</td><td class="num">0.0118</td><td class="num">-0.0956802</td><td class="num">-0.009344</td><td class="num">0.000873</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.6%"></div></div><span class="pct">7%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_expiry</td><td>pv</td><td class="num">99.5678</td><td class="num">0.00505</td><td class="num">99.6384</td><td class="num">0.07065</td><td class="num">0.0106</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:16.2%"></div></div><span class="pct">16%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_expiry</td><td>delta</td><td class="num">0.284584</td><td class="num">0.00117</td><td class="num">0.266508</td><td class="num">-0.01808</td><td class="num">0.00799</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.1%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>near_expiry</td><td>gamma</td><td class="num">-0.0472864</td><td class="num">0.00329</td><td class="num">-0.0418617</td><td class="num">0.005425</td><td class="num">0.00094</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.4%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>discrete_ki</td><td>pv</td><td class="num">96.7295</td><td class="num">0.00999</td><td class="num">96.7322</td><td class="num">0.002688</td><td class="num">9.86e-06</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.5%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>discrete_ki</td><td>delta</td><td class="num">0.612278</td><td class="num">0.00409</td><td class="num">0.608858</td><td class="num">-0.00342</td><td class="num">0.00653</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.3%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>discrete_ki</td><td>gamma</td><td class="num">-0.0366268</td><td class="num">0.00883</td><td class="num">-0.046709</td><td class="num">-0.01008</td><td class="num">0.000288</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.6%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>ordinary</td><td>pv</td><td class="num">96.6613</td><td class="num">0.011</td><td class="num">96.6856</td><td class="num">0.02433</td><td class="num">0.0226</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:9.3%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>ordinary</td><td>delta</td><td class="num">0.621389</td><td class="num">0.00868</td><td class="num">0.611456</td><td class="num">-0.009933</td><td class="num">0.00229</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.5%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>ordinary</td><td>gamma</td><td class="num">-0.0416238</td><td class="num">0.0297</td><td class="num">-0.0463172</td><td class="num">-0.004693</td><td class="num">0.0309</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:12.8%"></div></div><span class="pct">13%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_pre_ko</td><td>pv</td><td class="num">98.0475</td><td class="num">0.0132</td><td class="num">98.0601</td><td class="num">0.0126</td><td class="num">0.0214</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:7.8%"></div></div><span class="pct">8%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_pre_ko</td><td>delta</td><td class="num">0.487059</td><td class="num">0.00233</td><td class="num">0.489166</td><td class="num">0.002108</td><td class="num">0.00315</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:1.5%"></div></div><span class="pct">1%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_pre_ko</td><td>gamma</td><td class="num">-0.034448</td><td class="num">0.0126</td><td class="num">-0.0499693</td><td class="num">-0.01552</td><td class="num">0.00338</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.1%"></div></div><span class="pct">8%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_ki</td><td>pv</td><td class="num">79.0154</td><td class="num">0.00618</td><td class="num">79.0376</td><td class="num">0.02219</td><td class="num">0.0907</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.9%"></div></div><span class="pct">7%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_ki</td><td>delta</td><td class="num">1.06603</td><td class="num">0.00536</td><td class="num">1.05918</td><td class="num">-0.006857</td><td class="num">5.96e-06</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.5%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_ki</td><td>gamma</td><td class="num">-0.0382894</td><td class="num">0.0268</td><td class="num">-0.0374854</td><td class="num">0.000804</td><td class="num">0.00518</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:10.9%"></div></div><span class="pct">11%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>below_ki</td><td>pv</td><td class="num">74.0373</td><td class="num">0.0119</td><td class="num">74.0455</td><td class="num">0.008203</td><td class="num">0.076</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.4%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>below_ki</td><td>delta</td><td class="num">1.10845</td><td class="num">0.00477</td><td class="num">1.10667</td><td class="num">-0.001774</td><td class="num">0.00407</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.3%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>below_ki</td><td>gamma</td><td class="num">-0.0131948</td><td class="num">0.0123</td><td class="num">0.00547268</td><td class="num">0.01867</td><td class="num">0.0201</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.7%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>low_vol</td><td>pv</td><td class="num">100.165</td><td class="num">0.0116</td><td class="num">100.169</td><td class="num">0.003378</td><td class="num">0.0151</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.3%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>low_vol</td><td>delta</td><td class="num">0.359471</td><td class="num">0.00292</td><td class="num">0.368805</td><td class="num">0.009333</td><td class="num">0.000385</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.0%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>low_vol</td><td>gamma</td><td class="num">-0.0863362</td><td class="num">0.0118</td><td class="num">-0.105346</td><td class="num">-0.01901</td><td class="num">0.0317</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.5%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_expiry</td><td>pv</td><td class="num">99.5678</td><td class="num">0.00505</td><td class="num">99.57</td><td class="num">0.00224</td><td class="num">0.000412</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.5%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_expiry</td><td>delta</td><td class="num">0.284584</td><td class="num">0.00117</td><td class="num">0.285801</td><td class="num">0.001217</td><td class="num">0.000649</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:1.5%"></div></div><span class="pct">1%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>near_expiry</td><td>gamma</td><td class="num">-0.0472864</td><td class="num">0.00329</td><td class="num">-0.0448217</td><td class="num">0.002465</td><td class="num">0.00198</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:1.8%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>discrete_ki</td><td>pv</td><td class="num">96.7295</td><td class="num">0.00999</td><td class="num">96.7344</td><td class="num">0.004878</td><td class="num">0</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.0%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>discrete_ki</td><td>delta</td><td class="num">0.612278</td><td class="num">0.00409</td><td class="num">0.605935</td><td class="num">-0.006343</td><td class="num">0</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.9%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>discrete_ki</td><td>gamma</td><td class="num">-0.0366268</td><td class="num">0.00883</td><td class="num">-0.0463895</td><td class="num">-0.009763</td><td class="num">0</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.5%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr></tbody></table></div></section>
+<section><h2>Aggregate bias</h2><p class="lede">Per-cell bounds are blind to a small error repeated with the same sign in every case. This gate catches exactly that: it measures the mean <em>signed</em> error across cells against a 0.1 c budget.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>quantity</th><th>cells</th><th>mean bias (c)</th><th>SE (c)</th><th>bias vs bound</th><th>passed</th></tr></thead><tbody><tr><td class="name">equity.ko_reset_snowball.pde</td><td>pv</td><td class="num">7</td><td class="num">0.02332</td><td class="num">0.00388</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:31.1%"></div></div><span class="pct">31%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>delta</td><td class="num">7</td><td class="num">-0.005492</td><td class="num">0.0018</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:9.1%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.pde</td><td>gamma</td><td class="num">7</td><td class="num">0.00356</td><td class="num">0.00661</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:16.8%"></div></div><span class="pct">17%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>pv</td><td class="num">7</td><td class="num">0.01112</td><td class="num">0.00388</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:18.9%"></div></div><span class="pct">19%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>delta</td><td class="num">7</td><td class="num">-0.00175</td><td class="num">0.0018</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.4%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.ko_reset_snowball.quad</td><td>gamma</td><td class="num">7</td><td class="num">-0.003864</td><td class="num">0.00661</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:17.1%"></div></div><span class="pct">17%</span></div></td><td><span class="pill pass">PASS</span></td></tr></tbody></table></div></section>
+<div class="meta"><dl><dt>evidence digest</dt><dd>33e1f27fdff63c2665b6342ed40150021dfaa445a86578f2571b3f03ce7be0d3</dd><dt>machine</dt><dd>arm64 &middot; macOS-26.6-arm64-arm-64bit</dd><dt>python</dt><dd>3.11.8 &middot; numpy 2.4.6</dd><dt>quantark</dt><dd>f470133f8b17729948189381a3684d9b7453218f</dd><dt>schema</dt><dd>1</dd></dl></div>
+</div></body></html>
