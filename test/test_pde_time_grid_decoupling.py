@@ -94,8 +94,15 @@ def test_ko_reset_reconciliation_gate(ko_reset_product, pricing_env):
 
     # Grid-converged on the decoupled grid.
     assert abs(pv_coarse - pv_fine) / abs(pv_fine) < 1e-3
-    # Agrees with the pre-change baseline captured on main (98.0279).
-    assert abs(pv_fine - 97.9593) < 0.05
+    # Re-pinned 2026-08-18 (audit #13): the old 97.9593 baseline was captured
+    # while the ko-reset solver seeded its not-yet-KI surface at maturity_post
+    # and marched it back through a period the trade can never reach. This
+    # fixture is maturity_pre=1 / maturity_post=2, so it carried the full
+    # defect. The new value is benchmark-verified, not merely re-frozen: MC at
+    # 262,144 paired-RQMC paths prices this product at 98.20548, which the
+    # corrected solver matches to 0.008 under default event semantics; the old
+    # pin was 0.25 away from it.
+    assert abs(pv_fine - 98.1827) < 0.05
 
     # Reconciliation intact: reported pv == PDE price.
     stats = coarse.calculate_event_stats(ko_reset_product, pricing_env)

@@ -838,3 +838,73 @@ class TestSubclassQuadEnginesShareTheBridgeFix:
 
         # Pre-fix -0.0914; post-fix +0.0361.
         assert quad_price == pytest.approx(mc_price, abs=0.06)
+
+
+# ============================================================================
+# Audit #13 — the ko-reset deterministic engines never learned when a
+# NOT-YET-KNOCKED-IN trade matures.
+#
+# A KO-reset snowball runs a pre-KI schedule to maturity_pre; only once it
+# knocks in does it switch to the post-KI schedule running to maturity_post.
+# Both KOResetSnowballQuadEngine and KOResetSnowballPDESolver seeded the
+# not-yet-KI surface with get_maturity_payoff_v0 at the END of the grid
+# (maturity_post) and diffused it back through a period the trade can never
+# reach. get_pre_maturity_time was referenced only by the product and by
+# SnowballMCEngine -- neither deterministic engine called it.
+#
+# Fingerprint: price depended on maturity_post even with an UNREACHABLE KI
+# barrier (-0.67 per extra year at r=2.5%/q=3%), and the dependence vanished
+# at r=q=0, because a constant surface diffused at zero rate is unchanged.
+#
+# The invariant below needs no benchmark: if KI can never happen, the post-KI
+# horizon is unreachable and cannot move the price.
+# ============================================================================
+
+
+class TestKOResetNotYetKnockedInMaturity:
+    """An unreachable post-KI period must not price."""
+
+    @staticmethod
+    def _unreachable_ki_product(maturity_post):
+        from quantark.asset.equity.product.option import create_ko_reset_snowball
+        from quantark.asset.equity.product.option.ko_reset_snowball_option import (
+            PostKOScheduleMode,
+        )
+
+        # ki_barrier=1.0 against spot 100 at 22% vol: KI is not reachable, so the
+        # trade is a plain snowball maturing at maturity_pre.
+        return create_ko_reset_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity_pre=1.0,
+            maturity_post=maturity_post,
+            post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+            ki_continuous=True,
+            ki_barrier=1.0,
+        )
+
+    def test_quad_price_ignores_an_unreachable_post_ki_horizon(self):
+        from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
+            KOResetSnowballQuadEngine,
+        )
+
+        env = create_pricing_env(spot=100.0, vol=0.22, rate=0.025, div=0.03)
+        price_at = lambda m: KOResetSnowballQuadEngine(
+            params=QuadParams(grid_points=1001)
+        ).price(self._unreachable_ki_product(m), env)
+
+        # Pre-fix: 101.54015 -> 100.22980, a drift of -0.66 per extra year.
+        assert price_at(3.0) == pytest.approx(price_at(1.0), abs=0.02)
+
+    def test_pde_price_ignores_an_unreachable_post_ki_horizon(self):
+        from quantark.asset.equity.engine.pde.ko_reset_snowball_pde_solver import (
+            KOResetSnowballPDESolver,
+        )
+
+        env = create_pricing_env(spot=100.0, vol=0.22, rate=0.025, div=0.03)
+        price_at = lambda m: KOResetSnowballPDESolver(
+            params=PDEParams(accuracy="standard")
+        ).price(self._unreachable_ki_product(m), env)
+
+        # Pre-fix: 101.53409 -> 100.21675.
+        assert price_at(3.0) == pytest.approx(price_at(1.0), abs=0.02)
