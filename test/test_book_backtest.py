@@ -76,10 +76,16 @@ def test_single_product_summary_is_stable(single_summary):
     # spot bump (deprecated EngineParams.bump_size=1e-4 shim retired).
     # Re-pinned 2026-07-28: QUAD autocallable defaults now use phase-stable
     # trapezoid integration and cell-average event projection.
+    # Re-pinned 2026-08-18: this snowball is a CONTINUOUS-KI product priced by
+    # QUAD, whose Brownian-bridge correction was applying a knocked-in surface
+    # already rolled back one step (audit #12 in
+    # test_pde_quad_audit_regressions.py). Correcting it moved PV -- and hence
+    # the hedge ladder and realised P&L -- by a genuine amount. Day count and
+    # trade count are unchanged; only the P&L level moved.
     assert single_summary["num_days"] == 86
     assert single_summary["num_trades"] == 5
     assert single_summary["num_trades"] > 0, "hedging must produce at least one trade"
-    assert single_summary["total_pnl"] == pytest.approx(-3342.531116780636, rel=1e-9)
+    assert single_summary["total_pnl"] == pytest.approx(-3164.8326029009986, rel=1e-9)
 
 
 def test_book_config_rejects_empty_products():

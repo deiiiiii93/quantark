@@ -668,3 +668,87 @@ class TestPhoenixMemoryCouponAtKO:
         ).price(phoenix, env)
 
         assert pde_price == pytest.approx(mc_price, rel=0.02, abs=0.10)
+
+
+# ============================================================================
+# Audit #12 — QUAD applied its continuous-KI Brownian-bridge correction using
+# a knocked-in surface that had ALREADY been diffused one step back in time.
+#
+# The two-surface continuous-barrier scheme is
+#     V_out(x, t_{k-1}) = INT K(x,y) [ (1-p_hit) V_out(y,t_k)
+#                                      + p_hit    V_in (y,t_k) ] dy
+# so both surfaces must be sampled at the SAME later slice t_k. Every caller
+# of _diffuse_with_bridge rebound `v_in = self._diffuse_fft(v_in, ...)` first
+# and then passed that stale, extra-discounted surface in, so the correction
+# term INT K p_hit (v_in - v_out) subtracted a t_k surface from a t_{k-1} one.
+#
+# Consequence: PV biased LOW in proportion to p_hit -- worst just above the KI
+# barrier and decaying outward -- and entirely independent of grid_points
+# (1001 -> 16001 moved the price by 2e-6 while the error stayed at -0.30).
+# Only the continuous-KI path was affected; discrete KI never calls the bridge.
+# ============================================================================
+
+
+class TestQuadContinuousKIBridgeStaleness:
+    """Continuous-KI QUAD must agree with the other two engines near the barrier."""
+
+    @staticmethod
+    def _continuous_ki_snowball():
+        from quantark.asset.equity.product.option import SnowballOption
+        from quantark.asset.equity.product.option.snowball_config import (
+            BarrierConfig as SnowballBarrierConfig,
+            PayoffConfig,
+        )
+
+        barrier_config = SnowballBarrierConfig(
+            ko_barrier=103.0,
+            ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[(i + 1) / 12 for i in range(12)],
+            ki_barrier=85.0,
+            ki_continuous=True,
+            ki_observation_type=ObservationType.CONTINUOUS,
+        )
+        return SnowballOption(
+            initial_price=100.0,
+            strike=100.0,
+            barrier_config=barrier_config,
+            payoff_config=PayoffConfig(rebate_rate=0.15),
+            contract_multiplier=1.0,
+            maturity=1.0,
+        )
+
+    def test_continuous_ki_price_matches_pde_just_above_the_barrier(self):
+        """Spot 86 against a KI barrier of 85: pre-fix QUAD was 0.32 below PDE."""
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+
+        env = create_pricing_env(spot=86.0, vol=0.22, rate=0.025, div=0.03)
+        snowball = self._continuous_ki_snowball()
+
+        quad_price = SnowballQuadEngine(params=QuadParams(grid_points=2001)).price(
+            snowball, env
+        )
+        pde_price = SnowballPDESolver(params=PDEParams(accuracy="standard")).price(
+            snowball, env
+        )
+
+        assert quad_price == pytest.approx(pde_price, abs=0.10)
+
+    def test_continuous_ki_bias_does_not_scale_with_knock_in_proximity(self):
+        """The defect grew as spot approached the barrier; a sound bridge does not."""
+        from quantark.asset.equity.engine.pde import SnowballPDESolver
+        from quantark.asset.equity.engine.quad import SnowballQuadEngine
+
+        snowball = self._continuous_ki_snowball()
+        solver = SnowballPDESolver(params=PDEParams(accuracy="standard"))
+
+        for spot in (85.5, 88.0, 100.0):
+            env = create_pricing_env(spot=spot, vol=0.22, rate=0.025, div=0.03)
+            quad_price = SnowballQuadEngine(params=QuadParams(grid_points=2001)).price(
+                snowball, env
+            )
+            pde_price = solver.price(snowball, env)
+            assert quad_price == pytest.approx(pde_price, abs=0.10), (
+                f"continuous-KI QUAD/PDE disagreement at spot {spot}"
+            )

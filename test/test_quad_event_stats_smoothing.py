@@ -179,15 +179,28 @@ def test_cells_zero_reproduces_hard_mask_baseline():
             integration_rule="simpson",
         )
     ).calculate_event_stats(ph, env)
+    # Re-baselined 2026-08-18 for the continuous-KI bridge-staleness fix
+    # (audit #12 in test_pde_quad_audit_regressions.py). This phoenix is a
+    # CONTINUOUS-KI product, so its event stats run through
+    # _diffuse_with_bridge, which was correcting against a knocked-in surface
+    # that had already been rolled back one step. The invariant this test
+    # guards -- smoothing is purely additive on top of the hard mask -- is
+    # unchanged; only the hard-mask numbers it is pinned to moved.
+    #
+    # In the PRODUCTION config the fix improves agreement with MC (300k paths,
+    # 252 steps): coupon RMS error 0.002032 -> 0.001433, and the KO-probability
+    # sum error 0.00158 -> 0.00023. This degraded config (cells=0 + NODAL) sits
+    # at RMS ~0.021, an order of magnitude above the shift, so it is not
+    # evidence either way.
     ko_baseline = np.array([
-        0.354468887686, 0.140439831531, 0.077573430563, 0.050661052323,
-        0.036378003003, 0.027774839276, 0.022137332992, 0.018206780906,
-        0.015330151732, 0.013141766061, 0.011424788127, 0.010044303939,
+        0.354468887677, 0.140439806223, 0.077572281329, 0.050650821005,
+        0.036339860516, 0.027689214398, 0.021996606161, 0.018017655092,
+        0.015108290509, 0.012905303710, 0.011189958953, 0.009823491326,
     ])
     coupon_baseline = np.array([
-        0.993817910015, 0.607795810328, 0.435407594056, 0.33466259599,
-        0.268523202241, 0.222035236917, 0.187722221082, 0.16142555321,
-        0.140670083009, 0.123903915985, 0.110109488865, 0.098592290015,
+        0.993817761713, 0.607749348541, 0.435040182387, 0.333648557060,
+        0.266761879525, 0.219645023918, 0.184928740459, 0.158469343047,
+        0.137756038844, 0.121182902483, 0.107678604857, 0.096503578694,
     ])
     np.testing.assert_allclose(
         np.asarray(stats.ko_probability), ko_baseline, rtol=0, atol=1e-9
