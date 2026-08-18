@@ -1,0 +1,104 @@
+# KO-reset snowball under flat Black-Scholes.
+#
+# The hard part of this payoff is a REGIME SWITCH. The trade runs a pre-KI KO
+# schedule (barrier 103) to maturity_pre; only once it knocks in at 80 does it
+# switch to a second, lower KO schedule (barrier 95) running on to
+# maturity_post. Two value surfaces therefore live on different horizons -- and
+# that is precisely what both deterministic engines got wrong before audit #13,
+# maturing the not-yet-knocked-in surface on the post-KI schedule.
+#
+# Environment, economic scale and bounds are identical to snowball_flat_bsm and
+# phoenix_flat_bsm on purpose: at multiplier 200, inception spot 100 and
+# notional 20,000 the delta quantum and the reference move are both exactly
+# 1.0, so a raw error IS a contract error and all three studies share one axis.
+#
+# Bound calibration (release procedure section 7, step 4). The cell gate needs
+# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this
+# budget (4 batches x 65,536 paths, paired bumps): pv 0.0110, delta 0.0087,
+# gamma 0.0297. Gamma is the binding quantity at a 4.2x margin -- tighter than
+# the other two studies, this being a longer-dated two-regime payoff -- but
+# still compatible, and the sampler may take up to 32 batches to sharpen it.
+#
+# Offline study (minutes, not seconds). Run it with:
+#   python -m quantark.modelvalidation run example/modelvalidation/ko_reset_flat_bsm.yaml
+# Add --quick for a wiring check that is explicitly not bankable evidence.
+
+study: ko-reset-flat-bsm
+schema: 1
+
+quantities: [pv, delta, gamma]
+
+bounds:
+  cell: 0.5
+  mean_signed_bias: 0.1
+
+sampling:
+  paths_per_batch: 65536
+  min_batches: 4
+  max_batches: 32
+  seed: 20260818
+  bump: 0.01
+
+economic_scale:
+  builder: hedge_contracts
+  params:
+    hedge_multiplier: 200.0
+    hedge_inception_spot: 100.0
+    notional: 20000.0
+
+environment:
+  builder: flat_bsm
+  params:
+    spot: 100.0
+    vol: 0.22
+    rate: 0.025
+    div_yield: 0.03
+
+product:
+  builder: equity.ko_reset_snowball
+  params:
+    initial_price: 100.0
+    strike: 100.0
+    maturity_pre: 1.0
+    maturity_post: 2.0
+    pre_ko_barrier: 103.0
+    pre_ko_rate: 0.15
+    post_ko_barrier: 95.0
+    post_ko_rate: 0.03
+    ki_barrier: 80.0
+    ki_continuous: true
+    contract_multiplier: 1.0
+
+reference:
+  builder: equity.ko_reset_snowball.mc_rqmc
+  params: {}
+
+candidates:
+  - builder: equity.ko_reset_snowball.pde
+    params: {accuracy: standard}
+  - builder: equity.ko_reset_snowball.quad
+    params: {grid_points: 1001}
+
+cases:
+  # At inception, clear of both KO barriers and well above KI.
+  - {name: ordinary}
+  # Just under the pre-KI KO barrier: the KO discontinuity sits inside the bump
+  # stencil, where deterministic gamma usually breaks first.
+  - {name: near_pre_ko, environment: {spot: 102.5}}
+  # Just above the KI barrier: the regime switch is one small move away, so both
+  # surfaces and the transition between them are in play at once.
+  - {name: near_ki, environment: {spot: 80.5}}
+  # Below the KI barrier: already knocked in at valuation, which exercises the
+  # post-KI schedule and its lower KO barrier directly rather than through the
+  # transition.
+  - {name: below_ki, environment: {spot: 76.0}}
+  # Low vol: the KI barrier is rarely reached, so almost all the value sits on
+  # the pre-KI surface and its maturity must be exactly right.
+  - {name: low_vol, environment: {vol: 0.12}}
+  # Short horizons on both legs: few observations left and time discretization
+  # error has nowhere to average out.
+  - {name: near_expiry, product: {maturity_pre: 0.25, maturity_post: 0.5}}
+  # Discrete KI monitoring instead of continuous. This is a different code path
+  # in every engine -- the continuous one runs a Brownian-bridge correction that
+  # the discrete one never touches -- so it is certified explicitly.
+  - {name: discrete_ki, product: {ki_continuous: false}}
