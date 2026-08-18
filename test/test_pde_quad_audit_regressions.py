@@ -752,3 +752,89 @@ class TestQuadContinuousKIBridgeStaleness:
             assert quad_price == pytest.approx(pde_price, abs=0.10), (
                 f"continuous-KI QUAD/PDE disagreement at spot {spot}"
             )
+
+
+# ============================================================================
+# Audit #12b — the same continuous-KI bridge staleness in the two SUBCLASS
+# engines. PhoenixQuadEngine and KOResetSnowballQuadEngine inherit
+# _diffuse_with_bridge from SnowballQuadEngine but override the backward
+# induction, so each carries its OWN copy of the call. Fixing only the parent's
+# four call sites left these three untouched -- and a grep of one file rather
+# than the repository is what hid them.
+#
+# Phoenix near-KI PV error against a paired-RQMC benchmark: -0.0256 -> -0.0003.
+# ============================================================================
+
+
+class TestSubclassQuadEnginesShareTheBridgeFix:
+    """Every engine that inherits the bridge must also inherit its contract."""
+
+    def test_phoenix_continuous_ki_price_matches_mc_just_above_the_barrier(self):
+        from quantark.asset.equity.engine.mc.phoenix_mc_engine import PhoenixMCEngine
+        from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+
+        phoenix = create_standard_phoenix(
+            initial_price=100.0, strike=100.0, maturity=1.0,
+            ko_barrier=103.0, ki_barrier=75.0, coupon_barrier=85.0,
+            coupon_rate=0.02, num_observations=12, memory_coupon=False,
+        )
+        assert phoenix.barrier_config.ki_continuous, "test only bites on the bridge path"
+
+        # Spot 76 against a continuous KI barrier of 75.
+        env = create_pricing_env(spot=76.0, vol=0.22, rate=0.025, div=0.03)
+
+        quad_price = PhoenixQuadEngine(params=QuadParams(grid_points=1001)).price(
+            phoenix, env
+        )
+        mc_price = PhoenixMCEngine(
+            params=MCParams(
+                seed=20260818, num_paths=65536, use_qmc=True,
+                rqmc_min_batches=1, rqmc_max_batches=1, rqmc_paths_mode="per_batch",
+            ),
+            method=MonteCarloMethod.RANDOMIZED_QUASI,
+        ).price(phoenix, env)
+
+        assert quad_price == pytest.approx(mc_price, abs=0.010)
+
+    def test_ko_reset_continuous_ki_price_matches_mc(self):
+        from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+        from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
+            KOResetSnowballQuadEngine,
+        )
+        from quantark.asset.equity.product.option import create_ko_reset_snowball
+        from quantark.asset.equity.product.option.ko_reset_snowball_option import (
+            PostKOScheduleMode,
+        )
+
+        product = create_ko_reset_snowball(
+            initial_price=100.0,
+            strike=100.0,
+            maturity_pre=1.0,
+            maturity_post=2.0,
+            post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+            ki_continuous=True,
+        )
+        # Sit just above the continuous KI barrier, which is the regime the
+        # bridge correction governs. Away from the barrier this engine carries
+        # a SEPARATE, larger disagreement with MC (-0.66 to -0.77 at spots 88
+        # and 100) that the bridge fix moves but does not explain; that is an
+        # open finding, deliberately not asserted here and not papered over by
+        # widening this bound.
+        env = create_pricing_env(spot=76.0, vol=0.22, rate=0.025, div=0.03)
+
+        quad_price = KOResetSnowballQuadEngine(params=QuadParams(grid_points=1001)).price(
+            product, env
+        )
+        mc_price = SnowballMCEngine(
+            params=MCParams(
+                seed=20260818, num_paths=65536, use_qmc=True,
+                rqmc_min_batches=1, rqmc_max_batches=1, rqmc_paths_mode="per_batch",
+            ),
+            method=MonteCarloMethod.RANDOMIZED_QUASI,
+        ).price(product, env)
+
+        # Pre-fix -0.0914; post-fix +0.0361.
+        assert quad_price == pytest.approx(mc_price, abs=0.06)

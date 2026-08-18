@@ -461,6 +461,8 @@ class PhoenixQuadEngine(SnowballQuadEngine):
 
             # Diffuse all surfaces
             for i in range(len(v_in_list)):
+                # Retained pre-diffusion for the bridge correction below.
+                v_in_at_obs = v_in_list[i]
                 v_in_list[i] = self._diffuse_fft(
                     v_in_list[i],
                     math_utils,
@@ -477,7 +479,7 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 if ki_continuous:
                     v_out_list[i] = self._diffuse_with_bridge(
                         v_out_list[i],
-                        v_in_list[i],
+                        v_in_at_obs,
                         math_utils,
                         omega_array,
                         prefactor,

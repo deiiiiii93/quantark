@@ -286,6 +286,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
 
+            # The bridge correction below samples BOTH surfaces at this step's
+            # slice, so retain the knocked-in surface before it is rolled back.
+            v_in_at_obs = v_in
             v_in = self._diffuse_fft(
                 v_in,
                 math_utils,
@@ -302,7 +305,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if ki_continuous and log_ki_barrier is not None:
                 v_out = self._diffuse_with_bridge(
                     v_out,
-                    v_in,
+                    v_in_at_obs,
                     math_utils,
                     omega_array,
                     prefactor,
@@ -569,6 +572,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
 
+            # The bridge correction below samples BOTH surfaces at this step's
+            # slice, so retain the knocked-in surface before it is rolled back.
+            v_in_at_obs = v_in
             v_in = self._diffuse_fft(
                 v_in,
                 math_utils,
@@ -585,7 +591,7 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             if ki_continuous and log_ki_barrier is not None:
                 v_out = self._diffuse_with_bridge(
                     v_out,
-                    v_in,
+                    v_in_at_obs,
                     math_utils,
                     omega_array,
                     prefactor,
