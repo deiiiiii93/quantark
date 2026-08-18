@@ -68,67 +68,67 @@
       "candidate": "equity.phoenix.quad",
       "case": "low_vol",
       "values": {
-        "delta": 0.005377366422148644,
-        "gamma": -0.031955013224996054,
-        "pv": 0.5278086000786626
+        "delta": 0.005502982476830343,
+        "gamma": -0.03197906835409081,
+        "pv": 0.5273295860594116
       }
     },
     {
       "candidate": "equity.phoenix.quad",
       "case": "memory",
       "values": {
-        "delta": 0.477248367442459,
-        "gamma": -0.032459126857548704,
-        "pv": -3.3501440212867344
+        "delta": 0.47703308223363794,
+        "gamma": -0.03240830916538373,
+        "pv": -3.349566734241995
       }
     },
     {
       "candidate": "equity.phoenix.quad",
       "case": "near_coupon",
       "values": {
-        "delta": 0.9483342555934116,
-        "gamma": -0.03090791983534709,
-        "pv": -13.876578703331017
+        "delta": 0.9471379670158859,
+        "gamma": -0.03082706289924432,
+        "pv": -13.866127007325664
       }
     },
     {
       "candidate": "equity.phoenix.quad",
       "case": "near_expiry",
       "values": {
-        "delta": 0.05537897249835538,
-        "gamma": -0.018354071439384133,
-        "pv": 0.09154036737206321
+        "delta": 0.05545766808013375,
+        "gamma": -0.01837340935819021,
+        "pv": 0.09124684668959807
       }
     },
     {
       "candidate": "equity.phoenix.quad",
       "case": "near_ki",
       "values": {
-        "delta": 1.1340198017648886,
-        "gamma": -0.006549238425755947,
-        "pv": -23.944039429465352
+        "delta": 1.1316773840071226,
+        "gamma": -0.006105063477096787,
+        "pv": -23.918690697951345
       }
     },
     {
       "candidate": "equity.phoenix.quad",
       "case": "near_ko",
       "values": {
-        "delta": 0.39574750818362886,
-        "gamma": -0.03802488308688751,
-        "pv": -2.3210453005883718
+        "delta": 0.395607859163198,
+        "gamma": -0.0379981136806035,
+        "pv": -2.3204392886304563
       }
     },
     {
       "candidate": "equity.phoenix.quad",
       "case": "ordinary",
       "values": {
-        "delta": 0.4879537256988695,
-        "gamma": -0.033279950186901,
-        "pv": -3.427224128758324
+        "delta": 0.4877345947633147,
+        "gamma": -0.033245069573852426,
+        "pv": -3.4261769472337624
       }
     }
   ],
-  "certificate_sha256": "d1789cb2e8211dffd1a3f3e4389673cbb9ff2cff979e251888f2972171d13343",
+  "certificate_sha256": "ef6f1040db99998eb399110402df1151caf27b9d4dc1aa6484fcafa12615e3dc",
   "fingerprint": {
     "machine": "arm64",
     "system": "Darwin"

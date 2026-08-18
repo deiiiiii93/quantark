@@ -1,8 +1,8 @@
 # Certification report: phoenix-flat-bsm
 
-Evidence digest: `d1789cb2e8211dffd1a3f3e4389673cbb9ff2cff979e251888f2972171d13343`
+Evidence digest: `ef6f1040db99998eb399110402df1151caf27b9d4dc1aa6484fcafa12615e3dc`
 
-Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `3655050ca8a42f2f559c5128fc63f4bcc8b95636`
+Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `5521168b5cec0dcfb4f7051dd409a32728353cf4`
 
 ## Decisions
 
@@ -97,27 +97,27 @@ Sampling policy: 65536 paths/batch, 4-32 batches, seed 20260818, bump 0.01.
 | equity.phoenix.pde | memory | pv | -3.34946 | 0.00452 | -3.30045 | 0.04901 | 0.05806 | 0.02569 | PASS |
 | equity.phoenix.pde | memory | delta | 0.477563 | 0.000903 | 0.468882 | -0.008681 | 0.01049 | 0.001064 | PASS |
 | equity.phoenix.pde | memory | gamma | -0.0428127 | 0.0044 | -0.0344852 | 0.008327 | 0.01713 | 0.00012 | PASS |
-| equity.phoenix.quad | ordinary | pv | -3.42614 | 0.00424 | -3.42722 | -0.001085 | 0.009574 | 0.004553 | PASS |
-| equity.phoenix.quad | ordinary | delta | 0.488242 | 0.000842 | 0.487954 | -0.0002887 | 0.001973 | 0.00315 | PASS |
-| equity.phoenix.quad | ordinary | gamma | -0.0432388 | 0.00451 | -0.03328 | 0.009959 | 0.01897 | 0.0001272 | PASS |
-| equity.phoenix.quad | near_ko | pv | -2.31343 | 0.00358 | -2.32105 | -0.007613 | 0.01478 | 0.00723 | PASS |
-| equity.phoenix.quad | near_ko | delta | 0.400328 | 0.00292 | 0.395748 | -0.004581 | 0.01042 | 0.002239 | PASS |
-| equity.phoenix.quad | near_ko | gamma | -0.0493471 | 0.00687 | -0.0380249 | 0.01132 | 0.02507 | 0.002756 | PASS |
-| equity.phoenix.quad | near_coupon | pv | -13.8608 | 0.00517 | -13.8766 | -0.01575 | 0.02609 | 0.004036 | PASS |
-| equity.phoenix.quad | near_coupon | delta | 0.948728 | 0.00425 | 0.948334 | -0.0003942 | 0.008892 | 7.258e-06 | PASS |
-| equity.phoenix.quad | near_coupon | gamma | -0.0437926 | 0.0216 | -0.0309079 | 0.01288 | 0.05604 | 0.00296 | PASS |
-| equity.phoenix.quad | near_ki | pv | -23.9184 | 0.00146 | -23.944 | -0.02563 | 0.02855 | 0.001108 | PASS |
-| equity.phoenix.quad | near_ki | delta | 1.13636 | 0.00424 | 1.13402 | -0.00234 | 0.01081 | 0.0006175 | PASS |
-| equity.phoenix.quad | near_ki | gamma | -0.00717388 | 0.00491 | -0.00654924 | 0.0006246 | 0.01045 | 0.00133 | PASS |
-| equity.phoenix.quad | low_vol | pv | 0.526131 | 0.00105 | 0.527809 | 0.001678 | 0.003771 | 0.004681 | PASS |
-| equity.phoenix.quad | low_vol | delta | 0.00547519 | 0.00269 | 0.00537737 | -9.782e-05 | 0.005484 | 0.001729 | PASS |
-| equity.phoenix.quad | low_vol | gamma | -0.0266412 | 0.00211 | -0.031955 | -0.005314 | 0.009527 | 0.0002634 | PASS |
-| equity.phoenix.quad | near_expiry | pv | 0.0923547 | 0.00199 | 0.0915404 | -0.0008144 | 0.004785 | 0.0003528 | PASS |
-| equity.phoenix.quad | near_expiry | delta | 0.0556837 | 0.000659 | 0.055379 | -0.0003047 | 0.001622 | 3.208e-06 | PASS |
-| equity.phoenix.quad | near_expiry | gamma | -0.0205876 | 0.00317 | -0.0183541 | 0.002233 | 0.008568 | 0.0002959 | PASS |
-| equity.phoenix.quad | memory | pv | -3.34946 | 0.00452 | -3.35014 | -0.0006835 | 0.009731 | 0.004371 | PASS |
-| equity.phoenix.quad | memory | delta | 0.477563 | 0.000903 | 0.477248 | -0.0003148 | 0.002122 | 0.003086 | PASS |
-| equity.phoenix.quad | memory | gamma | -0.0428127 | 0.0044 | -0.0324591 | 0.01035 | 0.01916 | 0.0001318 | PASS |
+| equity.phoenix.quad | ordinary | pv | -3.42614 | 0.00424 | -3.42618 | -3.764e-05 | 0.008526 | 0.004547 | PASS |
+| equity.phoenix.quad | ordinary | delta | 0.488242 | 0.000842 | 0.487735 | -0.0005078 | 0.002192 | 0.003148 | PASS |
+| equity.phoenix.quad | ordinary | gamma | -0.0432388 | 0.00451 | -0.0332451 | 0.009994 | 0.01901 | 0.0001285 | PASS |
+| equity.phoenix.quad | near_ko | pv | -2.31343 | 0.00358 | -2.32044 | -0.007007 | 0.01418 | 0.007224 | PASS |
+| equity.phoenix.quad | near_ko | delta | 0.400328 | 0.00292 | 0.395608 | -0.00472 | 0.01056 | 0.002238 | PASS |
+| equity.phoenix.quad | near_ko | gamma | -0.0493471 | 0.00687 | -0.0379981 | 0.01135 | 0.0251 | 0.002753 | PASS |
+| equity.phoenix.quad | near_coupon | pv | -13.8608 | 0.00517 | -13.8661 | -0.005296 | 0.01564 | 0.004035 | PASS |
+| equity.phoenix.quad | near_coupon | delta | 0.948728 | 0.00425 | 0.947138 | -0.00159 | 0.01009 | 5.253e-06 | PASS |
+| equity.phoenix.quad | near_coupon | gamma | -0.0437926 | 0.0216 | -0.0308271 | 0.01297 | 0.05612 | 0.00295 | PASS |
+| equity.phoenix.quad | near_ki | pv | -23.9184 | 0.00146 | -23.9187 | -0.0002812 | 0.003205 | 0.0009991 | PASS |
+| equity.phoenix.quad | near_ki | delta | 1.13636 | 0.00424 | 1.13168 | -0.004682 | 0.01315 | 0.0006387 | PASS |
+| equity.phoenix.quad | near_ki | gamma | -0.00717388 | 0.00491 | -0.00610506 | 0.001069 | 0.01089 | 0.001399 | PASS |
+| equity.phoenix.quad | low_vol | pv | 0.526131 | 0.00105 | 0.52733 | 0.001198 | 0.003292 | 0.004685 | PASS |
+| equity.phoenix.quad | low_vol | delta | 0.00547519 | 0.00269 | 0.00550298 | 2.779e-05 | 0.005414 | 0.00173 | PASS |
+| equity.phoenix.quad | low_vol | gamma | -0.0266412 | 0.00211 | -0.0319791 | -0.005338 | 0.009551 | 0.0002637 | PASS |
+| equity.phoenix.quad | near_expiry | pv | 0.0923547 | 0.00199 | 0.0912468 | -0.001108 | 0.005079 | 0.0003531 | PASS |
+| equity.phoenix.quad | near_expiry | delta | 0.0556837 | 0.000659 | 0.0554577 | -0.000226 | 0.001544 | 3.223e-06 | PASS |
+| equity.phoenix.quad | near_expiry | gamma | -0.0205876 | 0.00317 | -0.0183734 | 0.002214 | 0.008549 | 0.0002962 | PASS |
+| equity.phoenix.quad | memory | pv | -3.34946 | 0.00452 | -3.34957 | -0.0001063 | 0.009154 | 0.004358 | PASS |
+| equity.phoenix.quad | memory | delta | 0.477563 | 0.000903 | 0.477033 | -0.0005301 | 0.002337 | 0.003084 | PASS |
+| equity.phoenix.quad | memory | gamma | -0.0428127 | 0.0044 | -0.0324083 | 0.0104 | 0.01921 | 0.0001341 | PASS |
 
 ## Aggregate bias
 
@@ -126,6 +126,6 @@ Sampling policy: 65536 paths/batch, 4-32 batches, seed 20260818, bump 0.01.
 | equity.phoenix.pde | pv | 7 | 0.05757 | 0.00132 | yes |
 | equity.phoenix.pde | delta | 7 | -0.005953 | 0.00105 | yes |
 | equity.phoenix.pde | gamma | 7 | 0.005723 | 0.00347 | yes |
-| equity.phoenix.quad | pv | 7 | -0.007128 | 0.00132 | yes |
-| equity.phoenix.quad | delta | 7 | -0.001189 | 0.00105 | yes |
-| equity.phoenix.quad | gamma | 7 | 0.006009 | 0.00347 | yes |
+| equity.phoenix.quad | pv | 7 | -0.001805 | 0.00132 | yes |
+| equity.phoenix.quad | delta | 7 | -0.001747 | 0.00105 | yes |
+| equity.phoenix.quad | gamma | 7 | 0.006094 | 0.00347 | yes |
