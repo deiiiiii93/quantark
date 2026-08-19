@@ -70,7 +70,12 @@ def _capture_legacy():
     for tag, ki_continuous in (("disc", False), ("cont", True)):
         env = _env()
         product = _product(ki_continuous)
-        solver = SnowballPDESolver(params=PDEParams())
+        # The oracle pins the bare nodal jump transform; the FIRST_PASSAGE
+        # continuous-KI correction is a separate stage with its own gates
+        # (test_pde_continuous_ki_first_passage.py).
+        solver = SnowballPDESolver(
+            params=PDEParams(continuous_ki_correction="none")
+        )
         solver.price(product, env)  # populates solve state + observation maps
 
         spot, tau = env.spot, product.get_maturity(env)
@@ -196,7 +201,12 @@ def test_migrated_event_schedule_reproduces_oracle():
     d = _load_or_create()
     env = _env()
     product = _product(ki_continuous=False)
-    solver = SnowballPDESolver(params=PDEParams())
+    # The oracle pins the bare nodal jump transform; the FIRST_PASSAGE
+    # continuous-KI correction is a separate stage with its own gates
+    # (test_pde_continuous_ki_first_passage.py).
+    solver = SnowballPDESolver(
+        params=PDEParams(continuous_ki_correction="none")
+    )
     market = solver.market_snapshot(product, env)
     tau = product.get_maturity(env)
     layout = solver.grid_binder.bind(

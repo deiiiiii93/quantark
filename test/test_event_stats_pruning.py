@@ -99,9 +99,14 @@ def _phoenix():
 # nudged -1e-5 relative on 2026-07-23 when the straddling cell switched to
 # the full two-branch cell average (review finding 1: envelope-preserving
 # projection; moves further toward the QUAD reference).
-SNOWBALL_PV = 988075.839351229719  # re-frozen on the layer grid (anchor-certified)
-SNOWBALL_KI = 0.111354320426
-SNOWBALL_KI_EVER = 0.147043244283
+# Re-frozen 2026-08-18 for the FIRST_PASSAGE continuous-KI correction: the
+# per-step nodal jump missed intra-step barrier crossings, understating KI.
+# Verification against SnowballMCEngine at 262,144 paths (exact first-passage
+# ki_ever 0.150738): ki_ever moved 0.147043 -> 0.150637, closing the gap to
+# ~1e-4; pv is steps-per-day invariant to 0.5c/unit post-fix (was O(sqrt(dt))).
+SNOWBALL_PV = 987699.4565124855  # re-frozen with the FIRST_PASSAGE default
+SNOWBALL_KI = 0.1137292664812044
+SNOWBALL_KI_EVER = 0.1506367647842925
 
 
 def test_snowball_full_stream_matches_golden():

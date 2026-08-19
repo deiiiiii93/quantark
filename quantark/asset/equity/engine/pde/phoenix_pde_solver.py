@@ -561,6 +561,9 @@ class PhoenixPDESolver(SnowballPDESolver):
         """Backward time stepping for vector surfaces."""
         params = self.params
         num_t, num_x = len(t_vec), len(x_vec)
+        # FIRST_PASSAGE continuous-KI state for the inherited _apply_ki_jump
+        # (inert unless continuous KI is live).
+        self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
         I_int = sp.eye(num_x - 2, format="csc")
         use_banded = params.use_banded_solver
         n_int = num_x - 2

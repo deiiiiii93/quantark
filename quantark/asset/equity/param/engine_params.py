@@ -5,7 +5,7 @@ Engine configuration parameters.
 import math
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
-from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode
+from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode, ContinuousKICorrection
 from quantark.util.exceptions import ValidationError
 
 
@@ -489,6 +489,15 @@ class PDEParams(EngineParams):
     ki_monitoring_mode: Union[KnockInMonitoringMode, str] = (
         KnockInMonitoringMode.EXACT_DISCRETE
     )
+    # Temporal treatment of CONTINUOUSLY monitored KI in the autocallable
+    # solvers. FIRST_PASSAGE (default) supplements the per-step nodal jump
+    # with the exact intra-step barrier-crossing probability (reflection
+    # principle, per-step-constant GBM coefficients), removing the
+    # O(sqrt(dt)) under-monitoring bias of pure per-step application.
+    # NONE is the explicit legacy opt-out (bare per-step nodal jump).
+    continuous_ki_correction: Union[ContinuousKICorrection, str] = (
+        ContinuousKICorrection.FIRST_PASSAGE
+    )
     # Spatial representation of discrete event operators (coupon/KO/KI jumps)
     # in the autocallable solvers (1D BSM/LV and 2D Heston/SLV slice-wise).
     # CELL_AVERAGE (default) applies the conservative dual-cell projection
@@ -593,6 +602,23 @@ class PDEParams(EngineParams):
             raise ValidationError(
                 "ki_monitoring_mode must be a KnockInMonitoringMode or its "
                 f"string value, got {type(self.ki_monitoring_mode).__name__}"
+            )
+        # Coerce continuous_ki_correction to the enum (same contract as above).
+        if isinstance(self.continuous_ki_correction, str):
+            try:
+                self.continuous_ki_correction = ContinuousKICorrection(
+                    self.continuous_ki_correction.lower()
+                )
+            except ValueError:
+                raise ValidationError(
+                    "continuous_ki_correction must be one of "
+                    f"{[mode.value for mode in ContinuousKICorrection]}, "
+                    f"got {self.continuous_ki_correction!r}"
+                )
+        elif not isinstance(self.continuous_ki_correction, ContinuousKICorrection):
+            raise ValidationError(
+                "continuous_ki_correction must be a ContinuousKICorrection or "
+                f"its string value, got {type(self.continuous_ki_correction).__name__}"
             )
         # Coerce event_projection to the enum (same contract as above).
         if isinstance(self.event_projection, str):

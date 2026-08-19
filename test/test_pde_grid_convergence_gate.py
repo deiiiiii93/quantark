@@ -65,6 +65,12 @@ def _solver(spd: int) -> SnowballPDESolver:
             grid=GridConfig(points=300, steps_per_day=float(spd)),
             event_projection="nodal",
             event_rannacher_steps=1,
+            # Pinned alongside nodal events: the FIRST_PASSAGE continuous-KI
+            # correction (default since 2026-08-18) intentionally reprices
+            # monthly_ko and restores its self-convergence; this oracle
+            # characterizes the PRE-change discretization. The corrected
+            # default's gates live in test_pde_continuous_ki_first_passage.py.
+            continuous_ki_correction="none",
         )
     )
 

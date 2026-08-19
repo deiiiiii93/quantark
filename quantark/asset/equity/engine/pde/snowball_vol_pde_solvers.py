@@ -66,6 +66,10 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
 
     engine_type = EngineType.PDE
     _solver_name = "LocalVolSnowballPDESolver"
+    # Crossing dynamics are local-vol, not the TermCoefficients GBM the
+    # closed-form FIRST_PASSAGE correction assumes; keep the pinned per-step
+    # KI treatment until a barrier-local variant exists.
+    _first_passage_ki_supported = False
 
     def __init__(
         self,
@@ -208,6 +212,10 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
 
 
 class _Heston2DSnowballPDEBase(SnowballPDESolver):
+
+    # See LocalVolSnowballPDESolver: stochastic-vol crossing dynamics are
+    # outside the closed-form FIRST_PASSAGE assumptions.
+    _first_passage_ki_supported = False
     """Shared 2-D (log-spot, variance) ADI machinery for the Snowball solvers.
 
     ``v0_boundary`` defaults to ``"degenerate_pde"``, diverging from the ADI
