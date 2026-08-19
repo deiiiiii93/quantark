@@ -11,8 +11,10 @@ temporal bias without a fitted constant.
 
 Products and environments come from the modelvalidation builders so the cells
 here are exactly the certified ones; reference values are the banked Monte
-Carlo benchmarks from docs/modelvalidation/certificates/*/2026-08-18
-(paired RQMC, 4 x 65536 paths).
+Carlo benchmarks under docs/modelvalidation/certificates/ (paired RQMC,
+4 x 65536 paths). They were read from the 2026-08-18 certification and are
+unchanged in the re-banked evidence: the fix moved the candidates, not the
+benchmark, so the reference identity never moved.
 """
 
 import pytest

@@ -111,6 +111,13 @@ docs/modelvalidation/certificates/<study>/<YYYY-MM-DD>/
 └── anchors.json
 ```
 
+When two certifications for the same study land on one calendar day -- an
+amendment on top of that morning's certificate, say -- the later one takes a
+numeric suffix: `2026-08-19-2`. **Never overwrite the parent directory.** A
+child records its parent's digest, and a chain whose parent has been replaced
+cannot be verified; the CI guard globs `*/*/anchors.json`, so both directories
+keep being checked.
+
 Copy in `certificate.json`, `report.md`, and `report.html` (never
 `checkpoints/`), then extract the anchors:
 
