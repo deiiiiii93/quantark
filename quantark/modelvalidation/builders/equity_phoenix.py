@@ -60,6 +60,10 @@ _PRODUCT_KEYS = (
     "memory_coupon",
     "maturity",
     "contract_multiplier",
+    # Step-down knobs. Absent, the product is exactly what the original
+    # certification built, so its cells keep their identity.
+    "ko_stepdown",
+    "coupon_stepdown",
 )
 
 _REQUIRED_PRODUCT_KEYS = (
@@ -92,7 +96,34 @@ def build_phoenix_product_spec(params: Mapping[str, Any]) -> dict:
     for key in _REQUIRED_PRODUCT_KEYS:
         if key not in spec:
             raise ValidationError(f"equity.phoenix product is missing {key!r}")
+
+    ki_barrier = float(spec["ki_barrier"])
+    for key, start in (("ko_stepdown", "ko_barrier"), ("coupon_stepdown", "coupon_barrier")):
+        rate = float(spec.get(key, 0.0))
+        if rate < 0.0:
+            raise ValidationError(f"{key} must be non-negative, got {rate}")
+        schedule = _stepdown_schedule(spec, start, key)
+        if isinstance(schedule, list) and any(level <= ki_barrier for level in schedule):
+            raise ValidationError(
+                f"{key}={rate} walks {start} below the ki_barrier ({ki_barrier}): "
+                f"schedule reaches {min(schedule)}. Crossing barriers is a "
+                "different product, not a step-down."
+            )
     return spec
+
+
+def _stepdown_schedule(spec: Mapping[str, Any], barrier_key: str, rate_key: str):
+    """A barrier as a scalar when flat, a per-observation list when stepping.
+
+    Staying scalar in the flat case is what keeps the originally certified
+    cells byte-identical rather than merely equivalent.
+    """
+    start = float(spec[barrier_key])
+    rate = float(spec.get(rate_key, 0.0))
+    if rate == 0.0:
+        return start
+    step = rate * float(spec["initial_price"])
+    return [start - step * i for i in range(int(spec["num_observations"]))]
 
 
 def make_phoenix(spec: Mapping[str, Any]) -> PhoenixOption:
@@ -101,16 +132,21 @@ def make_phoenix(spec: Mapping[str, Any]) -> PhoenixOption:
     Barriers are absolute levels, so a case that moves spot moves the trade
     relative to its barriers -- which is what the near_ko, near_coupon and
     near_ki cases exist to exercise.
+
+    ``ko_stepdown`` and ``coupon_stepdown`` turn the corresponding flat barrier
+    into a declining per-observation schedule, which is a different engine code
+    path: every observation then projects onto its own barrier level, and the
+    grid has a dozen levels to align rather than one.
     """
     return create_standard_phoenix(
         initial_price=float(spec["initial_price"]),
         strike=float(spec["strike"]),
         maturity=float(spec["maturity"]),
         contract_multiplier=float(spec.get("contract_multiplier", 1.0)),
-        ko_barrier=float(spec["ko_barrier"]),
+        ko_barrier=_stepdown_schedule(spec, "ko_barrier", "ko_stepdown"),
         ko_rate=float(spec.get("ko_rate", 0.0)),
         ki_barrier=float(spec["ki_barrier"]),
-        coupon_barrier=float(spec["coupon_barrier"]),
+        coupon_barrier=_stepdown_schedule(spec, "coupon_barrier", "coupon_stepdown"),
         coupon_rate=float(spec["coupon_rate"]),
         num_observations=int(spec["num_observations"]),
         memory_coupon=bool(spec.get("memory_coupon", False)),
@@ -139,6 +175,10 @@ class _PhoenixArm:
         environment.update(case.environment_params)
         product = dict(self.product_params)
         product.update(case.product_params)
+        # A variant is expressed as a case override, which the study-level
+        # validator never sees. Validate the merged spec here or a typo builds
+        # a different product and gets certified under the wrong case name.
+        build_phoenix_product_spec(product)
         return environment, product
 
 

@@ -2,9 +2,16 @@
 #
 # Two deterministic engines -- the two-surface PDE solver and the quadrature
 # engine -- are certified against one paired-RQMC Monte Carlo benchmark, on PV
-# and both spot Greeks, across five scenarios chosen to stress the parts of the
+# and both spot Greeks, across scenarios chosen to stress the parts of the
 # payoff that are hard: sitting just under the knock-out barrier, sitting just
 # above the knock-in barrier, and running into expiry.
+#
+# The last six cases certify product VARIANTS rather than market scenarios.
+# Each is a distinct engine code path, not a re-parameterization: discrete and
+# European knock-in skip the continuous-monitoring machinery entirely, and a
+# per-observation KO schedule gives every observation its own barrier level to
+# project onto and align to. They were added after the original certification,
+# whose five scenarios all shared one flat KO barrier and continuous KI.
 #
 # Economic scale: the trade is 20,000 of notional, and one index-futures
 # contract at multiplier 200 with spot 100 hedges exactly that -- so one
@@ -85,3 +92,30 @@ cases:
   # Three months to expiry with a quarterly schedule: few observations left,
   # and time discretization error has nowhere to average out.
   - {name: near_expiry, product: {months: 3, maturity: 0.25}}
+  # Discretely monitored KI, on the KO observation dates. A different code path
+  # in every engine -- the benchmark drops its Brownian-bridge crossing
+  # correction and the PDE its per-step first-passage transfer -- so what the
+  # continuous cases certify says nothing about this one.
+  - {name: discrete_ki, product: {ki_monitoring: discrete}}
+  # European KI: the barrier is looked at once, at maturity. The two-surface
+  # dynamic programme collapses to a single terminal test, and the knock-in
+  # probability is a closed-form quantity rather than a first-passage one.
+  - {name: european_ki, product: {ki_monitoring: european}}
+  # Step-down KO (递减雪球): the barrier declines 0.5% of initial price per
+  # observation, ending at 97.5. Twelve distinct levels now compete for grid
+  # alignment where every case above had exactly one.
+  - {name: stepdown_ko, product: {ko_stepdown: 0.005}}
+  # The step-down schedule's LAST barrier is 97.5, and this parks spot just
+  # under it. near_ko stresses the first barrier of a flat schedule; this
+  # stresses the final barrier of a declining one, which is a different node.
+  - {name: stepdown_near_last_ko, environment: {spot: 97.0},
+     product: {ko_stepdown: 0.005}}
+  # Parachute (降落伞雪球): the final KO barrier sits exactly on the KI barrier,
+  # so anything that never knocked in necessarily knocks out. A KO event and
+  # the KI barrier coincide at one level -- a degeneracy no other case has.
+  - {name: parachute, product: {parachute: true}}
+  # The parachute's coincident level is at 85, and this parks spot just above
+  # it. This is where the KO/KI degeneracy actually binds; certifying the
+  # parachute only at spot 100 would leave its defining feature untested.
+  - {name: parachute_near_ki, environment: {spot: 86.0},
+     product: {parachute: true}}

@@ -99,3 +99,8 @@ cases:
   # the PDE paying accrued memory coupons at KO regardless of the coupon-barrier
   # condition, so this path carries history and must be certified explicitly.
   - {name: memory, product: {memory_coupon: true}}
+  # Step-down barriers: KO and coupon barriers both decline 0.5% of initial
+  # price per observation. Twenty-four distinct levels now compete for grid
+  # alignment where every case above had two, and the coupon digital moves to a
+  # new strike at every observation instead of sitting still.
+  - {name: stepdown, product: {ko_stepdown: 0.005, coupon_stepdown: 0.005}}

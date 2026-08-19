@@ -56,7 +56,17 @@ _PRODUCT_KEYS = (
     "months",
     "maturity",
     "contract_multiplier",
+    # Variant knobs. Absent, they leave the product exactly as the original
+    # certification built it, so the already-certified cells keep their identity.
+    "ki_monitoring",
+    "ko_stepdown",
+    "parachute",
 )
+
+#: How the knock-in barrier is watched. ``continuous`` is the structure the
+#: original certification covered; the other two are separate engine code paths
+#: (no Brownian-bridge crossing correction, no per-step regime transfer).
+_KI_MONITORING = ("continuous", "discrete", "european")
 
 #: One profile coarser than each target, for the refinement ladder.
 _COARSER_ACCURACY = {"high": "standard", "standard": "fast", "fast": "fast"}
@@ -87,7 +97,80 @@ def build_snowball_product_spec(params: Mapping[str, Any]) -> dict:
     for key in ("initial_price", "strike", "ko_barrier", "ki_barrier", "maturity", "months"):
         if key not in spec:
             raise ValidationError(f"equity.snowball product is missing {key!r}")
+
+    monitoring = str(spec.get("ki_monitoring", "continuous"))
+    if monitoring not in _KI_MONITORING:
+        raise ValidationError(
+            f"ki_monitoring must be one of {_KI_MONITORING}, got {monitoring!r}"
+        )
+
+    stepdown = float(spec.get("ko_stepdown", 0.0))
+    if stepdown < 0.0:
+        raise ValidationError(f"ko_stepdown must be non-negative, got {stepdown}")
+
+    # A KO schedule that walks below the KI barrier is not a step-down snowball:
+    # the two barriers cross and the payoff means something else entirely. Only
+    # a parachute may land the *final* barrier on KI, and it does so exactly.
+    schedule = _ko_schedule(spec)
+    live = schedule[:-1] if bool(spec.get("parachute", False)) else schedule
+    ki_barrier = float(spec["ki_barrier"])
+    if isinstance(live, list) and any(level <= ki_barrier for level in live):
+        raise ValidationError(
+            f"ko_stepdown={stepdown} walks below the ki_barrier ({ki_barrier}): "
+            f"schedule reaches {min(live)}. Crossing barriers is a different "
+            "product, not a step-down."
+        )
     return spec
+
+
+def _ko_observation_dates(spec: Mapping[str, Any]) -> list:
+    """Evenly spaced KO observations, the schedule every case shares."""
+    months = int(spec["months"])
+    maturity = float(spec["maturity"])
+    return [maturity * (i + 1) / months for i in range(months)]
+
+
+def _ko_schedule(spec: Mapping[str, Any]):
+    """The KO barrier: a scalar when flat, a per-observation list when not.
+
+    Staying scalar in the flat case matters beyond tidiness -- it is what keeps
+    the originally certified cells byte-identical rather than merely equivalent.
+    """
+    barrier = float(spec["ko_barrier"])
+    stepdown = float(spec.get("ko_stepdown", 0.0))
+    parachute = bool(spec.get("parachute", False))
+    if stepdown == 0.0 and not parachute:
+        return barrier
+
+    months = int(spec["months"])
+    step = stepdown * float(spec["initial_price"])
+    levels = [barrier - step * i for i in range(months)]
+    if parachute:
+        # The parachute: at the final observation the KO barrier drops onto the
+        # KI barrier, so anything that never knocked in necessarily knocks out.
+        levels[-1] = float(spec["ki_barrier"])
+    return levels
+
+
+def _ki_monitoring(spec: Mapping[str, Any]) -> dict:
+    """BarrierConfig keyword arguments for this case's KI monitoring."""
+    monitoring = str(spec.get("ki_monitoring", "continuous"))
+    if monitoring not in _KI_MONITORING:
+        raise ValidationError(
+            f"ki_monitoring must be one of {_KI_MONITORING}, got {monitoring!r}"
+        )
+    if monitoring == "continuous":
+        return {"ki_continuous": True}
+    dates = (
+        [float(spec["maturity"])]
+        if monitoring == "european"
+        else _ko_observation_dates(spec)
+    )
+    return {
+        "ki_continuous": False,
+        "ki_observation_type": ObservationType.DISCRETE,
+        "ki_observation_dates": dates,
+    }
 
 
 def make_environment(spec: Mapping[str, Any], spot: float | None = None) -> PricingEnvironment:
@@ -102,25 +185,28 @@ def make_environment(spec: Mapping[str, Any], spot: float | None = None) -> Pric
 
 
 def make_snowball(spec: Mapping[str, Any]) -> SnowballOption:
-    """Build a snowball with a monthly discrete KO schedule and continuous KI.
+    """Build a snowball with a monthly discrete KO schedule.
 
     Barriers are absolute levels, so a case that moves spot moves the trade's
     position relative to its barriers -- which is the point of the near_ko and
     near_ki cases.
+
+    Three product variants are reachable from the spec, each a distinct engine
+    code path rather than a re-parameterization: ``ki_monitoring`` selects
+    continuous / discrete / European knock-in observation, ``ko_stepdown``
+    turns the flat KO barrier into a declining schedule, and ``parachute``
+    drops the final KO barrier onto the KI barrier.
     """
-    months = int(spec["months"])
     maturity = float(spec["maturity"])
     ko_rate = float(spec.get("ko_rate", 0.15))
 
     barrier_config = BarrierConfig(
-        ko_barrier=float(spec["ko_barrier"]),
+        ko_barrier=_ko_schedule(spec),
         ko_rate=ko_rate,
         ko_observation_type=ObservationType.DISCRETE,
-        ko_observation_dates=[
-            maturity * (i + 1) / months for i in range(months)
-        ],
+        ko_observation_dates=_ko_observation_dates(spec),
         ki_barrier=float(spec["ki_barrier"]),
-        ki_continuous=True,
+        **_ki_monitoring(spec),
     )
     payoff_config = PayoffConfig(rebate_rate=float(spec.get("rebate_rate", ko_rate)))
 
@@ -165,6 +251,10 @@ class _SnowballArm:
         environment.update(case.environment_params)
         product = dict(self.product_params)
         product.update(case.product_params)
+        # A variant is expressed as a case override, which the study-level
+        # validator never sees. Validate the merged spec here or a typo builds
+        # a different product and gets certified under the wrong case name.
+        build_snowball_product_spec(product)
         return environment, product
 
 
