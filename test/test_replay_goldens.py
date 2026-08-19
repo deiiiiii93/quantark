@@ -25,20 +25,51 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import numpy as np
+
 from golden_compare import GOLDEN_REL_TOL, assert_close
 
-#: Absolute floor for these frames, raised from ``GOLDEN_ABS_TOL`` because they
-#: carry BUMP SECOND DIFFERENCES. Gamma is ``(V+ - 2V + V-)/h**2``, so its noise
-#: floor is set by the magnitude of the PRICE it differences (~1e4 here), not by
-#: gamma's own -- and gamma ranges down to 0.037, where a relative tolerance has
-#: no purchase at all. Measured on the first x86_64 run against these ARM64
-#: goldens: worst gamma drift 4.6e-10 absolute (1.2e-8 relative), on prices that
-#: themselves agreed inside 1e-9 relative. 1e-8 keeps ~20x over that.
+#: Cross-architecture tolerance for these frames, expressed against each
+#: COLUMN's scale rather than each element's own magnitude.
 #:
-#: This only binds where |value| < atol/rtol = 10; above that ``GOLDEN_REL_TOL``
-#: still governs, so price (~1e4) and delta (~1e2) are unaffected. A real change
-#: to these engines moves gamma by percent -- six orders above this floor.
-SECOND_DIFFERENCE_ABS_TOL = 1e-8
+#: That is the shape the noise actually has. These columns carry bump
+#: derivatives -- gamma is ``(V+ - 2V + V-)/h**2`` -- so the rounding noise is
+#: set by the magnitude of the PRICE being differenced, which is roughly uniform
+#: down the column. It is therefore roughly constant in ABSOLUTE terms per
+#: column, and a per-element relative tolerance has no purchase on the small
+#: rows. Measured on the first x86_64 runs against these ARM64 goldens:
+#:
+#:   gamma            worst drift 4.6e-10, column max    43.0  -> 1.1e-11
+#:   gamma_cash_1pct  worst drift 3.8e-08, column max 4,301.2  -> 8.9e-12
+#:
+#: Same ratio for both, which is why fixing gamma with a flat absolute floor
+#: left its scaled sibling failing on the next run. 1e-9 of column scale keeps
+#: ~100x over the measured drift, while a real change to these engines moves
+#: these columns by percent -- seven orders above it. Integer and non-numeric
+#: columns still compare exactly, as do column names, order and frame shape.
+COLUMN_SCALE_TOL = 1e-9
+
+
+def assert_frame_matches(actual, expected, label: str) -> None:
+    """Compare a live frame against a frozen golden, column by column."""
+    assert list(actual.columns) == list(expected.columns), (
+        f"{label} column set/order changed"
+    )
+    assert len(actual) == len(expected), f"{label} row count changed"
+    for column in expected.columns:
+        want, got = expected[column], actual[column]
+        if not pd.api.types.is_float_dtype(want):
+            # Integers, strings, dates and booleans are discrete: exact.
+            assert got.equals(want), f"{label} column {column!r} differs"
+            continue
+        want_values = want.to_numpy(dtype=float)
+        got_values = got.to_numpy(dtype=float)
+        scale = float(np.max(np.abs(want_values))) if want_values.size else 0.0
+        np.testing.assert_allclose(
+            got_values, want_values,
+            rtol=GOLDEN_REL_TOL, atol=COLUMN_SCALE_TOL * scale,
+            err_msg=f"{label} column {column!r}",
+        )
 
 sys.path.insert(0, str(Path(__file__).parent))
 from replay_golden import fixtures  # noqa: E402
@@ -90,14 +121,8 @@ def test_frame_matches_golden(all_results, case, frame_name, tmp_path):
         # actual frame must be empty too; there is nothing to parse.
         assert actual_df.empty and len(actual_df.columns) == 0
         return
-    actual = pd.read_csv(actual_path)
-    expected = pd.read_csv(golden_path)
-    assert list(actual.columns) == list(expected.columns), (
-        f"{case}/{frame_name} column set/order changed"
-    )
-    pd.testing.assert_frame_equal(
-        actual, expected, check_exact=False,
-        rtol=GOLDEN_REL_TOL, atol=SECOND_DIFFERENCE_ABS_TOL,
+    assert_frame_matches(
+        pd.read_csv(actual_path), pd.read_csv(golden_path), f"{case}/{frame_name}"
     )
 
 
@@ -131,3 +156,65 @@ def test_localvol_calibration_records_match_golden(all_results):
     )
     assert_close(actual, expected, msg="localvol calibration records")
     assert all(r["variant"] == "localvol" for r in actual)
+
+
+# --- the tolerance itself, tested ------------------------------------------
+#
+# The comparison above cannot be validated on the machine the goldens were
+# frozen on: everything is bitwise there, so any tolerance passes. What CAN be
+# checked locally is that the tolerance admits noise of the size measured
+# cross-architecture and still rejects a change of the size a real engine bug
+# makes. Without both, a green CI proves nothing.
+
+def _golden_like_frame():
+    """A frame with the shape that matters: a large column and a small one
+    carrying the same absolute noise, which is what a bump second difference
+    does."""
+    return pd.DataFrame(
+        {
+            "date": ["2024-01-02", "2024-01-03", "2024-01-04"],
+            "count": [1, 2, 3],
+            "price": [9504.27292802203, 9611.5, 9118.734185],
+            "gamma": [23.74735191146168, 0.037035, -43.011715],
+            "gamma_cash_1pct": [2143.1985100094166, -3.1566762373795587, -4301.171488],
+        }
+    )
+
+
+def _perturbed(frame, relative_to_column_scale):
+    out = frame.copy()
+    for column in out.columns:
+        if pd.api.types.is_float_dtype(out[column]):
+            scale = float(out[column].abs().max())
+            out[column] = out[column] + relative_to_column_scale * scale
+    return out
+
+
+def test_the_golden_gate_admits_the_measured_cross_architecture_drift():
+    """1.1e-11 of column scale is the worst x86_64-vs-ARM64 drift measured on
+    these frames. If this failed, CI could never be green off this machine."""
+    expected = _golden_like_frame()
+    assert_frame_matches(_perturbed(expected, 1.1e-11), expected, "drift")
+
+
+def test_the_golden_gate_still_catches_a_real_change():
+    """1e-6 of column scale is far below the percent-level move a genuine
+    numerics change makes, and must already fail -- otherwise the tolerance has
+    swallowed the gate it is supposed to guard."""
+    expected = _golden_like_frame()
+    with pytest.raises(AssertionError):
+        assert_frame_matches(_perturbed(expected, 1e-6), expected, "real change")
+
+
+def test_the_golden_gate_compares_discrete_columns_exactly():
+    """Integers and strings carry no rounding noise, so they get no slack."""
+    expected = _golden_like_frame()
+    bumped_int = expected.copy()
+    bumped_int.loc[0, "count"] = 2
+    with pytest.raises(AssertionError):
+        assert_frame_matches(bumped_int, expected, "int")
+
+    bumped_str = expected.copy()
+    bumped_str.loc[0, "date"] = "2024-01-05"
+    with pytest.raises(AssertionError):
+        assert_frame_matches(bumped_str, expected, "str")

@@ -10,6 +10,8 @@ from datetime import datetime
 
 import numpy as np
 
+from golden_compare import assert_close
+
 from quantark.asset.equity.engine.pde import PhoenixPDESolver, SnowballPDESolver
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.option.phoenix_config import CouponBarrierConfig
@@ -113,9 +115,17 @@ def test_snowball_full_stream_matches_golden():
     stats = SnowballPDESolver(PDEParams()).calculate_event_stats(
         _snowball(), _env()
     )
-    assert abs(float(stats.pv) - SNOWBALL_PV) < 1e-6
-    assert abs(float(stats.ki_probability) - SNOWBALL_KI) < 1e-9
-    assert abs(float(stats.ki_ever_probability) - SNOWBALL_KI_EVER) < 1e-9
+    # These are frozen on ONE machine, so they compare at the suite's
+    # cross-architecture tolerance rather than an absolute epsilon. `< 1e-6` on
+    # a PV of ~9.9e5 is 1e-12 RELATIVE -- tighter than the 2.2e-11 drift
+    # measured between x86_64 and ARM64 on these solvers, so it was passing on
+    # margin rather than by design. Probabilities are O(0.1), where the same
+    # relative bound is far tighter in absolute terms than the old 1e-9.
+    assert_close(float(stats.pv), SNOWBALL_PV, msg="snowball pv")
+    assert_close(float(stats.ki_probability), SNOWBALL_KI, msg="snowball ki")
+    assert_close(
+        float(stats.ki_ever_probability), SNOWBALL_KI_EVER, msg="snowball ki_ever"
+    )
 
 
 def test_snowball_ki_pruning_preserves_ko_and_pv():
