@@ -1012,10 +1012,13 @@ class SnowballPDESolver(BasePDESolver):
                     current_time=float(t_vec[j]),
                     settlement_time=rec.settlement_time,
                 )
+                ko_surfaces = (
+                    (v0_cur, v1_cur) if self._ko_survives_ki(product) else (v0_cur,)
+                )
                 if self._event_uses_projection(j):
                     # Zero all event surfaces in the KO region (KO_i indicator
                     # to df_delay); KI-ever is exempt (first-passage statistic).
-                    for v in (v0_cur, v1_cur):
+                    for v in ko_surfaces:
                         target = np.zeros_like(v)
                         target[:, ko_idx] = df_delay
                         if want_ki:
@@ -1031,16 +1034,13 @@ class SnowballPDESolver(BasePDESolver):
 
                     # Zero all event surfaces in KO region, then set the KO_i indicator.
                     # KI-ever is exempt (pure first-passage statistic, no KO absorption).
-                    if want_ki:
-                        ever0 = v0_cur[mask_ko, ki_ever_col].copy()
-                        ever1 = v1_cur[mask_ko, ki_ever_col].copy()
-                    v0_cur[mask_ko, :] = 0.0
-                    v1_cur[mask_ko, :] = 0.0
-                    v0_cur[mask_ko, ko_idx] = df_delay
-                    v1_cur[mask_ko, ko_idx] = df_delay
-                    if want_ki:
-                        v0_cur[mask_ko, ki_ever_col] = ever0
-                        v1_cur[mask_ko, ki_ever_col] = ever1
+                    for v in ko_surfaces:
+                        if want_ki:
+                            ever = v[mask_ko, ki_ever_col].copy()
+                        v[mask_ko, :] = 0.0
+                        v[mask_ko, ko_idx] = df_delay
+                        if want_ki:
+                            v[mask_ko, ki_ever_col] = ever
                 if want_coupon:
                     self._set_extra_event_indicators(
                         v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
@@ -1694,6 +1694,20 @@ class SnowballPDESolver(BasePDESolver):
 
         return result
 
+    @staticmethod
+    def _ko_survives_ki(product: SnowballOption) -> bool:
+        """Whether a knock-out can still fire once the trade has knocked in.
+
+        ``disable_ko_after_ki`` says it cannot, and the two-surface solver
+        expresses "knocked in" as the V1 surface -- so honouring the flag means
+        writing the KO payoff to V0 alone and leaving V1 to run on unbarriered.
+        The flag is meaningless without a KI barrier, which is the guard the
+        Monte Carlo engine applies too.
+        """
+        return not (
+            product.barrier_config.disable_ko_after_ki and product.has_ki_barrier
+        )
+
     def _resolve_ki_barrier_at_tidx(self, t_idx: int) -> float:
         """Resolve KI barrier for a specific PDE time index."""
         if self._bgk_active:
@@ -2128,8 +2142,9 @@ class SnowballPDESolver(BasePDESolver):
             )
             barrier = float(rec.barrier)
             breach_up = not is_reverse
+            ko_hits_ki = self._ko_survives_ki(product)
 
-            def _ko(states, _b=barrier, _c=cash, _up=breach_up):
+            def _ko(states, _b=barrier, _c=cash, _up=breach_up, _hits_ki=ko_hits_ki):
                 cash_col = np.full_like(states["alive"], _c)
                 return {
                     "alive": project_between(
@@ -2137,7 +2152,9 @@ class SnowballPDESolver(BasePDESolver):
                     ),
                     "ki": project_between(
                         spatial, _b, _up, cash_col, states["ki"]
-                    ),
+                    )
+                    if _hits_ki
+                    else states["ki"],
                 }
 
             interior[step] = _chain(interior.get(step), _ko)
@@ -2257,8 +2274,10 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        grids = (grid_v0, grid_v1) if self._ko_survives_ki(product) else (grid_v0,)
+
         if self._use_cell_average_events():
-            for grid in (grid_v0, grid_v1):
+            for grid in grids:
                 grid[:, -1] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
                     grid[:, -1], cashflow_value,
@@ -2268,8 +2287,8 @@ class SnowballPDESolver(BasePDESolver):
         # Apply to breached region (KO is an UP barrier)
         mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
-        grid_v0[mask, -1] = cashflow_value
-        grid_v1[mask, -1] = cashflow_value
+        for grid in grids:
+            grid[mask, -1] = cashflow_value
 
     def _time_stepping_two_surface(
         self,
@@ -2753,8 +2772,11 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        # V1 is the knocked-in surface; disable_ko_after_ki removes it here.
+        grids = (grid_v0, grid_v1) if self._ko_survives_ki(product) else (grid_v0,)
+
         if self._event_uses_projection(t_idx):
-            for grid in (grid_v0, grid_v1):
+            for grid in grids:
                 grid[:, t_idx] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
                     grid[:, t_idx], cashflow_value,
@@ -2766,9 +2788,8 @@ class SnowballPDESolver(BasePDESolver):
             s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
         )
 
-        # Apply to both surfaces
-        grid_v0[mask, t_idx] = cashflow_value
-        grid_v1[mask, t_idx] = cashflow_value
+        for grid in grids:
+            grid[mask, t_idx] = cashflow_value
 
     def _apply_ki_jump(
         self,

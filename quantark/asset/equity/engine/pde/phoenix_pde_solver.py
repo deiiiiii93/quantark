@@ -902,9 +902,14 @@ class PhoenixPDESolver(SnowballPDESolver):
                 )
                 total_pay = (coupon_amt + accumulated_k) * coupon_discount
                 next_k = k + 1 if use_memory else 0
-            for grids, diffused0 in (
-                (grid_v0_list, diffused_cols[0]),
-                (grid_v1_list, diffused_cols[1]),
+            # On the knocked-in surface a disabled KO simply never triggers, so
+            # its branch collapses into the coupon treatment. The KO break stays
+            # in the partition and is then redundant -- projecting a function
+            # across a break it does not jump at is exact, so this costs
+            # nothing but keeps one partition for both surfaces.
+            for grids, diffused0, ko_here in (
+                (grid_v0_list, diffused_cols[0], True),
+                (grid_v1_list, diffused_cols[1], self._ko_survives_ki(product)),
             ):
                 branches = []
                 for j in range(len(breaks) + 1):
@@ -914,6 +919,7 @@ class PhoenixPDESolver(SnowballPDESolver):
                     else:
                         m_ko = his[j] <= b_ko_x
                         m_pay = his[j] <= b_c_x
+                    m_ko = m_ko and ko_here
                     if m_ko:
                         branches.append(
                             np.full(
@@ -1073,10 +1079,13 @@ class PhoenixPDESolver(SnowballPDESolver):
                     s_vec, barrier, product.is_reverse, True,
                     grid_v0_list[k][:, t_idx], total_payoff,
                 )
-                grid_v1_list[k][:, t_idx] = self._project_event_values(
-                    s_vec, barrier, product.is_reverse, True,
-                    grid_v1_list[k][:, t_idx], total_payoff,
-                )
+                # V1 is the knocked-in surface; disable_ko_after_ki removes the
+                # knock-out from it and leaves it running on unbarriered.
+                if self._ko_survives_ki(product):
+                    grid_v1_list[k][:, t_idx] = self._project_event_values(
+                        s_vec, barrier, product.is_reverse, True,
+                        grid_v1_list[k][:, t_idx], total_payoff,
+                    )
             return
 
         for k in range(len(grid_v0_list)):
@@ -1100,4 +1109,5 @@ class PhoenixPDESolver(SnowballPDESolver):
 
             if ko_mask.any():
                 grid_v0_list[k][ko_mask, t_idx] = total_payoff[ko_mask]
-                grid_v1_list[k][ko_mask, t_idx] = total_payoff[ko_mask]
+                if self._ko_survives_ki(product):
+                    grid_v1_list[k][ko_mask, t_idx] = total_payoff[ko_mask]
