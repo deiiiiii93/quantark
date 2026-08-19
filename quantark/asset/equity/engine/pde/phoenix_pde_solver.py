@@ -6,7 +6,7 @@ Adds coupon jumps at observation times on top of the Snowball PDE framework.
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import scipy.sparse as sp
@@ -46,6 +46,13 @@ class PhoenixPDESolver(SnowballPDESolver):
         self._coupon_barriers: np.ndarray = np.array([])
         self._coupon_amounts: np.ndarray = np.array([])
         self._coupon_cumulative: np.ndarray = np.array([])
+        # Termination-value surfaces; None whenever coupons pay INSTANT, and on
+        # any solve path that never prepared them.
+        self._term_w0: Optional[np.ndarray] = None
+        self._term_w1: Optional[np.ndarray] = None
+        self._term_df_maturity: Optional[np.ndarray] = None
+        self._term_df_next_ko: Optional[np.ndarray] = None
+        self._term_is_reverse: bool = False
 
     # --- Native event stats (no MC): reuse the Snowball KO/KI machinery ---
 
@@ -564,6 +571,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         # FIRST_PASSAGE continuous-KI state for the inherited _apply_ki_jump
         # (inert unless continuous KI is live).
         self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
+        term = self._prepare_termination_surfaces(product, pricing_env, t_vec, num_x)
         I_int = sp.eye(num_x - 2, format="csc")
         use_banded = params.use_banded_solver
         n_int = num_x - 2
@@ -614,6 +622,15 @@ class PhoenixPDESolver(SnowballPDESolver):
             self._step_grids(grid_v1_list, j, dt, theta, x_vec, s_vec, tau_remaining, product, pricing_env,
                              use_banded, banded, lower1, main1, upper1, M1, M2_lu, rhs, l, u, is_v1=True)
 
+            # Step the termination-value surfaces on the same operator. They
+            # carry the discount a rolled-up coupon earns, so they must see the
+            # same events in the same order as the value surfaces.
+            if term is not None:
+                self._step_grids(list(term), j, dt, theta, x_vec, s_vec, tau_remaining,
+                                 product, pricing_env, use_banded, banded, lower1, main1,
+                                 upper1, M1, M2_lu, rhs, l, u, is_v1=False,
+                                 boundary=self._set_termination_boundary)
+
             # Apply modifications (Coupons, KO, KI). The valuation-date
             # level-0 columns are captured BEFORE their events: t=0 events
             # are deterministic at the known spot, so the readout uses this
@@ -629,11 +646,19 @@ class PhoenixPDESolver(SnowballPDESolver):
             )
 
     def _step_grids(self, grid_list, j, dt, theta, x_vec, s_vec, tau_remaining, product, pricing_env,
-                    use_banded, banded, lower1, main1, upper1, M1, M2_lu, rhs, l, u, is_v1):
-        """Helper to diffuse a list of grids."""
+                    use_banded, banded, lower1, main1, upper1, M1, M2_lu, rhs, l, u, is_v1,
+                    boundary=None):
+        """Helper to diffuse a list of grids.
+
+        ``boundary`` overrides the payoff boundary conditions, which is what the
+        termination-value surface needs: it is not a payoff and its limits are
+        pure discount factors.
+        """
         for grid in grid_list:
             # Set boundary
-            if is_v1:
+            if boundary is not None:
+                boundary(grid, j)
+            elif is_v1:
                 self._set_boundary_conditions_v1(grid, x_vec, s_vec, j, tau_remaining, product, pricing_env)
             else:
                 self._set_boundary_conditions_v0(grid, x_vec, s_vec, j, tau_remaining, product, pricing_env)
@@ -702,6 +727,11 @@ class PhoenixPDESolver(SnowballPDESolver):
                 # Apply to all states
                 for k in range(len(grid_v0_list)):
                     self._apply_ki_jump(grid_v0_list[k], grid_v1_list[k], s_vec, t_idx, product)
+                # A knock-in switches regime for the termination law too.
+                if self._term_w0 is not None:
+                    self._apply_ki_jump(
+                        self._term_w0, self._term_w1, s_vec, t_idx, product
+                    )
 
         # 3. KO Jump
         ko_record = self._ko_observation_indices.get(t_idx)
@@ -716,6 +746,138 @@ class PhoenixPDESolver(SnowballPDESolver):
                 pricing_env,
                 ko_record,
             )
+            self._apply_termination_ko(
+                s_vec, t_idx, current_time, product, pricing_env, ko_record
+            )
+
+    # ------------------------------------------------------------------
+    # Termination-value surface (coupon_pay_type=EXPIRY)
+    # ------------------------------------------------------------------
+    #
+    # EXPIRY rolls coupons up and pays them when the note ENDS -- at the
+    # knock-out settlement if it knocks out, at maturity otherwise. A fixed
+    # discount to maturity is therefore wrong whenever a knock-out is possible.
+    #
+    # W(S,t) is the value of one unit paid at that termination, so a coupon of
+    # c earned at (S,t) is worth c*W(S,t). Linearity is what makes this cheap:
+    # every rolled-up coupon shares one termination date, so W does not depend
+    # on how many coupons have been earned and no accrual state is needed --
+    # two surfaces rather than one per possible earned-count.
+
+    def _termination_surface_active(self, product: PhoenixOption) -> bool:
+        """EXPIRY coupons need the surface; INSTANT ones are paid on the spot."""
+        return (
+            product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+            and self._coupon_amounts is not None
+            and len(self._coupon_amounts) > 0
+        )
+
+    def _prepare_termination_surfaces(
+        self, product, pricing_env, t_vec: np.ndarray, num_x: int
+    ):
+        """Allocate W for both regimes and tabulate its boundary limits."""
+        self._term_w0 = None
+        self._term_w1 = None
+        self._term_df_maturity = None
+        self._term_df_next_ko = None
+        if not self._termination_surface_active(product):
+            return None
+
+        num_t = len(t_vec)
+        df_maturity = np.empty(num_t, dtype=float)
+        df_next_ko = np.empty(num_t, dtype=float)
+        next_settlement = None
+        for j in range(num_t - 1, -1, -1):
+            now = float(t_vec[j])
+            df_maturity[j] = self._df_between_times(pricing_env, now, self._total_tau)
+            rec = self._ko_observation_indices.get(j)
+            if rec is not None:
+                next_settlement = (
+                    float(rec.settlement_time)
+                    if rec.settlement_time is not None
+                    else now
+                )
+            df_next_ko[j] = (
+                self._df_between_times(pricing_env, now, next_settlement)
+                if next_settlement is not None
+                else df_maturity[j]
+            )
+
+        w0 = np.zeros((num_x, num_t), dtype=float)
+        w1 = np.zeros((num_x, num_t), dtype=float)
+        # At maturity the note ends however it got there, so one unit paid at
+        # termination is one unit paid now.
+        w0[:, -1] = 1.0
+        w1[:, -1] = 1.0
+
+        self._term_w0 = w0
+        self._term_w1 = w1
+        self._term_df_maturity = df_maturity
+        self._term_df_next_ko = df_next_ko
+        self._term_is_reverse = bool(product.is_reverse)
+        return w0, w1
+
+    def _set_termination_boundary(self, grid: np.ndarray, t_idx: int) -> None:
+        """Exact Dirichlet limits: the boundaries sit outside every barrier.
+
+        Beyond the knock-out barrier the note ends at the next observation, so
+        W is the discount to that settlement. On the far side it can never knock
+        out, so W is the discount to maturity. Which end is which flips for a
+        reverse structure, whose knock-out is a down barrier.
+        """
+        never_ko = float(self._term_df_maturity[t_idx])
+        always_ko = float(self._term_df_next_ko[t_idx])
+        if self._term_is_reverse:
+            grid[0, t_idx] = always_ko
+            grid[-1, t_idx] = never_ko
+        else:
+            grid[0, t_idx] = never_ko
+            grid[-1, t_idx] = always_ko
+
+    def _apply_termination_ko(
+        self, s_vec, t_idx, current_time, product, pricing_env, ko_record
+    ) -> None:
+        """A knock-out ends the note, so W becomes the discount to its settlement."""
+        w0, w1 = self._term_w0, self._term_w1
+        if w0 is None:
+            return
+        barrier = ko_record.barrier
+        settled = self._cashflow_value_at_time(
+            pricing_env=pricing_env,
+            cashflow=1.0,
+            current_time=current_time,
+            settlement_time=ko_record.settlement_time,
+        )
+        grids = (w0, w1) if self._ko_survives_ki(product) else (w0,)
+        if self._event_uses_projection(t_idx):
+            for grid in grids:
+                grid[:, t_idx] = self._project_event_values(
+                    s_vec, barrier, product.is_reverse, True,
+                    grid[:, t_idx], settled,
+                )
+            return
+        mask = self._event_nodal_mask(
+            s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
+        )
+        for grid in grids:
+            grid[mask, t_idx] = settled
+
+    def _coupon_discounts(self, t_idx: int, current_time: float, product, pricing_env):
+        """Per-regime discount applied to a coupon earned now.
+
+        INSTANT pays immediately and EXPIRY without a reachable knock-out is a
+        plain discount to maturity; otherwise each regime carries its own
+        termination law, so V0 and V1 discount the same coupon differently.
+        """
+        if self._term_w0 is not None:
+            return self._term_w0[:, t_idx], self._term_w1[:, t_idx]
+        settlement_time = (
+            self._total_tau
+            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+            else current_time
+        )
+        scalar = self._df_between_times(pricing_env, current_time, settlement_time)
+        return scalar, scalar
 
     def _apply_coupon_jump_vector(
         self,
@@ -735,12 +897,9 @@ class PhoenixPDESolver(SnowballPDESolver):
         coupon_amt = float(self._coupon_amounts[obs_idx])
         use_memory = product.has_memory_coupon
         
-        settlement_time = (
-            self._total_tau
-            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-            else current_time
+        disc_v0, disc_v1 = self._coupon_discounts(
+            t_idx, current_time, product, pricing_env
         )
-        coupon_discount = self._df_between_times(pricing_env, current_time, settlement_time)
 
         max_k = obs_idx if use_memory else 0
         diffused_v0_0 = grid_v0_list[0][:, t_idx].copy()
@@ -751,18 +910,18 @@ class PhoenixPDESolver(SnowballPDESolver):
                 accumulated_pay = (
                     self._accumulated_coupon_amount(obs_idx, k) if use_memory else 0.0
                 )
-                total_pay = (coupon_amt + accumulated_pay) * coupon_discount
+                earned = coupon_amt + accumulated_pay
                 next_k = k + 1 if use_memory else 0
 
                 val_miss_0 = grid_v0_list[next_k][:, t_idx]
                 grid_v0_list[k][:, t_idx] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
-                    val_miss_0, diffused_v0_0 + total_pay,
+                    val_miss_0, diffused_v0_0 + earned * disc_v0,
                 )
                 val_miss_1 = grid_v1_list[next_k][:, t_idx]
                 grid_v1_list[k][:, t_idx] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
-                    val_miss_1, diffused_v1_0 + total_pay,
+                    val_miss_1, diffused_v1_0 + earned * disc_v1,
                 )
             return
 
@@ -784,17 +943,17 @@ class PhoenixPDESolver(SnowballPDESolver):
                 use_memory,
                 obs_idx,
                 coupon_amt,
-                coupon_discount,
+                (disc_v0, disc_v1),
             )
 
         for k in range(max_k + 1):
             accumulated_pay = (
                 self._accumulated_coupon_amount(obs_idx, k) if use_memory else 0.0
             )
-            total_pay = (coupon_amt + accumulated_pay) * coupon_discount
+            earned = coupon_amt + accumulated_pay
 
             # V0
-            val_pay_0 = diffused_v0_0 + total_pay
+            val_pay_0 = diffused_v0_0 + earned * disc_v0
             next_k = k + 1 if use_memory else 0
             val_miss_0 = grid_v0_list[next_k][:, t_idx]
 
@@ -802,7 +961,7 @@ class PhoenixPDESolver(SnowballPDESolver):
             grid_v0_list[k][~pay_mask, t_idx] = val_miss_0[~pay_mask]
 
             # V1
-            val_pay_1 = diffused_v1_0 + total_pay
+            val_pay_1 = diffused_v1_0 + earned * disc_v1
             val_miss_1 = grid_v1_list[next_k][:, t_idx]
 
             grid_v1_list[k][pay_mask, t_idx] = val_pay_1[pay_mask]
@@ -867,13 +1026,8 @@ class PhoenixPDESolver(SnowballPDESolver):
         n = len(s_vec)
         x_vec = np.log(np.asarray(s_vec, dtype=float))
         coupon_barrier = float(self._coupon_barriers[obs_idx])
-        settlement_time = (
-            self._total_tau
-            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-            else current_time
-        )
-        coupon_discount = self._df_between_times(
-            pricing_env, current_time, settlement_time
+        disc_v0, disc_v1 = self._coupon_discounts(
+            t_idx, current_time, product, pricing_env
         )
         trig_up = not bool(product.is_reverse)
         breaks = sorted((np.log(coupon_barrier), np.log(float(ko_barrier))))
@@ -900,16 +1054,16 @@ class PhoenixPDESolver(SnowballPDESolver):
                     if use_memory
                     else 0.0
                 )
-                total_pay = (coupon_amt + accumulated_k) * coupon_discount
+                earned_k = coupon_amt + accumulated_k
                 next_k = k + 1 if use_memory else 0
             # On the knocked-in surface a disabled KO simply never triggers, so
             # its branch collapses into the coupon treatment. The KO break stays
             # in the partition and is then redundant -- projecting a function
             # across a break it does not jump at is exact, so this costs
             # nothing but keeps one partition for both surfaces.
-            for grids, diffused0, ko_here in (
-                (grid_v0_list, diffused_cols[0], True),
-                (grid_v1_list, diffused_cols[1], self._ko_survives_ki(product)),
+            for grids, diffused0, ko_here, disc in (
+                (grid_v0_list, diffused_cols[0], True, disc_v0),
+                (grid_v1_list, diffused_cols[1], self._ko_survives_ki(product), disc_v1),
             ):
                 branches = []
                 for j in range(len(breaks) + 1):
@@ -929,7 +1083,9 @@ class PhoenixPDESolver(SnowballPDESolver):
                             )
                         )
                     elif in_coupon_fan and m_pay:
-                        branches.append(diffused0 + total_pay)
+                        # `disc` is this regime's termination value under
+                        # EXPIRY, a plain discount factor otherwise.
+                        branches.append(diffused0 + earned_k * disc)
                     elif in_coupon_fan:
                         branches.append(grids[next_k][:, t_idx])
                     else:
@@ -951,7 +1107,7 @@ class PhoenixPDESolver(SnowballPDESolver):
         use_memory: bool,
         obs_idx: int,
         coupon_amt: float,
-        coupon_discount: float,
+        coupon_discounts,
     ) -> None:
         """Pointwise-exact valuation-date coupon readout at the actual spot.
 
@@ -978,10 +1134,19 @@ class PhoenixPDESolver(SnowballPDESolver):
             accumulated = (
                 self._accumulated_coupon_amount(obs_idx, 0) if use_memory else 0.0
             )
-            total_pay = (coupon_amt + accumulated) * coupon_discount
+            earned = coupon_amt + accumulated
+            # The readout is pointwise at the spot, so a termination-value
+            # discount is interpolated there like any other surface.
+            discounts = tuple(
+                float(np.interp(spot_log, x_vec, d))
+                if isinstance(d, np.ndarray)
+                else float(d)
+                for d in coupon_discounts
+            )
             cols = (diffused_v0_0.copy(), diffused_v1_0.copy())
             values = tuple(
-                float(np.interp(spot_log, x_vec, col)) + total_pay for col in cols
+                float(np.interp(spot_log, x_vec, col)) + earned * disc
+                for col, disc in zip(cols, discounts)
             )
         else:
             next_k = 1 if use_memory else 0

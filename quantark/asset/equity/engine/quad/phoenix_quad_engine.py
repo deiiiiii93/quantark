@@ -227,6 +227,19 @@ class PhoenixQuadEngine(SnowballQuadEngine):
         v_in_list = []
         v_out_list = []
 
+        # Termination-value surfaces for coupon_pay_type=EXPIRY. W is the value
+        # of one unit paid when the note ENDS -- at the knock-out settlement if
+        # it knocks out, at maturity otherwise -- so a coupon of c earned here
+        # is worth c*W rather than c*DF(now -> maturity). Every rolled-up coupon
+        # shares one termination date, so W does not depend on how many have
+        # been earned: two surfaces, not one per earned-count. At maturity the
+        # note ends however it got there, so W starts at one.
+        expiry_coupons = (
+            product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+        )
+        w_out = np.ones_like(spot_grid, dtype=float) if expiry_coupons else None
+        w_in = np.ones_like(spot_grid, dtype=float) if expiry_coupons else None
+
         def accumulated_before(obs_idx: int, missed: int) -> float:
             if missed <= 0 or obs_idx <= 0:
                 return 0.0
@@ -325,9 +338,12 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     rate, obs_time, ko_record.settlement_time, df_fn=df_local)
                 base_ko_payoff = float(ko_record.payoff or 0.0)
                 
-                coupon_discount = 1.0
-                if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
-                    coupon_discount = self._ko_discount(rate, obs_time, maturity, df_fn=df_local)
+                # INSTANT pays the coupon now; EXPIRY pays it at termination,
+                # whose value is the regime's own W surface.
+                if expiry_coupons:
+                    coupon_discount_out, coupon_discount_in = w_out, w_in
+                else:
+                    coupon_discount_out = coupon_discount_in = 1.0
 
                 new_v_in_list = []
                 new_v_out_list = []
@@ -345,14 +361,14 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                     accumulated_pay = (
                         accumulated_before(ko_index, k) if use_memory else 0.0
                     )
-                    total_pay = (coupon_amt + accumulated_pay) * coupon_discount
-                    
+                    earned = coupon_amt + accumulated_pay
+
                     # Continuation value if paid: comes from state 0 of the next step
                     # Wait, diffused surfaces `v_out_list` are indexed by *future* memory state.
                     # If we pay now, the future starts with 0 memory.
                     # So we use `v_out_list[0]`.
-                    val_pay_out = v_out_list[0] + total_pay
-                    val_pay_in = v_in_list[0] + total_pay
+                    val_pay_out = v_out_list[0] + earned * coupon_discount_out
+                    val_pay_in = v_in_list[0] + earned * coupon_discount_in
 
                     # Branch 2: Coupon Condition Missed
                     # Payoff = 0
@@ -425,6 +441,15 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 v_in_list = new_v_in_list
                 v_out_list = new_v_out_list
 
+                # A knock-out ends the note, so W becomes the discount to its
+                # settlement. Blended by the same weight the value surfaces use,
+                # and left alone on the knocked-in regime when the knock-out no
+                # longer applies there.
+                if expiry_coupons:
+                    w_out = ko_weight * ko_discount + (1.0 - ko_weight) * w_out
+                    if not disable_ko_after_ki:
+                        w_in = ko_weight * ko_discount + (1.0 - ko_weight) * w_in
+
             # KI Logic (Discrete/Continuous) applied to ALL surfaces
             if ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
@@ -434,6 +459,9 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 )
                 for i in range(len(v_out_list)):
                     v_out_list[i][ki_mask] = v_in_list[i][ki_mask]
+                if expiry_coupons:
+                    # A knock-in switches regime for the termination law too.
+                    w_out[ki_mask] = w_in[ki_mask]
             elif discrete_ki_record is not None and not ki_applied_jointly:
                 ki_record = discrete_ki_record
                 for i in range(len(v_out_list)):
@@ -449,6 +477,12 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         ko_weight=(
                             ko_weight if not disable_ko_after_ki else None
                         ),
+                    )
+                if expiry_coupons:
+                    w_out = self._blend_ki_transition(
+                        w_out, w_in, grid, spot_grid, ki_record.barrier, spot,
+                        smoothing_width, product.is_reverse,
+                        ko_weight=(ko_weight if not disable_ko_after_ki else None),
                     )
 
             # Diffusion Step
@@ -506,6 +540,28 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                         alpha,
                         beta,
                         tau_step,
+                    )
+
+            # The termination-value surfaces ride the same operator, including
+            # the knock-in bridge, so the discount a rolled-up coupon earns is
+            # transported exactly as the values it is applied to.
+            if expiry_coupons:
+                w_in_at_obs = w_in
+                w_in = self._diffuse_fft(
+                    w_in, math_utils, omega_array, prefactor,
+                    full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
+                )
+                if ki_continuous:
+                    w_out = self._diffuse_with_bridge(
+                        w_out, w_in_at_obs, math_utils, omega_array, prefactor,
+                        full_p_lr, full_p_ur, full_p0, log_ki_barrier, alpha,
+                        beta, vol_step, dt[step_index], tau_step,
+                        product.is_reverse,
+                    )
+                else:
+                    w_out = self._diffuse_fft(
+                        w_out, math_utils, omega_array, prefactor,
+                        full_p_lr, full_p_ur, full_p0, alpha, beta, tau_step,
                     )
 
         # t0 surfaces (memory 0, no observation at valuation): the exposure grid's

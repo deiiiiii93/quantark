@@ -99,21 +99,6 @@ def quad_price(pay_type, rate):
 
 ENGINES = {"mc": mc_price, "pde": pde_price, "quad": quad_price}
 
-#: The deterministic engines value a rolled-up coupon as a fixed discount from
-#: the CONTRACTUAL maturity, so an accrued coupon survives a knock-out (they
-#: never forfeited) but is paid after the note has already ended. Pricing it
-#: correctly needs the coupon discounted by a "1 paid at termination" claim --
-#: an auxiliary surface carried through the backward induction with its own
-#: boundary conditions -- rather than by a scalar. Strict xfail: this flips to a
-#: failure the moment someone implements it, which is the point.
-_PAYS_AT_MATURITY_NOT_TERMINATION = pytest.mark.xfail(
-    strict=True,
-    reason="PDE/QUAD discount the roll-up from maturity, not from the knock-out "
-    "date; needs a termination-value surface. Phoenix EXPIRY is uncertified "
-    "for exactly this reason.",
-)
-
-
 @pytest.mark.parametrize("engine", sorted(ENGINES))
 def test_nothing_is_forfeited_at_zero_rates(engine):
     """Zero rates make payment timing free, so the two conventions coincide.
@@ -127,14 +112,7 @@ def test_nothing_is_forfeited_at_zero_rates(engine):
     )
 
 
-@pytest.mark.parametrize(
-    "engine",
-    [
-        "mc",
-        pytest.param("pde", marks=_PAYS_AT_MATURITY_NOT_TERMINATION),
-        pytest.param("quad", marks=_PAYS_AT_MATURITY_NOT_TERMINATION),
-    ],
-)
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 def test_the_roll_up_is_paid_on_the_knock_out_date(engine):
     """The whole payoff is one cashflow at knock-out, so one discount factor
     separates the zero-rate price from the discounted one."""
