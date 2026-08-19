@@ -117,3 +117,12 @@ cases:
   # barriers. Every barrier mask in the vector-surface solver inverts.
   - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 125.0,
                               coupon_barrier: 115.0}}
+  # Coupons rolled up and paid when the note ENDS -- at the knock-out settlement
+  # if it knocks out, at maturity otherwise. The payment date is path-dependent,
+  # so a fixed discount cannot express it: the deterministic engines carry a
+  # termination-value surface and the benchmark pays the roll-up at knock-out.
+  - {name: coupon_at_expiry, product: {coupon_pay_type: expiry}}
+  # The roll-up meeting the memory ladder: accrued coupons are released on a
+  # later coupon date and then still wait for termination to be paid.
+  - {name: coupon_at_expiry_memory, product: {coupon_pay_type: expiry,
+                                              memory_coupon: true}}

@@ -51,7 +51,6 @@ def test_study_file_loads_with_both_engines(study):
     assert study.name == "phoenix-flat-bsm"
     assert tuple(c.name() for c in study.candidates) == CANDIDATES
     assert [case.name for case in study.cases] == [
-        # Market scenarios, from the original certification.
         "ordinary",
         "near_ko",
         "near_coupon",
@@ -59,13 +58,13 @@ def test_study_file_loads_with_both_engines(study):
         "low_vol",
         "near_expiry",
         "memory",
-        # Barrier-shape and KI-monitoring variants (first amendment).
         "stepdown",
-        # The remaining product feature surface (second amendment).
         "discrete_ki",
         "ki_stepdown",
         "disable_ko_after_ki",
         "reverse",
+        "coupon_at_expiry",
+        "coupon_at_expiry_memory",
     ]
 
 

@@ -505,3 +505,22 @@ def test_ko_reset_variant_knobs_are_absent_by_default():
     product = ko_reset()
     assert product.barrier_config.disable_ko_after_ki is False
     assert product.barrier_config.ki_barrier == 80.0
+
+
+def test_phoenix_coupon_pay_type_reaches_the_coupon_config():
+    """EXPIRY rolls coupons up to the note's termination."""
+    from quantark.util.enum import CouponPayType as _CPT
+
+    product = phoenix(coupon_pay_type="expiry")
+    assert product.coupon_config.coupon_pay_type is _CPT.EXPIRY
+
+
+def test_phoenix_coupon_pay_type_defaults_to_instant():
+    from quantark.util.enum import CouponPayType as _CPT
+
+    assert phoenix().coupon_config.coupon_pay_type is _CPT.INSTANT
+
+
+def test_phoenix_rejects_an_unknown_coupon_pay_type():
+    with pytest.raises(ValidationError, match="coupon_pay_type must be one of"):
+        phoenix(coupon_pay_type="at_the_end")

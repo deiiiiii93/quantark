@@ -68,7 +68,24 @@ _PRODUCT_KEYS = (
     "ki_stepdown",
     "disable_ko_after_ki",
     "is_reverse",
+    "coupon_pay_type",
 )
+
+_COUPON_PAY = {"instant": CouponPayType.INSTANT, "expiry": CouponPayType.EXPIRY}
+
+
+def _coupon_pay_type(spec: Mapping[str, Any]) -> CouponPayType:
+    """Resolve the pay type, refusing an unknown one at the point of use.
+
+    A case override never reaches the study-level validator, so falling back to
+    a KeyError here would surface as a crash rather than a reason.
+    """
+    name = str(spec.get("coupon_pay_type", "instant"))
+    if name not in _COUPON_PAY:
+        raise ValidationError(
+            f"coupon_pay_type must be one of {tuple(_COUPON_PAY)}, got {name!r}"
+        )
+    return _COUPON_PAY[name]
 
 #: See ``equity_snowball._KI_MONITORING``. Phoenix has no European variant:
 #: its knock-in interacts with a coupon stream observed on the same schedule.
@@ -110,6 +127,12 @@ def build_phoenix_product_spec(params: Mapping[str, Any]) -> dict:
         raise ValidationError(
             f"ki_monitoring must be one of {_KI_MONITORING}, got {monitoring!r}"
         )
+    coupon_pay = str(spec.get("coupon_pay_type", "instant"))
+    if coupon_pay not in _COUPON_PAY:
+        raise ValidationError(
+            f"coupon_pay_type must be one of {tuple(_COUPON_PAY)}, got {coupon_pay!r}"
+        )
+
     ki_stepdown = float(spec.get("ki_stepdown", 0.0))
     if ki_stepdown and monitoring != "discrete":
         raise ValidationError(
@@ -194,7 +217,7 @@ def make_phoenix(spec: Mapping[str, Any]) -> PhoenixOption:
         coupon_rate=float(spec["coupon_rate"]),
         num_observations=int(spec["num_observations"]),
         memory_coupon=bool(spec.get("memory_coupon", False)),
-        coupon_pay_type=CouponPayType.INSTANT,
+        coupon_pay_type=_coupon_pay_type(spec),
         is_reverse=bool(spec.get("is_reverse", False)),
         disable_ko_after_ki=bool(spec.get("disable_ko_after_ki", False)),
         **_ki_kwargs(spec),
