@@ -276,3 +276,33 @@ def test_substep_refinement_folds_the_variance_onto_the_contractual_grid():
             rtol=1e-12,
             atol=0,
         )
+
+
+def test_the_bridge_variance_survives_parallel_batches():
+    """Regression: the dask path runs each batch through delayed/compute on the
+    THREADED scheduler, so several batches sit between their own path
+    generation and their payoff computation at once, on the same engine object.
+
+    The recorded variance was a single instance attribute, so batches of 6667
+    and 6666 paths overwrote each other and the bridge was handed variance
+    belonging to a different batch -- caught by the shape guard rather than
+    silently mispriced, which is the only reason this surfaced as an error and
+    not as a wrong number. Batch sizes are deliberately unequal here (a total
+    that does not divide by 3), because equal batches would hide it.
+    """
+    pytest.importorskip("dask")
+    engine = LocalVolSnowballMCEngine(
+        params=MCParams(num_paths=20_000, time_steps=26, seed=5),
+        use_dask=True,
+        num_batches=3,
+    )
+    price = engine.price(_knock_in_only_snowball(), _env())
+    assert np.isfinite(price)
+
+    serial = LocalVolSnowballMCEngine(
+        params=MCParams(num_paths=20_000, time_steps=26, seed=5)
+    ).price(_knock_in_only_snowball(), _env())
+    # Batching changes the draw partition, so this is a sanity band, not an
+    # equality: the point is that the parallel path prices at all, and lands
+    # in the same place.
+    assert price == pytest.approx(serial, rel=0.05)

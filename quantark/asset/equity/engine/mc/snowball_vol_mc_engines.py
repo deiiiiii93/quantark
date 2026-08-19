@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+import threading
+
 import numpy as np
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
@@ -148,6 +150,23 @@ class _SubstepRefinementMixin:
     # record it per fine SDE step and fold it onto the contractual grid, the
     # same grid `_make_path_generator` records the nodes on.
 
+    def _bridge_variance_store(self) -> dict:
+        """Per-thread slots for the recorded variance.
+
+        The recording happens inside ``simulate`` and is consumed by the bridge
+        during ``_compute_payoffs``. Those are one call apart in serial use, but
+        the legacy dask path runs each batch through ``delayed``/``compute`` on
+        the THREADED scheduler, so several batches sit between their own
+        generate and consume at once on this same engine object. A single
+        instance attribute is a race there -- batches of 6667 and 6666 paths
+        overwriting each other -- so each thread gets its own slot. Every batch
+        generates and consumes within one ``batch_fn`` call, hence one thread.
+        """
+        store = self.__dict__.get("_bridge_variance_slots")
+        if store is None:
+            store = self.__dict__.setdefault("_bridge_variance_slots", {})
+        return store
+
     def _new_step_log_variance(self, n_paths: int, n_fine_steps: int):
         """Buffer for the per-fine-step log-variance, or None when no
         continuous-KI bridge will run (it costs a second paths-sized array)."""
@@ -161,21 +180,29 @@ class _SubstepRefinementMixin:
         Variance is additive over sub-intervals, so a contractual interval's
         log-variance is the SUM of its substeps'.
         """
-        if fine is None:
-            self._step_log_variance = None
-            return
-        n = self.substeps_per_interval
-        if n > 1:
-            fine = fine.reshape(fine.shape[0], -1, n).sum(axis=2)
-        self._step_log_variance = fine
+        if fine is not None:
+            n = self.substeps_per_interval
+            if n > 1:
+                fine = fine.reshape(fine.shape[0], -1, n).sum(axis=2)
+        self._bridge_variance_store()[threading.get_ident()] = fine
+
+    @property
+    def _step_log_variance(self):
+        """The variance recorded by THIS thread's most recent simulate."""
+        return self._bridge_variance_store().get(threading.get_ident())
 
     def _ki_bridge_step_log_variance(self, paths):
-        recorded = getattr(self, "_step_log_variance", None)
+        recorded = self._bridge_variance_store().get(threading.get_ident())
         if recorded is None:
             raise PricingError(
                 f"{type(self).__name__} ran the continuous-KI bridge without "
                 "recording the variance its own paths accumulated"
             )
+        # Shape, not identity: with substeps_per_interval > 1 the recorded
+        # nodes are handed on as a strided view, so the array the payoffs see
+        # is not the one simulate built. Shape plus per-thread scoping is what
+        # is actually checkable, and the shape check is what caught the dask
+        # race described in _bridge_variance_store.
         expected = (paths.shape[0], paths.shape[1] - 1)
         if recorded.shape != expected:
             raise PricingError(
