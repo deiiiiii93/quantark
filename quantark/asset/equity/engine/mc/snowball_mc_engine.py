@@ -732,6 +732,11 @@ class SnowballMCEngine(BaseEngine):
                 ki_profile = product.get_ki_observation_profile(pricing_env)
                 ki_times = ki_profile["observation_times"]
 
+        # Recording the realized per-step variance costs a second
+        # paths-sized array, so the vol-model engines only do it when a
+        # continuously monitored KI barrier will actually run the bridge.
+        self._ki_bridge_wanted = bool(product.has_ki_barrier and ki_continuous)
+
         # Combine all times and ensure maturity is included
         all_times_set = set(ko_times) | set(ki_times) | {T}
         all_times = np.array(sorted(all_times_set))
@@ -857,6 +862,10 @@ class SnowballMCEngine(BaseEngine):
         else:
             ki_indices = np.searchsorted(all_times, np.array(ki_times, dtype=float))
             ki_horizon_idx = None
+
+        # See _build_time_grid: the vol-model engines record the realized
+        # per-step variance only when the bridge will actually run.
+        self._ki_bridge_wanted = bool(product.has_ki_barrier and ki_continuous)
 
         return {
             "all_times": all_times,
@@ -1099,6 +1108,20 @@ class SnowballMCEngine(BaseEngine):
 
         return ki_triggered, first_ki_idx
 
+    def _ki_bridge_step_log_variance(
+        self, paths: np.ndarray
+    ) -> Optional[np.ndarray]:
+        """Log-variance accumulated over each monitoring interval, per path.
+
+        Shape ``(n_paths, n_steps)``, or ``None`` to use the scalar ``sigma``
+        the bridge was handed. The Brownian-bridge crossing probability is
+        governed by the quadratic variation of log S over the interval, so a
+        constant-vol engine is exactly served by ``sigma**2 * dt`` -- but a
+        local-vol, Heston or SLV path accumulates variance those engines
+        simulate and this engine never sees. They override.
+        """
+        return None
+
     def _check_ki_barriers_continuous_with_bridge(
         self,
         paths: np.ndarray,
@@ -1155,6 +1178,7 @@ class SnowballMCEngine(BaseEngine):
             raise ValidationError("all_times must be strictly increasing and > 0")
 
         rng = np.random.default_rng(int(rng_seed))
+        step_log_variance = self._ki_bridge_step_log_variance(paths)
 
         # Sample step-wise hit events using the Brownian-bridge probabilities.
         # If a hit occurs in step k, we record the right endpoint index k.
@@ -1195,10 +1219,21 @@ class SnowballMCEngine(BaseEngine):
 
             idx = np.flatnonzero(bridge_candidates)
             dt_k = float(dt[k])
-            h2 = float(sigma * sigma) * dt_k
+            # h2 is the log-variance the path ACTUALLY accumulated over this
+            # interval. sigma**2 * dt is exact only when the diffusion is the
+            # constant `sigma`; engines whose diffusion varies with spot,
+            # time or a simulated variance report what they integrated. A
+            # step that accumulated no variance cannot have crossed, and the
+            # -inf exponent clips to give exactly that.
+            h2 = (
+                float(sigma * sigma) * dt_k
+                if step_log_variance is None
+                else step_log_variance[idx, k]
+            )
 
             log_term = safe_log(s0[idx] / ki_barrier) * safe_log(s1[idx] / ki_barrier)
-            exponent = -2.0 * log_term / h2
+            with np.errstate(divide="ignore"):
+                exponent = -2.0 * log_term / h2
             exponent = np.clip(exponent, -745.0, 0.0)
             p = np.exp(exponent)
 
