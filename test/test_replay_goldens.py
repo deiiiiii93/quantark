@@ -25,7 +25,20 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from golden_compare import GOLDEN_ABS_TOL, GOLDEN_REL_TOL, assert_close
+from golden_compare import GOLDEN_REL_TOL, assert_close
+
+#: Absolute floor for these frames, raised from ``GOLDEN_ABS_TOL`` because they
+#: carry BUMP SECOND DIFFERENCES. Gamma is ``(V+ - 2V + V-)/h**2``, so its noise
+#: floor is set by the magnitude of the PRICE it differences (~1e4 here), not by
+#: gamma's own -- and gamma ranges down to 0.037, where a relative tolerance has
+#: no purchase at all. Measured on the first x86_64 run against these ARM64
+#: goldens: worst gamma drift 4.6e-10 absolute (1.2e-8 relative), on prices that
+#: themselves agreed inside 1e-9 relative. 1e-8 keeps ~20x over that.
+#:
+#: This only binds where |value| < atol/rtol = 10; above that ``GOLDEN_REL_TOL``
+#: still governs, so price (~1e4) and delta (~1e2) are unaffected. A real change
+#: to these engines moves gamma by percent -- six orders above this floor.
+SECOND_DIFFERENCE_ABS_TOL = 1e-8
 
 sys.path.insert(0, str(Path(__file__).parent))
 from replay_golden import fixtures  # noqa: E402
@@ -84,7 +97,7 @@ def test_frame_matches_golden(all_results, case, frame_name, tmp_path):
     )
     pd.testing.assert_frame_equal(
         actual, expected, check_exact=False,
-        rtol=GOLDEN_REL_TOL, atol=GOLDEN_ABS_TOL,
+        rtol=GOLDEN_REL_TOL, atol=SECOND_DIFFERENCE_ABS_TOL,
     )
 
 
