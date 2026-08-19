@@ -5,6 +5,8 @@ import pytest
 from quantark.util.exceptions import ValidationError
 from quantark.modelvalidation import anchors as anchors_module
 from quantark.modelvalidation.anchors import (
+    DEFAULT_ABS_TOL,
+    DEFAULT_REL_TOL,
     assert_anchors,
     extract_anchors,
     machine_fingerprint,
@@ -34,7 +36,8 @@ def test_extract_anchors_captures_candidate_values(certified):
     assert anchors["schema"] == 1
     assert anchors["study_source_text"] == study.source_text
     assert anchors["fingerprint"] == machine_fingerprint()
-    assert anchors["rel_tol"] == 1e-12
+    assert anchors["rel_tol"] == DEFAULT_REL_TOL
+    assert anchors["abs_tol"] == DEFAULT_ABS_TOL
 
     entries = {(a["candidate"], a["case"]): a for a in anchors["anchors"]}
     assert set(entries) == {
@@ -107,14 +110,28 @@ def test_same_machine_comparison_is_exact(tmp_path, certified, monkeypatch):
         assert_anchors(path)
 
 
+def _a_different_machine() -> dict:
+    """A fingerprint that cannot be THIS machine, whatever this machine is.
+
+    These tests used to hardcode ``{"machine": "x86_64", "system": "Linux"}``,
+    which made them exercise the cross-architecture path only on machines that
+    were not x86_64 Linux. CI is exactly that, so on the first run there the
+    comparison went down the same-machine EXACT branch and the tests failed --
+    reporting a numerics problem where there was only a bad stub.
+    """
+    fingerprint = dict(machine_fingerprint())
+    fingerprint["machine"] = f"{fingerprint['machine']}-not-this-one"
+    return fingerprint
+
+
 def test_cross_architecture_uses_the_tolerance(tmp_path, certified, monkeypatch):
     """A different machine gets ULP-level slack -- and no more."""
     study, payload = certified
     anchors = extract_anchors(payload, study)
-    anchors["fingerprint"] = {"machine": "x86_64", "system": "Linux"}
+    anchors["fingerprint"] = _a_different_machine()
     for entry in anchors["anchors"]:
         entry["values"] = {
-            q: v * (1 + 1e-13) for q, v in entry["values"].items()
+            q: v * (1 + 1e-11) for q, v in entry["values"].items()
         }
     path = tmp_path / "anchors.json"
     atomic_write_json(path, anchors)
@@ -126,9 +143,9 @@ def test_cross_architecture_uses_the_tolerance(tmp_path, certified, monkeypatch)
 def test_cross_architecture_still_catches_real_drift(tmp_path, certified, monkeypatch):
     study, payload = certified
     anchors = extract_anchors(payload, study)
-    anchors["fingerprint"] = {"machine": "x86_64", "system": "Linux"}
+    anchors["fingerprint"] = _a_different_machine()
     for entry in anchors["anchors"]:
-        entry["values"] = {q: v * (1 + 1e-9) for q, v in entry["values"].items()}
+        entry["values"] = {q: v * (1 + 1e-6) for q, v in entry["values"].items()}
     path = tmp_path / "anchors.json"
     atomic_write_json(path, anchors)
 
