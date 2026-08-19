@@ -51,11 +51,20 @@ def test_study_file_loads_with_both_engines(study):
     assert study.name == "snowball-flat-bsm"
     assert tuple(c.name() for c in study.candidates) == CANDIDATES
     assert [case.name for case in study.cases] == [
+        # Market scenarios, from the original certification.
         "ordinary",
         "near_ko",
         "near_ki",
         "low_vol",
         "near_expiry",
+        # Product variants, added by amendment. Each is a distinct engine code
+        # path, so dropping one silently narrows what the study certifies.
+        "discrete_ki",
+        "european_ki",
+        "stepdown_ko",
+        "stepdown_near_last_ko",
+        "parachute",
+        "parachute_near_ki",
     ]
 
 
