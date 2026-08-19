@@ -19,6 +19,13 @@
 # the other two studies, this being a longer-dated two-regime payoff -- but
 # still compatible, and the sampler may take up to 32 batches to sharpen it.
 #
+# The last five cases certify product VARIANTS rather than market scenarios,
+# and this payoff gives each of them two schedules to get right: a step-down
+# walks BOTH the pre-KI and post-KI KO barriers, and the parachute lands the
+# final pre-KI barrier on the KI level, so at maturity_pre a trade that never
+# knocked in necessarily knocks out. They were added after the original
+# certification, whose barriers were all flat scalars.
+#
 # Offline study (minutes, not seconds). Run it with:
 #   python -m quantark.modelvalidation run example/modelvalidation/ko_reset_flat_bsm.yaml
 # Add --quick for a wiring check that is explicitly not bankable evidence.
@@ -101,4 +108,29 @@ cases:
   # Discrete KI monitoring instead of continuous. This is a different code path
   # in every engine -- the continuous one runs a Brownian-bridge correction that
   # the discrete one never touches -- so it is certified explicitly.
+  # (`ki_continuous` rather than `ki_monitoring: discrete`: they build the same
+  # product, and this spelling is the one the parent certificate hashes.)
   - {name: discrete_ki, product: {ki_continuous: false}}
+  # European KI: the barrier is looked at once, at maturity_pre. Knock-in can
+  # then only happen at the moment the pre-KI schedule ends, so the regime
+  # switch and the pre-KI maturity land on the same date.
+  - {name: european_ki, product: {ki_monitoring: european}}
+  # Step-down on both schedules: 0.5% of initial price per observation, so the
+  # pre-KI barrier walks 103 -> 97.5 over twelve observations and the post-KI
+  # barrier 95 -> 83.5 over twenty-four. Thirty-six distinct levels where every
+  # case above had two.
+  - {name: stepdown, product: {pre_ko_stepdown: 0.005, post_ko_stepdown: 0.005}}
+  # The pre-KI schedule's LAST barrier is 97.5, and this parks spot just under
+  # it. near_pre_ko stresses the first barrier of a flat schedule; this is the
+  # final barrier of a declining one, a different node on a different date.
+  - {name: stepdown_near_last_pre_ko, environment: {spot: 97.0},
+     product: {pre_ko_stepdown: 0.005, post_ko_stepdown: 0.005}}
+  # Parachute: the final pre-KI KO barrier sits exactly on the KI barrier, so a
+  # KO event and the KI barrier coincide at one level -- and here that level is
+  # also where the two value surfaces meet.
+  - {name: parachute, product: {parachute: true}}
+  # Just above the coincident level, where the parachute's degeneracy actually
+  # binds. Certifying it only at spot 100 would leave its defining feature
+  # untested.
+  - {name: parachute_near_ki, environment: {spot: 80.5},
+     product: {parachute: true}}

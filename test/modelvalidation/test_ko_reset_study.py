@@ -53,6 +53,13 @@ def test_study_file_loads_with_both_engines(study):
         "low_vol",
         "near_expiry",
         "discrete_ki",
+        # Product variants, added by amendment. Each is a distinct engine code
+        # path, so dropping one silently narrows what the study certifies.
+        "european_ki",
+        "stepdown",
+        "stepdown_near_last_pre_ko",
+        "parachute",
+        "parachute_near_ki",
     ]
 
 

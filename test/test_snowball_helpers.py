@@ -10,6 +10,7 @@ from quantark.asset.equity.product.option import (
     create_european_ki_snowball,
     create_parachute_snowball,
     create_airbag_snowball,
+    create_ko_reset_snowball,
     generate_ko_observation_dates,
     generate_stepdown_barriers,
 )
@@ -719,3 +720,45 @@ class TestHelperIntegration:
         assert callable(create_airbag_snowball)
         assert callable(generate_ko_observation_dates)
         assert callable(generate_stepdown_barriers)
+
+
+class TestKOResetExplicitKIObservationDates:
+    """A KO-reset KI schedule the caller supplies outright.
+
+    ``ki_frequency`` can only express a regular grid, so a European KI -- one
+    observation, at the end of the pre-KI horizon -- was unreachable: passing
+    ``ki_observation_dates`` through **kwargs collided with the keyword the
+    helper already supplies, raising TypeError rather than doing anything.
+    """
+
+    def test_explicit_dates_replace_the_generated_schedule(self):
+        product = create_ko_reset_snowball(
+            initial_price=100.0, strike=100.0,
+            maturity_pre=1.0, maturity_post=2.0,
+            ki_barrier=80.0, ki_continuous=False,
+            ki_observation_dates=[1.0],
+        )
+        barriers = product.barrier_config
+        assert barriers.ki_observation_dates == [1.0]
+        assert barriers.ki_continuous is False
+        assert barriers.ki_observation_type is ObservationType.DISCRETE
+
+    def test_omitting_them_keeps_the_generated_schedule(self):
+        """Regression guard: the certified discrete-KI product is daily."""
+        product = create_ko_reset_snowball(
+            initial_price=100.0, strike=100.0,
+            maturity_pre=1.0, maturity_post=2.0,
+            ki_barrier=80.0, ki_continuous=False,
+        )
+        dates = product.barrier_config.ki_observation_dates
+        assert len(dates) > 200  # daily over one year
+        assert dates[-1] == pytest.approx(1.0)
+
+    def test_dates_contradicting_continuous_monitoring_are_rejected(self):
+        with pytest.raises(ValidationError, match="ki_observation_dates"):
+            create_ko_reset_snowball(
+                initial_price=100.0, strike=100.0,
+                maturity_pre=1.0, maturity_post=2.0,
+                ki_barrier=80.0, ki_continuous=True,
+                ki_observation_dates=[1.0],
+            )

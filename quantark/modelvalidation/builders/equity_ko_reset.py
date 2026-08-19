@@ -27,7 +27,10 @@ from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
     KOResetSnowballQuadEngine,
 )
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
-from quantark.asset.equity.product.option import create_ko_reset_snowball
+from quantark.asset.equity.product.option import (
+    create_ko_reset_snowball,
+    generate_ko_observation_dates,
+)
 from quantark.asset.equity.product.option.ko_reset_snowball_option import (
     KnockOutResetSnowballOption,
     PostKOScheduleMode,
@@ -59,7 +62,22 @@ _PRODUCT_KEYS = (
     "ki_barrier",
     "ki_continuous",
     "contract_multiplier",
+    # Variant knobs. Absent, they leave the product exactly as the original
+    # certification built it, so the already-certified cells keep their identity.
+    "ki_monitoring",
+    "pre_ko_stepdown",
+    "post_ko_stepdown",
+    "parachute",
 )
+
+#: How the knock-in barrier is watched over the pre-KI horizon. ``european``
+#: is unreachable through ``ki_frequency`` -- one observation, at maturity_pre.
+_KI_MONITORING = ("continuous", "discrete", "european")
+
+#: Both schedules are monthly; the helper's own defaults. Barrier vectors must
+#: be exactly as long as the schedule they price, so their length is derived
+#: from the same generator rather than assumed.
+_FREQUENCY = "monthly"
 
 _REQUIRED_PRODUCT_KEYS = (
     "initial_price",
@@ -91,11 +109,108 @@ def build_ko_reset_product_spec(params: Mapping[str, Any]) -> dict:
             "maturity_post must not precede maturity_pre: the post-KI schedule "
             "runs on from the pre-KI one"
         )
+
+    monitoring = spec.get("ki_monitoring")
+    if monitoring is not None and str(monitoring) not in _KI_MONITORING:
+        raise ValidationError(
+            f"ki_monitoring must be one of {_KI_MONITORING}, got {monitoring!r}"
+        )
+
+    ki_barrier = float(spec["ki_barrier"])
+    parachute = bool(spec.get("parachute", False))
+    for barrier_key, stepdown_key, maturity_key, may_land in (
+        ("pre_ko_barrier", "pre_ko_stepdown", "maturity_pre", parachute),
+        ("post_ko_barrier", "post_ko_stepdown", "maturity_post", False),
+    ):
+        rate = float(spec.get(stepdown_key, 0.0))
+        if rate < 0.0:
+            raise ValidationError(f"{stepdown_key} must be non-negative, got {rate}")
+        schedule = _ko_schedule(spec, barrier_key, stepdown_key, maturity_key,
+                                parachute=may_land)
+        if not isinstance(schedule, list):
+            continue
+        # Only a parachute may land the FINAL pre-KI barrier on the KI level.
+        # Anything else crossing it is a different product, not a step-down.
+        live = schedule[:-1] if may_land else schedule
+        if live and min(live) <= ki_barrier:
+            raise ValidationError(
+                f"{stepdown_key}={rate} walks below the ki_barrier "
+                f"({ki_barrier}): {barrier_key} reaches {min(live)}. Crossing "
+                "barriers is a different product, not a step-down."
+            )
     return spec
 
 
+def _ko_schedule(
+    spec: Mapping[str, Any],
+    barrier_key: str,
+    stepdown_key: str,
+    maturity_key: str,
+    parachute: bool = False,
+):
+    """One KO schedule: a scalar when flat, a per-observation list when not.
+
+    Staying scalar in the flat case is what keeps the originally certified
+    cells byte-identical rather than merely equivalent.
+    """
+    if barrier_key not in spec:
+        return None
+    barrier = float(spec[barrier_key])
+    rate = float(spec.get(stepdown_key, 0.0))
+    if rate == 0.0 and not parachute:
+        return barrier
+
+    count = len(
+        generate_ko_observation_dates(
+            maturity=float(spec[maturity_key]), frequency=_FREQUENCY, skip_first=0
+        )
+    )
+    step = rate * float(spec["initial_price"])
+    levels = [barrier - step * i for i in range(count)]
+    if parachute:
+        # At the final pre-KI observation the KO barrier drops onto the KI
+        # barrier, so anything that never knocked in necessarily knocks out.
+        levels[-1] = float(spec["ki_barrier"])
+    return levels
+
+
+def _ki_kwargs(spec: Mapping[str, Any]) -> dict:
+    """KI monitoring for ``create_ko_reset_snowball``.
+
+    ``ki_monitoring`` wins over ``ki_continuous`` when both are present, which
+    they always are once a case override meets a study block that sets the
+    older key -- rejecting the combination would make the newer key unusable
+    here. ``ki_continuous`` stays supported because a banked certificate
+    hashes a case that spells monitoring that way.
+    """
+    monitoring = spec.get("ki_monitoring")
+    if monitoring is None:
+        return {"ki_continuous": bool(spec.get("ki_continuous", True))}
+    monitoring = str(monitoring)
+    if monitoring not in _KI_MONITORING:
+        raise ValidationError(
+            f"ki_monitoring must be one of {_KI_MONITORING}, got {monitoring!r}"
+        )
+    if monitoring == "continuous":
+        return {"ki_continuous": True}
+    if monitoring == "european":
+        return {
+            "ki_continuous": False,
+            "ki_observation_dates": [float(spec["maturity_pre"])],
+        }
+    return {"ki_continuous": False}
+
+
 def make_ko_reset(spec: Mapping[str, Any]) -> KnockOutResetSnowballOption:
-    """Build a KO-reset snowball with an ABSOLUTE post-KI schedule."""
+    """Build a KO-reset snowball with an ABSOLUTE post-KI schedule.
+
+    The variants reach both schedules: ``ki_monitoring`` selects continuous /
+    discrete / European knock-in over the pre-KI horizon, ``pre_ko_stepdown``
+    and ``post_ko_stepdown`` turn either flat barrier into a declining
+    schedule, and ``parachute`` drops the FINAL pre-KI KO barrier onto the KI
+    barrier -- so at maturity_pre a trade that never knocked in necessarily
+    knocks out.
+    """
     kwargs: dict[str, Any] = dict(
         initial_price=float(spec["initial_price"]),
         strike=float(spec["strike"]),
@@ -103,12 +218,21 @@ def make_ko_reset(spec: Mapping[str, Any]) -> KnockOutResetSnowballOption:
         maturity_post=float(spec["maturity_post"]),
         contract_multiplier=float(spec.get("contract_multiplier", 1.0)),
         ki_barrier=float(spec["ki_barrier"]),
-        ki_continuous=bool(spec.get("ki_continuous", True)),
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        **_ki_kwargs(spec),
     )
-    for key in ("pre_ko_barrier", "post_ko_barrier", "pre_ko_rate", "post_ko_rate"):
+    for key in ("pre_ko_rate", "post_ko_rate"):
         if key in spec:
             kwargs[key] = float(spec[key])
+    parachute = bool(spec.get("parachute", False))
+    for barrier_key, stepdown_key, maturity_key, may_land in (
+        ("pre_ko_barrier", "pre_ko_stepdown", "maturity_pre", parachute),
+        ("post_ko_barrier", "post_ko_stepdown", "maturity_post", False),
+    ):
+        schedule = _ko_schedule(spec, barrier_key, stepdown_key, maturity_key,
+                                parachute=may_land)
+        if schedule is not None:
+            kwargs[barrier_key] = schedule
     return create_ko_reset_snowball(**kwargs)
 
 
@@ -132,6 +256,10 @@ class _KOResetArm:
         environment.update(case.environment_params)
         product = dict(self.product_params)
         product.update(case.product_params)
+        # A variant is expressed as a case override, which the study-level
+        # validator never sees. Validate the merged spec here or a typo builds
+        # a different product and gets certified under the wrong case name.
+        build_ko_reset_product_spec(product)
         return environment, product
 
 

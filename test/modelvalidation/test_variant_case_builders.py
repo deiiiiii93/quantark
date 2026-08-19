@@ -245,3 +245,120 @@ def test_phoenix_arms_validate_the_merged_case_spec():
     )
     with pytest.raises(ValidationError, match="walks coupon_barrier below"):
         arm.evaluate(CaseSpec(name="crossing", product_params={"coupon_stepdown": 0.05}))
+
+
+# --- KO-reset --------------------------------------------------------------
+#
+# The KO-reset study carries TWO KO schedules, so a step-down has two barriers
+# to walk and the parachute lands on the pre-KI one. Its `discrete_ki` case
+# already spells monitoring `ki_continuous: false`, and a banked certificate
+# hashes that spelling -- so it stays accepted alongside the newer
+# `ki_monitoring`, which is the only way to say "European".
+
+KO_RESET = {
+    "initial_price": 100.0,
+    "strike": 100.0,
+    "maturity_pre": 1.0,
+    "maturity_post": 2.0,
+    "pre_ko_barrier": 103.0,
+    "pre_ko_rate": 0.15,
+    "post_ko_barrier": 95.0,
+    "post_ko_rate": 0.03,
+    "ki_barrier": 80.0,
+    "ki_continuous": True,
+    "contract_multiplier": 1.0,
+}
+
+N_PRE, N_POST = 12, 24
+
+
+def ko_reset(**overrides):
+    from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
+
+    return make_ko_reset(dict(KO_RESET, **overrides))
+
+
+def test_ko_reset_default_barriers_stay_scalar():
+    product = ko_reset()
+    assert product.barrier_config.ko_barrier == 103.0
+    assert product.post_barrier_config.ko_barrier == 95.0
+
+
+def test_ko_reset_legacy_ki_continuous_spelling_still_works():
+    """The parent certificate hashes {ki_continuous: false}; it must keep working."""
+    from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
+
+    barriers = make_ko_reset(dict(KO_RESET, ki_continuous=False)).barrier_config
+    assert barriers.ki_continuous is False
+    assert len(barriers.ki_observation_dates) > 200  # daily over the pre horizon
+
+
+def test_ko_reset_european_ki_is_observed_once_at_the_pre_maturity():
+    barriers = ko_reset(ki_monitoring="european").barrier_config
+    assert barriers.ki_continuous is False
+    assert barriers.ki_observation_dates == [1.0]
+
+
+def test_ko_reset_discrete_ki_matches_the_legacy_spelling():
+    """Two spellings, one product -- otherwise the vocabulary is a trap."""
+    from quantark.modelvalidation.builders.equity_ko_reset import make_ko_reset
+
+    legacy = make_ko_reset(dict(KO_RESET, ki_continuous=False)).barrier_config
+    modern = ko_reset(ki_monitoring="discrete").barrier_config
+    assert modern.ki_continuous == legacy.ki_continuous
+    assert modern.ki_observation_dates == legacy.ki_observation_dates
+
+
+def test_ko_reset_ki_monitoring_overrides_the_legacy_spelling():
+    """The study block already sets ki_continuous, so a case that says
+    ki_monitoring always merges into a spec carrying BOTH keys. Rejecting that
+    combination would make the newer key unusable in this study, so
+    ki_monitoring simply wins."""
+    barriers = ko_reset(ki_continuous=True, ki_monitoring="european").barrier_config
+    assert barriers.ki_continuous is False
+    assert barriers.ki_observation_dates == [1.0]
+
+
+def test_ko_reset_rejects_an_unknown_ki_monitoring():
+    with pytest.raises(ValidationError, match="ki_monitoring must be one of"):
+        ko_reset(ki_monitoring="at_maturity")
+
+
+def test_ko_reset_steps_down_both_schedules():
+    product = ko_reset(pre_ko_stepdown=0.005, post_ko_stepdown=0.005)
+    assert product.barrier_config.ko_barrier == pytest.approx(
+        [103.0 - 0.5 * i for i in range(N_PRE)]
+    )
+    assert product.post_barrier_config.ko_barrier == pytest.approx(
+        [95.0 - 0.5 * i for i in range(N_POST)]
+    )
+
+
+def test_ko_reset_parachute_lands_the_last_pre_barrier_on_the_ki_barrier():
+    product = ko_reset(parachute=True)
+    assert product.barrier_config.ko_barrier == [103.0] * (N_PRE - 1) + [80.0]
+    # The post schedule is untouched: the parachute is a pre-KI feature.
+    assert product.post_barrier_config.ko_barrier == 95.0
+
+
+def test_ko_reset_step_down_through_the_ki_barrier_is_rejected():
+    from quantark.modelvalidation.builders.equity_ko_reset import (
+        build_ko_reset_product_spec,
+    )
+
+    with pytest.raises(ValidationError, match="walks below the ki_barrier"):
+        build_ko_reset_product_spec(dict(KO_RESET, post_ko_stepdown=0.05))
+
+
+def test_ko_reset_arms_validate_the_merged_case_spec():
+    from quantark.modelvalidation.builders.equity_ko_reset import KOResetQuadCandidate
+    from quantark.modelvalidation.study import CaseSpec
+
+    arm = KOResetQuadCandidate(
+        environment_params=ENVIRONMENT,
+        product_params=KO_RESET,
+        quantities=("pv",),
+        params={},
+    )
+    with pytest.raises(ValidationError, match="walks below the ki_barrier"):
+        arm.evaluate(CaseSpec(name="crossing", product_params={"post_ko_stepdown": 0.05}))

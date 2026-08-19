@@ -865,6 +865,7 @@ def create_ko_reset_snowball(
     pre_frequency: str = "monthly",
     post_frequency: str = "monthly",
     ki_frequency: str = "daily",
+    ki_observation_dates: Optional[List[float]] = None,
     pre_lockout: int = 0,
     post_lockout: int = 0,
     ki_continuous: bool = False,
@@ -888,6 +889,9 @@ def create_ko_reset_snowball(
         pre_frequency: Observation frequency for pre-KI KO schedule
         post_frequency: Observation frequency for post-KI KO schedule
         ki_frequency: Observation frequency for discrete KI monitoring
+        ki_observation_dates: Explicit KI observation times, overriding
+            ki_frequency. A single date at maturity_pre gives a European KI --
+            a schedule no frequency can express
         pre_lockout: Number of initial pre-KI KO observations to skip
         post_lockout: Number of initial post-KI KO observations to skip
         ki_continuous: If True, use continuous KI monitoring (ABSOLUTE mode only)
@@ -926,14 +930,23 @@ def create_ko_reset_snowball(
         maturity=maturity_post, frequency=post_frequency, skip_first=post_lockout
     )
 
-    ki_observation_dates = None
+    if ki_continuous and ki_observation_dates is not None:
+        raise ValidationError(
+            "create_ko_reset_snowball: ki_observation_dates contradicts "
+            "ki_continuous=True; continuous monitoring has no observation dates."
+        )
+
     ki_observation_type = (
         ObservationType.CONTINUOUS if ki_continuous else ObservationType.DISCRETE
     )
-    if not ki_continuous:
+    if ki_continuous:
+        ki_observation_dates = None
+    elif ki_observation_dates is None:
         ki_observation_dates = generate_ko_observation_dates(
             maturity=maturity_pre, frequency=ki_frequency, skip_first=0
         )
+    else:
+        ki_observation_dates = [float(t) for t in ki_observation_dates]
 
     barrier_kwargs, payoff_kwargs, accrual_kwargs, airbag_kwargs = _extract_config_kwargs(
         kwargs
