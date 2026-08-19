@@ -104,3 +104,16 @@ cases:
   # alignment where every case above had two, and the coupon digital moves to a
   # new strike at every observation instead of sitting still.
   - {name: stepdown, product: {ko_stepdown: 0.005, coupon_stepdown: 0.005}}
+  # Discretely monitored KI. Unreachable until 2026-08-19: PhoenixOption built
+  # only its KO observation schedule, so a discrete KI phoenix raised rather
+  # than priced, and no certified cell used anything but continuous KI.
+  - {name: discrete_ki, product: {ki_monitoring: discrete}}
+  # A KI barrier declining 0.5% of initial price per observation, 75 -> 69.5.
+  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}
+  # Once knocked in the KO stops applying, so the knocked-in surface carries the
+  # coupon stream on to maturity unbarriered.
+  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}
+  # Reverse phoenix: call payoff, DOWN knock-out, UP knock-in and coupon
+  # barriers. Every barrier mask in the vector-surface solver inverts.
+  - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 125.0,
+                              coupon_barrier: 115.0}}

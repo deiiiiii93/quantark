@@ -57,14 +57,26 @@ def test_study_file_loads_with_both_engines(study):
         "near_ki",
         "low_vol",
         "near_expiry",
-        # Product variants, added by amendment. Each is a distinct engine code
-        # path, so dropping one silently narrows what the study certifies.
+        # Barrier-shape and KI-monitoring variants (first amendment).
         "discrete_ki",
         "european_ki",
         "stepdown_ko",
         "stepdown_near_last_ko",
         "parachute",
         "parachute_near_ki",
+        # The remaining product feature surface (second amendment).
+        "ki_stepdown",
+        "reverse",
+        "airbag",
+        "protection_partial",
+        "protection_full",
+        "participation",
+        "call_rebate",
+        "disable_ko_after_ki",
+        "disable_ko_after_ki_knocked_in",
+        "coupon_at_expiry",
+        "not_annualized",
+        "ko_rate_step",
     ]
 
 

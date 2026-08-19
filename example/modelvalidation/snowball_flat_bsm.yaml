@@ -119,3 +119,38 @@ cases:
   # parachute only at spot 100 would leave its defining feature untested.
   - {name: parachute_near_ki, environment: {spot: 86.0},
      product: {parachute: true}}
+  # A KI barrier that declines 0.5% of initial price per observation, 85 -> 79.5.
+  # Both deterministic engines refuse a per-observation KI under continuous
+  # monitoring, so a stepping KI is a discretely observed product by
+  # construction, and the per-observation barrier map is a path of its own.
+  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}
+  # Reverse snowball: the embedded option is a call, the KO barrier is a DOWN
+  # barrier and the KI an UP barrier. Every mask in every engine inverts.
+  - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 115.0}}
+  # Airbag: below 90 the investor participates at half rate, so the terminal
+  # payoff gains a second kink away from the strike.
+  - {name: airbag, product: {airbag_barrier: 90.0, airbag_participation_rate: 0.5}}
+  # Partial and full principal protection: both reshape the knocked-in terminal
+  # payoff, which is the surface the KI transfer copies from.
+  - {name: protection_partial, product: {protection_type: partial, protection_rate: 0.5}}
+  - {name: protection_full, product: {protection_type: full}}
+  # Downside participation at half rate.
+  - {name: participation, product: {participation_rate: 0.5}}
+  # Call-style rebate: the no-KO/no-KI payoff becomes an option on the terminal
+  # spot rather than a fixed coupon.
+  - {name: call_rebate, product: {call_rebate: true, call_strike: 100.0}}
+  # disable_ko_after_ki: once knocked in the KO barrier stops applying, so the
+  # knocked-in surface runs on unbarriered. The PDE ignored this flag entirely
+  # until 2026-08-19 and mispriced by 159% of the cell bound in silence.
+  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}
+  # The same flag with the trade already knocked in at valuation, where it bites
+  # hardest: no knock-out can ever pay from here.
+  - {name: disable_ko_after_ki_knocked_in, environment: {spot: 80.0},
+     product: {disable_ko_after_ki: true}}
+  # Coupons discounted to maturity instead of paid at the knock-out date.
+  - {name: coupon_at_expiry, product: {coupon_pay_type: expiry}}
+  # Rates quoted per period rather than annualized: a different accrual path.
+  - {name: not_annualized, product: {is_annualized: false}}
+  # A KO rate that rises 0.5% per observation, so the coupon is a schedule
+  # rather than one number.
+  - {name: ko_rate_step, product: {ko_rate_step: 0.005}}

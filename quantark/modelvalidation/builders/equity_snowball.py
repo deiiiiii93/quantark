@@ -14,7 +14,7 @@ on gamma near a barrier. Those are exactly the cells the gates exist to catch.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
 from quantark.asset.equity.engine.pde.grid.config import resolve_config
@@ -22,6 +22,8 @@ from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolv
 from quantark.asset.equity.engine.quad.snowball_quad_engine import SnowballQuadEngine
 from quantark.asset.equity.param import MCParams, PDEParams, QuadParams
 from quantark.asset.equity.product.option.snowball_config import (
+    AccrualConfig,
+    AirbagConfig,
     BarrierConfig,
     PayoffConfig,
 )
@@ -33,7 +35,7 @@ from quantark.param import (
     SpotQuote,
 )
 from quantark.priceenv import PricingEnvironment
-from quantark.util.enum import ObservationType
+from quantark.util.enum import CouponPayType, ObservationType, ProtectionType
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 
@@ -61,7 +63,29 @@ _PRODUCT_KEYS = (
     "ki_monitoring",
     "ko_stepdown",
     "parachute",
+    "ki_stepdown",
+    "ko_rate_step",
+    "is_reverse",
+    "disable_ko_after_ki",
+    "airbag_barrier",
+    "airbag_participation_rate",
+    "protection_type",
+    "protection_rate",
+    "participation_rate",
+    "call_rebate",
+    "call_strike",
+    "call_participation_rate",
+    "coupon_pay_type",
+    "is_annualized",
 )
+
+_PROTECTION = {
+    "none": ProtectionType.NONE,
+    "partial": ProtectionType.PARTIAL,
+    "full": ProtectionType.FULL,
+}
+
+_COUPON_PAY = {"instant": CouponPayType.INSTANT, "expiry": CouponPayType.EXPIRY}
 
 #: How the knock-in barrier is watched. ``continuous`` is the structure the
 #: original certification covered; the other two are separate engine code paths
@@ -120,7 +144,86 @@ def build_snowball_product_spec(params: Mapping[str, Any]) -> dict:
             f"schedule reaches {min(live)}. Crossing barriers is a different "
             "product, not a step-down."
         )
+    ki_stepdown = float(spec.get("ki_stepdown", 0.0))
+    if ki_stepdown:
+        if monitoring != "discrete":
+            raise ValidationError(
+                "ki_stepdown requires ki_monitoring='discrete': both deterministic "
+                "engines refuse a per-observation KI barrier under continuous "
+                "monitoring, so a stepping KI is a discretely observed product."
+            )
+        levels = _ki_schedule(spec)
+        if min(levels) <= 0.0:
+            raise ValidationError(
+                f"ki_stepdown={ki_stepdown} walks the ki_barrier to {min(levels)}; "
+                "a barrier must stay positive."
+            )
+
+    protection = str(spec.get("protection_type", "none"))
+    if protection not in _PROTECTION:
+        raise ValidationError(
+            f"protection_type must be one of {tuple(_PROTECTION)}, got {protection!r}"
+        )
+    coupon_pay = str(spec.get("coupon_pay_type", "instant"))
+    if coupon_pay not in _COUPON_PAY:
+        raise ValidationError(
+            f"coupon_pay_type must be one of {tuple(_COUPON_PAY)}, got {coupon_pay!r}"
+        )
     return spec
+
+
+def _ki_schedule(spec: Mapping[str, Any]):
+    """The KI barrier: scalar when flat, per-observation list when stepping."""
+    barrier = float(spec["ki_barrier"])
+    rate = float(spec.get("ki_stepdown", 0.0))
+    if rate == 0.0:
+        return barrier
+    step = rate * float(spec["initial_price"])
+    return [barrier - step * i for i in range(int(spec["months"]))]
+
+
+def _ko_rate_schedule(spec: Mapping[str, Any]):
+    """The KO rate: scalar when flat, per-observation list when stepping."""
+    rate = float(spec.get("ko_rate", 0.15))
+    step = float(spec.get("ko_rate_step", 0.0))
+    if step == 0.0:
+        return rate
+    return [rate + step * i for i in range(int(spec["months"]))]
+
+
+def _payoff_config(spec: Mapping[str, Any]) -> PayoffConfig:
+    """Payoff features: protection, participation, and a call-style rebate."""
+    kwargs: dict[str, Any] = {
+        "rebate_rate": float(spec.get("rebate_rate", spec.get("ko_rate", 0.15))),
+        "protection_type": _PROTECTION[str(spec.get("protection_type", "none"))],
+    }
+    for key in ("protection_rate", "participation_rate", "call_participation_rate"):
+        if key in spec:
+            kwargs[key] = float(spec[key])
+    if bool(spec.get("call_rebate", False)):
+        kwargs["call_rebate_enabled"] = True
+        kwargs["call_strike"] = float(spec.get("call_strike", spec["strike"]))
+    return PayoffConfig(**kwargs)
+
+
+def _accrual_config(spec: Mapping[str, Any]) -> Optional[AccrualConfig]:
+    """Only built when a knob asks for it, so the certified cells keep the
+    product's own default accrual object rather than an equal-looking copy."""
+    if "coupon_pay_type" not in spec and "is_annualized" not in spec:
+        return None
+    return AccrualConfig(
+        coupon_pay_type=_COUPON_PAY[str(spec.get("coupon_pay_type", "instant"))],
+        is_annualized=bool(spec.get("is_annualized", True)),
+    )
+
+
+def _airbag_config(spec: Mapping[str, Any]) -> Optional[AirbagConfig]:
+    if "airbag_barrier" not in spec:
+        return None
+    kwargs: dict[str, Any] = {"airbag_barrier": float(spec["airbag_barrier"])}
+    if "airbag_participation_rate" in spec:
+        kwargs["airbag_participation_rate"] = float(spec["airbag_participation_rate"])
+    return AirbagConfig(**kwargs)
 
 
 def _ko_observation_dates(spec: Mapping[str, Any]) -> list:
@@ -202,21 +305,31 @@ def make_snowball(spec: Mapping[str, Any]) -> SnowballOption:
 
     barrier_config = BarrierConfig(
         ko_barrier=_ko_schedule(spec),
-        ko_rate=ko_rate,
+        ko_rate=_ko_rate_schedule(spec),
         ko_observation_type=ObservationType.DISCRETE,
         ko_observation_dates=_ko_observation_dates(spec),
-        ki_barrier=float(spec["ki_barrier"]),
+        ki_barrier=_ki_schedule(spec),
+        disable_ko_after_ki=bool(spec.get("disable_ko_after_ki", False)),
         **_ki_monitoring(spec),
     )
-    payoff_config = PayoffConfig(rebate_rate=float(spec.get("rebate_rate", ko_rate)))
+
+    optional: dict[str, Any] = {}
+    accrual = _accrual_config(spec)
+    if accrual is not None:
+        optional["accrual_config"] = accrual
+    airbag = _airbag_config(spec)
+    if airbag is not None:
+        optional["airbag_config"] = airbag
 
     return SnowballOption(
         initial_price=float(spec["initial_price"]),
         strike=float(spec["strike"]),
         barrier_config=barrier_config,
-        payoff_config=payoff_config,
+        payoff_config=_payoff_config(spec),
         contract_multiplier=float(spec.get("contract_multiplier", 1.0)),
         maturity=maturity,
+        is_reverse=bool(spec.get("is_reverse", False)),
+        **optional,
     )
 
 

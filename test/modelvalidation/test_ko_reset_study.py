@@ -46,6 +46,7 @@ def test_study_file_loads_with_both_engines(study):
     assert study.name == "ko-reset-flat-bsm"
     assert tuple(c.name() for c in study.candidates) == CANDIDATES
     assert [case.name for case in study.cases] == [
+        # Market scenarios, from the original certification.
         "ordinary",
         "near_pre_ko",
         "near_ki",
@@ -53,13 +54,15 @@ def test_study_file_loads_with_both_engines(study):
         "low_vol",
         "near_expiry",
         "discrete_ki",
-        # Product variants, added by amendment. Each is a distinct engine code
-        # path, so dropping one silently narrows what the study certifies.
+        # Barrier-shape and KI-monitoring variants (first amendment).
         "european_ki",
         "stepdown",
         "stepdown_near_last_pre_ko",
         "parachute",
         "parachute_near_ki",
+        # The remaining product feature surface (second amendment).
+        "ki_stepdown",
+        "disable_ko_after_ki",
     ]
 
 

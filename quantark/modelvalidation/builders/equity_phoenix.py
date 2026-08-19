@@ -32,7 +32,7 @@ from quantark.asset.equity.product.option.phoenix_helpers import (
     create_standard_phoenix,
 )
 from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
-from quantark.util.enum import CouponPayType
+from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import MonteCarloMethod
 from quantark.util.exceptions import ValidationError
 
@@ -64,7 +64,15 @@ _PRODUCT_KEYS = (
     # certification built, so its cells keep their identity.
     "ko_stepdown",
     "coupon_stepdown",
+    "ki_monitoring",
+    "ki_stepdown",
+    "disable_ko_after_ki",
+    "is_reverse",
 )
+
+#: See ``equity_snowball._KI_MONITORING``. Phoenix has no European variant:
+#: its knock-in interacts with a coupon stream observed on the same schedule.
+_KI_MONITORING = ("continuous", "discrete")
 
 _REQUIRED_PRODUCT_KEYS = (
     "initial_price",
@@ -97,6 +105,18 @@ def build_phoenix_product_spec(params: Mapping[str, Any]) -> dict:
         if key not in spec:
             raise ValidationError(f"equity.phoenix product is missing {key!r}")
 
+    monitoring = str(spec.get("ki_monitoring", "continuous"))
+    if monitoring not in _KI_MONITORING:
+        raise ValidationError(
+            f"ki_monitoring must be one of {_KI_MONITORING}, got {monitoring!r}"
+        )
+    ki_stepdown = float(spec.get("ki_stepdown", 0.0))
+    if ki_stepdown and monitoring != "discrete":
+        raise ValidationError(
+            "ki_stepdown requires ki_monitoring='discrete': both deterministic "
+            "engines refuse a per-observation KI barrier under continuous monitoring."
+        )
+
     ki_barrier = float(spec["ki_barrier"])
     for key, start in (("ko_stepdown", "ko_barrier"), ("coupon_stepdown", "coupon_barrier")):
         rate = float(spec.get(key, 0.0))
@@ -110,6 +130,30 @@ def build_phoenix_product_spec(params: Mapping[str, Any]) -> dict:
                 "different product, not a step-down."
             )
     return spec
+
+
+def _ki_kwargs(spec: Mapping[str, Any]) -> dict:
+    """KI monitoring and, when it steps, its per-observation levels."""
+    monitoring = str(spec.get("ki_monitoring", "continuous"))
+    if monitoring == "continuous":
+        return {}
+    count = int(spec["num_observations"])
+    maturity = float(spec["maturity"])
+    return {
+        "ki_continuous": False,
+        "ki_observation_type": ObservationType.DISCRETE,
+        "ki_observation_dates": [maturity * (i + 1) / count for i in range(count)],
+    }
+
+
+def _ki_schedule(spec: Mapping[str, Any]):
+    """The KI barrier: scalar when flat, per-observation list when stepping."""
+    barrier = float(spec["ki_barrier"])
+    rate = float(spec.get("ki_stepdown", 0.0))
+    if rate == 0.0:
+        return barrier
+    step = rate * float(spec["initial_price"])
+    return [barrier - step * i for i in range(int(spec["num_observations"]))]
 
 
 def _stepdown_schedule(spec: Mapping[str, Any], barrier_key: str, rate_key: str):
@@ -145,13 +189,15 @@ def make_phoenix(spec: Mapping[str, Any]) -> PhoenixOption:
         contract_multiplier=float(spec.get("contract_multiplier", 1.0)),
         ko_barrier=_stepdown_schedule(spec, "ko_barrier", "ko_stepdown"),
         ko_rate=float(spec.get("ko_rate", 0.0)),
-        ki_barrier=float(spec["ki_barrier"]),
+        ki_barrier=_ki_schedule(spec),
         coupon_barrier=_stepdown_schedule(spec, "coupon_barrier", "coupon_stepdown"),
         coupon_rate=float(spec["coupon_rate"]),
         num_observations=int(spec["num_observations"]),
         memory_coupon=bool(spec.get("memory_coupon", False)),
         coupon_pay_type=CouponPayType.INSTANT,
-        is_reverse=False,
+        is_reverse=bool(spec.get("is_reverse", False)),
+        disable_ko_after_ki=bool(spec.get("disable_ko_after_ki", False)),
+        **_ki_kwargs(spec),
     )
 
 

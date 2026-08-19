@@ -362,3 +362,146 @@ def test_ko_reset_arms_validate_the_merged_case_spec():
     )
     with pytest.raises(ValidationError, match="walks below the ki_barrier"):
         arm.evaluate(CaseSpec(name="crossing", product_params={"post_ko_stepdown": 0.05}))
+
+
+# --- The rest of the snowball feature surface ------------------------------
+#
+# Everything the product model offers that the release never priced. Each knob
+# is absent by default, so an unset knob leaves the product exactly as the
+# original certification built it.
+
+from quantark.util.enum import CouponPayType, OptionType, ProtectionType  # noqa: E402
+
+
+def test_ki_stepdown_walks_the_knock_in_barrier_down():
+    """A KI barrier that declines 0.5% of initial price per observation."""
+    barriers = snowball(ki_monitoring="discrete", ki_stepdown=0.005).barrier_config
+    assert barriers.ki_barrier == pytest.approx([85.0 - 0.5 * i for i in range(12)])
+
+
+def test_ki_stepdown_requires_discrete_monitoring():
+    """Both deterministic engines refuse a vector KI under continuous
+    monitoring, so the study must not be able to ask for one."""
+    with pytest.raises(ValidationError, match="ki_stepdown requires"):
+        build_snowball_product_spec(dict(SNOWBALL, ki_stepdown=0.005))
+
+
+def test_ki_stepdown_through_zero_is_rejected():
+    with pytest.raises(ValidationError, match="ki_stepdown"):
+        build_snowball_product_spec(
+            dict(SNOWBALL, ki_monitoring="discrete", ki_stepdown=0.9)
+        )
+
+
+def test_reverse_flips_the_embedded_option():
+    product = snowball(is_reverse=True, ko_barrier=97.0, ki_barrier=115.0)
+    assert product.is_reverse is True
+    assert product.option_type is OptionType.CALL
+
+
+def test_airbag_reaches_the_airbag_config():
+    product = snowball(airbag_barrier=90.0, airbag_participation_rate=0.5)
+    assert product.airbag_config.airbag_barrier == 90.0
+    assert product.airbag_config.airbag_participation_rate == 0.5
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [("partial", ProtectionType.PARTIAL), ("full", ProtectionType.FULL)],
+)
+def test_protection_type_reaches_the_payoff_config(name, expected):
+    product = snowball(protection_type=name, protection_rate=0.5)
+    assert product.payoff_config.protection_type is expected
+
+
+def test_participation_rate_reaches_the_payoff_config():
+    assert snowball(participation_rate=0.5).payoff_config.participation_rate == 0.5
+
+
+def test_call_rebate_reaches_the_payoff_config():
+    payoff = snowball(call_rebate=True, call_strike=100.0).payoff_config
+    assert payoff.call_rebate_enabled is True
+    assert payoff.call_strike == 100.0
+
+
+def test_disable_ko_after_ki_reaches_the_barrier_config():
+    assert snowball(disable_ko_after_ki=True).barrier_config.disable_ko_after_ki is True
+
+
+def test_coupon_pay_type_reaches_the_accrual_config():
+    accrual = snowball(coupon_pay_type="expiry").accrual_config
+    assert accrual.coupon_pay_type is CouponPayType.EXPIRY
+
+
+def test_is_annualized_reaches_the_accrual_config():
+    assert snowball(is_annualized=False).accrual_config.is_annualized is False
+
+
+def test_ko_rate_step_makes_the_rate_a_schedule():
+    barriers = snowball(ko_rate_step=0.005).barrier_config
+    assert barriers.ko_rate == pytest.approx([0.15 + 0.005 * i for i in range(12)])
+
+
+def test_every_variant_knob_is_absent_by_default():
+    """The certified cells set none of these, and must not move because the
+    knobs exist."""
+    product = snowball()
+    assert product.is_reverse is False
+    assert product.barrier_config.disable_ko_after_ki is False
+    assert product.barrier_config.ko_rate == 0.15
+    assert product.barrier_config.ki_barrier == 85.0
+    assert product.payoff_config.protection_type is ProtectionType.NONE
+    assert product.payoff_config.participation_rate == 1.0
+    assert product.payoff_config.call_rebate_enabled is False
+    assert product.accrual_config.coupon_pay_type is CouponPayType.INSTANT
+    assert product.accrual_config.is_annualized is True
+    assert product.airbag_config.airbag_barrier is None
+
+
+# --- The same feature families on phoenix and KO-reset ---------------------
+
+
+def test_phoenix_discrete_ki_builds_a_schedule():
+    barriers = phoenix(ki_monitoring="discrete").barrier_config
+    assert barriers.ki_continuous is False
+    assert barriers.ki_observation_schedule is not None
+
+
+def test_phoenix_ki_stepdown_walks_the_barrier_down():
+    barriers = phoenix(ki_monitoring="discrete", ki_stepdown=0.005).barrier_config
+    assert barriers.ki_barrier == pytest.approx([75.0 - 0.5 * i for i in range(12)])
+
+
+def test_phoenix_disable_ko_after_ki_reaches_the_config():
+    assert phoenix(disable_ko_after_ki=True).barrier_config.disable_ko_after_ki is True
+
+
+def test_phoenix_reverse_flips_the_embedded_option():
+    product = phoenix(is_reverse=True, ko_barrier=97.0, ki_barrier=125.0,
+                      coupon_barrier=115.0)
+    assert product.is_reverse is True
+
+
+def test_phoenix_variant_knobs_are_absent_by_default():
+    product = phoenix()
+    assert product.is_reverse is False
+    assert product.barrier_config.ki_continuous is True
+    assert product.barrier_config.disable_ko_after_ki is False
+
+
+def test_ko_reset_ki_stepdown_uses_monthly_observations():
+    """Daily KI monitoring cannot carry a monthly step, so a stepping KI moves
+    the schedule to monthly -- twelve observations, twelve levels."""
+    barriers = ko_reset(ki_monitoring="discrete", ki_stepdown=0.005).barrier_config
+    assert barriers.ki_barrier == pytest.approx([80.0 - 0.5 * i for i in range(12)])
+    assert len(barriers.ki_observation_dates) == 12
+
+
+def test_ko_reset_disable_ko_after_ki_reaches_the_config():
+    assert ko_reset(disable_ko_after_ki=True).barrier_config.disable_ko_after_ki is True
+
+
+def test_ko_reset_variant_knobs_are_absent_by_default():
+    product = ko_reset()
+    assert product.barrier_config.disable_ko_after_ki is False
+    assert product.barrier_config.ki_barrier == 80.0

@@ -68,6 +68,8 @@ _PRODUCT_KEYS = (
     "pre_ko_stepdown",
     "post_ko_stepdown",
     "parachute",
+    "ki_stepdown",
+    "disable_ko_after_ki",
 )
 
 #: How the knock-in barrier is watched over the pre-KI horizon. ``european``
@@ -114,6 +116,13 @@ def build_ko_reset_product_spec(params: Mapping[str, Any]) -> dict:
     if monitoring is not None and str(monitoring) not in _KI_MONITORING:
         raise ValidationError(
             f"ki_monitoring must be one of {_KI_MONITORING}, got {monitoring!r}"
+        )
+
+    ki_stepdown = float(spec.get("ki_stepdown", 0.0))
+    if ki_stepdown and str(spec.get("ki_monitoring", "")) != "discrete":
+        raise ValidationError(
+            "ki_stepdown requires ki_monitoring='discrete': both deterministic "
+            "engines refuse a per-observation KI barrier under continuous monitoring."
         )
 
     ki_barrier = float(spec["ki_barrier"])
@@ -198,7 +207,34 @@ def _ki_kwargs(spec: Mapping[str, Any]) -> dict:
             "ki_continuous": False,
             "ki_observation_dates": [float(spec["maturity_pre"])],
         }
+    # Discrete. A stepping KI moves the schedule from the helper's daily grid
+    # to monthly: a level per month is what "0.5% per month" describes, and a
+    # daily schedule would need the same twelve levels repeated twenty-one
+    # times each.
+    if float(spec.get("ki_stepdown", 0.0)):
+        return {
+            "ki_continuous": False,
+            "ki_observation_dates": generate_ko_observation_dates(
+                maturity=float(spec["maturity_pre"]), frequency=_FREQUENCY,
+                skip_first=0,
+            ),
+        }
     return {"ki_continuous": False}
+
+
+def _ki_schedule(spec: Mapping[str, Any]):
+    """The KI barrier: scalar when flat, per-observation list when stepping."""
+    barrier = float(spec["ki_barrier"])
+    rate = float(spec.get("ki_stepdown", 0.0))
+    if rate == 0.0:
+        return barrier
+    count = len(
+        generate_ko_observation_dates(
+            maturity=float(spec["maturity_pre"]), frequency=_FREQUENCY, skip_first=0
+        )
+    )
+    step = rate * float(spec["initial_price"])
+    return [barrier - step * i for i in range(count)]
 
 
 def make_ko_reset(spec: Mapping[str, Any]) -> KnockOutResetSnowballOption:
@@ -217,8 +253,9 @@ def make_ko_reset(spec: Mapping[str, Any]) -> KnockOutResetSnowballOption:
         maturity_pre=float(spec["maturity_pre"]),
         maturity_post=float(spec["maturity_post"]),
         contract_multiplier=float(spec.get("contract_multiplier", 1.0)),
-        ki_barrier=float(spec["ki_barrier"]),
+        ki_barrier=_ki_schedule(spec),
         post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        disable_ko_after_ki=bool(spec.get("disable_ko_after_ki", False)),
         **_ki_kwargs(spec),
     )
     for key in ("pre_ko_rate", "post_ko_rate"):

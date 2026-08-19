@@ -134,3 +134,10 @@ cases:
   # untested.
   - {name: parachute_near_ki, environment: {spot: 80.5},
      product: {parachute: true}}
+  # A KI barrier declining 0.5% of initial price per month, 80 -> 74.5. The KI
+  # schedule moves from the helper's daily grid to monthly, because a level per
+  # month is what the step describes.
+  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}
+  # Once knocked in the pre-KI KO stops applying, so the trade switches to the
+  # post-KI schedule without the pre-KI barrier ever firing again.
+  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}
