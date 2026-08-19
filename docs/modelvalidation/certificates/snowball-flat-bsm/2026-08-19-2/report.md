@@ -4,6 +4,16 @@ Evidence digest: `0b0eb96318e7bf6f80027c5267bc39404bf8a774ad052c4e967edef7d7ac36
 
 Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `c22a4307085ee10959b6d7d048a456dd59925379`
 
+## Amendment
+
+| field | value |
+|---|---|
+| parent | docs/modelvalidation/certificates/snowball-flat-bsm/2026-08-19/certificate.json |
+| parent digest | `3454f3074cb39a8c49e7adc1bae9ac1f6648fc2a8ca69fb85f575bfca189c04a` |
+| reason | Certify the discrete-KI, European-KI, step-down KO and parachute product variants the original scope omitted |
+| re-priced | 36 cell(s) |
+| carried forward | 30 cell(s) |
+
 ## Decisions
 
 | candidate | decision |

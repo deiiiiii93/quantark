@@ -81,3 +81,32 @@ def test_report_shows_aggregate_bias(tmp_path):
     text = render_markdown(payload)
     assert "Aggregate" in text
     assert "REJECTED" in text
+
+
+def test_report_discloses_an_amendment(tmp_path, study):
+    """The markdown report is the diff-friendly record of what was measured.
+
+    An amendment re-prices some cells and carries the rest forward by
+    reference. A report that omits that reads as though every cell was freshly
+    measured -- the HTML review copy has always disclosed it, and the markdown
+    one must not disagree with it.
+    """
+    from quantark.modelvalidation.amendment import amend
+
+    parent = certify(study, out_dir=tmp_path / "parent")
+    amended = amend(
+        make_study(),
+        parent=parent.path,
+        out_dir=tmp_path / "amended",
+        reason="grid refinement",
+    )
+    text = render_markdown(amended.payload)
+    assert "Amendment" in text
+    assert "grid refinement" in text
+    assert parent.payload["projected_sha256"] in text
+    assert str(len(amended.payload["amendment"]["carried_cells"])) in text
+
+
+def test_report_omits_the_amendment_block_for_a_fresh_certification(tmp_path, study):
+    payload = certify(study, out_dir=tmp_path).payload
+    assert "Amendment" not in render_markdown(payload)

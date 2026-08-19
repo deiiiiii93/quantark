@@ -69,6 +69,27 @@ def render_markdown(payload: Mapping[str, Any]) -> str:
     )
     parts.append("")
 
+    amendment = payload.get("amendment")
+    if amendment:
+        # Without this the report reads as though every cell was freshly
+        # measured. Carried cells were not re-priced; they are the parent's
+        # numbers, admitted here because both identities still matched.
+        parts.append("## Amendment")
+        parts.append("")
+        parts.append(
+            _table(
+                ["field", "value"],
+                [
+                    ["parent", str(amendment["parent"])],
+                    ["parent digest", f"`{amendment['parent_projected_sha256']}`"],
+                    ["reason", str(amendment["reason"])],
+                    ["re-priced", f"{len(amendment['replaced_cells'])} cell(s)"],
+                    ["carried forward", f"{len(amendment['carried_cells'])} cell(s)"],
+                ],
+            )
+        )
+        parts.append("")
+
     parts.append("## Decisions")
     parts.append("")
     parts.append(

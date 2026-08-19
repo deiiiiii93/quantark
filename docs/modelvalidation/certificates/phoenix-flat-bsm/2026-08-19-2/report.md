@@ -4,6 +4,16 @@ Evidence digest: `e34c5f84be31440414dff16ead70240f4dc98a14fc5a17ea24a6ca741d06b9
 
 Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `c22a4307085ee10959b6d7d048a456dd59925379`
 
+## Amendment
+
+| field | value |
+|---|---|
+| parent | docs/modelvalidation/certificates/phoenix-flat-bsm/2026-08-19/certificate.json |
+| parent digest | `ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b` |
+| reason | Certify the step-down KO/coupon barrier variant the original scope omitted |
+| re-priced | 6 cell(s) |
+| carried forward | 42 cell(s) |
+
 ## Decisions
 
 | candidate | decision |
