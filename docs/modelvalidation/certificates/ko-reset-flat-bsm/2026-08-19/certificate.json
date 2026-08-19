@@ -3,7 +3,7 @@
     {
       "candidate": "equity.ko_reset_snowball.pde",
       "cells": 7,
-      "mean_signed_bias_c": 0.02332033852036172,
+      "mean_signed_bias_c": 0.0034644073039820406,
       "passed": true,
       "quantity": "pv",
       "se_adequate": true,
@@ -13,7 +13,7 @@
     {
       "candidate": "equity.ko_reset_snowball.pde",
       "cells": 7,
-      "mean_signed_bias_c": -0.005491999951520047,
+      "mean_signed_bias_c": -0.00021632710060356545,
       "passed": true,
       "quantity": "delta",
       "se_adequate": true,
@@ -23,7 +23,7 @@
     {
       "candidate": "equity.ko_reset_snowball.pde",
       "cells": 7,
-      "mean_signed_bias_c": 0.0035596087597453566,
+      "mean_signed_bias_c": -0.005583317805770032,
       "passed": true,
       "quantity": "gamma",
       "se_adequate": true,
@@ -64,18 +64,18 @@
   "cells": [
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 96.70401029091036,
+      "candidate_value": 96.67021788863633,
       "case": "ordinary",
       "error": null,
       "gate": {
-        "envelope_c": 0.015171099508151542,
+        "envelope_c": 0.001207074719530965,
         "envelope_within_bound": true,
-        "interval_c": 0.06475272991739023,
+        "interval_c": 0.030960327643359212,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.011013816101866804,
-        "signed_err_c": 0.04272509771365662
+        "signed_err_c": 0.008932695439625604
       },
       "identity_hash": "f2c9bd52a97e90eb009682aaf94ef3912577b04da42e285bdcb6945ce0d8454c",
       "quantity": "pv",
@@ -87,18 +87,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 0.6112520270164897,
+      "candidate_value": 0.614448621188659,
       "case": "ordinary",
       "error": null,
       "gate": {
-        "envelope_c": 0.005066481266080891,
+        "envelope_c": 0.006386871710059472,
         "envelope_within_bound": true,
-        "interval_c": 0.027496750600534078,
+        "interval_c": 0.024300156428364857,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.008679842711833112,
-        "signed_err_c": -0.010137065176867854
+        "signed_err_c": -0.006940471004698634
       },
       "identity_hash": "f2c9bd52a97e90eb009682aaf94ef3912577b04da42e285bdcb6945ce0d8454c",
       "quantity": "delta",
@@ -110,18 +110,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": -0.046614000261598815,
+      "candidate_value": -0.046469837278630785,
       "case": "ordinary",
       "error": null,
       "gate": {
-        "envelope_c": 0.00023922842017390367,
+        "envelope_c": 0.00030263074648734234,
         "envelope_within_bound": true,
-        "interval_c": 0.0643887849259466,
+        "interval_c": 0.06424462194297857,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.029699284255749026,
-        "signed_err_c": -0.004990216414448551
+        "signed_err_c": -0.004846053431480521
       },
       "identity_hash": "f2c9bd52a97e90eb009682aaf94ef3912577b04da42e285bdcb6945ce0d8454c",
       "quantity": "gamma",
@@ -133,18 +133,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 98.06939037285156,
+      "candidate_value": 98.05269755076209,
       "case": "near_pre_ko",
       "error": null,
       "gate": {
-        "envelope_c": 0.002868319996025548,
+        "envelope_c": 0.0010939281541766377,
         "envelope_within_bound": true,
-        "interval_c": 0.04835110516721752,
+        "interval_c": 0.03165828307774998,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.013220315745224255,
-        "signed_err_c": 0.021910473676769016
+        "signed_err_c": 0.005217651587301475
       },
       "identity_hash": "a69f8f5e1857eb8c20d3076fe5795945275920a554103b0765b3b2ce61029509",
       "quantity": "pv",
@@ -156,18 +156,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 0.4855989099404938,
+      "candidate_value": 0.4877289627317499,
       "case": "near_pre_ko",
       "error": null,
       "gate": {
-        "envelope_c": 0.008528420592849084,
+        "envelope_c": 0.008306367584330177,
         "envelope_within_bound": true,
-        "interval_c": 0.0061287677741141315,
+        "interval_c": 0.005339200511952737,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.0023344788737026897,
-        "signed_err_c": -0.0014598100267087522
+        "signed_err_c": 0.0006702427645473574
       },
       "identity_hash": "a69f8f5e1857eb8c20d3076fe5795945275920a554103b0765b3b2ce61029509",
       "quantity": "delta",
@@ -179,18 +179,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": -0.0501370292331277,
+      "candidate_value": -0.05018725243133927,
       "case": "near_pre_ko",
       "error": null,
       "gate": {
-        "envelope_c": 6.736701661549244e-05,
+        "envelope_c": 8.085517189130448e-05,
         "envelope_within_bound": true,
-        "interval_c": 0.04084964113021742,
+        "interval_c": 0.04089986432842899,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.012580323042641343,
-        "signed_err_c": -0.015688995044934734
+        "signed_err_c": -0.015739218243146308
       },
       "identity_hash": "a69f8f5e1857eb8c20d3076fe5795945275920a554103b0765b3b2ce61029509",
       "quantity": "gamma",
@@ -202,18 +202,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 79.01331822744325,
+      "candidate_value": 79.02294879513606,
       "case": "near_ki",
       "error": null,
       "gate": {
-        "envelope_c": 0.0078061210853945795,
+        "envelope_c": 0.0021905231040193485,
         "envelope_within_bound": true,
-        "interval_c": 0.014449364557752056,
+        "interval_c": 0.019885379326286447,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.0061760440478072064,
-        "signed_err_c": -0.0020972764621376427
+        "signed_err_c": 0.0075332912306720345
       },
       "identity_hash": "3a6df572f16567fb93f4ddffa02e2ff937d530f650646984c0c9fc30abecec71",
       "quantity": "pv",
@@ -225,18 +225,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 1.0490802265242631,
+      "candidate_value": 1.0627573387301978,
       "case": "near_ki",
       "error": null,
       "gate": {
-        "envelope_c": 0.0043005588461160205,
+        "envelope_c": 0.00029491331172071256,
         "envelope_within_bound": true,
-        "interval_c": 0.027664154332229796,
+        "interval_c": 0.013987042126295092,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.005355863613204615,
-        "signed_err_c": -0.016952427105820567
+        "signed_err_c": -0.0032753148998858617
       },
       "identity_hash": "3a6df572f16567fb93f4ddffa02e2ff937d530f650646984c0c9fc30abecec71",
       "quantity": "delta",
@@ -248,18 +248,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 0.0026668521613572517,
+      "candidate_value": -0.05947540151398034,
       "case": "near_ki",
       "error": null,
       "gate": {
-        "envelope_c": 0.0004010178899331567,
+        "envelope_c": 0.0011505592041048812,
         "envelope_within_bound": true,
-        "interval_c": 0.09459756703552236,
+        "interval_c": 0.07482723529068347,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.026820637162717056,
-        "signed_err_c": 0.04095629271008824
+        "signed_err_c": -0.02118596096524935
       },
       "identity_hash": "3a6df572f16567fb93f4ddffa02e2ff937d530f650646984c0c9fc30abecec71",
       "quantity": "gamma",
@@ -340,18 +340,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 100.19344434298746,
+      "candidate_value": 100.1644644379276,
       "case": "low_vol",
       "error": null,
       "gate": {
-        "envelope_c": 0.028413928205353045,
+        "envelope_c": 0.003430000249309728,
         "envelope_within_bound": true,
-        "interval_c": 0.05123181085247086,
+        "interval_c": 0.024193105536085002,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.011611252832174956,
-        "signed_err_c": 0.028009305188120948
+        "signed_err_c": -0.0009705998717350894
       },
       "identity_hash": "1187c6e23217a0a7aee8287fc1eb4ddab7be8aa35cfe794fa826d4a4b5d66798",
       "quantity": "pv",
@@ -363,18 +363,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 0.37321479025671245,
+      "candidate_value": 0.37896154212401634,
       "case": "low_vol",
       "error": null,
       "gate": {
-        "envelope_c": 0.015369790183971666,
+        "envelope_c": 0.009128230977646867,
         "envelope_within_bound": true,
-        "interval_c": 0.01959214836867817,
+        "interval_c": 0.02533890023598206,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.002924257495863723,
-        "signed_err_c": 0.013743633376950726
+        "signed_err_c": 0.019490385244254615
       },
       "identity_hash": "1187c6e23217a0a7aee8287fc1eb4ddab7be8aa35cfe794fa826d4a4b5d66798",
       "quantity": "delta",
@@ -386,18 +386,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": -0.09568020526110871,
+      "candidate_value": -0.09603786320381508,
       "case": "low_vol",
       "error": null,
       "gate": {
-        "envelope_c": 0.0008734358457980068,
+        "envelope_c": 0.0004568357803131917,
         "envelope_within_bound": true,
-        "interval_c": 0.03295617524495134,
+        "interval_c": 0.03331383318765771,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.011806095202254273,
-        "signed_err_c": -0.009343984840442798
+        "signed_err_c": -0.009701642783149167
       },
       "identity_hash": "1187c6e23217a0a7aee8287fc1eb4ddab7be8aa35cfe794fa826d4a4b5d66798",
       "quantity": "gamma",
@@ -409,18 +409,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 99.63841439221208,
+      "candidate_value": 99.56925743542797,
       "case": "near_expiry",
       "error": null,
       "gate": {
-        "envelope_c": 0.010550527385291275,
+        "envelope_c": 0.0013466249859703794,
         "envelope_within_bound": true,
-        "interval_c": 0.08076362231701117,
+        "interval_c": 0.011606665532898358,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.005054954869324282,
-        "signed_err_c": 0.07065371257836262
+        "signed_err_c": 0.0014967557942497933
       },
       "identity_hash": "2d71cb0643800b2b1bceb8f3e80bc8e216363c5d7cf146b666b0022d91dbf975",
       "quantity": "pv",
@@ -432,18 +432,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": 0.2665081338495541,
+      "candidate_value": 0.2786873327693055,
       "case": "near_expiry",
       "error": null,
       "gate": {
-        "envelope_c": 0.00799116028733371,
+        "envelope_c": 0.006087273694622863,
         "envelope_within_bound": true,
-        "interval_c": 0.02041131663618489,
+        "interval_c": 0.008232117716433446,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.0011677120999015716,
-        "signed_err_c": -0.018075892436381746
+        "signed_err_c": -0.0058966935166303025
       },
       "identity_hash": "2d71cb0643800b2b1bceb8f3e80bc8e216363c5d7cf146b666b0022d91dbf975",
       "quantity": "delta",
@@ -455,18 +455,18 @@
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
-      "candidate_value": -0.04186168131629543,
+      "candidate_value": -0.04345619544161566,
       "case": "near_expiry",
       "error": null,
       "gate": {
-        "envelope_c": 0.0009396648580234576,
+        "envelope_c": 0.0006735744225737986,
         "envelope_within_bound": true,
-        "interval_c": 0.012005164361763156,
+        "interval_c": 0.010410650236442932,
         "interval_within_bound": true,
         "passed": true,
         "se_budget_met": true,
         "se_c": 0.003290208250012657,
-        "signed_err_c": 0.005424747861737841
+        "signed_err_c": 0.0038302337364176167
       },
       "identity_hash": "2d71cb0643800b2b1bceb8f3e80bc8e216363c5d7cf146b666b0022d91dbf975",
       "quantity": "gamma",
@@ -1033,7 +1033,7 @@
     "equity.ko_reset_snowball.pde": "ADMITTED",
     "equity.ko_reset_snowball.quad": "ADMITTED"
   },
-  "projected_sha256": "33e1f27fdff63c2665b6342ed40150021dfaa445a86578f2571b3f03ce7be0d3",
+  "projected_sha256": "4b5d2213a18ffd207556b0123699a05da60a576876d3776d2334e31ea5248ce1",
   "reference_config": {
     "engine": "SnowballMCEngine",
     "greeks": "paired central difference (common random numbers)",
@@ -1194,7 +1194,7 @@
     "numpy": "2.4.6",
     "platform": "macOS-26.6-arm64-arm-64bit",
     "python": "3.11.8",
-    "quantark_git_sha": "f470133f8b17729948189381a3684d9b7453218f"
+    "quantark_git_sha": "62f72b6a41935b90e1a3d772573e0bd3f62bcb95"
   },
   "schema": 1,
   "study": {
@@ -1324,5 +1324,5 @@
     },
     "source_text": "# KO-reset snowball under flat Black-Scholes.\n#\n# The hard part of this payoff is a REGIME SWITCH. The trade runs a pre-KI KO\n# schedule (barrier 103) to maturity_pre; only once it knocks in at 80 does it\n# switch to a second, lower KO schedule (barrier 95) running on to\n# maturity_post. Two value surfaces therefore live on different horizons -- and\n# that is precisely what both deterministic engines got wrong before audit #13,\n# maturing the not-yet-knocked-in surface on the post-KI schedule.\n#\n# Environment, economic scale and bounds are identical to snowball_flat_bsm and\n# phoenix_flat_bsm on purpose: at multiplier 200, inception spot 100 and\n# notional 20,000 the delta quantum and the reference move are both exactly\n# 1.0, so a raw error IS a contract error and all three studies share one axis.\n#\n# Bound calibration (release procedure section 7, step 4). The cell gate needs\n# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this\n# budget (4 batches x 65,536 paths, paired bumps): pv 0.0110, delta 0.0087,\n# gamma 0.0297. Gamma is the binding quantity at a 4.2x margin -- tighter than\n# the other two studies, this being a longer-dated two-regime payoff -- but\n# still compatible, and the sampler may take up to 32 batches to sharpen it.\n#\n# Offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/ko_reset_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: ko-reset-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260818\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.ko_reset_snowball\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    maturity_pre: 1.0\n    maturity_post: 2.0\n    pre_ko_barrier: 103.0\n    pre_ko_rate: 0.15\n    post_ko_barrier: 95.0\n    post_ko_rate: 0.03\n    ki_barrier: 80.0\n    ki_continuous: true\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.ko_reset_snowball.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.ko_reset_snowball.pde\n    params: {accuracy: standard}\n  - builder: equity.ko_reset_snowball.quad\n    params: {grid_points: 1001}\n\ncases:\n  # At inception, clear of both KO barriers and well above KI.\n  - {name: ordinary}\n  # Just under the pre-KI KO barrier: the KO discontinuity sits inside the bump\n  # stencil, where deterministic gamma usually breaks first.\n  - {name: near_pre_ko, environment: {spot: 102.5}}\n  # Just above the KI barrier: the regime switch is one small move away, so both\n  # surfaces and the transition between them are in play at once.\n  - {name: near_ki, environment: {spot: 80.5}}\n  # Below the KI barrier: already knocked in at valuation, which exercises the\n  # post-KI schedule and its lower KO barrier directly rather than through the\n  # transition.\n  - {name: below_ki, environment: {spot: 76.0}}\n  # Low vol: the KI barrier is rarely reached, so almost all the value sits on\n  # the pre-KI surface and its maturity must be exactly right.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Short horizons on both legs: few observations left and time discretization\n  # error has nowhere to average out.\n  - {name: near_expiry, product: {maturity_pre: 0.25, maturity_post: 0.5}}\n  # Discrete KI monitoring instead of continuous. This is a different code path\n  # in every engine -- the continuous one runs a Brownian-bridge correction that\n  # the discrete one never touches -- so it is certified explicitly.\n  - {name: discrete_ki, product: {ki_continuous: false}}\n"
   },
-  "wall_clock_seconds": 141.19011306762695
+  "wall_clock_seconds": 114.1428918838501
 }

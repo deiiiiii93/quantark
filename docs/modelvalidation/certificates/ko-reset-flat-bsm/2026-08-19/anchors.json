@@ -23,45 +23,45 @@
       "candidate": "equity.ko_reset_snowball.pde",
       "case": "low_vol",
       "values": {
-        "delta": 0.37321479025671245,
-        "gamma": -0.09568020526110871,
-        "pv": 100.19344434298746
+        "delta": 0.37896154212401634,
+        "gamma": -0.09603786320381508,
+        "pv": 100.1644644379276
       }
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
       "case": "near_expiry",
       "values": {
-        "delta": 0.2665081338495541,
-        "gamma": -0.04186168131629543,
-        "pv": 99.63841439221208
+        "delta": 0.2786873327693055,
+        "gamma": -0.04345619544161566,
+        "pv": 99.56925743542797
       }
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
       "case": "near_ki",
       "values": {
-        "delta": 1.0490802265242631,
-        "gamma": 0.0026668521613572517,
-        "pv": 79.01331822744325
+        "delta": 1.0627573387301978,
+        "gamma": -0.05947540151398034,
+        "pv": 79.02294879513606
       }
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
       "case": "near_pre_ko",
       "values": {
-        "delta": 0.4855989099404938,
-        "gamma": -0.0501370292331277,
-        "pv": 98.06939037285156
+        "delta": 0.4877289627317499,
+        "gamma": -0.05018725243133927,
+        "pv": 98.05269755076209
       }
     },
     {
       "candidate": "equity.ko_reset_snowball.pde",
       "case": "ordinary",
       "values": {
-        "delta": 0.6112520270164897,
-        "gamma": -0.046614000261598815,
-        "pv": 96.70401029091036
+        "delta": 0.614448621188659,
+        "gamma": -0.046469837278630785,
+        "pv": 96.67021788863633
       }
     },
     {
@@ -128,7 +128,7 @@
       }
     }
   ],
-  "certificate_sha256": "33e1f27fdff63c2665b6342ed40150021dfaa445a86578f2571b3f03ce7be0d3",
+  "certificate_sha256": "4b5d2213a18ffd207556b0123699a05da60a576876d3776d2334e31ea5248ce1",
   "fingerprint": {
     "machine": "arm64",
     "system": "Darwin"

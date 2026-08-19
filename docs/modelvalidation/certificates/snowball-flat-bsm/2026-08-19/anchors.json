@@ -5,45 +5,45 @@
       "candidate": "equity.snowball.pde",
       "case": "low_vol",
       "values": {
-        "delta": 0.14469715864190005,
-        "gamma": -0.1350651293863526,
-        "pv": 101.86640536183528
+        "delta": 0.16740662381399662,
+        "gamma": -0.13534668843867853,
+        "pv": 101.7365078246738
       }
     },
     {
       "candidate": "equity.snowball.pde",
       "case": "near_expiry",
       "values": {
-        "delta": 0.07892514795936638,
-        "gamma": -0.10837612072248869,
-        "pv": 103.41322915101524
+        "delta": 0.10076742720288577,
+        "gamma": -0.109690344900454,
+        "pv": 103.25388262360042
       }
     },
     {
       "candidate": "equity.snowball.pde",
       "case": "near_ki",
       "values": {
-        "delta": 1.0202955007586874,
-        "gamma": -0.010324336174264571,
-        "pv": 84.28351335327793
+        "delta": 1.0145047390302375,
+        "gamma": -0.0059711983007821965,
+        "pv": 84.26631762724037
       }
     },
     {
       "candidate": "equity.snowball.pde",
       "case": "near_ko",
       "values": {
-        "delta": 0.5105211634515711,
-        "gamma": -0.051576435526742896,
-        "pv": 97.91862524482869
+        "delta": 0.5128356122672934,
+        "gamma": -0.05157958686701762,
+        "pv": 97.89939456114074
       }
     },
     {
       "candidate": "equity.snowball.pde",
       "case": "ordinary",
       "values": {
-        "delta": 0.6341521273521906,
-        "gamma": -0.04745052346284955,
-        "pv": 96.49611252348434
+        "delta": 0.6371658481991073,
+        "gamma": -0.04720211267336552,
+        "pv": 96.46065192554826
       }
     },
     {
@@ -92,7 +92,7 @@
       }
     }
   ],
-  "certificate_sha256": "a3591aa83b0dbc08c2e6202a2d61a6b3bdd3c2b069c2464281384625ee6bfbe4",
+  "certificate_sha256": "3454f3074cb39a8c49e7adc1bae9ac1f6648fc2a8ca69fb85f575bfca189c04a",
   "fingerprint": {
     "machine": "arm64",
     "system": "Darwin"

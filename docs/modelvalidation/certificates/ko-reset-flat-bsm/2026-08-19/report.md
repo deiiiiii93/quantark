@@ -1,8 +1,8 @@
 # Certification report: ko-reset-flat-bsm
 
-Evidence digest: `33e1f27fdff63c2665b6342ed40150021dfaa445a86578f2571b3f03ce7be0d3`
+Evidence digest: `4b5d2213a18ffd207556b0123699a05da60a576876d3776d2334e31ea5248ce1`
 
-Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `f470133f8b17729948189381a3684d9b7453218f`
+Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `62f72b6a41935b90e1a3d772573e0bd3f62bcb95`
 
 ## Decisions
 
@@ -76,24 +76,24 @@ Sampling policy: 65536 paths/batch, 4-32 batches, seed 20260818, bump 0.01.
 
 | candidate | case | quantity | reference | SE | candidate | err (c) | interval (c) | envelope (c) | verdict |
 |---|---|---|---|---|---|---|---|---|---|
-| equity.ko_reset_snowball.pde | ordinary | pv | 96.6613 | 0.011 | 96.704 | 0.04273 | 0.06475 | 0.01517 | PASS |
-| equity.ko_reset_snowball.pde | ordinary | delta | 0.621389 | 0.00868 | 0.611252 | -0.01014 | 0.0275 | 0.005066 | PASS |
-| equity.ko_reset_snowball.pde | ordinary | gamma | -0.0416238 | 0.0297 | -0.046614 | -0.00499 | 0.06439 | 0.0002392 | PASS |
-| equity.ko_reset_snowball.pde | near_pre_ko | pv | 98.0475 | 0.0132 | 98.0694 | 0.02191 | 0.04835 | 0.002868 | PASS |
-| equity.ko_reset_snowball.pde | near_pre_ko | delta | 0.487059 | 0.00233 | 0.485599 | -0.00146 | 0.006129 | 0.008528 | PASS |
-| equity.ko_reset_snowball.pde | near_pre_ko | gamma | -0.034448 | 0.0126 | -0.050137 | -0.01569 | 0.04085 | 6.737e-05 | PASS |
-| equity.ko_reset_snowball.pde | near_ki | pv | 79.0154 | 0.00618 | 79.0133 | -0.002097 | 0.01445 | 0.007806 | PASS |
-| equity.ko_reset_snowball.pde | near_ki | delta | 1.06603 | 0.00536 | 1.04908 | -0.01695 | 0.02766 | 0.004301 | PASS |
-| equity.ko_reset_snowball.pde | near_ki | gamma | -0.0382894 | 0.0268 | 0.00266685 | 0.04096 | 0.0946 | 0.000401 | PASS |
+| equity.ko_reset_snowball.pde | ordinary | pv | 96.6613 | 0.011 | 96.6702 | 0.008933 | 0.03096 | 0.001207 | PASS |
+| equity.ko_reset_snowball.pde | ordinary | delta | 0.621389 | 0.00868 | 0.614449 | -0.00694 | 0.0243 | 0.006387 | PASS |
+| equity.ko_reset_snowball.pde | ordinary | gamma | -0.0416238 | 0.0297 | -0.0464698 | -0.004846 | 0.06424 | 0.0003026 | PASS |
+| equity.ko_reset_snowball.pde | near_pre_ko | pv | 98.0475 | 0.0132 | 98.0527 | 0.005218 | 0.03166 | 0.001094 | PASS |
+| equity.ko_reset_snowball.pde | near_pre_ko | delta | 0.487059 | 0.00233 | 0.487729 | 0.0006702 | 0.005339 | 0.008306 | PASS |
+| equity.ko_reset_snowball.pde | near_pre_ko | gamma | -0.034448 | 0.0126 | -0.0501873 | -0.01574 | 0.0409 | 8.086e-05 | PASS |
+| equity.ko_reset_snowball.pde | near_ki | pv | 79.0154 | 0.00618 | 79.0229 | 0.007533 | 0.01989 | 0.002191 | PASS |
+| equity.ko_reset_snowball.pde | near_ki | delta | 1.06603 | 0.00536 | 1.06276 | -0.003275 | 0.01399 | 0.0002949 | PASS |
+| equity.ko_reset_snowball.pde | near_ki | gamma | -0.0382894 | 0.0268 | -0.0594754 | -0.02119 | 0.07483 | 0.001151 | PASS |
 | equity.ko_reset_snowball.pde | below_ki | pv | 74.0373 | 0.0119 | 74.0367 | -0.0006474 | 0.02455 | 0.001612 | PASS |
 | equity.ko_reset_snowball.pde | below_ki | delta | 1.10845 | 0.00477 | 1.1063 | -0.002142 | 0.01167 | 0.000501 | PASS |
 | equity.ko_reset_snowball.pde | below_ki | gamma | -0.0131948 | 0.0123 | 0.00544677 | 0.01864 | 0.04328 | 1.701e-05 | PASS |
-| equity.ko_reset_snowball.pde | low_vol | pv | 100.165 | 0.0116 | 100.193 | 0.02801 | 0.05123 | 0.02841 | PASS |
-| equity.ko_reset_snowball.pde | low_vol | delta | 0.359471 | 0.00292 | 0.373215 | 0.01374 | 0.01959 | 0.01537 | PASS |
-| equity.ko_reset_snowball.pde | low_vol | gamma | -0.0863362 | 0.0118 | -0.0956802 | -0.009344 | 0.03296 | 0.0008734 | PASS |
-| equity.ko_reset_snowball.pde | near_expiry | pv | 99.5678 | 0.00505 | 99.6384 | 0.07065 | 0.08076 | 0.01055 | PASS |
-| equity.ko_reset_snowball.pde | near_expiry | delta | 0.284584 | 0.00117 | 0.266508 | -0.01808 | 0.02041 | 0.007991 | PASS |
-| equity.ko_reset_snowball.pde | near_expiry | gamma | -0.0472864 | 0.00329 | -0.0418617 | 0.005425 | 0.01201 | 0.0009397 | PASS |
+| equity.ko_reset_snowball.pde | low_vol | pv | 100.165 | 0.0116 | 100.164 | -0.0009706 | 0.02419 | 0.00343 | PASS |
+| equity.ko_reset_snowball.pde | low_vol | delta | 0.359471 | 0.00292 | 0.378962 | 0.01949 | 0.02534 | 0.009128 | PASS |
+| equity.ko_reset_snowball.pde | low_vol | gamma | -0.0863362 | 0.0118 | -0.0960379 | -0.009702 | 0.03331 | 0.0004568 | PASS |
+| equity.ko_reset_snowball.pde | near_expiry | pv | 99.5678 | 0.00505 | 99.5693 | 0.001497 | 0.01161 | 0.001347 | PASS |
+| equity.ko_reset_snowball.pde | near_expiry | delta | 0.284584 | 0.00117 | 0.278687 | -0.005897 | 0.008232 | 0.006087 | PASS |
+| equity.ko_reset_snowball.pde | near_expiry | gamma | -0.0472864 | 0.00329 | -0.0434562 | 0.00383 | 0.01041 | 0.0006736 | PASS |
 | equity.ko_reset_snowball.pde | discrete_ki | pv | 96.7295 | 0.00999 | 96.7322 | 0.002688 | 0.02268 | 9.864e-06 | PASS |
 | equity.ko_reset_snowball.pde | discrete_ki | delta | 0.612278 | 0.00409 | 0.608858 | -0.00342 | 0.0116 | 0.006534 | PASS |
 | equity.ko_reset_snowball.pde | discrete_ki | gamma | -0.0366268 | 0.00883 | -0.046709 | -0.01008 | 0.02775 | 0.0002885 | PASS |
@@ -123,9 +123,9 @@ Sampling policy: 65536 paths/batch, 4-32 batches, seed 20260818, bump 0.01.
 
 | candidate | quantity | cells | mean bias (c) | SE (c) | passed |
 |---|---|---|---|---|---|
-| equity.ko_reset_snowball.pde | pv | 7 | 0.02332 | 0.00388 | yes |
-| equity.ko_reset_snowball.pde | delta | 7 | -0.005492 | 0.0018 | yes |
-| equity.ko_reset_snowball.pde | gamma | 7 | 0.00356 | 0.00661 | yes |
+| equity.ko_reset_snowball.pde | pv | 7 | 0.003464 | 0.00388 | yes |
+| equity.ko_reset_snowball.pde | delta | 7 | -0.0002163 | 0.0018 | yes |
+| equity.ko_reset_snowball.pde | gamma | 7 | -0.005583 | 0.00661 | yes |
 | equity.ko_reset_snowball.quad | pv | 7 | 0.01112 | 0.00388 | yes |
 | equity.ko_reset_snowball.quad | delta | 7 | -0.00175 | 0.0018 | yes |
 | equity.ko_reset_snowball.quad | gamma | 7 | -0.003864 | 0.00661 | yes |

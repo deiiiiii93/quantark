@@ -1,8 +1,8 @@
 # Certification report: snowball-flat-bsm
 
-Evidence digest: `a3591aa83b0dbc08c2e6202a2d61a6b3bdd3c2b069c2464281384625ee6bfbe4`
+Evidence digest: `3454f3074cb39a8c49e7adc1bae9ac1f6648fc2a8ca69fb85f575bfca189c04a`
 
-Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `40ca3b01fa7d8e3489688a97cb52e39580d69df1`
+Machine: `arm64` / macOS-26.6-arm64-arm-64bit - Python 3.11.8, NumPy 2.4.6, quantark `62f72b6a41935b90e1a3d772573e0bd3f62bcb95`
 
 ## Decisions
 
@@ -74,21 +74,21 @@ Sampling policy: 65536 paths/batch, 4-32 batches, seed 20260814, bump 0.01.
 
 | candidate | case | quantity | reference | SE | candidate | err (c) | interval (c) | envelope (c) | verdict |
 |---|---|---|---|---|---|---|---|---|---|
-| equity.snowball.pde | ordinary | pv | 96.4619 | 0.00863 | 96.4961 | 0.03417 | 0.05142 | 0.00998 | PASS |
-| equity.snowball.pde | ordinary | delta | 0.636873 | 0.00447 | 0.634152 | -0.002721 | 0.01165 | 0.002331 | PASS |
-| equity.snowball.pde | ordinary | gamma | -0.0350358 | 0.00663 | -0.0474505 | -0.01241 | 0.02568 | 9.622e-05 | PASS |
-| equity.snowball.pde | near_ko | pv | 97.8973 | 0.00502 | 97.9186 | 0.02129 | 0.03132 | 0.01042 | PASS |
-| equity.snowball.pde | near_ko | delta | 0.517695 | 0.0043 | 0.510521 | -0.007174 | 0.01578 | 0.00543 | PASS |
-| equity.snowball.pde | near_ko | gamma | -0.0394148 | 0.0128 | -0.0515764 | -0.01216 | 0.03772 | 4.389e-05 | PASS |
-| equity.snowball.pde | near_ki | pv | 84.2677 | 0.00342 | 84.2835 | 0.01579 | 0.02263 | 0.0002684 | PASS |
-| equity.snowball.pde | near_ki | delta | 1.01836 | 0.00588 | 1.0203 | 0.001939 | 0.01369 | 0.0001534 | PASS |
-| equity.snowball.pde | near_ki | gamma | -0.013149 | 0.0111 | -0.0103243 | 0.002825 | 0.02495 | 2.98e-06 | PASS |
-| equity.snowball.pde | low_vol | pv | 101.737 | 0.00392 | 101.866 | 0.1295 | 0.1373 | 0.03348 | PASS |
-| equity.snowball.pde | low_vol | delta | 0.187698 | 0.00449 | 0.144697 | -0.043 | 0.05198 | 0.007844 | PASS |
-| equity.snowball.pde | low_vol | gamma | -0.124929 | 0.00785 | -0.135065 | -0.01014 | 0.02583 | 0.002265 | PASS |
-| equity.snowball.pde | near_expiry | pv | 103.261 | 0.00783 | 103.413 | 0.1518 | 0.1675 | 0.05294 | PASS |
-| equity.snowball.pde | near_expiry | delta | 0.120079 | 0.005 | 0.0789251 | -0.04115 | 0.05114 | 0.006403 | PASS |
-| equity.snowball.pde | near_expiry | gamma | -0.10491 | 0.0177 | -0.108376 | -0.003466 | 0.03888 | 0.0002647 | PASS |
+| equity.snowball.pde | ordinary | pv | 96.4619 | 0.00863 | 96.4607 | -0.001291 | 0.01854 | 0.001934 | PASS |
+| equity.snowball.pde | ordinary | delta | 0.636873 | 0.00447 | 0.637166 | 0.0002924 | 0.009223 | 0.00301 | PASS |
+| equity.snowball.pde | ordinary | gamma | -0.0350358 | 0.00663 | -0.0472021 | -0.01217 | 0.02543 | 0.0001555 | PASS |
+| equity.snowball.pde | near_ko | pv | 97.8973 | 0.00502 | 97.8994 | 0.002057 | 0.01209 | 0.002202 | PASS |
+| equity.snowball.pde | near_ko | delta | 0.517695 | 0.0043 | 0.512836 | -0.00486 | 0.01347 | 0.004432 | PASS |
+| equity.snowball.pde | near_ko | gamma | -0.0394148 | 0.0128 | -0.0515796 | -0.01216 | 0.03772 | 5.578e-05 | PASS |
+| equity.snowball.pde | near_ki | pv | 84.2677 | 0.00342 | 84.2663 | -0.001404 | 0.008246 | 0.0001292 | PASS |
+| equity.snowball.pde | near_ki | delta | 1.01836 | 0.00588 | 1.0145 | -0.003851 | 0.0156 | 2.785e-05 | PASS |
+| equity.snowball.pde | near_ki | gamma | -0.013149 | 0.0111 | -0.0059712 | 0.007178 | 0.02931 | 0.0001 | PASS |
+| equity.snowball.pde | low_vol | pv | 101.737 | 0.00392 | 101.737 | -0.0003949 | 0.008226 | 0.003265 | PASS |
+| equity.snowball.pde | low_vol | delta | 0.187698 | 0.00449 | 0.167407 | -0.02029 | 0.02927 | 0.01432 | PASS |
+| equity.snowball.pde | low_vol | gamma | -0.124929 | 0.00785 | -0.135347 | -0.01042 | 0.02611 | 0.002255 | PASS |
+| equity.snowball.pde | near_expiry | pv | 103.261 | 0.00783 | 103.254 | -0.00756 | 0.02323 | 0.0139 | PASS |
+| equity.snowball.pde | near_expiry | delta | 0.120079 | 0.005 | 0.100767 | -0.01931 | 0.0293 | 0.0009136 | PASS |
+| equity.snowball.pde | near_expiry | gamma | -0.10491 | 0.0177 | -0.10969 | -0.00478 | 0.0402 | 9.773e-05 | PASS |
 | equity.snowball.quad | ordinary | pv | 96.4619 | 0.00863 | 96.459 | -0.002912 | 0.02016 | 0.005653 | PASS |
 | equity.snowball.quad | ordinary | delta | 0.636873 | 0.00447 | 0.637121 | 0.0002477 | 0.009178 | 0.004398 | PASS |
 | equity.snowball.quad | ordinary | gamma | -0.0350358 | 0.00663 | -0.0442877 | -0.009252 | 0.02251 | 0.0002628 | PASS |
@@ -109,9 +109,9 @@ Sampling policy: 65536 paths/batch, 4-32 batches, seed 20260814, bump 0.01.
 
 | candidate | quantity | cells | mean bias (c) | SE (c) | passed |
 |---|---|---|---|---|---|
-| equity.snowball.pde | pv | 5 | 0.07051 | 0.00274 | yes |
-| equity.snowball.pde | delta | 5 | -0.01842 | 0.00217 | yes |
-| equity.snowball.pde | gamma | 5 | -0.007071 | 0.00531 | yes |
+| equity.snowball.pde | pv | 5 | -0.001719 | 0.00274 | yes |
+| equity.snowball.pde | delta | 5 | -0.009604 | 0.00217 | yes |
+| equity.snowball.pde | gamma | 5 | -0.00647 | 0.00531 | yes |
 | equity.snowball.quad | pv | 5 | -0.0008358 | 0.00274 | yes |
 | equity.snowball.quad | delta | 5 | -0.002496 | 0.00217 | yes |
 | equity.snowball.quad | gamma | 5 | -0.007093 | 0.00531 | yes |
