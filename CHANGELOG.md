@@ -7,10 +7,75 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
-Backtest replay consolidation
+## [0.4.5] - 2026-08-19
+
+Two programs land together: **model-release certification** — the first
+module that decides whether an engine is fit to ship, and the numerics
+fixes that decision surfaced — and the **backtest replay consolidation**.
+
+### Model-release certification
+
+#### Added
+- `quantark.modelvalidation`: engine-release certification. A study YAML
+  declares the product, the market environment, the candidate engines and
+  the economic scale; the runner prices every (candidate, case) cell against
+  a paired-RQMC benchmark, applies per-cell and aggregate-bias gates, and
+  emits a signed certificate, a Markdown/HTML report, and an *anchor file*.
+  Anchors are the cheap residue of an expensive run — the deterministic
+  engines' own outputs at the certified configurations — so CI can re-check
+  in seconds that a released engine still produces what its certificate
+  claims (exact on the banking machine, tolerance-based elsewhere).
+  `amend` extends a certification's scope while carrying unaffected cells
+  forward on identity hashes; scope may grow but never shrink.
+  Procedure: `docs/modelvalidation/RELEASE_PROCEDURE.md`.
+- Banked flat-BSM certifications for snowball (23 cases), phoenix (14) and
+  KO-reset snowball (14), PDE and QUAD both ADMITTED, under
+  `docs/modelvalidation/certificates/`, covering the full product feature
+  surface: discrete / European / stepping knock-in, step-down and parachute
+  knock-out, reverse, airbag, protection types, participation, call rebate,
+  `disable_ko_after_ki`, and EXPIRY coupons.
+
+#### Fixed
+- **Continuous knock-in was monitored at the time-step width** by the
+  local-vol, Heston and SLV solvers, which were gated off the FIRST_PASSAGE
+  correction. The correction is barrier-local, so it never needed globally
+  constant coefficients — only the dynamics at the barrier. Each solver now
+  reports its own: `sigma_loc(barrier, t)` for local vol, one
+  `(mu, sigma^2)` per variance column for Heston, and `L(barrier,t)^2 * v`
+  for SLV. On a flat surface the local-vol solver had been bitwise identical
+  to the *uncorrected* flat-BSM solver (+0.099% of PV). Applies to the
+  snowball and phoenix families alike; the phoenix 2-D solvers had never
+  built the state at all.
+- **The Monte Carlo continuous-KI Brownian bridge used the implied vol at
+  the strike** as the variance of every path and every step. The vol-model
+  engines now supply the log-variance their own scheme accumulated. Against
+  the closed-form first-passage probability the error falls from -10.0 / -8.5
+  / -9.2 standard errors (Heston / local vol / SLV) to inside 4.
+- The first-passage correction estimated its slope from a node that could sit
+  a fraction of a cell above the barrier, where the knock-in mask's own step
+  — not the slope — dominates. Sampling is now floored at half a cell.
+- `PhoenixOption` never built its knock-in observation schedule, so a
+  discretely monitored phoenix raised instead of pricing.
+- `disable_ko_after_ki` was ignored by the snowball and phoenix PDE solvers,
+  which wrote the knock-out payoff to the knocked-in surface as well.
+- Phoenix `coupon_pay_type=EXPIRY` coupons roll up and are paid at
+  termination — the knock-out settlement when it knocks out, maturity
+  otherwise — and are never forfeited. All three engine families agree;
+  PDE and QUAD gained a termination-value surface to price it.
+
+#### Changed
+- Continuous knock-in prices move in the local-vol, Heston and SLV engines
+  (PDE and Monte Carlo). Discretely monitored, European and no-knock-in
+  products are bitwise unchanged, verified across 54 engine/product/
+  monitoring combinations; the sole exception is the opt-in
+  `KnockInMonitoringMode.BGK_APPROXIMATION`, which replaces a discrete
+  schedule with continuous monitoring by design.
+
+### Backtest replay consolidation
+
 (spec: `docs/superpowers/specs/2026-07-30-backtest-replay-consolidation-design.md`).
 
-### Added
+#### Added
 - `quantark.backtest.replay`: canonical home of the product-replay backtest —
   ONE multi-product daily loop (`ReplayBacktestEngine`/`ReplayBacktestConfig`/
   `ReplayProduct`/`ReplayBacktestResults`); the single-product
@@ -36,7 +101,7 @@ Backtest replay consolidation
 - `AutocallableDeltaHedgeStrategy` joined the `BaseStrategy` hierarchy
   (`quantark.backtest.strategy`).
 
-### Changed
+#### Changed
 - Relocations (old paths remain as `DeprecationWarning` shims until 0.5.0):
   `quantark.backtest.otc.*` -> `quantark.backtest.replay.*`;
   `otc.vol_calibrators` -> `quantark.volmodels.calibration`;
@@ -67,7 +132,7 @@ Backtest replay consolidation
   cache entries are invalidated automatically (the fingerprint embeds the
   preset); `localvol` entries are unaffected.
 
-### Fixed
+#### Fixed
 - `BaseEngine.calculate_greeks` and Gate G2's deterministic delta helper bypassed
   `create_bump_context`, so Heston/SLV central spot bumps rebuilt their S grids even
   though the solvers already provided a frozen-layout context. Base, up, down, and
