@@ -198,6 +198,10 @@ class ContinuousKICorrection(Enum):
             touches the barrier during the step yet ends on the live side
             (reflection principle under the per-step-constant GBM
             coefficients the operator itself uses). No fitted constant.
+            The crossing is barrier-LOCAL, so each solver reports the
+            dynamics there: flat/term BSM sample the term vol, local vol
+            reads sigma_loc(barrier, t), and the 2-D solvers carry one
+            (mu, sigma^2) per variance column, L(barrier,t)^2 * v.
         NONE: Legacy opt-out -- the bare per-step nodal jump (the pinned
             characterization discretization before the 2026-08-18 fix).
     """

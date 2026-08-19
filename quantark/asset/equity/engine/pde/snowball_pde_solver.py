@@ -110,13 +110,24 @@ class _ContinuousKIFirstPassage:
         self._sig2 = np.asarray(sig2, dtype=float)
         self._is_reverse = bool(is_reverse)
         self._cache: Dict[tuple, tuple] = {}
+        # (n_steps, n_cols) coefficients drive the columnar branch: the 2-D
+        # solvers monitor the barrier under the spot dynamics CONDITIONAL on
+        # each variance column, so every column carries its own (mu, sigma^2).
+        if self._mu.ndim != self._sig2.ndim:
+            raise ValidationError(
+                "first-passage mu and sigma^2 must share a shape"
+            )
+        if self._sig2.ndim not in (1, 2):
+            raise ValidationError(
+                "first-passage coefficients must be per-step or per-step-per-column"
+            )
+        self._columnar = self._sig2.ndim == 2
 
-    def _geometry(self, t_idx: int, s_vec: np.ndarray, barrier: float):
+    def _geometry(
+        self, dt: float, mu: float, sig2: float, s_vec: np.ndarray, barrier: float
+    ):
         """Cached (G, k_star): the lambda multiplier profile and the node
         the slope is sampled at. G is zero off the live band."""
-        dt = float(self._dt[t_idx])
-        mu = float(self._mu[t_idx])
-        sig2 = float(self._sig2[t_idx])
         key = (
             round(dt, 12), round(mu, 12), round(sig2, 12),
             round(float(barrier), 12), len(s_vec),
@@ -144,6 +155,18 @@ class _ContinuousKIFirstPassage:
                 G = np.zeros(len(s_vec), dtype=float)
                 G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
                 live = np.flatnonzero(a > 0.0)
+                # lambda is a SLOPE, and the grid has to resolve it. The nodal
+                # mask has just set d to zero on the breached side, so on the
+                # grid d steps from 0 to its full size across the barrier: a
+                # node sitting a fraction of a cell above it reports that step,
+                # not the slope, and d/a diverges as the node approaches the
+                # barrier. Sample no closer than half a cell -- a resolution
+                # floor, not a tuned constant. Barrier-aligned grids (every 1-D
+                # layout) already clear it, so their sample is unchanged.
+                if live.size > 1:
+                    resolved = live[a[live] >= 0.5 * (a[live[1]] - a[live[0]])]
+                    if resolved.size:
+                        live = resolved
                 k_star = int(live[np.argmin(np.abs(a[live] - s_step))])
                 result = (G, k_star, float(a[k_star]))
         self._cache[key] = result
@@ -159,13 +182,58 @@ class _ContinuousKIFirstPassage:
         event-stats sweep passes every indicator column at once, since the
         indicator expectations follow the same regime dynamic programming.
         """
-        G, k_star, dist = self._geometry(t_idx, s_vec, barrier)
+        dt = float(self._dt[t_idx])
+        if self._columnar:
+            return self._columnar_correction(dt, t_idx, s_vec, barrier, d)
+        G, k_star, dist = self._geometry(
+            dt, float(self._mu[t_idx]), float(self._sig2[t_idx]), s_vec, barrier
+        )
         if G is None:
             return np.zeros_like(d)
         lam = d[k_star] / dist
         if d.ndim == 2:
             return G[:, None] * np.asarray(lam)[None, :]
         return G * lam
+
+    def _columnar_correction(
+        self,
+        dt: float,
+        t_idx: int,
+        s_vec: np.ndarray,
+        barrier: float,
+        d: np.ndarray,
+    ) -> np.ndarray:
+        """One (mu, sigma^2) per column, evaluated through the SAME closed form.
+
+        A 2-D (log-spot, variance) solver knows the spot's instantaneous
+        variance exactly -- it is the column's own variance node, scaled by the
+        leverage at the barrier for SLV -- so the crossing geometry is rebuilt
+        per column rather than shared. Freezing the variance across the step
+        neglects its own diffusion, an O(dt) error in sigma^2 and hence
+        O(dt^1.5) in a correction that repairs O(sqrt(dt)); it is the same
+        conditional-Gaussian reduction the Monte Carlo bridge makes. Columns
+        are looped rather than broadcast so the arithmetic is bit-for-bit the
+        scalar path's, which is what keeps the certified 1-D engines inert.
+        """
+        if d.ndim != 2:
+            raise ValidationError(
+                "columnar first-passage coefficients need a (n_x, n_cols) surface"
+            )
+        mu_row = np.asarray(self._mu[t_idx], dtype=float)
+        sig2_row = np.asarray(self._sig2[t_idx], dtype=float)
+        if mu_row.size != d.shape[1]:
+            raise ValidationError(
+                "first-passage columns must match the surface's column count"
+            )
+        out = np.zeros_like(d)
+        for col in range(d.shape[1]):
+            G, k_star, dist = self._geometry(
+                dt, float(mu_row[col]), float(sig2_row[col]), s_vec, barrier
+            )
+            if G is None:
+                continue
+            out[:, col] = G * (d[k_star, col] / dist)
+        return out
 
 
 class SnowballPDESolver(BasePDESolver):
@@ -199,12 +267,12 @@ class SnowballPDESolver(BasePDESolver):
     # Subclasses can override this to specify their supported product type
     _supported_product_type: type = SnowballOption
     _solver_name: str = "SnowballPDESolver"
-    #: FIRST_PASSAGE continuous-KI correction eligibility. The closed form is
-    #: exact only when the barrier-crossing dynamics ARE the per-step-constant
-    #: GBM sampled by TermCoefficients -- true for the flat/term BSM solvers.
-    #: Vol-model subclasses (local vol, Heston) monitor under different
-    #: dynamics and set this False until they carry their own barrier-local
-    #: treatment; they keep the pinned per-step behavior.
+    #: FIRST_PASSAGE continuous-KI correction eligibility. The closed form
+    #: reduces the crossing to a per-step-constant GBM, so a solver is
+    #: eligible once it can report those coefficients AT THE BARRIER --
+    #: which every solver can, since the correction never looks further than
+    #: a few step-widths from it (see _first_passage_step_coefficients).
+    #: Kept as a hook for solvers whose barrier treatment must stay pinned.
     _first_passage_ki_supported: bool = True
 
     def __init__(
@@ -479,21 +547,47 @@ class SnowballPDESolver(BasePDESolver):
             ContinuousKICorrection.FIRST_PASSAGE
         ):
             return
-        from quantark.priceenv.term_sampling import TermCoefficients
-
         t = np.asarray(t_vec, dtype=float)
         if t.size < 3:
             return
-        tc = TermCoefficients.from_env(
-            pricing_env, t, ref_strike=float(product.strike)
+        barrier = (
+            float(self._bgk_ki_barrier)
+            if self._bgk_active
+            else float(self._ki_barrier)
         )
-        sig2 = tc.step_vols * tc.step_vols
+        mu, sig2 = self._first_passage_step_coefficients(
+            product, pricing_env, t, barrier
+        )
         self._ki_fp = _ContinuousKIFirstPassage(
             dt=np.diff(t),
-            mu=tc.fwd_rates - tc.fwd_carry - 0.5 * sig2,
+            mu=mu,
             sig2=sig2,
             is_reverse=bool(product.is_reverse),
         )
+
+    def _first_passage_step_coefficients(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        t_vec: np.ndarray,
+        barrier: float,
+    ):
+        """Per-step ``(mu, sigma^2)`` governing the barrier crossing.
+
+        Sampled from the same forward coefficients the stepping operator uses,
+        so the correction is exactly consistent with the discretized dynamics.
+        The closed form only ever looks in a band a few step-widths either side
+        of ``barrier``, so solvers whose diffusion varies in space or state
+        override this to report the dynamics THERE rather than disabling the
+        correction outright.
+        """
+        from quantark.priceenv.term_sampling import TermCoefficients
+
+        tc = TermCoefficients.from_env(
+            pricing_env, t_vec, ref_strike=float(product.strike)
+        )
+        sig2 = tc.step_vols * tc.step_vols
+        return tc.fwd_rates - tc.fwd_carry - 0.5 * sig2, sig2
 
     def _check_product_type(self, product: BaseEquityProduct) -> None:
         """

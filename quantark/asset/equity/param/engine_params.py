@@ -492,9 +492,11 @@ class PDEParams(EngineParams):
     # Temporal treatment of CONTINUOUSLY monitored KI in the autocallable
     # solvers. FIRST_PASSAGE (default) supplements the per-step nodal jump
     # with the exact intra-step barrier-crossing probability (reflection
-    # principle, per-step-constant GBM coefficients), removing the
-    # O(sqrt(dt)) under-monitoring bias of pure per-step application.
-    # NONE is the explicit legacy opt-out (bare per-step nodal jump).
+    # principle, per-step-constant GBM coefficients read AT THE BARRIER),
+    # removing the O(sqrt(dt)) under-monitoring bias of pure per-step
+    # application. Applies to the local-vol and Heston/SLV solvers too, which
+    # report their own barrier-local (and, in 2-D, per-variance-column)
+    # coefficients. NONE is the explicit legacy opt-out (bare per-step jump).
     continuous_ki_correction: Union[ContinuousKICorrection, str] = (
         ContinuousKICorrection.FIRST_PASSAGE
     )

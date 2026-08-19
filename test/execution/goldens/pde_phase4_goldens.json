@@ -63,7 +63,7 @@
       ]
     },
     "HestonSnowballPDESolver": {
-      "price": 976388.3672969306,
+      "price": 973280.2206936385,
       "price_with_events": {
         "event_distribution": {
           "event_times": [
@@ -79,8 +79,8 @@
               0.08054568405430815,
               0.05317800100824038
             ],
-            "MATURITY_NO_KO": 0.27720502494333593,
-            "MATURITY_WITH_KI": 0.13461619876617986
+            "MATURITY_NO_KO": 0.2712405051604483,
+            "MATURITY_WITH_KI": 0.14058071854906753
           },
           "survival_probability": [
             1.0,
@@ -90,7 +90,7 @@
             0.4118212237095158
           ]
         },
-        "npv": 976388.3672969306
+        "npv": 973280.2206936385
       }
     },
     "KOResetSnowballPDESolver": {
@@ -177,7 +177,7 @@
       ]
     },
     "LocalVolSnowballPDESolver": {
-      "price": 978296.3683345078,
+      "price": 977333.5648267246,
       "price_with_events": {
         "event_distribution": {
           "event_times": [
@@ -193,8 +193,8 @@
               0.08054581719180559,
               0.053178221635947424
             ],
-            "MATURITY_NO_KO": 0.2772086444567087,
-            "MATURITY_WITH_KI": 0.1346129864350063
+            "MATURITY_NO_KO": 0.2712422624340166,
+            "MATURITY_WITH_KI": 0.1405793684576984
           },
           "survival_probability": [
             1.0,
@@ -204,7 +204,7 @@
             0.411821630891715
           ]
         },
-        "npv": 978296.3683345078
+        "npv": 977333.5648267246
       }
     },
     "PhoenixPDESolver": {

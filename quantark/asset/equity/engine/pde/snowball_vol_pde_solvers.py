@@ -8,7 +8,10 @@ import numpy as np
 
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
-from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.pde.snowball_pde_solver import (
+    SnowballPDESolver,
+    _ContinuousKIFirstPassage,
+)
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -16,7 +19,11 @@ from quantark.param import GridVolSurface
 from quantark.priceenv import PricingEnvironment, TermMarketContext
 from quantark.priceenv.term_sampling import TermCoefficients
 from quantark.util.enum import ObservationType
-from quantark.util.enum.engine_enums import ADIScheme, EngineType
+from quantark.util.enum.engine_enums import (
+    ADIScheme,
+    ContinuousKICorrection,
+    EngineType,
+)
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import is_close, is_zero
 from quantark.volmodels.adi_core import HestonSLVADICore
@@ -66,10 +73,6 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
 
     engine_type = EngineType.PDE
     _solver_name = "LocalVolSnowballPDESolver"
-    # Crossing dynamics are local-vol, not the TermCoefficients GBM the
-    # closed-form FIRST_PASSAGE correction assumes; keep the pinned per-step
-    # KI treatment until a barrier-local variant exists.
-    _first_passage_ki_supported = False
 
     def __init__(
         self,
@@ -177,6 +180,39 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
     def _flat_exact_step_coefficients(self, sc, r, q, sigma, dx_vec, num_x):
         return sc
 
+    def _first_passage_step_coefficients(self, product, pricing_env, t_vec, barrier):
+        """Local vol AT THE BARRIER, sampled at each step's midpoint.
+
+        The continuous-KI correction only ever looks a few step-widths either
+        side of the barrier, so the diffusion that governs the crossing is
+        ``sigma_loc(barrier, t)`` -- not the term vol at the reference strike
+        the flat solvers sample. The midpoint convention matches
+        ``_build_step_coefficients`` exactly, so the correction and the
+        stepping operator read the same surface at the same times. A flat
+        surface makes local vol constant and this reduces to the base sampling.
+        """
+        surface = self._active_lv_surface
+        if surface is None:
+            raise PricingError("Local-vol surface is not initialized for this solve")
+
+        from quantark.priceenv.term_sampling import TermCoefficients
+
+        t = np.asarray(t_vec, dtype=float)
+        tc = TermCoefficients.from_env(
+            pricing_env, t, ref_strike=float(product.strike)
+        )
+        t_mid = 0.5 * (t[:-1] + t[1:])
+        sigma = np.asarray(
+            surface.local_vol(np.full(t_mid.shape, float(barrier)), t_mid),
+            dtype=float,
+        )
+        if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0.0):
+            raise ValidationError(
+                "local-vol surface returned non-positive or non-finite vols at the KI barrier"
+            )
+        sig2 = sigma * sigma
+        return tc.fwd_rates - tc.fwd_carry - 0.5 * sig2, sig2
+
     @staticmethod
     def _local_vol_coefficients(r, q, sigma_vec, dx_vec, num_x):
         sigma_vec = np.asarray(sigma_vec, dtype=float)
@@ -213,9 +249,6 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
 
 class _Heston2DSnowballPDEBase(SnowballPDESolver):
 
-    # See LocalVolSnowballPDESolver: stochastic-vol crossing dynamics are
-    # outside the closed-form FIRST_PASSAGE assumptions.
-    _first_passage_ki_supported = False
     """Shared 2-D (log-spot, variance) ADI machinery for the Snowball solvers.
 
     ``v0_boundary`` defaults to ``"degenerate_pde"``, diverging from the ADI
@@ -571,6 +604,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         core = self._make_core(product, pricing_env, T)
         if not (core.S_grid[0] <= spot <= core.S_grid[-1]):
             raise ValidationError("spot falls outside the Heston/SLV Snowball PDE grid")
+        self._prepare_2d_continuous_ki_correction(core, product)
 
         v1_snapshots: dict[float, np.ndarray] = {}
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
@@ -637,9 +671,75 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         self._bgk_active = False
         self._ki_barrier = 0.0
         self._ki_barrier_by_tidx.clear()
+        self._ki_fp = None  # rebuilt once the ADI core (and its V grid) exists
         if product.has_ki_barrier:
             ki_barrier = product.barrier_config.ki_barrier
             self._ki_barrier = float(ki_barrier[0] if isinstance(ki_barrier, list) else ki_barrier)
+
+    def _barrier_leverage(self, barrier: float, t: float) -> float:
+        """Leverage multiplying the spot diffusion at the barrier. 1 for Heston."""
+        return 1.0
+
+    def _prepare_2d_continuous_ki_correction(self, core, product) -> None:
+        """Build the per-variance-column FIRST_PASSAGE state for the ADI sweep.
+
+        Column ``k`` carries the spot dynamics CONDITIONAL on that column's
+        variance: the ADI operator's own log-spot assembly uses diffusion
+        ``0.5 * L(S,t)**2 * v`` and convection ``(r - q) - 0.5 * L(S,t)**2 * v``
+        (``_tri_S``), so the crossing coefficients at the barrier are
+        ``sigma**2 = L(barrier,t)**2 * v`` and ``mu = (r - q) - 0.5 * sigma**2``,
+        with the operator's own variance floor and forward-rate schedule. That
+        keeps the correction consistent with what the scheme actually
+        integrates -- the same discipline the 1-D solvers follow.
+        """
+        self._ki_fp = None
+        if not self._first_passage_ki_supported:
+            return
+        if not product.has_ki_barrier or not self._ki_continuous:
+            return
+        if self.params.continuous_ki_correction is not (
+            ContinuousKICorrection.FIRST_PASSAGE
+        ):
+            return
+        barrier = float(self._ki_barrier)
+        if barrier <= 0.0:
+            return
+
+        n_t = int(core.N_T)
+        dt = float(core.dt)
+        if n_t < 2 or dt <= 0.0:
+            return
+        # The operator floors the variance grid identically; the v = 0 row
+        # would otherwise hand the closed form a zero diffusion.
+        v = np.maximum(np.asarray(core.V_grid, dtype=float), 1e-10)
+        mu = np.empty((n_t, v.size), dtype=float)
+        sig2 = np.empty((n_t, v.size), dtype=float)
+        for j in range(n_t):
+            t_mid = (j + 0.5) * dt
+            r_step, q_step = core.forward_rates_at(t_mid)
+            lev = float(self._barrier_leverage(barrier, t_mid))
+            sig2[j, :] = (lev * lev) * v
+            mu[j, :] = (r_step - q_step) - 0.5 * sig2[j, :]
+        self._ki_fp = _ContinuousKIFirstPassage(
+            dt=np.full(n_t, dt, dtype=float),
+            mu=mu,
+            sig2=sig2,
+            is_reverse=bool(product.is_reverse),
+        )
+
+    @staticmethod
+    def _first_passage_step_index(core, tau: float) -> Optional[int]:
+        """Forward-time step index of the step that just landed on ``tau``.
+
+        ``tau`` is time-to-maturity, so forward time is ``T - tau`` and the
+        completed step spans ``[T - tau, T - tau + dt]``. Interior steps only,
+        mirroring the 1-D guard: the maturity column has no step interior and
+        the valuation column's events belong to the t=0 readout.
+        """
+        k = _Heston2DSnowballPDEBase._hook_tau_key(tau, float(core.dt))
+        if k is None or not (0 < k < int(core.N_T)):
+            return None
+        return int(core.N_T) - k
 
     def _terminal_surface(self, core, product, env, knocked_in: bool) -> np.ndarray:
         if knocked_in:
@@ -796,6 +896,19 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                             at_valuation=(at_valuation and ki_discrete),
                         )
                         U[mask, :] = v1[mask, :]
+                        # FIRST_PASSAGE correction: that mask monitors the
+                        # continuous barrier only at step boundaries, so
+                        # crossings INSIDE the step are invisible and the live
+                        # surface is biased high by O(sqrt(dt)). Restore the
+                        # touch-and-return mass column by column (see
+                        # SnowballPDESolver._apply_ki_jump).
+                        fp = self._ki_fp
+                        if fp is not None:
+                            j = self._first_passage_step_index(core, tau)
+                            if j is not None:
+                                U += fp.step_correction(
+                                    j, core.S_grid, barrier, v1 - U
+                                )
             return U
 
         return hook
@@ -826,6 +939,12 @@ class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
         super().__init__(model_params=model_params, **kwargs)
         self.leverage_surface = leverage_surface
         self.eta = float(eta)
+
+    def _barrier_leverage(self, barrier: float, t: float) -> float:
+        """``eta`` scales the vol-of-vol, not the spot diffusion, so the
+        crossing sees the raw calibrated leverage -- exactly what the ADI
+        core's ``_L`` feeds its log-spot operator."""
+        return float(np.asarray(self.leverage_surface.leverage(float(barrier), float(t))))
 
     def _make_core(self, product: SnowballOption, env: PricingEnvironment, T: float):
         t_grid = np.linspace(0.0, float(T), self.n_t + 1)
