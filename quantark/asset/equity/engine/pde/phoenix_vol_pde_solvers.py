@@ -21,6 +21,11 @@ from quantark.priceenv.term_sampling import TermCoefficients
 from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import ADIScheme, EngineType
 from quantark.util.exceptions import PricingError, ValidationError
+from quantark.asset.equity.engine.pde.vol_continuous_ki import (
+    Heston2DBarrierCrossingMixin,
+    LocalVolBarrierCrossingMixin,
+    SLVBarrierLeverageMixin,
+)
 from quantark.asset.equity.engine.pde.snowball_vol_pde_solvers import (
     event_damped_step_keys,
 )
@@ -31,7 +36,7 @@ from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.slv.leverage import LeverageSurface
 
 
-class LocalVolPhoenixPDESolver(PhoenixPDESolver):
+class LocalVolPhoenixPDESolver(LocalVolBarrierCrossingMixin, PhoenixPDESolver):
 
     """Two-surface Phoenix PDE with Dupire local volatility on the S grid."""
 
@@ -183,7 +188,7 @@ class LocalVolPhoenixPDESolver(PhoenixPDESolver):
         return l, c, u
 
 
-class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
+class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
     """Shared 2-D (log-spot, variance) ADI machinery for the Phoenix solvers.
 
     ``v0_boundary`` defaults to ``"degenerate_pde"`` rather than the ADI core's
@@ -514,6 +519,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         core = self._make_core(product, pricing_env, T)
         if not (core.S_grid[0] <= spot <= core.S_grid[-1]):
             raise ValidationError("spot falls outside the Heston/SLV Phoenix PDE grid")
+        self._prepare_2d_continuous_ki_correction(core, product)
 
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
         damped_keys = event_damped_step_keys(self.params, event_maps, core.N_T)
@@ -594,6 +600,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         self._bgk_active = False
         self._ki_barrier = 0.0
         self._ki_barrier_by_tidx.clear()
+        self._ki_fp = None  # rebuilt once the ADI core (and its V grid) exists
         self._ko_observation_indices.clear()
         self._ki_observation_indices.clear()
         self._coupon_observation_indices.clear()
@@ -924,7 +931,8 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
             return False, None
         return True, float(barrier)
 
-    def _apply_ki(self, U, core, product, barrier: float, v1, at_valuation=False):
+    def _apply_ki(self, U, core, product, barrier: float, v1, at_valuation=False,
+                  tau: Optional[float] = None):
         # Continuous KI stays a nodal mask (continuous-barrier treatment);
         # only discretely observed KI events project — and a valuation-date
         # observation is deterministic, so it uses the exact inclusive trigger.
@@ -939,6 +947,8 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
         )
         if np.any(mask):
             U[mask, :] = v1[mask, :]
+        if tau is not None:
+            U = self._apply_continuous_ki_correction(U, core, tau, barrier, v1)
         return U
 
     def _hook_coupon_is_joint(self, tau, T, event_maps, k, obs_idx) -> bool:
@@ -991,6 +1001,7 @@ class _Heston2DPhoenixPDEBase(PhoenixPDESolver):
                     U = self._apply_ki(
                         U, core, product, barrier, v1,
                         at_valuation=is_close(float(tau), float(T)),
+                        tau=float(tau),
                     )
             if k is not None:
                 for rec in event_maps["ko"].get(k, []):
@@ -1006,7 +1017,7 @@ class HestonPhoenixPDESolver(_Heston2DPhoenixPDEBase):
     _solver_name = "HestonPhoenixPDESolver"
 
 
-class HestonSLVPhoenixPDESolver(_Heston2DPhoenixPDEBase):
+class HestonSLVPhoenixPDESolver(SLVBarrierLeverageMixin, _Heston2DPhoenixPDEBase):
     """Two-surface Phoenix PDE under Heston-SLV using a calibrated leverage surface."""
 
     _solver_name = "HestonSLVPhoenixPDESolver"

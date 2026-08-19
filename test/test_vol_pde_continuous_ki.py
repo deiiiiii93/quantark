@@ -292,3 +292,102 @@ def test_the_two_dimensional_correction_reads_leverage_at_the_barrier():
     np.testing.assert_allclose(
         slv._ki_fp._sig2, 4.0 * heston._ki_fp._sig2, rtol=1e-12, atol=0
     )
+
+
+# ---------------------------------------------------------------------------
+# Phoenix runs the SAME two-surface knock-in dynamic programming on a
+# different payoff, and its vol-model solvers were never gated at all: the
+# local-vol one applied the correction with the flat solvers' coefficients
+# (the term vol at the strike, not the barrier), and the Heston/SLV ones
+# never built the state, so it was silently inert.
+# ---------------------------------------------------------------------------
+
+
+def _continuous_ki_phoenix():
+    from quantark.asset.equity.product.option.phoenix_option import PhoenixOption
+    from quantark.asset.equity.product.option.phoenix_config import (
+        CouponBarrierConfig,
+    )
+    from quantark.asset.equity.product.option.snowball_config import PayoffConfig
+    from quantark.util.calendar.day_counter import DayCountConvention
+    from quantark.util.enum import CouponPayType
+
+    return PhoenixOption(
+        initial_price=100.0, strike=100.0, maturity=1.0,
+        contract_multiplier=10_000.0, is_reverse=False,
+        barrier_config=BarrierConfig(
+            ko_barrier=105.0, ko_rate=0.12,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[0.25, 0.5, 0.75, 1.0],
+            ki_barrier=75.0,
+            ki_observation_type=ObservationType.CONTINUOUS,
+            ki_continuous=True,
+        ),
+        coupon_config=CouponBarrierConfig(
+            coupon_barrier=90.0, coupon_rate=0.02,
+            coupon_pay_type=CouponPayType.INSTANT,
+            day_count_convention=DayCountConvention.ACT_365,
+            memory_coupon=False,
+        ),
+        payoff_config=PayoffConfig(include_principal=True),
+    )
+
+
+def test_local_vol_phoenix_continuous_ki_is_grid_invariant_under_a_skew():
+    """Same property as the snowball: with the crossing read at the barrier
+    the price stops depending on the grid.  Sampling the term vol at the
+    strike -- which is what this solver did -- leaves most of the bias."""
+    from quantark.asset.equity.engine.pde import LocalVolPhoenixPDESolver
+
+    product, env = _continuous_ki_phoenix(), _skewed_env()
+
+    def spread(mode):
+        prices = [
+            LocalVolPhoenixPDESolver(
+                PDEParams(accuracy=acc, continuous_ki_correction=mode)
+            ).price(product, env)
+            for acc in ("fast", "standard", "high")
+        ]
+        return max(prices) - min(prices)
+
+    corrected, uncorrected = spread("first_passage"), spread("none")
+    assert corrected < uncorrected / 4.0
+
+
+def test_heston_phoenix_continuous_ki_stops_scaling_like_sqrt_dt():
+    """Uncorrected, this solver monitors the KI barrier at the step width."""
+    from quantark.asset.equity.engine.pde import HestonPhoenixPDESolver
+
+    product, env = _continuous_ki_phoenix(), _flat_env()
+    hp = _degenerate_heston()
+
+    coarse = HestonPhoenixPDESolver(hp, n_x=200, n_v=40, n_t=100).price(product, env)
+    fine = HestonPhoenixPDESolver(hp, n_x=200, n_v=40, n_t=400).price(product, env)
+
+    assert abs(coarse - fine) < 300.0
+
+
+def test_the_two_dimensional_phoenix_correction_reads_leverage_at_the_barrier():
+    from quantark.asset.equity.engine.pde import (
+        HestonPhoenixPDESolver,
+        HestonSLVPhoenixPDESolver,
+    )
+
+    product, env = _continuous_ki_phoenix(), _flat_env()
+    hp = _degenerate_heston()
+    kw = dict(n_x=200, n_v=40, n_t=100)
+    lev = LeverageSurface(
+        time_grid=np.linspace(0.0, 1.0, 4),
+        strike_grid=np.array(list(100.0 * np.exp(np.linspace(-0.8, 0.8, 11)))),
+        leverage_grid=np.full((4, 11), 2.0),
+    )
+
+    heston = HestonPhoenixPDESolver(hp, **kw)
+    heston.price(product, env)
+    slv = HestonSLVPhoenixPDESolver(hp, lev, **kw)
+    slv.price(product, env)
+
+    assert heston._ki_fp is not None, "the 2-D phoenix never built the crossing state"
+    np.testing.assert_allclose(
+        slv._ki_fp._sig2, 4.0 * heston._ki_fp._sig2, rtol=1e-12, atol=0
+    )
