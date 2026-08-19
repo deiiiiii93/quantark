@@ -50,6 +50,16 @@ from golden_compare import GOLDEN_REL_TOL, assert_close
 COLUMN_SCALE_TOL = 1e-9
 
 
+def _finite_scale(values) -> float:
+    """Largest finite magnitude in a column, or 0.0 if it has none."""
+    if values.size == 0:
+        return 0.0
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return 0.0
+    return float(np.max(np.abs(finite)))
+
+
 def assert_frame_matches(actual, expected, label: str) -> None:
     """Compare a live frame against a frozen golden, column by column."""
     assert list(actual.columns) == list(expected.columns), (
@@ -64,7 +74,13 @@ def assert_frame_matches(actual, expected, label: str) -> None:
             continue
         want_values = want.to_numpy(dtype=float)
         got_values = got.to_numpy(dtype=float)
-        scale = float(np.max(np.abs(want_values))) if want_values.size else 0.0
+        # nanmax, not max: these frames carry NaN wherever a surface has no
+        # value for a row, and np.max over them returns NaN -> atol NaN ->
+        # assert_allclose rejects ANY non-zero difference, however tiny. That
+        # failure is invisible on the machine the goldens were frozen on,
+        # because numpy short-circuits bitwise-identical arrays before the
+        # tolerance is consulted; it only fires where values differ at all.
+        scale = _finite_scale(want_values)
         np.testing.assert_allclose(
             got_values, want_values,
             rtol=GOLDEN_REL_TOL, atol=COLUMN_SCALE_TOL * scale,
@@ -177,6 +193,10 @@ def _golden_like_frame():
             "price": [9504.27292802203, 9611.5, 9118.734185],
             "gamma": [23.74735191146168, 0.037035, -43.011715],
             "gamma_cash_1pct": [2143.1985100094166, -3.1566762373795587, -4301.171488],
+            # NaN wherever a surface has no value for the row -- present in the
+            # real event_probabilities frames, and the reason the column scale
+            # has to be computed over finite entries only.
+            "conditional_probability": [0.1057088398090991, float("nan"), 3.8556814e-06],
         }
     )
 
@@ -218,3 +238,28 @@ def test_the_golden_gate_compares_discrete_columns_exactly():
     bumped_str.loc[0, "date"] = "2024-01-05"
     with pytest.raises(AssertionError):
         assert_frame_matches(bumped_str, expected, "str")
+
+
+@pytest.mark.parametrize("case,frame_name", CASES, ids=[f"{c}-{f}" for c, f in CASES])
+def test_every_golden_frame_admits_simulated_cross_architecture_drift(case, frame_name):
+    """A LOCAL proxy for the cross-architecture run, over the real goldens.
+
+    The comparison above cannot be exercised on the machine the goldens were
+    frozen on: the live frames are bitwise identical there, so numpy
+    short-circuits before the tolerance is even consulted. Every calibration
+    bug in this gate has therefore been invisible locally and found by CI one
+    45-minute run at a time -- a flat floor that was 90x too small for a
+    column expressed in cash, then a NaN column whose scale poisoned atol.
+
+    So perturb each frozen golden by the worst drift shape actually measured
+    (1.1e-11 of column scale) and require the comparison to admit it. That
+    exercises every column of every frame, with their real magnitudes, NaN
+    patterns and dtypes, without needing another architecture.
+    """
+    golden_path = GOLDEN_DIR / f"{case}_{frame_name}.csv"
+    if golden_path.read_text().strip() == "":
+        pytest.skip("frame recorded as genuinely empty")
+    expected = pd.read_csv(golden_path)
+    assert_frame_matches(
+        _perturbed(expected, 1.1e-11), expected, f"{case}/{frame_name} drift"
+    )
