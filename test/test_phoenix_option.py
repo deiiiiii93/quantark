@@ -823,3 +823,58 @@ class TestHelperFunctions:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestPhoenixDiscreteKISchedule:
+    """A phoenix with discretely monitored KI.
+
+    PhoenixOption overrides `_build_observation_schedules` to give its KO
+    records a return rate, and the override built the KO schedule ONLY --
+    returning early when no KO schedule was needed and never touching KI. A
+    phoenix with legacy `ki_observation_dates` therefore reached the engines
+    with `ki_observation_schedule=None`, and `resolve_ki_observations` raised.
+    Every certified phoenix cell monitors KI continuously, so nothing caught it.
+    """
+
+    @staticmethod
+    def _phoenix(ki_barrier):
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+        from quantark.util.enum import ObservationType
+
+        dates = [(i + 1) / 12 for i in range(12)]
+        return create_standard_phoenix(
+            initial_price=100.0, strike=100.0, maturity=1.0,
+            ko_barrier=103.0, ko_rate=0.0, ki_barrier=ki_barrier,
+            coupon_barrier=85.0, coupon_rate=0.02, num_observations=12,
+            memory_coupon=False, ki_continuous=False,
+            ki_observation_type=ObservationType.DISCRETE,
+            ki_observation_dates=dates,
+        )
+
+    def test_discrete_ki_builds_a_schedule(self, pricing_env):
+        product = self._phoenix(75.0)
+        assert product.barrier_config.ki_observation_schedule is not None
+        assert len(product.resolve_ki_observations(pricing_env)) == 12
+
+    def test_a_stepping_ki_barrier_reaches_every_observation(self, pricing_env):
+        levels = [75.0 - 0.5 * i for i in range(12)]
+        product = self._phoenix(levels)
+        records = product.resolve_ki_observations(pricing_env)
+        assert [r.barrier for r in records] == pytest.approx(levels)
+
+    def test_continuous_ki_still_needs_no_schedule(self):
+        """Regression guard: every certified phoenix cell takes this path."""
+        from quantark.asset.equity.product.option.phoenix_helpers import (
+            create_standard_phoenix,
+        )
+
+        product = create_standard_phoenix(
+            initial_price=100.0, strike=100.0, maturity=1.0,
+            ko_barrier=103.0, ko_rate=0.0, ki_barrier=75.0,
+            coupon_barrier=85.0, coupon_rate=0.02, num_observations=12,
+            memory_coupon=False,
+        )
+        assert product.barrier_config.ki_continuous is True
+        assert product.barrier_config.ko_observation_schedule is not None
