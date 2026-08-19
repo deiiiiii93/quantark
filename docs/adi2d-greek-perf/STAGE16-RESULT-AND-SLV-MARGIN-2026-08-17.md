@@ -260,3 +260,39 @@ flip.
    true aggregate bias is near the current best estimate (−0.045), it admits
    SLV at ≈25% margin; if the truth sits near ±0.07, the honest conclusion is
    exclusion.
+
+## 8. Closure (2026-08-19): SLV ADMITTED — program complete
+
+Both open items resolved.
+
+**Re-pilot (2026-08-17, 3h50m)** — and it was substantively necessary, not just
+auditability: reconstruction against the pinned hashes proved the lost
+`b5a5243` pilots measured **pre-bridge8** estimators for
+`ordinary_full`/`ordinary_decayed`/`sigma_collapse` (bridge dims 1 → 8 shipped
+after they ran; `low_feller`, whose config never changed, reproduced
+bit-for-bit). The old frozen allocation was stale on three of six control
+cells. Fresh pilots + the strided-parent projection re-froze an **8× smaller**
+plan (commit `0f13d93`): primary 512 × 1024, middle 32 × 8192, smooth Heston
+weight 1.0, 8,388,608 unique paths; projected interval [−0.081, −0.008],
+guarded [−0.092, +0.003], both inside the bound.
+
+**Production amendment (launched 2026-08-17 21:37, published 2026-08-19 03:22,
+28.6 h)** — held-out seeds 20260811/12 opened for the first time, fixed
+allocation, no optional stopping, 1.16 × 10⁹ conditional path valuations.
+Verdict:
+
+- D + S = −0.029994 ± 0.024242, D − S = −0.027270 ± 0.018171
+  (paired within each seed family, independent-cohort Welch-t across families,
+  ≥95% simultaneous coverage)
+- simultaneous interval **[−0.063387, +0.003398]**, bound ±0.10 →
+  **PASS at 36.6% margin**
+- `heston_slv route = pde`; Heston carried at `pde`. Artifact:
+  `output/p18_slv_amendment` (evidence `84a16fca…`, parent `5c2bd579…`
+  byte-linked, nothing rerun).
+
+The held-out estimate (≈ −0.029) landed inside the development guard and
+better-centered than projected. Final state of the certification: **both
+variants admitted** — Heston at 41.0% margin (strided stage-16 re-publish,
+`output/p18_strided`), Heston-SLV at 36.6% margin (this amendment) — with the
+full lineage (parent, pilots, allocation freeze, seeds) hash-chained and
+re-derivable end to end.
