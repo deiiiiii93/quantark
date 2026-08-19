@@ -885,8 +885,17 @@ class PhoenixMCEngine(BaseEngine):
 
                 payoffs[ko_at_obs] = ko_payoffs_schedule[obs_idx] + ko_coupon[ko_at_obs]
 
-                if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
-                    settlement_times[ko_at_obs] = ko_settlement_times[obs_idx]
+                if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
+                    # EXPIRY rolls coupons up and pays them when the note ends.
+                    # A knock-out IS the end: the roll-up is paid here, at the
+                    # knock-out settlement -- not deferred to the contractual
+                    # maturity, and not forfeited.
+                    payoffs[ko_at_obs] += expiry_coupon[ko_at_obs]
+                    expiry_coupon[ko_at_obs] = 0.0
+
+                # The knock-out payoff settles on the knock-out date whatever the
+                # coupon convention; only the coupons' timing follows pay type.
+                settlement_times[ko_at_obs] = ko_settlement_times[obs_idx]
 
                 if product.coupon_config.memory_coupon:
                     accrued[ko_at_obs] = 0.0
