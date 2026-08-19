@@ -445,6 +445,8 @@ class TestProjectPiecewiseEvent:
             is_reverse=False,
             has_memory_coupon=False,
             has_ki_barrier=False,
+            # the joint projection asks whether the KO survives a knock-in
+            barrier_config=types.SimpleNamespace(disable_ko_after_ki=False),
             coupon_config=types.SimpleNamespace(
                 coupon_pay_type=CouponPayType.INSTANT
             ),
@@ -951,7 +953,13 @@ class TestValuationDateEvents:
         solver = SnowballPDESolver(PDEParams())
         s_vec = np.linspace(60.0, 120.0, 61)
         rec = types.SimpleNamespace(barrier=100.0, payoff=100.0, settlement_time=None)
-        product = types.SimpleNamespace(is_reverse=False)
+        # _apply_ko_jump asks whether the KO survives a knock-in, so the double
+        # has to carry that part of the product contract too.
+        product = types.SimpleNamespace(
+            is_reverse=False,
+            has_ki_barrier=True,
+            barrier_config=types.SimpleNamespace(disable_ko_after_ki=False),
+        )
         env = _env()
         j = int(np.argmin(np.abs(s_vec - 100.0)))
 
@@ -1004,6 +1012,8 @@ class TestValuationDateEvents:
         )
         product = types.SimpleNamespace(
             is_reverse=False,
+            has_ki_barrier=True,
+            barrier_config=types.SimpleNamespace(disable_ko_after_ki=False),
             coupon_config=types.SimpleNamespace(coupon_pay_type=CouponPayType.INSTANT),
         )
         env = _heston_env()
