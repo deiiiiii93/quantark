@@ -7,6 +7,59 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-08-20
+
+0.4.5's test suite passed on the ARM64 machine its goldens were frozen on and
+failed 28 tests on x86_64 Linux. Chasing that down found one genuine pricing
+defect and a set of comparisons that were architecture-dependent by accident.
+The published 0.4.5 package is unaffected except as noted below.
+
+### Fixed
+- **Parallel-batch pricing of continuously monitored knock-in under Local Vol /
+  Heston / SLV Monte Carlo.** The per-step variance the Brownian-bridge crossing
+  estimate needs was held in a single engine attribute, written while simulating
+  and read while computing payoffs. The dask path (`use_dask=True`) submits every
+  batch through `delayed`/`compute` on the threaded scheduler, so batches sat
+  between their own generation and their payoffs concurrently on one engine and
+  overwrote each other — 20,000 paths over 3 batches is 6667/6667/6666. Now
+  scoped per thread, which is where a batch begins and ends. A shape guard made
+  this raise rather than price one batch against another's variance, so no wrong
+  number could have been returned; serial pricing was never affected.
+- `quantark.modelvalidation.anchors`: comparing a banked certificate off the
+  banking machine now floors the tolerance at the suite's cross-architecture
+  standard (`DEFAULT_REL_TOL` 1e-12 → 1e-9, `DEFAULT_ABS_TOL` 1e-15 → 1e-12).
+  Measured across 326 anchors, x86_64-vs-ARM64 drift spans 1e-14 to 2.2e-11
+  relative (median 2.0e-12, both signs, no outlier of a different order): last-ULP
+  differences in FMA contraction, libm transcendentals and BLAS kernels, amplified
+  by an autocallable PDE/QUAD solve marching hundreds of steps through barrier
+  events. The bound keeps ~44x margin over that and stays six orders under any
+  real numerics change. Applied as a floor on each banked file's own tolerances,
+  so already-banked evidence is corrected without its anchored *values* being
+  touched. Same-machine comparison remains exact.
+
+### Changed (tests)
+- The replay golden gate compares floats against each column's scale rather than
+  bitwise. These frames carry bump derivatives, so the rounding noise is set by
+  the magnitude of the price being differenced and is near-constant in absolute
+  terms down a column: gamma drifts 4.6e-10 against a column max of 43, and the
+  same quantity in cash drifts 3.8e-8 against 4,301 — one ratio, ~1e-11. Column
+  names and order, row count, and integer, string and date columns still compare
+  exactly. New tests pin the tolerance itself: it admits the measured drift,
+  rejects 1e-6 of column scale, and every real golden frame is checked against a
+  simulated drift locally, because bitwise-identical frames short-circuit before
+  any tolerance is consulted and made earlier calibration bugs invisible here.
+- Two cross-architecture anchor tests hardcoded the fingerprint
+  `{"machine": "x86_64", "system": "Linux"}` — which is the CI machine, so there
+  they took the same-machine *exact* branch, the opposite of what they verify.
+  They now derive a fingerprint that cannot be the current machine.
+- `test_event_stats_pruning` pinned a PV of ~9.9e5 with a `1e-6` absolute
+  epsilon, i.e. 1e-12 relative — tighter than the measured drift, passing on
+  margin rather than by design. Now on the documented cross-arch tolerance.
+- A settlement fixture placed a strike exactly on the parity-implied forward.
+  Stage 10 splits OTM puts from calls with `strike < forward` against an
+  OLS-regressed forward, so that strike changed side with the last ULP of the
+  regression. The grid now keeps every strike clear of the forward.
+
 ## [0.4.5] - 2026-08-19
 
 Two programs land together: **model-release certification** — the first
