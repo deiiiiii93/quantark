@@ -17,3 +17,10 @@ quantark/util/numerical/thomas_kernel.dll
 
 # modelvalidation run output (evidence is banked deliberately, not by accident)
 output/modelvalidation/
+
+# Raw certification payloads. An imported certificate names its producing
+# harness's payloads and publishes their digests, but the payloads themselves
+# are multi-megabyte Monte-Carlo row dumps -- artifacts, not source. Keep them
+# out of the repository; see docs/modelvalidation/RELEASE_PROCEDURE.md section
+# 10. Tests that need them skip with a reason rather than passing vacuously.
+docs/modelvalidation/certificates/*/*/evidence/

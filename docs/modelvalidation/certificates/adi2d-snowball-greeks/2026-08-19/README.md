@@ -44,18 +44,42 @@ one of the 28 values came back bit-for-bit equal to the harness's. Two
 independent expressions of the same configuration agreeing exactly is what makes
 the anchor a tripwire rather than a restatement.
 
-**Archived.** The stochastic arm. `evidence/` holds the original payloads
-verbatim, digests intact:
+**Archived, and deliberately not committed.** The stochastic arm. The original
+payloads are 14.4 MB of Monte-Carlo row dumps — artifacts, not source — and this
+repository publishes code, tests and research docs. What is published instead is
+their **identity**, so a holder can prove the payload they have is the one this
+certificate describes, and nobody can substitute a different run:
 
-| file | schema | what it is |
-|---|---|---|
-| `evidence/stage16_greek_certification.json` | 13 | the full certification (`p18_strided`), evidence `5c2bd579…` |
-| `evidence/stage16_decision.json` | — | its decision record |
-| `evidence/stage17_slv_aggregate_amendment.json` | 12 | the SLV aggregate amendment on held-out seeds, evidence `84a16fca…` |
-| `evidence/stage17_decision.json` | — | its decision record |
+| file (relative to this directory) | schema | size | file SHA-256 |
+|---|---|---|---|
+| `evidence/stage16_greek_certification.json` | 13 | 6.06 MB | `9041c3a299bb518d683768ff4c852c7556078786e2b6d0115ed6027a36867ba7` |
+| `evidence/stage16_decision.json` | — | 12.9 KB | `63e959ab274e7816a1f99760b72a2020c87fd63c634fcf888f95f73ec80e89ab` |
+| `evidence/stage17_slv_aggregate_amendment.json` | 12 | 8.31 MB | `d829b4468f19baebb650980ee90e7415a956e4c0887f925f698837a47ea87d84` |
+| `evidence/stage17_decision.json` | — | 15.2 KB | `39529005cd82f2b5d0950cd3c7c4a8d4f48d4b42c55326ee8e9a3257070931ff` |
+
+Those are whole-file checksums. The payloads *also* carry the harness's own
+projected digests — stage 16 evidence `5c2bd579…`, stage 17 evidence
+`84a16fca…` — and every one of them is recorded in `certificate.json` under
+`imported.source_digests`, together with the implementation, numerical
+implementation and run-configuration hashes for both stages.
+
+The parent/child link survives without the files at all: the certificate records
+the parent's evidence digest twice, once as stage 16's own and once as the
+parent stage 17 declares it was built on. If a payload were ever swapped, those
+two would part company. `test_the_digest_chain_is_published_and_self_consistent`
+checks exactly that, on every commit.
 
 Produced by `example/mo_volmodels/16_adi_greek_certification.py` and
 `17_adi_slv_aggregate_certification.py` at commit `258fd7ec`.
+
+### Running the checks that need the payloads
+
+Drop the four files into `evidence/` (the path is gitignored, so they will stay
+untracked) and the twelve tests marked `requires_banked_evidence` across
+`test/modelvalidation/test_adi2d_import.py` and
+`test/mo_volmodels/test_adi_slv_aggregate_certification.py` switch from skipped
+to enforcing. Without them those tests **skip with a reason** — they never
+report a vacuous pass.
 
 ## Where this certificate's arithmetic differs from the module's
 
@@ -130,4 +154,5 @@ PYTHONPATH=$PWD .venv/bin/python \
 
 The tool is deterministic: same banked evidence in, byte-identical directory
 out. It reads `output/p18_strided` and `output/p18_slv_amendment`, which are the
-run outputs the `evidence/` copies here came from.
+run outputs the payloads came from — so it needs those run directories present,
+and it writes the `evidence/` copies that this repository then leaves untracked.

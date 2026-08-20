@@ -5,6 +5,12 @@ fourteen cells -- is already covered by ``test_banked_certificates.py``, which
 globs every banked ``anchors.json``. These tests are the cheap half: they hold
 the *import* itself to the rules in release procedure section 10, so a future
 edit cannot quietly turn a translated certificate into one that looks native.
+
+The producing harness's raw payloads are artifacts and are not carried in this
+repository, so the checks split. Everything provable from the published
+certificate -- including the parent/child digest chain -- runs everywhere. The
+one check that genuinely needs the rows is marked ``requires_banked_evidence``
+and skips with a reason rather than passing vacuously.
 """
 
 import json
@@ -21,6 +27,22 @@ STUDY = REPO_ROOT / "example/modelvalidation/adi2d_snowball_greeks.yaml"
 BANKED = (
     REPO_ROOT
     / "docs/modelvalidation/certificates/adi2d-snowball-greeks/2026-08-19"
+)
+#: The producing harness's raw payloads. 14.4 MB of Monte-Carlo row dumps --
+#: artifacts, not source -- so they are kept out of the repository. Their
+#: digests are published in the certificate, which is what makes them
+#: identifiable without being carried.
+EVIDENCE = BANKED / "evidence"
+
+requires_banked_evidence = pytest.mark.skipif(
+    not (
+        (EVIDENCE / "stage16_greek_certification.json").is_file()
+        and (EVIDENCE / "stage17_slv_aggregate_amendment.json").is_file()
+    ),
+    reason=(
+        "raw stage-16/17 payloads are kept out of the repository as artifacts; "
+        f"place them under {EVIDENCE.relative_to(REPO_ROOT)} to run this."
+    ),
 )
 
 CANDIDATES = ("equity.snowball.heston_pde", "equity.snowball.heston_slv_pde")
@@ -110,12 +132,54 @@ def test_the_certificate_declares_that_it_was_imported(certificate):
     assert len(imported["gate_differences"]) >= 4
     assert imported["source_digests"]["stage16_schema"] == 13
     assert imported["source_digests"]["stage17_schema"] == 12
+    # The payloads are artifacts and are not carried here, but the certificate
+    # must still say what they are and where they would sit, or a reader cannot
+    # tell which files the digests below describe.
+    assert set(imported["evidence_files"]) == {
+        "stage16_certification",
+        "stage16_decision",
+        "stage17_decision",
+        "stage17_slv_amendment",
+    }
     for relative in imported["evidence_files"].values():
-        assert (BANKED / relative).is_file(), relative
+        assert relative.startswith("evidence/"), relative
 
 
-def test_the_original_payloads_are_banked_with_their_digests_intact(certificate):
-    """The translation is a convenience; the original is the record."""
+def test_the_digest_chain_is_published_and_self_consistent(certificate):
+    """The amendment is byte-linked to the certification it amends -- and that
+    link is provable from the certificate ALONE.
+
+    This is what lets the raw payloads stay out of the repository. The
+    certificate records the parent's evidence digest twice: once as stage 16's
+    own, once as the parent stage 17 declares it was built on. If a payload
+    were ever swapped for a different run, those two would part company.
+    """
+    digests = certificate["imported"]["source_digests"]
+    for key in (
+        "stage16_evidence_sha256",
+        "stage16_decision_sha256",
+        "stage17_evidence_sha256",
+        "stage17_decision_sha256",
+        "stage17_parent_evidence_sha256",
+    ):
+        assert len(digests[key]) == 64, key
+        int(digests[key], 16)  # a hex digest, not a placeholder
+    assert (
+        digests["stage17_parent_evidence_sha256"]
+        == digests["stage16_evidence_sha256"]
+    )
+
+
+@requires_banked_evidence
+def test_the_original_payloads_match_the_digests_the_certificate_publishes(
+    certificate,
+):
+    """The translation is a convenience; the original is the record.
+
+    Skipped where the payloads are absent -- which is the honest outcome. The
+    claim this makes cannot be faked from the certificate, so it must not be
+    silently reported as passing when the rows are not there to check.
+    """
     digests = certificate["imported"]["source_digests"]
     stage16 = json.loads(
         (BANKED / "evidence/stage16_greek_certification.json").read_text()

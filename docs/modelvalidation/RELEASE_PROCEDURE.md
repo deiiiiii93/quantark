@@ -252,8 +252,23 @@ The rule for importing one:
 - **Booleans are exact or recomputed, never invented.** Restate the harness's
   own status where it means the same thing; recompute where the inputs are
   banked; leave a field out rather than guess it.
-- **Keep the original payloads verbatim** under `evidence/`, digests intact. The
-  translation is a convenience; the original is the record.
+- **Publish the originals' identity, not their bytes.** The translation is a
+  convenience; the original is the record — but a multi-megabyte dump of Monte
+  Carlo rows is an artifact, and this repository carries code, tests and
+  research docs. Record every digest the producing harness computed
+  (evidence, decision, parent, implementation, numerical implementation, run
+  configuration, schema) in `imported.source_digests`, name the payload layout
+  in `imported.evidence_files`, and put the whole-file checksums in the
+  certificate's `README.md`. A holder can then prove their payload is the one
+  certified; nobody can substitute a different run.
+  Prefer a chain that is checkable **without** the payloads: recording the
+  parent's evidence digest both as the parent's own and as the child's declared
+  parent makes the byte-link provable from the certificate alone.
+- **Tests that need the rows must skip, not soften.** Mark them
+  `requires_banked_evidence` (or equivalent) so they report `SKIPPED` with a
+  reason naming the directory to drop the payloads into. Never weaken such a
+  test into one that passes vacuously when the evidence is missing — a green
+  run must mean the check ran.
 - **The candidate arm must be live.** Write real builders and a real study YAML,
   so `anchors.json` re-runs the deterministic engines and compares them to the
   banked values. An import whose engines are not anchored is a document, not a
