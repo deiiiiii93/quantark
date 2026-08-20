@@ -1,0 +1,125 @@
+{
+  "abs_tol": 1e-12,
+  "anchors": [
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "case": "low_feller",
+      "values": {
+        "delta": -0.012754941115497465,
+        "gamma": 0.021148841131201745
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "case": "near_expiry",
+      "values": {
+        "delta": -0.3640504092441432,
+        "gamma": -0.01745677448612426
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "case": "near_ki",
+      "values": {
+        "delta": 2.0557298107262207,
+        "gamma": 0.20539296415473854
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.10257580109452578,
+        "gamma": -0.014196457785354636
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "case": "ordinary_decayed",
+      "values": {
+        "delta": 0.5854591480670586,
+        "gamma": -0.05922810839987458
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "case": "ordinary_full",
+      "values": {
+        "delta": 0.20190506535828479,
+        "gamma": -0.02292799888245023
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_pde",
+      "case": "sigma_collapse",
+      "values": {
+        "delta": 0.3247690734269042,
+        "gamma": -0.03321752770058062
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "case": "low_feller",
+      "values": {
+        "delta": -0.002603523341887959,
+        "gamma": 0.02036803538391707
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "case": "near_expiry",
+      "values": {
+        "delta": -0.3589031493035808,
+        "gamma": -0.018923130457892512
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.9961719623165612,
+        "gamma": 0.191572752377141
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.11207614066415315,
+        "gamma": -0.015152830587018851
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "case": "ordinary_decayed",
+      "values": {
+        "delta": 0.5958363715144719,
+        "gamma": -0.058234366344228
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "case": "ordinary_full",
+      "values": {
+        "delta": 0.20878281071604965,
+        "gamma": -0.023222909885675325
+      }
+    },
+    {
+      "candidate": "equity.snowball.heston_slv_pde",
+      "case": "sigma_collapse",
+      "values": {
+        "delta": 0.33975500813104226,
+        "gamma": -0.03322988135023619
+      }
+    }
+  ],
+  "certificate_sha256": "b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446",
+  "fingerprint": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "rel_tol": 1e-09,
+  "schema": 1,
+  "study_source_text": "# Snowball spot Greeks under Heston and Heston-SLV: the ADI 2D certification.\n#\n# Two deterministic engines -- the Heston ADI solver and the Heston-SLV ADI\n# solver, each two-dimensional in (spot, variance) -- certified for spot delta\n# and gamma across seven variance regimes.  The knock-in is monitored DISCRETELY\n# at 252 observations per year, which is what a Chinese snowball actually trades\n# and what keeps the continuous-monitoring machinery out of every cell here.\n#\n# THIS STUDY IS ARCHIVED, NOT RUNNABLE END TO END.\n#\n# Its benchmark is not a paired-RQMC average.  It is a multilevel\n# control-variate telescope on independent seed families, with exact conditional\n# integration of the spot factor, a pilot-frozen cost-weighted Neyman allocation\n# and a substep-refinement bias envelope -- machinery that lives in\n# example/mo_volmodels/16_adi_greek_certification.py and cost 28.6 hours of\n# held-out production sampling.  The reference builder named below DECLARES that\n# benchmark and refuses to run, because a simplified stand-in would certify\n# against something the banked evidence does not describe.\n#\n# What this file IS for: it defines the candidate arm exactly, so\n# `assert_anchors` can re-run the two deterministic solvers on every commit and\n# check they still produce the numbers the evidence claims.  That takes about\n# four minutes for all fourteen cells.\n#\n# Banked evidence and provenance:\n#   docs/modelvalidation/certificates/adi2d-snowball-greeks/\n#\n# Economic scale: the trade is 50,000,000 of notional and one index-futures\n# contract at multiplier 200 hedges it at the cohort's strictest inception level\n# (4,532.52).  NOTE that the certification converted GAMMA using each case's own\n# model spot rather than the hedge inception spot -- a convention this module's\n# HedgeContractScale does not express -- so the banked cells carry their own\n# already-converted economic numbers and the scale below is declared for the\n# record, not used to re-derive them.  See the certificate README.\n\nstudy: adi2d-snowball-greeks\nschema: 1\n\n# Delta and gamma only.  PV was certified separately, by the stage-11 PDE\n# convergence gate, and folding it in here would claim coverage this evidence\n# does not have.\nquantities: [delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\n# The production sampling the banked evidence used, recorded so the certificate\n# is self-describing.  Per-case allocation was frozen from pilots and is not\n# expressible as a single batch count; the numbers here are the heston arm's\n# base allocation, and the per-case grid is in the banked evidence.\nsampling:\n  paths_per_batch: 8192\n  min_batches: 1024\n  max_batches: 2048\n  seed: 20260808\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 4532.52\n    notional: 50000000.0\n\nenvironment:\n  builder: equity.snowball.heston_flat_market\n  params:\n    spot: 100.0\n    rate: 0.02\n    div_yield: 0.01\n    asset_name: synthetic_index\n\nproduct:\n  builder: equity.snowball.vol_dense_ki\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ki_barrier: 75.0\n    ko_rate: 0.15\n    rebate_rate: 0.15\n    maturity: 1.0\n    contract_multiplier: 1.0\n    ki_observations_per_year: 252\n    ko_first_observation_years: 0.25\n    ko_observation_interval_years: 0.0833333333333333\n\nreference:\n  builder: equity.snowball.vol_multilevel_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.snowball.heston_pde\n    params: {}\n  - builder: equity.snowball.heston_slv_pde\n    params: {}\n\n# Seven variance regimes.  Each case names its own Heston block: the regime IS\n# the scenario here, in a way a spot shift alone cannot reproduce.\ncases:\n  # Three years at inception, comfortably between the barriers. The longest\n  # time axis in the study, so time-discretization error has the most room to\n  # accumulate.\n  - name: ordinary_full\n    environment:\n      spot: 100.0\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 3.0}\n\n  # Eighteen months in and 8% underwater: the seasoned state most of a live\n  # book is actually in, and the one a fresh-trade-only study never visits.\n  - name: ordinary_decayed\n    environment:\n      spot: 92.0\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 1.5}\n\n  # Just under the knock-out barrier at 103. The KO discontinuity sits inside\n  # the bump stencil, which is where a deterministic gamma usually breaks first.\n  - name: near_ko\n    environment:\n      spot: 102.7\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 1.0}\n\n  # Half a point above the knock-in barrier at 75, where the payoff turns over.\n  # This cell certifies the production Greek policy's own step density -- 16 ADI\n  # steps per 252-clock KI tick -- against a 32-step solve, so it runs a denser\n  # stencil than every other cell and doubles the spot axis to resolve a barrier\n  # the trade is sitting on.\n  - name: near_ki\n    environment:\n      spot: 75.5\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 1.0, dense_ki_stencil: true}\n\n  # Feller ratio 2*kappa*theta/sigma^2 = 0.192, far below 1: the variance\n  # process hits zero often, which is where a variance-axis discretization\n  # either holds or does not. Roughly half the certification's total cost.\n  - name: low_feller\n    environment:\n      spot: 100.0\n      heston: {v0: 0.04, kappa: 0.60, theta: 0.04, sigma: 0.50, rho: -0.70}\n    product: {maturity: 2.0}\n\n  # Vol-of-vol collapsed to 0.003 with v0 far above theta: the variance PDE\n  # becomes convection-dominated, the regime that exposed a first-order upwind\n  # bias in the variance transport.\n  - name: sigma_collapse\n    environment:\n      spot: 100.0\n      heston: {v0: 0.14027, kappa: 3.0, theta: 0.00306, sigma: 0.00311, rho: -0.50}\n    product: {maturity: 3.0}\n\n  # Three months left: few observations remain and time-discretization error has\n  # nowhere to average out.\n  - name: near_expiry\n    environment:\n      spot: 100.0\n      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}\n    product: {maturity: 0.25}\n"
+}

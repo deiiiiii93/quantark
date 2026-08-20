@@ -1,0 +1,162 @@
+# Snowball spot Greeks under Heston and Heston-SLV: the ADI 2D certification.
+#
+# Two deterministic engines -- the Heston ADI solver and the Heston-SLV ADI
+# solver, each two-dimensional in (spot, variance) -- certified for spot delta
+# and gamma across seven variance regimes.  The knock-in is monitored DISCRETELY
+# at 252 observations per year, which is what a Chinese snowball actually trades
+# and what keeps the continuous-monitoring machinery out of every cell here.
+#
+# THIS STUDY IS ARCHIVED, NOT RUNNABLE END TO END.
+#
+# Its benchmark is not a paired-RQMC average.  It is a multilevel
+# control-variate telescope on independent seed families, with exact conditional
+# integration of the spot factor, a pilot-frozen cost-weighted Neyman allocation
+# and a substep-refinement bias envelope -- machinery that lives in
+# example/mo_volmodels/16_adi_greek_certification.py and cost 28.6 hours of
+# held-out production sampling.  The reference builder named below DECLARES that
+# benchmark and refuses to run, because a simplified stand-in would certify
+# against something the banked evidence does not describe.
+#
+# What this file IS for: it defines the candidate arm exactly, so
+# `assert_anchors` can re-run the two deterministic solvers on every commit and
+# check they still produce the numbers the evidence claims.  That takes about
+# four minutes for all fourteen cells.
+#
+# Banked evidence and provenance:
+#   docs/modelvalidation/certificates/adi2d-snowball-greeks/
+#
+# Economic scale: the trade is 50,000,000 of notional and one index-futures
+# contract at multiplier 200 hedges it at the cohort's strictest inception level
+# (4,532.52).  NOTE that the certification converted GAMMA using each case's own
+# model spot rather than the hedge inception spot -- a convention this module's
+# HedgeContractScale does not express -- so the banked cells carry their own
+# already-converted economic numbers and the scale below is declared for the
+# record, not used to re-derive them.  See the certificate README.
+
+study: adi2d-snowball-greeks
+schema: 1
+
+# Delta and gamma only.  PV was certified separately, by the stage-11 PDE
+# convergence gate, and folding it in here would claim coverage this evidence
+# does not have.
+quantities: [delta, gamma]
+
+bounds:
+  cell: 0.5
+  mean_signed_bias: 0.1
+
+# The production sampling the banked evidence used, recorded so the certificate
+# is self-describing.  Per-case allocation was frozen from pilots and is not
+# expressible as a single batch count; the numbers here are the heston arm's
+# base allocation, and the per-case grid is in the banked evidence.
+sampling:
+  paths_per_batch: 8192
+  min_batches: 1024
+  max_batches: 2048
+  seed: 20260808
+  bump: 0.01
+
+economic_scale:
+  builder: hedge_contracts
+  params:
+    hedge_multiplier: 200.0
+    hedge_inception_spot: 4532.52
+    notional: 50000000.0
+
+environment:
+  builder: equity.snowball.heston_flat_market
+  params:
+    spot: 100.0
+    rate: 0.02
+    div_yield: 0.01
+    asset_name: synthetic_index
+
+product:
+  builder: equity.snowball.vol_dense_ki
+  params:
+    initial_price: 100.0
+    strike: 100.0
+    ko_barrier: 103.0
+    ki_barrier: 75.0
+    ko_rate: 0.15
+    rebate_rate: 0.15
+    maturity: 1.0
+    contract_multiplier: 1.0
+    ki_observations_per_year: 252
+    ko_first_observation_years: 0.25
+    ko_observation_interval_years: 0.0833333333333333
+
+reference:
+  builder: equity.snowball.vol_multilevel_rqmc
+  params: {}
+
+candidates:
+  - builder: equity.snowball.heston_pde
+    params: {}
+  - builder: equity.snowball.heston_slv_pde
+    params: {}
+
+# Seven variance regimes.  Each case names its own Heston block: the regime IS
+# the scenario here, in a way a spot shift alone cannot reproduce.
+cases:
+  # Three years at inception, comfortably between the barriers. The longest
+  # time axis in the study, so time-discretization error has the most room to
+  # accumulate.
+  - name: ordinary_full
+    environment:
+      spot: 100.0
+      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}
+    product: {maturity: 3.0}
+
+  # Eighteen months in and 8% underwater: the seasoned state most of a live
+  # book is actually in, and the one a fresh-trade-only study never visits.
+  - name: ordinary_decayed
+    environment:
+      spot: 92.0
+      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}
+    product: {maturity: 1.5}
+
+  # Just under the knock-out barrier at 103. The KO discontinuity sits inside
+  # the bump stencil, which is where a deterministic gamma usually breaks first.
+  - name: near_ko
+    environment:
+      spot: 102.7
+      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}
+    product: {maturity: 1.0}
+
+  # Half a point above the knock-in barrier at 75, where the payoff turns over.
+  # This cell certifies the production Greek policy's own step density -- 16 ADI
+  # steps per 252-clock KI tick -- against a 32-step solve, so it runs a denser
+  # stencil than every other cell and doubles the spot axis to resolve a barrier
+  # the trade is sitting on.
+  - name: near_ki
+    environment:
+      spot: 75.5
+      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}
+    product: {maturity: 1.0, dense_ki_stencil: true}
+
+  # Feller ratio 2*kappa*theta/sigma^2 = 0.192, far below 1: the variance
+  # process hits zero often, which is where a variance-axis discretization
+  # either holds or does not. Roughly half the certification's total cost.
+  - name: low_feller
+    environment:
+      spot: 100.0
+      heston: {v0: 0.04, kappa: 0.60, theta: 0.04, sigma: 0.50, rho: -0.70}
+    product: {maturity: 2.0}
+
+  # Vol-of-vol collapsed to 0.003 with v0 far above theta: the variance PDE
+  # becomes convection-dominated, the regime that exposed a first-order upwind
+  # bias in the variance transport.
+  - name: sigma_collapse
+    environment:
+      spot: 100.0
+      heston: {v0: 0.14027, kappa: 3.0, theta: 0.00306, sigma: 0.00311, rho: -0.50}
+    product: {maturity: 3.0}
+
+  # Three months left: few observations remain and time-discretization error has
+  # nowhere to average out.
+  - name: near_expiry
+    environment:
+      spot: 100.0
+      heston: {v0: 0.04, kappa: 2.0, theta: 0.04, sigma: 0.30, rho: -0.55}
+    product: {maturity: 0.25}

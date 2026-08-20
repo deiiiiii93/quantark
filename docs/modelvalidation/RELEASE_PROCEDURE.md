@@ -223,7 +223,48 @@ Before a certification is accepted as backing a release:
 |---|---|---|
 | `european_selftest.yaml` | The framework's own calibration check: the candidate is closed-form Black-Scholes, so the framework **must** admit it. Runs in CI on every commit. | ~3 s |
 | `snowball_flat_bsm.yaml` | The demonstration study: PDE and quadrature snowball engines against one paired-RQMC benchmark, five scenarios, PV and both spot Greeks. | minutes |
+| `adi2d_snowball_greeks.yaml` | **Imported, not runnable** (see §10): the 2D ADI Heston and Heston-SLV solvers, spot Greeks, seven variance regimes. Its candidate arm is live and anchored. | anchors ~6 min |
 
 If `european_selftest` ever fails, suspect the certification machinery before
 suspecting the engine — that study exists precisely to make that distinction
 possible.
+
+## 10. Imported certifications
+
+Some evidence was produced before this module existed, or by a benchmark this
+module's reference protocol cannot express. `adi2d-snowball-greeks` is both: its
+benchmark is a multilevel control-variate telescope on independent seed
+families, and its production arm cost 28.6 hours of held-out sampling. Re-running
+such a study to obtain a native certificate is not a reasonable price for a
+change of file format, and it would break the digest chain the original evidence
+is banked on.
+
+The rule for importing one:
+
+- **Translate, never re-gate.** Carry the producing harness's own numbers into
+  the certificate's numeric fields. If you re-derive verdicts with this module's
+  arithmetic you will report verdicts nobody earned — the bounds may match while
+  the interval construction does not.
+- **Declare every difference** in an `imported` block on the payload:
+  `reason`, the harness paths, the source digests, and a `gate_differences` list
+  naming each place the arithmetic diverges. A reader comparing this certificate
+  to a native one must be able to see where the comparison stops holding.
+- **Booleans are exact or recomputed, never invented.** Restate the harness's
+  own status where it means the same thing; recompute where the inputs are
+  banked; leave a field out rather than guess it.
+- **Keep the original payloads verbatim** under `evidence/`, digests intact. The
+  translation is a convenience; the original is the record.
+- **The candidate arm must be live.** Write real builders and a real study YAML,
+  so `anchors.json` re-runs the deterministic engines and compares them to the
+  banked values. An import whose engines are not anchored is a document, not a
+  certification — the anchor is the only part that keeps describing the engine
+  as the code moves.
+- **Prove the anchors independently.** The builders should reconstruct the
+  configuration from the YAML rather than importing the harness, and every
+  anchored value should come back bit-for-bit. Two independent expressions of
+  one configuration agreeing exactly is the evidence that the YAML really
+  describes what was certified.
+- **The reference builder should refuse to run.** Declare the external
+  benchmark, record its configuration, and raise. A simplified stand-in would
+  make `run` appear to work while certifying against something the evidence does
+  not describe.

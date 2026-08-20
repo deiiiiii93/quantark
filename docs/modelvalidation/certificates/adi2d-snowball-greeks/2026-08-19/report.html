@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certification: adi2d-snowball-greeks</title>
+<style>
+:root {
+  --ground: #eceff1;
+  --paper: #ffffff;
+  --ink: #16212b;
+  --muted: #5d6d79;
+  --rule: #ccd6dc;
+  --rail: #dfe6ea;
+  --accent: #0f7a56;
+  --pass: #0f7a56;
+  --fail: #b3261e;
+  --warn: #a8690f;
+  --err: #6b5b95;
+  --pass-bg: #e4f1eb;
+  --fail-bg: #fae9e7;
+  --warn-bg: #f8eeda;
+  --err-bg: #ece9f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #10171d;
+    --paper: #18212a;
+    --ink: #e4ecf1;
+    --muted: #93a4b0;
+    --rule: #31404c;
+    --rail: #26323c;
+    --accent: #46c391;
+    --pass: #46c391;
+    --fail: #f08b80;
+    --warn: #dfa445;
+    --err: #a595c9;
+    --pass-bg: #17332a;
+    --fail-bg: #3a211f;
+    --warn-bg: #35291480;
+    --err-bg: #262137;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #10171d;
+  --paper: #18212a;
+  --ink: #e4ecf1;
+  --muted: #93a4b0;
+  --rule: #31404c;
+  --rail: #26323c;
+  --accent: #46c391;
+  --pass: #46c391;
+  --fail: #f08b80;
+  --warn: #dfa445;
+  --err: #a595c9;
+  --pass-bg: #17332a;
+  --fail-bg: #3a211f;
+  --warn-bg: #35291480;
+  --err-bg: #262137;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+.sheet {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+.masthead { border-bottom: 3px solid var(--ink); padding-bottom: 18px; }
+.eyebrow {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 10px;
+}
+h1 {
+  font-size: clamp(26px, 4vw, 36px); line-height: 1.12; margin: 0 0 6px;
+  letter-spacing: -0.01em; text-wrap: balance;
+}
+.subtitle { margin: 0; color: var(--muted); font-size: 16px; }
+
+.banner {
+  display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: baseline;
+  margin: 22px 0 0; padding: 16px 20px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 5px;
+  border-left: 5px solid var(--rule);
+}
+.banner.pass { border-left-color: var(--pass); }
+.banner.fail { border-left-color: var(--fail); }
+.banner.warn { border-left-color: var(--warn); }
+.banner .headline { font-size: 19px; font-weight: 600; }
+.banner .note { color: var(--muted); font-size: 14.5px; }
+
+.quick {
+  margin: 18px 0 0; padding: 12px 18px; border-radius: 5px;
+  background: var(--warn-bg); border-left: 4px solid var(--warn);
+  font-size: 15px;
+}
+
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 22px 0 0; }
+.stat {
+  flex: 1 1 150px; background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 5px; padding: 12px 16px;
+}
+.stat .k {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); display: block; margin-bottom: 4px;
+}
+.stat .v {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 21px; font-variant-numeric: tabular-nums; font-weight: 600;
+}
+.stat .v.small { font-size: 15px; font-weight: 500; }
+
+section { margin: 40px 0 0; }
+h2 {
+  font-size: 19px; margin: 0 0 4px; letter-spacing: -0.005em;
+  border-bottom: 1px solid var(--rule); padding-bottom: 7px;
+}
+.lede { color: var(--muted); font-size: 14.5px; margin: 8px 0 14px; max-width: 74ch; }
+
+.scroll { overflow-x: auto; }
+table {
+  width: 100%; border-collapse: collapse; background: var(--paper);
+  border: 1px solid var(--rule); font-size: 13.5px;
+}
+th, td {
+  text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+th {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600; background: var(--rail);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+td.name { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+td.wrap { white-space: normal; }
+
+.pill {
+  display: inline-block; padding: 1px 9px; border-radius: 999px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+}
+.pill.pass { background: var(--pass-bg); color: var(--pass); }
+.pill.fail { background: var(--fail-bg); color: var(--fail); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.err  { background: var(--err-bg);  color: var(--err); }
+
+.gauge { display: flex; align-items: center; gap: 8px; min-width: 132px; }
+.track {
+  position: relative; flex: 1; height: 7px; border-radius: 4px;
+  background: var(--rail); overflow: hidden; min-width: 74px;
+}
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
+.fill.pass { background: var(--pass); }
+.fill.fail { background: var(--fail); }
+.fill.warn { background: var(--warn); }
+.fill.err  { background: var(--err); }
+.gauge .pct {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  min-width: 38px; text-align: right;
+}
+
+/* Engines side by side: the point is comparing one grid against another. */
+.configs {
+  display: grid; gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  align-items: start;
+}
+.config-block { min-width: 0; }
+h3.cfg-name {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px; font-weight: 600; margin: 0 0 4px;
+  padding-bottom: 5px; border-bottom: 2px solid var(--accent);
+}
+p.cfg-head { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+p.cfg-head strong {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 600; color: var(--ink);
+}
+.configs table { font-size: 12.5px; table-layout: fixed; width: 100%; }
+.configs td { padding: 5px 11px; }
+/* Setting names are long and the columns are narrow: wrap rather than clip,
+   so no reviewer has to scroll a nested box to read a grid setting. */
+.configs td.name { white-space: normal; overflow-wrap: anywhere; width: 62%; }
+.configs td.num { white-space: normal; overflow-wrap: anywhere; }
+
+.meta {
+  margin: 44px 0 0; padding-top: 14px; border-top: 1px solid var(--rule);
+  font-size: 13px; color: var(--muted);
+}
+.meta dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 0; }
+.meta dt {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+}
+.meta dd {
+  margin: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; word-break: break-all; color: var(--ink);
+}
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.empty { color: var(--muted); font-style: italic; font-size: 14px; }
+
+@media print {
+  body { background: #fff; }
+  .sheet { max-width: none; padding: 0; }
+  section { break-inside: avoid; }
+}
+</style>
+</head><body><div class='sheet'>
+<header class="masthead">
+<p class="eyebrow">quantark &middot; engine release certification</p>
+<h1>adi2d-snowball-greeks</h1>
+<p class="subtitle">Deterministic engines measured against a statistically controlled stochastic benchmark, in hedge contracts.</p>
+</header>
+<div class="banner pass"><span class="headline">All candidates admitted</span><span class="note">Every cell was measured against a benchmark that met its budget.</span></div>
+<div class="stats"><div class="stat"><span class="k">cells</span><span class="v">28</span></div><div class="stat"><span class="k">candidates</span><span class="v">2</span></div><div class="stat"><span class="k">worst cell margin</span><span class="v">83%</span></div><div class="stat"><span class="k">benchmark batches</span><span class="v">8192</span></div><div class="stat"><span class="k">cell bound</span><span class="v small">0.5 c</span></div><div class="stat"><span class="k">bias bound</span><span class="v small">0.1 c</span></div></div>
+<section><h2>Decisions</h2><p class="lede">One decision per candidate engine. ADMITTED requires every cell to pass against a benchmark sharp enough to discriminate; REJECTED requires confident evidence of disagreement; INCONCLUSIVE means the evidence cannot say.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>decision</th><th>cells</th></tr></thead><tbody><tr><td class="name">equity.snowball.heston_pde</td><td><span class="pill pass">ADMITTED</span></td><td><span class="pill pass">14 PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td><span class="pill pass">ADMITTED</span></td><td><span class="pill pass">14 PASS</span></td></tr></tbody></table></div></section>
+<section><h2>Engine configuration</h2><p class="lede">The settings each engine was handed, resolved rather than named: a profile like <code>standard</code> is an indirection whose meaning can change between releases, so the certificate records what it expanded to. These are the <em>requested</em> settings.</p><div class="configs"><div class="config-block"><h3 class="cfg-name">equity.snowball.heston_pde</h3><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">controls.<wbr>barrier_<wbr>greek_<wbr>min_<wbr>n_<wbr>x</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>barrier_<wbr>greek_<wbr>steps_<wbr>per_<wbr>tick</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>greek_<wbr>min_<wbr>n_<wbr>v</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>greek_<wbr>min_<wbr>n_<wbr>x</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>greek_<wbr>min_<wbr>steps_<wbr>per_<wbr>year</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>grid_<wbr>style</td><td class="num">concentrated</td></tr><tr><td class="name">controls.<wbr>v0_<wbr>boundary</td><td class="num">degenerate_pde</td></tr><tr><td class="name">controls.<wbr>v_<wbr>drift_<wbr>scheme</td><td class="num">auto</td></tr><tr><td class="name">controls.<wbr>variance_<wbr>grid_<wbr>mode</td><td class="num">auto</td></tr><tr><td class="name">engine</td><td class="num">HestonSnowballPDESolver</td></tr><tr><td class="name">greeks</td><td class="num">central finite bump on a frozen spatial domain</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>dense_<wbr>ki_<wbr>stencil.<wbr>n_<wbr>x</td><td class="num">600</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>dense_<wbr>ki_<wbr>stencil.<wbr>steps_<wbr>per_<wbr>ki_<wbr>tick</td><td class="num">16</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>min_<wbr>n_<wbr>t</td><td class="num">180</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>n_<wbr>v</td><td class="num">135</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>n_<wbr>x</td><td class="num">300</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>steps_<wbr>per_<wbr>year</td><td class="num">1600</td></tr><tr><td class="name">spot_<wbr>bump</td><td class="num">0.01</td></tr></tbody></table></div></div><div class="config-block"><h3 class="cfg-name">equity.snowball.heston_slv_pde</h3><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">controls.<wbr>barrier_<wbr>greek_<wbr>min_<wbr>n_<wbr>x</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>barrier_<wbr>greek_<wbr>steps_<wbr>per_<wbr>tick</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>greek_<wbr>min_<wbr>n_<wbr>v</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>greek_<wbr>min_<wbr>n_<wbr>x</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>greek_<wbr>min_<wbr>steps_<wbr>per_<wbr>year</td><td class="num">0</td></tr><tr><td class="name">controls.<wbr>grid_<wbr>style</td><td class="num">concentrated</td></tr><tr><td class="name">controls.<wbr>v0_<wbr>boundary</td><td class="num">degenerate_pde</td></tr><tr><td class="name">controls.<wbr>v_<wbr>drift_<wbr>scheme</td><td class="num">auto</td></tr><tr><td class="name">controls.<wbr>variance_<wbr>grid_<wbr>mode</td><td class="num">auto</td></tr><tr><td class="name">engine</td><td class="num">HestonSLVSnowballPDESolver</td></tr><tr><td class="name">greeks</td><td class="num">central finite bump on a frozen spatial domain</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>dense_<wbr>ki_<wbr>stencil.<wbr>n_<wbr>x</td><td class="num">600</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>dense_<wbr>ki_<wbr>stencil.<wbr>steps_<wbr>per_<wbr>ki_<wbr>tick</td><td class="num">16</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>min_<wbr>n_<wbr>t</td><td class="num">180</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>n_<wbr>v</td><td class="num">135</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>n_<wbr>x</td><td class="num">300</td></tr><tr><td class="name">grid_<wbr>policy.<wbr>steps_<wbr>per_<wbr>year</td><td class="num">1600</td></tr><tr><td class="name">spot_<wbr>bump</td><td class="num">0.01</td></tr></tbody></table></div></div><div class="config-block"><h3 class="cfg-name">benchmark</h3><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">allocation</td><td class="num">pilot-frozen cost-weighted Neyman, no optional stopping</td></tr><tr><td class="name">engine</td><td class="num">QESnowballMCEngine / HestonSLVQESnowballMCEngine</td></tr><tr><td class="name">estimator</td><td class="num">multilevel control-variate telescope with exact conditional integration of the spot factor</td></tr><tr><td class="name">external</td><td class="num">true</td></tr><tr><td class="name">greeks</td><td class="num">paired central difference (common random numbers)</td></tr><tr><td class="name">harness</td><td class="num">example/mo_volmodels/16_adi_greek_certification.py</td></tr><tr><td class="name">method</td><td class="num">randomized_quasi (scrambled Sobol, Brownian bridge)</td></tr><tr><td class="name">variance_<wbr>scheme</td><td class="num">QE-M (martingale-corrected quadratic exponential)</td></tr></tbody></table></div></div></div></section>
+<section><h2>Benchmark sampling</h2><p class="lede">Sampling continues until the benchmark is sharp enough for the gate that will judge it. A case that stopped at <code>max_batches</code> never reached that point, and its cells cannot certify anything.</p><div class="scroll"><table><thead><tr><th>case</th><th>batches</th><th>stopped because</th><th>standard errors (raw units)</th></tr></thead><tbody><tr><td>low_feller</td><td class="num">1024</td><td><span class="pill warn">declared_allocation_exhausted</span></td><td class="name">delta 0.000559, gamma 0.00021</td></tr><tr><td>near_expiry</td><td class="num">1024</td><td><span class="pill warn">declared_allocation_exhausted</span></td><td class="name">delta 2.79e-05, gamma 6.7e-06</td></tr><tr><td>near_ki</td><td class="num">2048</td><td><span class="pill warn">declared_allocation_exhausted</span></td><td class="name">delta 0.000293, gamma 0.000778</td></tr><tr><td>near_ko</td><td class="num">1024</td><td><span class="pill warn">declared_allocation_exhausted</span></td><td class="name">delta 0.000117, gamma 5.29e-05</td></tr><tr><td>ordinary_decayed</td><td class="num">1024</td><td><span class="pill warn">declared_allocation_exhausted</span></td><td class="name">delta 0.000197, gamma 0.000123</td></tr><tr><td>ordinary_full</td><td class="num">1024</td><td><span class="pill warn">declared_allocation_exhausted</span></td><td class="name">delta 0.000296, gamma 0.000203</td></tr><tr><td>sigma_collapse</td><td class="num">1024</td><td><span class="pill warn">declared_allocation_exhausted</span></td><td class="name">delta 0.000184, gamma 8.72e-05</td></tr></tbody></table></div><p class="lede">Policy: 8,192 paths per batch, 1024&ndash;2048 batches, seed 20260808, relative bump 0.01.</p></section>
+<section><h2>Cells</h2><p class="lede">One row per candidate &times; case &times; quantity. The gauge shows how much of the 0.5 c cell bound the disagreement interval (|error| + k&middot;SE) consumed &mdash; a pass near 100% is a pass with no room left. Envelope is the candidate's own discretization error from its refinement ladder.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>case</th><th>quantity</th><th>reference</th><th>SE</th><th>candidate</th><th>err (c)</th><th>envelope (c)</th><th>interval vs bound</th><th>verdict</th></tr></thead><tbody><tr><td class="name">equity.snowball.heston_pde</td><td>ordinary_full</td><td>delta</td><td class="num">0.202601</td><td class="num">0.000296</td><td class="num">0.201905</td><td class="num">-0.03839</td><td class="num">0.00373</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:16.3%"></div></div><span class="pct">16%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>ordinary_full</td><td>gamma</td><td class="num">-0.0232394</td><td class="num">0.000203</td><td class="num">-0.022928</td><td class="num">0.01718</td><td class="num">0.00336</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:10.0%"></div></div><span class="pct">10%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>ordinary_decayed</td><td>delta</td><td class="num">0.585689</td><td class="num">0.000197</td><td class="num">0.585459</td><td class="num">-0.0127</td><td class="num">0.0064</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:9.0%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>ordinary_decayed</td><td>gamma</td><td class="num">-0.0592196</td><td class="num">0.000123</td><td class="num">-0.0592281</td><td class="num">-0.000431</td><td class="num">0.00101</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.8%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>near_ko</td><td>delta</td><td class="num">0.102891</td><td class="num">0.000117</td><td class="num">0.102576</td><td class="num">-0.01741</td><td class="num">0.0111</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.7%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>near_ko</td><td>gamma</td><td class="num">-0.0141373</td><td class="num">5.29e-05</td><td class="num">-0.0141965</td><td class="num">-0.003353</td><td class="num">0.00183</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.6%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>near_ki</td><td>delta</td><td class="num">2.05623</td><td class="num">0.000293</td><td class="num">2.05573</td><td class="num">-0.02736</td><td class="num">0.095</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:35.6%"></div></div><span class="pct">36%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>near_ki</td><td>gamma</td><td class="num">0.201439</td><td class="num">0.000778</td><td class="num">0.205393</td><td class="num">0.1646</td><td class="num">0.0301</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:69.1%"></div></div><span class="pct">69%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>low_feller</td><td>delta</td><td class="num">-0.0108225</td><td class="num">0.000559</td><td class="num">-0.0127549</td><td class="num">-0.1066</td><td class="num">0.0124</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:42.2%"></div></div><span class="pct">42%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>low_feller</td><td>gamma</td><td class="num">0.0200765</td><td class="num">0.00021</td><td class="num">0.0211488</td><td class="num">0.05915</td><td class="num">0.0146</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:25.0%"></div></div><span class="pct">25%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>sigma_collapse</td><td>delta</td><td class="num">0.324729</td><td class="num">0.000184</td><td class="num">0.324769</td><td class="num">0.002223</td><td class="num">0.0206</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:9.1%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>sigma_collapse</td><td>gamma</td><td class="num">-0.0331118</td><td class="num">8.72e-05</td><td class="num">-0.0332175</td><td class="num">-0.00583</td><td class="num">0.00822</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.0%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>near_expiry</td><td>delta</td><td class="num">-0.363598</td><td class="num">2.79e-05</td><td class="num">-0.36405</td><td class="num">-0.02496</td><td class="num">0.0156</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.8%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_pde</td><td>near_expiry</td><td>gamma</td><td class="num">-0.01767</td><td class="num">6.7e-06</td><td class="num">-0.0174568</td><td class="num">0.01176</td><td class="num">0.0171</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.0%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>ordinary_full</td><td>delta</td><td class="num">0.208715</td><td class="num">0.0011</td><td class="num">0.208783</td><td class="num">0.00373</td><td class="num">0.00357</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:42.1%"></div></div><span class="pct">42%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>ordinary_full</td><td>gamma</td><td class="num">-0.0224045</td><td class="num">0.00126</td><td class="num">-0.0232229</td><td class="num">-0.04514</td><td class="num">0.00339</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:79.9%"></div></div><span class="pct">80%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>ordinary_decayed</td><td>delta</td><td class="num">0.597527</td><td class="num">0.000755</td><td class="num">0.595836</td><td class="num">-0.09323</td><td class="num">0.00629</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:53.6%"></div></div><span class="pct">54%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>ordinary_decayed</td><td>gamma</td><td class="num">-0.058192</td><td class="num">0.00143</td><td class="num">-0.0582344</td><td class="num">-0.002148</td><td class="num">0.00101</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:83.3%"></div></div><span class="pct">83%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>near_ko</td><td>delta</td><td class="num">0.111806</td><td class="num">0.000521</td><td class="num">0.112076</td><td class="num">0.01491</td><td class="num">0.011</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:25.3%"></div></div><span class="pct">25%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>near_ko</td><td>gamma</td><td class="num">-0.0148174</td><td class="num">0.00083</td><td class="num">-0.0151528</td><td class="num">-0.019</td><td class="num">0.00186</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:56.3%"></div></div><span class="pct">56%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>near_ki</td><td>delta</td><td class="num">1.99678</td><td class="num">0.000302</td><td class="num">1.99617</td><td class="num">-0.03372</td><td class="num">0.0876</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:41.3%"></div></div><span class="pct">41%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>near_ki</td><td>gamma</td><td class="num">0.188255</td><td class="num">0.00117</td><td class="num">0.191573</td><td class="num">0.1382</td><td class="num">0.0213</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:75.7%"></div></div><span class="pct">76%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>low_feller</td><td>delta</td><td class="num">0.000280896</td><td class="num">0.000631</td><td class="num">-0.00260352</td><td class="num">-0.1591</td><td class="num">0.0122</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:59.6%"></div></div><span class="pct">60%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>low_feller</td><td>gamma</td><td class="num">0.0196499</td><td class="num">0.000529</td><td class="num">0.020368</td><td class="num">0.03961</td><td class="num">0.0147</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:40.6%"></div></div><span class="pct">41%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>sigma_collapse</td><td>delta</td><td class="num">0.340288</td><td class="num">0.00068</td><td class="num">0.339755</td><td class="num">-0.02942</td><td class="num">0.0198</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:37.7%"></div></div><span class="pct">38%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>sigma_collapse</td><td>gamma</td><td class="num">-0.0347779</td><td class="num">0.0014</td><td class="num">-0.0332299</td><td class="num">0.08538</td><td class="num">0.00822</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:82.6%"></div></div><span class="pct">83%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>near_expiry</td><td>delta</td><td class="num">-0.358612</td><td class="num">0.000281</td><td class="num">-0.358903</td><td class="num">-0.01608</td><td class="num">0.0161</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:18.7%"></div></div><span class="pct">19%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>near_expiry</td><td>gamma</td><td class="num">-0.0202751</td><td class="num">0.000772</td><td class="num">-0.0189231</td><td class="num">0.07457</td><td class="num">0.018</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:54.4%"></div></div><span class="pct">54%</span></div></td><td><span class="pill pass">PASS</span></td></tr></tbody></table></div></section>
+<section><h2>Aggregate bias</h2><p class="lede">Per-cell bounds are blind to a small error repeated with the same sign in every case. This gate catches exactly that: it measures the mean <em>signed</em> error across cells against a 0.1 c budget.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>quantity</th><th>cells</th><th>mean bias (c)</th><th>SE (c)</th><th>bias vs bound</th><th>passed</th></tr></thead><tbody><tr><td class="name">equity.snowball.heston_pde</td><td>delta</td><td class="num">7</td><td class="num">-0.03217</td><td class="num">0.0269</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:85.9%"></div></div><span class="pct">86%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.heston_slv_pde</td><td>delta</td><td class="num">7</td><td class="num">-0.02999</td><td class="num">0.0334</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:96.8%"></div></div><span class="pct">97%</span></div></td><td><span class="pill pass">PASS</span></td></tr></tbody></table></div></section>
+<div class="meta"><dl><dt>evidence digest</dt><dd>b6c99a6c96ce6f1bdcc221f35da8f325d5f754fe290649a82ea4364add411446</dd><dt>machine</dt><dd>arm64 &middot; macOS-26.6-arm64-arm-64bit</dd><dt>python</dt><dd>3.11.8 &middot; numpy 2.4.6</dd><dt>quantark</dt><dd>258fd7ec39416335a00e7fad70822c15c8c1294a</dd><dt>schema</dt><dd>1</dd></dl></div>
+</div></body></html>

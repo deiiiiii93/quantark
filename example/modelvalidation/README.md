@@ -44,6 +44,7 @@ That path is gitignored — banking evidence is a deliberate act, described in
 | `snowball_flat_bsm.yaml` | Snowball PDE and quadrature engines against one paired-RQMC benchmark, on PV and both spot Greeks, across five scenarios including near-KO, near-KI, low-vol, and near-expiry. | minutes |
 | `phoenix_flat_bsm.yaml` | Phoenix PDE and quadrature engines against one paired-RQMC benchmark, across seven scenarios. Adds what the snowball has not: a coupon barrier, so every observation date carries a digital — `near_coupon` sits right on it — plus a memory-coupon case. | minutes |
 | `ko_reset_flat_bsm.yaml` | KO-reset snowball PDE and quadrature engines against one paired-RQMC benchmark, across seven scenarios. The payoff switches regime at knock-in — a pre-KI schedule to `maturity_pre`, a second lower KO schedule on to `maturity_post` — so the two value surfaces live on different horizons. | minutes |
+| `adi2d_snowball_greeks.yaml` | **Imported, not runnable end to end.** The 2D ADI Heston and Heston-SLV snowball solvers on spot delta and gamma, across seven variance regimes (low Feller, collapsed vol-of-vol, near-KO, near-KI, …). Its benchmark is a multilevel control-variate telescope that cost 28.6 h of held-out sampling, so `run` refuses; the candidate arm is live and anchored. See [the banked certificate](../../docs/modelvalidation/certificates/adi2d-snowball-greeks/2026-08-19/README.md) and release procedure §10. | anchors ~6 min |
 
 ## Writing a new study
 
