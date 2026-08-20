@@ -1,0 +1,975 @@
+{
+  "schema_version": 1,
+  "source": "CFETS / China Foreign Exchange Trade System public composite curve",
+  "source_class": "public_composite_not_executable_history",
+  "currency_pair": "USD.CNY",
+  "trade_date": "2026-07-20",
+  "quote_time": "16:00",
+  "fetched_at": "2026-07-21T12:52:13.131970+00:00",
+  "spot": 6.7664,
+  "delta_convention": {
+    "name": "non-premium-adjusted spot delta",
+    "call": "exp(-r_f*T) * N(d1)",
+    "put": "exp(-r_f*T) * (N(d1)-1)",
+    "atm": "ATMF / published CFETS strikePrice"
+  },
+  "provenance": {
+    "curve_endpoint": "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-fx/FoivltltyCurv",
+    "delta_endpoint": "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-fx/FodpParamHis",
+    "methodology_url": "https://www.chinamoney.com.cn/english/bmkycvivc/",
+    "delta_parameters_url": "https://www.chinamoney.com.cn/english/bmkycvdpp/",
+    "spot_price_type": "28 / Mean Quote Rate of OTC FX Spot Market",
+    "cny_rate_type": "25 / Shibor-Shibor3M IRS closing curve",
+    "payload_sha256": {
+      "delta": "60cf97bfeb751d8eab75a357f8738687b2bcf84c52e3c34678b13d7781a09e0d",
+      "ATM": "cf156ec7b4c924b891fa06b654911f41bda8878600d3aee3deffc97a6586d754",
+      "25C": "a755da78dd02e45d58f7208ab52018b900fbce77a96602e929e6786652fa2873",
+      "25P": "72d89c784bac8e9aea3020c431637733cfaf19fbbd2a223ce92805c3e651d67d",
+      "10C": "79659c5fa32999703d8eb9bc2201c52f91ced438158bfbd27a14f31eea1a5f6d",
+      "10P": "6a4e91847f16054257a13c51a6a4d88c023b2634175d16be133fc465a0685ea6"
+    }
+  },
+  "limitations": [
+    "Public bid/mid/ask are CFETS composite outputs, not node-level executable quotes.",
+    "A displayed zero spread must not be interpreted as an executable zero-spread market.",
+    "Official turnover evidence supports the <=1Y core much more strongly than 18M-3Y."
+  ],
+  "slices": [
+    {
+      "tenor": "1D",
+      "expiry_date": "2026-07-21",
+      "delivery_date": null,
+      "expiry_days": 1,
+      "maturity": 0.0027397260273972603,
+      "delivery_maturity": 0.0027397260273972603,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014539,
+      "foreign_rate": 0.037843,
+      "pricing_foreign_rate": 0.04151150283884755,
+      "published_forward_basis_bps": 0.10050743217471236,
+      "atm_call_delta": 0.5002,
+      "atm_put_delta": -0.4997,
+      "foreign_discount_factor_from_deltas": 0.9999,
+      "effective_foreign_rate_for_delta": 0.03650182512167177,
+      "spot": 6.7664,
+      "forward": 6.7659,
+      "swap_points_pips": -4.32,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.755927520068305,
+          "bid_iv": 0.004,
+          "mid_iv": 0.022000000000000002,
+          "ask_iv": 0.04,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.760235192872149,
+          "bid_iv": 0.006500000000000001,
+          "mid_iv": 0.02375,
+          "ask_iv": 0.040999999999999995,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.7659,
+          "bid_iv": 0.005,
+          "mid_iv": 0.0225,
+          "ask_iv": 0.04,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.771460282347841,
+          "bid_iv": 0.0025,
+          "mid_iv": 0.023250000000000003,
+          "ask_iv": 0.044000000000000004,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.778171358131273,
+          "bid_iv": 0.004,
+          "mid_iv": 0.027000000000000003,
+          "ask_iv": 0.05,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "1W",
+      "expiry_date": "2026-07-27",
+      "delivery_date": null,
+      "expiry_days": 7,
+      "maturity": 0.019178082191780823,
+      "delivery_maturity": 0.019178082191780823,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014549000000000001,
+      "foreign_rate": 0.038597,
+      "pricing_foreign_rate": 0.039214495797140606,
+      "published_forward_basis_bps": 0.1184245527197092,
+      "atm_call_delta": 0.5001,
+      "atm_put_delta": -0.4991,
+      "foreign_discount_factor_from_deltas": 0.9992,
+      "effective_foreign_rate_for_delta": 0.04173098033296309,
+      "spot": 6.7664,
+      "forward": 6.7632,
+      "swap_points_pips": -31.2,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.743329179640505,
+          "bid_iv": 0.0166,
+          "mid_iv": 0.0166,
+          "ask_iv": 0.0166,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.752356587377228,
+          "bid_iv": 0.017225,
+          "mid_iv": 0.017225,
+          "ask_iv": 0.017225,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.7632,
+          "bid_iv": 0.017849999999999998,
+          "mid_iv": 0.017849999999999998,
+          "ask_iv": 0.017849999999999998,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.775685945880632,
+          "bid_iv": 0.019725,
+          "mid_iv": 0.019725,
+          "ask_iv": 0.019725,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.78980110857407,
+          "bid_iv": 0.022099999999999998,
+          "mid_iv": 0.022099999999999998,
+          "ask_iv": 0.022099999999999998,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "2W",
+      "expiry_date": "2026-08-03",
+      "delivery_date": null,
+      "expiry_days": 14,
+      "maturity": 0.038356164383561646,
+      "delivery_maturity": 0.038356164383561646,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014517,
+      "foreign_rate": 0.039420000000000004,
+      "pricing_foreign_rate": 0.039574007276007545,
+      "published_forward_basis_bps": 0.05907145841810291,
+      "atm_call_delta": 0.5,
+      "atm_put_delta": -0.4985,
+      "foreign_discount_factor_from_deltas": 0.9984999999999999,
+      "effective_foreign_rate_for_delta": 0.039136502577680636,
+      "spot": 6.7664,
+      "forward": 6.7599,
+      "swap_points_pips": -64.6,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.729883390579542,
+          "bid_iv": 0.017766999999999998,
+          "mid_iv": 0.017766999999999998,
+          "ask_iv": 0.017766999999999998,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.743790145370326,
+          "bid_iv": 0.018142000000000002,
+          "mid_iv": 0.018142000000000002,
+          "ask_iv": 0.018142000000000002,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.7599,
+          "bid_iv": 0.018517,
+          "mid_iv": 0.018517,
+          "ask_iv": 0.018517,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.777931148431818,
+          "bid_iv": 0.020142000000000004,
+          "mid_iv": 0.020142000000000004,
+          "ask_iv": 0.020142000000000004,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.7969691618312345,
+          "bid_iv": 0.021766999999999998,
+          "mid_iv": 0.021766999999999998,
+          "ask_iv": 0.021766999999999998,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "3W",
+      "expiry_date": "2026-08-10",
+      "delivery_date": null,
+      "expiry_days": 21,
+      "maturity": 0.057534246575342465,
+      "delivery_maturity": 0.057534246575342465,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014432,
+      "foreign_rate": 0.039238,
+      "pricing_foreign_rate": 0.03936641104623787,
+      "published_forward_basis_bps": 0.07388060089041915,
+      "atm_call_delta": 0.4998,
+      "atm_put_delta": -0.4979,
+      "foreign_discount_factor_from_deltas": 0.9977,
+      "effective_foreign_rate_for_delta": 0.0400222337084085,
+      "spot": 6.7664,
+      "forward": 6.7567,
+      "swap_points_pips": -96.5,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.717462190093906,
+          "bid_iv": 0.0178,
+          "mid_iv": 0.019,
+          "ask_iv": 0.0202,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.735979999736197,
+          "bid_iv": 0.01675,
+          "mid_iv": 0.0191,
+          "ask_iv": 0.02145,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.7567,
+          "bid_iv": 0.0175,
+          "mid_iv": 0.0195,
+          "ask_iv": 0.0215,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.78038031896735,
+          "bid_iv": 0.01825,
+          "mid_iv": 0.0216,
+          "ask_iv": 0.02495,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.803645099327104,
+          "bid_iv": 0.0178,
+          "mid_iv": 0.0225,
+          "ask_iv": 0.027200000000000002,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "1M",
+      "expiry_date": "2026-08-20",
+      "delivery_date": null,
+      "expiry_days": 31,
+      "maturity": 0.08493150684931507,
+      "delivery_maturity": 0.08493150684931507,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014400999999999999,
+      "foreign_rate": 0.039112,
+      "pricing_foreign_rate": 0.040705829450304244,
+      "published_forward_basis_bps": 1.3537549931119663,
+      "atm_call_delta": 0.4993,
+      "atm_put_delta": -0.4971,
+      "foreign_discount_factor_from_deltas": 0.9964,
+      "effective_foreign_rate_for_delta": 0.042463577156476986,
+      "spot": 6.7664,
+      "forward": 6.7513,
+      "swap_points_pips": -151.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.705311075506559,
+          "bid_iv": 0.018369,
+          "mid_iv": 0.018369,
+          "ask_iv": 0.018369,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.726512439849482,
+          "bid_iv": 0.018869,
+          "mid_iv": 0.018869,
+          "ask_iv": 0.018869,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.7513,
+          "bid_iv": 0.019018999999999998,
+          "mid_iv": 0.019018999999999998,
+          "ask_iv": 0.019018999999999998,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.779060015717816,
+          "bid_iv": 0.020869,
+          "mid_iv": 0.020869,
+          "ask_iv": 0.020869,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.805442218557947,
+          "bid_iv": 0.021369,
+          "mid_iv": 0.021369,
+          "ask_iv": 0.021369,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "2M",
+      "expiry_date": "2026-09-18",
+      "delivery_date": null,
+      "expiry_days": 60,
+      "maturity": 0.1643835616438356,
+      "delivery_maturity": 0.1643835616438356,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014454,
+      "foreign_rate": 0.039609,
+      "pricing_foreign_rate": 0.040492196630910554,
+      "published_forward_basis_bps": 1.4519354738373735,
+      "atm_call_delta": 0.4983,
+      "atm_put_delta": -0.495,
+      "foreign_discount_factor_from_deltas": 0.9933000000000001,
+      "effective_foreign_rate_for_delta": 0.04089548671169576,
+      "spot": 6.7664,
+      "forward": 6.7375,
+      "swap_points_pips": -288.5,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.660300728627017,
+          "bid_iv": 0.022324999999999998,
+          "mid_iv": 0.022324999999999998,
+          "ask_iv": 0.022324999999999998,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.699284274721038,
+          "bid_iv": 0.021099999999999997,
+          "mid_iv": 0.021099999999999997,
+          "ask_iv": 0.021099999999999997,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.7375,
+          "bid_iv": 0.02105,
+          "mid_iv": 0.02105,
+          "ask_iv": 0.02105,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.7796907691189086,
+          "bid_iv": 0.022850000000000002,
+          "mid_iv": 0.022850000000000002,
+          "ask_iv": 0.022850000000000002,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.8241611800384545,
+          "bid_iv": 0.024575,
+          "mid_iv": 0.024575,
+          "ask_iv": 0.024575,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "3M",
+      "expiry_date": "2026-10-20",
+      "delivery_date": null,
+      "expiry_days": 92,
+      "maturity": 0.25205479452054796,
+      "delivery_maturity": 0.25205479452054796,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014477,
+      "foreign_rate": 0.040125,
+      "pricing_foreign_rate": 0.04012401587251737,
+      "published_forward_basis_bps": -0.0024805401965810603,
+      "atm_call_delta": 0.4972,
+      "atm_put_delta": -0.4927,
+      "foreign_discount_factor_from_deltas": 0.9899,
+      "effective_foreign_rate_for_delta": 0.0402743819084457,
+      "spot": 6.7664,
+      "forward": 6.7228,
+      "swap_points_pips": -436.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.6166352043891825,
+          "bid_iv": 0.024975,
+          "mid_iv": 0.024975,
+          "ask_iv": 0.024975,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.672224642032017,
+          "bid_iv": 0.022763,
+          "mid_iv": 0.022763,
+          "ask_iv": 0.022763,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.7228,
+          "bid_iv": 0.0225,
+          "mid_iv": 0.0225,
+          "ask_iv": 0.0225,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.778104844420936,
+          "bid_iv": 0.024263,
+          "mid_iv": 0.024263,
+          "ask_iv": 0.024263,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.839481978079014,
+          "bid_iv": 0.026725,
+          "mid_iv": 0.026725,
+          "ask_iv": 0.026725,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "6M",
+      "expiry_date": "2027-01-20",
+      "delivery_date": null,
+      "expiry_days": 184,
+      "maturity": 0.5041095890410959,
+      "delivery_maturity": 0.5041095890410959,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014576,
+      "foreign_rate": 0.040752,
+      "pricing_foreign_rate": 0.040751996530140056,
+      "published_forward_basis_bps": -1.7491895709653704e-05,
+      "atm_call_delta": 0.4934,
+      "atm_put_delta": -0.4863,
+      "foreign_discount_factor_from_deltas": 0.9797,
+      "effective_foreign_rate_for_delta": 0.040683369404957946,
+      "spot": 6.7664,
+      "forward": 6.6777,
+      "swap_points_pips": -887.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.504726562197769,
+          "bid_iv": 0.02785,
+          "mid_iv": 0.02935,
+          "ask_iv": 0.03085,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.596071424989186,
+          "bid_iv": 0.02665,
+          "mid_iv": 0.026699999999999998,
+          "ask_iv": 0.02675,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.6777,
+          "bid_iv": 0.025249999999999998,
+          "mid_iv": 0.0255,
+          "ask_iv": 0.025750000000000002,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.764395215764797,
+          "bid_iv": 0.02665,
+          "mid_iv": 0.027200000000000002,
+          "ask_iv": 0.02775,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.864540111872732,
+          "bid_iv": 0.02785,
+          "mid_iv": 0.030350000000000002,
+          "ask_iv": 0.032850000000000004,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "9M",
+      "expiry_date": "2027-04-20",
+      "delivery_date": null,
+      "expiry_days": 274,
+      "maturity": 0.7506849315068493,
+      "delivery_maturity": 0.7506849315068493,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.0147,
+      "foreign_rate": 0.041205,
+      "pricing_foreign_rate": 0.0412050227289014,
+      "published_forward_basis_bps": 0.00017062243840015867,
+      "atm_call_delta": 0.4895,
+      "atm_put_delta": -0.48,
+      "foreign_discount_factor_from_deltas": 0.9695,
+      "effective_foreign_rate_for_delta": 0.04126205682223409,
+      "spot": 6.7664,
+      "forward": 6.6331,
+      "swap_points_pips": -1333.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.398422747983342,
+          "bid_iv": 0.031,
+          "mid_iv": 0.033275,
+          "ask_iv": 0.03515,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.523612403601957,
+          "bid_iv": 0.029825,
+          "mid_iv": 0.030163000000000002,
+          "ask_iv": 0.0301,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": true
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.6331,
+          "bid_iv": 0.027999999999999997,
+          "mid_iv": 0.0285,
+          "ask_iv": 0.0286,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.749527251994703,
+          "bid_iv": 0.029575,
+          "mid_iv": 0.030288,
+          "ask_iv": 0.030600000000000002,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.887887240985125,
+          "bid_iv": 0.031,
+          "mid_iv": 0.034025,
+          "ask_iv": 0.03665,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "1Y",
+      "expiry_date": "2027-07-20",
+      "delivery_date": null,
+      "expiry_days": 365,
+      "maturity": 1.0,
+      "delivery_maturity": 1.0,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014724,
+      "foreign_rate": 0.041580000000000006,
+      "pricing_foreign_rate": 0.04157999677482326,
+      "published_forward_basis_bps": -3.2251766812763094e-05,
+      "atm_call_delta": 0.4855,
+      "atm_put_delta": -0.4738,
+      "foreign_discount_factor_from_deltas": 0.9593,
+      "effective_foreign_rate_for_delta": 0.041551427158235114,
+      "spot": 6.7664,
+      "forward": 6.5871,
+      "swap_points_pips": -1793.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.3011475177187215,
+          "bid_iv": 0.0338,
+          "mid_iv": 0.035796,
+          "ask_iv": 0.03785,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.455211215955931,
+          "bid_iv": 0.032345,
+          "mid_iv": 0.032345,
+          "ask_iv": 0.032395,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.5871,
+          "bid_iv": 0.0305,
+          "mid_iv": 0.030600000000000002,
+          "ask_iv": 0.030750000000000003,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.728719350591565,
+          "bid_iv": 0.032095,
+          "mid_iv": 0.032345,
+          "ask_iv": 0.032645,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.899320073504275,
+          "bid_iv": 0.0338,
+          "mid_iv": 0.036296,
+          "ask_iv": 0.038849999999999996,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "18M",
+      "expiry_date": "2028-01-20",
+      "delivery_date": null,
+      "expiry_days": 549,
+      "maturity": 1.5041095890410958,
+      "delivery_maturity": 1.5041095890410958,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014737,
+      "foreign_rate": 0.041609999999999994,
+      "pricing_foreign_rate": 0.041707834539854174,
+      "published_forward_basis_bps": 1.4716469719577852,
+      "atm_call_delta": 0.477,
+      "atm_put_delta": -0.4622,
+      "foreign_discount_factor_from_deltas": 0.9392,
+      "effective_foreign_rate_for_delta": 0.04170363008475652,
+      "spot": 6.7664,
+      "forward": 6.4974,
+      "swap_points_pips": -2690.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 6.137654451664024,
+          "bid_iv": 0.037000000000000005,
+          "mid_iv": 0.038,
+          "ask_iv": 0.039,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.326215854496226,
+          "bid_iv": 0.0335,
+          "mid_iv": 0.03615,
+          "ask_iv": 0.0388,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.4974,
+          "bid_iv": 0.0305,
+          "mid_iv": 0.03225,
+          "ask_iv": 0.034,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.664527131393707,
+          "bid_iv": 0.029500000000000002,
+          "mid_iv": 0.03215,
+          "ask_iv": 0.0348,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.89318656886945,
+          "bid_iv": 0.032,
+          "mid_iv": 0.038,
+          "ask_iv": 0.044000000000000004,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "2Y",
+      "expiry_date": "2028-07-20",
+      "delivery_date": null,
+      "expiry_days": 731,
+      "maturity": 2.0027397260273974,
+      "delivery_maturity": 2.0027397260273974,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014750000000000001,
+      "foreign_rate": 0.041741,
+      "pricing_foreign_rate": 0.041814687549929085,
+      "published_forward_basis_bps": 1.4758787357527225,
+      "atm_call_delta": 0.4684,
+      "atm_put_delta": -0.4512,
+      "foreign_discount_factor_from_deltas": 0.9196,
+      "effective_foreign_rate_for_delta": 0.041850913028707755,
+      "spot": 6.7664,
+      "forward": 6.4094,
+      "swap_points_pips": -3570.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 5.997785512907251,
+          "bid_iv": 0.038900000000000004,
+          "mid_iv": 0.038900000000000004,
+          "ask_iv": 0.038900000000000004,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.216120378375788,
+          "bid_iv": 0.03725,
+          "mid_iv": 0.03725,
+          "ask_iv": 0.03725,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.4094,
+          "bid_iv": 0.03315,
+          "mid_iv": 0.03315,
+          "ask_iv": 0.03315,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.602475557753107,
+          "bid_iv": 0.03325,
+          "mid_iv": 0.03325,
+          "ask_iv": 0.03325,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.870051286407454,
+          "bid_iv": 0.038900000000000004,
+          "mid_iv": 0.038900000000000004,
+          "ask_iv": 0.038900000000000004,
+          "displayed_spread_is_zero": true,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    },
+    {
+      "tenor": "3Y",
+      "expiry_date": "2029-07-19",
+      "delivery_date": null,
+      "expiry_days": 1095,
+      "maturity": 3.0,
+      "delivery_maturity": 3.0,
+      "pricing_v1_delivery_assumption": "expiry_equals_delivery",
+      "domestic_rate": 0.014926,
+      "foreign_rate": 0.041665,
+      "pricing_foreign_rate": 0.041714066861969566,
+      "published_forward_basis_bps": 1.472114204466024,
+      "atm_call_delta": 0.4517,
+      "atm_put_delta": -0.4306,
+      "foreign_discount_factor_from_deltas": 0.8823,
+      "effective_foreign_rate_for_delta": 0.04174104825135935,
+      "spot": 6.7664,
+      "forward": 6.2439,
+      "swap_points_pips": -5225.0,
+      "quotes": [
+        {
+          "pillar": "10P",
+          "delta": -0.1,
+          "strike": 5.74750884978702,
+          "bid_iv": 0.039,
+          "mid_iv": 0.04075,
+          "ask_iv": 0.0425,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25P",
+          "delta": -0.25,
+          "strike": 6.020594038684318,
+          "bid_iv": 0.0355,
+          "mid_iv": 0.039,
+          "ask_iv": 0.0425,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "ATM",
+          "delta": null,
+          "strike": 6.2439,
+          "bid_iv": 0.0325,
+          "mid_iv": 0.03475,
+          "ask_iv": 0.037000000000000005,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "25C",
+          "delta": 0.25,
+          "strike": 6.476457991142455,
+          "bid_iv": 0.0315,
+          "mid_iv": 0.035,
+          "ask_iv": 0.0385,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        },
+        {
+          "pillar": "10C",
+          "delta": 0.1,
+          "strike": 6.817038529812227,
+          "bid_iv": 0.034,
+          "mid_iv": 0.04075,
+          "ask_iv": 0.0475,
+          "displayed_spread_is_zero": false,
+          "mid_outside_displayed_band": false
+        }
+      ]
+    }
+  ]
+}
