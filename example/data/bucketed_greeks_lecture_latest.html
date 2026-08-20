@@ -315,6 +315,8 @@ footer {
       <a href="#terms">Product terms</a>
       <a href="#market">Market data</a>
       <a href="#buckets">Bucket Greeks</a>
+      <a href="#barrier-proximity">Barrier proximity</a>
+      <a href="#rhoq-hedge">Rhoq hedge</a>
       <a href="#checks">Finite-difference checks</a>
       <a href="#model">Vol-model inputs</a>
     </nav>
@@ -423,10 +425,145 @@ footer {
   </div>
 </section>
 
-<section id="checks">
+<section id="barrier-proximity">
   <div class="section-grid">
     <div class="rail">
       <p class="eyebrow">Step 4</p>
+      <h2>When spot is already above the KO barrier</h2>
+      <p>Barrier proximity changes where futures delta appears. To isolate that
+      effect, this scenario shifts spot and all IM futures marks by the same
+      level ratio, preserving the observed basis percentages from the real
+      snapshot.</p>
+    </div>
+    <div>
+      <h3>Does delta migrate to the near contracts?</h3>
+      <table><thead><tr><th>case</th><th>spot / initial</th><th>spot vs KO</th><th>largest bucket</th><th>front share</th><th>tail share</th><th>front hedge</th><th>tail hedge</th></tr></thead><tbody><tr><td>market snapshot</td><td>100.00%</td><td>-2.91%</td><td>IM2612</td><td>11.24%</td><td>77.93%</td><td>-0.952</td><td>-6.605</td></tr><tr><td>spot above KO</td><td>105.00%</td><td>+1.94%</td><td>IM2612</td><td>19.56%</td><td>66.57%</td><td>-1.091</td><td>-3.713</td></tr><tr><td>spot deep above KO</td><td>120.00%</td><td>+16.50%</td><td>IM2612</td><td>39.37%</td><td>41.65%</td><td>-0.187</td><td>-0.197</td></tr></tbody></table>
+      <div class="note"><b>Reading the scenario.</b> Yes, the front contract
+      gets more important once spot is above KO, because the first monthly
+      observation can terminate the product. But the last listed IM bucket still
+      absorbs all post-December tail exposure in this four-contract curve. With
+      a fuller 2Y IM strip, that tail would be split across later contracts
+      instead of being concentrated in IM2612.</div>
+      <h3>Spot above KO: full futures-delta buckets</h3>
+      <table><thead><tr><th>IM contract</th><th>T</th><th>shifted F</th><th>dPV/dF</th><th>hedge hands</th><th>PnL @ +5pt</th></tr></thead><tbody><tr><td>IM2607</td><td>0.030y</td><td>8,880.9</td><td>+CNY 218.24</td><td>-1.091</td><td>+CNY 1,091</td></tr><tr><td>IM2608</td><td>0.126y</td><td>8,780.1</td><td>+CNY 93.39</td><td>-0.467</td><td>+CNY 466.94</td></tr><tr><td>IM2609</td><td>0.203y</td><td>8,678.2</td><td>+CNY 61.41</td><td>-0.307</td><td>+CNY 307.06</td></tr><tr><td>IM2612</td><td>0.452y</td><td>8,414.5</td><td>+CNY 742.70</td><td>-3.713</td><td>+CNY 3,713</td></tr></tbody></table>
+    </div>
+  </div>
+</section>
+
+<section id="rhoq-hedge">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 5</p>
+      <h2>Does bucketed IM hedging mitigate rhoq?</h2>
+      <p>Both methods still trade IM futures. The scalar approach computes one
+      spot-delta number, converts it into total IM hands, and then needs an
+      allocation rule. Here the scalar hedge is placed in
+      <code>IM2609</code>, the highest-volume contract in the
+      snapshot. The bucketed approach prices <code>dPV/dF_i</code> directly and
+      gives the hands contract by contract. The difference is not
+      index-versus-futures trading; it is the total number of IM hands and their
+      tenor distribution.</p>
+    </div>
+    <div>
+      <h3>Total hands and allocation</h3>
+      <table><thead><tr><th>method</th><th>total hands</th><th>allocation</th></tr></thead><tbody><tr><td>scalar delta IM hedge (IM2609)</td><td>-3.532</td><td>convert scalar delta to IM hands; allocate all hands to IM2609 (highest-volume contract)</td></tr><tr><td>bucketed IM futures delta</td><td>-8.476</td><td>IM2607 -0.952; IM2608 -0.450; IM2609 -0.468; IM2612 -6.605</td></tr></tbody></table>
+      <h3>Delta cash and hands math</h3>
+      <p>Delta cash below is the first-order PnL for a 1% move in the relevant
+      risk variable. It is useful for reading scale. Futures hands are still
+      calculated from raw per-point delta because each IM futures hand has
+      <code>CNY 200</code> PnL per index point.</p>
+      <table><thead><tr><th>view</th><th>delta input</th><th>reference move</th><th>delta cash</th><th>hands formula</th><th>hands</th></tr></thead><tbody><tr><td>scalar delta IM hedge (IM2609)</td><td>+706.33 CNY/spot pt</td><td>1% spot = 84.9 index pts</td><td>+CNY 59,962</td><td>-(+706.33 CNY/spot pt) / 200</td><td>-3.532</td></tr><tr><td>bucketed IM futures delta</td><td>sum dPV/dF_i = +1,695.11</td><td>1% move in each listed IM futures mark</td><td>+CNY 137,237</td><td>sum_i [-(dPV/dF_i) / 200]</td><td>-8.476</td></tr></tbody></table>
+      <h3>Bucket hands detail</h3>
+      <table><thead><tr><th>IM contract</th><th>delta input</th><th>F close</th><th>delta cash @ +1% F</th><th>delta per hand</th><th>hands formula</th><th>hedge hands</th></tr></thead><tbody><tr><td>IM2607</td><td>+190.46 CNY/F pt</td><td>8,458.0</td><td>+CNY 16,109</td><td>200</td><td>-(+190.46) / 200</td><td>-0.952</td></tr><tr><td>IM2608</td><td>+89.97 CNY/F pt</td><td>8,362.0</td><td>+CNY 7,523</td><td>200</td><td>-(+89.97) / 200</td><td>-0.450</td></tr><tr><td>IM2609</td><td>+93.63 CNY/F pt</td><td>8,265.0</td><td>+CNY 7,739</td><td>200</td><td>-(+93.63) / 200</td><td>-0.468</td></tr><tr><td>IM2612</td><td>+1,321.05 CNY/F pt</td><td>8,013.8</td><td>+CNY 105,866</td><td>200</td><td>-(+1,321.05) / 200</td><td>-6.605</td></tr></tbody></table>
+      <h3>Scalar Greeks versus bucket sums</h3>
+      <table><thead><tr><th>risk</th><th>scalar story</th><th>bucket-sum story</th><th>comparison rule</th></tr></thead><tbody><tr><td>delta</td><td>dPV/dS = +706.33; 1% spot delta cash = +CNY 59,962</td><td>sum dPV/dF_i = +1,695.11; all-F +1% delta cash = +CNY 137,237</td><td>Do not compare as identities: spot and listed-futures curve shocks are different scenarios.</td></tr><tr><td>rhoq</td><td>parallel scalar carry rhoq = -CNY 50,869</td><td>sum implied-carry node rhoq = -CNY 50,860</td><td>Compare only after defining the carry scenario and node weights; bucket rhoq is mainly a hedge-placement map.</td></tr></tbody></table>
+      <div class="note"><b>Comparison rule.</b> Scalar Greeks and bucket sums
+      can be compared only when they describe the same market story. A scalar
+      delta is a spot shock; the futures bucket sum is a listed-futures curve
+      shock. A scalar rhoq is a parallel carry shock; the bucket rhoq vector is
+      a node-by-node implied-carry map. For hedging, the right comparison is
+      after translating the chosen story into IM hands and measuring residual
+      node exposure. In this snapshot the scalar rhoq and summed bucket rhoq are
+      close because both approximate a parallel carry move on the same implied
+      carry curve; the delta row is not close because the shocks are different.</div>
+      <h3>Why desks still start with scalar delta cash</h3>
+      <table><thead><tr><th>reason</th><th>what scalar delta cash gives</th><th>what bucketed futures delta adds / caveat</th></tr></thead><tbody><tr><td>common risk language</td><td>one CNY number for book limits, trader handover, PnL explain, and stress dashboards</td><td>a vector needs tenor labels, curve construction, and an aggregation rule before comparison</td></tr><tr><td>fast intraday control</td><td>updates cheaply from spot moves and portfolio aggregation</td><td>requires current futures marks, implied-carry rebuild, and product repricing per node</td></tr><tr><td>execution liquidity</td><td>converts cleanly into IM hands through a house allocation rule focused on liquid contracts</td><td>may ask for far-tenor or less-liquid contracts where rounding, margin, bid/ask, and roll calendars matter</td></tr><tr><td>model governance</td><td>more stable across engines and easier for risk managers to audit</td><td>depends on futures basis, interpolation, tail extrapolation, KO/KI model details, and finite-difference settings</td></tr><tr><td>hedge objective</td><td>good first-order control for broad spot/futures co-move</td><td>best used as a second-layer overlay when basis, carry, rhoq, or roll placement matters</td></tr></tbody></table>
+      <div class="note"><b>Practical takeaway.</b> Scalar delta cash is a
+      production control number, not a claim that traders can trade the index
+      directly. It gives one robust exposure number that can be converted into
+      IM futures through the desk's execution rule. Bucketed futures delta is
+      more informative, but it is model- and curve-dependent, so it is usually
+      introduced as an allocation, basis, rhoq, and roll-risk overlay rather
+      than a full replacement for the scalar delta-cash limit.</div>
+      <h3>When front office and risk use different bases</h3>
+      <table><thead><tr><th>control question</th><th>what happens in this example</th><th>risk-control fix</th></tr></thead><tbody><tr><td>day-end scalar delta limit</td><td>front office uses bucketed hedge hands -8.476. If risk maps those hands back through the scalar IM multiplier, the book looks -988.78 CNY/spot pt, or -CNY 83,940 for a 1% spot move.</td><td>Keep the scalar delta-cash limit, but require a bridge showing scalar before/after hedge and bucket allocation.</td></tr><tr><td>day-end rhoq limit</td><td>bucketed hedge residual is CNY 0.15 by node, while the scalar report only sees a parallel carry story.</td><td>Report both scalar parallel rhoq and node residual rhoq; do not let one replace the other silently.</td></tr><tr><td>PnL explain</td><td>trader explains futures PnL by IM contract and carry node; risk explains by spot delta cash and parallel carry.</td><td>Add a daily reconciliation from scalar delta cash to futures buckets, basis, roll, and residual rhoq.</td></tr><tr><td>governance</td><td>neither desk is necessarily wrong; they are using different risk-factor bases.</td><td>Define the official hierarchy: scalar limits for top-down control, bucket limits for hedge placement and basis/rhoq risk.</td></tr></tbody></table>
+      <div class="note warn"><b>Control issue.</b> This is a measurement-basis
+      mismatch. The front office can be right that bucketed futures delta gives
+      a better contract allocation and lower node rhoq, while risk can also be
+      right that the same hedge breaches a scalar delta-cash limit. The fix is
+      not to choose one number blindly; the day-end package needs a governed
+      bridge from scalar delta cash to futures-bucket hands and residual rhoq.</div>
+      <h3>Reconciliation framework</h3>
+      <p>The reconciliation should be a daily control package, not an informal
+      spreadsheet note. It must preserve both views and show how the hedge looks
+      when translated through the other view's risk factors.</p>
+      <table><thead><tr><th>bridge item</th><th>scalar / risk lens</th><th>bucket / front-office lens</th></tr></thead><tbody><tr><td>pre-hedge delta</td><td>+706.33 CNY/spot pt; +CNY 59,962 for 1% spot</td><td>sum dPV/dF_i = +1,695.11; +CNY 137,237 for all-F +1%</td></tr><tr><td>hedge instruction</td><td>-3.532 IM hands by desk allocation rule into IM2609</td><td>-8.476 total IM hands split as IM2607 -0.952; IM2608 -0.450; IM2609 -0.468; IM2612 -6.605</td></tr><tr><td>post-hedge scalar delta check</td><td>scalar hedge target is approximately zero before rounding and execution slippage</td><td>bucket hedge maps to -988.78 CNY/spot pt, or -CNY 83,940 for 1% spot</td></tr><tr><td>post-hedge rhoq check</td><td>scalar-allocation hedge residual abs rhoq = CNY 59,558</td><td>bucket hedge residual abs node rhoq = CNY 0.15</td></tr></tbody></table>
+      <h3>Real-case numerical bridge</h3>
+      <p>These equations use the same 000852.SH Snowball and listed IM futures
+      snapshot. They show why a hedge can be correct under one lens and fail
+      under the other.</p>
+      <table><thead><tr><th>hedge</th><th>scalar delta equation</th><th>scalar 1% cash residual</th><th>bucket-delta equation</th><th>bucket 1% cash residual</th><th>rhoq residual</th></tr></thead><tbody><tr><td>scalar IM hedge (IM2609)</td><td>+706.33 - 706.33 = +0.00</td><td>+CNY 0.00</td><td>+1,695.11 - 706.33 = +988.78</td><td>+CNY 78,859 (abs CNY 180,138)</td><td>CNY 59,558</td></tr><tr><td>bucketed IM futures hedge</td><td>+706.33 - 1,695.11 = -988.78</td><td>-CNY 83,940</td><td>+1,695.11 - 1,695.11 = +0.00</td><td>+CNY 0.00 (abs CNY 0.00)</td><td>CNY 0.15</td></tr></tbody></table>
+      <h3>Delta residual by contract</h3>
+      <table><thead><tr><th>IM contract</th><th>option dPV/dF</th><th>scalar hedge hands</th><th>residual dPV/dF: scalar hedge</th><th>residual cash: scalar hedge</th><th>bucket hedge hands</th><th>residual dPV/dF: bucket hedge</th><th>residual cash: bucket hedge</th></tr></thead><tbody><tr><td>IM2607</td><td>+CNY 190.46</td><td>+0.000</td><td>+CNY 190.46</td><td>+CNY 16,109</td><td>-0.952</td><td>+CNY 0.00</td><td>+CNY 0.00</td></tr><tr><td>IM2608</td><td>+CNY 89.97</td><td>+0.000</td><td>+CNY 89.97</td><td>+CNY 7,523</td><td>-0.450</td><td>+CNY 0.00</td><td>+CNY 0.00</td></tr><tr><td>IM2609</td><td>+CNY 93.63</td><td>-3.532</td><td>-CNY 612.70</td><td>-CNY 50,639</td><td>-0.468</td><td>+CNY 0.00</td><td>+CNY 0.00</td></tr><tr><td>IM2612</td><td>+CNY 1,321</td><td>+0.000</td><td>+CNY 1,321</td><td>+CNY 105,866</td><td>-6.605</td><td>+CNY 0.00</td><td>+CNY 0.00</td></tr></tbody></table>
+      <table><thead><tr><th>step</th><th>daily control action</th><th>required output</th></tr></thead><tbody><tr><td>1. Freeze inputs</td><td>lock product terms, valuation date, spot, IM quotes, rates, vol model, engine, bump sizes, and curve mode</td><td>one reproducible market/model snapshot shared by desk and risk</td></tr><tr><td>2. Produce scalar risk view</td><td>calculate scalar delta cash, scalar parallel rhoq, and limit usage under the official risk methodology</td><td>day-end hard-limit view and breach status</td></tr><tr><td>3. Produce bucket hedge view</td><td>calculate dPV/dF_i, hands_i = -dPV/dF_i / multiplier, bucket rhoq, and residual node rhoq after hedge</td><td>contract allocation, node residuals, and roll/basis exposure</td></tr><tr><td>4. Translate across lenses</td><td>map bucket hands back to scalar delta cash; map scalar hands back to node rhoq residuals</td><td>bridge table showing why scalar and bucket reports differ</td></tr><tr><td>5. Attribute the gap</td><td>split the difference into tenor basis, tail extrapolation, rounding/liquidity, curve interpolation, and model/bump settings</td><td>explainable residual rather than an unexplained limit dispute</td></tr><tr><td>6. Govern exceptions</td><td>pre-define tolerances and approvals when bucket hedging improves rhoq but worsens scalar delta cash, or vice versa</td><td>signed exception, hedge rationale, and next rebalancing trigger</td></tr></tbody></table>
+      <div class="note"><b>Policy recommendation.</b> Keep scalar delta cash as
+      the hard top-down limit, add bucketed futures delta and node rhoq as
+      controlled sub-limits, and require an exception workflow whenever an
+      optimizer improves one view while worsening the other. The bridge table is
+      the evidence for approving, resizing, or rejecting that hedge.</div>
+      <h3>Residual carry risk after each IM hedge</h3>
+      <table><thead><tr><th>carry node</th><th>option rhoq</th><th>scalar IM hedge rhoq</th><th>residual: scalar IM</th><th>bucketed IM hedge rhoq</th><th>residual: bucketed IM</th></tr></thead><tbody><tr><td>IM2607</td><td>-CNY 485.47</td><td>+CNY 0.00</td><td>-CNY 485.47</td><td>+CNY 485.48</td><td>+CNY 0.01</td></tr><tr><td>IM2608</td><td>-CNY 948.15</td><td>+CNY 0.00</td><td>-CNY 948.15</td><td>+CNY 948.15</td><td>+CNY 0.00</td></tr><tr><td>IM2609</td><td>-CNY 1,569</td><td>+CNY 11,836</td><td>+CNY 10,267</td><td>+CNY 1,569</td><td>+CNY 0.02</td></tr><tr><td>IM2612</td><td>-CNY 47,857</td><td>+CNY 0.00</td><td>-CNY 47,857</td><td>+CNY 47,857</td><td>-CNY 0.12</td></tr></tbody></table>
+      <table><thead><tr><th>hedge method</th><th>absolute residual rhoq</th><th>reduction vs unhedged</th></tr></thead><tbody><tr><td>unhedged option</td><td>CNY 50,860</td><td>0.00%</td></tr><tr><td>scalar delta IM hedge (IM2609)</td><td>CNY 59,558</td><td>-17.10%</td></tr><tr><td>bucketed IM futures delta hedge</td><td>CNY 0.15</td><td>+100.00%</td></tr></tbody></table>
+      <div class="note"><b>Why total hands are so different.</b> The scalar
+      hedge starts from <code>dPV/dS</code>: one spot shock, then one execution
+      rule for where to trade the IM futures. The bucket hedge starts from
+      <code>dPV/dF_i</code>: each listed futures mark is shocked separately and
+      the implied carry curve is rebuilt. Those bucket shocks include tenor and
+      basis/carry information that a spot shock does not contain. With this
+      four-contract strip, <code>IM2612</code> also carries
+      the post-December tail of the 2Y Snowball. That is why the scalar hedge is
+      -3.532 IM hands while the bucket hedge totals
+      -8.476 hands across contracts; the bucket
+      vector is not required to add back to the scalar spot delta.</div>
+      <div class="note"><b>Why the scalar IM hedge can increase rhoq.</b> The
+      scalar rule puts all hands into <code>IM2609</code>, so
+      it adds +CNY 11,836 of carry rhoq on that
+      node. But the largest option carry exposure is the tail node
+      <code>IM2612</code>, where the scalar hedge leaves
+      -CNY 47,857 residual rhoq. The scalar
+      hedge therefore over-hedges one node and leaves the main tail node open,
+      increasing absolute residual rhoq from CNY 50,860 to
+      CNY 59,558.</div>
+      <div class="note"><b>Trading interpretation.</b> The scalar IM hedge is
+      still a futures hedge, but its single total-hand number does not know
+      which carry node created the risk. In this snapshot it over-hedges
+      <code>IM2609</code> carry and leaves the far IM tail
+      mostly open. Bucketed futures delta mitigates measured rhoq because each
+      IM hedge is placed on the same node that defines the implied carry curve:
+      <code>dPV/dq_i = dPV/dF_i * dF_i/dq_i</code>.</div>
+      <div class="note warn"><b>Limitations.</b> This is not a universal
+      basis hedge. It works for the listed IM carry nodes represented in the
+      curve. It does not eliminate model risk, volatility risk, realised
+      rebalancing error, non-parallel basis moves, or unlisted tail-tenor risk
+      that the four-contract curve approximates with its last node.</div>
+    </div>
+  </div>
+</section>
+
+<section id="checks">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 6</p>
       <h2>Finite differences are explicit</h2>
       <p>This example requests central mode per coordinate. That is the least
       biased finite-difference choice when both up and down bumps are valid.</p>
@@ -457,7 +594,7 @@ footer {
 
 
 <footer>
-Generated 2026-07-08 14:44:14 from local artifact tag <code>latest</code>.
+Generated 2026-07-08 20:15:29 from local artifact tag <code>latest</code>.
 MO data date 2026-07-06; IM data date 2026-07-06.
 </footer>
 </div>
