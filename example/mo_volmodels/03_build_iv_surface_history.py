@@ -573,8 +573,20 @@ def load_manifest_records(manifest_path: Path) -> dict[str, dict]:
 def save_manifest(
     manifest_path: Path, records: dict[str, dict], *, window: dict
 ) -> None:
-    """Rewrite the surface manifest atomically with top-level provenance."""
-    payload = {
+    """Rewrite the surface manifest without dropping downstream policy metadata."""
+    previous: dict = {}
+    if manifest_path.is_file():
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(
+                f"surface manifest {manifest_path} is corrupt ({exc}); "
+                "refusing to replace its provenance metadata"
+            ) from exc
+        if isinstance(loaded, dict):
+            previous = loaded
+    payload = dict(previous)
+    payload.update({
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "source": SOURCE_CLASS,
         "price_field": PRICE_FIELD,
@@ -589,7 +601,7 @@ def save_manifest(
             "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
         },
         "records": [records[tag] for tag in sorted(records)],
-    }
+    })
     serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     _atomic_write_bytes(manifest_path, serialized.encode("utf-8"))
 
@@ -652,8 +664,6 @@ def main() -> None:
 
     spots = load_spot_map(args.spot_csv)
     records = load_manifest_records(args.manifest)
-    window = {"start": dates[0], "end": dates[-1]}
-
     pending: list[tuple] = []
     for trade_date in dates:
         iso = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}"
@@ -691,6 +701,15 @@ def main() -> None:
     for entry in results:
         records[entry["date"]] = entry
 
+    # ``--start``/``--end`` select the incremental work for this invocation;
+    # they must not shrink the manifest's provenance window to only that
+    # incremental slice.  Derive the persisted window from the complete
+    # record set after merging the new results.
+    record_dates = sorted(records)
+    window = {
+        "start": record_dates[0] if record_dates else dates[0],
+        "end": record_dates[-1] if record_dates else dates[-1],
+    }
     save_manifest(args.manifest, records, window=window)
     n_ok = sum(1 for entry in results if entry["status"] == "ok")
     n_excluded = len(results) - n_ok

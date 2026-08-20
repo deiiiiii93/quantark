@@ -65,7 +65,16 @@ def apply_exclusions(manifest: Dict[str, Any]) -> List[str]:
             "consumers carry forward the previous admitted surface"
         )
         changed.append(str(rec.get("date")))
-    if changed:
+    excluded_dates = sorted(
+        str(rec["date"])
+        for rec in manifest.get("records", [])
+        if (
+            rec.get("reason") == EXCLUSION_REASON
+            and rec.get("n_expiries") is not None
+            and int(rec["n_expiries"]) < MIN_EXPIRIES_FOR_DUPIRE
+        )
+    )
+    if excluded_dates:
         manifest.setdefault("study_admission", {})[
             "vol_model_backtest"
         ] = {
@@ -76,7 +85,7 @@ def apply_exclusions(manifest: Dict[str, Any]) -> List[str]:
                 "three maturity pillars; the builder's own min_expiries=2 "
                 "admits surfaces those models cannot price."
             ),
-            "excluded_dates": changed,
+            "excluded_dates": excluded_dates,
         }
     return changed
 
@@ -115,14 +124,19 @@ def main(argv=None) -> int:
             print(f"   {rec['date']}  n_expiries={rec.get('n_expiries')}")
         return 1 if thin else 0
 
+    before = json.dumps(manifest, sort_keys=True)
     changed = apply_exclusions(manifest)
-    if not changed:
+    policy_changed = json.dumps(manifest, sort_keys=True) != before
+    if not policy_changed:
         print(f"no change: all {before_ok} admitted surfaces already have "
               f">= {MIN_EXPIRIES_FOR_DUPIRE} expiries")
         return 0
     _atomic_write_json(path, manifest)
     after_ok = sum(1 for r in manifest["records"] if r.get("status") == "ok")
-    print(f"excluded {len(changed)} thin surfaces: {', '.join(changed)}")
+    if changed:
+        print(f"excluded {len(changed)} thin surfaces: {', '.join(changed)}")
+    else:
+        print("restored vol-model study admission provenance")
     print(f"admitted: {before_ok} -> {after_ok}")
     return 0
 

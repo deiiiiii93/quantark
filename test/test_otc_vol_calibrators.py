@@ -278,6 +278,27 @@ class TestHestonCalibrator:
         # Different calibration config -> different cache entry -> recalibrated.
         assert spy.calls == 2
 
+    def test_temporal_reference_changes_cache_key_and_record(
+        self, tmp_path, artifact
+    ):
+        reference = (0.04, 2.0, 0.04, 0.3, -0.5)
+        config = _fast_calibration_config(
+            cache_dir=str(tmp_path / "calib_cache"),
+            heston_temporal_reference=reference,
+            heston_temporal_regularization=0.1,
+        )
+        calibrator = VolModelCalibrator(config)
+        legacy_fingerprint = VolModelCalibrator(
+            _fast_calibration_config()
+        )._config_fingerprint("heston")
+        temporal_fingerprint = calibrator._config_fingerprint("heston")
+        assert temporal_fingerprint != legacy_fingerprint
+
+        model = calibrator.calibrate("heston", artifact)
+        assert model.record["temporal_reference"]["v0"] == pytest.approx(0.04)
+        assert model.record["temporal_regularization"] == pytest.approx(0.1)
+        assert model.record["temporal_penalty_cost"] >= 0.0
+
 
 class TestSlvCalibrator:
     def test_slv_reuses_heston_cache_entry(self, monkeypatch, calibrator, artifact):
@@ -330,6 +351,24 @@ class TestSlvCalibrator:
         assert record["leverage_max"] >= record["leverage_min"]
         assert record["heston"]["v0"] > 0.0
         json.dumps(record)
+
+    def test_slv_override_skips_heston_kernel(
+        self, monkeypatch, tmp_path, artifact
+    ):
+        override = (0.04, 2.0, 0.04, 0.3, -0.5)
+        config = _fast_calibration_config(
+            cache_dir=str(tmp_path / "calib_cache"),
+            slv_heston_override=override,
+        )
+        heston_spy = _KernelSpy(
+            monkeypatch, vol_calibrators, "calibrate_heston"
+        )
+        model = VolModelCalibrator(config).calibrate("heston_slv", artifact)
+        assert heston_spy.calls == 0
+        assert model.record["heston_source"] == "config_override"
+        assert tuple(model.record["heston"][name] for name in (
+            "v0", "kappa", "theta", "sigma", "rho"
+        )) == pytest.approx(override)
 
 
 class TestCalibratorFailClosed:
@@ -587,6 +626,18 @@ class TestEngineConfigVolModel:
             VolModelCalibrationConfig(slv_n_steps=0)
         with pytest.raises(ValidationError, match="heston_preset"):
             VolModelCalibrationConfig(heston_preset="unknown_preset")
+        with pytest.raises(
+            ValidationError, match="heston_temporal_reference is required"
+        ):
+            VolModelCalibrationConfig(heston_temporal_regularization=0.1)
+        with pytest.raises(ValidationError, match="five finite parameters"):
+            VolModelCalibrationConfig(
+                heston_temporal_reference=(0.04, 2.0)
+            )
+        with pytest.raises(ValidationError, match="must lie within"):
+            VolModelCalibrationConfig(
+                slv_heston_override=(0.04, 2.0, 0.04, 0.3, 0.5)
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -869,4 +920,3 @@ class TestVolModelMcMethodSlot:
         )
         with pytest.raises(ValidationError, match="Invalid method type"):
             create_pricing_engine(product, config)
-

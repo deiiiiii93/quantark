@@ -35,8 +35,12 @@ class VolModelCalibrationConfig:
     (only ``"mo_frozen"`` — the mo_volmodels suite values).  ``slv_eta`` /
     ``slv_n_steps`` / ``slv_n_x`` / ``slv_n_z`` steer the forward
     Fokker-Planck leverage calibration (suite defaults 1.0 / 40 / 161 /
-    81).  ``shared_store`` is an optional caller-held dict shared across
-    runs as a common in-memory cache.
+    81).  ``heston_temporal_reference`` and
+    ``heston_temporal_regularization`` opt into a structural-only temporal
+    penalty for Heston; ``slv_heston_override`` supplies an explicit Heston
+    vector for leverage calibration.  These advanced fields are normally
+    orchestrated by the daily MO pipeline.  ``shared_store`` is an optional
+    caller-held dict shared across runs as a common in-memory cache.
     """
 
     cache_dir: Optional[str] = None
@@ -47,6 +51,13 @@ class VolModelCalibrationConfig:
     slv_n_steps: int = 40
     slv_n_x: int = 161
     slv_n_z: int = 81
+    heston_temporal_reference: Optional[
+        tuple[float, float, float, float, float]
+    ] = None
+    heston_temporal_regularization: float = 0.0
+    slv_heston_override: Optional[
+        tuple[float, float, float, float, float]
+    ] = None
     shared_store: Optional[MutableMapping] = None
 
     def __post_init__(self) -> None:
@@ -64,10 +75,62 @@ class VolModelCalibrationConfig:
             raise ValidationError("slv_n_x must be >= 3")
         if int(self.slv_n_z) < 3:
             raise ValidationError("slv_n_z must be >= 3")
+        if not math.isfinite(float(self.heston_temporal_regularization)) or (
+            float(self.heston_temporal_regularization) < 0.0
+        ):
+            raise ValidationError(
+                "heston_temporal_regularization must be non-negative and finite"
+            )
+        self.heston_temporal_reference = self._validate_heston_vector(
+            self.heston_temporal_reference,
+            "heston_temporal_reference",
+        )
+        self.slv_heston_override = self._validate_heston_vector(
+            self.slv_heston_override,
+            "slv_heston_override",
+        )
+        if (
+            float(self.heston_temporal_regularization) > 0.0
+            and self.heston_temporal_reference is None
+        ):
+            raise ValidationError(
+                "heston_temporal_reference is required when "
+                "heston_temporal_regularization > 0"
+            )
         if self.shared_store is not None and not isinstance(
             self.shared_store, MutableMapping
         ):
             raise ValidationError("shared_store must be a mutable mapping")
+
+    def _validate_heston_vector(
+        self,
+        value: Optional[tuple[float, float, float, float, float]],
+        field_name: str,
+    ) -> Optional[tuple[float, float, float, float, float]]:
+        if value is None:
+            return None
+        if isinstance(value, (str, bytes)):
+            raise ValidationError(f"{field_name} must contain five parameters")
+        try:
+            normalized = tuple(float(item) for item in value)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"{field_name} must contain five finite parameters"
+            ) from exc
+        if len(normalized) != 5 or not all(math.isfinite(x) for x in normalized):
+            raise ValidationError(
+                f"{field_name} must contain five finite parameters"
+            )
+        lower, upper = HESTON_PRESETS[self.heston_preset]["bounds"]
+        if any(
+            parameter < lo or parameter > hi
+            for parameter, lo, hi in zip(normalized, lower, upper)
+        ):
+            raise ValidationError(
+                f"{field_name} parameters must lie within the "
+                f"{self.heston_preset!r} bounds"
+            )
+        return normalized
 
 
 @dataclass

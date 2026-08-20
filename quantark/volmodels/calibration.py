@@ -153,9 +153,11 @@ class VolModelCalibrator:
     Args:
         config: a ``VolModelCalibrationConfig`` (duck-typed: cache_dir,
             heston_preset, heston_max_nfev, slv_eta, slv_n_steps, slv_n_x,
-            slv_n_z, shared_store).  ``cache_dir=None`` means in-memory
-            caching only; ``shared_store`` lets a fleet of backtest runs
-            share one in-memory cache.
+            slv_n_z, heston_temporal_reference,
+            heston_temporal_regularization, slv_heston_override,
+            shared_store).  ``cache_dir=None`` means in-memory caching only;
+            ``shared_store`` lets a fleet of backtest runs share one in-memory
+            cache.
     """
 
     def __init__(self, config: Any) -> None:
@@ -294,7 +296,17 @@ class VolModelCalibrator:
         rate_curve, div_curve = self._artifact_curves(artifact)
         s0 = float(artifact.s0)
         nodes = self._heston_nodes(artifact)
-        initial = self._initial_heston_guess(artifact)
+        temporal_reference_vector = getattr(
+            cfg, "heston_temporal_reference", None
+        )
+        temporal_reference = (
+            self._heston_params_from_vector(temporal_reference_vector)
+            if temporal_reference_vector is not None
+            else None
+        )
+        # A prior is also the most stable starting point for the regularized
+        # solve.  Its v0 is supplied by the daily raw fit and is not penalized.
+        initial = temporal_reference or self._initial_heston_guess(artifact)
         options = [
             MarketOption(K=node["K"], T=node["T"], iv=node["iv"], weight=1.0)
             for node in nodes
@@ -310,6 +322,10 @@ class VolModelCalibrator:
             method=preset["method"],
             regularize_feller=preset["regularize_feller"],
             enforce_feller=preset["enforce_feller"],
+            temporal_reference=temporal_reference,
+            temporal_regularization=float(
+                getattr(cfg, "heston_temporal_regularization", 0.0)
+            ),
             max_nfev=int(cfg.heston_max_nfev),
             **preset["solver_tolerances"],
         )
@@ -347,6 +363,24 @@ class VolModelCalibrator:
             "n_nodes": len(nodes),
             "heston_preset": str(cfg.heston_preset),
         }
+        if temporal_reference is not None:
+            record.update(
+                {
+                    "temporal_reference": {
+                        name: float(getattr(temporal_reference, name))
+                        for name in HESTON_PARAMETER_NAMES
+                    },
+                    "temporal_regularization": float(
+                        getattr(cfg, "heston_temporal_regularization", 0.0)
+                    ),
+                    "temporal_penalty_cost": float(
+                        result.temporal_penalty_cost
+                    ),
+                    "temporal_parameters": list(
+                        HESTON_PARAMETER_NAMES[1:]
+                    ),
+                }
+            )
         return params_payload, record
 
     def _calibrate_slv(
@@ -355,9 +389,19 @@ class VolModelCalibrator:
         cfg = self._config
         eta = float(cfg.slv_eta)
         n_steps = int(cfg.slv_n_steps)
-        # Reuse the SAME cache entries: no recalibration of LV or Heston.
+        # Reuse the SAME LV cache entry.  Heston is either the matching
+        # calibrated entry (legacy behavior) or the daily pipeline's explicit
+        # v0 + structural-EWMA override.
         lv_model = self.calibrate(VOL_MODEL_LOCALVOL, artifact)
-        heston_model = self.calibrate(VOL_MODEL_HESTON, artifact)
+        heston_override = getattr(cfg, "slv_heston_override", None)
+        if heston_override is None:
+            heston_params = self.calibrate(
+                VOL_MODEL_HESTON, artifact
+            ).heston_params
+            heston_source = "calibrated_heston"
+        else:
+            heston_params = self._heston_params_from_vector(heston_override)
+            heston_source = "config_override"
         rate_curve, div_curve = self._artifact_curves(artifact)
         # Suite grid (05_slv_calibration.py): uniform time grid to the last
         # listed expiry, forward rate/carry per interval from the artifact
@@ -367,7 +411,7 @@ class VolModelCalibrator:
         carry_fwd = forward_carry_on_grid(div_curve.get_yield, t_grid)
         leverage = calibrate_leverage_surface_fp(
             float(artifact.s0),
-            heston_model.heston_params,
+            heston_params,
             lv_model.local_vol_surface,
             np.diff(t_grid),
             r_fwd,
@@ -378,7 +422,7 @@ class VolModelCalibrator:
         lg = np.asarray(leverage.leverage_grid, dtype=float)
         diagnostics = dict(leverage.diagnostics or {})
         heston_payload = {
-            name: float(getattr(heston_model.heston_params, name))
+            name: float(getattr(heston_params, name))
             for name in HESTON_PARAMETER_NAMES
         }
         params = {
@@ -400,6 +444,8 @@ class VolModelCalibrator:
             "n_clipped": int(diagnostics.get("n_clipped", 0)),
             "max_negative_mass": float(diagnostics.get("max_negative_mass", 0.0)),
         }
+        if heston_override is not None:
+            record["heston_source"] = heston_source
         return params, record
 
     # ------------------------------------------------------------------
@@ -468,6 +514,20 @@ class VolModelCalibrator:
         atm0 = min(artifact.atm_pillars, key=lambda p: p["T"])
         v_level = float(np.clip(float(atm0["atm_vol"]) ** 2, 0.01, 0.2))
         return HestonParams(v0=v_level, kappa=2.0, theta=v_level, sigma=0.6, rho=-0.5)
+
+    @staticmethod
+    def _heston_params_from_vector(values: Sequence[float]) -> HestonParams:
+        if len(values) != len(HESTON_PARAMETER_NAMES):
+            raise ValidationError(
+                "Heston parameter vector must contain "
+                f"{len(HESTON_PARAMETER_NAMES)} values"
+            )
+        return HestonParams(
+            **{
+                name: float(value)
+                for name, value in zip(HESTON_PARAMETER_NAMES, values)
+            }
+        )
 
     @staticmethod
     def _heston_fit_metrics(
@@ -547,10 +607,25 @@ class VolModelCalibrator:
                 "max_nfev": int(cfg.heston_max_nfev),
                 "schema": _CACHE_SCHEMA_VERSION,
             }
+            temporal_reference = getattr(
+                cfg, "heston_temporal_reference", None
+            )
+            if temporal_reference is not None:
+                payload.update(
+                    temporal_reference=[
+                        float(value) for value in temporal_reference
+                    ],
+                    temporal_regularization=float(
+                        getattr(
+                            cfg, "heston_temporal_regularization", 0.0
+                        )
+                    ),
+                    temporal_parameters=list(HESTON_PARAMETER_NAMES[1:]),
+                )
         else:
+            heston_override = getattr(cfg, "slv_heston_override", None)
             payload = {
                 "kernel": "calibrate_leverage_surface_fp",
-                "heston": self._config_fingerprint(VOL_MODEL_HESTON),
                 "localvol": self._config_fingerprint(VOL_MODEL_LOCALVOL),
                 "eta": float(cfg.slv_eta),
                 "n_steps": int(cfg.slv_n_steps),
@@ -558,6 +633,12 @@ class VolModelCalibrator:
                 "n_z": int(cfg.slv_n_z),
                 "schema": _CACHE_SCHEMA_VERSION,
             }
+            if heston_override is None:
+                payload["heston"] = self._config_fingerprint(VOL_MODEL_HESTON)
+            else:
+                payload["heston_override"] = [
+                    float(value) for value in heston_override
+                ]
         return json.dumps(
             payload, sort_keys=True, separators=(",", ":"), allow_nan=False
         )

@@ -39,6 +39,7 @@ class CalibrationResult:
     nfev: int
     data_cost: float = 0.0
     feller_penalty_cost: float = 0.0
+    temporal_penalty_cost: float = 0.0
     feller_margin: float = 0.0
     enforce_feller: bool = False
     optimizer: str = "least_squares"
@@ -65,6 +66,8 @@ def calibrate_heston(
     ftol: float = 1e-6,
     gtol: float = 1e-6,
     enforce_feller: bool = False,
+    temporal_reference: Optional[HestonParams] = None,
+    temporal_regularization: float = 0.0,
 ) -> CalibrationResult:
     """Calibrate (v0, kappa, theta, sigma, rho) to market options via least squares.
 
@@ -88,6 +91,13 @@ def calibrate_heston(
             ``2 * kappa * theta >= sigma**2``.  This is a genuine constrained
             solve; ``regularize_feller`` remains the independent soft-penalty
             control used by the objective.
+        temporal_reference: optional prior Heston parameter set for temporal
+            regularization.  Only the structural parameters ``kappa``,
+            ``theta``, ``sigma``, and ``rho`` are penalized; ``v0`` remains a
+            daily surface fit.
+        temporal_regularization: non-negative weight on squared structural
+            parameter changes, normalized by each parameter's calibration
+            bound span.  Zero (default) preserves independent calibration.
 
     Notes:
         In the default least-squares branch, a NumericalError raised by the CF
@@ -111,6 +121,21 @@ def calibrate_heston(
         raise ValidationError("regularize_feller must be finite and non-negative")
     if not isinstance(enforce_feller, bool):
         raise ValidationError("enforce_feller must be a bool")
+    if not (
+        np.isfinite(temporal_regularization)
+        and temporal_regularization >= 0.0
+    ):
+        raise ValidationError(
+            "temporal_regularization must be finite and non-negative"
+        )
+    if temporal_reference is not None and not isinstance(
+        temporal_reference, HestonParams
+    ):
+        raise ValidationError("temporal_reference must be a HestonParams")
+    if temporal_regularization > 0.0 and temporal_reference is None:
+        raise ValidationError(
+            "temporal_reference is required when temporal_regularization > 0"
+        )
     if not (np.isfinite(s0) and s0 > 0):
         raise ValidationError("s0 must be finite and positive")
     def resolve(value, t: float, name: str) -> float:
@@ -171,6 +196,24 @@ def calibrate_heston(
             "initial parameters must lie within [lower, upper]; tighten the initial "
             "guess or widen the bounds"
         )
+    temporal_reference_x: Optional[np.ndarray] = None
+    if temporal_reference is not None:
+        temporal_reference_x = np.array(
+            [
+                temporal_reference.v0,
+                temporal_reference.kappa,
+                temporal_reference.theta,
+                temporal_reference.sigma,
+                temporal_reference.rho,
+            ],
+            dtype=float,
+        )
+        if np.any(temporal_reference_x < lower) or np.any(
+            temporal_reference_x > upper
+        ):
+            raise ValidationError(
+                "temporal_reference parameters must lie within [lower, upper]"
+            )
     if enforce_feller:
         max_box_margin = 2.0 * upper[1] * upper[2] - lower[3] * lower[3]
         if max_box_margin <= 0.0:
@@ -226,6 +269,19 @@ def calibrate_heston(
         if regularize_feller > 0.0:
             feller_violation = max(0.0, -feller_margin(x))
             res = np.concatenate([res, np.array([math.sqrt(regularize_feller) * feller_violation])])
+        if temporal_regularization > 0.0:
+            # Normalize by the frozen calibration box so one unit of kappa is
+            # not treated as the same move as one unit of theta.  v0 is
+            # deliberately excluded: it remains today's variance anchor.
+            structural_span = np.where(
+                upper[1:] > lower[1:], upper[1:] - lower[1:], 1.0
+            )
+            temporal_residual = (
+                math.sqrt(temporal_regularization)
+                * (x[1:] - temporal_reference_x[1:])
+                / structural_span
+            )
+            res = np.concatenate([res, temporal_residual])
         return res
 
     if enforce_feller:
@@ -331,14 +387,28 @@ def calibrate_heston(
     )
     violation = max(0.0, -margin)
     penalty_cost = float(0.5 * regularize_feller * violation * violation)
+    temporal_penalty_cost = 0.0
+    if temporal_regularization > 0.0:
+        structural_span = np.where(
+            upper[1:] > lower[1:], upper[1:] - lower[1:], 1.0
+        )
+        normalized_change = (
+            fitted_x[1:] - temporal_reference_x[1:]
+        ) / structural_span
+        temporal_penalty_cost = float(
+            0.5
+            * temporal_regularization
+            * np.dot(normalized_change, normalized_change)
+        )
     return CalibrationResult(
         params=unpack(fitted_x),
         success=success,
-        cost=data_cost + penalty_cost,
+        cost=data_cost + penalty_cost + temporal_penalty_cost,
         message=message,
         nfev=nfev,
         data_cost=data_cost,
         feller_penalty_cost=penalty_cost,
+        temporal_penalty_cost=temporal_penalty_cost,
         feller_margin=margin,
         enforce_feller=enforce_feller,
         optimizer=optimizer,

@@ -60,6 +60,34 @@ The genuine cross-date study is a separate official-settlement cohort:
 .venv/bin/python example/mo_volmodels/03_build_iv_surface_history.py --workers 4
 ```
 
+For ongoing EOD operation, use the incremental daily orchestrator rather than
+running those stages individually:
+
+```bash
+# Refresh market caches, fetch new official settlements, build new surfaces,
+# and calibrate Local Vol + hard-Feller Heston + Heston-SLV.
+.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run
+
+# Opt in to daily v0 + five-date structural EWMA for SLV, with a
+# structural temporal penalty for pure Heston.
+.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py run \
+  --temporal-smoothing
+
+# Read-only freshness/health check.
+.venv/bin/python example/mo_volmodels/14_daily_calibration_pipeline.py status
+
+# Install the macOS launchd job (18:30 and 20:30 Asia/Shanghai, weekdays).
+.venv/bin/python example/mo_volmodels/install_daily_scheduler.py install
+.venv/bin/python example/mo_volmodels/install_daily_scheduler.py status
+```
+
+The first operational run calibrates only the latest admitted surface; later
+runs calibrate every newly admitted date. A multi-year SLV backfill is never
+started implicitly, including when the temporal scheme is first enabled. See
+[`DAILY_PIPELINE.md`](DAILY_PIPELINE.md) for the EWMA/regularization formula,
+audit fields, status semantics, runtime artifacts, scheduler behavior, and
+recovery procedures.
+
 Open the results:
 
 - **`data/mo_volmodels_lecture_latest.html`** — long-form teaching material.
@@ -88,6 +116,9 @@ fixture) so the test pipeline and the live pipeline never clobber each other's f
 | `06_lecture.py`           | weave everything into the HTML lecture + comparison CSV |
 | `10_calibration_diagnostics.py` | normalized Heston fits across strictly comparable official CFFEX settlement dates → JSON/CSV/plot |
 | `10_explainer.py`         | fail-closed, artifact-driven eight-section verdict with interactive raw-smile, tenor-error, and official-settlement stability explorers |
+| `14_daily_calibration_pipeline.py` | one locked, incremental EOD transaction: refresh → settlements → surfaces → LV/Heston/SLV calibration → atomic freshness status |
+| `15_calibration_stability_report.py` | bounded HTML/JSON/CSV stability evidence from persisted daily calibration records |
+| `install_daily_scheduler.py` | generate/install/inspect the macOS launchd job; weekday 18:30 primary run plus 20:30 source-publication retry |
 | `_heston_diagnostics.py`  | bound-aware finite-difference Jacobian, scaled SVD, and deterministic bootstrap summaries |
 | `_mo_common.py`           | shared helpers (snapshot IO, parity, OTM filter, IV inversion, env build, leverage, plots) |
 
