@@ -10,12 +10,14 @@ from typing import Optional, List
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
 from .observation_schedule import ObservationRecord, ObservationSchedule
+from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import (
     OptionType,
     ExerciseType,
     BarrierType,
     ObservationType,
     ObservationAggregation,
+    TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
 
@@ -70,6 +72,11 @@ class BarrierOption(BaseEquityOption):
         observation_dates: Optional[List[float]] = None,
         observation_schedule: Optional[ObservationSchedule] = None,
         contract_multiplier: float = 1.0,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
     ):
         """
         Initialize barrier option.
@@ -89,12 +96,6 @@ class BarrierOption(BaseEquityOption):
         Raises:
             ValidationError: If parameters are invalid
         """
-        # Default maturity handling
-        if maturity is None and exercise_date is None:
-            maturity = 0.0
-        elif maturity is None:
-            maturity = 0.0
-
         # Store barrier parameters before calling super().__init__
         self.barrier = barrier
         self.barrier_type = barrier_type
@@ -110,8 +111,13 @@ class BarrierOption(BaseEquityOption):
             maturity=maturity,
             option_type=option_type,
             exercise_type=ExerciseType.EUROPEAN,  # Barrier options are typically European
+            tenor=tenor,
+            initial_date=initial_date,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
         )
 
@@ -283,7 +289,7 @@ class BarrierOption(BaseEquityOption):
         return (
             f"BarrierOption("
             f"{self.option_type}, K={self.strike:.2f}, "
-            f"B={self.barrier:.2f}, {self.barrier_type}, T={self.maturity:.4f}, "
+            f"B={self.barrier:.2f}, {self.barrier_type}, {self._format_maturity()}, "
             f"rebate={self.rebate:.2f}, pay_at_hit={self.pay_at_hit}, "
             f"participation={self.participation_rate:.4f})"
         )

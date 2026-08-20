@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
-from quantark.util.enum import ExerciseType, OptionType
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import ExerciseType, OptionType, TenorEnd
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero
 
@@ -49,6 +50,7 @@ class RangeAccrualOption(BaseEquityOption):
     """
 
     # Range accrual specific parameters
+    initial_price: float = 0.0
     range_config: Optional[RangeAccrualConfig] = None
     observation_records: Optional[List[RangeAccrualObservationRecord]] = None
     observation_times: Optional[List[float]] = None
@@ -64,6 +66,12 @@ class RangeAccrualOption(BaseEquityOption):
         observation_times: Optional[List[float]] = None,
         num_observations: Optional[int] = None,
         contract_multiplier: float = 1.0,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        settlement_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
     ):
         """
         Initialize Range Accrual option.
@@ -82,6 +90,7 @@ class RangeAccrualOption(BaseEquityOption):
         self.observation_records = observation_records
         self.observation_times = observation_times
         self.num_observations = num_observations
+        self.initial_price = initial_price
 
         # RangeAccrualOption doesn't use strike in the traditional sense
         # We use initial_price as the reference for barrier percentages
@@ -91,8 +100,13 @@ class RangeAccrualOption(BaseEquityOption):
             option_type=OptionType.CALL,  # Dummy, not used for payoff
             exercise_type=ExerciseType.EUROPEAN,
             maturity=maturity,
+            tenor=tenor,
+            initial_date=initial_date,
             exercise_date=exercise_date,
-            initial_price=initial_price,
+            settlement_date=settlement_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
         )
 
@@ -106,6 +120,7 @@ class RangeAccrualOption(BaseEquityOption):
         # Skip strike validation (we use initial_price as reference, not strike)
         self._validate_maturity_dates()
         self._validate_date_ordering()
+        self._validate_types()
         self._validate_tenor_end()
         self._validate_contract_multiplier()
         self._validate_range_accrual_parameters()

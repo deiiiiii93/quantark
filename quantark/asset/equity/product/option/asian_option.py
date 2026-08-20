@@ -10,11 +10,13 @@ from datetime import datetime
 from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 import numpy as np
 
+from quantark.util.calendar import DayCountConvention, calculate_year_fraction
 from quantark.util.enum import (
     OptionType,
     ExerciseType,
     AveragingType,
     AsianStrikeType,
+    TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_zero, is_close, safe_log, safe_exp
@@ -23,12 +25,6 @@ from .base_equity_option import BaseEquityOption
 
 if TYPE_CHECKING:
     from quantark.priceenv import PricingEnvironment
-
-try:
-    from quantark.util.calendar import calculate_year_fraction
-except ImportError:
-    calculate_year_fraction = None
-
 
 @dataclass
 class AsianObservationRecord:
@@ -153,6 +149,7 @@ class AsianOption(BaseEquityOption):
     observation_dates: Optional[List[datetime]] = None
     observation_records: Optional[List[AsianObservationRecord]] = None
     num_observations: Optional[int] = 12
+    initial_price: float = 0.0
 
     def __init__(
         self,
@@ -168,6 +165,12 @@ class AsianOption(BaseEquityOption):
         num_observations: Optional[int] = 12,
         initial_price: float = 0.0,
         contract_multiplier: float = 1.0,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        settlement_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
     ):
         """
         Initialize Asian option.
@@ -185,6 +188,12 @@ class AsianOption(BaseEquityOption):
             num_observations: Number of observations for uniform schedule (default: 12)
             initial_price: Reference/initial underlying price
             contract_multiplier: Underlying units represented by one contract
+            tenor: Full contract tenor in years (optional)
+            initial_date: Product start/issue date (optional)
+            settlement_date: Settlement date (optional)
+            maturity_date: Explicit contract maturity date (optional)
+            tenor_end: End-point used when deriving contract tenor
+            annualization_day_count: Day count convention for contract tenor
         """
         self.asian_strike_type = asian_strike_type
         self.averaging_type = averaging_type
@@ -192,6 +201,7 @@ class AsianOption(BaseEquityOption):
         self.observation_dates = observation_dates
         self.observation_records = observation_records
         self.num_observations = num_observations
+        self.initial_price = initial_price
 
         # For floating strike, strike can be zero (strike is the average)
         if asian_strike_type == AsianStrikeType.FLOATING and strike == 0.0:
@@ -202,8 +212,13 @@ class AsianOption(BaseEquityOption):
             option_type=option_type,
             exercise_type=ExerciseType.EUROPEAN,  # Asian options are European-style
             maturity=maturity,
+            tenor=tenor,
+            initial_date=initial_date,
             exercise_date=exercise_date,
-            initial_price=initial_price,
+            settlement_date=settlement_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
         )
 
@@ -223,6 +238,10 @@ class AsianOption(BaseEquityOption):
         self._validate_types()
         self._validate_tenor_end()
         self._validate_contract_multiplier()
+        if self.initial_price < 0:
+            raise ValidationError(
+                f"initial_price must be non-negative when provided, got {self.initial_price}"
+            )
         self._validate_asian_parameters()
 
     def _validate_asian_parameters(self) -> None:

@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
-from quantark.util.enum import OptionType, ExerciseType
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import OptionType, ExerciseType, TenorEnd
 from quantark.util.exceptions import ValidationError
 
 
@@ -31,6 +32,11 @@ class EuropeanVanillaOption(BaseEquityOption):
         exercise_date: Optional[datetime] = None,
         settlement_date: Optional[datetime] = None,
         contract_multiplier: float = 1.0,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
     ):
         """
         Initialize European vanilla option.
@@ -41,16 +47,17 @@ class EuropeanVanillaOption(BaseEquityOption):
             maturity: Time to maturity in years (optional if exercise_date provided)
             exercise_date: Date when option can be exercised (optional if maturity provided)
             settlement_date: Date when settlement occurs (optional, defaults to exercise_date)
-            
+            contract_multiplier: Underlying units represented by one contract
+            tenor: Full contract tenor in years (optional)
+            initial_date: Product start/issue date (optional)
+            maturity_date: Explicit contract maturity date (optional)
+            tenor_end: End-point used when deriving contract tenor
+            annualization_day_count: Day count convention for contract tenor
+
         Note:
-            Either maturity OR exercise_date must be provided (not both).
+            Provide one pricing-expiry form: maturity/tenor or
+            exercise_date/maturity_date.
         """
-        # Default maturity to 0 if not provided (will be validated)
-        if maturity is None and exercise_date is None:
-            maturity = 0.0  # Will trigger validation error
-        elif maturity is None:
-            maturity = 0.0  # Placeholder when using dates
-            
         super().__init__(
             strike=strike,
             maturity=maturity,
@@ -58,6 +65,11 @@ class EuropeanVanillaOption(BaseEquityOption):
             exercise_type=ExerciseType.EUROPEAN,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            tenor=tenor,
+            initial_date=initial_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
         )
 
@@ -99,5 +111,5 @@ class EuropeanVanillaOption(BaseEquityOption):
     def __repr__(self):
         return (
             f"EuropeanVanillaOption("
-            f"{self.option_type}, K={self.strike:.2f}, T={self.maturity:.4f})"
+            f"{self.option_type}, K={self.strike:.2f}, {self._format_maturity()})"
         )

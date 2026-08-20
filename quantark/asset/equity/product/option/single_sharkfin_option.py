@@ -12,12 +12,14 @@ from datetime import datetime
 from math import ceil
 from typing import List, Optional, Sequence
 
+from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import (
     ExerciseType,
     ObservationAggregation,
     ObservationFrequency,
     ObservationType,
     OptionType,
+    TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close
@@ -90,6 +92,11 @@ class SingleSharkfinOption(BaseEquityOption):
         use_business_days_for_frequency: bool = True,
         business_days_in_year: float = 252.0,
         contract_multiplier: float = 1.0,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
     ):
         """
         Initialize a single sharkfin option.
@@ -117,11 +124,6 @@ class SingleSharkfinOption(BaseEquityOption):
         Raises:
             ValidationError: If parameters are invalid.
         """
-        if maturity is None and exercise_date is None:
-            maturity = 0.0
-        elif maturity is None:
-            maturity = 0.0
-
         self.barrier = barrier
         self.participation_rate = participation_rate
         self.knock_out_rebate = knock_out_rebate
@@ -139,8 +141,13 @@ class SingleSharkfinOption(BaseEquityOption):
             option_type=option_type,
             exercise_type=ExerciseType.EUROPEAN,
             maturity=maturity,
+            tenor=tenor,
+            initial_date=initial_date,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
         )
 
@@ -416,5 +423,5 @@ class SingleSharkfinOption(BaseEquityOption):
         return (
             "SingleSharkfinOption("
             f"{self.option_type}, K={self.strike:.2f}, "
-            f"B={self.barrier:.2f}, T={self.maturity:.4f})"
+            f"B={self.barrier:.2f}, {self._format_maturity()})"
         )

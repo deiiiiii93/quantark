@@ -23,6 +23,7 @@ from datetime import datetime
 from math import ceil
 from typing import List, Optional, Sequence, Tuple
 
+from quantark.util.calendar import DayCountConvention
 from quantark.util.enum import (
     AccumulatorKnockOutType,
     ExerciseType,
@@ -30,6 +31,7 @@ from quantark.util.enum import (
     ObservationFrequency,
     ObservationType,
     OptionType,
+    TenorEnd,
 )
 from quantark.util.exceptions import ValidationError
 from quantark.util.numerical import is_close, is_zero
@@ -68,6 +70,7 @@ class AccumulatorOption(BaseEquityOption):
     """
 
     knock_out_barrier: float = 0.0
+    initial_price: float = 0.0
     knock_out_type: AccumulatorKnockOutType = AccumulatorKnockOutType.TERMINATION
     knock_out_rebate_rate: float = 0.0
     gearing: float = 2.0
@@ -107,6 +110,11 @@ class AccumulatorOption(BaseEquityOption):
         use_business_days_for_frequency: bool = True,
         business_days_in_year: float = 252.0,
         contract_multiplier: float = 1.0,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
     ):
         """
         Initialize an accumulator option.
@@ -139,9 +147,6 @@ class AccumulatorOption(BaseEquityOption):
         Raises:
             ValidationError: If parameters are invalid.
         """
-        if maturity is None and exercise_date is None:
-            maturity = 0.0
-
         self.knock_out_barrier = knock_out_barrier
         self.knock_out_type = knock_out_type
         self.knock_out_rebate_rate = knock_out_rebate_rate
@@ -156,6 +161,7 @@ class AccumulatorOption(BaseEquityOption):
         self.observation_frequency = observation_frequency
         self.use_business_days_for_frequency = use_business_days_for_frequency
         self.business_days_in_year = business_days_in_year
+        self.initial_price = initial_price
 
         # Derive daily shares from notional when not explicitly provided.
         if is_zero(daily_share_accumulation) and not is_zero(notional):
@@ -173,9 +179,13 @@ class AccumulatorOption(BaseEquityOption):
             option_type=option_type,
             exercise_type=ExerciseType.EUROPEAN,
             maturity=maturity,
+            tenor=tenor,
+            initial_date=initial_date,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
-            initial_price=initial_price,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
         )
 
@@ -191,6 +201,10 @@ class AccumulatorOption(BaseEquityOption):
         """
         super().validate()
 
+        if self.initial_price < 0:
+            raise ValidationError(
+                f"initial_price must be non-negative when provided, got {self.initial_price}"
+            )
         if self.option_type != OptionType.CALL:
             raise ValidationError(
                 "AccumulatorOption only supports CALL; a PUT-style structure is a "
@@ -438,5 +452,5 @@ class AccumulatorOption(BaseEquityOption):
         return (
             "AccumulatorOption("
             f"K={self.strike:.2f}, KO={self.knock_out_barrier:.2f}, "
-            f"gearing={self.gearing:.2f}, T={self.maturity:.4f})"
+            f"gearing={self.gearing:.2f}, {self._format_maturity()})"
         )
