@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 from .base_equity_option import BaseEquityOption
-from quantark.util.enum import OptionType, ExerciseType
+from quantark.util.calendar import DayCountConvention
+from quantark.util.enum import OptionType, ExerciseType, TenorEnd
 from quantark.util.exceptions import ValidationError
 
 
@@ -30,6 +31,11 @@ class CashOrNothingDigitalOption(BaseEquityOption):
         exercise_date: Optional[datetime] = None,
         settlement_date: Optional[datetime] = None,
         contract_multiplier: float = 1.0,
+        tenor: Optional[float] = None,
+        initial_date: Optional[datetime] = None,
+        maturity_date: Optional[datetime] = None,
+        tenor_end: TenorEnd = TenorEnd.EXERCISE,
+        annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
     ):
         """
         Initialize cash-or-nothing digital option.
@@ -43,13 +49,9 @@ class CashOrNothingDigitalOption(BaseEquityOption):
             settlement_date: Date when settlement occurs (optional, defaults to exercise_date)
 
         Note:
-            Either maturity OR exercise_date must be provided (not both).
+            Provide one pricing-expiry form: maturity/tenor or
+            exercise_date/maturity_date.
         """
-        if maturity is None and exercise_date is None:
-            maturity = 0.0  # Will trigger validation error
-        elif maturity is None:
-            maturity = 0.0  # Placeholder when using dates
-
         self.payout = payout
 
         super().__init__(
@@ -57,8 +59,13 @@ class CashOrNothingDigitalOption(BaseEquityOption):
             maturity=maturity,
             option_type=option_type,
             exercise_type=ExerciseType.EUROPEAN,
+            tenor=tenor,
+            initial_date=initial_date,
             exercise_date=exercise_date,
             settlement_date=settlement_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
             contract_multiplier=contract_multiplier,
         )
 
@@ -98,5 +105,6 @@ class CashOrNothingDigitalOption(BaseEquityOption):
     def __repr__(self):
         return (
             f"CashOrNothingDigitalOption("
-            f"{self.option_type}, K={self.strike:.4f}, P={self.payout:.4f}, T={self.maturity:.4f})"
+            f"{self.option_type}, K={self.strike:.4f}, P={self.payout:.4f}, "
+            f"{self._format_maturity()})"
         )

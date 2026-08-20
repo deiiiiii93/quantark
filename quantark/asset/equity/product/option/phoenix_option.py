@@ -181,7 +181,8 @@ class PhoenixOption(BaseEquityOption):
             airbag_config if airbag_config is not None else AirbagConfig()
         )
 
-        # Set core attributes for local use before base init if needed
+        # Set subclass state before BaseEquityOption invokes polymorphic validation.
+        self.initial_price = initial_price
         self.is_reverse = is_reverse
         # Set option type based on standard vs reverse
         self.option_type = OptionType.CALL if is_reverse else OptionType.PUT
@@ -200,28 +201,8 @@ class PhoenixOption(BaseEquityOption):
             maturity_date=maturity_date,
             tenor_end=tenor_end,
             annualization_day_count=annualization_day_count,
-            initial_price=initial_price,
             contract_multiplier=contract_multiplier,
         )
-
-        self.initial_date = initial_date
-        self.exercise_date = exercise_date
-        self.settlement_date = settlement_date
-        self.maturity_date = maturity_date
-        self.tenor = tenor
-        self.maturity = maturity
-        self.tenor_end = tenor_end
-        self.annualization_day_count = annualization_day_count
-
-        # Set core attributes
-        self.initial_price = initial_price
-        self.strike = strike
-        self.contract_multiplier = contract_multiplier
-        # is_reverse already set above
-
-        # Configuration objects already set above
-
-        self.validate()
 
     def validate(self) -> None:
         """

@@ -180,29 +180,9 @@ class SnowballOption(BaseEquityOption):
                 - Embedded option is CALL (investor is short call on KI)
                 - V1 payoff: participation × (Strike - Spot), typically negative when spot > strike
         """
-        # Set base class attributes
-        self.initial_date = initial_date
-        self.exercise_date = exercise_date
-        self.settlement_date = settlement_date
-        self.maturity_date = maturity_date
-        self.tenor = tenor
-        self.maturity = maturity
-        self.tenor_end = tenor_end
-        self.annualization_day_count = annualization_day_count
-
-        # Set core attributes
+        # Set subclass state before BaseEquityOption invokes polymorphic validation.
         self.initial_price = initial_price
-        self.strike = strike
-        self.contract_multiplier = contract_multiplier
         self.is_reverse = is_reverse
-
-        # Set option type based on standard vs reverse snowball
-        # Standard snowball: embedded PUT (short put exposure on KI)
-        # Reverse snowball: embedded CALL (short call exposure on KI)
-        self.option_type = OptionType.CALL if is_reverse else OptionType.PUT
-        self.exercise_type = ExerciseType.EUROPEAN
-
-        # Set configuration objects
         self.barrier_config = barrier_config
         self.payoff_config = (
             payoff_config if payoff_config is not None else PayoffConfig()
@@ -214,7 +194,21 @@ class SnowballOption(BaseEquityOption):
             airbag_config if airbag_config is not None else AirbagConfig()
         )
 
-        self.validate()
+        option_type = OptionType.CALL if is_reverse else OptionType.PUT
+        super().__init__(
+            strike=strike,
+            option_type=option_type,
+            exercise_type=ExerciseType.EUROPEAN,
+            maturity=maturity,
+            tenor=tenor,
+            initial_date=initial_date,
+            exercise_date=exercise_date,
+            settlement_date=settlement_date,
+            maturity_date=maturity_date,
+            tenor_end=tenor_end,
+            annualization_day_count=annualization_day_count,
+            contract_multiplier=contract_multiplier,
+        )
 
     def validate(self) -> None:
         """

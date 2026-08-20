@@ -39,9 +39,14 @@ class BaseEquityOption(BaseEquityProduct):
         annualization_day_count: Day count convention for year fraction calculations
         option_type: CALL or PUT
         exercise_type: EUROPEAN, AMERICAN, or BERMUDAN
-        initial_price: Reference/initial underlying price for payoff calculations
         strike: Strike price
         contract_multiplier: Underlying units represented by one contract
+
+    ``initial_price`` is intentionally not part of this base contract.  A
+    reference fixing is a contractual term only for products whose payoff is
+    defined relative to inception (for example Asians and autocallables).
+    Those products declare and validate it themselves; absolute-strike options
+    obtain valuation spot from the pricing environment.
     """
 
     # ==========================================================================
@@ -65,7 +70,6 @@ class BaseEquityOption(BaseEquityProduct):
     # ==========================================================================
     # Price parameters
     # ==========================================================================
-    initial_price: float = 0.0
     strike: float = 0.0
 
     # ==========================================================================
@@ -86,7 +90,6 @@ class BaseEquityOption(BaseEquityProduct):
         maturity_date: Optional[datetime] = None,
         tenor_end: TenorEnd = TenorEnd.EXERCISE,
         annualization_day_count: DayCountConvention = DayCountConvention.ACT_365,
-        initial_price: float = 0.0,
         contract_multiplier: float = 1.0,
     ):
         """
@@ -97,16 +100,28 @@ class BaseEquityOption(BaseEquityProduct):
             option_type: CALL or PUT
             exercise_type: EUROPEAN, AMERICAN, or BERMUDAN
             maturity: Time to maturity in years from valuation (optional)
-            tenor: Contract tenor in years from issue to expiry (optional)
+            tenor: Contract tenor in years from issue to expiry. At inception it
+                also supplies maturity when no other expiry representation is set.
             initial_date: Product start/issue date (optional)
             exercise_date: Date when option can be exercised (optional)
             settlement_date: Date when settlement occurs (optional)
-            maturity_date: Explicit maturity date (optional)
+            maturity_date: Explicit contract maturity date. It also supplies the
+                exercise/expiry date when no exercise_date or maturity is set.
             tenor_end: Determines which date to use for tenor calculations
             annualization_day_count: Day count convention for year fractions
-            initial_price: Reference/initial underlying price (optional)
             contract_multiplier: Underlying units represented by one contract
         """
+        # Normalize alternate term-sheet representations into the two canonical
+        # pricing forms used by engines: a remaining year fraction (`maturity`)
+        # or an explicit expiry (`exercise_date`).  Keep the original tenor and
+        # maturity_date as contract metadata for annualization/settlement logic.
+        maturity_is_unset = maturity is None or maturity == 0.0
+        if exercise_date is None and maturity_is_unset:
+            if maturity_date is not None:
+                exercise_date = maturity_date
+            elif tenor is not None:
+                maturity = tenor
+
         self.strike = strike
         self.option_type = option_type
         self.exercise_type = exercise_type
@@ -118,7 +133,6 @@ class BaseEquityOption(BaseEquityProduct):
         self.maturity_date = maturity_date
         self.tenor_end = tenor_end
         self.annualization_day_count = annualization_day_count
-        self.initial_price = initial_price
         self.contract_multiplier = contract_multiplier
 
         self.validate()
@@ -169,17 +183,19 @@ class BaseEquityOption(BaseEquityProduct):
         has_dates = self.exercise_date is not None
         has_maturity = self.maturity is not None and self.maturity > 0
 
-        if not has_dates and not has_maturity:
-            raise ValidationError("Either maturity or exercise_date must be provided")
-
-        if has_dates and has_maturity:
-            raise ValidationError("Cannot provide both maturity and exercise_date")
-
-        if has_maturity and self.maturity <= 0:
+        if self.maturity is not None and self.maturity < 0:
             raise ValidationError(f"Maturity must be positive, got {self.maturity}")
 
         if self.tenor is not None and self.tenor <= 0:
             raise ValidationError(f"Tenor must be positive, got {self.tenor}")
+
+        if not has_dates and not has_maturity:
+            raise ValidationError(
+                "Either maturity/tenor or exercise_date/maturity_date must be provided"
+            )
+
+        if has_dates and has_maturity:
+            raise ValidationError("Cannot provide both maturity and exercise_date")
 
     def _validate_date_ordering(self) -> None:
         """Validate that dates are in proper chronological order."""
@@ -642,18 +658,21 @@ class BaseEquityOption(BaseEquityProduct):
     # String Representation
     # ==========================================================================
 
+    def _format_maturity(self) -> str:
+        """Format the canonical numeric or date-based expiry representation."""
+        if self.exercise_date is not None:
+            return f"exp={self.exercise_date}"
+        if self.maturity is not None:
+            return f"T={self.maturity:.4f}"
+        return "expiry=unset"
+
     def __repr__(self) -> str:
         """
         Return string representation of the option.
 
         Handles both maturity-based and date-based options safely.
         """
-        maturity_str = (
-            f"T={self.maturity:.4f}"
-            if self.maturity is not None
-            else f"exp={self.exercise_date}"
-        )
         return (
             f"{self.__class__.__name__}("
-            f"{self.option_type}, K={self.strike:.2f}, {maturity_str})"
+            f"{self.option_type}, K={self.strike:.2f}, {self._format_maturity()})"
         )
