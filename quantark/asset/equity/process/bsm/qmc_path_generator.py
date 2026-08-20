@@ -16,6 +16,7 @@ from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 
+from quantark.montecarlo.gbm_kernels import gbm_path_tail
 from quantark.util.numerical import is_close
 
 from .qmc_brownian_bridge import apply_brownian_bridge
@@ -251,19 +252,13 @@ class GBMPathGenerator:
         # Convert to Brownian increments
         dW = self._build_brownian_increments(z_processed)
 
-        # Build GBM/BSM paths
-        paths = np.zeros((self.num_paths, self.time_steps + 1), dtype=float)
-        paths[:, 0] = self.initial_value
-
-        drift_term = (
+        # Build GBM/BSM paths via the shared kernel (Numba-accelerated when
+        # quantark[accel] is installed, NumPy reference otherwise -- bitwise
+        # either way, asserted in test_gbm_path_kernel.py).
+        drift_dt = (
             self._drift_vec - 0.5 * self._vol_vec * self._vol_vec
         ) * self.dt_vector
-        drift_term = drift_term.reshape(1, -1)
-
-        diffusion_term = self._vol_vec.reshape(1, -1) * dW
-        exp_term = np.exp(drift_term + diffusion_term)
-
-        paths[:, 1:] = self.initial_value * np.cumprod(exp_term, axis=1)
+        paths = gbm_path_tail(dW, drift_dt, self._vol_vec, self.initial_value)
 
         aux: Optional[Dict[str, np.ndarray]] = None
         if return_aux:

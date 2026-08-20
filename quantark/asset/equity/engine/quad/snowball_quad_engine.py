@@ -375,6 +375,9 @@ class SnowballQuadEngine(BaseEngine):
             prefactor = math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
             omega_array = np.exp(-(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid)
 
+            # The bridge correction below samples BOTH surfaces at this step's
+            # slice, so retain the knocked-in surface before it is rolled back.
+            v_in_at_obs = v_in
             v_in = self._diffuse_fft(
                 v_in,
                 math_utils,
@@ -391,7 +394,7 @@ class SnowballQuadEngine(BaseEngine):
             if ki_continuous:
                 v_out = self._diffuse_with_bridge(
                     v_out,
-                    v_in,
+                    v_in_at_obs,
                     math_utils,
                     omega_array,
                     prefactor,
@@ -831,6 +834,9 @@ class SnowballQuadEngine(BaseEngine):
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
 
+            # The bridge correction below samples BOTH surfaces at this step's
+            # slice, so retain the knocked-in surface before it is rolled back.
+            v_in_at_obs = v_in
             v_in = self._diffuse_fft(
                 v_in,
                 math_utils,
@@ -848,7 +854,7 @@ class SnowballQuadEngine(BaseEngine):
                 log_ki_barrier = safe_log(ki_barrier_continuous / spot)
                 v_out = self._diffuse_with_bridge(
                     v_out,
-                    v_in,
+                    v_in_at_obs,
                     math_utils,
                     omega_array,
                     prefactor,
@@ -987,6 +993,8 @@ class SnowballQuadEngine(BaseEngine):
                 omega_array = np.exp(
                     -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
                 )
+                # Retained pre-diffusion for the bridge correction below.
+                v_in_ki_at_obs = v_in_ki
                 v_in_ki = self._diffuse_fft(
                     v_in_ki,
                     math_utils,
@@ -999,6 +1007,7 @@ class SnowballQuadEngine(BaseEngine):
                     beta,
                     tau_step,
                 )
+                v_in_ever_at_obs = v_in_ever
                 v_in_ever = self._diffuse_fft(
                     v_in_ever,
                     math_utils,
@@ -1015,7 +1024,7 @@ class SnowballQuadEngine(BaseEngine):
                     log_ki_barrier = safe_log(ki_barrier_continuous / spot)
                     v_out_ki = self._diffuse_with_bridge(
                         v_out_ki,
-                        v_in_ki,
+                        v_in_ki_at_obs,
                         math_utils,
                         omega_array,
                         prefactor,
@@ -1032,7 +1041,7 @@ class SnowballQuadEngine(BaseEngine):
                     )
                     v_out_ever = self._diffuse_with_bridge(
                         v_out_ever,
-                        v_in_ever,
+                        v_in_ever_at_obs,
                         math_utils,
                         omega_array,
                         prefactor,
@@ -1422,6 +1431,26 @@ class SnowballQuadEngine(BaseEngine):
         tau_step: float,
         is_reverse: bool,
     ) -> np.ndarray:
+        """Roll ``v_out`` back one step under CONTINUOUS knock-in monitoring.
+
+        Between two observation dates a path may touch the KI barrier and
+        recover, so the not-yet-knocked-in surface must be blended with the
+        knocked-in one using the Brownian-bridge touch probability::
+
+            V_out(x, t_km1) = INT K(x,y) [ (1 - p_hit) V_out(y, t_k)
+                                           + p_hit     V_in (y, t_k) ] dy
+
+        which is evaluated here as ``base + INT K p_hit (v_in - v_out)``.
+
+        Contract, and the reason this method takes ``v_in`` as an argument
+        rather than reading a rolled surface: **both ``v_out`` and ``v_in``
+        must be the slices at ``t_k``**, i.e. neither may have been diffused
+        yet. Passing a ``v_in`` that the caller has already rolled back to
+        ``t_km1`` subtracts surfaces from two different times, and in the
+        ``p_hit -> 1`` limit returns ``K(K(v_in))`` instead of ``K(v_in)``.
+        That defect biased PV low in proportion to ``p_hit`` -- worst just
+        above the barrier -- and was invisible to grid refinement.
+        """
         grid = math_utils.grid
         weights = math_utils.simpson_weight_vector()
         base = self._diffuse_fft(

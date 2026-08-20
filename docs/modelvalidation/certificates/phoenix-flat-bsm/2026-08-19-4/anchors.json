@@ -1,0 +1,265 @@
+{
+  "abs_tol": 1e-15,
+  "anchors": [
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "coupon_at_expiry",
+      "values": {
+        "delta": 0.48546860218060384,
+        "gamma": -0.03546127028530376,
+        "pv": -3.430676944388196
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "coupon_at_expiry_memory",
+      "values": {
+        "delta": 0.4749293823773506,
+        "gamma": -0.03458185081206866,
+        "pv": -3.354643545434896
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "disable_ko_after_ki",
+      "values": {
+        "delta": 0.48537527322597207,
+        "gamma": -0.03555030552430696,
+        "pv": -3.4275442414317125
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "discrete_ki",
+      "values": {
+        "delta": 0.4242028807637034,
+        "gamma": -0.03385879504979114,
+        "pv": -2.899231133426693
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "ki_stepdown",
+      "values": {
+        "delta": 0.31717324336547925,
+        "gamma": -0.0313594881234553,
+        "pv": -1.9076813531968941
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.0007102078504911181,
+        "gamma": -0.031749294676320206,
+        "pv": 0.5268300106232131
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "memory",
+      "values": {
+        "delta": 0.4742695110526206,
+        "gamma": -0.03458605919731446,
+        "pv": -3.3482862645050324
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "near_coupon",
+      "values": {
+        "delta": 0.9499234765501507,
+        "gamma": -0.02949657000600674,
+        "pv": -13.871454707817344
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.05279090568086426,
+        "gamma": -0.017722367582587554,
+        "pv": 0.09107553016214766
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.1266987654202998,
+        "gamma": 0.017574026060222542,
+        "pv": -23.91990650428209
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.3941966187323544,
+        "gamma": -0.03805800113198505,
+        "pv": -2.318724337606669
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.4848880456326151,
+        "gamma": -0.035474196888307094,
+        "pv": -3.424842262262186
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "reverse",
+      "values": {
+        "delta": -0.5920981747697885,
+        "gamma": -0.03515622588394964,
+        "pv": -4.006042708622695
+      }
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "case": "stepdown",
+      "values": {
+        "delta": 0.4739048177712488,
+        "gamma": -0.03596228709982868,
+        "pv": -3.2570330668938428
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "coupon_at_expiry",
+      "values": {
+        "delta": 0.48831084269051495,
+        "gamma": -0.03323198613479672,
+        "pv": -3.432007596176282
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "coupon_at_expiry_memory",
+      "values": {
+        "delta": 0.47768957559470193,
+        "gamma": -0.032403487319626834,
+        "pv": -3.3559205142469746
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "disable_ko_after_ki",
+      "values": {
+        "delta": 0.48822933313655303,
+        "gamma": -0.03331748409285318,
+        "pv": -3.428873602586275
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "discrete_ki",
+      "values": {
+        "delta": 0.42718864393667966,
+        "gamma": -0.03179139718790491,
+        "pv": -2.9013907667399303
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "ki_stepdown",
+      "values": {
+        "delta": 0.3133755212934337,
+        "gamma": -0.0293307576724251,
+        "pv": -1.9095183306172283
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.005502982476830343,
+        "gamma": -0.03197906835409081,
+        "pv": 0.5273295860594116
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "memory",
+      "values": {
+        "delta": 0.47703308223363794,
+        "gamma": -0.03240830916538373,
+        "pv": -3.349566734241995
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "near_coupon",
+      "values": {
+        "delta": 0.9471379670158859,
+        "gamma": -0.03082706289924432,
+        "pv": -13.866127007325664
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.05545766808013375,
+        "gamma": -0.01837340935819021,
+        "pv": 0.09124684668959807
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.1316773840071226,
+        "gamma": -0.006105063477096787,
+        "pv": -23.918690697951345
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.395607859163198,
+        "gamma": -0.0379981136806035,
+        "pv": -2.3204392886304563
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.4877345947633147,
+        "gamma": -0.033245069573852426,
+        "pv": -3.4261769472337624
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "reverse",
+      "values": {
+        "delta": -0.5907498765163677,
+        "gamma": -0.034592813852636795,
+        "pv": -4.005301272814468
+      }
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "case": "stepdown",
+      "values": {
+        "delta": 0.47262249405010026,
+        "gamma": -0.03649043460639323,
+        "pv": -3.256712288467848
+      }
+    }
+  ],
+  "certificate_sha256": "35d6ee3a290cbaacd4cacf22b70405a1678dc84b48ec5d646fbf8737374c7542",
+  "fingerprint": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "rel_tol": 1e-12,
+  "schema": 1,
+  "study_source_text": "# Phoenix under flat Black-Scholes.\n#\n# The same three arms as the snowball study -- two-surface PDE, quadrature, and\n# one paired-RQMC benchmark -- over a payoff with one extra hard feature: a\n# coupon barrier. A phoenix pays a coupon at every observation where spot sits\n# above 85, knock-out or not, so every observation date carries a digital. That\n# is where a deterministic grid and Monte Carlo tend to part company first,\n# which is why near_coupon parks spot right on the barrier.\n#\n# Economic scale, environment and bounds are identical to snowball_flat_bsm, on\n# purpose: with multiplier 200, inception spot 100 and notional 20,000 the delta\n# quantum and the reference move are both exactly 1.0, so a raw error IS a\n# contract error -- and the two certifications sit on the same axis.\n#\n# Bound calibration (release procedure section 7, step 4). The cell gate needs\n# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this\n# sampling budget (4 batches x 65,536 paths, paired bumps): pv 0.0033, delta\n# 0.0035, gamma 0.0052 -- a 24-38x margin. Desk tolerance and benchmark\n# resolution are compatible, so the bound is not one the sampling cannot cash.\n#\n# Offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/phoenix_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: phoenix-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260818\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.phoenix\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ko_rate: 0.0\n    ki_barrier: 75.0\n    coupon_barrier: 85.0\n    coupon_rate: 0.02\n    num_observations: 12\n    memory_coupon: false\n    maturity: 1.0\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.phoenix.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.phoenix.pde\n    params: {accuracy: standard}\n  - builder: equity.phoenix.quad\n    params: {grid_points: 1001}\n\ncases:\n  # At inception, clear of all three barriers.\n  - {name: ordinary}\n  # Just under the knock-out barrier: the KO discontinuity sits inside the bump\n  # stencil, which is where deterministic gamma usually breaks first.\n  - {name: near_ko, environment: {spot: 102.5}}\n  # Sitting ON the coupon barrier. A phoenix coupon is a digital at 85, so its\n  # sensitivity is maximal here and the whole coupon stream is in play.\n  - {name: near_coupon, environment: {spot: 85.5}}\n  # Just above the knock-in barrier: the terminal payoff turns over here.\n  - {name: near_ki, environment: {spot: 76.0}}\n  # Low vol: barriers are rarely reached, so the grid resolves a much narrower\n  # region of interest and the coupon stream is nearly certain.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Three months with a quarterly schedule: few observations left, and time\n  # discretization error has nowhere to average out.\n  - {name: near_expiry, product: {num_observations: 3, maturity: 0.25}}\n  # Memory coupons: missed coupons accumulate and pay later. A prior audit found\n  # the PDE paying accrued memory coupons at KO regardless of the coupon-barrier\n  # condition, so this path carries history and must be certified explicitly.\n  - {name: memory, product: {memory_coupon: true}}\n  # Step-down barriers: KO and coupon barriers both decline 0.5% of initial\n  # price per observation. Twenty-four distinct levels now compete for grid\n  # alignment where every case above had two, and the coupon digital moves to a\n  # new strike at every observation instead of sitting still.\n  - {name: stepdown, product: {ko_stepdown: 0.005, coupon_stepdown: 0.005}}\n  # Discretely monitored KI. Unreachable until 2026-08-19: PhoenixOption built\n  # only its KO observation schedule, so a discrete KI phoenix raised rather\n  # than priced, and no certified cell used anything but continuous KI.\n  - {name: discrete_ki, product: {ki_monitoring: discrete}}\n  # A KI barrier declining 0.5% of initial price per observation, 75 -> 69.5.\n  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}\n  # Once knocked in the KO stops applying, so the knocked-in surface carries the\n  # coupon stream on to maturity unbarriered.\n  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}\n  # Reverse phoenix: call payoff, DOWN knock-out, UP knock-in and coupon\n  # barriers. Every barrier mask in the vector-surface solver inverts.\n  - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 125.0,\n                              coupon_barrier: 115.0}}\n  # Coupons rolled up and paid when the note ENDS -- at the knock-out settlement\n  # if it knocks out, at maturity otherwise. The payment date is path-dependent,\n  # so a fixed discount cannot express it: the deterministic engines carry a\n  # termination-value surface and the benchmark pays the roll-up at knock-out.\n  - {name: coupon_at_expiry, product: {coupon_pay_type: expiry}}\n  # The roll-up meeting the memory ladder: accrued coupons are released on a\n  # later coupon date and then still wait for termination to be paid.\n  - {name: coupon_at_expiry_memory, product: {coupon_pay_type: expiry,\n                                              memory_coupon: true}}\n"
+}

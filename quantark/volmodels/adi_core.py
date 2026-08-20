@@ -580,6 +580,15 @@ class HestonSLVADICore:
         idx = self._forward_step_index(t)
         return float(self.r_fwd[idx]), float(self.q_fwd[idx])
 
+    def forward_rates_at(self, t: float) -> tuple[float, float]:
+        """The ``(r, q)`` the tridiagonal assembly uses for a step at ``t``.
+
+        Public because collaborators that must stay consistent with the
+        DISCRETIZED dynamics -- barrier corrections in particular -- have to
+        sample this schedule rather than re-deriving one from the environment.
+        """
+        return self._rq_at(t)
+
     def _advance_tau(self, tau: float, step: float, final: bool) -> float:
         """Advance the backward time-to-maturity by one (half-)step.
 

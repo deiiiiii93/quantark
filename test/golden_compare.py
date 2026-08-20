@@ -4,7 +4,13 @@ The frozen goldens throughout this suite were captured on ONE machine — every
 such test's module docstring calls them "same-machine references", not
 cross-platform bit claims. Bitwise float equality does not hold across CPU
 architectures / BLAS / libm builds: the x86_64 CI runners differ from the ARM64
-machine the goldens were frozen on by the last 1-2 ULP (~1e-14 relative). These
+machine the goldens were frozen on by the last 1-2 ULP (~1e-14 relative) on a
+single operation. Measured 2026-08-19 across 326 banked certificate anchors,
+an autocallable PDE/QUAD solve marching hundreds of steps through barrier events
+amplifies that to a median 2.0e-12 and a worst case 2.2e-11 -- three orders
+above the per-operation figure, with no outlier of a different order. The 1e-9
+bound below still clears that by ~44x; do not tighten it on the strength of the
+per-operation number alone. These
 helpers compare a live payload against a frozen golden with a tight relative
 tolerance that absorbs that cross-arch ULP noise while still catching any
 genuine numerical regression (>~1e-8).
@@ -16,8 +22,9 @@ site. Do NOT route those comparisons through here; only frozen goldens
 """
 import math
 
-# ~5 orders of magnitude of headroom over the measured ~1e-14 cross-arch noise,
-# yet tight enough to fail on a real numerical regression of ~1e-8 or larger.
+# ~44x headroom over the worst measured cross-arch drift (2.2e-11, iterative
+# barrier solves), yet tight enough to fail on a real numerical regression of
+# ~1e-8 or larger.
 GOLDEN_REL_TOL = 1e-9
 # Absorbs cross-arch noise on values whose magnitude is ~0 (survival
 # probabilities, deep-OTM greeks), where a relative tolerance has no purchase.

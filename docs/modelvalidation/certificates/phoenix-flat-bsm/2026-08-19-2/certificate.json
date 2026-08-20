@@ -1,0 +1,1786 @@
+{
+  "aggregates": [
+    {
+      "candidate": "equity.phoenix.pde",
+      "cells": 8,
+      "mean_signed_bias_c": -0.0015075857898426432,
+      "passed": true,
+      "quantity": "pv",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0012525277269237478,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "cells": 8,
+      "mean_signed_bias_c": -0.0031801893439194987,
+      "passed": true,
+      "quantity": "delta",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0009261215097454825,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "cells": 8,
+      "mean_signed_bias_c": 0.00782760734076234,
+      "passed": true,
+      "quantity": "gamma",
+      "se_adequate": true,
+      "se_of_mean_c": 0.003302513487515102,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "cells": 8,
+      "mean_signed_bias_c": -0.0011069518548749158,
+      "passed": true,
+      "quantity": "pv",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0012525277269237478,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "cells": 8,
+      "mean_signed_bias_c": -0.0012562289564721635,
+      "passed": true,
+      "quantity": "delta",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0009261215097454825,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "cells": 8,
+      "mean_signed_bias_c": 0.005083634766671369,
+      "passed": true,
+      "quantity": "gamma",
+      "se_adequate": true,
+      "se_of_mean_c": 0.003302513487515102,
+      "within_bound": true
+    }
+  ],
+  "amendment": {
+    "carried_cells": [
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "ordinary",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "ordinary",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "ordinary",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_ko",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_ko",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_ko",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_coupon",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_coupon",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_coupon",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_ki",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_ki",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_ki",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "low_vol",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "low_vol",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "low_vol",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_expiry",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_expiry",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "near_expiry",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "memory",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "memory",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "memory",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "ordinary",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "ordinary",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "ordinary",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_ko",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_ko",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_ko",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_coupon",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_coupon",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_coupon",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_ki",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_ki",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_ki",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "low_vol",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "low_vol",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "low_vol",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_expiry",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_expiry",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "near_expiry",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "memory",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "memory",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "memory",
+        "quantity": "gamma"
+      }
+    ],
+    "parent": "docs/modelvalidation/certificates/phoenix-flat-bsm/2026-08-19/certificate.json",
+    "parent_projected_sha256": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+    "reason": "Certify the step-down KO/coupon barrier variant the original scope omitted",
+    "replaced_cells": [
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "stepdown",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "stepdown",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.pde",
+        "case": "stepdown",
+        "quantity": "gamma"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "stepdown",
+        "quantity": "pv"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "stepdown",
+        "quantity": "delta"
+      },
+      {
+        "candidate": "equity.phoenix.quad",
+        "case": "stepdown",
+        "quantity": "gamma"
+      }
+    ]
+  },
+  "cells": [
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -3.424842262262186,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0006088401184833891,
+        "envelope_within_bound": true,
+        "interval_c": 0.009785783637423282,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004244371178118577,
+        "signed_err_c": 0.0012970412811861287
+      },
+      "identity_hash": "6a9aae028872384b572d6e3384ad83859f538b0f16f6df4ca375da1955323bbb",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.004244371178118577,
+        "value": -3.4261393035433723
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.4848880456326151,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0019575677239018208,
+        "envelope_within_bound": true,
+        "interval_c": 0.005038425915140912,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0008420297783376065,
+        "signed_err_c": -0.003354366358465699
+      },
+      "identity_hash": "6a9aae028872384b572d6e3384ad83859f538b0f16f6df4ca375da1955323bbb",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0008420297783376065,
+        "value": 0.4882424119910808
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -0.035474196888307094,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 6.963344228116258e-05,
+        "envelope_within_bound": true,
+        "interval_c": 0.01677820385102255,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004506786548450639,
+        "signed_err_c": 0.007764630754121274
+      },
+      "identity_hash": "6a9aae028872384b572d6e3384ad83859f538b0f16f6df4ca375da1955323bbb",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.004506786548450639,
+        "value": -0.04323882764242837
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -2.318724337606669,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0004942693540561649,
+        "envelope_within_bound": true,
+        "interval_c": 0.01246065684937425,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0035842875902638007,
+        "signed_err_c": -0.005292081668846649
+      },
+      "identity_hash": "b947e1a1f3984d56a8f3d6e0659a74ce5eda4eeb4cd5dd15d8a61ac141f2a205",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0035842875902638007,
+        "value": -2.313432255937822
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.3941966187323544,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0004674137585155558,
+        "envelope_within_bound": true,
+        "interval_c": 0.01197413333755569,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0029212322187417076,
+        "signed_err_c": -0.0061316689000722735
+      },
+      "identity_hash": "b947e1a1f3984d56a8f3d6e0659a74ce5eda4eeb4cd5dd15d8a61ac141f2a205",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0029212322187417076,
+        "value": 0.40032828763242667
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -0.03805800113198505,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 1.6425392152519258e-06,
+        "envelope_within_bound": true,
+        "interval_c": 0.02503905157447111,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.006874999128594304,
+        "signed_err_c": 0.0112890533172825
+      },
+      "identity_hash": "b947e1a1f3984d56a8f3d6e0659a74ce5eda4eeb4cd5dd15d8a61ac141f2a205",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.006874999128594304,
+        "value": -0.04934705444926755
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -13.871454707817344,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_coupon",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0031829620566856676,
+        "envelope_within_bound": true,
+        "interval_c": 0.020965628269938592,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.005171093002780822,
+        "signed_err_c": -0.010623442264376948
+      },
+      "identity_hash": "2f04481dc748c0612274aadee5189a98502cf31dfe34cd067fbdfb7809908e96",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.005171093002780822,
+        "value": -13.860831265552967
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.9499234765501507,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_coupon",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.003882888130211093,
+        "envelope_within_bound": true,
+        "interval_c": 0.009692421604042907,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004248699495452466,
+        "signed_err_c": 0.0011950226131379749
+      },
+      "identity_hash": "2f04481dc748c0612274aadee5189a98502cf31dfe34cd067fbdfb7809908e96",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004248699495452466,
+        "value": 0.9487284539370128
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -0.02949657000600674,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_coupon",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00014311978480001028,
+        "envelope_within_bound": true,
+        "interval_c": 0.057455214630642126,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.021579583232094995,
+        "signed_err_c": 0.014296048166452132
+      },
+      "identity_hash": "2f04481dc748c0612274aadee5189a98502cf31dfe34cd067fbdfb7809908e96",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.021579583232094995,
+        "value": -0.04379261817245887
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -23.91990650428209,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0026807901938035172,
+        "envelope_within_bound": true,
+        "interval_c": 0.0044211180053768265,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0014620744915800972,
+        "signed_err_c": -0.001496969022216632
+      },
+      "identity_hash": "95fced1803e5f78fb7b746e8b7adf33bf34f1070ebe656baed8549b392529aa4",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0014620744915800972,
+        "value": -23.918409535259872
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 1.1266987654202998,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0005933147220993362,
+        "envelope_within_bound": true,
+        "interval_c": 0.01813089237124935,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004235054812413501,
+        "signed_err_c": -0.009660782746422347
+      },
+      "identity_hash": "95fced1803e5f78fb7b746e8b7adf33bf34f1070ebe656baed8549b392529aa4",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004235054812413501,
+        "value": 1.1363595481667221
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.017574026060222542,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0016013269508314415,
+        "envelope_within_bound": true,
+        "interval_c": 0.03456865592396335,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0049103745919762505,
+        "signed_err_c": 0.024747906740010848
+      },
+      "identity_hash": "95fced1803e5f78fb7b746e8b7adf33bf34f1070ebe656baed8549b392529aa4",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0049103745919762505,
+        "value": -0.007173880679788306
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.5268300106232131,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0027199617649186214,
+        "envelope_within_bound": true,
+        "interval_c": 0.0027923690170092216,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0010467237581819498,
+        "signed_err_c": 0.000698921500645322
+      },
+      "identity_hash": "c8242d04852042d519317d4b07f748cc8c02b51709f913048a940a7fc7856558",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0010467237581819498,
+        "value": 0.5261310891225678
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.0007102078504911181,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0067521484846762014,
+        "envelope_within_bound": true,
+        "interval_c": 0.010150778372217426,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.00269289756392335,
+        "signed_err_c": -0.004764983244370727
+      },
+      "identity_hash": "c8242d04852042d519317d4b07f748cc8c02b51709f913048a940a7fc7856558",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.00269289756392335,
+        "value": 0.005475191094861845
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -0.031749294676320206,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.001816301799459609,
+        "envelope_within_bound": true,
+        "interval_c": 0.009321074832664452,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0021064727569378447,
+        "signed_err_c": -0.005108129318788762
+      },
+      "identity_hash": "c8242d04852042d519317d4b07f748cc8c02b51709f913048a940a7fc7856558",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0021064727569378447,
+        "value": -0.026641165357531443
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.09107553016214766,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0008889172023260339,
+        "envelope_within_bound": true,
+        "interval_c": 0.00525008100289449,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.001985430806633824,
+        "signed_err_c": -0.0012792193896268428
+      },
+      "identity_hash": "0ca4a040ff3a9640ac23e2b0e26d6669ed9ef3982fa0d207b5de1d726e5817c3",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.001985430806633824,
+        "value": 0.0923547495517745
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.05279090568086426,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0009749892407950669,
+        "envelope_within_bound": true,
+        "interval_c": 0.004210334819222608,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0006587754094529224,
+        "signed_err_c": -0.002892784000316763
+      },
+      "identity_hash": "0ca4a040ff3a9640ac23e2b0e26d6669ed9ef3982fa0d207b5de1d726e5817c3",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0006587754094529224,
+        "value": 0.05568368968118102
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -0.017722367582587554,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00020848686766074612,
+        "envelope_within_bound": true,
+        "interval_c": 0.009199848575552767,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.00316732984705288,
+        "signed_err_c": 0.002865188881447007
+      },
+      "identity_hash": "0ca4a040ff3a9640ac23e2b0e26d6669ed9ef3982fa0d207b5de1d726e5817c3",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.00316732984705288,
+        "value": -0.02058755646403456
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -3.3482862645050324,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "memory",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0006082696197653448,
+        "envelope_within_bound": true,
+        "interval_c": 0.010221787913351283,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004523784475657053,
+        "signed_err_c": 0.0011742189620371768
+      },
+      "identity_hash": "20d60ae62e55a30245377dc56d83d66d60a1fc5a7f0e13cb848048b74a6b11dd",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.004523784475657053,
+        "value": -3.3494604834670696
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.4742695110526206,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "memory",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0019105688690508882,
+        "envelope_within_bound": true,
+        "interval_c": 0.005100470073459653,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009033886894801454,
+        "signed_err_c": -0.0032936926944993616
+      },
+      "identity_hash": "20d60ae62e55a30245377dc56d83d66d60a1fc5a7f0e13cb848048b74a6b11dd",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0009033886894801454,
+        "value": 0.47756320374711997
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -0.03458605919731446,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "memory",
+      "error": null,
+      "gate": {
+        "envelope_c": 6.99748512411405e-05,
+        "envelope_within_bound": true,
+        "interval_c": 0.01703174578358958,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004402572729069283,
+        "signed_err_c": 0.008226600325451014
+      },
+      "identity_hash": "20d60ae62e55a30245377dc56d83d66d60a1fc5a7f0e13cb848048b74a6b11dd",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.004402572729069283,
+        "value": -0.04281265952276547
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -3.2570330668938428,
+      "case": "stepdown",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0019513015796102096,
+        "envelope_within_bound": true,
+        "interval_c": 0.011248779629864238,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0038939676737034692,
+        "signed_err_c": 0.0034608442824572982
+      },
+      "identity_hash": "aab0cb5f32053fe9628ca67113d7491e9a4b735775e3d637b218e58e93fa0acc",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0038939676737034692,
+        "value": -3.2604939111763
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": 0.4739048177712488,
+      "case": "stepdown",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0011345327953145024,
+        "envelope_within_bound": true,
+        "interval_c": 0.00561703666850653,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0010776480444266625,
+        "signed_err_c": 0.0034617405796532053
+      },
+      "identity_hash": "aab0cb5f32053fe9628ca67113d7491e9a4b735775e3d637b218e58e93fa0acc",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0010776480444266625,
+        "value": 0.4704430771915956
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.pde",
+      "candidate_value": -0.03596228709982868,
+      "case": "stepdown",
+      "error": null,
+      "gate": {
+        "envelope_c": 3.948353160820178e-05,
+        "envelope_within_bound": true,
+        "interval_c": 0.022129578473888096,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.010334569167005406,
+        "signed_err_c": -0.0014604401398772837
+      },
+      "identity_hash": "aab0cb5f32053fe9628ca67113d7491e9a4b735775e3d637b218e58e93fa0acc",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.010334569167005406,
+        "value": -0.0345018469599514
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -3.4261769472337624,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0045470910124643105,
+        "envelope_within_bound": true,
+        "interval_c": 0.008526386046627319,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004244371178118577,
+        "signed_err_c": -3.7643690390165574e-05
+      },
+      "identity_hash": "3a4debdb396f50bb019a991f31197f288345a8e5f21f688be9d6be2d7235c225",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.004244371178118577,
+        "value": -3.4261393035433723
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.4877345947633147,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.003147788346997471,
+        "envelope_within_bound": true,
+        "interval_c": 0.002191876784441318,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0008420297783376065,
+        "signed_err_c": -0.0005078172277661053
+      },
+      "identity_hash": "3a4debdb396f50bb019a991f31197f288345a8e5f21f688be9d6be2d7235c225",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0008420297783376065,
+        "value": 0.4882424119910808
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.033245069573852426,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00012850879257397807,
+        "envelope_within_bound": true,
+        "interval_c": 0.019007331165477218,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004506786548450639,
+        "signed_err_c": 0.009993758068575942
+      },
+      "identity_hash": "3a4debdb396f50bb019a991f31197f288345a8e5f21f688be9d6be2d7235c225",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.004506786548450639,
+        "value": -0.04323882764242837
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -2.3204392886304563,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.007224355296521878,
+        "envelope_within_bound": true,
+        "interval_c": 0.014175607873161742,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0035842875902638007,
+        "signed_err_c": -0.007007032692634141
+      },
+      "identity_hash": "7a53691c63e5b9701025c556ffbcb382191a4eafe914e8b7214db316269ea105",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0035842875902638007,
+        "value": -2.313432255937822
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.395607859163198,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.002238372701083846,
+        "envelope_within_bound": true,
+        "interval_c": 0.01056289290671207,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0029212322187417076,
+        "signed_err_c": -0.004720428469228655
+      },
+      "identity_hash": "7a53691c63e5b9701025c556ffbcb382191a4eafe914e8b7214db316269ea105",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0029212322187417076,
+        "value": 0.40032828763242667
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.0379981136806035,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0027530036780415434,
+        "envelope_within_bound": true,
+        "interval_c": 0.02509893902585266,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.006874999128594304,
+        "signed_err_c": 0.011348940768664051
+      },
+      "identity_hash": "7a53691c63e5b9701025c556ffbcb382191a4eafe914e8b7214db316269ea105",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.006874999128594304,
+        "value": -0.04934705444926755
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -13.866127007325664,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_coupon",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.004034986525391915,
+        "envelope_within_bound": true,
+        "interval_c": 0.015637927778258516,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.005171093002780822,
+        "signed_err_c": -0.005295741772696871
+      },
+      "identity_hash": "c071a77ec6f6ad5b6b26360c6489cc5e3af42c1fd2c4a921ad40df4db2b88820",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.005171093002780822,
+        "value": -13.860831265552967
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.9471379670158859,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_coupon",
+      "error": null,
+      "gate": {
+        "envelope_c": 5.253219856782287e-06,
+        "envelope_within_bound": true,
+        "interval_c": 0.010087885912031776,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004248699495452466,
+        "signed_err_c": -0.0015904869211268435
+      },
+      "identity_hash": "c071a77ec6f6ad5b6b26360c6489cc5e3af42c1fd2c4a921ad40df4db2b88820",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004248699495452466,
+        "value": 0.9487284539370128
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.03082706289924432,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_coupon",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.002950149371993293,
+        "envelope_within_bound": true,
+        "interval_c": 0.05612472173740454,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.021579583232094995,
+        "signed_err_c": 0.012965555273214552
+      },
+      "identity_hash": "c071a77ec6f6ad5b6b26360c6489cc5e3af42c1fd2c4a921ad40df4db2b88820",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.021579583232094995,
+        "value": -0.04379261817245887
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -23.918690697951345,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0009991062001084572,
+        "envelope_within_bound": true,
+        "interval_c": 0.003205311674632242,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0014620744915800972,
+        "signed_err_c": -0.00028116269147204775
+      },
+      "identity_hash": "31c821387ce2035287de4810e814aea0393e1357c0c720711a6c6f0c8df6a66e",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0014620744915800972,
+        "value": -23.918409535259872
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 1.1316773840071226,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0006386975477297163,
+        "envelope_within_bound": true,
+        "interval_c": 0.013152273784426547,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004235054812413501,
+        "signed_err_c": -0.0046821641595995445
+      },
+      "identity_hash": "31c821387ce2035287de4810e814aea0393e1357c0c720711a6c6f0c8df6a66e",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004235054812413501,
+        "value": 1.1363595481667221
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.006105063477096787,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0013989301419824653,
+        "envelope_within_bound": true,
+        "interval_c": 0.010889566386644019,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0049103745919762505,
+        "signed_err_c": 0.0010688172026915186
+      },
+      "identity_hash": "31c821387ce2035287de4810e814aea0393e1357c0c720711a6c6f0c8df6a66e",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0049103745919762505,
+        "value": -0.007173880679788306
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.5273295860594116,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.004684688151149197,
+        "envelope_within_bound": true,
+        "interval_c": 0.0032919444532077177,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0010467237581819498,
+        "signed_err_c": 0.001198496936843818
+      },
+      "identity_hash": "6364f0a814ef427d7458acc9311a32ff2f374233f8575fdde2e406385830a2c3",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0010467237581819498,
+        "value": 0.5261310891225678
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.005502982476830343,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0017301996690852195,
+        "envelope_within_bound": true,
+        "interval_c": 0.005413586509815198,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.00269289756392335,
+        "signed_err_c": 2.779138196849773e-05
+      },
+      "identity_hash": "6364f0a814ef427d7458acc9311a32ff2f374233f8575fdde2e406385830a2c3",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.00269289756392335,
+        "value": 0.005475191094861845
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.03197906835409081,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00026373971228055293,
+        "envelope_within_bound": true,
+        "interval_c": 0.009550848510435058,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0021064727569378447,
+        "signed_err_c": -0.005337902996559368
+      },
+      "identity_hash": "6364f0a814ef427d7458acc9311a32ff2f374233f8575fdde2e406385830a2c3",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.0021064727569378447,
+        "value": -0.026641165357531443
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.09124684668959807,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.000353089549475577,
+        "envelope_within_bound": true,
+        "interval_c": 0.005078764475444083,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.001985430806633824,
+        "signed_err_c": -0.0011079028621764353
+      },
+      "identity_hash": "6e553d32add1727d74e38d2ffd945d9b744591048fea80762e712a2180fae6b9",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.001985430806633824,
+        "value": 0.0923547495517745
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.05545766808013375,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 3.222953976915466e-06,
+        "envelope_within_bound": true,
+        "interval_c": 0.0015435724199531192,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0006587754094529224,
+        "signed_err_c": -0.0002260216010472743
+      },
+      "identity_hash": "6e553d32add1727d74e38d2ffd945d9b744591048fea80762e712a2180fae6b9",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0006587754094529224,
+        "value": 0.05568368968118102
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.01837340935819021,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0002961794464807384,
+        "envelope_within_bound": true,
+        "interval_c": 0.00854880679995011,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.00316732984705288,
+        "signed_err_c": 0.0022141471058443503
+      },
+      "identity_hash": "6e553d32add1727d74e38d2ffd945d9b744591048fea80762e712a2180fae6b9",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.00316732984705288,
+        "value": -0.02058755646403456
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -3.349566734241995,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "memory",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.004358469299565293,
+        "envelope_within_bound": true,
+        "interval_c": 0.009153819726239538,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004523784475657053,
+        "signed_err_c": -0.00010625077492543156
+      },
+      "identity_hash": "a4ab2a4abe14faaeaa66b55a384e91fc6ce74e7438cd27ebe742669df8bc1813",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.004523784475657053,
+        "value": -3.3494604834670696
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.47703308223363794,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "memory",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.003083565806704769,
+        "envelope_within_bound": true,
+        "interval_c": 0.00233689889244232,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0009033886894801454,
+        "signed_err_c": -0.0005301215134820292
+      },
+      "identity_hash": "a4ab2a4abe14faaeaa66b55a384e91fc6ce74e7438cd27ebe742669df8bc1813",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0009033886894801454,
+        "value": 0.47756320374711997
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.03240830916538373,
+      "carried_from": "ebbaafea6cd09b6233f959d9d5978402b55043a7a4ba142060370d0717584f7b",
+      "case": "memory",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0001341493629434254,
+        "envelope_within_bound": true,
+        "interval_c": 0.019209495815520308,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004402572729069283,
+        "signed_err_c": 0.010404350357381742
+      },
+      "identity_hash": "a4ab2a4abe14faaeaa66b55a384e91fc6ce74e7438cd27ebe742669df8bc1813",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.004402572729069283,
+        "value": -0.04281265952276547
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -3.256712288467848,
+      "case": "stepdown",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0025114260581950987,
+        "envelope_within_bound": true,
+        "interval_c": 0.011569558055858888,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0038939676737034692,
+        "signed_err_c": 0.0037816227084519483
+      },
+      "identity_hash": "23791db4b7a8e1fb03adf7871a8049797b8c083088eb16fa9698cfa045b12592",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0038939676737034692,
+        "value": -3.2604939111763
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": 0.47262249405010026,
+      "case": "stepdown",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0013862492990939224,
+        "envelope_within_bound": true,
+        "interval_c": 0.004334712947357971,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0010776480444266625,
+        "signed_err_c": 0.002179416858504646
+      },
+      "identity_hash": "23791db4b7a8e1fb03adf7871a8049797b8c083088eb16fa9698cfa045b12592",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0010776480444266625,
+        "value": 0.4704430771915956
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.phoenix.quad",
+      "candidate_value": -0.03649043460639323,
+      "case": "stepdown",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0005012575746334846,
+        "envelope_within_bound": true,
+        "interval_c": 0.022657725980452643,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.010334569167005406,
+        "signed_err_c": -0.0019885876464418306
+      },
+      "identity_hash": "23791db4b7a8e1fb03adf7871a8049797b8c083088eb16fa9698cfa045b12592",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.010334569167005406,
+        "value": -0.0345018469599514
+      },
+      "verdict": "PASS"
+    }
+  ],
+  "decisions": {
+    "equity.phoenix.pde": "ADMITTED",
+    "equity.phoenix.quad": "ADMITTED"
+  },
+  "projected_sha256": "e34c5f84be31440414dff16ead70240f4dc98a14fc5a17ea24a6ca741d06b965",
+  "reference_config": {
+    "engine": "PhoenixMCEngine",
+    "greeks": "paired central difference (common random numbers)",
+    "method": "randomized_quasi",
+    "paths_per_batch": 65536
+  },
+  "references": {
+    "low_vol": {
+      "batches": 4,
+      "identity_hash": "07024e8d56cc26355896936bdd1b37583531298ff51aa83bff1473bb13f29312",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.00269289756392335,
+        "gamma": 0.0021064727569378447,
+        "pv": 0.0010467237581819498
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.005475191094861845,
+        "gamma": -0.026641165357531443,
+        "pv": 0.5261310891225678
+      }
+    },
+    "memory": {
+      "batches": 4,
+      "identity_hash": "961c9982fcf342ad37b8e51e9d49ed3e6e168601df9eb39ebda92ba79c62930f",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.0009033886894801454,
+        "gamma": 0.004402572729069283,
+        "pv": 0.004523784475657053
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.47756320374711997,
+        "gamma": -0.04281265952276547,
+        "pv": -3.3494604834670696
+      }
+    },
+    "near_coupon": {
+      "batches": 4,
+      "identity_hash": "b2a083dca569982455c00ca03e1b2eca8c9ba5f52a3a090651646fd25dfa8f4e",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.004248699495452466,
+        "gamma": 0.021579583232094995,
+        "pv": 0.005171093002780822
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.9487284539370128,
+        "gamma": -0.04379261817245887,
+        "pv": -13.860831265552967
+      }
+    },
+    "near_expiry": {
+      "batches": 4,
+      "identity_hash": "f7758ee85233eda79751daba7e439cf873381aaa8e549ffc4d58102b3e80f4fa",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.0006587754094529224,
+        "gamma": 0.00316732984705288,
+        "pv": 0.001985430806633824
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.05568368968118102,
+        "gamma": -0.02058755646403456,
+        "pv": 0.0923547495517745
+      }
+    },
+    "near_ki": {
+      "batches": 4,
+      "identity_hash": "0b69b462917d71c6c00bf0096d7bda25483ca97611d255573559dd12625702cc",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.004235054812413501,
+        "gamma": 0.0049103745919762505,
+        "pv": 0.0014620744915800972
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 1.1363595481667221,
+        "gamma": -0.007173880679788306,
+        "pv": -23.918409535259872
+      }
+    },
+    "near_ko": {
+      "batches": 4,
+      "identity_hash": "29217e222a09f9a4404a3f6d483cdf7ce59641f97ae45aad29290dbfbe1b093a",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.0029212322187417076,
+        "gamma": 0.006874999128594304,
+        "pv": 0.0035842875902638007
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.40032828763242667,
+        "gamma": -0.04934705444926755,
+        "pv": -2.313432255937822
+      }
+    },
+    "ordinary": {
+      "batches": 4,
+      "identity_hash": "629e32b0864880fac1b76f761c641b1ea35b566217edd7ec4cae93fcabfe8ca0",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.0008420297783376065,
+        "gamma": 0.004506786548450639,
+        "pv": 0.004244371178118577
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.4882424119910808,
+        "gamma": -0.04323882764242837,
+        "pv": -3.4261393035433723
+      }
+    },
+    "stepdown": {
+      "batches": 4,
+      "identity_hash": "c2d66c29dae550a8a9432733f1722d5bc7e4a14802709be159b4a5aa2a2604eb",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.0010776480444266625,
+        "gamma": 0.010334569167005406,
+        "pv": 0.0038939676737034692
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.4704430771915956,
+        "gamma": -0.0345018469599514,
+        "pv": -3.2604939111763
+      }
+    }
+  },
+  "runtime": {
+    "machine": "arm64",
+    "numpy": "2.4.6",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "python": "3.11.8",
+    "quantark_git_sha": "c22a4307085ee10959b6d7d048a456dd59925379"
+  },
+  "schema": 1,
+  "study": {
+    "bounds": {
+      "cell": 0.5,
+      "envelope_fraction": 0.5,
+      "interval_k": 2.0,
+      "mean_signed_bias": 0.1,
+      "se_budget_fraction": 0.25
+    },
+    "candidates": [
+      {
+        "name": "equity.phoenix.pde",
+        "params": {
+          "accuracy": "standard",
+          "engine": "PhoenixPDESolver",
+          "grid": {
+            "bounds": [
+              null,
+              null
+            ],
+            "day_count": 252,
+            "eps_crit": 0.003,
+            "event_damping_steps": 2,
+            "max_points": 2000,
+            "max_steps": 5000,
+            "num_std": 4.0,
+            "points": 400,
+            "steps_per_day": 4.0,
+            "terminal_damping_steps": 1
+          }
+        }
+      },
+      {
+        "name": "equity.phoenix.quad",
+        "params": {
+          "engine": "PhoenixQuadEngine",
+          "grid": {
+            "align_priority": "auto",
+            "barrier_reach_stddevs": null,
+            "bgk_min_ki_observations": 100,
+            "bus_days_in_year": 252,
+            "event_projection": "cell_average",
+            "event_smoothing_cells": 1,
+            "event_smoothing_kernel": "cosine",
+            "event_smoothing_log_width": 0.002,
+            "event_smoothing_mode": "fixed",
+            "fft_filter_alpha": 12.0,
+            "fft_filter_power": 8,
+            "fft_padding_factor": 2,
+            "filter_unreachable_barriers": true,
+            "grid_points": 1001,
+            "integration_rule": "trapezoid",
+            "ki_monitoring_mode": "exact_discrete",
+            "max_adaptive_grid_points": 5001,
+            "min_diffusion_stddev_cells": 2.5,
+            "num_std_devs": 10.0,
+            "stability_preset": null
+          },
+          "grid_points": 1001
+        }
+      }
+    ],
+    "cases": [
+      {
+        "environment_params": {},
+        "name": "ordinary",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "spot": 102.5
+        },
+        "name": "near_ko",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "spot": 85.5
+        },
+        "name": "near_coupon",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "spot": 76.0
+        },
+        "name": "near_ki",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "vol": 0.12
+        },
+        "name": "low_vol",
+        "product_params": {}
+      },
+      {
+        "environment_params": {},
+        "name": "near_expiry",
+        "product_params": {
+          "maturity": 0.25,
+          "num_observations": 3
+        }
+      },
+      {
+        "environment_params": {},
+        "name": "memory",
+        "product_params": {
+          "memory_coupon": true
+        }
+      },
+      {
+        "environment_params": {},
+        "name": "stepdown",
+        "product_params": {
+          "coupon_stepdown": 0.005,
+          "ko_stepdown": 0.005
+        }
+      }
+    ],
+    "name": "phoenix-flat-bsm",
+    "quantities": [
+      "pv",
+      "delta",
+      "gamma"
+    ],
+    "quick": false,
+    "sampling": {
+      "bump": 0.01,
+      "max_batches": 32,
+      "min_batches": 4,
+      "paths_per_batch": 65536,
+      "seed": 20260818
+    },
+    "source_text": "# Phoenix under flat Black-Scholes.\n#\n# The same three arms as the snowball study -- two-surface PDE, quadrature, and\n# one paired-RQMC benchmark -- over a payoff with one extra hard feature: a\n# coupon barrier. A phoenix pays a coupon at every observation where spot sits\n# above 85, knock-out or not, so every observation date carries a digital. That\n# is where a deterministic grid and Monte Carlo tend to part company first,\n# which is why near_coupon parks spot right on the barrier.\n#\n# Economic scale, environment and bounds are identical to snowball_flat_bsm, on\n# purpose: with multiplier 200, inception spot 100 and notional 20,000 the delta\n# quantum and the reference move are both exactly 1.0, so a raw error IS a\n# contract error -- and the two certifications sit on the same axis.\n#\n# Bound calibration (release procedure section 7, step 4). The cell gate needs\n# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this\n# sampling budget (4 batches x 65,536 paths, paired bumps): pv 0.0033, delta\n# 0.0035, gamma 0.0052 -- a 24-38x margin. Desk tolerance and benchmark\n# resolution are compatible, so the bound is not one the sampling cannot cash.\n#\n# Offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/phoenix_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: phoenix-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260818\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.phoenix\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ko_rate: 0.0\n    ki_barrier: 75.0\n    coupon_barrier: 85.0\n    coupon_rate: 0.02\n    num_observations: 12\n    memory_coupon: false\n    maturity: 1.0\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.phoenix.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.phoenix.pde\n    params: {accuracy: standard}\n  - builder: equity.phoenix.quad\n    params: {grid_points: 1001}\n\ncases:\n  # At inception, clear of all three barriers.\n  - {name: ordinary}\n  # Just under the knock-out barrier: the KO discontinuity sits inside the bump\n  # stencil, which is where deterministic gamma usually breaks first.\n  - {name: near_ko, environment: {spot: 102.5}}\n  # Sitting ON the coupon barrier. A phoenix coupon is a digital at 85, so its\n  # sensitivity is maximal here and the whole coupon stream is in play.\n  - {name: near_coupon, environment: {spot: 85.5}}\n  # Just above the knock-in barrier: the terminal payoff turns over here.\n  - {name: near_ki, environment: {spot: 76.0}}\n  # Low vol: barriers are rarely reached, so the grid resolves a much narrower\n  # region of interest and the coupon stream is nearly certain.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Three months with a quarterly schedule: few observations left, and time\n  # discretization error has nowhere to average out.\n  - {name: near_expiry, product: {num_observations: 3, maturity: 0.25}}\n  # Memory coupons: missed coupons accumulate and pay later. A prior audit found\n  # the PDE paying accrued memory coupons at KO regardless of the coupon-barrier\n  # condition, so this path carries history and must be certified explicitly.\n  - {name: memory, product: {memory_coupon: true}}\n  # Step-down barriers: KO and coupon barriers both decline 0.5% of initial\n  # price per observation. Twenty-four distinct levels now compete for grid\n  # alignment where every case above had two, and the coupon digital moves to a\n  # new strike at every observation instead of sitting still.\n  - {name: stepdown, product: {ko_stepdown: 0.005, coupon_stepdown: 0.005}}\n"
+  },
+  "wall_clock_seconds": 22.788282871246338
+}

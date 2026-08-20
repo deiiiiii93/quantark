@@ -10,6 +10,11 @@ import numpy as np
 from quantark.asset.equity.engine.base_engine import BaseEngine
 from quantark.asset.equity.engine.pde.base_pde_solver import StepCoefficients
 from quantark.asset.equity.engine.pde.snowball_pde_solver import SnowballPDESolver
+from quantark.asset.equity.engine.pde.vol_continuous_ki import (
+    Heston2DBarrierCrossingMixin,
+    LocalVolBarrierCrossingMixin,
+    SLVBarrierLeverageMixin,
+)
 from quantark.asset.equity.param import PDEParams
 from quantark.asset.equity.product.base_equity_product import BaseEquityProduct
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
@@ -61,7 +66,7 @@ def event_damped_step_keys(params, event_maps, n_t: int):
     return keys or None
 
 
-class LocalVolSnowballPDESolver(SnowballPDESolver):
+class LocalVolSnowballPDESolver(LocalVolBarrierCrossingMixin, SnowballPDESolver):
 
     """Two-surface Snowball PDE with Dupire local volatility on the S grid."""
 
@@ -208,7 +213,9 @@ class LocalVolSnowballPDESolver(SnowballPDESolver):
         return l, c, u
 
 
-class _Heston2DSnowballPDEBase(SnowballPDESolver):
+
+class _Heston2DSnowballPDEBase(Heston2DBarrierCrossingMixin, SnowballPDESolver):
+
     """Shared 2-D (log-spot, variance) ADI machinery for the Snowball solvers.
 
     ``v0_boundary`` defaults to ``"degenerate_pde"``, diverging from the ADI
@@ -984,6 +991,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         core = self._make_core(product, pricing_env, T)
         if not (core.S_grid[0] <= spot <= core.S_grid[-1]):
             raise ValidationError("spot falls outside the Heston/SLV Snowball PDE grid")
+        self._prepare_2d_continuous_ki_correction(core, product)
 
         v1_snapshots: dict[float, np.ndarray] = {}
         event_maps = self._build_event_maps(product, pricing_env, T, core.dt)
@@ -1050,6 +1058,7 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
         self._bgk_active = False
         self._ki_barrier = 0.0
         self._ki_barrier_by_tidx.clear()
+        self._ki_fp = None  # rebuilt once the ADI core (and its V grid) exists
         if product.has_ki_barrier:
             ki_barrier = product.barrier_config.ki_barrier
             self._ki_barrier = float(ki_barrier[0] if isinstance(ki_barrier, list) else ki_barrier)
@@ -1209,6 +1218,9 @@ class _Heston2DSnowballPDEBase(SnowballPDESolver):
                             at_valuation=(at_valuation and ki_discrete),
                         )
                         U[mask, :] = v1[mask, :]
+                        U = self._apply_continuous_ki_correction(
+                            U, core, tau, barrier, v1
+                        )
             return U
 
         return hook
@@ -1220,7 +1232,7 @@ class HestonSnowballPDESolver(_Heston2DSnowballPDEBase):
     _solver_name = "HestonSnowballPDESolver"
 
 
-class HestonSLVSnowballPDESolver(_Heston2DSnowballPDEBase):
+class HestonSLVSnowballPDESolver(SLVBarrierLeverageMixin, _Heston2DSnowballPDEBase):
     """Two-surface Snowball PDE under Heston-SLV using a calibrated leverage surface."""
 
     _solver_name = "HestonSLVSnowballPDESolver"

@@ -1,0 +1,139 @@
+{
+  "abs_tol": 1e-15,
+  "anchors": [
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "case": "below_ki",
+      "values": {
+        "delta": 1.1063046128520244,
+        "gamma": 0.005446772780856919,
+        "pv": 74.03665937076286
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "case": "discrete_ki",
+      "values": {
+        "delta": 0.6088581896143347,
+        "gamma": -0.046709001375684726,
+        "pv": 96.73216779493548
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.37896154212401634,
+        "gamma": -0.09603786320381508,
+        "pv": 100.1644644379276
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.2786873327693055,
+        "gamma": -0.04345619544161566,
+        "pv": 99.56925743542797
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.0627573387301978,
+        "gamma": -0.05947540151398034,
+        "pv": 79.02294879513606
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "case": "near_pre_ko",
+      "values": {
+        "delta": 0.4877289627317499,
+        "gamma": -0.05018725243133927,
+        "pv": 98.05269755076209
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.614448621188659,
+        "gamma": -0.046469837278630785,
+        "pv": 96.67021788863633
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "case": "below_ki",
+      "values": {
+        "delta": 1.1066730687963793,
+        "gamma": 0.005472683035855848,
+        "pv": 74.04550924350467
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "case": "discrete_ki",
+      "values": {
+        "delta": 0.6059354612093415,
+        "gamma": -0.04638950023604593,
+        "pv": 96.73435708079182
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.36880460757077316,
+        "gamma": -0.10534557446707993,
+        "pv": 100.16881318856198
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.28580106109932757,
+        "gamma": -0.044821718834256785,
+        "pv": 99.57000069434598
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.0591754684712993,
+        "gamma": -0.0374854111298411,
+        "pv": 79.03760590105668
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "case": "near_pre_ko",
+      "values": {
+        "delta": 0.4891663983955518,
+        "gamma": -0.04996930912262052,
+        "pv": 98.0600797992009
+      }
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.6114557863042975,
+        "gamma": -0.046317153651827425,
+        "pv": 96.68561677716731
+      }
+    }
+  ],
+  "certificate_sha256": "4b5d2213a18ffd207556b0123699a05da60a576876d3776d2334e31ea5248ce1",
+  "fingerprint": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "rel_tol": 1e-12,
+  "schema": 1,
+  "study_source_text": "# KO-reset snowball under flat Black-Scholes.\n#\n# The hard part of this payoff is a REGIME SWITCH. The trade runs a pre-KI KO\n# schedule (barrier 103) to maturity_pre; only once it knocks in at 80 does it\n# switch to a second, lower KO schedule (barrier 95) running on to\n# maturity_post. Two value surfaces therefore live on different horizons -- and\n# that is precisely what both deterministic engines got wrong before audit #13,\n# maturing the not-yet-knocked-in surface on the post-KI schedule.\n#\n# Environment, economic scale and bounds are identical to snowball_flat_bsm and\n# phoenix_flat_bsm on purpose: at multiplier 200, inception spot 100 and\n# notional 20,000 the delta quantum and the reference move are both exactly\n# 1.0, so a raw error IS a contract error and all three studies share one axis.\n#\n# Bound calibration (release procedure section 7, step 4). The cell gate needs\n# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this\n# budget (4 batches x 65,536 paths, paired bumps): pv 0.0110, delta 0.0087,\n# gamma 0.0297. Gamma is the binding quantity at a 4.2x margin -- tighter than\n# the other two studies, this being a longer-dated two-regime payoff -- but\n# still compatible, and the sampler may take up to 32 batches to sharpen it.\n#\n# Offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/ko_reset_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: ko-reset-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260818\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.ko_reset_snowball\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    maturity_pre: 1.0\n    maturity_post: 2.0\n    pre_ko_barrier: 103.0\n    pre_ko_rate: 0.15\n    post_ko_barrier: 95.0\n    post_ko_rate: 0.03\n    ki_barrier: 80.0\n    ki_continuous: true\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.ko_reset_snowball.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.ko_reset_snowball.pde\n    params: {accuracy: standard}\n  - builder: equity.ko_reset_snowball.quad\n    params: {grid_points: 1001}\n\ncases:\n  # At inception, clear of both KO barriers and well above KI.\n  - {name: ordinary}\n  # Just under the pre-KI KO barrier: the KO discontinuity sits inside the bump\n  # stencil, where deterministic gamma usually breaks first.\n  - {name: near_pre_ko, environment: {spot: 102.5}}\n  # Just above the KI barrier: the regime switch is one small move away, so both\n  # surfaces and the transition between them are in play at once.\n  - {name: near_ki, environment: {spot: 80.5}}\n  # Below the KI barrier: already knocked in at valuation, which exercises the\n  # post-KI schedule and its lower KO barrier directly rather than through the\n  # transition.\n  - {name: below_ki, environment: {spot: 76.0}}\n  # Low vol: the KI barrier is rarely reached, so almost all the value sits on\n  # the pre-KI surface and its maturity must be exactly right.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Short horizons on both legs: few observations left and time discretization\n  # error has nowhere to average out.\n  - {name: near_expiry, product: {maturity_pre: 0.25, maturity_post: 0.5}}\n  # Discrete KI monitoring instead of continuous. This is a different code path\n  # in every engine -- the continuous one runs a Brownian-bridge correction that\n  # the discrete one never touches -- so it is certified explicitly.\n  - {name: discrete_ki, product: {ki_continuous: false}}\n"
+}

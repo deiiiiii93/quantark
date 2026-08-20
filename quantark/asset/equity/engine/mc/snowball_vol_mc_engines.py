@@ -259,6 +259,50 @@ class _SubstepRefinementMixin:
     def _rqmc_substep_factor(self) -> int:
         return self.substeps_per_interval
 
+    # --- continuous-KI bridge variance -------------------------------------
+    #
+    # The bridge asks how much log-variance a path accumulated between two
+    # RECORDED nodes. These engines know it exactly -- it is the quantity each
+    # scheme already multiplies into its own log-spot increment -- so they
+    # record it per fine SDE step and fold it onto the contractual grid, the
+    # same grid `_make_path_generator` records the nodes on.
+
+    def _new_step_log_variance(self, n_paths: int, n_fine_steps: int):
+        """Buffer for the per-fine-step log-variance, or None when no
+        continuous-KI bridge will run (it costs a second paths-sized array)."""
+        if not getattr(self, "_ki_bridge_wanted", False):
+            return None
+        return np.empty((int(n_paths), int(n_fine_steps)), dtype=float)
+
+    def _record_step_log_variance(self, fine) -> None:
+        """Fold the fine SDE steps onto the contractual grid and keep it.
+
+        Variance is additive over sub-intervals, so a contractual interval's
+        log-variance is the SUM of its substeps'.
+        """
+        if fine is None:
+            self._step_log_variance = None
+            return
+        n = self.substeps_per_interval
+        if n > 1:
+            fine = fine.reshape(fine.shape[0], -1, n).sum(axis=2)
+        self._step_log_variance = fine
+
+    def _ki_bridge_step_log_variance(self, paths):
+        recorded = getattr(self, "_step_log_variance", None)
+        if recorded is None:
+            raise PricingError(
+                f"{type(self).__name__} ran the continuous-KI bridge without "
+                "recording the variance its own paths accumulated"
+            )
+        expected = (paths.shape[0], paths.shape[1] - 1)
+        if recorded.shape != expected:
+            raise PricingError(
+                f"recorded step variance {recorded.shape} does not describe "
+                f"these paths {expected}"
+            )
+        return recorded
+
 
 class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
     engine_type = EngineType.MONTE_CARLO
@@ -615,12 +659,15 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
                 else None
             )
             nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+            h2 = self._new_step_log_variance(n_eff, len(dt_array))
             spot = np.full(n_eff, float(S), dtype=float)
             nodes[:, 0] = spot
             t = 0.0
             sqrt_dt = np.sqrt(np.asarray(dt_array, dtype=float))
             for i, dt in enumerate(dt_array):
                 vol = np.asarray(lv.local_vol(spot, t), dtype=float)
+                if h2 is not None:
+                    h2[:, i] = vol * vol * dt
                 z = (
                     z_all[:, i]
                     if z_all is not None
@@ -632,6 +679,7 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
                 )
                 nodes[:, i + 1] = spot
                 t += float(dt)
+            self._record_step_log_variance(h2)
             return nodes
 
         return self._make_path_generator(simulate, n_eff, batch_id)
@@ -770,7 +818,15 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                     n_eff, np.log(max(float(S), 1e-12)), dtype=float
                 )
                 nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+                h2 = self._new_step_log_variance(n_eff, len(dt_array))
             else:
+                # The conditional-control path records nodes on the CONTRACTUAL
+                # grid with one row per (path, bridge stratum), which the
+                # bridge's (paths, steps) variance buffer cannot describe.  Leave
+                # it unrecorded: _ki_bridge_step_log_variance then raises rather
+                # than pricing a continuous KI off a variance these paths never
+                # accumulated.  No certified configuration reaches both at once.
+                h2 = None
                 residual_z, spot_loadings = conditioning
                 bridge_strata = int(self.rqmc_spot_bridge_strata)
                 if bridge_strata > 1:
@@ -820,6 +876,8 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                     z_s = rho * z1 + rho_bar * z2
                     v_plus = np.maximum(var, 0.0)
                     sqrt_v = np.sqrt(v_plus)
+                    if h2 is not None:
+                        h2[:, i] = v_plus * dt
                     drift = float(term.rrf[i] - term.div[i])
                     log_s = log_s + (drift - 0.5 * v_plus) * dt + sqrt_v * z_s
                     var = (
@@ -829,6 +887,7 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                         + 0.25 * sigma2 * (z1 * z1 - dt)
                     )
                     nodes[:, i + 1] = np.exp(log_s)
+                self._record_step_log_variance(h2)
                 return nodes
 
             martingale = scheme == HestonMCScheme.QUADEXP_M
@@ -875,6 +934,8 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                 v_np = np.where(psi <= psi_c, v_a, v_b)
                 v_np = np.maximum(v_np, 0.0)
                 v_bar = np.maximum(0.5 * (v_np + np.maximum(var, 0.0)), 0.0)
+                if h2 is not None:
+                    h2[:, i] = v_bar * dt
                 if deterministic_vol:
                     corr = 0.0
                 else:
@@ -940,6 +1001,7 @@ class HestonSnowballMCEngine(_VolModelSnowballMCBase):
                     log_spot_factor_loadings[:, contractual_index] = (
                         factor_loading.reshape(-1)
                     )
+            self._record_step_log_variance(h2)
             if conditioning is None:
                 return nodes
             aux = {
@@ -1086,6 +1148,7 @@ class HestonSLVSnowballMCEngine(_VolModelSnowballMCBase):
                 )
                 qmc_z = qmc_z.reshape(n_eff, 2, len(dt_array))
             nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+            h2 = self._new_step_log_variance(n_eff, len(dt_array))
             log_s = np.full(n_eff, np.log(max(float(S), 1e-12)), dtype=float)
             var = np.full(n_eff, max(float(p.v0), 0.0), dtype=float)
             nodes[:, 0] = np.exp(log_s)
@@ -1113,6 +1176,8 @@ class HestonSLVSnowballMCEngine(_VolModelSnowballMCBase):
                 v_plus = np.maximum(var, 0.0)
                 sqrt_v = np.sqrt(v_plus)
                 eff_vol = leverage * sqrt_v
+                if h2 is not None:
+                    h2[:, i] = eff_vol * eff_vol * dt
                 sqrt_dt = float(np.sqrt(dt))
                 if qmc_z is not None:
                     d_w_v = qmc_z[:, 0, i] * sqrt_dt
@@ -1133,6 +1198,7 @@ class HestonSLVSnowballMCEngine(_VolModelSnowballMCBase):
                 )
                 nodes[:, i + 1] = np.exp(log_s)
                 t += float(dt)
+            self._record_step_log_variance(h2)
             return nodes
 
         return self._make_path_generator(simulate, n_eff, batch_id)
@@ -1229,6 +1295,13 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
             conditioning = None
             conditional_spot_factors = None
             control_only = bool(self.rqmc_conditional_control_only)
+            # The conditional-control paths below are recorded on the CONTRACTUAL
+            # grid with one row per (path, stratum), a shape the continuous-KI
+            # bridge's (paths, steps) variance buffer cannot describe.  Only the
+            # plain path records it; the conditional one leaves it None so
+            # _ki_bridge_step_log_variance raises rather than falling back to a
+            # variance these paths never accumulated.
+            h2 = None
             if self.rqmc_heston_conditional_control:
                 if self.rqmc_spot_strata > 1 and self.leverage_surface is None:
                     raise ValidationError(
@@ -1326,6 +1399,7 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
                         z_ind, np.cumsum(dt_array)
                     ) / np.sqrt(dt_array)[None, :]
                 nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+                h2 = self._new_step_log_variance(n_eff, len(dt_array))
                 log_s = np.full(
                     n_eff, np.log(max(float(S), 1e-12)), dtype=float
                 )
@@ -1399,6 +1473,11 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
                 v_np = qe_step.v_np
                 v_bar = qe_step.v_bar
                 quad_mask = qe_step.quad_mask
+                if h2 is not None:
+                    # Quadratic variation of log S over this fine step. The SLV
+                    # diffusion is L(S,t)*sqrt(v), so the interval accumulates
+                    # L^2 * v_bar * dt with the scheme's own trapezoidal v_bar.
+                    h2[:, i] = leverage * leverage * v_bar * dt
                 if not control_only:
                     if conditioning is None:
                         v_bar_p = v_bar
@@ -1590,6 +1669,7 @@ class HestonSLVQESnowballMCEngine(HestonSLVSnowballMCEngine):
                             * conditional_spot_factors[:, None, :]
                         ).reshape(-1)
                 t += float(dt)
+            self._record_step_log_variance(h2)
             if conditioning is None:
                 return nodes
             if control_only:

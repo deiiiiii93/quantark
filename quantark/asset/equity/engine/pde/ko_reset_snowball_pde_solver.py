@@ -24,7 +24,7 @@ from quantark.asset.equity.product.option.observation_schedule import ResolvedOb
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import CouponPayType, ObservationType, PostKOScheduleMode
 from quantark.util.exceptions import PricingError, ValidationError
-from quantark.util.numerical import is_close, is_zero
+from quantark.util.numerical import Tolerance, is_close, is_zero
 
 
 class KOResetSnowballPDESolver(SnowballPDESolver):
@@ -50,6 +50,11 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._pre_ko_observation_indices: Dict[int, ResolvedObservationRecord] = {}
         self._post_ko_observation_indices: Dict[int, ResolvedObservationRecord] = {}
         self._pre_ko_terminal_record: Optional[ResolvedObservationRecord] = None
+        #: Time index at which the not-yet-KI surface is seeded, and the
+        #: payoff to seed it with. Both stay None when the pre-KI schedule
+        #: runs to the full maturity, which is the un-staged case.
+        self._v0_seed_idx: Optional[int] = None
+        self._v0_seed_values = None
         self._post_ko_terminal_record: Optional[ResolvedObservationRecord] = None
         self._has_pre_terminal_ko: bool = False
         self._has_post_terminal_ko: bool = False
@@ -348,12 +353,32 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
         self._grid_v0 = np.zeros((num_x, num_t))
         self._grid_v1 = np.zeros((num_x, num_t))
 
-        self._set_terminal_condition_v0(
-            self._grid_v0, x_vec, s_vec, product, pricing_env
-        )
         self._set_terminal_condition_v1(
             self._grid_v1, x_vec, s_vec, product, pricing_env
         )
+
+        # A not-yet-knocked-in contract matures on the PRE-KI schedule; only a
+        # knocked-in one runs on to `tau`. Seeding V0 at the end of the grid
+        # would march it back through a period it can never reach, so when the
+        # two horizons differ V0 stays zero above the pre-KI maturity -- its
+        # true value there -- and is seeded at that index during stepping.
+        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+        self._v0_seed_idx = None
+        self._v0_seed_values = None
+        staged_v0 = (
+            self._pre_ko_observation_indices
+            and pre_maturity < tau
+            and not is_close(pre_maturity, tau, abs_tol=Tolerance.PRECISION)
+        )
+        if staged_v0:
+            seed = np.zeros((num_x, 1))
+            self._set_terminal_condition_v0(seed, x_vec, s_vec, product, pricing_env)
+            self._v0_seed_values = seed[:, -1].copy()
+            self._v0_seed_idx = max(self._pre_ko_observation_indices)
+        else:
+            self._set_terminal_condition_v0(
+                self._grid_v0, x_vec, s_vec, product, pricing_env
+            )
 
         if self._has_pre_terminal_ko and self._pre_ko_terminal_record is not None:
             self._apply_terminal_ko_single(
@@ -377,7 +402,7 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 self._post_ko_terminal_record,
             )
 
-        if product.has_ki_barrier:
+        if product.has_ki_barrier and not staged_v0:
             is_terminal_ki = self._ki_continuous or self._bgk_active
             if not is_terminal_ki:
                 if (num_t - 1) in self._ki_observation_indices:
@@ -441,6 +466,9 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
     ) -> None:
         current_time = self._total_tau - tau
 
+        if self._v0_seed_idx is not None and t_idx == self._v0_seed_idx:
+            grid_v0[:, t_idx] = self._v0_seed_values
+
         pre_record = self._pre_ko_observation_indices.get(t_idx)
         if pre_record is not None:
             self._apply_ko_jump_single(
@@ -468,7 +496,8 @@ class KOResetSnowballPDESolver(SnowballPDESolver):
                 post_record,
             )
 
-        if product.has_ki_barrier:
+        v0_live = self._v0_seed_idx is None or t_idx <= self._v0_seed_idx
+        if product.has_ki_barrier and v0_live:
             should_apply_ki = (
                 self._ki_continuous or t_idx in self._ki_observation_indices
             )

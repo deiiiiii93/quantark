@@ -150,12 +150,15 @@ class LocalVolPhoenixMCEngine(_VolModelPhoenixMCBase):
                 else None
             )
             nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+            h2 = self._new_step_log_variance(n_eff, len(dt_array))
             spot = np.full(n_eff, float(S), dtype=float)
             nodes[:, 0] = spot
             t = 0.0
             sqrt_dt = np.sqrt(np.asarray(dt_array, dtype=float))
             for i, dt in enumerate(dt_array):
                 vol = np.asarray(lv.local_vol(spot, t), dtype=float)
+                if h2 is not None:
+                    h2[:, i] = vol * vol * dt
                 z = (
                     z_all[:, i]
                     if z_all is not None
@@ -167,6 +170,7 @@ class LocalVolPhoenixMCEngine(_VolModelPhoenixMCBase):
                 )
                 nodes[:, i + 1] = spot
                 t += float(dt)
+            self._record_step_log_variance(h2)
             return nodes
 
         return self._make_path_generator(simulate, n_eff, batch_id)
@@ -276,6 +280,7 @@ class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
         def simulate(batch_id=None, seed=None):
             z_var, z_ind, u_var = _draws(batch_id=batch_id, seed=seed)
             nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+            h2 = self._new_step_log_variance(n_eff, len(dt_array))
             log_s = np.full(n_eff, np.log(max(float(S), 1e-12)), dtype=float)
             var = np.full(n_eff, max(float(p.v0), 0.0), dtype=float)
             nodes[:, 0] = np.exp(log_s)
@@ -297,6 +302,8 @@ class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
                     z2 = z_ind[:, i] * sqrt_dt
                     z_s = rho * z1 + rho_bar * z2
                     v_plus = np.maximum(var, 0.0)
+                    if h2 is not None:
+                        h2[:, i] = v_plus * dt
                     sqrt_v = np.sqrt(v_plus)
                     drift = float(term.rrf[i] - term.div[i])
                     log_s = log_s + (drift - 0.5 * v_plus) * dt + sqrt_v * z_s
@@ -307,6 +314,7 @@ class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
                         + 0.25 * sigma2 * (z1 * z1 - dt)
                     )
                     nodes[:, i + 1] = np.exp(log_s)
+                self._record_step_log_variance(h2)
                 return nodes
 
             martingale = scheme == HestonMCScheme.QUADEXP_M
@@ -351,6 +359,8 @@ class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
 
                 v_np = np.maximum(np.where(psi <= psi_c, v_a, v_b), 0.0)
                 v_bar = np.maximum(0.5 * (v_np + np.maximum(var, 0.0)), 0.0)
+                if h2 is not None:
+                    h2[:, i] = v_bar * dt
                 if deterministic_vol:
                     corr = 0.0
                 else:
@@ -398,6 +408,7 @@ class HestonPhoenixMCEngine(_VolModelPhoenixMCBase):
                     )
                 var = v_np
                 nodes[:, i + 1] = np.exp(log_s)
+            self._record_step_log_variance(h2)
             return nodes
 
         return self._make_path_generator(simulate, n_eff, batch_id)
@@ -516,6 +527,7 @@ class HestonSLVPhoenixMCEngine(_VolModelPhoenixMCBase):
                 )
                 qmc_z = qmc_z.reshape(n_eff, 2, len(dt_array))
             nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+            h2 = self._new_step_log_variance(n_eff, len(dt_array))
             log_s = np.full(n_eff, np.log(max(float(S), 1e-12)), dtype=float)
             var = np.full(n_eff, max(float(p.v0), 0.0), dtype=float)
             nodes[:, 0] = np.exp(log_s)
@@ -543,6 +555,8 @@ class HestonSLVPhoenixMCEngine(_VolModelPhoenixMCBase):
                 v_plus = np.maximum(var, 0.0)
                 sqrt_v = np.sqrt(v_plus)
                 eff_vol = leverage * sqrt_v
+                if h2 is not None:
+                    h2[:, i] = eff_vol * eff_vol * dt
                 sqrt_dt = float(np.sqrt(dt))
                 if qmc_z is not None:
                     d_w_v = qmc_z[:, 0, i] * sqrt_dt
@@ -563,6 +577,7 @@ class HestonSLVPhoenixMCEngine(_VolModelPhoenixMCBase):
                 )
                 nodes[:, i + 1] = np.exp(log_s)
                 t += float(dt)
+            self._record_step_log_variance(h2)
             return nodes
 
         return self._make_path_generator(simulate, n_eff, batch_id)
@@ -646,6 +661,7 @@ class HestonSLVQEPhoenixMCEngine(HestonSLVPhoenixMCEngine):
         def simulate(batch_id=None, seed=None):
             z_var, z_ind, u_var = _draws(batch_id=batch_id, seed=seed)
             nodes = np.empty((n_eff, len(dt_array) + 1), dtype=float)
+            h2 = self._new_step_log_variance(n_eff, len(dt_array))
             log_s = np.full(n_eff, np.log(max(float(S), 1e-12)), dtype=float)
             var = np.full(n_eff, max(float(p.v0), 0.0), dtype=float)
             nodes[:, 0] = np.exp(log_s)
@@ -715,6 +731,8 @@ class HestonSLVQEPhoenixMCEngine(HestonSLVPhoenixMCEngine):
                 v_np = np.maximum(np.where(psi <= psi_c, v_a, v_b), 0.0)
                 v_bar = np.maximum(0.5 * (v_np + np.maximum(var, 0.0)), 0.0)
                 leverage2 = leverage * leverage
+                if h2 is not None:
+                    h2[:, i] = leverage2 * v_bar * dt
                 if deterministic_vol:
                     corr = 0.0
                 else:
@@ -773,6 +791,7 @@ class HestonSLVQEPhoenixMCEngine(HestonSLVPhoenixMCEngine):
                 var = v_np
                 nodes[:, i + 1] = np.exp(log_s)
                 t += float(dt)
+            self._record_step_log_variance(h2)
             return nodes
 
         return self._make_path_generator(simulate, n_eff, batch_id)

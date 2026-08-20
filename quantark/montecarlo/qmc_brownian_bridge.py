@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from quantark.montecarlo.bridge_kernels import bridge_transform
 from quantark.util.numerical import safe_log
 
 
@@ -122,52 +123,19 @@ class BrownianBridge:
         if z.ndim != 2:
             raise ValueError("z must be a 2D array of shape (n_paths, n_steps)")
 
-        n_paths, n_steps = z.shape
+        n_steps = z.shape[1]
         if n_steps != self.times.shape[0]:
             raise ValueError(
                 f"z has {n_steps} time steps but BrownianBridge is configured "
                 f"for {self.times.shape[0]} steps."
             )
 
-        W = np.zeros((n_paths, n_steps), dtype=float)
-
-        # First dimension: terminal time T
-        idx0 = self.indices[0]
-        std0 = np.sqrt(self.variances[0])
-        W[:, idx0] = std0 * z[:, 0]
-
-        # Remaining dimensions: midpoints
-        for j in range(1, n_steps):
-            k = self.indices[j]
-            l = self.left[j]
-            r = self.right[j]
-
-            t_l = 0.0 if l == -1 else self.times[l]
-            t_r = self.times[r]
-            t_m = self.times[k]
-
-            if l == -1:
-                W_l = 0.0
-            else:
-                W_l = W[:, l]
-            W_r = W[:, r]
-
-            # Conditional mean and variance for the bridge
-            denom = t_r - t_l
-            if denom <= 0.0:
-                raise ValueError("Invalid Brownian bridge interval length.")
-            mean = ((t_r - t_m) * W_l + (t_m - t_l) * W_r) / denom
-            std = np.sqrt(self.variances[j])
-
-            W[:, k] = mean + std * z[:, j]
-
-        # Convert Brownian motion values to increments
-        dW = np.empty_like(W)
-        dW[:, 0] = W[:, 0]
-        if n_steps > 1:
-            dW[:, 1:] = W[:, 1:] - W[:, :-1]
-
-        return dW
+        # Delegated to the shared kernel (Numba-accelerated when
+        # quantark[accel] is installed, NumPy reference otherwise -- bitwise
+        # either way, asserted in test_bridge_transform_kernel.py).
+        return bridge_transform(
+            z, self.times, self.indices, self.left, self.right, self.variances
+        )
 
 
 def apply_brownian_bridge(z: np.ndarray, times: np.ndarray) -> np.ndarray:

@@ -1,0 +1,427 @@
+{
+  "abs_tol": 1e-15,
+  "anchors": [
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "airbag",
+      "values": {
+        "delta": 0.32634011280115294,
+        "gamma": -0.03153164010603547,
+        "pv": 98.94728946969967
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "call_rebate",
+      "values": {
+        "delta": 0.648696787450309,
+        "gamma": -0.04546603295577124,
+        "pv": 96.30026291346265
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "coupon_at_expiry",
+      "values": {
+        "delta": 0.5394551551807651,
+        "gamma": -0.046517188215876054,
+        "pv": 95.08758165309467
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "disable_ko_after_ki",
+      "values": {
+        "delta": 0.7450801133234456,
+        "gamma": -0.05515405824220803,
+        "pv": 95.6655761006976
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "disable_ko_after_ki_knocked_in",
+      "values": {
+        "delta": 0.7992846933740226,
+        "gamma": -0.014290534526916103,
+        "pv": 76.15572504057943
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "discrete_ki",
+      "values": {
+        "delta": 0.5959407337697118,
+        "gamma": -0.04931954401395499,
+        "pv": 96.90679303667929
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "european_ki",
+      "values": {
+        "delta": 0.39989195426007723,
+        "gamma": -0.04231049680777139,
+        "pv": 98.54915975064615
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "ki_stepdown",
+      "values": {
+        "delta": 0.510635779401039,
+        "gamma": -0.054177632427317664,
+        "pv": 97.79377204171129
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "ko_rate_step",
+      "values": {
+        "delta": 0.6010465785778791,
+        "gamma": -0.04875141467416411,
+        "pv": 96.85440490552256
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.16740662381399662,
+        "gamma": -0.13534668843867853,
+        "pv": 101.7365078246738
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.10076742720288577,
+        "gamma": -0.109690344900454,
+        "pv": 103.25388262360042
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.0145047390302375,
+        "gamma": -0.0059711983007821965,
+        "pv": 84.26631762724037
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.5128356122672934,
+        "gamma": -0.05157958686701762,
+        "pv": 97.89939456114074
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "not_annualized",
+      "values": {
+        "delta": 1.2312358290349352,
+        "gamma": -0.05005550839113534,
+        "pv": 104.5635978645197
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.6371658481991073,
+        "gamma": -0.04720211267336552,
+        "pv": 96.46065192554826
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "parachute",
+      "values": {
+        "delta": 0.4007799907840947,
+        "gamma": -0.042477448411500786,
+        "pv": 98.54483762799603
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "parachute_near_ki",
+      "values": {
+        "delta": 0.9564865596753425,
+        "gamma": -0.0324436230855923,
+        "pv": 88.8352807005808
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "participation",
+      "values": {
+        "delta": 0.3110408413831807,
+        "gamma": -0.031208787766084357,
+        "pv": 99.08163957925312
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "protection_full",
+      "values": {
+        "delta": -0.015084165432782166,
+        "gamma": -0.015215462859734035,
+        "pv": 101.70262723295808
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "protection_partial",
+      "values": {
+        "delta": 0.636552663130341,
+        "gamma": -0.04710754430683927,
+        "pv": 96.46403375045557
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "reverse",
+      "values": {
+        "delta": -0.6174615891096447,
+        "gamma": -0.04508854659001651,
+        "pv": 96.96459932968683
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "stepdown_ko",
+      "values": {
+        "delta": 0.570609480045446,
+        "gamma": -0.047383824382774234,
+        "pv": 97.11967127617517
+      }
+    },
+    {
+      "candidate": "equity.snowball.pde",
+      "case": "stepdown_near_last_ko",
+      "values": {
+        "delta": 0.6990431140234792,
+        "gamma": -0.04171276552808698,
+        "pv": 95.20660838332476
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "airbag",
+      "values": {
+        "delta": 0.32532483638695453,
+        "gamma": -0.029516826395934004,
+        "pv": 98.9574917829833
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "call_rebate",
+      "values": {
+        "delta": 0.6485517017580378,
+        "gamma": -0.0426645819774194,
+        "pv": 96.29845853818453
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "coupon_at_expiry",
+      "values": {
+        "delta": 0.5397182375115648,
+        "gamma": -0.04361606552541275,
+        "pv": 95.08574555833894
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "disable_ko_after_ki",
+      "values": {
+        "delta": 0.7448802005489981,
+        "gamma": -0.051757721819100766,
+        "pv": 95.66519320455299
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "disable_ko_after_ki_knocked_in",
+      "values": {
+        "delta": 0.7986144377696558,
+        "gamma": -0.014045146631924684,
+        "pv": 76.15560880715536
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "discrete_ki",
+      "values": {
+        "delta": 0.5962962893413106,
+        "gamma": -0.04626396008086431,
+        "pv": 96.90367443361744
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "european_ki",
+      "values": {
+        "delta": 0.4014944265557432,
+        "gamma": -0.03982810523268654,
+        "pv": 98.54211178580859
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "ki_stepdown",
+      "values": {
+        "delta": 0.5168897739577005,
+        "gamma": -0.05093378281839023,
+        "pv": 97.79079219529082
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "ko_rate_step",
+      "values": {
+        "delta": 0.6012029435800983,
+        "gamma": -0.045724770489343314,
+        "pv": 96.85258925100165
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "low_vol",
+      "values": {
+        "delta": 0.1865870348561458,
+        "gamma": -0.13477750185333548,
+        "pv": 101.73325489333376
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "near_expiry",
+      "values": {
+        "delta": 0.11526792916770034,
+        "gamma": -0.11266258959005881,
+        "pv": 103.26250908857203
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "near_ki",
+      "values": {
+        "delta": 1.0163559776371773,
+        "gamma": -0.009680714266091392,
+        "pv": 84.2671929442917
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "near_ko",
+      "values": {
+        "delta": 0.5128896030833531,
+        "gamma": -0.05149422612582154,
+        "pv": 97.89918036874391
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "not_annualized",
+      "values": {
+        "delta": 1.2292732044299868,
+        "gamma": -0.04715217715659037,
+        "pv": 104.56336713300948
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "ordinary",
+      "values": {
+        "delta": 0.6371211452131504,
+        "gamma": -0.04428772725894703,
+        "pv": 96.45903094731773
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "parachute",
+      "values": {
+        "delta": 0.4014944265557432,
+        "gamma": -0.03982810523268654,
+        "pv": 98.54211178580859
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "parachute_near_ki",
+      "values": {
+        "delta": 0.9597076499352414,
+        "gamma": -0.03281349127879374,
+        "pv": 88.83471395995228
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "participation",
+      "values": {
+        "delta": 0.3113458824022146,
+        "gamma": -0.029235303396362156,
+        "pv": 99.0804931560487
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "protection_full",
+      "values": {
+        "delta": -0.014429380408721215,
+        "gamma": -0.014182879533663595,
+        "pv": 101.70195536477965
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "protection_partial",
+      "values": {
+        "delta": 0.6365057614383716,
+        "gamma": -0.044198674458840514,
+        "pv": 96.46240766925918
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "reverse",
+      "values": {
+        "delta": -0.6183037949473231,
+        "gamma": -0.04418587978059918,
+        "pv": 96.96293170134744
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "stepdown_ko",
+      "values": {
+        "delta": 0.5686749605673924,
+        "gamma": -0.04768693768230037,
+        "pv": 97.12011082252874
+      }
+    },
+    {
+      "candidate": "equity.snowball.quad",
+      "case": "stepdown_near_last_ko",
+      "values": {
+        "delta": 0.7033508641743277,
+        "gamma": -0.04070035140884734,
+        "pv": 95.20637035721984
+      }
+    }
+  ],
+  "certificate_sha256": "40ae8280f233729d6eb7427a62c89c3f253948e5c189e0753517760fd89de563",
+  "fingerprint": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "rel_tol": 1e-12,
+  "schema": 1,
+  "study_source_text": "# Snowball under flat Black-Scholes: the module's demonstration study.\n#\n# Two deterministic engines -- the two-surface PDE solver and the quadrature\n# engine -- are certified against one paired-RQMC Monte Carlo benchmark, on PV\n# and both spot Greeks, across scenarios chosen to stress the parts of the\n# payoff that are hard: sitting just under the knock-out barrier, sitting just\n# above the knock-in barrier, and running into expiry.\n#\n# The last six cases certify product VARIANTS rather than market scenarios.\n# Each is a distinct engine code path, not a re-parameterization: discrete and\n# European knock-in skip the continuous-monitoring machinery entirely, and a\n# per-observation KO schedule gives every observation its own barrier level to\n# project onto and align to. They were added after the original certification,\n# whose five scenarios all shared one flat KO barrier and continuous KI.\n#\n# Economic scale: the trade is 20,000 of notional, and one index-futures\n# contract at multiplier 200 with spot 100 hedges exactly that -- so one\n# \"contract\" of error is one contract of hedge a desk would have mis-placed.\n#\n# Bounds follow the desk convention: 0.5 contracts per cell, 0.1 contracts of\n# mean signed bias across cells.\n#\n# This is an offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/snowball_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: snowball-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260814\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.snowball\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    ko_barrier: 103.0\n    ki_barrier: 85.0\n    ko_rate: 0.15\n    rebate_rate: 0.15\n    months: 12\n    maturity: 1.0\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.snowball.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.snowball.pde\n    params: {accuracy: standard}\n  - builder: equity.snowball.quad\n    params: {grid_points: 1001}\n\ncases:\n  # At inception, comfortably between the barriers.\n  - {name: ordinary}\n  # Just under the knock-out barrier: the KO discontinuity sits inside the\n  # bump stencil, which is where deterministic gamma usually breaks first.\n  - {name: near_ko, environment: {spot: 102.5}}\n  # Just above the knock-in barrier: the payoff turns over here.\n  - {name: near_ki, environment: {spot: 86.0}}\n  # Low vol: barriers become rarely reached, so the PDE grid resolves a much\n  # narrower region of interest.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Three months to expiry with a quarterly schedule: few observations left,\n  # and time discretization error has nowhere to average out.\n  - {name: near_expiry, product: {months: 3, maturity: 0.25}}\n  # Discretely monitored KI, on the KO observation dates. A different code path\n  # in every engine -- the benchmark drops its Brownian-bridge crossing\n  # correction and the PDE its per-step first-passage transfer -- so what the\n  # continuous cases certify says nothing about this one.\n  - {name: discrete_ki, product: {ki_monitoring: discrete}}\n  # European KI: the barrier is looked at once, at maturity. The two-surface\n  # dynamic programme collapses to a single terminal test, and the knock-in\n  # probability is a closed-form quantity rather than a first-passage one.\n  - {name: european_ki, product: {ki_monitoring: european}}\n  # Step-down KO (\u9012\u51cf\u96ea\u7403): the barrier declines 0.5% of initial price per\n  # observation, ending at 97.5. Twelve distinct levels now compete for grid\n  # alignment where every case above had exactly one.\n  - {name: stepdown_ko, product: {ko_stepdown: 0.005}}\n  # The step-down schedule's LAST barrier is 97.5, and this parks spot just\n  # under it. near_ko stresses the first barrier of a flat schedule; this\n  # stresses the final barrier of a declining one, which is a different node.\n  - {name: stepdown_near_last_ko, environment: {spot: 97.0},\n     product: {ko_stepdown: 0.005}}\n  # Parachute (\u964d\u843d\u4f1e\u96ea\u7403): the final KO barrier sits exactly on the KI barrier,\n  # so anything that never knocked in necessarily knocks out. A KO event and\n  # the KI barrier coincide at one level -- a degeneracy no other case has.\n  - {name: parachute, product: {parachute: true}}\n  # The parachute's coincident level is at 85, and this parks spot just above\n  # it. This is where the KO/KI degeneracy actually binds; certifying the\n  # parachute only at spot 100 would leave its defining feature untested.\n  - {name: parachute_near_ki, environment: {spot: 86.0},\n     product: {parachute: true}}\n  # A KI barrier that declines 0.5% of initial price per observation, 85 -> 79.5.\n  # Both deterministic engines refuse a per-observation KI under continuous\n  # monitoring, so a stepping KI is a discretely observed product by\n  # construction, and the per-observation barrier map is a path of its own.\n  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}\n  # Reverse snowball: the embedded option is a call, the KO barrier is a DOWN\n  # barrier and the KI an UP barrier. Every mask in every engine inverts.\n  - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 115.0}}\n  # Airbag: below 90 the investor participates at half rate, so the terminal\n  # payoff gains a second kink away from the strike.\n  - {name: airbag, product: {airbag_barrier: 90.0, airbag_participation_rate: 0.5}}\n  # Partial and full principal protection: both reshape the knocked-in terminal\n  # payoff, which is the surface the KI transfer copies from.\n  - {name: protection_partial, product: {protection_type: partial, protection_rate: 0.5}}\n  - {name: protection_full, product: {protection_type: full}}\n  # Downside participation at half rate.\n  - {name: participation, product: {participation_rate: 0.5}}\n  # Call-style rebate: the no-KO/no-KI payoff becomes an option on the terminal\n  # spot rather than a fixed coupon.\n  - {name: call_rebate, product: {call_rebate: true, call_strike: 100.0}}\n  # disable_ko_after_ki: once knocked in the KO barrier stops applying, so the\n  # knocked-in surface runs on unbarriered. The PDE ignored this flag entirely\n  # until 2026-08-19 and mispriced by 159% of the cell bound in silence.\n  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}\n  # The same flag with the trade already knocked in at valuation, where it bites\n  # hardest: no knock-out can ever pay from here.\n  - {name: disable_ko_after_ki_knocked_in, environment: {spot: 80.0},\n     product: {disable_ko_after_ki: true}}\n  # Coupons discounted to maturity instead of paid at the knock-out date.\n  - {name: coupon_at_expiry, product: {coupon_pay_type: expiry}}\n  # Rates quoted per period rather than annualized: a different accrual path.\n  - {name: not_annualized, product: {is_annualized: false}}\n  # A KO rate that rises 0.5% per observation, so the coupon is a schedule\n  # rather than one number.\n  - {name: ko_rate_step, product: {ko_rate_step: 0.005}}\n"
+}

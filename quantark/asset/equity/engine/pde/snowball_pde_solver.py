@@ -21,6 +21,9 @@ import numpy as np
 import scipy.sparse as sp
 
 from scipy.linalg import solve_banded
+from scipy.special import ndtr
+
+_SQRT_2PI = float(np.sqrt(2.0 * np.pi))
 
 from quantark.asset.equity.engine.pde.base_pde_solver import (
     BasePDESolver,
@@ -43,7 +46,11 @@ from quantark.asset.equity.product.option.observation_schedule import ResolvedOb
 from quantark.asset.equity.product.option.snowball_option import SnowballOption
 from quantark.priceenv import PricingEnvironment
 from quantark.util.enum import ObservationType, ProtectionType
-from quantark.util.enum.engine_enums import EventProjectionMode, KnockInMonitoringMode
+from quantark.util.enum.engine_enums import (
+    ContinuousKICorrection,
+    EventProjectionMode,
+    KnockInMonitoringMode,
+)
 from quantark.util.exceptions import PricingError, ValidationError
 from quantark.util.numerical import (
     Tolerance,
@@ -59,6 +66,174 @@ from quantark.util.numerical import (
 # and quad BGK shifted barriers coincide (kept as a local literal rather than a
 # cross-engine import to avoid a PDE->quad module dependency) [§11.6].
 _BGK_BETA = 0.5825971579390107
+
+
+
+class _ContinuousKIFirstPassage:
+    """Per-solve state for the FIRST_PASSAGE continuous-KI correction.
+
+    Per-step nodal application of the KI regime jump monitors the continuous
+    barrier only at step boundaries: paths that touch the barrier inside a
+    step yet end on the live side are never knocked in, and the live surface
+    is biased high by O(sqrt(dt)). ``step_correction`` returns the missing
+    value transfer
+
+        C(x) = integral over live y of  K(x,y) p_hit(x,y) [V1 - V0](y) dy
+
+    in closed form under two exact-to-leading-order reductions: the step
+    transition K and Brownian-bridge crossing probability p_hit use the SAME
+    per-step-constant GBM coefficients as the stepping operator, and
+    [V1 - V0] is locally linear at the barrier, lambda * (y - b) in log
+    space, with lambda read off the current column at distance ~ sigma
+    sqrt(dt) from the barrier. The y-integral is then a Gaussian partial
+    moment (reflection principle):
+
+        C(x) = lambda * exp(-2 mu_e a / sig^2) * [m Phi(m/s) + s phi(m/s)]
+
+    with a the log distance to the barrier on the live side, m = mu_e dt - a,
+    s = sigma sqrt(dt), and mu_e the drift signed toward the barrier
+    (mu for a down barrier, -mu for a reverse/up barrier). No fitted
+    constants. Paths ending on the breached side are already captured by the
+    nodal mask at the neighbouring column, so only touch-and-return mass is
+    added here.
+    """
+
+    #: Beyond this many step-widths from the barrier the crossing mass is
+    #: below double-precision noise (phi(10) ~ 1e-22); nodes there take zero.
+    _BAND_STDS = 10.0
+
+    def __init__(
+        self, dt: np.ndarray, mu: np.ndarray, sig2: np.ndarray, is_reverse: bool
+    ):
+        self._dt = np.asarray(dt, dtype=float)
+        self._mu = np.asarray(mu, dtype=float)
+        self._sig2 = np.asarray(sig2, dtype=float)
+        self._is_reverse = bool(is_reverse)
+        self._cache: Dict[tuple, tuple] = {}
+        # (n_steps, n_cols) coefficients drive the columnar branch: the 2-D
+        # solvers monitor the barrier under the spot dynamics CONDITIONAL on
+        # each variance column, so every column carries its own (mu, sigma^2).
+        if self._mu.ndim != self._sig2.ndim:
+            raise ValidationError(
+                "first-passage mu and sigma^2 must share a shape"
+            )
+        if self._sig2.ndim not in (1, 2):
+            raise ValidationError(
+                "first-passage coefficients must be per-step or per-step-per-column"
+            )
+        self._columnar = self._sig2.ndim == 2
+
+    def _geometry(
+        self, dt: float, mu: float, sig2: float, s_vec: np.ndarray, barrier: float
+    ):
+        """Cached (G, k_star): the lambda multiplier profile and the node
+        the slope is sampled at. G is zero off the live band."""
+        key = (
+            round(dt, 12), round(mu, 12), round(sig2, 12),
+            round(float(barrier), 12), len(s_vec),
+        )
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        result = (None, None, None)
+        if dt > 0.0 and sig2 > 0.0 and barrier > 0.0:
+            log_s = np.log(np.asarray(s_vec, dtype=float))
+            log_b = np.log(float(barrier))
+            if self._is_reverse:
+                a = log_b - log_s
+                mu_e = -mu
+            else:
+                a = log_s - log_b
+                mu_e = mu
+            s_step = np.sqrt(sig2 * dt)
+            band = np.flatnonzero((a > 0.0) & (a < self._BAND_STDS * s_step))
+            if band.size:
+                ab = a[band]
+                m = mu_e * dt - ab
+                t = m / s_step
+                bracket = m * ndtr(t) + s_step * np.exp(-0.5 * t * t) / _SQRT_2PI
+                G = np.zeros(len(s_vec), dtype=float)
+                G[band] = np.exp(-2.0 * mu_e * ab / sig2) * bracket
+                live = np.flatnonzero(a > 0.0)
+                # lambda is a SLOPE, and the grid has to resolve it. The nodal
+                # mask has just set d to zero on the breached side, so on the
+                # grid d steps from 0 to its full size across the barrier: a
+                # node sitting a fraction of a cell above it reports that step,
+                # not the slope, and d/a diverges as the node approaches the
+                # barrier. Sample no closer than half a cell -- a resolution
+                # floor, not a tuned constant. Barrier-aligned grids (every 1-D
+                # layout) already clear it, so their sample is unchanged.
+                if live.size > 1:
+                    resolved = live[a[live] >= 0.5 * (a[live[1]] - a[live[0]])]
+                    if resolved.size:
+                        live = resolved
+                k_star = int(live[np.argmin(np.abs(a[live] - s_step))])
+                result = (G, k_star, float(a[k_star]))
+        self._cache[key] = result
+        return result
+
+    def step_correction(
+        self, t_idx: int, s_vec: np.ndarray, barrier: float, d: np.ndarray
+    ) -> np.ndarray:
+        """Correction to ADD to the live surface at the current column.
+
+        ``d`` is V1 - V0 at the current column AFTER the nodal mask (so it is
+        zero on the breached side); shape (n_x,) or (n_x, n_cols) -- the
+        event-stats sweep passes every indicator column at once, since the
+        indicator expectations follow the same regime dynamic programming.
+        """
+        dt = float(self._dt[t_idx])
+        if self._columnar:
+            return self._columnar_correction(dt, t_idx, s_vec, barrier, d)
+        G, k_star, dist = self._geometry(
+            dt, float(self._mu[t_idx]), float(self._sig2[t_idx]), s_vec, barrier
+        )
+        if G is None:
+            return np.zeros_like(d)
+        lam = d[k_star] / dist
+        if d.ndim == 2:
+            return G[:, None] * np.asarray(lam)[None, :]
+        return G * lam
+
+    def _columnar_correction(
+        self,
+        dt: float,
+        t_idx: int,
+        s_vec: np.ndarray,
+        barrier: float,
+        d: np.ndarray,
+    ) -> np.ndarray:
+        """One (mu, sigma^2) per column, evaluated through the SAME closed form.
+
+        A 2-D (log-spot, variance) solver knows the spot's instantaneous
+        variance exactly -- it is the column's own variance node, scaled by the
+        leverage at the barrier for SLV -- so the crossing geometry is rebuilt
+        per column rather than shared. Freezing the variance across the step
+        neglects its own diffusion, an O(dt) error in sigma^2 and hence
+        O(dt^1.5) in a correction that repairs O(sqrt(dt)); it is the same
+        conditional-Gaussian reduction the Monte Carlo bridge makes. Columns
+        are looped rather than broadcast so the arithmetic is bit-for-bit the
+        scalar path's, which is what keeps the certified 1-D engines inert.
+        """
+        if d.ndim != 2:
+            raise ValidationError(
+                "columnar first-passage coefficients need a (n_x, n_cols) surface"
+            )
+        mu_row = np.asarray(self._mu[t_idx], dtype=float)
+        sig2_row = np.asarray(self._sig2[t_idx], dtype=float)
+        if mu_row.size != d.shape[1]:
+            raise ValidationError(
+                "first-passage columns must match the surface's column count"
+            )
+        out = np.zeros_like(d)
+        for col in range(d.shape[1]):
+            G, k_star, dist = self._geometry(
+                dt, float(mu_row[col]), float(sig2_row[col]), s_vec, barrier
+            )
+            if G is None:
+                continue
+            out[:, col] = G * (d[k_star, col] / dist)
+        return out
 
 
 class SnowballPDESolver(BasePDESolver):
@@ -81,12 +256,24 @@ class SnowballPDESolver(BasePDESolver):
         2. Step backward in time using Crank-Nicolson
         3. At KO observation times: apply KO payoff to breached regions
         4. At KI observation times (or every step for continuous): V0 <- V1
+           in the breached region; for continuous monitoring the live region
+           additionally receives the closed-form intra-step crossing
+           correction (ContinuousKICorrection.FIRST_PASSAGE, default) so the
+           scheme prices the continuously monitored barrier rather than
+           step-width discrete monitoring
         5. Interpolate final price from V0 (or V1 if already knocked-in)
     """
 
     # Subclasses can override this to specify their supported product type
     _supported_product_type: type = SnowballOption
     _solver_name: str = "SnowballPDESolver"
+    #: FIRST_PASSAGE continuous-KI correction eligibility. The closed form
+    #: reduces the crossing to a per-step-constant GBM, so a solver is
+    #: eligible once it can report those coefficients AT THE BARRIER --
+    #: which every solver can, since the correction never looks further than
+    #: a few step-widths from it (see _first_passage_step_coefficients).
+    #: Kept as a hook for solvers whose barrier treatment must stay pinned.
+    _first_passage_ki_supported: bool = True
 
     def __init__(
         self, params: Optional[PDEParams] = None, enable_profiling: bool = False
@@ -114,6 +301,8 @@ class SnowballPDESolver(BasePDESolver):
         self._ki_barrier_by_tidx: Dict[int, float] = {}
         self._ki_continuous: bool = False
         self._ki_barrier: float = 0.0
+        # FIRST_PASSAGE continuous-KI correction state, rebuilt per solve.
+        self._ki_fp: Optional[_ContinuousKIFirstPassage] = None
         self._is_reverse: bool = False
 
         # BGK opt-in continuous-KI state [§11.6]. Set per-solve by _configure_bgk:
@@ -323,6 +512,7 @@ class SnowballPDESolver(BasePDESolver):
         self._knocked_in_at_valuation = knocked_in_at_valuation
         self._is_reverse = product.is_reverse
         self._ki_continuous = ki_continuous
+        self._ki_fp = None  # per-solve; the time-stepping loop rebuilds it
         if product.has_ki_barrier:
             ki_barrier = product.barrier_config.ki_barrier
             if isinstance(ki_barrier, list):
@@ -330,6 +520,74 @@ class SnowballPDESolver(BasePDESolver):
             else:
                 self._ki_barrier = ki_barrier
         return knocked_in_at_valuation
+
+    def _prepare_continuous_ki_correction(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        t_vec: np.ndarray,
+    ) -> None:
+        """Build the per-solve FIRST_PASSAGE state consumed by _apply_ki_jump,
+        the schedule's continuous stage, and the event-stats sweep.
+
+        The per-step (dt, mu, sigma^2) come from the same forward-coefficient
+        sampling the stepping operator uses, so the correction is exactly
+        consistent with the discretized dynamics. Stays ``None`` (inert) for
+        discrete KI, for products without a KI barrier, and under the NONE
+        legacy opt-out.
+        """
+        self._ki_fp = None
+        if not self._first_passage_ki_supported:
+            return
+        if not product.has_ki_barrier:
+            return
+        if not (self._ki_continuous or self._bgk_active):
+            return
+        if self.params.continuous_ki_correction is not (
+            ContinuousKICorrection.FIRST_PASSAGE
+        ):
+            return
+        t = np.asarray(t_vec, dtype=float)
+        if t.size < 3:
+            return
+        barrier = (
+            float(self._bgk_ki_barrier)
+            if self._bgk_active
+            else float(self._ki_barrier)
+        )
+        mu, sig2 = self._first_passage_step_coefficients(
+            product, pricing_env, t, barrier
+        )
+        self._ki_fp = _ContinuousKIFirstPassage(
+            dt=np.diff(t),
+            mu=mu,
+            sig2=sig2,
+            is_reverse=bool(product.is_reverse),
+        )
+
+    def _first_passage_step_coefficients(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        t_vec: np.ndarray,
+        barrier: float,
+    ):
+        """Per-step ``(mu, sigma^2)`` governing the barrier crossing.
+
+        Sampled from the same forward coefficients the stepping operator uses,
+        so the correction is exactly consistent with the discretized dynamics.
+        The closed form only ever looks in a band a few step-widths either side
+        of ``barrier``, so solvers whose diffusion varies in space or state
+        override this to report the dynamics THERE rather than disabling the
+        correction outright.
+        """
+        from quantark.priceenv.term_sampling import TermCoefficients
+
+        tc = TermCoefficients.from_env(
+            pricing_env, t_vec, ref_strike=float(product.strike)
+        )
+        sig2 = tc.step_vols * tc.step_vols
+        return tc.fwd_rates - tc.fwd_carry - 0.5 * sig2, sig2
 
     def _check_product_type(self, product: BaseEquityProduct) -> None:
         """
@@ -595,6 +853,7 @@ class SnowballPDESolver(BasePDESolver):
         # Store product properties needed by _build_grids
         self._is_reverse = product.is_reverse
         self._ki_continuous = ki_continuous
+        self._ki_fp = None  # per-solve; the time-stepping loop rebuilds it
         if product.has_ki_barrier:
             ki_barrier = product.barrier_config.ki_barrier
             if isinstance(ki_barrier, list):
@@ -743,6 +1002,10 @@ class SnowballPDESolver(BasePDESolver):
         sc_ev = self._build_step_coefficients(
             pricing_env, product.strike, t_vec, dx_vec, num_x
         )
+        # FIRST_PASSAGE continuous-KI state for the stats sweep's KI stage:
+        # the indicator columns follow the same regime dynamic programming as
+        # the value surfaces, so they take the same crossing correction.
+        self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
         sc_ev = self._flat_exact_step_coefficients(sc_ev, r, q, sigma, dx_vec, num_x)
         ev_step_coeffs = None if sc_ev.n_unique == 1 else sc_ev
         use_banded = params.use_banded_solver and (num_x - 2) > 2
@@ -843,10 +1106,13 @@ class SnowballPDESolver(BasePDESolver):
                     current_time=float(t_vec[j]),
                     settlement_time=rec.settlement_time,
                 )
+                ko_surfaces = (
+                    (v0_cur, v1_cur) if self._ko_survives_ki(product) else (v0_cur,)
+                )
                 if self._event_uses_projection(j):
                     # Zero all event surfaces in the KO region (KO_i indicator
                     # to df_delay); KI-ever is exempt (first-passage statistic).
-                    for v in (v0_cur, v1_cur):
+                    for v in ko_surfaces:
                         target = np.zeros_like(v)
                         target[:, ko_idx] = df_delay
                         if want_ki:
@@ -862,16 +1128,13 @@ class SnowballPDESolver(BasePDESolver):
 
                     # Zero all event surfaces in KO region, then set the KO_i indicator.
                     # KI-ever is exempt (pure first-passage statistic, no KO absorption).
-                    if want_ki:
-                        ever0 = v0_cur[mask_ko, ki_ever_col].copy()
-                        ever1 = v1_cur[mask_ko, ki_ever_col].copy()
-                    v0_cur[mask_ko, :] = 0.0
-                    v1_cur[mask_ko, :] = 0.0
-                    v0_cur[mask_ko, ko_idx] = df_delay
-                    v1_cur[mask_ko, ko_idx] = df_delay
-                    if want_ki:
-                        v0_cur[mask_ko, ki_ever_col] = ever0
-                        v1_cur[mask_ko, ki_ever_col] = ever1
+                    for v in ko_surfaces:
+                        if want_ki:
+                            ever = v[mask_ko, ki_ever_col].copy()
+                        v[mask_ko, :] = 0.0
+                        v[mask_ko, ko_idx] = df_delay
+                        if want_ki:
+                            v[mask_ko, ki_ever_col] = ever
                 if want_coupon:
                     self._set_extra_event_indicators(
                         v0_cur, v1_cur, s_vec, n_ko, ko_idx, rec,
@@ -899,6 +1162,10 @@ class SnowballPDESolver(BasePDESolver):
                             at_valuation=(j == 0 and ki_discrete),
                         )
                         v0_cur[mask_ki, :] = v1_cur[mask_ki, :]
+                        fp = self._ki_fp
+                        if fp is not None and 0 < j < len(t_vec) - 1:
+                            d = v1_cur - v0_cur
+                            v0_cur += fp.step_correction(j, s_vec, ki_barrier, d)
 
             # Enforce simple Neumann-like boundary (zero slope) for stability.
             v0_cur[0, :] = v0_cur[1, :]
@@ -1521,6 +1788,20 @@ class SnowballPDESolver(BasePDESolver):
 
         return result
 
+    @staticmethod
+    def _ko_survives_ki(product: SnowballOption) -> bool:
+        """Whether a knock-out can still fire once the trade has knocked in.
+
+        ``disable_ko_after_ki`` says it cannot, and the two-surface solver
+        expresses "knocked in" as the V1 surface -- so honouring the flag means
+        writing the KO payoff to V0 alone and leaving V1 to run on unbarriered.
+        The flag is meaningless without a KI barrier, which is the guard the
+        Monte Carlo engine applies too.
+        """
+        return not (
+            product.barrier_config.disable_ko_after_ki and product.has_ki_barrier
+        )
+
     def _resolve_ki_barrier_at_tidx(self, t_idx: int) -> float:
         """Resolve KI barrier for a specific PDE time index."""
         if self._bgk_active:
@@ -1955,8 +2236,9 @@ class SnowballPDESolver(BasePDESolver):
             )
             barrier = float(rec.barrier)
             breach_up = not is_reverse
+            ko_hits_ki = self._ko_survives_ki(product)
 
-            def _ko(states, _b=barrier, _c=cash, _up=breach_up):
+            def _ko(states, _b=barrier, _c=cash, _up=breach_up, _hits_ki=ko_hits_ki):
                 cash_col = np.full_like(states["alive"], _c)
                 return {
                     "alive": project_between(
@@ -1964,7 +2246,9 @@ class SnowballPDESolver(BasePDESolver):
                     ),
                     "ki": project_between(
                         spatial, _b, _up, cash_col, states["ki"]
-                    ),
+                    )
+                    if _hits_ki
+                    else states["ki"],
                 }
 
             interior[step] = _chain(interior.get(step), _ko)
@@ -2016,6 +2300,12 @@ class SnowballPDESolver(BasePDESolver):
                 mask = (s >= _b) if _rev else (s <= _b)
                 alive = states["alive"].copy()
                 alive[mask] = states["ki"][mask]
+                # FIRST_PASSAGE correction: restore the intra-step crossing
+                # mass the nodal jump cannot see (see _apply_ki_jump).
+                fp = self._ki_fp
+                if fp is not None and step > 0:
+                    d = states["ki"] - alive
+                    alive += fp.step_correction(step, s, _b, d)
                 return {"alive": alive, "ki": states["ki"]}
 
         return EventSchedule(interior=interior, continuous=continuous)
@@ -2078,8 +2368,10 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        grids = (grid_v0, grid_v1) if self._ko_survives_ki(product) else (grid_v0,)
+
         if self._use_cell_average_events():
-            for grid in (grid_v0, grid_v1):
+            for grid in grids:
                 grid[:, -1] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
                     grid[:, -1], cashflow_value,
@@ -2089,8 +2381,8 @@ class SnowballPDESolver(BasePDESolver):
         # Apply to breached region (KO is an UP barrier)
         mask = self._get_barrier_mask(s_vec, barrier, product.is_reverse, is_up_barrier=True)
 
-        grid_v0[mask, -1] = cashflow_value
-        grid_v1[mask, -1] = cashflow_value
+        for grid in grids:
+            grid[mask, -1] = cashflow_value
 
     def _time_stepping_two_surface(
         self,
@@ -2123,6 +2415,9 @@ class SnowballPDESolver(BasePDESolver):
         """
         params: PDEParams = self.params
         num_t, num_x = len(t_vec), len(x_vec)
+        # FIRST_PASSAGE continuous-KI state for _apply_ki_jump and the
+        # schedule's continuous stage (inert unless continuous KI is live).
+        self._prepare_continuous_ki_correction(product, pricing_env, t_vec)
         profile = self._profile_enabled
         timings = self._profile_stats
         use_banded = params.use_banded_solver
@@ -2571,8 +2866,11 @@ class SnowballPDESolver(BasePDESolver):
             settlement_time=ko_record.settlement_time,
         )
 
+        # V1 is the knocked-in surface; disable_ko_after_ki removes it here.
+        grids = (grid_v0, grid_v1) if self._ko_survives_ki(product) else (grid_v0,)
+
         if self._event_uses_projection(t_idx):
-            for grid in (grid_v0, grid_v1):
+            for grid in grids:
                 grid[:, t_idx] = self._project_event_values(
                     s_vec, barrier, product.is_reverse, True,
                     grid[:, t_idx], cashflow_value,
@@ -2584,9 +2882,8 @@ class SnowballPDESolver(BasePDESolver):
             s_vec, barrier, product.is_reverse, True, at_valuation=(t_idx == 0)
         )
 
-        # Apply to both surfaces
-        grid_v0[mask, t_idx] = cashflow_value
-        grid_v1[mask, t_idx] = cashflow_value
+        for grid in grids:
+            grid[mask, t_idx] = cashflow_value
 
     def _apply_ki_jump(
         self,
@@ -2623,6 +2920,19 @@ class SnowballPDESolver(BasePDESolver):
 
         # V0 transitions to V1 in breached region
         grid_v0[mask, t_idx] = grid_v1[mask, t_idx]
+
+        # FIRST_PASSAGE correction [2026-08-18]: the jump above monitors the
+        # continuous barrier only at step boundaries, so crossings INSIDE the
+        # step are invisible and the live surface is biased high by
+        # O(sqrt(dt)). Mix the live region toward V1 with the exact
+        # touch-and-return probability for the step (paths ending breached
+        # are already captured by the mask at the neighbouring column).
+        # Interior steps only: the terminal column has no step interior, and
+        # the valuation column's events are owned by the t0 readout.
+        fp = self._ki_fp
+        if fp is not None and 0 < t_idx < grid_v0.shape[1] - 1:
+            d = grid_v1[:, t_idx] - grid_v0[:, t_idx]
+            grid_v0[:, t_idx] += fp.step_correction(t_idx, s_vec, ki_barrier, d)
 
     def _get_max_ko_barrier(self, product: SnowballOption) -> float:
         """Get the maximum KO barrier level."""

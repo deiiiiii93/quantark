@@ -397,8 +397,16 @@ class PhoenixOption(BaseEquityOption):
             self.barrier_config.ko_observation_schedule is None
             and self.barrier_config.ko_observation_dates is not None
         )
+        # Discretely monitored KI needs a schedule too. This override exists
+        # only because phoenix KO records carry a return rate; skipping KI
+        # entirely left resolve_ki_observations with nothing to resolve.
+        needs_ki_schedule = (
+            self.barrier_config.ki_barrier is not None
+            and self.barrier_config.ki_observation_schedule is None
+            and self.barrier_config.ki_observation_dates is not None
+        )
 
-        if not needs_ko_schedule:
+        if not needs_ko_schedule and not needs_ki_schedule:
             return
 
         # Build KO schedule (simplified version matching Snowball pattern)
@@ -413,29 +421,53 @@ class PhoenixOption(BaseEquityOption):
             else None
         )
 
-        records = []
-        for i, t in enumerate(self.barrier_config.ko_observation_dates):
-            barrier_val = (
-                ko_barriers[i] if ko_barriers else self.barrier_config.ko_barrier
+        ko_schedule = self.barrier_config.ko_observation_schedule
+        if needs_ko_schedule:
+            records = []
+            for i, t in enumerate(self.barrier_config.ko_observation_dates):
+                barrier_val = (
+                    ko_barriers[i] if ko_barriers else self.barrier_config.ko_barrier
+                )
+                rate_val = ko_rates[i] if ko_rates else self.barrier_config.ko_rate
+                records.append(
+                    ObservationRecord(
+                        observation_time=t,
+                        barrier=barrier_val,
+                        return_rate=rate_val,
+                        is_rate_annualized=False,
+                    )
+                )
+            ko_schedule = ObservationSchedule(
+                records=records,
+                aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
             )
-            rate_val = ko_rates[i] if ko_rates else self.barrier_config.ko_rate
-            records.append(
+
+        ki_schedule = self.barrier_config.ki_observation_schedule
+        if needs_ki_schedule:
+            ki_barriers = (
+                self.barrier_config.ki_barrier
+                if isinstance(self.barrier_config.ki_barrier, list)
+                else None
+            )
+            ki_records = [
                 ObservationRecord(
                     observation_time=t,
-                    barrier=barrier_val,
-                    return_rate=rate_val,
-                    is_rate_annualized=False,
+                    barrier=(
+                        ki_barriers[i] if ki_barriers else self.barrier_config.ki_barrier
+                    ),
                 )
+                for i, t in enumerate(self.barrier_config.ki_observation_dates)
+            ]
+            ki_schedule = ObservationSchedule(
+                records=ki_records,
+                aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
             )
-        ko_schedule = ObservationSchedule(
-            records=records,
-            aggregation_mode=ObservationAggregation.STOP_FIRST_HIT,
-        )
 
-        # Update barrier_config with built schedule
+        # Update barrier_config with built schedules
         self.barrier_config = replace(
             self.barrier_config,
             ko_observation_schedule=ko_schedule,
+            ki_observation_schedule=ki_schedule,
         )
 
     def time_shift(self, time_bump: float, bumped_date: datetime, pricing_env) -> bool:

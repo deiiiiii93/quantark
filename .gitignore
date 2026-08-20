@@ -14,3 +14,6 @@ htmlcov/
 # Locally built optional Thomas accelerator (platform-specific build artifact)
 quantark/util/numerical/libthomas_kernel.*
 quantark/util/numerical/thomas_kernel.dll
+
+# modelvalidation run output (evidence is banked deliberately, not by accident)
+output/modelvalidation/

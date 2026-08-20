@@ -1,0 +1,1328 @@
+{
+  "aggregates": [
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "cells": 7,
+      "mean_signed_bias_c": 0.0034644073039820406,
+      "passed": true,
+      "quantity": "pv",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0038789852968977557,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "cells": 7,
+      "mean_signed_bias_c": -0.00021632710060356545,
+      "passed": true,
+      "quantity": "delta",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0018002656144167036,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "cells": 7,
+      "mean_signed_bias_c": -0.005583317805770032,
+      "passed": true,
+      "quantity": "gamma",
+      "se_adequate": true,
+      "se_of_mean_c": 0.00660810809801492,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "cells": 7,
+      "mean_signed_bias_c": 0.011117180309832568,
+      "passed": true,
+      "quantity": "pv",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0038789852968977557,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "cells": 7,
+      "mean_signed_bias_c": -0.0017498625525060715,
+      "passed": true,
+      "quantity": "delta",
+      "se_adequate": true,
+      "se_of_mean_c": 0.0018002656144167036,
+      "within_bound": true
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "cells": 7,
+      "mean_signed_bias_c": -0.0038643472259995908,
+      "passed": true,
+      "quantity": "gamma",
+      "se_adequate": true,
+      "se_of_mean_c": 0.00660810809801492,
+      "within_bound": true
+    }
+  ],
+  "cells": [
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 96.67021788863633,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.001207074719530965,
+        "envelope_within_bound": true,
+        "interval_c": 0.030960327643359212,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011013816101866804,
+        "signed_err_c": 0.008932695439625604
+      },
+      "identity_hash": "f2c9bd52a97e90eb009682aaf94ef3912577b04da42e285bdcb6945ce0d8454c",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.011013816101866804,
+        "value": 96.6612851931967
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 0.614448621188659,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.006386871710059472,
+        "envelope_within_bound": true,
+        "interval_c": 0.024300156428364857,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.008679842711833112,
+        "signed_err_c": -0.006940471004698634
+      },
+      "identity_hash": "f2c9bd52a97e90eb009682aaf94ef3912577b04da42e285bdcb6945ce0d8454c",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.008679842711833112,
+        "value": 0.6213890921933576
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": -0.046469837278630785,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00030263074648734234,
+        "envelope_within_bound": true,
+        "interval_c": 0.06424462194297857,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.029699284255749026,
+        "signed_err_c": -0.004846053431480521
+      },
+      "identity_hash": "f2c9bd52a97e90eb009682aaf94ef3912577b04da42e285bdcb6945ce0d8454c",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.029699284255749026,
+        "value": -0.041623783847150264
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 98.05269755076209,
+      "case": "near_pre_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0010939281541766377,
+        "envelope_within_bound": true,
+        "interval_c": 0.03165828307774998,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.013220315745224255,
+        "signed_err_c": 0.005217651587301475
+      },
+      "identity_hash": "a69f8f5e1857eb8c20d3076fe5795945275920a554103b0765b3b2ce61029509",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.013220315745224255,
+        "value": 98.04747989917479
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 0.4877289627317499,
+      "case": "near_pre_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.008306367584330177,
+        "envelope_within_bound": true,
+        "interval_c": 0.005339200511952737,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0023344788737026897,
+        "signed_err_c": 0.0006702427645473574
+      },
+      "identity_hash": "a69f8f5e1857eb8c20d3076fe5795945275920a554103b0765b3b2ce61029509",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0023344788737026897,
+        "value": 0.48705871996720257
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": -0.05018725243133927,
+      "case": "near_pre_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 8.085517189130448e-05,
+        "envelope_within_bound": true,
+        "interval_c": 0.04089986432842899,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.012580323042641343,
+        "signed_err_c": -0.015739218243146308
+      },
+      "identity_hash": "a69f8f5e1857eb8c20d3076fe5795945275920a554103b0765b3b2ce61029509",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.012580323042641343,
+        "value": -0.034448034188192964
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 79.02294879513606,
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0021905231040193485,
+        "envelope_within_bound": true,
+        "interval_c": 0.019885379326286447,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0061760440478072064,
+        "signed_err_c": 0.0075332912306720345
+      },
+      "identity_hash": "3a6df572f16567fb93f4ddffa02e2ff937d530f650646984c0c9fc30abecec71",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0061760440478072064,
+        "value": 79.01541550390539
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 1.0627573387301978,
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00029491331172071256,
+        "envelope_within_bound": true,
+        "interval_c": 0.013987042126295092,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.005355863613204615,
+        "signed_err_c": -0.0032753148998858617
+      },
+      "identity_hash": "3a6df572f16567fb93f4ddffa02e2ff937d530f650646984c0c9fc30abecec71",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.005355863613204615,
+        "value": 1.0660326536300837
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": -0.05947540151398034,
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0011505592041048812,
+        "envelope_within_bound": true,
+        "interval_c": 0.07482723529068347,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.026820637162717056,
+        "signed_err_c": -0.02118596096524935
+      },
+      "identity_hash": "3a6df572f16567fb93f4ddffa02e2ff937d530f650646984c0c9fc30abecec71",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.026820637162717056,
+        "value": -0.03828944054873099
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 74.03665937076286,
+      "case": "below_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.001612311848973036,
+        "envelope_within_bound": true,
+        "interval_c": 0.024546001732523717,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011949325290305941,
+        "signed_err_c": -0.0006473511519118347
+      },
+      "identity_hash": "7f33da0336da198536d444e2e4e9c5b677b78bf274a2b376e447d1f7eb4f1be7",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.011949325290305941,
+        "value": 74.03730672191477
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 1.1063046128520244,
+      "case": "below_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0005009943520883908,
+        "envelope_within_bound": true,
+        "interval_c": 0.011672954319184796,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004765310729336,
+        "signed_err_c": -0.0021423328605127967
+      },
+      "identity_hash": "7f33da0336da198536d444e2e4e9c5b677b78bf274a2b376e447d1f7eb4f1be7",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004765310729336,
+        "value": 1.1084469457125372
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 0.005446772780856919,
+      "case": "below_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 1.7006415134869154e-05,
+        "envelope_within_bound": true,
+        "interval_c": 0.0432809821478817,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.012319682636533004,
+        "signed_err_c": 0.018641616874815695
+      },
+      "identity_hash": "7f33da0336da198536d444e2e4e9c5b677b78bf274a2b376e447d1f7eb4f1be7",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.012319682636533004,
+        "value": -0.013194844093958777
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 100.1644644379276,
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.003430000249309728,
+        "envelope_within_bound": true,
+        "interval_c": 0.024193105536085002,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011611252832174956,
+        "signed_err_c": -0.0009705998717350894
+      },
+      "identity_hash": "1187c6e23217a0a7aee8287fc1eb4ddab7be8aa35cfe794fa826d4a4b5d66798",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.011611252832174956,
+        "value": 100.16543503779934
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 0.37896154212401634,
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.009128230977646867,
+        "envelope_within_bound": true,
+        "interval_c": 0.02533890023598206,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.002924257495863723,
+        "signed_err_c": 0.019490385244254615
+      },
+      "identity_hash": "1187c6e23217a0a7aee8287fc1eb4ddab7be8aa35cfe794fa826d4a4b5d66798",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.002924257495863723,
+        "value": 0.3594711568797617
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": -0.09603786320381508,
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0004568357803131917,
+        "envelope_within_bound": true,
+        "interval_c": 0.03331383318765771,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011806095202254273,
+        "signed_err_c": -0.009701642783149167
+      },
+      "identity_hash": "1187c6e23217a0a7aee8287fc1eb4ddab7be8aa35cfe794fa826d4a4b5d66798",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.011806095202254273,
+        "value": -0.08633622042066591
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 99.56925743542797,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0013466249859703794,
+        "envelope_within_bound": true,
+        "interval_c": 0.011606665532898358,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.005054954869324282,
+        "signed_err_c": 0.0014967557942497933
+      },
+      "identity_hash": "2d71cb0643800b2b1bceb8f3e80bc8e216363c5d7cf146b666b0022d91dbf975",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.005054954869324282,
+        "value": 99.56776067963372
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 0.2786873327693055,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.006087273694622863,
+        "envelope_within_bound": true,
+        "interval_c": 0.008232117716433446,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0011677120999015716,
+        "signed_err_c": -0.0058966935166303025
+      },
+      "identity_hash": "2d71cb0643800b2b1bceb8f3e80bc8e216363c5d7cf146b666b0022d91dbf975",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0011677120999015716,
+        "value": 0.2845840262859358
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": -0.04345619544161566,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0006735744225737986,
+        "envelope_within_bound": true,
+        "interval_c": 0.010410650236442932,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.003290208250012657,
+        "signed_err_c": 0.0038302337364176167
+      },
+      "identity_hash": "2d71cb0643800b2b1bceb8f3e80bc8e216363c5d7cf146b666b0022d91dbf975",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.003290208250012657,
+        "value": -0.047286429178033274
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 96.73216779493548,
+      "case": "discrete_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 9.863714069524576e-06,
+        "envelope_within_bound": true,
+        "interval_c": 0.02267793237386538,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.00999476213709654,
+        "signed_err_c": 0.0026884080996723014
+      },
+      "identity_hash": "20c0797219f8c18553a5fc9b1558f6d1c05863d2491ffc80347189018b5b4f3f",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.00999476213709654,
+        "value": 96.7294793868358
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": 0.6088581896143347,
+      "case": "discrete_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.006533908470500727,
+        "envelope_within_bound": true,
+        "interval_c": 0.011595459095926726,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004087676832313695,
+        "signed_err_c": -0.003420105431299336
+      },
+      "identity_hash": "20c0797219f8c18553a5fc9b1558f6d1c05863d2491ffc80347189018b5b4f3f",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004087676832313695,
+        "value": 0.612278295045634
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.pde",
+      "candidate_value": -0.046709001375684726,
+      "case": "discrete_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00028849328121730716,
+        "envelope_within_bound": true,
+        "interval_c": 0.027750817615433507,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.008834308893417655,
+        "signed_err_c": -0.010082199828598197
+      },
+      "identity_hash": "20c0797219f8c18553a5fc9b1558f6d1c05863d2491ffc80347189018b5b4f3f",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.008834308893417655,
+        "value": -0.03662680154708653
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 96.68561677716731,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.022625711350201527,
+        "envelope_within_bound": true,
+        "interval_c": 0.04635921617434069,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011013816101866804,
+        "signed_err_c": 0.024331583970607085
+      },
+      "identity_hash": "6482be80521a082e985a14254d9aaa6e0a532f633a62036b5cc9f8dcdcc679ff",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.011013816101866804,
+        "value": 96.6612851931967
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 0.6114557863042975,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.002288301315772401,
+        "envelope_within_bound": true,
+        "interval_c": 0.027292991312726275,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.008679842711833112,
+        "signed_err_c": -0.009933305889060051
+      },
+      "identity_hash": "6482be80521a082e985a14254d9aaa6e0a532f633a62036b5cc9f8dcdcc679ff",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.008679842711833112,
+        "value": 0.6213890921933576
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": -0.046317153651827425,
+      "case": "ordinary",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.030882046893282222,
+        "envelope_within_bound": true,
+        "interval_c": 0.06409193831617521,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.029699284255749026,
+        "signed_err_c": -0.004693369804677161
+      },
+      "identity_hash": "6482be80521a082e985a14254d9aaa6e0a532f633a62036b5cc9f8dcdcc679ff",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.029699284255749026,
+        "value": -0.041623783847150264
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 98.0600797992009,
+      "case": "near_pre_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.021449251355150523,
+        "envelope_within_bound": true,
+        "interval_c": 0.039040531516565946,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.013220315745224255,
+        "signed_err_c": 0.012599900026117439
+      },
+      "identity_hash": "32af63b7ce0898bfeed6a816ee09b585eafd1622205055f8f406a949d687d82c",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.013220315745224255,
+        "value": 98.04747989917479
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 0.4891663983955518,
+      "case": "near_pre_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0031517757252239598,
+        "envelope_within_bound": true,
+        "interval_c": 0.006776636175754626,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0023344788737026897,
+        "signed_err_c": 0.0021076784283492467
+      },
+      "identity_hash": "32af63b7ce0898bfeed6a816ee09b585eafd1622205055f8f406a949d687d82c",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0023344788737026897,
+        "value": 0.48705871996720257
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": -0.04996930912262052,
+      "case": "near_pre_ko",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0033768282404911254,
+        "envelope_within_bound": true,
+        "interval_c": 0.04068192101971024,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.012580323042641343,
+        "signed_err_c": -0.015521274934427558
+      },
+      "identity_hash": "32af63b7ce0898bfeed6a816ee09b585eafd1622205055f8f406a949d687d82c",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.012580323042641343,
+        "value": -0.034448034188192964
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 79.03760590105668,
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0906506504092306,
+        "envelope_within_bound": true,
+        "interval_c": 0.03454248524690598,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0061760440478072064,
+        "signed_err_c": 0.022190397151291563
+      },
+      "identity_hash": "e77c904d04af6cd46b18a232dc280639a7e362625f2fa495d01aa8a4f1004d1a",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.0061760440478072064,
+        "value": 79.01541550390539
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 1.0591754684712993,
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 5.962094815625818e-06,
+        "envelope_within_bound": true,
+        "interval_c": 0.017568912385193647,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.005355863613204615,
+        "signed_err_c": -0.006857185158784418
+      },
+      "identity_hash": "e77c904d04af6cd46b18a232dc280639a7e362625f2fa495d01aa8a4f1004d1a",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.005355863613204615,
+        "value": 1.0660326536300837
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": -0.0374854111298411,
+      "case": "near_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.005175218501780758,
+        "envelope_within_bound": true,
+        "interval_c": 0.054445303744324006,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.026820637162717056,
+        "signed_err_c": 0.0008040294188898928
+      },
+      "identity_hash": "e77c904d04af6cd46b18a232dc280639a7e362625f2fa495d01aa8a4f1004d1a",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.026820637162717056,
+        "value": -0.03828944054873099
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 74.04550924350467,
+      "case": "below_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.07598066136289106,
+        "envelope_within_bound": true,
+        "interval_c": 0.03210117217050565,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011949325290305941,
+        "signed_err_c": 0.008202521589893763
+      },
+      "identity_hash": "416e5bea34f073dc9541bc6e1661785b452eab2edd60921791cdf7fa0862e18e",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.011949325290305941,
+        "value": 74.03730672191477
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 1.1066730687963793,
+      "case": "below_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0040740183005207875,
+        "envelope_within_bound": true,
+        "interval_c": 0.011304498374829934,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004765310729336,
+        "signed_err_c": -0.0017738769161579349
+      },
+      "identity_hash": "416e5bea34f073dc9541bc6e1661785b452eab2edd60921791cdf7fa0862e18e",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004765310729336,
+        "value": 1.1084469457125372
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 0.005472683035855848,
+      "case": "below_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.020088019883327188,
+        "envelope_within_bound": true,
+        "interval_c": 0.04330689240288063,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.012319682636533004,
+        "signed_err_c": 0.018667527129814624
+      },
+      "identity_hash": "416e5bea34f073dc9541bc6e1661785b452eab2edd60921791cdf7fa0862e18e",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.012319682636533004,
+        "value": -0.013194844093958777
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 100.16881318856198,
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.015082642783994515,
+        "envelope_within_bound": true,
+        "interval_c": 0.02660065642699283,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011611252832174956,
+        "signed_err_c": 0.0033781507626429175
+      },
+      "identity_hash": "198fa1374ef7ec63ca306a00ced959463970ceb3c4a4d898f93ff8f6188efdd6",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.011611252832174956,
+        "value": 100.16543503779934
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 0.36880460757077316,
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00038467905213224185,
+        "envelope_within_bound": true,
+        "interval_c": 0.015181965682738881,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.002924257495863723,
+        "signed_err_c": 0.009333450691011436
+      },
+      "identity_hash": "198fa1374ef7ec63ca306a00ced959463970ceb3c4a4d898f93ff8f6188efdd6",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.002924257495863723,
+        "value": 0.3594711568797617
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": -0.10534557446707993,
+      "case": "low_vol",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.03172139163811494,
+        "envelope_within_bound": true,
+        "interval_c": 0.04262154445092256,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.011806095202254273,
+        "signed_err_c": -0.019009354046414018
+      },
+      "identity_hash": "198fa1374ef7ec63ca306a00ced959463970ceb3c4a4d898f93ff8f6188efdd6",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.011806095202254273,
+        "value": -0.08633622042066591
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 99.57000069434598,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.00041236332582172963,
+        "envelope_within_bound": true,
+        "interval_c": 0.01234992445090533,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.005054954869324282,
+        "signed_err_c": 0.002240014712256766
+      },
+      "identity_hash": "71f30adafc05fa7c8ab5716b45649e430b769cdf621f8d7592b0d3f0ccdb7143",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.005054954869324282,
+        "value": 99.56776067963372
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 0.28580106109932757,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0006489558345350588,
+        "envelope_within_bound": true,
+        "interval_c": 0.003552459013194892,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.0011677120999015716,
+        "signed_err_c": 0.0012170348133917486
+      },
+      "identity_hash": "71f30adafc05fa7c8ab5716b45649e430b769cdf621f8d7592b0d3f0ccdb7143",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.0011677120999015716,
+        "value": 0.2845840262859358
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": -0.044821718834256785,
+      "case": "near_expiry",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0019844321082587157,
+        "envelope_within_bound": true,
+        "interval_c": 0.009045126843801803,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.003290208250012657,
+        "signed_err_c": 0.0024647103437764883
+      },
+      "identity_hash": "71f30adafc05fa7c8ab5716b45649e430b769cdf621f8d7592b0d3f0ccdb7143",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.003290208250012657,
+        "value": -0.047286429178033274
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 96.73435708079182,
+      "case": "discrete_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.024867218230211527,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.00999476213709654,
+        "signed_err_c": 0.004877693956018447
+      },
+      "identity_hash": "46a053fc42d0879c479c51ac5c5d881a166a8bf057af965409d129c92de7c011",
+      "quantity": "pv",
+      "reference": {
+        "se": 0.00999476213709654,
+        "value": 96.7294793868358
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": 0.6059354612093415,
+      "case": "discrete_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.014518187500919917,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.004087676832313695,
+        "signed_err_c": -0.006342833836292527
+      },
+      "identity_hash": "46a053fc42d0879c479c51ac5c5d881a166a8bf057af965409d129c92de7c011",
+      "quantity": "delta",
+      "reference": {
+        "se": 0.004087676832313695,
+        "value": 0.612278295045634
+      },
+      "verdict": "PASS"
+    },
+    {
+      "candidate": "equity.ko_reset_snowball.quad",
+      "candidate_value": -0.04638950023604593,
+      "case": "discrete_ki",
+      "error": null,
+      "gate": {
+        "envelope_c": 0.0,
+        "envelope_within_bound": true,
+        "interval_c": 0.027431316475794713,
+        "interval_within_bound": true,
+        "passed": true,
+        "se_budget_met": true,
+        "se_c": 0.008834308893417655,
+        "signed_err_c": -0.009762698688959404
+      },
+      "identity_hash": "46a053fc42d0879c479c51ac5c5d881a166a8bf057af965409d129c92de7c011",
+      "quantity": "gamma",
+      "reference": {
+        "se": 0.008834308893417655,
+        "value": -0.03662680154708653
+      },
+      "verdict": "PASS"
+    }
+  ],
+  "decisions": {
+    "equity.ko_reset_snowball.pde": "ADMITTED",
+    "equity.ko_reset_snowball.quad": "ADMITTED"
+  },
+  "projected_sha256": "4b5d2213a18ffd207556b0123699a05da60a576876d3776d2334e31ea5248ce1",
+  "reference_config": {
+    "engine": "SnowballMCEngine",
+    "greeks": "paired central difference (common random numbers)",
+    "method": "randomized_quasi",
+    "paths_per_batch": 65536
+  },
+  "references": {
+    "below_ki": {
+      "batches": 4,
+      "identity_hash": "349b9ccd7609563494452fe87135bb1fea15586c81030d56455d14ae02fda6f6",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.004765310729336,
+        "gamma": 0.012319682636533004,
+        "pv": 0.011949325290305941
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 1.1084469457125372,
+        "gamma": -0.013194844093958777,
+        "pv": 74.03730672191477
+      }
+    },
+    "discrete_ki": {
+      "batches": 4,
+      "identity_hash": "66c2293d9d583f20e674c06411900f47ce06fa2d8837ccc08376fa5301f6a2bd",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.004087676832313695,
+        "gamma": 0.008834308893417655,
+        "pv": 0.00999476213709654
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.612278295045634,
+        "gamma": -0.03662680154708653,
+        "pv": 96.7294793868358
+      }
+    },
+    "low_vol": {
+      "batches": 4,
+      "identity_hash": "311ed269f9c436eb26263ef90b60c4b78b0bae13fcf067224c7523bea830608f",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.002924257495863723,
+        "gamma": 0.011806095202254273,
+        "pv": 0.011611252832174956
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.3594711568797617,
+        "gamma": -0.08633622042066591,
+        "pv": 100.16543503779934
+      }
+    },
+    "near_expiry": {
+      "batches": 4,
+      "identity_hash": "c09782b2cfbdb79e1a6096663388beafbfd32486feb8872657e03cc5883ad23b",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.0011677120999015716,
+        "gamma": 0.003290208250012657,
+        "pv": 0.005054954869324282
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.2845840262859358,
+        "gamma": -0.047286429178033274,
+        "pv": 99.56776067963372
+      }
+    },
+    "near_ki": {
+      "batches": 4,
+      "identity_hash": "83b8b868e04331b30f565997ff1cc3ab081a09aa945be2262f601029870cdd64",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.005355863613204615,
+        "gamma": 0.026820637162717056,
+        "pv": 0.0061760440478072064
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 1.0660326536300837,
+        "gamma": -0.03828944054873099,
+        "pv": 79.01541550390539
+      }
+    },
+    "near_pre_ko": {
+      "batches": 4,
+      "identity_hash": "93f187a38885f90c346e44b7c12461c60a6d33d6994003c52b157774259e4349",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.0023344788737026897,
+        "gamma": 0.012580323042641343,
+        "pv": 0.013220315745224255
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.48705871996720257,
+        "gamma": -0.034448034188192964,
+        "pv": 98.04747989917479
+      }
+    },
+    "ordinary": {
+      "batches": 4,
+      "identity_hash": "298badd33a8aa04b222a7f868de060ab016aadd014bd1dd52a68e2c3122b0846",
+      "seeds": [
+        20260818,
+        20260819,
+        20260820,
+        20260821
+      ],
+      "std_errors": {
+        "delta": 0.008679842711833112,
+        "gamma": 0.029699284255749026,
+        "pv": 0.011013816101866804
+      },
+      "stopped_reason": "se_budget_met",
+      "values": {
+        "delta": 0.6213890921933576,
+        "gamma": -0.041623783847150264,
+        "pv": 96.6612851931967
+      }
+    }
+  },
+  "runtime": {
+    "machine": "arm64",
+    "numpy": "2.4.6",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "python": "3.11.8",
+    "quantark_git_sha": "62f72b6a41935b90e1a3d772573e0bd3f62bcb95"
+  },
+  "schema": 1,
+  "study": {
+    "bounds": {
+      "cell": 0.5,
+      "envelope_fraction": 0.5,
+      "interval_k": 2.0,
+      "mean_signed_bias": 0.1,
+      "se_budget_fraction": 0.25
+    },
+    "candidates": [
+      {
+        "name": "equity.ko_reset_snowball.pde",
+        "params": {
+          "accuracy": "standard",
+          "engine": "KOResetSnowballPDESolver",
+          "grid": {
+            "bounds": [
+              null,
+              null
+            ],
+            "day_count": 252,
+            "eps_crit": 0.003,
+            "event_damping_steps": 2,
+            "max_points": 2000,
+            "max_steps": 5000,
+            "num_std": 4.0,
+            "points": 400,
+            "steps_per_day": 4.0,
+            "terminal_damping_steps": 1
+          }
+        }
+      },
+      {
+        "name": "equity.ko_reset_snowball.quad",
+        "params": {
+          "engine": "KOResetSnowballQuadEngine",
+          "grid": {
+            "align_priority": "auto",
+            "barrier_reach_stddevs": null,
+            "bgk_min_ki_observations": 100,
+            "bus_days_in_year": 252,
+            "event_projection": "cell_average",
+            "event_smoothing_cells": 1,
+            "event_smoothing_kernel": "cosine",
+            "event_smoothing_log_width": 0.002,
+            "event_smoothing_mode": "fixed",
+            "fft_filter_alpha": 12.0,
+            "fft_filter_power": 8,
+            "fft_padding_factor": 2,
+            "filter_unreachable_barriers": true,
+            "grid_points": 1001,
+            "integration_rule": "trapezoid",
+            "ki_monitoring_mode": "exact_discrete",
+            "max_adaptive_grid_points": 5001,
+            "min_diffusion_stddev_cells": 2.5,
+            "num_std_devs": 10.0,
+            "stability_preset": null
+          },
+          "grid_points": 1001
+        }
+      }
+    ],
+    "cases": [
+      {
+        "environment_params": {},
+        "name": "ordinary",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "spot": 102.5
+        },
+        "name": "near_pre_ko",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "spot": 80.5
+        },
+        "name": "near_ki",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "spot": 76.0
+        },
+        "name": "below_ki",
+        "product_params": {}
+      },
+      {
+        "environment_params": {
+          "vol": 0.12
+        },
+        "name": "low_vol",
+        "product_params": {}
+      },
+      {
+        "environment_params": {},
+        "name": "near_expiry",
+        "product_params": {
+          "maturity_post": 0.5,
+          "maturity_pre": 0.25
+        }
+      },
+      {
+        "environment_params": {},
+        "name": "discrete_ki",
+        "product_params": {
+          "ki_continuous": false
+        }
+      }
+    ],
+    "name": "ko-reset-flat-bsm",
+    "quantities": [
+      "pv",
+      "delta",
+      "gamma"
+    ],
+    "quick": false,
+    "sampling": {
+      "bump": 0.01,
+      "max_batches": 32,
+      "min_batches": 4,
+      "paths_per_batch": 65536,
+      "seed": 20260818
+    },
+    "source_text": "# KO-reset snowball under flat Black-Scholes.\n#\n# The hard part of this payoff is a REGIME SWITCH. The trade runs a pre-KI KO\n# schedule (barrier 103) to maturity_pre; only once it knocks in at 80 does it\n# switch to a second, lower KO schedule (barrier 95) running on to\n# maturity_post. Two value surfaces therefore live on different horizons -- and\n# that is precisely what both deterministic engines got wrong before audit #13,\n# maturing the not-yet-knocked-in surface on the post-KI schedule.\n#\n# Environment, economic scale and bounds are identical to snowball_flat_bsm and\n# phoenix_flat_bsm on purpose: at multiplier 200, inception spot 100 and\n# notional 20,000 the delta quantum and the reference move are both exactly\n# 1.0, so a raw error IS a contract error and all three studies share one axis.\n#\n# Bound calibration (release procedure section 7, step 4). The cell gate needs\n# the benchmark standard error inside 0.25 x 0.5 = 0.125 c. Measured at this\n# budget (4 batches x 65,536 paths, paired bumps): pv 0.0110, delta 0.0087,\n# gamma 0.0297. Gamma is the binding quantity at a 4.2x margin -- tighter than\n# the other two studies, this being a longer-dated two-regime payoff -- but\n# still compatible, and the sampler may take up to 32 batches to sharpen it.\n#\n# Offline study (minutes, not seconds). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/ko_reset_flat_bsm.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: ko-reset-flat-bsm\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260818\n  bump: 0.01\n\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 100.0\n    notional: 20000.0\n\nenvironment:\n  builder: flat_bsm\n  params:\n    spot: 100.0\n    vol: 0.22\n    rate: 0.025\n    div_yield: 0.03\n\nproduct:\n  builder: equity.ko_reset_snowball\n  params:\n    initial_price: 100.0\n    strike: 100.0\n    maturity_pre: 1.0\n    maturity_post: 2.0\n    pre_ko_barrier: 103.0\n    pre_ko_rate: 0.15\n    post_ko_barrier: 95.0\n    post_ko_rate: 0.03\n    ki_barrier: 80.0\n    ki_continuous: true\n    contract_multiplier: 1.0\n\nreference:\n  builder: equity.ko_reset_snowball.mc_rqmc\n  params: {}\n\ncandidates:\n  - builder: equity.ko_reset_snowball.pde\n    params: {accuracy: standard}\n  - builder: equity.ko_reset_snowball.quad\n    params: {grid_points: 1001}\n\ncases:\n  # At inception, clear of both KO barriers and well above KI.\n  - {name: ordinary}\n  # Just under the pre-KI KO barrier: the KO discontinuity sits inside the bump\n  # stencil, where deterministic gamma usually breaks first.\n  - {name: near_pre_ko, environment: {spot: 102.5}}\n  # Just above the KI barrier: the regime switch is one small move away, so both\n  # surfaces and the transition between them are in play at once.\n  - {name: near_ki, environment: {spot: 80.5}}\n  # Below the KI barrier: already knocked in at valuation, which exercises the\n  # post-KI schedule and its lower KO barrier directly rather than through the\n  # transition.\n  - {name: below_ki, environment: {spot: 76.0}}\n  # Low vol: the KI barrier is rarely reached, so almost all the value sits on\n  # the pre-KI surface and its maturity must be exactly right.\n  - {name: low_vol, environment: {vol: 0.12}}\n  # Short horizons on both legs: few observations left and time discretization\n  # error has nowhere to average out.\n  - {name: near_expiry, product: {maturity_pre: 0.25, maturity_post: 0.5}}\n  # Discrete KI monitoring instead of continuous. This is a different code path\n  # in every engine -- the continuous one runs a Brownian-bridge correction that\n  # the discrete one never touches -- so it is certified explicitly.\n  - {name: discrete_ki, product: {ki_continuous: false}}\n"
+  },
+  "wall_clock_seconds": 114.1428918838501
+}

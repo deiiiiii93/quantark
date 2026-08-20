@@ -443,6 +443,11 @@ class PhoenixMCEngine(BaseEngine):
                 ki_profile = product.get_ki_observation_profile(pricing_env)
                 ki_times = np.array(ki_profile["observation_times"], dtype=float)
 
+        # Recording the realized per-step variance costs a second
+        # paths-sized array, so the vol-model engines only do it when a
+        # continuously monitored KI barrier will actually run the bridge.
+        self._ki_bridge_wanted = bool(product.has_ki_barrier and ki_continuous)
+
         ko_grid_times = [t for t in ko_times if t > 0 and not is_zero(t)]
         ki_grid_times = [t for t in ki_times if t > 0 and not is_zero(t)]
 
@@ -586,6 +591,17 @@ class PhoenixMCEngine(BaseEngine):
 
         return ki_triggered, first_ki_idx
 
+    def _ki_bridge_step_log_variance(
+        self, paths: np.ndarray
+    ) -> Optional[np.ndarray]:
+        """Log-variance accumulated over each monitoring interval, per path.
+
+        See ``SnowballMCEngine._ki_bridge_step_log_variance``: ``None`` means
+        the scalar ``sigma`` the bridge was handed is the right one, which it
+        is exactly when the diffusion is that constant.
+        """
+        return None
+
     def _check_ki_barriers_continuous_with_bridge(
         self,
         paths: np.ndarray,
@@ -634,6 +650,7 @@ class PhoenixMCEngine(BaseEngine):
             raise ValidationError("all_times must be strictly increasing and > 0")
 
         rng = np.random.default_rng(int(rng_seed))
+        step_log_variance = self._ki_bridge_step_log_variance(paths)
 
         for k in range(n_steps):
             active = ~ki_triggered
@@ -669,10 +686,18 @@ class PhoenixMCEngine(BaseEngine):
 
             idx = np.flatnonzero(bridge_candidates)
             dt_k = float(dt[k])
-            h2 = float(sigma * sigma) * dt_k
+            # See SnowballMCEngine: h2 is the log-variance the path ACTUALLY
+            # accumulated over this interval, which is sigma**2 * dt only for
+            # a constant-vol engine.
+            h2 = (
+                float(sigma * sigma) * dt_k
+                if step_log_variance is None
+                else step_log_variance[idx, k]
+            )
 
             log_term = safe_log(s0[idx] / ki_barrier) * safe_log(s1[idx] / ki_barrier)
-            exponent = -2.0 * log_term / h2
+            with np.errstate(divide="ignore"):
+                exponent = -2.0 * log_term / h2
             exponent = np.clip(exponent, -745.0, 0.0)
             p = np.exp(exponent)
 
@@ -885,8 +910,17 @@ class PhoenixMCEngine(BaseEngine):
 
                 payoffs[ko_at_obs] = ko_payoffs_schedule[obs_idx] + ko_coupon[ko_at_obs]
 
-                if product.coupon_config.coupon_pay_type == CouponPayType.INSTANT:
-                    settlement_times[ko_at_obs] = ko_settlement_times[obs_idx]
+                if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
+                    # EXPIRY rolls coupons up and pays them when the note ends.
+                    # A knock-out IS the end: the roll-up is paid here, at the
+                    # knock-out settlement -- not deferred to the contractual
+                    # maturity, and not forfeited.
+                    payoffs[ko_at_obs] += expiry_coupon[ko_at_obs]
+                    expiry_coupon[ko_at_obs] = 0.0
+
+                # The knock-out payoff settles on the knock-out date whatever the
+                # coupon convention; only the coupons' timing follows pay type.
+                settlement_times[ko_at_obs] = ko_settlement_times[obs_idx]
 
                 if product.coupon_config.memory_coupon:
                     accrued[ko_at_obs] = 0.0

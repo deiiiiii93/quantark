@@ -7,6 +7,18 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+#: Three tests below pin regression counts against the REAL surface and spot
+#: history. That cache is unversioned market data kept outside git, so those
+#: tests are evidence wherever it exists and simply unrunnable everywhere
+#: else -- CI included. They skip rather than fail, which is the honest
+#: reading: absent data is not a broken engine.
+HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
+requires_real_history = pytest.mark.skipif(
+    not (HISTORY_DIR / "surface_manifest.json").exists()
+    or not (HISTORY_DIR / "csi1000_spot.csv").exists(),
+    reason="needs the unversioned mo_volmodels history cache",
+)
 MODULE = PROJECT_ROOT / "example/mo_volmodels/cohort.py"
 
 
@@ -90,6 +102,7 @@ def test_excluded_records_are_reported_with_reasons(tmp_path):
     ]
 
 
+@requires_real_history
 def test_real_history_matches_the_pinned_counts():
     """Regression pin: the numbers §7A.12 froze."""
     mod = _load()
@@ -166,6 +179,7 @@ def _load_stage12_for_cohort():
     return module
 
 
+@requires_real_history
 def test_data_end_pin_governs_the_inception_count():
     """The pin must reach schedule_inceptions, not only the task windows.
 
@@ -189,6 +203,7 @@ def test_data_end_pin_governs_the_inception_count():
     assert len(s12.schedule_inceptions(data_end=date(2026, 6, 30), **kwargs)) == 26
 
 
+@requires_real_history
 def test_prepare_inceptions_forwards_the_data_end_pin(monkeypatch):
     """prepare_inceptions must schedule against the pinned data_end, not the
     spot cache's last row -- this is the exact wiring the pin exists for.

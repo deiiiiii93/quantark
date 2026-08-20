@@ -186,6 +186,33 @@ class EventProjectionMode(Enum):
         return self.value
 
 
+class ContinuousKICorrection(Enum):
+    """Temporal treatment of continuously monitored knock-in in PDE solvers.
+
+    Attributes:
+        FIRST_PASSAGE: Default. Per-step application of the KI regime jump is
+            discrete monitoring at the time-step width, which misses barrier
+            crossings inside a step and biases the PV high by O(sqrt(dt)).
+            At every interior step the live region additionally mixes toward
+            the knocked-in surface with the exact probability that the path
+            touches the barrier during the step yet ends on the live side
+            (reflection principle under the per-step-constant GBM
+            coefficients the operator itself uses). No fitted constant.
+            The crossing is barrier-LOCAL, so each solver reports the
+            dynamics there: flat/term BSM sample the term vol, local vol
+            reads sigma_loc(barrier, t), and the 2-D solvers carry one
+            (mu, sigma^2) per variance column, L(barrier,t)^2 * v.
+        NONE: Legacy opt-out -- the bare per-step nodal jump (the pinned
+            characterization discretization before the 2026-08-18 fix).
+    """
+
+    FIRST_PASSAGE = "first_passage"
+    NONE = "none"
+
+    def __str__(self):
+        return self.value
+
+
 class GreeksCalculationMode(Enum):
     """Mode for calculating delta/gamma in GreeksCalculator.
 

@@ -173,13 +173,22 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
             ],
             dtype=float,
         )
-        v_out = np.array(
+        # The not-yet-knocked-in contract matures on the PRE-KI schedule; only a
+        # knocked-in one runs on to `maturity`. Seeding v_out at the end of the
+        # grid would price it through a period it can never reach, so it is
+        # seeded when the sweep reaches pre_maturity and is identically zero
+        # above -- which is its true value there, the contract having already
+        # terminated in that state.
+        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
+        v_out_terminal = np.array(
             [
                 product.get_maturity_payoff_v0(spot_value, pricing_env=pricing_env)
                 for spot_value in spot_grid
             ],
             dtype=float,
         )
+        v_out = np.zeros_like(v_out_terminal)
+        v_out_seeded = False
 
         log_ki_barrier = None
         if product.has_ki_barrier:
@@ -199,6 +208,13 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
+
+            out_live = obs_time < pre_maturity or is_close(
+                obs_time, pre_maturity, abs_tol=Tolerance.PRECISION
+            )
+            if out_live and not v_out_seeded:
+                v_out = v_out_terminal.copy()
+                v_out_seeded = True
 
             pre_ko_weight = None
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
@@ -246,14 +262,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
 
                 v_in = ko_weight * ko_value + (1.0 - ko_weight) * v_in
 
-            if ki_continuous and log_ki_barrier is not None:
+            if out_live and ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
                     spot_grid >= product.barrier_config.ki_barrier
                     if product.is_reverse
                     else spot_grid <= product.barrier_config.ki_barrier
                 )
                 v_out[ki_mask] = v_in[ki_mask]
-            elif ki_records:
+            elif out_live and ki_records:
                 ki_record = self._match_record(obs_time, ki_records)
                 if ki_record is not None:
                     # Resolution-aware smoothed KI transition (same O(h)
@@ -286,6 +302,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
 
+            # The bridge correction below samples BOTH surfaces at this step's
+            # slice, so retain the knocked-in surface before it is rolled back.
+            v_in_at_obs = v_in
             v_in = self._diffuse_fft(
                 v_in,
                 math_utils,
@@ -299,10 +318,15 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 tau_step,
             )
 
+            if not out_live:
+                # v_out is identically zero above pre_maturity: in that
+                # state the contract has already matured.
+                continue
+
             if ki_continuous and log_ki_barrier is not None:
                 v_out = self._diffuse_with_bridge(
                     v_out,
-                    v_in,
+                    v_in_at_obs,
                     math_utils,
                     omega_array,
                     prefactor,
@@ -477,9 +501,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         omega_grid = math_utils.z_grid
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
         smoothing_width = self._resolve_event_smoothing_width(math_utils, product)
+        pre_maturity = float(product.get_pre_maturity_time(pricing_env))
 
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
+
+            out_live = obs_time < pre_maturity or is_close(
+                obs_time, pre_maturity, abs_tol=Tolerance.PRECISION
+            )
 
             pre_ko_weight = None
             pre_ko_record = self._match_record(obs_time, pre_ko_records)
@@ -533,14 +562,14 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 )
                 v_in[ki_ever_col] = ever_before
 
-            if ki_continuous and log_ki_barrier is not None:
+            if out_live and ki_continuous and log_ki_barrier is not None:
                 ki_mask = (
                     spot_grid >= product.barrier_config.ki_barrier
                     if product.is_reverse
                     else spot_grid <= product.barrier_config.ki_barrier
                 )
                 v_out[:, ki_mask] = v_in[:, ki_mask]
-            elif ki_records:
+            elif out_live and ki_records:
                 ki_record = self._match_record(obs_time, ki_records)
                 if ki_record is not None:
                     # Smoothed discrete-KI transition, consistent with the
@@ -569,6 +598,9 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
             )
 
+            # The bridge correction below samples BOTH surfaces at this step's
+            # slice, so retain the knocked-in surface before it is rolled back.
+            v_in_at_obs = v_in
             v_in = self._diffuse_fft(
                 v_in,
                 math_utils,
@@ -582,10 +614,15 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
                 tau_step,
             )
 
+            if not out_live:
+                # v_out is identically zero above pre_maturity: in that
+                # state the contract has already matured.
+                continue
+
             if ki_continuous and log_ki_barrier is not None:
                 v_out = self._diffuse_with_bridge(
                     v_out,
-                    v_in,
+                    v_in_at_obs,
                     math_utils,
                     omega_array,
                     prefactor,

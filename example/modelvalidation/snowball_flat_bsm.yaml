@@ -1,0 +1,156 @@
+# Snowball under flat Black-Scholes: the module's demonstration study.
+#
+# Two deterministic engines -- the two-surface PDE solver and the quadrature
+# engine -- are certified against one paired-RQMC Monte Carlo benchmark, on PV
+# and both spot Greeks, across scenarios chosen to stress the parts of the
+# payoff that are hard: sitting just under the knock-out barrier, sitting just
+# above the knock-in barrier, and running into expiry.
+#
+# The last six cases certify product VARIANTS rather than market scenarios.
+# Each is a distinct engine code path, not a re-parameterization: discrete and
+# European knock-in skip the continuous-monitoring machinery entirely, and a
+# per-observation KO schedule gives every observation its own barrier level to
+# project onto and align to. They were added after the original certification,
+# whose five scenarios all shared one flat KO barrier and continuous KI.
+#
+# Economic scale: the trade is 20,000 of notional, and one index-futures
+# contract at multiplier 200 with spot 100 hedges exactly that -- so one
+# "contract" of error is one contract of hedge a desk would have mis-placed.
+#
+# Bounds follow the desk convention: 0.5 contracts per cell, 0.1 contracts of
+# mean signed bias across cells.
+#
+# This is an offline study (minutes, not seconds). Run it with:
+#   python -m quantark.modelvalidation run example/modelvalidation/snowball_flat_bsm.yaml
+# Add --quick for a wiring check that is explicitly not bankable evidence.
+
+study: snowball-flat-bsm
+schema: 1
+
+quantities: [pv, delta, gamma]
+
+bounds:
+  cell: 0.5
+  mean_signed_bias: 0.1
+
+sampling:
+  paths_per_batch: 65536
+  min_batches: 4
+  max_batches: 32
+  seed: 20260814
+  bump: 0.01
+
+economic_scale:
+  builder: hedge_contracts
+  params:
+    hedge_multiplier: 200.0
+    hedge_inception_spot: 100.0
+    notional: 20000.0
+
+environment:
+  builder: flat_bsm
+  params:
+    spot: 100.0
+    vol: 0.22
+    rate: 0.025
+    div_yield: 0.03
+
+product:
+  builder: equity.snowball
+  params:
+    initial_price: 100.0
+    strike: 100.0
+    ko_barrier: 103.0
+    ki_barrier: 85.0
+    ko_rate: 0.15
+    rebate_rate: 0.15
+    months: 12
+    maturity: 1.0
+    contract_multiplier: 1.0
+
+reference:
+  builder: equity.snowball.mc_rqmc
+  params: {}
+
+candidates:
+  - builder: equity.snowball.pde
+    params: {accuracy: standard}
+  - builder: equity.snowball.quad
+    params: {grid_points: 1001}
+
+cases:
+  # At inception, comfortably between the barriers.
+  - {name: ordinary}
+  # Just under the knock-out barrier: the KO discontinuity sits inside the
+  # bump stencil, which is where deterministic gamma usually breaks first.
+  - {name: near_ko, environment: {spot: 102.5}}
+  # Just above the knock-in barrier: the payoff turns over here.
+  - {name: near_ki, environment: {spot: 86.0}}
+  # Low vol: barriers become rarely reached, so the PDE grid resolves a much
+  # narrower region of interest.
+  - {name: low_vol, environment: {vol: 0.12}}
+  # Three months to expiry with a quarterly schedule: few observations left,
+  # and time discretization error has nowhere to average out.
+  - {name: near_expiry, product: {months: 3, maturity: 0.25}}
+  # Discretely monitored KI, on the KO observation dates. A different code path
+  # in every engine -- the benchmark drops its Brownian-bridge crossing
+  # correction and the PDE its per-step first-passage transfer -- so what the
+  # continuous cases certify says nothing about this one.
+  - {name: discrete_ki, product: {ki_monitoring: discrete}}
+  # European KI: the barrier is looked at once, at maturity. The two-surface
+  # dynamic programme collapses to a single terminal test, and the knock-in
+  # probability is a closed-form quantity rather than a first-passage one.
+  - {name: european_ki, product: {ki_monitoring: european}}
+  # Step-down KO (递减雪球): the barrier declines 0.5% of initial price per
+  # observation, ending at 97.5. Twelve distinct levels now compete for grid
+  # alignment where every case above had exactly one.
+  - {name: stepdown_ko, product: {ko_stepdown: 0.005}}
+  # The step-down schedule's LAST barrier is 97.5, and this parks spot just
+  # under it. near_ko stresses the first barrier of a flat schedule; this
+  # stresses the final barrier of a declining one, which is a different node.
+  - {name: stepdown_near_last_ko, environment: {spot: 97.0},
+     product: {ko_stepdown: 0.005}}
+  # Parachute (降落伞雪球): the final KO barrier sits exactly on the KI barrier,
+  # so anything that never knocked in necessarily knocks out. A KO event and
+  # the KI barrier coincide at one level -- a degeneracy no other case has.
+  - {name: parachute, product: {parachute: true}}
+  # The parachute's coincident level is at 85, and this parks spot just above
+  # it. This is where the KO/KI degeneracy actually binds; certifying the
+  # parachute only at spot 100 would leave its defining feature untested.
+  - {name: parachute_near_ki, environment: {spot: 86.0},
+     product: {parachute: true}}
+  # A KI barrier that declines 0.5% of initial price per observation, 85 -> 79.5.
+  # Both deterministic engines refuse a per-observation KI under continuous
+  # monitoring, so a stepping KI is a discretely observed product by
+  # construction, and the per-observation barrier map is a path of its own.
+  - {name: ki_stepdown, product: {ki_monitoring: discrete, ki_stepdown: 0.005}}
+  # Reverse snowball: the embedded option is a call, the KO barrier is a DOWN
+  # barrier and the KI an UP barrier. Every mask in every engine inverts.
+  - {name: reverse, product: {is_reverse: true, ko_barrier: 97.0, ki_barrier: 115.0}}
+  # Airbag: below 90 the investor participates at half rate, so the terminal
+  # payoff gains a second kink away from the strike.
+  - {name: airbag, product: {airbag_barrier: 90.0, airbag_participation_rate: 0.5}}
+  # Partial and full principal protection: both reshape the knocked-in terminal
+  # payoff, which is the surface the KI transfer copies from.
+  - {name: protection_partial, product: {protection_type: partial, protection_rate: 0.5}}
+  - {name: protection_full, product: {protection_type: full}}
+  # Downside participation at half rate.
+  - {name: participation, product: {participation_rate: 0.5}}
+  # Call-style rebate: the no-KO/no-KI payoff becomes an option on the terminal
+  # spot rather than a fixed coupon.
+  - {name: call_rebate, product: {call_rebate: true, call_strike: 100.0}}
+  # disable_ko_after_ki: once knocked in the KO barrier stops applying, so the
+  # knocked-in surface runs on unbarriered. The PDE ignored this flag entirely
+  # until 2026-08-19 and mispriced by 159% of the cell bound in silence.
+  - {name: disable_ko_after_ki, product: {disable_ko_after_ki: true}}
+  # The same flag with the trade already knocked in at valuation, where it bites
+  # hardest: no knock-out can ever pay from here.
+  - {name: disable_ko_after_ki_knocked_in, environment: {spot: 80.0},
+     product: {disable_ko_after_ki: true}}
+  # Coupons discounted to maturity instead of paid at the knock-out date.
+  - {name: coupon_at_expiry, product: {coupon_pay_type: expiry}}
+  # Rates quoted per period rather than annualized: a different accrual path.
+  - {name: not_annualized, product: {is_annualized: false}}
+  # A KO rate that rises 0.5% per observation, so the coupon is a schedule
+  # rather than one number.
+  - {name: ko_rate_step, product: {ko_rate_step: 0.005}}
