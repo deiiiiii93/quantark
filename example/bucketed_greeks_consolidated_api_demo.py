@@ -224,6 +224,67 @@ def make_market_snowball(
     )
 
 
+def make_spot_shifted_market_state(
+    env: PricingEnvironment,
+    curve: IndexFuturesCurve,
+    *,
+    base_spot: float,
+    scenario_spot: float,
+) -> tuple[PricingEnvironment, IndexFuturesCurve]:
+    """Shift spot and futures marks together, preserving observed basis ratios."""
+    ratio = float(scenario_spot) / float(base_spot)
+    scenario_env = deepcopy(env)
+    scenario_env.spot_quote.spot = float(scenario_spot)
+    scenario_curve = IndexFuturesCurve(
+        underlying=curve.underlying,
+        spot=float(scenario_spot),
+        quotes=[
+            IndexFuturesQuote(
+                quote.contract,
+                maturity=quote.maturity,
+                price=quote.price * ratio,
+                multiplier=quote.multiplier,
+                beta=quote.beta,
+                expiry_date=quote.expiry_date,
+            )
+            for quote in curve.quotes
+        ],
+        mode=curve.mode,
+        interpolation=curve.interpolation,
+    )
+    scenario_env.div_yield = scenario_curve.to_dividend_yield_curve(
+        scenario_env.rate_curve
+    )
+    return scenario_env, scenario_curve
+
+
+def calculate_futures_delta_points(
+    calc: GreeksCalculator,
+    product,
+    env: PricingEnvironment,
+    engine,
+    curve: IndexFuturesCurve,
+    *,
+    price_bump: float,
+) -> tuple[BucketedGreekPoint, ...]:
+    result = calc.calculate_bucketed_greeks(
+        product,
+        env,
+        engine,
+        BucketedGreeksRequest(
+            coordinates=(BucketedGreekCoordinate.FUTURES_DELTA,),
+            futures_curve=curve,
+            futures_price_bump=price_bump,
+            difference_mode_overrides={
+                BucketedGreekCoordinate.FUTURES_DELTA: (
+                    BucketedGreekDifferenceMode.CENTRAL
+                )
+            },
+        ),
+    )
+    return result.by_coordinate(BucketedGreekCoordinate.FUTURES_DELTA)
+
+
 def make_vanilla():
     return EuropeanVanillaOption(
         strike=100.0,
@@ -319,6 +380,11 @@ def _fmt_plain_pct(value: float, digits: int = 2) -> str:
 
 def _fmt_num(value: float, digits: int = 4) -> str:
     return f"{float(value):+,.{digits}f}"
+
+
+def _fmt_addend(value: float, digits: int = 2) -> str:
+    sign = "+" if float(value) >= 0.0 else "-"
+    return f"{sign} {abs(float(value)):,.{digits}f}"
 
 
 def _html_kv_table(rows: list[tuple[str, object]]) -> str:
@@ -765,6 +831,85 @@ def render_market_snowball_html_report(
         active_vega.bump_size,
     )
 
+    above_ko_spot = 1.05 * s0
+    deep_above_ko_spot = 1.20 * s0
+    scenario_rows = []
+    above_ko_delta_points = None
+    for label, scenario_spot, points in (
+        ("market snapshot", s0, delta_points),
+        ("spot above KO", above_ko_spot, None),
+        ("spot deep above KO", deep_above_ko_spot, None),
+    ):
+        if points is None:
+            scenario_env, scenario_curve = make_spot_shifted_market_state(
+                env,
+                curve,
+                base_spot=s0,
+                scenario_spot=scenario_spot,
+            )
+            points = calculate_futures_delta_points(
+                calc,
+                snowball,
+                scenario_env,
+                engine,
+                scenario_curve,
+                price_bump=request.futures_price_bump,
+            )
+            if label == "spot above KO":
+                above_ko_delta_points = points
+        total_abs_delta = sum(abs(float(p.derivative or 0.0)) for p in points)
+        front_point = points[0]
+        tail_point = points[-1]
+        top_point = _active_point(points)
+        scenario_rows.append(
+            [
+                label,
+                _fmt_plain_pct(scenario_spot / s0),
+                _fmt_pct(scenario_spot / snowball.barrier_config.ko_barrier - 1.0),
+                top_point.contract,
+                _fmt_plain_pct(abs(front_point.derivative) / total_abs_delta),
+                _fmt_plain_pct(abs(tail_point.derivative) / total_abs_delta),
+                _fmt_num(front_point.hedge_hands, 3),
+                _fmt_num(tail_point.hedge_hands, 3),
+            ]
+        )
+    if above_ko_delta_points is None:
+        above_ko_delta_points = ()
+    barrier_scenario_summary_table = _html_table(
+        [
+            "case",
+            "spot / initial",
+            "spot vs KO",
+            "largest bucket",
+            "front share",
+            "tail share",
+            "front hedge",
+            "tail hedge",
+        ],
+        scenario_rows,
+    )
+    above_ko_delta_table = _html_table(
+        [
+            "IM contract",
+            "T",
+            "shifted F",
+            "dPV/dF",
+            "hedge hands",
+            "PnL @ +5pt",
+        ],
+        [
+            [
+                p.contract,
+                f"{p.maturity:.3f}y",
+                _fmt_level(p.future_price),
+                _fmt_signed_money(p.derivative),
+                _fmt_num(p.hedge_hands, 3),
+                _fmt_signed_money(p.pnl),
+            ]
+            for p in above_ko_delta_points
+        ],
+    )
+
     term_sheet = _html_kv_table(
         [
             ("Underlying", f"CSI 1000 index, 000852.SH, spot {_fmt_level(s0)}"),
@@ -842,6 +987,562 @@ def render_market_snowball_html_report(
                 _fmt_signed_money(p.pnl),
             ]
             for p in rhoq_points
+        ],
+    )
+    delta_by_contract = {p.contract: p for p in delta_points}
+    scalar_greeks = calc.calculate(
+        snowball,
+        pricing_env,
+        engine,
+        greeks=("delta", "dividend_rho"),
+    )
+    scalar_delta = float(scalar_greeks["delta"])
+    scalar_rhoq = float(scalar_greeks["dividend_rho"])
+    if futures_snapshot is not None:
+        scalar_hedge_contract = max(
+            futures_snapshot["quotes"],
+            key=lambda row: float(row.get("volume", 0.0)),
+        )["contract"]
+    else:
+        scalar_hedge_contract = curve.quotes[0].contract
+    scalar_hedge_quote = curve.get_quote(scalar_hedge_contract)
+    scalar_delta_cash_1pct = scalar_delta * s0 * 0.01
+    scalar_total_hands = -scalar_delta / scalar_hedge_quote.multiplier
+    bucket_total_hands = sum(float(p.hedge_hands or 0.0) for p in delta_points)
+    bucket_distribution = "; ".join(
+        f"{p.contract} {_fmt_num(p.hedge_hands, 3)}" for p in delta_points
+    )
+    bucket_delta_sum = sum(float(p.derivative or 0.0) for p in delta_points)
+    bucket_delta_cash_1pct = sum(
+        float(p.derivative or 0.0) * float(p.future_price or 0.0) * 0.01
+        for p in delta_points
+    )
+    bucket_rhoq_sum = sum(float(p.reported or 0.0) for p in rhoq_points)
+    scalar_multiplier_text = f"{float(scalar_hedge_quote.multiplier):,.0f}"
+    scalar_hands_formula = (
+        f"-({_fmt_num(scalar_delta, 2)} CNY/spot pt) / "
+        f"{scalar_multiplier_text}"
+    )
+    bucket_hands_detail_table = _html_table(
+        [
+            "IM contract",
+            "delta input",
+            "F close",
+            "delta cash @ +1% F",
+            "delta per hand",
+            "hands formula",
+            "hedge hands",
+        ],
+        [
+            [
+                p.contract,
+                f"{_fmt_num(p.derivative, 2)} CNY/F pt",
+                _fmt_level(p.future_price),
+                _fmt_signed_money(float(p.derivative) * float(p.future_price) * 0.01),
+                f"{float(p.delta_per_hand):,.0f}",
+                f"-({_fmt_num(p.derivative, 2)}) / {float(p.delta_per_hand):,.0f}",
+                _fmt_num(p.hedge_hands, 3),
+            ]
+            for p in delta_points
+        ],
+    )
+    delta_cash_math_table = _html_table(
+        [
+            "view",
+            "delta input",
+            "reference move",
+            "delta cash",
+            "hands formula",
+            "hands",
+        ],
+        [
+            [
+                f"scalar delta IM hedge ({scalar_hedge_contract})",
+                f"{_fmt_num(scalar_delta, 2)} CNY/spot pt",
+                f"1% spot = {_fmt_level(s0 * 0.01)} index pts",
+                _fmt_signed_money(scalar_delta_cash_1pct),
+                scalar_hands_formula,
+                _fmt_num(scalar_total_hands, 3),
+            ],
+            [
+                "bucketed IM futures delta",
+                f"sum dPV/dF_i = {_fmt_num(bucket_delta_sum, 2)}",
+                "1% move in each listed IM futures mark",
+                _fmt_signed_money(bucket_delta_cash_1pct),
+                "sum_i [-(dPV/dF_i) / 200]",
+                _fmt_num(bucket_total_hands, 3),
+            ],
+        ],
+    )
+    scalar_bucket_relationship_table = _html_table(
+        ["risk", "scalar story", "bucket-sum story", "comparison rule"],
+        [
+            [
+                "delta",
+                (
+                    f"dPV/dS = {_fmt_num(scalar_delta, 2)}; "
+                    f"1% spot delta cash = {_fmt_signed_money(scalar_delta_cash_1pct)}"
+                ),
+                (
+                    f"sum dPV/dF_i = {_fmt_num(bucket_delta_sum, 2)}; "
+                    f"all-F +1% delta cash = {_fmt_signed_money(bucket_delta_cash_1pct)}"
+                ),
+                (
+                    "Do not compare as identities: spot and listed-futures "
+                    "curve shocks are different scenarios."
+                ),
+            ],
+            [
+                "rhoq",
+                f"parallel scalar carry rhoq = {_fmt_signed_money(scalar_rhoq)}",
+                f"sum implied-carry node rhoq = {_fmt_signed_money(bucket_rhoq_sum)}",
+                (
+                    "Compare only after defining the carry scenario and node "
+                    "weights; bucket rhoq is mainly a hedge-placement map."
+                ),
+            ],
+        ],
+    )
+    desk_scalar_practice_table = _html_table(
+        [
+            "reason",
+            "what scalar delta cash gives",
+            "what bucketed futures delta adds / caveat",
+        ],
+        [
+            [
+                "common risk language",
+                (
+                    "one CNY number for book limits, trader handover, PnL "
+                    "explain, and stress dashboards"
+                ),
+                (
+                    "a vector needs tenor labels, curve construction, and an "
+                    "aggregation rule before comparison"
+                ),
+            ],
+            [
+                "fast intraday control",
+                "updates cheaply from spot moves and portfolio aggregation",
+                (
+                    "requires current futures marks, implied-carry rebuild, "
+                    "and product repricing per node"
+                ),
+            ],
+            [
+                "execution liquidity",
+                (
+                    "converts cleanly into IM hands through a house allocation "
+                    "rule focused on liquid contracts"
+                ),
+                (
+                    "may ask for far-tenor or less-liquid contracts where "
+                    "rounding, margin, bid/ask, and roll calendars matter"
+                ),
+            ],
+            [
+                "model governance",
+                "more stable across engines and easier for risk managers to audit",
+                (
+                    "depends on futures basis, interpolation, tail extrapolation, "
+                    "KO/KI model details, and finite-difference settings"
+                ),
+            ],
+            [
+                "hedge objective",
+                "good first-order control for broad spot/futures co-move",
+                (
+                    "best used as a second-layer overlay when basis, carry, "
+                    "rhoq, or roll placement matters"
+                ),
+            ],
+        ],
+    )
+    rhoq_hedge_rows = []
+    scalar_im_hedge_by_contract: dict[str, float] = {}
+    scalar_im_residual_by_contract: dict[str, float] = {}
+    scalar_im_abs_residual = 0.0
+    bucketed_im_abs_residual = 0.0
+    option_abs_rhoq = 0.0
+    for point in rhoq_points:
+        delta_point = delta_by_contract[point.contract]
+        scalar_im_hedge_rhoq = (
+            scalar_total_hands
+            * scalar_hedge_quote.multiplier
+            * (-point.maturity * point.future_price)
+            * 0.01
+            if point.contract == scalar_hedge_contract
+            else 0.0
+        )
+        bucketed_im_hedge_rhoq = (
+            delta_point.hedge_hands
+            * delta_point.delta_per_hand
+            * (-point.maturity * point.future_price)
+            * 0.01
+        )
+        scalar_im_residual = point.reported + scalar_im_hedge_rhoq
+        bucketed_im_residual = point.reported + bucketed_im_hedge_rhoq
+        option_abs_rhoq += abs(point.reported)
+        scalar_im_abs_residual += abs(scalar_im_residual)
+        bucketed_im_abs_residual += abs(bucketed_im_residual)
+        scalar_im_hedge_by_contract[point.contract] = scalar_im_hedge_rhoq
+        scalar_im_residual_by_contract[point.contract] = scalar_im_residual
+        rhoq_hedge_rows.append(
+            [
+                point.contract,
+                _fmt_signed_money(point.reported),
+                _fmt_signed_money(scalar_im_hedge_rhoq),
+                _fmt_signed_money(scalar_im_residual),
+                _fmt_signed_money(bucketed_im_hedge_rhoq),
+                _fmt_signed_money(bucketed_im_residual),
+            ]
+        )
+    scalar_im_rhoq_reduction = (
+        1.0 - scalar_im_abs_residual / option_abs_rhoq
+        if option_abs_rhoq > 0.0
+        else 0.0
+    )
+    bucketed_im_rhoq_reduction = (
+        1.0 - bucketed_im_abs_residual / option_abs_rhoq
+        if option_abs_rhoq > 0.0
+        else 0.0
+    )
+    rhoq_hedge_table = _html_table(
+        [
+            "carry node",
+            "option rhoq",
+            "scalar IM hedge rhoq",
+            "residual: scalar IM",
+            "bucketed IM hedge rhoq",
+            "residual: bucketed IM",
+        ],
+        rhoq_hedge_rows,
+    )
+    tail_rhoq_point = rhoq_points[-1]
+    scalar_node_added_rhoq = scalar_im_hedge_by_contract.get(
+        scalar_hedge_contract, 0.0
+    )
+    scalar_tail_residual_rhoq = scalar_im_residual_by_contract.get(
+        tail_rhoq_point.contract, 0.0
+    )
+    rhoq_hands_table = _html_table(
+        ["method", "total hands", "allocation"],
+        [
+            [
+                f"scalar delta IM hedge ({scalar_hedge_contract})",
+                _fmt_num(scalar_total_hands, 3),
+                (
+                    "convert scalar delta to IM hands; allocate all hands to "
+                    f"{scalar_hedge_contract} (highest-volume contract)"
+                ),
+            ],
+            [
+                "bucketed IM futures delta",
+                _fmt_num(bucket_total_hands, 3),
+                bucket_distribution,
+            ],
+        ],
+    )
+    rhoq_hedge_summary_table = _html_table(
+        ["hedge method", "absolute residual rhoq", "reduction vs unhedged"],
+        [
+            ["unhedged option", _fmt_money(option_abs_rhoq), "0.00%"],
+            [
+                f"scalar delta IM hedge ({scalar_hedge_contract})",
+                _fmt_money(scalar_im_abs_residual),
+                _fmt_pct(scalar_im_rhoq_reduction),
+            ],
+            [
+                "bucketed IM futures delta hedge",
+                _fmt_money(bucketed_im_abs_residual),
+                _fmt_pct(bucketed_im_rhoq_reduction),
+            ],
+        ],
+    )
+    bucket_scalar_equivalent_delta = sum(
+        float(p.hedge_hands or 0.0) * float(p.delta_per_hand or 0.0)
+        for p in delta_points
+    )
+    scalar_delta_after_scalar_hedge = (
+        scalar_delta + scalar_total_hands * scalar_hedge_quote.multiplier
+    )
+    scalar_delta_cash_after_scalar_hedge = (
+        scalar_delta_after_scalar_hedge * s0 * 0.01
+    )
+    scalar_delta_after_bucket_hedge = scalar_delta + bucket_scalar_equivalent_delta
+    scalar_delta_cash_after_bucket_hedge = (
+        scalar_delta_after_bucket_hedge * s0 * 0.01
+    )
+    scalar_hedge_delta_contribution = (
+        scalar_total_hands * scalar_hedge_quote.multiplier
+    )
+    bucket_hedge_delta_contribution = bucket_scalar_equivalent_delta
+    scalar_bucket_delta_residual_sum = 0.0
+    scalar_bucket_delta_residual_cash = 0.0
+    scalar_bucket_delta_abs_residual = 0.0
+    scalar_bucket_delta_abs_cash = 0.0
+    bucket_bucket_delta_residual_sum = 0.0
+    bucket_bucket_delta_residual_cash = 0.0
+    bucket_bucket_delta_abs_residual = 0.0
+    bucket_bucket_delta_abs_cash = 0.0
+    delta_reconciliation_rows = []
+    for point in delta_points:
+        scalar_hands = (
+            scalar_total_hands if point.contract == scalar_hedge_contract else 0.0
+        )
+        bucket_hands = float(point.hedge_hands or 0.0)
+        per_hand = float(point.delta_per_hand or 0.0)
+        future_price = float(point.future_price or 0.0)
+        scalar_residual = float(point.derivative or 0.0) + scalar_hands * per_hand
+        bucket_residual = float(point.derivative or 0.0) + bucket_hands * per_hand
+        scalar_residual_cash = scalar_residual * future_price * 0.01
+        bucket_residual_cash = bucket_residual * future_price * 0.01
+        scalar_bucket_delta_residual_sum += scalar_residual
+        scalar_bucket_delta_residual_cash += scalar_residual_cash
+        scalar_bucket_delta_abs_residual += abs(scalar_residual)
+        scalar_bucket_delta_abs_cash += abs(scalar_residual_cash)
+        bucket_bucket_delta_residual_sum += bucket_residual
+        bucket_bucket_delta_residual_cash += bucket_residual_cash
+        bucket_bucket_delta_abs_residual += abs(bucket_residual)
+        bucket_bucket_delta_abs_cash += abs(bucket_residual_cash)
+        delta_reconciliation_rows.append(
+            [
+                point.contract,
+                _fmt_signed_money(point.derivative),
+                _fmt_num(scalar_hands, 3),
+                _fmt_signed_money(scalar_residual),
+                _fmt_signed_money(scalar_residual_cash),
+                _fmt_num(bucket_hands, 3),
+                _fmt_signed_money(bucket_residual),
+                _fmt_signed_money(bucket_residual_cash),
+            ]
+        )
+    numerical_reconciliation_table = _html_table(
+        [
+            "hedge",
+            "scalar delta equation",
+            "scalar 1% cash residual",
+            "bucket-delta equation",
+            "bucket 1% cash residual",
+            "rhoq residual",
+        ],
+        [
+            [
+                f"scalar IM hedge ({scalar_hedge_contract})",
+                (
+                    f"{_fmt_num(scalar_delta, 2)} "
+                    f"{_fmt_addend(scalar_hedge_delta_contribution)} = "
+                    f"{_fmt_num(scalar_delta_after_scalar_hedge, 2)}"
+                ),
+                _fmt_signed_money(scalar_delta_cash_after_scalar_hedge),
+                (
+                    f"{_fmt_num(bucket_delta_sum, 2)} "
+                    f"{_fmt_addend(scalar_hedge_delta_contribution)} = "
+                    f"{_fmt_num(scalar_bucket_delta_residual_sum, 2)}"
+                ),
+                (
+                    f"{_fmt_signed_money(scalar_bucket_delta_residual_cash)} "
+                    f"(abs {_fmt_money(scalar_bucket_delta_abs_cash)})"
+                ),
+                _fmt_money(scalar_im_abs_residual),
+            ],
+            [
+                "bucketed IM futures hedge",
+                (
+                    f"{_fmt_num(scalar_delta, 2)} "
+                    f"{_fmt_addend(bucket_hedge_delta_contribution)} = "
+                    f"{_fmt_num(scalar_delta_after_bucket_hedge, 2)}"
+                ),
+                _fmt_signed_money(scalar_delta_cash_after_bucket_hedge),
+                (
+                    f"{_fmt_num(bucket_delta_sum, 2)} "
+                    f"{_fmt_addend(bucket_hedge_delta_contribution)} = "
+                    f"{_fmt_num(bucket_bucket_delta_residual_sum, 2)}"
+                ),
+                (
+                    f"{_fmt_signed_money(bucket_bucket_delta_residual_cash)} "
+                    f"(abs {_fmt_money(bucket_bucket_delta_abs_cash)})"
+                ),
+                _fmt_money(bucketed_im_abs_residual),
+            ],
+        ],
+    )
+    delta_reconciliation_table = _html_table(
+        [
+            "IM contract",
+            "option dPV/dF",
+            "scalar hedge hands",
+            "residual dPV/dF: scalar hedge",
+            "residual cash: scalar hedge",
+            "bucket hedge hands",
+            "residual dPV/dF: bucket hedge",
+            "residual cash: bucket hedge",
+        ],
+        delta_reconciliation_rows,
+    )
+    front_risk_alignment_table = _html_table(
+        [
+            "control question",
+            "what happens in this example",
+            "risk-control fix",
+        ],
+        [
+            [
+                "day-end scalar delta limit",
+                (
+                    "front office uses bucketed hedge hands "
+                    f"{_fmt_num(bucket_total_hands, 3)}. If risk maps those "
+                    "hands back through the scalar IM multiplier, the book "
+                    f"looks {_fmt_num(scalar_delta_after_bucket_hedge, 2)} "
+                    "CNY/spot pt, or "
+                    f"{_fmt_signed_money(scalar_delta_cash_after_bucket_hedge)} "
+                    "for a 1% spot move."
+                ),
+                (
+                    "Keep the scalar delta-cash limit, but require a bridge "
+                    "showing scalar before/after hedge and bucket allocation."
+                ),
+            ],
+            [
+                "day-end rhoq limit",
+                (
+                    "bucketed hedge residual is "
+                    f"{_fmt_money(bucketed_im_abs_residual)} by node, while "
+                    "the scalar report only sees a parallel carry story."
+                ),
+                (
+                    "Report both scalar parallel rhoq and node residual rhoq; "
+                    "do not let one replace the other silently."
+                ),
+            ],
+            [
+                "PnL explain",
+                (
+                    "trader explains futures PnL by IM contract and carry node; "
+                    "risk explains by spot delta cash and parallel carry."
+                ),
+                (
+                    "Add a daily reconciliation from scalar delta cash to "
+                    "futures buckets, basis, roll, and residual rhoq."
+                ),
+            ],
+            [
+                "governance",
+                (
+                    "neither desk is necessarily wrong; they are using "
+                    "different risk-factor bases."
+                ),
+                (
+                    "Define the official hierarchy: scalar limits for top-down "
+                    "control, bucket limits for hedge placement and basis/rhoq "
+                    "risk."
+                ),
+            ],
+        ],
+    )
+    reconciliation_snapshot_table = _html_table(
+        ["bridge item", "scalar / risk lens", "bucket / front-office lens"],
+        [
+            [
+                "pre-hedge delta",
+                (
+                    f"{_fmt_num(scalar_delta, 2)} CNY/spot pt; "
+                    f"{_fmt_signed_money(scalar_delta_cash_1pct)} for 1% spot"
+                ),
+                (
+                    f"sum dPV/dF_i = {_fmt_num(bucket_delta_sum, 2)}; "
+                    f"{_fmt_signed_money(bucket_delta_cash_1pct)} for all-F +1%"
+                ),
+            ],
+            [
+                "hedge instruction",
+                (
+                    f"{_fmt_num(scalar_total_hands, 3)} IM hands by desk "
+                    f"allocation rule into {scalar_hedge_contract}"
+                ),
+                (
+                    f"{_fmt_num(bucket_total_hands, 3)} total IM hands split as "
+                    f"{bucket_distribution}"
+                ),
+            ],
+            [
+                "post-hedge scalar delta check",
+                (
+                    "scalar hedge target is approximately zero before rounding "
+                    "and execution slippage"
+                ),
+                (
+                    "bucket hedge maps to "
+                    f"{_fmt_num(scalar_delta_after_bucket_hedge, 2)} "
+                    "CNY/spot pt, or "
+                    f"{_fmt_signed_money(scalar_delta_cash_after_bucket_hedge)} "
+                    "for 1% spot"
+                ),
+            ],
+            [
+                "post-hedge rhoq check",
+                (
+                    f"scalar-allocation hedge residual abs rhoq = "
+                    f"{_fmt_money(scalar_im_abs_residual)}"
+                ),
+                (
+                    f"bucket hedge residual abs node rhoq = "
+                    f"{_fmt_money(bucketed_im_abs_residual)}"
+                ),
+            ],
+        ],
+    )
+    reconciliation_framework_table = _html_table(
+        ["step", "daily control action", "required output"],
+        [
+            [
+                "1. Freeze inputs",
+                (
+                    "lock product terms, valuation date, spot, IM quotes, "
+                    "rates, vol model, engine, bump sizes, and curve mode"
+                ),
+                "one reproducible market/model snapshot shared by desk and risk",
+            ],
+            [
+                "2. Produce scalar risk view",
+                (
+                    "calculate scalar delta cash, scalar parallel rhoq, and "
+                    "limit usage under the official risk methodology"
+                ),
+                "day-end hard-limit view and breach status",
+            ],
+            [
+                "3. Produce bucket hedge view",
+                (
+                    "calculate dPV/dF_i, hands_i = -dPV/dF_i / multiplier, "
+                    "bucket rhoq, and residual node rhoq after hedge"
+                ),
+                "contract allocation, node residuals, and roll/basis exposure",
+            ],
+            [
+                "4. Translate across lenses",
+                (
+                    "map bucket hands back to scalar delta cash; map scalar "
+                    "hands back to node rhoq residuals"
+                ),
+                "bridge table showing why scalar and bucket reports differ",
+            ],
+            [
+                "5. Attribute the gap",
+                (
+                    "split the difference into tenor basis, tail extrapolation, "
+                    "rounding/liquidity, curve interpolation, and model/bump settings"
+                ),
+                "explainable residual rather than an unexplained limit dispute",
+            ],
+            [
+                "6. Govern exceptions",
+                (
+                    "pre-define tolerances and approvals when bucket hedging "
+                    "improves rhoq but worsens scalar delta cash, or vice versa"
+                ),
+                "signed exception, hedge rationale, and next rebalancing trigger",
+            ],
         ],
     )
     vega_table = _html_table(
@@ -1295,6 +1996,8 @@ footer {{
       <a href="#terms">Product terms</a>
       <a href="#market">Market data</a>
       <a href="#buckets">Bucket Greeks</a>
+      <a href="#barrier-proximity">Barrier proximity</a>
+      <a href="#rhoq-hedge">Rhoq hedge</a>
       <a href="#checks">Finite-difference checks</a>
       <a href="#model">Vol-model inputs</a>
     </nav>
@@ -1403,10 +2106,145 @@ footer {{
   </div>
 </section>
 
-<section id="checks">
+<section id="barrier-proximity">
   <div class="section-grid">
     <div class="rail">
       <p class="eyebrow">Step 4</p>
+      <h2>When spot is already above the KO barrier</h2>
+      <p>Barrier proximity changes where futures delta appears. To isolate that
+      effect, this scenario shifts spot and all IM futures marks by the same
+      level ratio, preserving the observed basis percentages from the real
+      snapshot.</p>
+    </div>
+    <div>
+      <h3>Does delta migrate to the near contracts?</h3>
+      {barrier_scenario_summary_table}
+      <div class="note"><b>Reading the scenario.</b> Yes, the front contract
+      gets more important once spot is above KO, because the first monthly
+      observation can terminate the product. But the last listed IM bucket still
+      absorbs all post-December tail exposure in this four-contract curve. With
+      a fuller 2Y IM strip, that tail would be split across later contracts
+      instead of being concentrated in IM2612.</div>
+      <h3>Spot above KO: full futures-delta buckets</h3>
+      {above_ko_delta_table}
+    </div>
+  </div>
+</section>
+
+<section id="rhoq-hedge">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 5</p>
+      <h2>Does bucketed IM hedging mitigate rhoq?</h2>
+      <p>Both methods still trade IM futures. The scalar approach computes one
+      spot-delta number, converts it into total IM hands, and then needs an
+      allocation rule. Here the scalar hedge is placed in
+      <code>{scalar_hedge_contract}</code>, the highest-volume contract in the
+      snapshot. The bucketed approach prices <code>dPV/dF_i</code> directly and
+      gives the hands contract by contract. The difference is not
+      index-versus-futures trading; it is the total number of IM hands and their
+      tenor distribution.</p>
+    </div>
+    <div>
+      <h3>Total hands and allocation</h3>
+      {rhoq_hands_table}
+      <h3>Delta cash and hands math</h3>
+      <p>Delta cash below is the first-order PnL for a 1% move in the relevant
+      risk variable. It is useful for reading scale. Futures hands are still
+      calculated from raw per-point delta because each IM futures hand has
+      <code>CNY 200</code> PnL per index point.</p>
+      {delta_cash_math_table}
+      <h3>Bucket hands detail</h3>
+      {bucket_hands_detail_table}
+      <h3>Scalar Greeks versus bucket sums</h3>
+      {scalar_bucket_relationship_table}
+      <div class="note"><b>Comparison rule.</b> Scalar Greeks and bucket sums
+      can be compared only when they describe the same market story. A scalar
+      delta is a spot shock; the futures bucket sum is a listed-futures curve
+      shock. A scalar rhoq is a parallel carry shock; the bucket rhoq vector is
+      a node-by-node implied-carry map. For hedging, the right comparison is
+      after translating the chosen story into IM hands and measuring residual
+      node exposure. In this snapshot the scalar rhoq and summed bucket rhoq are
+      close because both approximate a parallel carry move on the same implied
+      carry curve; the delta row is not close because the shocks are different.</div>
+      <h3>Why desks still start with scalar delta cash</h3>
+      {desk_scalar_practice_table}
+      <div class="note"><b>Practical takeaway.</b> Scalar delta cash is a
+      production control number, not a claim that traders can trade the index
+      directly. It gives one robust exposure number that can be converted into
+      IM futures through the desk's execution rule. Bucketed futures delta is
+      more informative, but it is model- and curve-dependent, so it is usually
+      introduced as an allocation, basis, rhoq, and roll-risk overlay rather
+      than a full replacement for the scalar delta-cash limit.</div>
+      <h3>When front office and risk use different bases</h3>
+      {front_risk_alignment_table}
+      <div class="note warn"><b>Control issue.</b> This is a measurement-basis
+      mismatch. The front office can be right that bucketed futures delta gives
+      a better contract allocation and lower node rhoq, while risk can also be
+      right that the same hedge breaches a scalar delta-cash limit. The fix is
+      not to choose one number blindly; the day-end package needs a governed
+      bridge from scalar delta cash to futures-bucket hands and residual rhoq.</div>
+      <h3>Reconciliation framework</h3>
+      <p>The reconciliation should be a daily control package, not an informal
+      spreadsheet note. It must preserve both views and show how the hedge looks
+      when translated through the other view's risk factors.</p>
+      {reconciliation_snapshot_table}
+      <h3>Real-case numerical bridge</h3>
+      <p>These equations use the same 000852.SH Snowball and listed IM futures
+      snapshot. They show why a hedge can be correct under one lens and fail
+      under the other.</p>
+      {numerical_reconciliation_table}
+      <h3>Delta residual by contract</h3>
+      {delta_reconciliation_table}
+      {reconciliation_framework_table}
+      <div class="note"><b>Policy recommendation.</b> Keep scalar delta cash as
+      the hard top-down limit, add bucketed futures delta and node rhoq as
+      controlled sub-limits, and require an exception workflow whenever an
+      optimizer improves one view while worsening the other. The bridge table is
+      the evidence for approving, resizing, or rejecting that hedge.</div>
+      <h3>Residual carry risk after each IM hedge</h3>
+      {rhoq_hedge_table}
+      {rhoq_hedge_summary_table}
+      <div class="note"><b>Why total hands are so different.</b> The scalar
+      hedge starts from <code>dPV/dS</code>: one spot shock, then one execution
+      rule for where to trade the IM futures. The bucket hedge starts from
+      <code>dPV/dF_i</code>: each listed futures mark is shocked separately and
+      the implied carry curve is rebuilt. Those bucket shocks include tenor and
+      basis/carry information that a spot shock does not contain. With this
+      four-contract strip, <code>{tail_rhoq_point.contract}</code> also carries
+      the post-December tail of the 2Y Snowball. That is why the scalar hedge is
+      {_fmt_num(scalar_total_hands, 3)} IM hands while the bucket hedge totals
+      {_fmt_num(bucket_total_hands, 3)} hands across contracts; the bucket
+      vector is not required to add back to the scalar spot delta.</div>
+      <div class="note"><b>Why the scalar IM hedge can increase rhoq.</b> The
+      scalar rule puts all hands into <code>{scalar_hedge_contract}</code>, so
+      it adds {_fmt_signed_money(scalar_node_added_rhoq)} of carry rhoq on that
+      node. But the largest option carry exposure is the tail node
+      <code>{tail_rhoq_point.contract}</code>, where the scalar hedge leaves
+      {_fmt_signed_money(scalar_tail_residual_rhoq)} residual rhoq. The scalar
+      hedge therefore over-hedges one node and leaves the main tail node open,
+      increasing absolute residual rhoq from {_fmt_money(option_abs_rhoq)} to
+      {_fmt_money(scalar_im_abs_residual)}.</div>
+      <div class="note"><b>Trading interpretation.</b> The scalar IM hedge is
+      still a futures hedge, but its single total-hand number does not know
+      which carry node created the risk. In this snapshot it over-hedges
+      <code>{scalar_hedge_contract}</code> carry and leaves the far IM tail
+      mostly open. Bucketed futures delta mitigates measured rhoq because each
+      IM hedge is placed on the same node that defines the implied carry curve:
+      <code>dPV/dq_i = dPV/dF_i * dF_i/dq_i</code>.</div>
+      <div class="note warn"><b>Limitations.</b> This is not a universal
+      basis hedge. It works for the listed IM carry nodes represented in the
+      curve. It does not eliminate model risk, volatility risk, realised
+      rebalancing error, non-parallel basis moves, or unlisted tail-tenor risk
+      that the four-contract curve approximates with its last node.</div>
+    </div>
+  </div>
+</section>
+
+<section id="checks">
+  <div class="section-grid">
+    <div class="rail">
+      <p class="eyebrow">Step 6</p>
       <h2>Finite differences are explicit</h2>
       <p>This example requests central mode per coordinate. That is the least
       biased finite-difference choice when both up and down bumps are valid.</p>
