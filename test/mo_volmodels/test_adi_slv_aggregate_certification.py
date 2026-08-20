@@ -10,7 +10,21 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "example/mo_volmodels/17_adi_slv_aggregate_certification.py"
-PARENT_DIR = ROOT / "output/adi_greek_certification_schema13"
+# The stage-16 parent this amendment was built on, as banked in git.
+#
+# It used to be read from a gitignored run directory, so these tests could only
+# ever pass on the machine that produced the run -- they were guaranteed red in
+# CI and on any fresh clone. The evidence is now committed alongside the
+# modelvalidation certificate that archives it, byte-identical and with its
+# digests intact, which is what the loader verifies below.
+BANKED_EVIDENCE = (
+    ROOT
+    / "docs/modelvalidation/certificates/adi2d-snowball-greeks/2026-08-19/evidence"
+)
+PARENT_EVIDENCE_FILE = BANKED_EVIDENCE / "stage16_greek_certification.json"
+PARENT_DECISION_FILE = BANKED_EVIDENCE / "stage16_decision.json"
+#: The amendment this module produced, banked beside its parent.
+BANKED_AMENDMENT_FILE = BANKED_EVIDENCE / "stage17_slv_aggregate_amendment.json"
 
 
 def _load():
@@ -50,54 +64,121 @@ def test_schema12_parent_and_development_families_are_pinned():
     assert module.PRODUCTION_PRIMARY_SEED == 20260811
     assert module.PRODUCTION_MIDDLE_SEED == 20260812
     assert module.PRODUCTION_ALLOCATION_FROZEN is True
-    assert module.PRODUCTION_PRIMARY_BATCHES == 4096
-    assert module.PRODUCTION_MIDDLE_BATCHES == 256
+    # Re-frozen at 0f13d93 from fresh pilots against the strided parent. The
+    # original freeze (4096 / 256 / weight 0.7 / 67,108,864 paths, designed at
+    # b5a5243) was proven STALE: reconstruction against its own pinned hashes
+    # showed it had measured pre-bridge8 estimators on ordinary_full,
+    # ordinary_decayed and sigma_collapse, because the spot-bridge dimension
+    # went 1 -> 8 after those pilots ran. low_feller, whose configuration did
+    # not change, reproduced bit-for-bit -- which is what made the diagnosis
+    # sound rather than a guess. The new plan is 8x smaller.
+    assert module.PRODUCTION_PRIMARY_BATCHES == 512
+    assert module.PRODUCTION_MIDDLE_BATCHES == 32
     assert module.PRODUCTION_PRIMARY_BATCH_WORKERS == 4
     assert module.PRODUCTION_MIDDLE_BATCH_WORKERS == 2
     assert module.PRODUCTION_MIDDLE_CELL_WORKERS == 2
-    assert module.FROZEN_SMOOTH_HESTON_WEIGHT == 0.7
-    assert module.FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS == 67_108_864
+    assert module.FROZEN_SMOOTH_HESTON_WEIGHT == 1.0
+    assert module.FROZEN_ALLOCATION_TOTAL_UNIQUE_PATHS == 8_388_608
     assert module.FROZEN_ALLOCATION_PROJECTION_SHA256 == (
-        "3e007060710eaba934180c69ffe6579822bfe84a13bca9f8c81751c21bf65bc6"
+        "f2a37465317e114f93f6c6c2f1c6f3674275549597c3c8d74077bd8eb3c2733d"
     )
     assert module.FROZEN_ALLOCATION_PROJECTION_FILE_SHA256 == (
-        "3e1327c76b88ce53eb2695f786117fa911579878990690a899a3c6d7b1f18c7e"
+        "59b81f6ae0bd7c8d22e8709f4a6ab3c210e263fcbcc15597359bc80975e629b3"
     )
     assert module.FROZEN_ALLOCATION_GUARDED_INTERVAL == pytest.approx(
-        (-0.09927214226746098, -0.038637498083171816)
+        (-0.09232497576315679, 0.0025153060199847935)
     )
     assert module.AGGREGATE_CONTROL_WEIGHTS["low_feller"]["heston"] == 0.0
-    assert module.AGGREGATE_CONTROL_WEIGHTS["ordinary_full"]["heston"] == 0.7
+    assert module.AGGREGATE_CONTROL_WEIGHTS["ordinary_full"]["heston"] == 1.0
     manifest = module.frozen_allocation_manifest()
     assert manifest["design_commit"] == (
-        "b5a5243d0335081e18c9c92dfebbb5f1f450f859"
+        "acd9f2feb2d86bb8360fb799209c86a55d753280"
     )
-    assert manifest["recommendation"]["primary_batches"] == 4096
-    assert manifest["recommendation"]["middle_batches"] == 256
+    assert manifest["recommendation"]["primary_batches"] == 512
+    assert manifest["recommendation"]["middle_batches"] == 32
 
 
-def test_exact_schema11_parent_loads_and_all_cells_are_pass():
+def _accept_live_production_pde(module, monkeypatch):
+    """Let a test past the parent's production-PDE compatibility guard.
+
+    The guard hashes whole source trees (``quantark/asset/equity/engine/pde``,
+    ``quantark/volmodels``, ``quantark/asset/equity/param``, ...), so ANY edit
+    under them moves it -- including edits that provably cannot touch these
+    cells. It has fired since main's continuous-KI work landed; see
+    ``test_the_parent_no_longer_accepts_this_tree_for_new_pde_work``, which is
+    where that fact is asserted. Tests about recomposition ARITHMETIC should
+    not also be re-testing compatibility, so they opt past it explicitly.
+    """
+    monkeypatch.setattr(
+        module,
+        "PARENT_PRODUCTION_PDE_SHA256",
+        module.stage16().production_pde_compatibility_sha256(),
+    )
+
+
+def test_the_banked_parent_is_intact_and_every_cell_passed():
+    """Pure evidence assertions: no live engine is consulted, so this keeps
+    holding as the tree moves underneath it."""
+    evidence = json.loads(PARENT_EVIDENCE_FILE.read_text())
+    decision = json.loads(PARENT_DECISION_FILE.read_text())
     module = _load()
 
-    evidence, decision, manifest = module.load_and_validate_parent_certificate(
-        PARENT_DIR / "adi_greek_certification.json",
-        PARENT_DIR / "adi_greek_certification_decision.json",
-    )
-
-    assert manifest == module.parent_certificate_manifest()
     assert evidence["evidence_sha256"] == module.PARENT_EVIDENCE_SHA256
     assert decision["decision_sha256"] == module.PARENT_DECISION_SHA256
     assert len(evidence["cells"]) == 14
     assert {cell["status"] for cell in evidence["cells"]} == {"PASS"}
     assert evidence["decisions"]["heston"]["route"] == "pde"
+    # The parent left SLV unresolved on purpose -- that is the precondition the
+    # stage-17 aggregate amendment exists to remove.
     assert evidence["decisions"]["heston_slv"]["route"] == (
         "excluded_greek_unresolved"
     )
 
 
+def test_the_parent_no_longer_accepts_this_tree_for_new_pde_work():
+    """The parent's production-PDE guard fires, and that is correct.
+
+    Main's continuous-KI work (62f72b6, c6b8401, 7baf042) edited files inside
+    the guarded source trees, so the digest moved and the parent will not carry
+    its completed PDE evidence into a NEW amendment from this tree. Nothing
+    already published is affected: the amendment that used this parent is
+    banked, and every one of the parent's fourteen PDE cells was re-measured on
+    the merged tree and reproduced BIT-FOR-BIT
+    (``docs/adi2d-greek-perf/probes/probe_merge_ki_invariance.py``).
+
+    The guard is a source-set proxy for a behavioural question that has since
+    been answered directly. Anyone re-pinning it must carry that measurement as
+    the justification -- which is why this asserts the refusal rather than
+    quietly widening it.
+    """
+    module = _load()
+    live = module.stage16().production_pde_compatibility_sha256()
+    assert live != module.PARENT_PRODUCTION_PDE_SHA256
+
+    with pytest.raises(ValueError, match="production PDE differs"):
+        module.load_and_validate_parent_certificate(
+            PARENT_EVIDENCE_FILE,
+            PARENT_DECISION_FILE,
+        )
+
+
+def test_the_parent_loads_when_the_production_pde_matches(monkeypatch):
+    module = _load()
+    _accept_live_production_pde(module, monkeypatch)
+
+    evidence, decision, manifest = module.load_and_validate_parent_certificate(
+        PARENT_EVIDENCE_FILE,
+        PARENT_DECISION_FILE,
+    )
+
+    assert manifest == module.parent_certificate_manifest()
+    assert evidence["evidence_sha256"] == module.PARENT_EVIDENCE_SHA256
+    assert decision["decision_sha256"] == module.PARENT_DECISION_SHA256
+
+
 def test_schema11_parent_loader_rejects_reformatted_bytes(tmp_path):
     module = _load()
-    source = PARENT_DIR / "adi_greek_certification.json"
+    source = PARENT_EVIDENCE_FILE
     payload = json.loads(source.read_text())
     reformatted = tmp_path / source.name
     reformatted.write_text(json.dumps(payload))
@@ -105,7 +186,7 @@ def test_schema11_parent_loader_rejects_reformatted_bytes(tmp_path):
     with pytest.raises(ValueError, match="evidence file hash mismatch"):
         module.load_and_validate_parent_certificate(
             reformatted,
-            PARENT_DIR / "adi_greek_certification_decision.json",
+            PARENT_DECISION_FILE,
         )
 
 
@@ -306,7 +387,7 @@ def test_allocation_projection_adds_source_variances_and_new_family_guard():
 def test_declared_allocation_grid_projects_from_complete_development_rows():
     module = _load()
     parent = json.loads(
-        (PARENT_DIR / "adi_greek_certification.json").read_text()
+        (PARENT_EVIDENCE_FILE).read_text()
     )
     slv = {
         cell["case"]["name"]: cell
@@ -381,7 +462,13 @@ def test_controlled_case_rows_recompose_the_declared_unbiased_identity():
     )
 
     def grouped(values):
-        return np.asarray(values, dtype=float).reshape(2, 2).mean(axis=1)
+        # STRIDED, matching _group_delta_rows since ae460f8: output row j
+        # averages scrambles {j, j+m, j+2m, ...}, so reshape is (n/m, m) and the
+        # mean is over axis 0. The consecutive form this helper used to carry --
+        # reshape(m, n/m).mean(axis=1) -- pushes same-scramble cross-case CRN
+        # coupling across outer-row boundaries where the empirical standard
+        # error cannot see it, which is the defect the strided alignment fixed.
+        return np.asarray(values, dtype=float).reshape(2, 2).mean(axis=0)
 
     target = (
         grouped([2.0, 4.0, 6.0, 8.0])
@@ -424,7 +511,7 @@ def test_nonzero_heston_weight_requires_a_high_expectation():
 def test_parent_pde_envelope_and_saved_rows_recompose_without_new_work():
     module = _load()
     parent = json.loads(
-        (PARENT_DIR / "adi_greek_certification.json").read_text()
+        (PARENT_EVIDENCE_FILE).read_text()
     )
     slv = {
         cell["case"]["name"]: cell
@@ -467,32 +554,48 @@ def test_parent_pde_envelope_and_saved_rows_recompose_without_new_work():
     assert all(np.all(np.isfinite(rows)) for rows in delta_cohorts.values())
     assert all(np.all(np.isfinite(rows)) for rows in substep_cohorts.values())
     assert set(hashes) == set(module.CONTROL_CASES) | {"near_ki"}
+
+    # Pinned against the PUBLISHED amendment rather than hand-copied literals.
+    # The literals here were stale -- written against the pre-strided parent --
+    # and a hand-copied number cannot notice when the artifact moves under it.
+    published = json.loads(BANKED_AMENDMENT_FILE.read_text())
     assert axes == pytest.approx(
-        {
-            "n_x": 0.007282222294434229,
-            "n_v": 0.005017828261686049,
-            "n_t": -0.0016101685456609712,
-        }
+        published["aggregate_pde_signed_refinement_contracts"]
     )
-    assert envelope == pytest.approx(0.01391021910178125)
+    assert envelope == pytest.approx(
+        published["aggregate_pde_discretization_envelope"]
+    )
 
 
 @pytest.mark.parametrize(
-    ("center", "bias_status", "route"),
+    ("center", "spread", "bias_status", "route"),
     [
-        (0.0, "PASS", "pde"),
-        (-0.09, "INCONCLUSIVE", "excluded_greek_unresolved"),
-        (-0.2, "FAIL", "excluded_greek_unresolved"),
+        # Wholly inside the +/-0.1 bound.
+        (0.0, 0.0, "PASS", "pde"),
+        # Straddling it. This needs real scatter: with zero variance the
+        # interval collapses to a point, so a centre of -0.09 is simply INSIDE
+        # the bound and passes. The status is a property of the INTERVAL, not
+        # of the estimate, and only a fixture with width can exercise the
+        # straddle. (The old parametrization asked for -0.09 with no spread and
+        # expected INCONCLUSIVE, which stopped being reachable once the
+        # endpoints were built this way.)
+        (-0.09, 0.2, "INCONCLUSIVE", "excluded_greek_unresolved"),
+        # Wholly outside.
+        (-0.2, 0.0, "FAIL", "excluded_greek_unresolved"),
     ],
 )
 def test_aggregate_decision_carries_heston_and_routes_only_on_joint_pass(
-    center, bias_status, route
+    center, spread, bias_status, route
 ):
     module = _load()
     parent = json.loads(
-        (PARENT_DIR / "adi_greek_certification.json").read_text()
+        (PARENT_EVIDENCE_FILE).read_text()
     )
     delta = np.full(module.AGGREGATE_OUTER_BATCHES, center)
+    if spread:
+        delta = delta + spread * np.where(
+            np.arange(module.AGGREGATE_OUTER_BATCHES) % 2 == 0, 1.0, -1.0
+        )
     substep = np.zeros_like(delta)
     delta_cohorts = {
         name: (
@@ -623,16 +726,19 @@ def test_control_summary_is_explicitly_non_admissive_and_keeps_coupling():
     assert summary["substep"]["batches"] == 3
 
 
-def test_schema12_full_payload_recomposes_publishes_and_routes(tmp_path):
+def test_schema12_full_payload_recomposes_publishes_and_routes(tmp_path, monkeypatch):
     module = _load()
+    # This test is about recomposition and publication, not about whether the
+    # tree is still PDE-compatible with the parent -- which has its own test.
+    _accept_live_production_pde(module, monkeypatch)
     module.PRODUCTION_ALLOCATION_FROZEN = True
     module.PRODUCTION_PRIMARY_BATCHES = module.AGGREGATE_OUTER_BATCHES
     module.PRODUCTION_MIDDLE_BATCHES = module.AGGREGATE_OUTER_BATCHES
     parent = json.loads(
-        (PARENT_DIR / "adi_greek_certification.json").read_text()
+        (PARENT_EVIDENCE_FILE).read_text()
     )
     parent_decision = json.loads(
-        (PARENT_DIR / "adi_greek_certification_decision.json").read_text()
+        (PARENT_DECISION_FILE).read_text()
     )
     slv = {
         cell["case"]["name"]: cell
@@ -721,7 +827,10 @@ def test_schema12_full_payload_recomposes_publishes_and_routes(tmp_path):
         },
         "anchors": parent["anchors"],
         "cells": parent["cells"],
-        "cell_provenance": parent["cell_provenance"],
+        # Renamed at ae460f8: per-cell reuse is gated on a per-cell IDENTITY
+        # (numerical projection + declared plan + runtime + consumed cells),
+        # not on a fleet-wide provenance record.
+        "cell_identities": parent["cell_identities"],
         "aggregate_reference": {
             "primary_by_case": primary,
             "middle_by_case": middle,
@@ -786,9 +895,9 @@ def test_production_invocation_fails_closed_before_allocation_is_frozen():
         module.main(
             [
                 "--parent-evidence",
-                str(PARENT_DIR / "adi_greek_certification.json"),
+                str(PARENT_EVIDENCE_FILE),
                 "--parent-decision",
-                str(PARENT_DIR / "adi_greek_certification_decision.json"),
+                str(PARENT_DECISION_FILE),
             ]
         )
 

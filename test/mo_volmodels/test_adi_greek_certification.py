@@ -685,7 +685,85 @@ def test_production_decision_enforces_heston_bridge_sampling_profile():
     assert stale["heston"]["sampling_complete"] is False
 
 
-def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
+def test_heston_bias_pools_every_banked_row_of_an_over_allocated_cell():
+    """Strided pooling uses ALL of an over-allocated cell's rows.
+
+    The superseded contract truncated each cell to the common scramble count,
+    so near_ki's 2048 rows contributed only their first 1024. That is the
+    alignment-luck defect that decided an admission by itself (recorded in
+    2003239, fixed in 258fd7e): heston_slv/low_feller's four disjoint blocks of
+    banked rows had means -0.048 / -0.126 / -0.203 / -0.259, and truncation
+    kept exactly the one that passes.
+
+    Poisoning the tail is the sharpest way to state the difference. Under
+    truncation the aggregate did not notice; under strided pooling -- output row
+    j averaging scrambles {j, j+m, j+2m, ...} -- it must.
+    """
+    module = _load()
+    anchors = [
+        {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
+    ]
+
+    def fleet():
+        return [
+            _passing_cell(
+                module,
+                "heston",
+                batches=module.PRODUCTION_HESTON_BATCHES_BY_CASE[case.name],
+                case_name=case.name,
+            )
+            for case in module.certification_cases(quick=False)
+        ]
+
+    common = module.PRODUCTION_HESTON_BATCHES
+    sampling = {
+        "heston": {
+            "paths_per_batch": module.PRODUCTION_HESTON_PATHS_PER_BATCH,
+            "batches": common,
+            "batches_by_case": module.PRODUCTION_HESTON_BATCHES_BY_CASE,
+        }
+    }
+
+    def decide(rows, sampling_by_variant=sampling):
+        return module.make_decisions(
+            rows,
+            anchors,
+            quick=False,
+            variants=["heston"],
+            sampling_by_variant=sampling_by_variant,
+            heston_spot_bridge_profile_by_case=(
+                module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+            ),
+        )
+
+    clean = decide(fleet())
+    assert clean["heston"]["route"] == "pde"
+    assert clean["heston"]["aggregate_common_scrambles"] == common
+    assert clean["heston"]["delta_bias"]["aggregate_common_scrambles"] == common
+    assert clean["heston"]["delta_bias"]["aggregate_alignment"] == "strided_pooled"
+    # The over-allocated cell is declared at its own count, not the common one.
+    assert clean["heston"]["delta_bias"]["aggregate_batch_counts_by_case"][
+        "near_ki"
+    ] == module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"]
+
+    poisoned_rows = fleet()
+    near_ki = next(row for row in poisoned_rows if row["case"]["name"] == "near_ki")
+    tail = module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common
+    near_ki["batch_difference_contracts"]["delta"][common:] = [100.0] * tail
+    near_ki["certifications"]["delta"]["reference_substep_batch_contracts"][
+        common:
+    ] = [100.0] * tail
+
+    poisoned = decide(poisoned_rows)
+    assert poisoned["heston"]["route"] != "pde", (
+        "rows past the common scramble count were dropped -- that is the "
+        "truncating aggregate this alignment replaced"
+    )
+
+
+def test_heston_bias_refuses_a_case_count_the_sampling_does_not_declare():
+    """Banked must equal declared, exactly. A cell that ran longer than the
+    sampling record says is not evidence of anything until the record agrees."""
     module = _load()
     anchors = [
         {"name": name, "status": "PASS"} for name in module.REQUIRED_ANCHOR_NAMES
@@ -699,51 +777,27 @@ def test_heston_bias_uses_common_scramble_prefix_and_exact_case_profile():
         )
         for case in module.certification_cases(quick=False)
     ]
-    near_ki = next(row for row in rows if row["case"]["name"] == "near_ki")
     common = module.PRODUCTION_HESTON_BATCHES
-    near_ki["batch_difference_contracts"]["delta"][common:] = [100.0] * (
-        module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common
-    )
-    near_ki["certifications"]["delta"]["reference_substep_batch_contracts"][common:] = [
-        100.0
-    ] * (module.PRODUCTION_HESTON_BATCHES_BY_CASE["near_ki"] - common)
-    sampling = {
-        "heston": {
-            "paths_per_batch": module.PRODUCTION_HESTON_PATHS_PER_BATCH,
-            "batches": common,
-            "batches_by_case": module.PRODUCTION_HESTON_BATCHES_BY_CASE,
-        }
-    }
-
-    admitted = module.make_decisions(
-        rows,
-        anchors,
-        quick=False,
-        variants=["heston"],
-        sampling_by_variant=sampling,
-        heston_spot_bridge_profile_by_case=(module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
-    )
-    stale_sampling = {
-        "heston": {
-            **sampling["heston"],
-            "batches_by_case": {
-                **module.PRODUCTION_HESTON_BATCHES_BY_CASE,
-                "near_ki": common,
-            },
-        }
-    }
     stale = module.make_decisions(
         rows,
         anchors,
         quick=False,
         variants=["heston"],
-        sampling_by_variant=stale_sampling,
-        heston_spot_bridge_profile_by_case=(module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE),
+        sampling_by_variant={
+            "heston": {
+                "paths_per_batch": module.PRODUCTION_HESTON_PATHS_PER_BATCH,
+                "batches": common,
+                "batches_by_case": {
+                    **module.PRODUCTION_HESTON_BATCHES_BY_CASE,
+                    "near_ki": common,
+                },
+            }
+        },
+        heston_spot_bridge_profile_by_case=(
+            module.HESTON_SPOT_BRIDGE_PROFILE_BY_CASE
+        ),
     )
 
-    assert admitted["heston"]["route"] == "pde"
-    assert admitted["heston"]["aggregate_common_scrambles"] == common
-    assert admitted["heston"]["delta_bias"]["aggregate_common_scrambles"] == common
     assert stale["heston"]["route"] == "excluded_greek_unresolved"
     assert stale["heston"]["sampling_complete"] is False
 
