@@ -1,0 +1,54 @@
+# Contract A for the progress dashboard (spec section 5).
+#
+# Only what code cannot derive.  Fleet DIMENSIONS -- six variants, 27
+# inceptions -- come from stage 12 and the G4 artifact, never from this file.
+#
+# A run dir on disk but absent here renders as "unclassified": the
+# stale-registry failure mode is made visible, not silent.
+schema_version: 1
+
+fleet:
+  - dir: output/volmodel_backtest      # 0.4.0 re-baseline fleet
+
+probes:
+  - dir: output/volmodel_smoke         # 1 inception x 6 variants, censored at data_end
+  - dir: output/volmodel_smoke_gated   # 1 inception x 3 variants, post-f97fba3, censored
+  - dir: output/timing_on              # study 7.4 event-stats timing, --quick
+  - dir: output/timing_off             # study 7.4 control, --quick
+  - dir: output/volmodel_backtest_g3   # dead G3 probe, 1 failed run
+
+# Scoped invalidations.  These replace the hand-maintained
+# gate_decision_pre_*.json renaming convention.  A DOCUMENTATION commit can
+# appear here: 3fbbf21 is a spec section, and it voids a numeric artifact.
+invalidations:
+  - commit: 41f2117
+    landed: 2026-07-31T10:13:27+08:00
+    spec: "7A.4"
+    applies_to: {scopes: [G2, G4, FLEET], variants: "*", facets: "*"}
+    reason: >-
+      enforce_feller + degenerate_pde + QE-M changed what every engine
+      computes; prior engine output is not comparable.
+
+  - commit: f97fba3
+    landed: 2026-08-03T13:39:19+08:00
+    spec: "5.6"
+    applies_to: {scopes: [G2, FLEET], variants: [heston, heston_slv], facets: "*"}
+    reason: >-
+      2D PDE Heston delta grid stabilisation; the 1D routes are untouched.
+
+  - commit: 3fbbf21
+    landed: 2026-08-03T15:17:23+08:00
+    spec: "5.8"
+    applies_to: {scopes: [G2], variants: "*", facets: [delta]}
+    reason: >-
+      The MC delta reference carries sigma 0.41-0.51 futures contracts against
+      a 0.1 contract bias bound, so the delta half of every route decision is
+      void.  The PV half stands.
+
+# Deliberately absent, recorded so omission is not mistaken for oversight:
+#   b6b97f0 -- PDEEngine failed closed before it, so no surviving pricing
+#     summary contains numbers it changed.  Still covered by the dependency
+#     table, so predating artifacts read "stale" rather than certified.
+#   ec20db9 -- study 5.9 is a REATTRIBUTION (sigma-collapse dates fail on
+#     discretisation, not calibration).  The measured failures stand, so no
+#     artifact becomes non-comparable.  It reaches freshness via STUDY_SPEC.

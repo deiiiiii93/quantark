@@ -109,8 +109,8 @@ recreate that problem in a new file.
 ```
 example/mo_volmodels/
   16_dashboard.py            argparse + wiring only (~60 lines)
-  dashboard.yaml             the registry (contract A, §5)
-  dashboard/
+  mo_dashboard.yaml          the registry (contract A, §5)
+  mo_dashboard/
     provenance.py            freshness rule (contract B, §6) — pure
     gates.py                 G1/G4/G2/G5 artifacts → status rows
     fleet.py                 registry + runs/ walk → 6 x 27 cell grid
@@ -124,6 +124,14 @@ test/mo_volmodels/
 
 Each collector is a pure function of (paths, registry) returning a plain dict. No collector
 imports another; `payload.py` is the only composition point.
+
+The package is `mo_dashboard`, not `dashboard`: tests put `example/mo_volmodels/` on `sys.path`,
+where a top-level module named `dashboard` would be a collision hazard.
+
+Paths are absolutised with `os.path.normpath`, never `Path.resolve()`. Resolving follows
+symlinks, and `output/` is a symlink in a worktree checkout — registry entries would resolve into
+the main repository while a scan of the same symlink stays in worktree space, so the two sides
+could never match and every displayed path would be absolute.
 
 ### 3.2 Modes
 
@@ -141,6 +149,13 @@ Read-only and fail-soft-but-loud. A missing or unparseable artifact yields a row
 an omitted row, never an exception that blanks the page. A declared dependency path that no
 longer exists is an error row, not a skipped check — a renamed engine directory must not silently
 turn every verdict green.
+
+**Absent and corrupt are different states and must not share a return value.** A reader that
+answers `None` to both lets a truncated `run_manifest.json` render as "0 runs completed" — a
+legitimate-looking result produced by a parse failure. Every artifact reader returns a structured
+result carrying `missing` versus `unreadable` plus the exception text, and every `unreadable`
+propagates into `payload["errors"]`. A collector that always returns an empty error list is a
+contract violation, not a convenience.
 
 ### 3.4 Data model
 
@@ -161,12 +176,18 @@ payload = {
 }
 ```
 
-`GateRow = {id, title, artifact_path, artifact_mtime, status, headline, facets}` where
-`facets: {<facet>: Provenance}` — G2 carries `pv` and `delta` separately (§6.2); other gates
-carry a single `all` facet.
+`GateRow = {id, title, artifact_path, artifact_mtime, status, headline, facets, by_variant}`.
+`facets: {<facet>: Provenance}` is the gate-level roll-up — G2 carries `pv` and `delta`
+separately (§6.2), other gates a single `all`. G2 additionally carries
+`by_variant: {<variant>: {<facet>: Provenance}}`, because its invalidations are variant-scoped
+and a facet-only key makes them unreachable; each gate-level facet is the worst across variants.
 
-`Provenance = {mode: "exact"|"inferred", freshness: "fresh"|"stale"|"void",
-invalidated_by: <commit>|null, superseded_by: [...], dirty_deps: [...], missing_deps: [...]}`.
+`Provenance = {mode: "inferred", freshness: "fresh"|"stale"|"void", invalidated_by: <commit>|null,
+invalidation_reason: str, superseded_by: [...], dirty_deps: [...], missing_deps: [...]}`.
+`mode` is always `"inferred"` — see §6.4 for why `"exact"` is deferred rather than half-built.
+
+`Read = {state: "ok"|"missing"|"unreadable", doc: Any|None, message: str}` — the return of every
+artifact reader, so absent and corrupt never collapse into the same value (§3.3).
 
 `Cell = {inception, variant, state, mtime, provenance, run_dir}` with `state` from the exhaustive
 machine in §4.3.
@@ -199,11 +220,32 @@ Node predicates, all enumerated so two implementers cannot differ:
 | Node | Satisfied when |
 |---|---|
 | G1 | artifact readable, `failures == []`, `n_verified == n_admitted`, every facet non-void |
-| G4 | every cohort inception has `coupon_solution.solved == true`, every facet non-void |
+| G4 | every record has `coupon_solution.solved == true`, every facet non-void — **universe unverified at render time**, see below |
 | G2 | every study variant has a route, **and both `pv` and `delta` facets non-void** |
-| G5 | artifact exists and reports zero under-resolved operating points |
+| G5 | artifact readable **and schema-complete** (positive `n_operating_points` and an explicit `under_resolved` list) with zero under-resolved points |
 | fleet | `fresh` cells == `expected_cells` |
 | aggregate | aggregate artifact exists and is newer than the last fresh cell |
+
+**G4's universe cannot be checked at render time.** G4 *defines* the inception set, so it has
+nothing to be validated against: the only independent source is stage 12's
+`schedule_inceptions`, and reaching it means importing the pricing stack (§5.3). The gate
+therefore checks internal completeness only — every record solved — and reports
+`universe_verified: false` with `n_inceptions` shown prominently. The size of the universe is
+asserted in the test suite, which pays the import cost once rather than on every render. A
+silently shrunken G4 run would move the fleet denominator, so this limit is stated on the page
+rather than papered over.
+
+**One predicate, shared.** The rendered verdict and the chain's readiness test are the same
+function. Two predicates is how the page came to print `PASS (inferred)` for G2 while the badge
+one cell to its right read `void` and `next_action` correctly stopped at G2 — the most prominent
+element on the page contradicting the page. A void facet renders `VOID`; a passing gate with a
+stale facet renders `PASS (stale, inferred)`, never a bare pass.
+
+**Coverage is not readiness.** `admitted` (`fresh + stale`) is the display metric — work that
+exists. The chain's fleet node requires `fresh == expected_cells`, because a stale cell is one
+whose dependencies moved and 162 stale cells are not a finished fleet. The aggregate node
+likewise requires a *readable* artifact newer than the newest admitted cell; existence alone
+would let a conclusion that predates its own inputs satisfy the chain.
 
 `next_action` is the first unsatisfied node, reported with the reason and the confidence of the
 evidence behind it (`exact` / `inferred`). It is labelled **next action**, not "blocker" — the
@@ -237,10 +279,19 @@ difference as an explicit reconciliation line rather than leaving two numbers to
 eye. Carries §8's caveat inline: KO dates collapse onto ~13 days, 2024-10-08 kills 7, so
 effective sample size is far below 27.
 
-**Calibration health** — from `output/mo_daily_calibration/status.json` and
-`calibration_manifest.json`: Feller-ratio distribution, the 6.6 % sigma-collapse band, fit cost in
-bp of IV (§7A.10: median 8.4 / p90 29.3 / max 217), bound-hits, and whether the launchd job
+**Calibration health** — from `output/mo_daily_calibration/status.json` **and**
+`calibration_manifest.json`. Both are required: `status.json` carries only the latest date (3
+records), while the manifest carries the 240-date history (720 records), so reading status alone
+would compute the Feller distribution from a single day.
+
+Rendered: the Feller-ratio distribution across the pooled records, the σ-collapse band (§4.2
+label), the per-record calibration objective, bound-hits, and whether the launchd job
 (`com.quantark.mo-daily-calibration`) last completed.
+
+The objective is rendered as the record's own `cost` field and labelled as such. It is **not**
+§7A.10's "bp of IV" (median 8.4 / p90 29.3 / max 217) — measured on the live records the pooled
+median `cost` is ≈0.0039, a different quantity on a different scale. Presenting one under the
+other's label would be a fabricated unit.
 
 ### 4.3 Panel 3 — Fleet coverage and monitor
 
@@ -264,7 +315,15 @@ States are exhaustive and resolved by strict precedence, highest first:
 | 6 | `fresh` | artifact present, no invalidation and no newer dependency |
 | 7 | `missing` | no cell directory |
 
-Only `fresh` counts toward coverage. Run dirs are labelled by registry role (`fleet` / `probe`);
+**Coverage counts `fresh + stale`, and shows the split.** An earlier draft counted `fresh` only,
+which is wrong for the reason the stale/void distinction exists: *stale* means a dependency moved
+and the cell should be re-run to be certain, not that the work is absent. Under the fresh-only
+rule today's real state reads **0/162** — every `flat_bsm` cell predates `f97fba3`, `3fbbf21` and
+`ec20db9` — which is not a useful statement about a fleet that has 27 completed cells. `void`,
+`failed` and `missing` are what disqualify. The headline therefore reads
+`27/162 admitted (0 fresh · 27 stale)`, never a bare 27.
+
+Run dirs are labelled by registry role (`fleet` / `probe`);
 a dir on disk but absent from the registry renders in an **unclassified** strip. That failure
 mode is not hypothetical: `output/volmodel_smoke_gated` was created 2026-08-03 and was missed
 during this design's own survey of `output/`. Six run dirs exist; a naive sum of their
@@ -280,9 +339,15 @@ dark paper/ink palette (`--paper: #111110`, `--ink: #f5f2e8`), monospace numeric
 cards. Plotly is loaded from CDN there; this dashboard uses inline SVG and CSS for its grid and
 histograms so a snapshot stays readable offline.
 
+**The inlined payload must escape `<` as `<`.** `json.dumps` passes `</script>` through
+untouched (verified), and the payload carries log tails, exception text and git subjects — all
+attacker-adjacent only in the sense that they are arbitrary text from disk, which is enough. An
+unescaped `</script>` terminates the `application/json` element and everything after it becomes
+markup. Cheap to prevent, and the snapshot is a file people forward.
+
 ## 5. Contract A — the registry
 
-`example/mo_volmodels/dashboard.yaml`. Hand-maintained; `pyyaml>=6.0.0` is already declared
+`example/mo_volmodels/mo_dashboard.yaml`. Hand-maintained; `pyyaml>=6.0.0` is already declared
 (`pyproject.toml:39`). It states only what code cannot derive.
 
 ### 5.1 Run dirs
@@ -358,14 +423,25 @@ Derived from executable definitions, never restated here:
 
 - **Variants** — `VARIANTS` from `12_snowball_volmodel_backtest.py:143`, the canonical 6-tuple.
   Not stage 13's `VARIANT_ORDER`, which lists 5 (§1.3).
-- **Inceptions** — `schedule_inceptions()` from `12_snowball_volmodel_backtest.py:452`. It is
-  **not** in `cohort.py`, which exposes only `COHORT_ASOF`, `admitted_dates()` and
-  `excluded_records()`; an earlier draft named a function that does not exist. It requires four
-  arguments — `calendar`, `data_start`, `data_end`, `first_admitted_surface` — supplied as
-  `data_end = COHORT_ASOF`, `data_start` and `first_admitted_surface` from
-  `cohort.admitted_dates()`, and the study calendar. The resulting 6 × 27 grid is fixtured
-  exactly (§8), so a drift in either source fails a test rather than silently changing a
-  denominator.
+- **Inceptions** — read at runtime from the G4 artifact
+  `output/volmodel_backtest/inceptions.json`, which is the authoritative list of what the fleet
+  *is*. **The collector must not call `schedule_inceptions()`.** That function lives in
+  `12_snowball_volmodel_backtest.py:452` (not `cohort.py`, which exposes only `COHORT_ASOF`,
+  `admitted_dates()` and `excluded_records()` — an earlier draft named a function that does not
+  exist), and reaching it means executing stage 12, which imports the whole pricing and backtest
+  stack. That violates §2's no-pricing-code rule, is slow on every page render, and fails outright
+  in a read-only environment where matplotlib cannot write its font cache — degrading the grid to
+  zero cells silently.
+
+  The definition is still enforced, just in the test rather than the collector: a unit test
+  asserts the artifact's inception list equals
+  `schedule_inceptions(calendar=…, data_start=…, data_end=COHORT_ASOF, first_admitted_surface=…)`
+  with `data_start` from the spot cache's first row and `first_admitted_surface` from
+  `cohort.admitted_dates()[0]`, mirroring `test_cohort.py::test_data_end_pin_governs_the_
+  inception_count`. Drift fails a test; it never silently changes a denominator.
+
+  When the G4 artifact is absent the fleet dimensions are unknown, so the grid is not drawn and
+  the panel says so. That is the honest reading: with no coupon solve there is no defined fleet.
 
 ## 6. Contract B — freshness
 
@@ -395,6 +471,19 @@ different failure modes, and §5.8 voids exactly one of them. Facets are `pv` an
 and a single `all` elsewhere. Each facet carries its own `Provenance` and renders its own badge;
 the gate's overall status is the worst facet.
 
+**G2's provenance is keyed by (variant, facet), not facet alone.** `f97fba3` is scoped to
+`heston` and `heston_slv`; if the collector evaluates G2 with `variant=None`, that invalidation
+can never reach it — the scoping mechanism would be dead code for the one gate it was written
+for. G2 therefore produces a provenance entry per variant per facet, and the gate-level facet
+badge is the worst across variants.
+
+**Route is the decision; the comparison flags are evidence.** `delta_pass: false` on `heston`
+does not mean G2 failed — it is *why* `heston` is routed to `mc` rather than `pde`. Reading
+`delta_pass` as the gate predicate would leave G2 permanently unsatisfiable no matter what the
+study does, since the routes that exist are precisely the ones chosen because a comparison did
+not pass. The predicate is route presence plus non-void facets (§4.1); `medium_pass`,
+`fine_pass`, `delta_pass` and the bias blocks are rendered as supporting evidence.
+
 ### 6.3 Stale versus void, and what inference can prove
 
 *Stale* means a dependency moved: re-run to be sure. *Void* means a declared invalidation applies:
@@ -416,13 +505,21 @@ Making inferred-fresh non-satisfying was considered and rejected: on day one eve
 inferred, so the chain would report the same blocker regardless of state and carry no
 information. Honest labelling beats a uniformly-blocked page.
 
-### 6.4 Exact versus inferred
+### 6.4 Exact versus inferred — inferred only, for now
 
-When an artifact carries an embedded `provenance.commit` block, comparison switches to
-`git rev-list <commit>..HEAD -- <deps>` and the badge reads `exact`. Otherwise §6.1 applies and
-the badge reads `inferred`. Both readers ship; no gate script is modified by this work, so every
-artifact reads `inferred` on day one. Stamping is added opportunistically when those scripts are
-next edited.
+Every verdict this dashboard renders is `inferred`. An `exact` mode — reading an artifact's
+embedded `provenance.commit` and comparing with `git rev-list <commit>..HEAD -- <deps>` — is
+**deferred until artifacts actually carry stamps**, and is deliberately not half-built.
+
+An earlier draft shipped a `stamped_commit` parameter that set the badge to `exact` while still
+deciding freshness from mtime and never validating the SHA. A badge that says *exact* on
+unvalidated evidence is worse than no badge: it is the one label a reader would trust without
+checking, and it would have been wrong for every artifact, including ones stamped with a commit
+that does not exist. The parameter is removed rather than left as a lie.
+
+The dashboard consequently carries a single confidence level, and §6.3's honesty requirements
+apply to all of it. When gate scripts are eventually stamped, `exact` arrives together with the
+`rev-list` comparison and tests covering an old stamp, a current stamp and an invalid one.
 
 ### 6.5 Dependency table
 
@@ -454,6 +551,18 @@ Untracked data dependencies (`surface_manifest.json`, `data/history/`) have no g
 only the mtime arm of §6.1 applies to them. That limit is stated on the page beside any row whose
 freshness rests on one.
 
+Two details that a naive implementation gets wrong, both verified against this repository:
+
+- **`git status --porcelain` collapses untracked trees to a parent.** It reports
+  `?? example/mo_volmodels/data/history/`, never the `surface_manifest.json` inside it, so a
+  containment test that only asks "is the reported path at or below my declared dep" misses every
+  change. Declared untracked deps are therefore `stat`ed directly rather than discovered through
+  `git status`.
+- **A missing dependency is an error and a non-fresh verdict**, not metadata attached to a green
+  row. §3.3 already requires the error row; freshness must agree with it, or a renamed engine
+  directory silently turns every verdict green — the exact failure the error row exists to
+  prevent.
+
 ## 7. CLI
 
 ```
@@ -479,12 +588,31 @@ does not write a file. `--open` launches a browser.
 5. Collector soft-fail: unreadable JSON yields `status: "unreadable"` with the message.
 6. Payload contract: `schema_version` and required top-level keys present.
 
+7. **Vacuity guards**, each written because the corresponding check would otherwise pass without
+   exercising anything:
+   - G2 provenance is keyed by variant — a `heston`-scoped invalidation reaches G2's `heston`
+     row and not its `flat_bsm` row. Without this, §5.2's scoping is dead code for the one gate
+     it exists for.
+   - `headline_g5({})` and `headline_g5({"n_operating_points": 3})` are **not** satisfied.
+   - A manifest `failures[]` entry whose cell directory was never created renders `failed` **at
+     the collector level**, not merely in a hand-built `cell_state` call.
+   - Artifact readers distinguish missing from corrupt, and a corrupt `run_manifest.json`
+     produces a `payload["errors"]` entry rather than "0 runs completed".
+   - Rendering with a payload containing `</script><script>` yields a document where that text
+     does not terminate the payload element.
+8. **Dimensions are read-only**: collecting the fleet grid imports no pricing module. Asserted by
+   checking `sys.modules` gains no `quantark.asset` entry across a `collect()` call.
+
 **Integration fixture (the check that would have caught the §5.2 defect).** One test asserts the
-whole expected dashboard state against the real artifacts as of 2026-08-03, pinned by mtime in
-the fixture rather than read live: G1 `fresh`; G4 `stale`; G2 `pv` present and `delta` **void by
-`3fbbf21`**; 27 `fresh` cells; the 8 Jul-27 `ts_bsm`/`localvol` cells `void` by `41f2117`;
-coverage 27/162; `next_action` = G2. It skips when `output/` is absent, matching the existing
-convention for tests depending on the uncommitted history cache.
+whole expected dashboard state against the real artifacts as of 2026-08-03: G2 `pv` present and
+`delta` **void by `3fbbf21`**; G1 not void; **27 `stale` cells and 0 `fresh`** — every
+`flat_bsm` cell predates `f97fba3`, `3fbbf21` and `ec20db9`, which is why coverage counts
+`fresh + stale` (§4.3); the 8 Jul-27 `ts_bsm`/`localvol` cells `void` by `41f2117`; admitted
+27/162; `next_action` = G2. It skips when `output/` is absent, matching the existing convention
+for tests depending on the uncommitted history cache.
+
+The fixture asserts *computed* state, not hand-copied numbers: if it disagrees with the design,
+the design or the collector is wrong — the assertion is not the thing to adjust.
 
 Render and serve get one smoke assertion each — non-empty HTML containing all three panel ids,
 and `/api/fleet` returning valid JSON — consistent with `13_aggregate_and_report.py` not being
@@ -501,20 +629,31 @@ HTML-tested.
 | Dep table too narrow — a real change reads fresh | Directory-level deps incl. engine facades; `STUDY_SPEC` covers doc-borne invalidations; missing path is an error row |
 | Panel 2 and Panel 3 denominators diverge | Divergence is expected and rendered as an explicit reconciliation line (§1.2, §4.2) |
 | Snapshot mistaken for live | `generated_at` and `mode` in the header; `live` block absent in snapshots |
-| Dashboard drifts from study definitions | Variants and inceptions imported from stage 12 and fixtured (§5.3) |
+| Dashboard drifts from study definitions | Variants from stage 12's `VARIANTS`; inceptions read from the G4 artifact and asserted equal to `schedule_inceptions()` in a test (§5.3) |
+| Rendering the page executes the pricing stack | Dimensions come from an artifact, never from executing stage 12; a test renders in a read-only environment (§5.3, criterion 9) |
+| A confidence badge that does not check anything | `exact` mode removed until stamps exist and are validated (§6.4) |
+| A gate reads satisfied on a partial artifact | G5 requires a complete schema; incomplete is `unreadable`, not satisfied (§4.1) |
+| An early failure leaves no directory and vanishes | Cells are the union of the pinned grid, the walked tree, and manifest `failures[]` (criterion 10) |
+| Arbitrary artifact text breaks out of the inlined payload | `<` escaped as `<` in the embedded JSON (§4.4) |
 
 ## 10. Success criteria
 
 1. One command produces a page stating, without reading any other file: each gate's verdict per
-   facet with its freshness and confidence; fleet coverage as fresh cells out of 162; and the
-   next action with the reason behind it.
+   facet with its freshness; fleet coverage as admitted (`fresh + stale`) cells out of 162 with
+   the split shown; and the next action with the reason behind it.
 2. **G2's `delta` facet renders `void` by `3fbbf21` (§5.8)** — the live invalidation that exists
    today and appears nowhere on disk. This is the criterion that distinguishes this dashboard
    from a file listing.
 3. The eight Jul-27 `ts_bsm`/`localvol` cells render `void`, not as progress.
-4. Coverage reads 27/162 — not the 35 cells on disk, and not the 38 a naive sum of
-   `runs_completed` across all six run dirs would give.
+4. Coverage reads `27/162 admitted (0 fresh · 27 stale)` — not the 35 cells on disk, not the 38
+   a naive sum of `runs_completed` across all six run dirs would give, and not the 0 a
+   fresh-only rule would give.
 5. G1 and the 27 `flat_bsm` cells are **not** voided by `f97fba3`, demonstrating scoping works.
 6. The dirty working tree is visible on the page.
 7. `--serve` updates the fleet panel within ~10 s of a cell completing.
 8. The dashboard never writes to `output/` outside its own HTML file.
+9. Rendering the page imports no pricing or backtest code and completes in a read-only
+   environment — no stage-12 execution, no matplotlib font cache write (§5.3).
+10. A cell listed in a manifest's `failures[]` whose directory was never created still renders
+    as `failed`, not `missing`. An execution failure must not disappear because it failed early
+    enough to leave no trace on disk.

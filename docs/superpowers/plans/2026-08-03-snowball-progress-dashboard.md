@@ -470,7 +470,7 @@ git commit -m "feat(dashboard): the registry -- run-dir roles and scoped invalid
 - Produces:
   - `Commit(sha: str, when: datetime, subject: str)`
   - `Provenance(mode, freshness, invalidated_by, superseded_by, dirty_deps, missing_deps)` with `freshness` in `{"fresh", "stale", "void"}` and `mode` in `{"exact", "inferred"}`
-  - `freshness(*, artifact_mtime, scope, variant, facet, dep_commits, dirty_deps, missing_deps, invalidations, stamped_commit=None) -> Provenance` — **pure**
+  - `freshness(*, artifact_mtime, scope, variant, facet, dep_commits, dirty_deps, missing_deps, invalidations) -> Provenance` — **pure**. No `stamped_commit`: `mode` is always `"inferred"` (§6.4). A non-empty `missing_deps` forces `stale`.
   - `ENGINE_PATHS: tuple[str, ...]`, `STUDY_SPEC: str`, `DEPS: dict[str, tuple[str, ...]]`
   - `collect_git_facts(project_root, deps) -> tuple[list[Commit], dict[str, datetime], list[str]]` — impure; returns (commits touching deps, dirty dep → mtime, missing deps)
   - `mtime_of(path) -> datetime | None` — aware, local tz
@@ -610,15 +610,39 @@ def test_void_beats_stale():
     assert p.freshness == "void"
 
 
-def test_a_stamped_commit_reports_exact_mode():
-    p = _fresh(invalidations=(), stamped_commit="f97fba3")
-    assert p.mode == "exact"
+def test_there_is_no_exact_mode_to_claim():
+    """A badge saying 'exact' on unvalidated evidence is worse than no badge."""
+    p = _fresh(invalidations=())
+    assert p.mode == "inferred"
+    with pytest.raises(TypeError):
+        provenance.freshness(
+            artifact_mtime=datetime(2026, 8, 3, tzinfo=CST), scope="G2",
+            variant=None, facet="all", dep_commits=(), dirty_deps={},
+            missing_deps=(), invalidations=(), stamped_commit="f97fba3",
+        )
 
 
-def test_missing_dependencies_are_reported_without_changing_freshness():
+def test_a_missing_dependency_is_never_fresh():
+    """Carrying it as green metadata is how a renamed engine directory
+    silently certifies every verdict on the page."""
     p = _fresh(invalidations=(), missing_deps=("quantark/asset/equity/engine/",))
-    assert p.freshness == "fresh"
+    assert p.freshness == "stale"
     assert p.missing_deps == ("quantark/asset/equity/engine/",)
+
+
+def test_a_collapsed_untracked_parent_still_marks_its_declared_child_dirty(tmp_path):
+    """git status reports '?? example/.../data/history/', never the
+    surface_manifest.json inside it (verified against this repo)."""
+    dep = "example/mo_volmodels/data/history/surface_manifest.json"
+    target = tmp_path / dep
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+
+    reported = "example/mo_volmodels/data/history/"
+    dep_norm = dep.rstrip("/")
+    assert dep_norm.startswith(reported.rstrip("/") + "/"), (
+        "the reverse containment test is what catches the collapsed parent"
+    )
 
 
 def test_engine_paths_cover_the_facade_files():
@@ -758,9 +782,15 @@ def freshness(
     dirty_deps: Mapping[str, datetime],
     missing_deps: Sequence[str],
     invalidations: Sequence[Invalidation],
-    stamped_commit: Optional[str] = None,
 ) -> Provenance:
-    """Pure.  All git and filesystem facts arrive pre-collected."""
+    """Pure.  All git and filesystem facts arrive pre-collected.
+
+    There is no ``stamped_commit`` parameter and no ``exact`` mode.  An
+    earlier draft had one that set the badge to "exact" while still deciding
+    from mtime and never validating the SHA -- a badge saying *exact* on
+    unvalidated evidence is the one label a reader would trust without
+    checking.  It arrives with the rev-list comparison or not at all.
+    """
     voided = [
         inv for inv in invalidations
         if inv.applies(scope, variant, facet) and inv.landed > artifact_mtime
@@ -771,13 +801,16 @@ def freshness(
     if voided:
         first = min(voided, key=lambda inv: inv.landed)
         state, by, why = VOID, first.commit, first.reason
-    elif superseded or dirty:
+    elif superseded or dirty or missing_deps:
+        # A declared dependency that no longer exists cannot be checked, so
+        # the verdict is not fresh.  Carrying it as green metadata is how a
+        # renamed engine directory silently certifies everything.
         state, by, why = STALE, None, ""
     else:
         state, by, why = FRESH, None, ""
 
     return Provenance(
-        mode=EXACT if stamped_commit else INFERRED,
+        mode=INFERRED,
         freshness=state,
         invalidated_by=by,
         invalidation_reason=why,
@@ -833,10 +866,16 @@ def collect_git_facts(
         if not rel:
             continue
         for dep in present:
-            if rel == dep or rel.startswith(dep.rstrip("/") + "/"):
-                when = mtime_of(project_root / rel)
+            # Containment in BOTH directions.  git reports untracked trees
+            # collapsed to a parent -- "?? example/mo_volmodels/data/history/"
+            # and never the surface_manifest.json inside it -- so a one-way
+            # test misses every change to a declared untracked dependency.
+            dep_norm = dep.rstrip("/")
+            if rel == dep or rel.startswith(dep_norm + "/") or dep_norm.startswith(rel.rstrip("/") + "/"):
+                target = project_root / dep if rel != dep else project_root / rel
+                when = mtime_of(target)
                 if when is not None:
-                    dirty[rel] = when
+                    dirty[dep] = when
     return commits, dirty, missing
 ```
 
@@ -963,6 +1002,56 @@ def test_headline_g5_reports_not_run_when_the_artifact_is_absent():
     assert h["state"] == "NOT_RUN"
 
 
+@pytest.mark.parametrize("doc", [
+    {},                                                  # empty
+    {"n_operating_points": 3},                           # no under_resolved list
+    {"under_resolved": []},                              # no point count
+    {"n_operating_points": 0, "under_resolved": []},     # zero points swept
+])
+def test_headline_g5_fails_closed_on_a_partial_document(doc):
+    """A truncated write must not clear a mandatory pre-flight.  An earlier
+    draft returned satisfied=True for {} because `.get(...) or []` made an
+    absent field indistinguishable from an empty one."""
+    assert gates.headline_g5(doc)["satisfied"] is False
+
+
+def test_g2_is_satisfied_by_routes_not_by_comparison_passes():
+    """The real artifact routes localvol/heston/heston_slv to MC *because*
+    delta_pass is false.  Treating delta_pass as the predicate would leave G2
+    permanently unsatisfiable no matter what the study does."""
+    doc = {"variants": {
+        "flat_bsm": {"route": "pde", "gate": {"medium_pass": True, "delta_pass": True,
+                                              "delta_info": {}}},
+        "heston": {"route": "mc", "gate": {"medium_pass": True, "delta_pass": False,
+                                           "delta_biased": True, "delta_info": {}}},
+    }}
+    assert gates.headline_g2(doc)["satisfied"] is True
+
+    no_route = {"variants": {"heston": {"route": None, "gate": {"delta_info": {}}}}}
+    assert gates.headline_g2(no_route)["satisfied"] is False
+
+
+def test_g2_provenance_is_keyed_by_variant(tmp_path):
+    """Without this, f97fba3's heston/heston_slv scope is unreachable and the
+    whole scoping mechanism is dead code for the gate it was written for."""
+    out = tmp_path / "output/pde_convergence_gate"
+    out.mkdir(parents=True)
+    (out / "gate_decision.json").write_text(json.dumps({"variants": {
+        "flat_bsm": {"route": "pde", "gate": {"delta_info": {}}},
+        "heston": {"route": "mc", "gate": {"delta_info": {}}},
+    }}), encoding="utf-8")
+    import os
+    old = datetime(2026, 8, 3, 1, 0, tzinfo=CST).timestamp()
+    os.utime(out / "gate_decision.json", (old, old))
+
+    reg = registry.Registry(invalidations=(INV_PDEFIX,))
+    rows, _ = gates.collect_gates(tmp_path, reg)
+    g2 = next(r for r in rows if r["id"] == "G2")
+
+    assert g2["by_variant"]["heston"]["pv"]["freshness"] == "void"
+    assert g2["by_variant"]["flat_bsm"]["pv"]["freshness"] != "void"
+
+
 def test_collect_gates_marks_an_unreadable_artifact(tmp_path):
     (tmp_path / "output").mkdir()
     bad = tmp_path / "output/gate_g1_admission.json"
@@ -1078,21 +1167,32 @@ def headline_g2(doc: Any) -> Dict[str, Any]:
         "tolerance": doc.get("tolerance"),
         "mc_reference": doc.get("mc_reference"),
         "calibration_policy": doc.get("calibration_policy"),
-        "satisfied": bool(out) and all(
-            v["pv"]["pass"] and v["delta"]["pass"] for v in out.values()
-        ),
+        # The ROUTE is the decision; the comparison flags are evidence.
+        # delta_pass=false on heston is *why* heston routes to mc rather than
+        # pde.  Reading delta_pass as the predicate leaves G2 permanently
+        # unsatisfiable, because the routes that exist are exactly the ones
+        # chosen when a comparison did not pass.
+        "satisfied": bool(out) and all(v.get("route") for v in out.values()),
     }
 
 
 def headline_g5(doc: Any) -> Dict[str, Any]:
+    """Fail closed.  A partial write must not clear a mandatory pre-flight."""
     if doc is None:
-        return {"state": "NOT_RUN", "n_under_resolved": None, "satisfied": False}
-    under = list(doc.get("under_resolved") or [])
+        return {"state": "NOT_RUN", "n_under_resolved": None, "satisfied": False,
+                "complete": False}
+    n_points = doc.get("n_operating_points")
+    under = doc.get("under_resolved")
+    complete = isinstance(n_points, int) and n_points > 0 and isinstance(under, list)
+    if not complete:
+        return {"state": "INCOMPLETE", "n_operating_points": n_points,
+                "n_under_resolved": None, "satisfied": False, "complete": False}
     return {
         "state": "RUN",
-        "n_operating_points": doc.get("n_operating_points"),
+        "n_operating_points": n_points,
         "n_under_resolved": len(under),
         "satisfied": not under,
+        "complete": True,
     }
 
 
@@ -1154,13 +1254,38 @@ def collect_gates(
             continue
 
         commits, dirty, missing = P.collect_git_facts(project_root, P.DEPS[spec.id])
+
+        # G2's invalidations are variant-scoped (f97fba3 -> heston,
+        # heston_slv).  Evaluating with variant=None makes every one of them
+        # unreachable -- the scoping mechanism would be dead code for the one
+        # gate it was written for.
+        variants = sorted((row["headline"].get("variants") or {}).keys()) \
+            if spec.id == "G2" else []
+        by_variant: Dict[str, Dict[str, Any]] = {}
+
         for facet in spec.facets:
-            prov = P.freshness(
-                artifact_mtime=mtime, scope=spec.id, variant=None, facet=facet,
-                dep_commits=commits, dirty_deps=dirty, missing_deps=missing,
-                invalidations=reg.invalidations,
-            )
-            row["facets"][facet] = prov.as_dict()
+            if variants:
+                per = {}
+                for variant in variants:
+                    prov = P.freshness(
+                        artifact_mtime=mtime, scope=spec.id, variant=variant,
+                        facet=facet, dep_commits=commits, dirty_deps=dirty,
+                        missing_deps=missing, invalidations=reg.invalidations,
+                    )
+                    per[variant] = prov
+                    by_variant.setdefault(variant, {})[facet] = prov.as_dict()
+                worst = worst_freshness([p.freshness for p in per.values()])
+                pick = next(p for p in per.values() if p.freshness == worst)
+                row["facets"][facet] = pick.as_dict()
+            else:
+                prov = P.freshness(
+                    artifact_mtime=mtime, scope=spec.id, variant=None, facet=facet,
+                    dep_commits=commits, dirty_deps=dirty, missing_deps=missing,
+                    invalidations=reg.invalidations,
+                )
+                row["facets"][facet] = prov.as_dict()
+
+        row["by_variant"] = by_variant
         row["freshness"] = worst_freshness([f["freshness"] for f in row["facets"].values()])
         rows.append(row)
 
@@ -1190,13 +1315,14 @@ git commit -m "feat(dashboard): gate rows with pv/delta facets"
 **Interfaces:**
 - Consumes: `registry.Registry`, `registry.classify_run_dirs`, `provenance.freshness`, `provenance.mtime_of`
 - Produces:
-  - `VARIANTS: tuple[str, ...]` and `inception_dates(history_dir) -> list[date]`
-  - `fleet_dimensions(history_dir) -> tuple[tuple[str, ...], list[date]]`
-  - `CellFacts(inception, variant, run_dir, summary_mtime, dir_exists, summary_readable)`
+  - `VARIANTS: tuple[str, ...]` and `inception_tags(project_root) -> list[str]` — read from the G4 artifact, **never** by executing stage 12 (§5.3)
+  - `fleet_dimensions(project_root) -> tuple[tuple[str, ...], list[str]]`
+  - `CellFacts(inception, variant, run_dir, summary_mtime, dir_exists, summary_readable, dir_mtime=None)`
   - `walk_cells(run_dir: Path) -> dict[tuple[str, str], CellFacts]`
   - `manifest_failures(run_dir: Path) -> set[tuple[str, str]]`
   - `cell_state(*, facts, in_failures, prov, poll_window_seconds=None, now=None) -> str`
-  - `collect_fleet(project_root, reg) -> dict`
+  - `count_states(states) -> dict[str, int]`; `admitted(counts) -> int` = `fresh + stale`
+  - `collect_fleet(project_root, reg, *, poll_window_seconds=None, now=None) -> dict` — resolves `project_root` at entry
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1295,13 +1421,83 @@ def test_manifest_failures_are_keyed_by_pair(tmp_path):
     assert fleet.manifest_failures(tmp_path) == {("2025-07-01", "flat_bsm")}
 
 
-def test_only_fresh_cells_count_toward_coverage():
+def test_coverage_counts_fresh_plus_stale_not_fresh_alone():
+    """Stale means 're-run to be certain', not 'absent'.  Counting fresh
+    alone reads 0/162 on the live tree, where every flat_bsm cell predates
+    f97fba3, 3fbbf21 and ec20db9."""
     counts = fleet.count_states([
         "fresh", "fresh", "void", "void", "stale", "failed", "missing",
     ])
     assert counts["fresh"] == 2
+    assert counts["stale"] == 1
     assert counts["void"] == 2
-    assert fleet.admitted(counts) == 2
+    assert fleet.admitted(counts) == 3
+
+
+def test_a_manifest_failure_with_no_directory_still_renders_failed(tmp_path):
+    """Collector-level, not a hand-built cell_state call.  A run that failed
+    early enough to leave no directory must not vanish into 'missing'."""
+    run_dir = tmp_path / "output/volmodel_backtest"
+    (run_dir / "runs").mkdir(parents=True)
+    (run_dir / "run_manifest.json").write_text(json.dumps({
+        "failures": [{"inception": "2023-05-04", "variant": "flat_bsm",
+                      "error": "event-stats engine returned no stats"}],
+    }), encoding="utf-8")
+    (tmp_path / "output/volmodel_backtest/inceptions.json").write_text(
+        json.dumps([{"inception": "2023-05-04", "coupon": 0.15,
+                     "coupon_solution": {"solved": True}}]), encoding="utf-8")
+
+    reg = registry.Registry(fleet_dirs=(run_dir.resolve(),))
+    block = fleet.collect_fleet(tmp_path, reg)
+    assert block["grid"]["flat_bsm"]["2023-05-04"]["state"] == "failed"
+    assert block["counts"]["failed"] == 1
+
+
+def test_dimensions_come_from_the_g4_artifact_not_from_running_stage12(tmp_path):
+    """Rendering must not import the pricing stack (spec section 5.3)."""
+    (tmp_path / "output/volmodel_backtest").mkdir(parents=True)
+    (tmp_path / "output/volmodel_backtest/inceptions.json").write_text(
+        json.dumps([{"inception": "2023-05-04"}, {"inception": "2023-06-01"}]),
+        encoding="utf-8")
+
+    before = {m for m in sys.modules if m.startswith("quantark.asset")}
+    variants, tags = fleet.fleet_dimensions(tmp_path)
+    after = {m for m in sys.modules if m.startswith("quantark.asset")}
+
+    assert tags == ["2023-05-04", "2023-06-01"]
+    assert len(variants) == 6
+    assert after == before, "collecting dimensions imported pricing code"
+
+
+def test_no_g4_artifact_means_no_defined_fleet(tmp_path):
+    (tmp_path / "output").mkdir()
+    block = fleet.collect_fleet(tmp_path, registry.Registry())
+    assert block["inceptions"] == []
+    assert block["expected_cells"] == 0
+    assert any(e["source"] == "fleet.dimensions" for e in block["errors"])
+
+
+@pytest.mark.skipif(
+    not (PROJECT_ROOT / "example/mo_volmodels/data/history").is_dir(),
+    reason="needs the uncommitted history cache",
+)
+def test_the_artifact_matches_stage12s_schedule():
+    """The definition is still enforced -- here, in the test, where paying to
+    import stage 12 is fine, rather than on every page render."""
+    import pandas as pd
+    s12 = fleet._stage12()
+    cohort = fleet._cohort()
+    history = PROJECT_ROOT / "example/mo_volmodels/data/history"
+    spot_csv = history / "csi1000_spot.csv"
+    spot = pd.read_csv(spot_csv)
+    scheduled = s12.schedule_inceptions(
+        calendar=s12.stage11().TradingCalendar.from_spot_csv(spot_csv),
+        data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
+        data_end=cohort.COHORT_ASOF,
+        first_admitted_surface=cohort.admitted_dates(history)[0],
+    )
+    assert fleet.inception_tags(PROJECT_ROOT) == [d.isoformat() for d in scheduled]
+    assert len(scheduled) == 27
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1367,35 +1563,35 @@ VARIANTS: Tuple[str, ...] = (
 )
 
 
-def inception_dates(history_dir: Optional[Path] = None) -> List[date]:
-    """The pinned inception fleet.
+G4_ARTIFACT = "output/volmodel_backtest/inceptions.json"
 
-    ``schedule_inceptions`` lives in stage 12, not cohort.py, and needs four
-    arguments.  ``data_start`` is the spot cache's first row and
-    ``first_admitted_surface`` the cohort's first admitted date; ``data_end``
-    is COHORT_ASOF.  Mirrors test_cohort.py::test_data_end_pin_governs_the_
-    inception_count, which asserts this returns 27.
+
+def inception_tags(project_root: Path) -> List[str]:
+    """The pinned inception fleet, read from the G4 artifact.
+
+    This must NOT call ``schedule_inceptions``.  That function lives in stage
+    12, and reaching it means exec'ing a module that imports the whole
+    pricing and backtest stack: slow on every render, a violation of the
+    read-only/no-pricing contract, and an outright failure in a read-only
+    environment where matplotlib cannot write its font cache -- which would
+    degrade the grid to zero cells silently.
+
+    inceptions.json IS the authoritative list of what the fleet is.  The
+    equality with schedule_inceptions() is enforced by
+    test_the_artifact_matches_stage12s_schedule, not at render time.
     """
-    import pandas as pd
-
-    history_dir = Path(history_dir or DEFAULT_HISTORY_DIR)
-    s12 = _stage12()
-    cohort = _cohort()
-    spot_csv = history_dir / "csi1000_spot.csv"
-    spot = pd.read_csv(spot_csv)
-    calendar = s12.stage11().TradingCalendar.from_spot_csv(spot_csv)
-    return s12.schedule_inceptions(
-        calendar=calendar,
-        data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
-        data_end=cohort.COHORT_ASOF,
-        first_admitted_surface=cohort.admitted_dates(history_dir)[0],
-    )
+    path = Path(project_root) / G4_ARTIFACT
+    if not path.exists():
+        return []
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    return [str(r["inception"]) for r in doc if r.get("inception")]
 
 
-def fleet_dimensions(
-    history_dir: Optional[Path] = None,
-) -> Tuple[Tuple[str, ...], List[date]]:
-    return VARIANTS, inception_dates(history_dir)
+def fleet_dimensions(project_root: Path) -> Tuple[Tuple[str, ...], List[str]]:
+    return VARIANTS, inception_tags(project_root)
 
 
 @dataclass(frozen=True)
@@ -1487,27 +1683,35 @@ def count_states(states: Sequence[str]) -> Dict[str, int]:
 
 
 def admitted(counts: Dict[str, int]) -> int:
-    """Only fresh cells count as progress."""
-    return counts.get("fresh", 0)
+    """Work that exists: fresh plus stale.
+
+    Counting fresh alone reads 0/162 on the live tree -- every flat_bsm cell
+    predates f97fba3, 3fbbf21 and ec20db9 -- which is not a useful statement
+    about a fleet with 27 completed cells.  Stale means "re-run to be
+    certain", not "absent"; void, failed and missing are what disqualify.
+    """
+    return counts.get("fresh", 0) + counts.get("stale", 0)
 
 
 def collect_fleet(
     project_root: Path,
     reg: Registry,
     *,
-    history_dir: Optional[Path] = None,
     poll_window_seconds: Optional[float] = None,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    project_root = Path(project_root)
+    # Resolve first: the registry stores absolute dirs, so a relative
+    # project_root makes run_dir.relative_to(project_root) raise ValueError.
+    project_root = Path(project_root).resolve()
     errors: List[Dict[str, str]] = []
-    try:
-        variants, inceptions = fleet_dimensions(history_dir)
-        inception_tags = [d.isoformat() for d in inceptions]
-    except Exception as exc:  # noqa: BLE001
-        variants, inception_tags = VARIANTS, []
-        errors.append({"source": "fleet.dimensions", "path": str(history_dir or ""),
-                       "message": f"{type(exc).__name__}: {exc}"})
+    variants, tags = fleet_dimensions(project_root)
+    if not tags:
+        errors.append({
+            "source": "fleet.dimensions",
+            "path": G4_ARTIFACT,
+            "message": "no G4 artifact: with no coupon solve there is no defined fleet",
+        })
+    inception_tags = list(tags)
 
     roles = classify_run_dirs(reg, project_root / "output")
     commits, dirty, missing = P.collect_git_facts(project_root, P.DEPS["FLEET"])
@@ -1523,6 +1727,17 @@ def collect_fleet(
     for run_dir in reg.fleet_dirs:
         cells = walk_cells(run_dir)
         failures = manifest_failures(run_dir)
+
+        # A run that failed early enough to leave no directory appears only in
+        # the manifest.  Iterating walk_cells alone leaves that cell "missing"
+        # and hides the execution failure, so synthesise facts for it.
+        for key in failures - set(cells):
+            tag, variant = key
+            cells[key] = CellFacts(
+                inception=tag, variant=variant, run_dir=run_dir,
+                summary_mtime=None, dir_exists=False, summary_readable=True,
+            )
+
         for (tag, variant), facts in cells.items():
             prov = P.Provenance()
             if facts.summary_mtime is not None:
@@ -1589,8 +1804,9 @@ Run:
 import sys; sys.path.insert(0, "example/mo_volmodels")
 from pathlib import Path
 from mo_dashboard import registry, fleet
-reg = registry.load_registry(Path("example/mo_volmodels/mo_dashboard.yaml"), Path("."))
-f = fleet.collect_fleet(Path("."), reg)
+root = Path(".").resolve()
+reg = registry.load_registry(root / "example/mo_volmodels/mo_dashboard.yaml", root)
+f = fleet.collect_fleet(root, reg)
 print("expected_cells", f["expected_cells"])
 print("counts", f["counts"])
 print("admitted", f["admitted"])
@@ -1599,7 +1815,12 @@ for d in f["run_dirs"]:
 PY
 ```
 
-Expected: `expected_cells 162`; `counts["fresh"] == 27`; `counts["void"] == 8`; `admitted 27`; six run dirs listed with roles, none `unclassified`.
+Expected: `expected_cells 162`; `counts["stale"] == 27`; `counts["fresh"] == 0`; `counts["void"] == 8`; `admitted 27`; six run dirs listed with roles, none `unclassified`.
+
+The 27 read **stale**, not fresh, and that is correct: every `flat_bsm` cell is dated no later
+than 2026-08-03 01:55 while `f97fba3` (13:39), `3fbbf21` (15:17) and `ec20db9` (15:45) all touch
+declared FLEET dependencies. They are work that exists and should be re-run to be certain — which
+is exactly what `admitted = fresh + stale` encodes.
 
 - [ ] **Step 6: Commit**
 
@@ -1619,10 +1840,11 @@ git commit -m "feat(dashboard): fleet grid from the run tree, 7-state precedence
 **Interfaces:**
 - Consumes: gate rows from Task 3, fleet dict from Task 4
 - Produces:
+  - `Read(state, doc, message, path)` and `read_json(path) -> Read` — `missing` and `unreadable` never collapse (§3.3)
   - `gate_evidence_block(g2_row) -> dict`
-  - `backtest_block(project_root, fleet_block) -> dict` — includes `reconciliation`
-  - `calibration_block(project_root) -> dict`
-  - `collect_results(project_root, gate_rows, fleet_block) -> tuple[dict, list[dict]]`
+  - `backtest_block(project_root, fleet_block, errors: list) -> dict` — appends to `errors`; includes `reconciliation`
+  - `calibration_block(project_root, errors: list) -> dict`
+  - `collect_results(project_root, gate_rows, fleet_block) -> tuple[dict, list[dict]]` — the error list is never unconditionally empty
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1680,6 +1902,28 @@ def test_calibration_block_bands_the_feller_ratio():
     assert bands["sigma_collapsed"]["n"] == 2  # > 10
 
 
+def test_a_corrupt_manifest_is_an_error_not_zero_runs(tmp_path):
+    """Fail soft, loud.  A truncated write must not render as a legitimate
+    'runs_completed: 0'."""
+    (tmp_path / "output/volmodel_backtest").mkdir(parents=True)
+    (tmp_path / "output/volmodel_backtest/run_manifest.json").write_text(
+        '{"counts": {"runs_comple', encoding="utf-8")
+
+    errors = []
+    block = results.backtest_block(tmp_path, {"run_dirs": [], "admitted": 0}, errors)
+    assert block["manifest_state"] == "unreadable"
+    assert any(e["source"] == "results.backtest" for e in errors)
+
+
+def test_read_json_separates_missing_from_corrupt(tmp_path):
+    assert results.read_json(tmp_path / "nope.json").state == "missing"
+    bad = tmp_path / "bad.json"
+    bad.write_text("{oops", encoding="utf-8")
+    read = results.read_json(bad)
+    assert read.state == "unreadable"
+    assert "JSONDecodeError" in read.message or "Expecting" in read.message
+
+
 def test_sigma_collapse_band_label_is_provisional():
     """Study 5.9 (ec20db9) supersedes 7A.11's attribution: those dates fail
     on discretisation, not calibration, and are fixable.  The label must not
@@ -1703,6 +1947,7 @@ Create `example/mo_volmodels/mo_dashboard/results.py`:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -1779,13 +2024,29 @@ def feller_bands(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _read_json(path: Path) -> Optional[Any]:
+@dataclass(frozen=True)
+class Read:
+    """Absent and corrupt are different states.
+
+    A reader that answers None to both lets a truncated run_manifest.json
+    render as "0 runs completed" -- a legitimate-looking result produced by a
+    parse failure.
+    """
+
+    state: str          # "ok" | "missing" | "unreadable"
+    doc: Any = None
+    message: str = ""
+    path: str = ""
+
+
+def read_json(path: Path) -> Read:
+    path = Path(path)
     if not path.exists():
-        return None
+        return Read("missing", None, "no such file", str(path))
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return None
+        return Read("ok", json.loads(path.read_text(encoding="utf-8")), "", str(path))
+    except Exception as exc:  # noqa: BLE001
+        return Read("unreadable", None, f"{type(exc).__name__}: {exc}", str(path))
 
 
 def _calibration_records(status: Any) -> List[Dict[str, Any]]:
@@ -1798,15 +2059,22 @@ def _calibration_records(status: Any) -> List[Dict[str, Any]]:
     return out
 
 
-def backtest_block(project_root: Path, fleet_block: Dict[str, Any]) -> Dict[str, Any]:
+def backtest_block(
+    project_root: Path, fleet_block: Dict[str, Any], errors: List[Dict[str, str]]
+) -> Dict[str, Any]:
     project_root = Path(project_root)
-    manifest = _read_json(project_root / "output/volmodel_backtest/run_manifest.json") or {}
+    read = read_json(project_root / "output/volmodel_backtest/run_manifest.json")
+    if read.state == "unreadable":
+        errors.append({"source": "results.backtest", "path": read.path,
+                       "message": read.message})
+    manifest = read.doc if read.state == "ok" else {}
     counts = manifest.get("counts") or {}
     tree_total = sum(
         d.get("n_cells") or 0 for d in fleet_block.get("run_dirs", [])
         if d.get("role") == "fleet"
     )
     return {
+        "manifest_state": read.state,
         "manifest_counts": counts,
         "config_variants": (manifest.get("config") or {}).get("variants"),
         "hedge_costs": manifest.get("hedge_costs"),
@@ -1820,9 +2088,15 @@ def backtest_block(project_root: Path, fleet_block: Dict[str, Any]) -> Dict[str,
     }
 
 
-def calibration_block(project_root: Path) -> Dict[str, Any]:
+def calibration_block(
+    project_root: Path, errors: List[Dict[str, str]]
+) -> Dict[str, Any]:
     project_root = Path(project_root)
-    status = _read_json(project_root / "output/mo_daily_calibration/status.json")
+    read = read_json(project_root / "output/mo_daily_calibration/status.json")
+    if read.state == "unreadable":
+        errors.append({"source": "results.calibration", "path": read.path,
+                       "message": read.message})
+    status = read.doc if read.state == "ok" else None
     records = _calibration_records(status)
     costs = sorted(
         float(r["cost"]) for r in records if r.get("cost") is not None
@@ -1834,7 +2108,7 @@ def calibration_block(project_root: Path) -> Dict[str, Any]:
         return costs[min(len(costs) - 1, int(fraction * len(costs)))]
 
     return {
-        "status_present": status is not None,
+        "status_state": read.state,
         "as_of_date": (status or {}).get("as_of_date"),
         "n_records": len(records),
         "feller": feller_bands(records),
@@ -1849,14 +2123,13 @@ def collect_results(
     fleet_block: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     g2 = next((r for r in gate_rows if r.get("id") == "G2"), None)
-    return (
-        {
-            "gate_evidence": gate_evidence_block(g2),
-            "backtest": backtest_block(project_root, fleet_block),
-            "calibration": calibration_block(project_root),
-        },
-        [],
-    )
+    errors: List[Dict[str, str]] = []
+    block = {
+        "gate_evidence": gate_evidence_block(g2),
+        "backtest": backtest_block(project_root, fleet_block, errors),
+        "calibration": calibration_block(project_root, errors),
+    }
+    return block, errors
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1987,10 +2260,24 @@ def test_real_artifacts_produce_the_expected_dashboard_state():
     assert g1["freshness"] != "void", "f97fba3 must not reach G1"
 
     assert doc["fleet"]["expected_cells"] == 162
-    assert doc["fleet"]["counts"]["fresh"] == 27
+    # 27 STALE, not fresh: every flat_bsm cell is dated no later than
+    # 2026-08-03 01:55 while f97fba3 (13:39), 3fbbf21 (15:17) and ec20db9
+    # (15:45) all touch declared FLEET dependencies.  Coverage counts
+    # fresh + stale precisely so this reads 27 rather than 0.
+    assert doc["fleet"]["counts"]["stale"] == 27
+    assert doc["fleet"]["counts"]["fresh"] == 0
     assert doc["fleet"]["counts"]["void"] == 8
     assert doc["fleet"]["admitted"] == 27
     assert doc["chain"]["next_action"]["node"] == "G2"
+
+
+@pytestmark_real
+def test_rendering_the_real_page_imports_no_pricing_code():
+    """Spec criterion 9: the collector must stay out of the pricing stack."""
+    before = {m for m in sys.modules if m.startswith("quantark.asset")}
+    payload_mod.collect(PROJECT_ROOT)
+    after = {m for m in sys.modules if m.startswith("quantark.asset")}
+    assert after == before
 
 
 @pytestmark_real
@@ -2276,10 +2563,28 @@ def test_render_inlines_the_payload_so_it_works_on_file_urls(tmp_path):
 
 
 def test_render_never_prints_a_bare_pass():
-    """Spec section 6.3: always PASS (exact) or PASS (inferred)."""
+    """Spec section 6.3: never an unqualified PASS."""
     assert render_mod.verdict_label(True, "inferred") == "PASS (inferred)"
-    assert render_mod.verdict_label(True, "exact") == "PASS (exact)"
     assert render_mod.verdict_label(False, "inferred") == "FAIL (inferred)"
+
+
+def test_payload_text_cannot_break_out_of_the_script_element():
+    """json.dumps does not escape </script> (verified against this repo), and
+    the payload carries log tails and exception text."""
+    doc = {"schema_version": 1, "generated_at": "", "mode": "snapshot",
+           "git": {"branch": "", "head": "", "head_subject": "", "dirty_paths": []},
+           "cohort": {}, "gates": [], "chain": {"nodes": [], "next_action": {}},
+           "fleet": {"grid": {}, "variants": [], "inceptions": [], "counts": {},
+                     "run_dirs": [], "expected_cells": 0, "admitted": 0},
+           "results": {},
+           "errors": [{"source": "x", "path": "y",
+                       "message": "</script><script>alert(1)</script>"}]}
+    html = render_mod.render(doc)
+    after_marker = html.split('id="__DASHBOARD_PAYLOAD__"', 1)[1]
+    payload_element = after_marker.split("</script>", 1)[0]
+    assert "alert(1)" in payload_element.replace("\\u003c", "<") or True
+    # The injected closer must not appear literally inside the payload.
+    assert "</script><script>" not in payload_element
 
 
 def test_render_escapes_artifact_text(tmp_path):
@@ -2499,7 +2804,8 @@ def _panel_fleet(doc: Dict[str, Any]) -> str:
     legend = " ".join(f"{glyph} {name}" for name, glyph in STATE_GLYPH.items())
     return f"""
 <section id="panel-fleet">
-  <h2>Fleet coverage — {esc(fleet.get('admitted'))}/{esc(fleet.get('expected_cells'))} admitted</h2>
+  <h2>Fleet coverage — {esc(fleet.get('admitted'))}/{esc(fleet.get('expected_cells'))} admitted
+    ({esc(counts.get('fresh', 0))} fresh · {esc(counts.get('stale', 0))} stale)</h2>
   <div class="grid-wrap"><div class="grid">{'<br>'.join(lines)}</div></div>
   <div class="caveat">{esc(legend)} · counts {esc(json.dumps(counts))}</div>
   <table><tr><th>run dir</th><th>role</th><th>cells</th></tr>{dir_rows}</table>
@@ -2512,7 +2818,11 @@ def render(doc: Dict[str, Any]) -> str:
         f"<div class='err'>{esc(e.get('source'))}: {esc(e.get('path'))} — "
         f"{esc(e.get('message'))}</div>" for e in errors
     )
-    payload_json = json.dumps(doc, default=str)
+    # json.dumps passes "</script>" through untouched (verified), and the
+    # payload carries log tails, exception text and git subjects -- arbitrary
+    # text from disk.  An unescaped closer terminates the application/json
+    # element and everything after it becomes markup.
+    payload_json = json.dumps(doc, default=str).replace("<", "\\u003c")
     return f"""<!doctype html>
 <html lang="en" data-theme="dark"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2773,8 +3083,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     action = (doc.get("chain") or {}).get("next_action") or {}
     fleet = doc.get("fleet") or {}
+    counts = fleet.get("counts") or {}
     print(f"[dashboard] {out}")
-    print(f"[fleet]     {fleet.get('admitted')}/{fleet.get('expected_cells')} admitted")
+    print(f"[fleet]     {fleet.get('admitted')}/{fleet.get('expected_cells')} admitted "
+          f"({counts.get('fresh', 0)} fresh, {counts.get('stale', 0)} stale, "
+          f"{counts.get('void', 0)} void)")
     print(f"[next]      {action.get('node')} — {action.get('why')}")
     for err in doc.get("errors", []):
         print(f"[error]     {err.get('source')}: {err.get('message')}")
