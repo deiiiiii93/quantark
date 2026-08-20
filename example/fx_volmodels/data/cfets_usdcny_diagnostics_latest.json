@@ -1,0 +1,1895 @@
+{
+  "schema_version": 1,
+  "universe": "core",
+  "requested_tags": [
+    "20260430",
+    "20260515",
+    "20260615",
+    "20260630",
+    "20260715",
+    "20260720"
+  ],
+  "strict_comparable_node_gate": {
+    "expected_node_count": 30,
+    "expected_node_keys": [
+      [
+        "1M",
+        "10P"
+      ],
+      [
+        "1M",
+        "25P"
+      ],
+      [
+        "1M",
+        "ATM"
+      ],
+      [
+        "1M",
+        "25C"
+      ],
+      [
+        "1M",
+        "10C"
+      ],
+      [
+        "2M",
+        "10P"
+      ],
+      [
+        "2M",
+        "25P"
+      ],
+      [
+        "2M",
+        "ATM"
+      ],
+      [
+        "2M",
+        "25C"
+      ],
+      [
+        "2M",
+        "10C"
+      ],
+      [
+        "3M",
+        "10P"
+      ],
+      [
+        "3M",
+        "25P"
+      ],
+      [
+        "3M",
+        "ATM"
+      ],
+      [
+        "3M",
+        "25C"
+      ],
+      [
+        "3M",
+        "10C"
+      ],
+      [
+        "6M",
+        "10P"
+      ],
+      [
+        "6M",
+        "25P"
+      ],
+      [
+        "6M",
+        "ATM"
+      ],
+      [
+        "6M",
+        "25C"
+      ],
+      [
+        "6M",
+        "10C"
+      ],
+      [
+        "9M",
+        "10P"
+      ],
+      [
+        "9M",
+        "25P"
+      ],
+      [
+        "9M",
+        "ATM"
+      ],
+      [
+        "9M",
+        "25C"
+      ],
+      [
+        "9M",
+        "10C"
+      ],
+      [
+        "1Y",
+        "10P"
+      ],
+      [
+        "1Y",
+        "25P"
+      ],
+      [
+        "1Y",
+        "ATM"
+      ],
+      [
+        "1Y",
+        "25C"
+      ],
+      [
+        "1Y",
+        "10C"
+      ]
+    ],
+    "required_config_signature": {
+      "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+      "normalization": "forward=1, domestic_rate=foreign_rate=0",
+      "method": "lewis",
+      "weight_mode": "equal",
+      "starts": 5,
+      "max_nfev": 500,
+      "bounds": [
+        [
+          1e-07,
+          0.01,
+          1e-07,
+          0.0005,
+          -0.99
+        ],
+        [
+          0.02,
+          20.0,
+          0.02,
+          1.0,
+          0.99
+        ]
+      ],
+      "feller_modes": [
+        "free",
+        "hard_feller"
+      ]
+    }
+  },
+  "included": [
+    {
+      "tag": "20260430",
+      "trade_date": "2026-04-30",
+      "quote_time": "16:00",
+      "node_keys": [
+        [
+          "1M",
+          "10P"
+        ],
+        [
+          "1M",
+          "25P"
+        ],
+        [
+          "1M",
+          "ATM"
+        ],
+        [
+          "1M",
+          "25C"
+        ],
+        [
+          "1M",
+          "10C"
+        ],
+        [
+          "2M",
+          "10P"
+        ],
+        [
+          "2M",
+          "25P"
+        ],
+        [
+          "2M",
+          "ATM"
+        ],
+        [
+          "2M",
+          "25C"
+        ],
+        [
+          "2M",
+          "10C"
+        ],
+        [
+          "3M",
+          "10P"
+        ],
+        [
+          "3M",
+          "25P"
+        ],
+        [
+          "3M",
+          "ATM"
+        ],
+        [
+          "3M",
+          "25C"
+        ],
+        [
+          "3M",
+          "10C"
+        ],
+        [
+          "6M",
+          "10P"
+        ],
+        [
+          "6M",
+          "25P"
+        ],
+        [
+          "6M",
+          "ATM"
+        ],
+        [
+          "6M",
+          "25C"
+        ],
+        [
+          "6M",
+          "10C"
+        ],
+        [
+          "9M",
+          "10P"
+        ],
+        [
+          "9M",
+          "25P"
+        ],
+        [
+          "9M",
+          "ATM"
+        ],
+        [
+          "9M",
+          "25C"
+        ],
+        [
+          "9M",
+          "10C"
+        ],
+        [
+          "1Y",
+          "10P"
+        ],
+        [
+          "1Y",
+          "25P"
+        ],
+        [
+          "1Y",
+          "ATM"
+        ],
+        [
+          "1Y",
+          "25C"
+        ],
+        [
+          "1Y",
+          "10C"
+        ]
+      ],
+      "config_signature": {
+        "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+        "normalization": "forward=1, domestic_rate=foreign_rate=0",
+        "method": "lewis",
+        "weight_mode": "equal",
+        "starts": 5,
+        "max_nfev": 500,
+        "bounds": [
+          [
+            1e-07,
+            0.01,
+            1e-07,
+            0.0005,
+            -0.99
+          ],
+          [
+            0.02,
+            20.0,
+            0.02,
+            1.0,
+            0.99
+          ]
+        ],
+        "feller_modes": [
+          "free",
+          "hard_feller"
+        ]
+      },
+      "modes": {
+        "free": {
+          "params": {
+            "v0": 0.0005842516931962752,
+            "kappa": 1.8498968965648295,
+            "theta": 0.002068818447750762,
+            "sigma": 0.11007246434253183,
+            "rho": 0.00976526682166276
+          },
+          "rmse_vol_points": 0.0412051127893992,
+          "mae_vol_points": 0.0307646202972265,
+          "max_abs_vol_points": 0.09406400019088546,
+          "inside_nonzero_public_band_pct": 92.85714285714286,
+          "feller_ratio": 0.6317460282167666,
+          "feller_margin": -0.0044617457543375365,
+          "optimizer": "least_squares",
+          "nfev": 22,
+          "jacobian_condition": 29.834232029354947,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 5,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.0412051127893992,
+            "parameter_ranges": {
+              "v0": [
+                0.0005842481752030115,
+                0.0005842528724592691
+              ],
+              "kappa": [
+                1.8498656141791903,
+                1.8499875678239799
+              ],
+              "theta": [
+                0.00206877691595726,
+                0.0020688329247374885
+              ],
+              "sigma": [
+                0.11007193387353756,
+                0.11007405724238835
+              ],
+              "rho": [
+                0.009764944739690798,
+                0.009765341312097626
+              ]
+            }
+          }
+        },
+        "hard_feller": {
+          "params": {
+            "v0": 0.0006109126619636333,
+            "kappa": 1.00211994677758,
+            "theta": 0.0027569023715580962,
+            "sigma": 0.07433359792361506,
+            "rho": 0.013586936798812756
+          },
+          "rmse_vol_points": 0.06619200832720534,
+          "mae_vol_points": 0.055003214223232684,
+          "max_abs_vol_points": 0.13727591103441794,
+          "inside_nonzero_public_band_pct": 85.71428571428571,
+          "feller_ratio": 1.0000017981129423,
+          "feller_margin": 9.935443898156926e-09,
+          "optimizer": "SLSQP",
+          "nfev": 136,
+          "jacobian_condition": 50.88403755691845,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 1,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.06619200832720534,
+            "parameter_ranges": {
+              "v0": [
+                0.0006109126619636333,
+                0.0006109126619636333
+              ],
+              "kappa": [
+                1.00211994677758,
+                1.00211994677758
+              ],
+              "theta": [
+                0.0027569023715580962,
+                0.0027569023715580962
+              ],
+              "sigma": [
+                0.07433359792361506,
+                0.07433359792361506
+              ],
+              "rho": [
+                0.013586936798812756,
+                0.013586936798812756
+              ]
+            }
+          }
+        }
+      },
+      "hard_feller_fit_penalty": {
+        "rmse_vol_points": 0.024986895537806142,
+        "relative_rmse_pct": 60.64027943695982,
+        "inside_nonzero_public_band_pct": -7.142857142857153,
+        "hard_constraint_active": true
+      }
+    },
+    {
+      "tag": "20260515",
+      "trade_date": "2026-05-15",
+      "quote_time": "16:00",
+      "node_keys": [
+        [
+          "1M",
+          "10P"
+        ],
+        [
+          "1M",
+          "25P"
+        ],
+        [
+          "1M",
+          "ATM"
+        ],
+        [
+          "1M",
+          "25C"
+        ],
+        [
+          "1M",
+          "10C"
+        ],
+        [
+          "2M",
+          "10P"
+        ],
+        [
+          "2M",
+          "25P"
+        ],
+        [
+          "2M",
+          "ATM"
+        ],
+        [
+          "2M",
+          "25C"
+        ],
+        [
+          "2M",
+          "10C"
+        ],
+        [
+          "3M",
+          "10P"
+        ],
+        [
+          "3M",
+          "25P"
+        ],
+        [
+          "3M",
+          "ATM"
+        ],
+        [
+          "3M",
+          "25C"
+        ],
+        [
+          "3M",
+          "10C"
+        ],
+        [
+          "6M",
+          "10P"
+        ],
+        [
+          "6M",
+          "25P"
+        ],
+        [
+          "6M",
+          "ATM"
+        ],
+        [
+          "6M",
+          "25C"
+        ],
+        [
+          "6M",
+          "10C"
+        ],
+        [
+          "9M",
+          "10P"
+        ],
+        [
+          "9M",
+          "25P"
+        ],
+        [
+          "9M",
+          "ATM"
+        ],
+        [
+          "9M",
+          "25C"
+        ],
+        [
+          "9M",
+          "10C"
+        ],
+        [
+          "1Y",
+          "10P"
+        ],
+        [
+          "1Y",
+          "25P"
+        ],
+        [
+          "1Y",
+          "ATM"
+        ],
+        [
+          "1Y",
+          "25C"
+        ],
+        [
+          "1Y",
+          "10C"
+        ]
+      ],
+      "config_signature": {
+        "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+        "normalization": "forward=1, domestic_rate=foreign_rate=0",
+        "method": "lewis",
+        "weight_mode": "equal",
+        "starts": 5,
+        "max_nfev": 500,
+        "bounds": [
+          [
+            1e-07,
+            0.01,
+            1e-07,
+            0.0005,
+            -0.99
+          ],
+          [
+            0.02,
+            20.0,
+            0.02,
+            1.0,
+            0.99
+          ]
+        ],
+        "feller_modes": [
+          "free",
+          "hard_feller"
+        ]
+      },
+      "modes": {
+        "free": {
+          "params": {
+            "v0": 0.0005670530833589522,
+            "kappa": 2.3861425809199903,
+            "theta": 0.0019214644260234254,
+            "sigma": 0.12110348546700696,
+            "rho": -0.05962287185866953
+          },
+          "rmse_vol_points": 0.04569716049124825,
+          "mae_vol_points": 0.03579688624886512,
+          "max_abs_vol_points": 0.11980590582475643,
+          "inside_nonzero_public_band_pct": 90.0,
+          "feller_ratio": 0.6252381212498064,
+          "feller_margin": -0.005496278022942598,
+          "optimizer": "least_squares",
+          "nfev": 15,
+          "jacobian_condition": 25.20956591019924,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 5,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.04569716049124825,
+            "parameter_ranges": {
+              "v0": [
+                0.000567049213671502,
+                0.0005670549980302091
+              ],
+              "kappa": [
+                2.386092680556951,
+                2.3862418412086104
+              ],
+              "theta": [
+                0.0019214364185266457,
+                0.0019214784913628464
+              ],
+              "sigma": [
+                0.12110256089206156,
+                0.12110522337551972
+              ],
+              "rho": [
+                -0.05962314769628855,
+                -0.05962287185866953
+              ]
+            }
+          }
+        },
+        "hard_feller": {
+          "params": {
+            "v0": 0.0006150085085446655,
+            "kappa": 1.0022655518874053,
+            "theta": 0.0028249524863329057,
+            "sigma": 0.0752508812340676,
+            "rho": -0.06851737738076687
+          },
+          "rmse_vol_points": 0.07501910461449635,
+          "mae_vol_points": 0.06171475298307695,
+          "max_abs_vol_points": 0.1683483825837967,
+          "inside_nonzero_public_band_pct": 80.0,
+          "feller_ratio": 1.0000017657734213,
+          "feller_margin": 9.999036546665119e-09,
+          "optimizer": "SLSQP",
+          "nfev": 130,
+          "jacobian_condition": 48.99783603259467,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 1,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.07501910461449635,
+            "parameter_ranges": {
+              "v0": [
+                0.0006150085085446655,
+                0.0006150085085446655
+              ],
+              "kappa": [
+                1.0022655518874053,
+                1.0022655518874053
+              ],
+              "theta": [
+                0.0028249524863329057,
+                0.0028249524863329057
+              ],
+              "sigma": [
+                0.0752508812340676,
+                0.0752508812340676
+              ],
+              "rho": [
+                -0.06851737738076687,
+                -0.06851737738076687
+              ]
+            }
+          }
+        }
+      },
+      "hard_feller_fit_penalty": {
+        "rmse_vol_points": 0.029321944123248095,
+        "relative_rmse_pct": 64.1657901892257,
+        "inside_nonzero_public_band_pct": -10.0,
+        "hard_constraint_active": true
+      }
+    },
+    {
+      "tag": "20260615",
+      "trade_date": "2026-06-15",
+      "quote_time": "16:00",
+      "node_keys": [
+        [
+          "1M",
+          "10P"
+        ],
+        [
+          "1M",
+          "25P"
+        ],
+        [
+          "1M",
+          "ATM"
+        ],
+        [
+          "1M",
+          "25C"
+        ],
+        [
+          "1M",
+          "10C"
+        ],
+        [
+          "2M",
+          "10P"
+        ],
+        [
+          "2M",
+          "25P"
+        ],
+        [
+          "2M",
+          "ATM"
+        ],
+        [
+          "2M",
+          "25C"
+        ],
+        [
+          "2M",
+          "10C"
+        ],
+        [
+          "3M",
+          "10P"
+        ],
+        [
+          "3M",
+          "25P"
+        ],
+        [
+          "3M",
+          "ATM"
+        ],
+        [
+          "3M",
+          "25C"
+        ],
+        [
+          "3M",
+          "10C"
+        ],
+        [
+          "6M",
+          "10P"
+        ],
+        [
+          "6M",
+          "25P"
+        ],
+        [
+          "6M",
+          "ATM"
+        ],
+        [
+          "6M",
+          "25C"
+        ],
+        [
+          "6M",
+          "10C"
+        ],
+        [
+          "9M",
+          "10P"
+        ],
+        [
+          "9M",
+          "25P"
+        ],
+        [
+          "9M",
+          "ATM"
+        ],
+        [
+          "9M",
+          "25C"
+        ],
+        [
+          "9M",
+          "10C"
+        ],
+        [
+          "1Y",
+          "10P"
+        ],
+        [
+          "1Y",
+          "25P"
+        ],
+        [
+          "1Y",
+          "ATM"
+        ],
+        [
+          "1Y",
+          "25C"
+        ],
+        [
+          "1Y",
+          "10C"
+        ]
+      ],
+      "config_signature": {
+        "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+        "normalization": "forward=1, domestic_rate=foreign_rate=0",
+        "method": "lewis",
+        "weight_mode": "equal",
+        "starts": 5,
+        "max_nfev": 500,
+        "bounds": [
+          [
+            1e-07,
+            0.01,
+            1e-07,
+            0.0005,
+            -0.99
+          ],
+          [
+            0.02,
+            20.0,
+            0.02,
+            1.0,
+            0.99
+          ]
+        ],
+        "feller_modes": [
+          "free",
+          "hard_feller"
+        ]
+      },
+      "modes": {
+        "free": {
+          "params": {
+            "v0": 0.00033847803105103107,
+            "kappa": 1.0035920410475476,
+            "theta": 0.0028486095615387116,
+            "sigma": 0.09835661740993978,
+            "rho": -0.04946530262927846
+          },
+          "rmse_vol_points": 0.04613387071485443,
+          "mae_vol_points": 0.034669549313196595,
+          "max_abs_vol_points": 0.13854591442985403,
+          "inside_nonzero_public_band_pct": 86.66666666666667,
+          "feller_ratio": 0.5910346776809345,
+          "feller_margin": -0.003956340420300879,
+          "optimizer": "least_squares",
+          "nfev": 14,
+          "jacobian_condition": 41.464793830713184,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 5,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.04613387071485443,
+            "parameter_ranges": {
+              "v0": [
+                0.00033847132286923836,
+                0.00033847803105103107
+              ],
+              "kappa": [
+                1.0035920410475476,
+                1.003767485077029
+              ],
+              "theta": [
+                0.00284828791522333,
+                0.0028486095615387116
+              ],
+              "sigma": [
+                0.09835661740993978,
+                0.09836011492766751
+              ],
+              "rho": [
+                -0.04946542556150261,
+                -0.049464757493925454
+              ]
+            }
+          }
+        },
+        "hard_feller": {
+          "params": {
+            "v0": 0.0003341514834190216,
+            "kappa": 0.9989617655520887,
+            "theta": 0.0028127922781974947,
+            "sigma": 0.07496488476965393,
+            "rho": -0.05659104881767248
+          },
+          "rmse_vol_points": 0.06867110835323384,
+          "mae_vol_points": 0.05535608328698406,
+          "max_abs_vol_points": 0.14628831830337113,
+          "inside_nonzero_public_band_pct": 86.66666666666667,
+          "feller_ratio": 1.000001767377513,
+          "feller_margin": 9.932191409600666e-09,
+          "optimizer": "SLSQP",
+          "nfev": 113,
+          "jacobian_condition": 41.584788678610785,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 1,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.06867110835323384,
+            "parameter_ranges": {
+              "v0": [
+                0.0003341514834190216,
+                0.0003341514834190216
+              ],
+              "kappa": [
+                0.9989617655520887,
+                0.9989617655520887
+              ],
+              "theta": [
+                0.0028127922781974947,
+                0.0028127922781974947
+              ],
+              "sigma": [
+                0.07496488476965393,
+                0.07496488476965393
+              ],
+              "rho": [
+                -0.05659104881767248,
+                -0.05659104881767248
+              ]
+            }
+          }
+        }
+      },
+      "hard_feller_fit_penalty": {
+        "rmse_vol_points": 0.022537237638379407,
+        "relative_rmse_pct": 48.851824677097255,
+        "inside_nonzero_public_band_pct": 0.0,
+        "hard_constraint_active": true
+      }
+    },
+    {
+      "tag": "20260630",
+      "trade_date": "2026-06-30",
+      "quote_time": "16:00",
+      "node_keys": [
+        [
+          "1M",
+          "10P"
+        ],
+        [
+          "1M",
+          "25P"
+        ],
+        [
+          "1M",
+          "ATM"
+        ],
+        [
+          "1M",
+          "25C"
+        ],
+        [
+          "1M",
+          "10C"
+        ],
+        [
+          "2M",
+          "10P"
+        ],
+        [
+          "2M",
+          "25P"
+        ],
+        [
+          "2M",
+          "ATM"
+        ],
+        [
+          "2M",
+          "25C"
+        ],
+        [
+          "2M",
+          "10C"
+        ],
+        [
+          "3M",
+          "10P"
+        ],
+        [
+          "3M",
+          "25P"
+        ],
+        [
+          "3M",
+          "ATM"
+        ],
+        [
+          "3M",
+          "25C"
+        ],
+        [
+          "3M",
+          "10C"
+        ],
+        [
+          "6M",
+          "10P"
+        ],
+        [
+          "6M",
+          "25P"
+        ],
+        [
+          "6M",
+          "ATM"
+        ],
+        [
+          "6M",
+          "25C"
+        ],
+        [
+          "6M",
+          "10C"
+        ],
+        [
+          "9M",
+          "10P"
+        ],
+        [
+          "9M",
+          "25P"
+        ],
+        [
+          "9M",
+          "ATM"
+        ],
+        [
+          "9M",
+          "25C"
+        ],
+        [
+          "9M",
+          "10C"
+        ],
+        [
+          "1Y",
+          "10P"
+        ],
+        [
+          "1Y",
+          "25P"
+        ],
+        [
+          "1Y",
+          "ATM"
+        ],
+        [
+          "1Y",
+          "25C"
+        ],
+        [
+          "1Y",
+          "10C"
+        ]
+      ],
+      "config_signature": {
+        "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+        "normalization": "forward=1, domestic_rate=foreign_rate=0",
+        "method": "lewis",
+        "weight_mode": "equal",
+        "starts": 5,
+        "max_nfev": 500,
+        "bounds": [
+          [
+            1e-07,
+            0.01,
+            1e-07,
+            0.0005,
+            -0.99
+          ],
+          [
+            0.02,
+            20.0,
+            0.02,
+            1.0,
+            0.99
+          ]
+        ],
+        "feller_modes": [
+          "free",
+          "hard_feller"
+        ]
+      },
+      "modes": {
+        "free": {
+          "params": {
+            "v0": 0.00046524659061428534,
+            "kappa": 0.4211769950015535,
+            "theta": 0.0045250558116993475,
+            "sigma": 0.08490511399075093,
+            "rho": -0.011023909045045
+          },
+          "rmse_vol_points": 0.042170714991538655,
+          "mae_vol_points": 0.03411008073345634,
+          "max_abs_vol_points": 0.10180726874600698,
+          "inside_nonzero_public_band_pct": 90.0,
+          "feller_ratio": 0.5287506066969108,
+          "feller_margin": -0.0033971795638107166,
+          "optimizer": "least_squares",
+          "nfev": 37,
+          "jacobian_condition": 101.88858594778428,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 5,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.042170714991538655,
+            "parameter_ranges": {
+              "v0": [
+                0.0004652444135229001,
+                0.0004652483900881825
+              ],
+              "kappa": [
+                0.4211161896327254,
+                0.4212514279142347
+              ],
+              "theta": [
+                0.004524427293660868,
+                0.004525568907140636
+              ],
+              "sigma": [
+                0.08490391355809392,
+                0.08490654528271083
+              ],
+              "rho": [
+                -0.011024792946272522,
+                -0.01102364761496799
+              ]
+            }
+          }
+        },
+        "hard_feller": {
+          "params": {
+            "v0": 0.00045716547390971517,
+            "kappa": 0.4988056680385681,
+            "theta": 0.003894133621373887,
+            "sigma": 0.06232833902564944,
+            "rho": -0.012352571465389477
+          },
+          "rmse_vol_points": 0.07479449316198558,
+          "mae_vol_points": 0.0642799551854247,
+          "max_abs_vol_points": 0.13923600618505963,
+          "inside_nonzero_public_band_pct": 95.0,
+          "feller_ratio": 1.0000025739109288,
+          "feller_margin": 9.999185405021316e-09,
+          "optimizer": "SLSQP",
+          "nfev": 142,
+          "jacobian_condition": 90.8601698828496,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 1,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.07479449316198558,
+            "parameter_ranges": {
+              "v0": [
+                0.00045716547390971517,
+                0.00045716547390971517
+              ],
+              "kappa": [
+                0.4988056680385681,
+                0.4988056680385681
+              ],
+              "theta": [
+                0.003894133621373887,
+                0.003894133621373887
+              ],
+              "sigma": [
+                0.06232833902564944,
+                0.06232833902564944
+              ],
+              "rho": [
+                -0.012352571465389477,
+                -0.012352571465389477
+              ]
+            }
+          }
+        }
+      },
+      "hard_feller_fit_penalty": {
+        "rmse_vol_points": 0.032623778170446927,
+        "relative_rmse_pct": 77.36121660966081,
+        "inside_nonzero_public_band_pct": 5.0,
+        "hard_constraint_active": true
+      }
+    },
+    {
+      "tag": "20260715",
+      "trade_date": "2026-07-15",
+      "quote_time": "16:00",
+      "node_keys": [
+        [
+          "1M",
+          "10P"
+        ],
+        [
+          "1M",
+          "25P"
+        ],
+        [
+          "1M",
+          "ATM"
+        ],
+        [
+          "1M",
+          "25C"
+        ],
+        [
+          "1M",
+          "10C"
+        ],
+        [
+          "2M",
+          "10P"
+        ],
+        [
+          "2M",
+          "25P"
+        ],
+        [
+          "2M",
+          "ATM"
+        ],
+        [
+          "2M",
+          "25C"
+        ],
+        [
+          "2M",
+          "10C"
+        ],
+        [
+          "3M",
+          "10P"
+        ],
+        [
+          "3M",
+          "25P"
+        ],
+        [
+          "3M",
+          "ATM"
+        ],
+        [
+          "3M",
+          "25C"
+        ],
+        [
+          "3M",
+          "10C"
+        ],
+        [
+          "6M",
+          "10P"
+        ],
+        [
+          "6M",
+          "25P"
+        ],
+        [
+          "6M",
+          "ATM"
+        ],
+        [
+          "6M",
+          "25C"
+        ],
+        [
+          "6M",
+          "10C"
+        ],
+        [
+          "9M",
+          "10P"
+        ],
+        [
+          "9M",
+          "25P"
+        ],
+        [
+          "9M",
+          "ATM"
+        ],
+        [
+          "9M",
+          "25C"
+        ],
+        [
+          "9M",
+          "10C"
+        ],
+        [
+          "1Y",
+          "10P"
+        ],
+        [
+          "1Y",
+          "25P"
+        ],
+        [
+          "1Y",
+          "ATM"
+        ],
+        [
+          "1Y",
+          "25C"
+        ],
+        [
+          "1Y",
+          "10C"
+        ]
+      ],
+      "config_signature": {
+        "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+        "normalization": "forward=1, domestic_rate=foreign_rate=0",
+        "method": "lewis",
+        "weight_mode": "equal",
+        "starts": 5,
+        "max_nfev": 500,
+        "bounds": [
+          [
+            1e-07,
+            0.01,
+            1e-07,
+            0.0005,
+            -0.99
+          ],
+          [
+            0.02,
+            20.0,
+            0.02,
+            1.0,
+            0.99
+          ]
+        ],
+        "feller_modes": [
+          "free",
+          "hard_feller"
+        ]
+      },
+      "modes": {
+        "free": {
+          "params": {
+            "v0": 0.00032463416622160643,
+            "kappa": 0.9102488907465227,
+            "theta": 0.00278350879742266,
+            "sigma": 0.09401020579331748,
+            "rho": 0.0584292887096363
+          },
+          "rmse_vol_points": 0.05119970105625085,
+          "mae_vol_points": 0.03931003940586535,
+          "max_abs_vol_points": 0.15366513241801655,
+          "inside_nonzero_public_band_pct": 100.0,
+          "feller_ratio": 0.5733670685359539,
+          "feller_margin": -0.003770547202827576,
+          "optimizer": "least_squares",
+          "nfev": 20,
+          "jacobian_condition": 45.02173540564447,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 5,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.05119970105625085,
+            "parameter_ranges": {
+              "v0": [
+                0.00032462901055219676,
+                0.00032463416622160643
+              ],
+              "kappa": [
+                0.9102488907465227,
+                0.9104004047156496
+              ],
+              "theta": [
+                0.0027831992570874755,
+                0.00278350879742266
+              ],
+              "sigma": [
+                0.09401020579331748,
+                0.09401302304656362
+              ],
+              "rho": [
+                0.05842897122655353,
+                0.0584298360995876
+              ]
+            }
+          }
+        },
+        "hard_feller": {
+          "params": {
+            "v0": 0.0003169402077886298,
+            "kappa": 0.9979064167186453,
+            "theta": 0.0025777147117852397,
+            "sigma": 0.07172604898316105,
+            "rho": 0.07001403171173563
+          },
+          "rmse_vol_points": 0.07344031378350364,
+          "mae_vol_points": 0.06288582363503739,
+          "max_abs_vol_points": 0.14451311008839077,
+          "inside_nonzero_public_band_pct": 100.0,
+          "feller_ratio": 1.0000019437731857,
+          "feller_margin": 9.9999862696043e-09,
+          "optimizer": "SLSQP",
+          "nfev": 125,
+          "jacobian_condition": 41.376064013385964,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 1,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.07344031378350364,
+            "parameter_ranges": {
+              "v0": [
+                0.0003169402077886298,
+                0.0003169402077886298
+              ],
+              "kappa": [
+                0.9979064167186453,
+                0.9979064167186453
+              ],
+              "theta": [
+                0.0025777147117852397,
+                0.0025777147117852397
+              ],
+              "sigma": [
+                0.07172604898316105,
+                0.07172604898316105
+              ],
+              "rho": [
+                0.07001403171173563,
+                0.07001403171173563
+              ]
+            }
+          }
+        }
+      },
+      "hard_feller_fit_penalty": {
+        "rmse_vol_points": 0.022240612727252793,
+        "relative_rmse_pct": 43.43895036187422,
+        "inside_nonzero_public_band_pct": 0.0,
+        "hard_constraint_active": true
+      }
+    },
+    {
+      "tag": "20260720",
+      "trade_date": "2026-07-20",
+      "quote_time": "16:00",
+      "node_keys": [
+        [
+          "1M",
+          "10P"
+        ],
+        [
+          "1M",
+          "25P"
+        ],
+        [
+          "1M",
+          "ATM"
+        ],
+        [
+          "1M",
+          "25C"
+        ],
+        [
+          "1M",
+          "10C"
+        ],
+        [
+          "2M",
+          "10P"
+        ],
+        [
+          "2M",
+          "25P"
+        ],
+        [
+          "2M",
+          "ATM"
+        ],
+        [
+          "2M",
+          "25C"
+        ],
+        [
+          "2M",
+          "10C"
+        ],
+        [
+          "3M",
+          "10P"
+        ],
+        [
+          "3M",
+          "25P"
+        ],
+        [
+          "3M",
+          "ATM"
+        ],
+        [
+          "3M",
+          "25C"
+        ],
+        [
+          "3M",
+          "10C"
+        ],
+        [
+          "6M",
+          "10P"
+        ],
+        [
+          "6M",
+          "25P"
+        ],
+        [
+          "6M",
+          "ATM"
+        ],
+        [
+          "6M",
+          "25C"
+        ],
+        [
+          "6M",
+          "10C"
+        ],
+        [
+          "9M",
+          "10P"
+        ],
+        [
+          "9M",
+          "25P"
+        ],
+        [
+          "9M",
+          "ATM"
+        ],
+        [
+          "9M",
+          "25C"
+        ],
+        [
+          "9M",
+          "10C"
+        ],
+        [
+          "1Y",
+          "10P"
+        ],
+        [
+          "1Y",
+          "25P"
+        ],
+        [
+          "1Y",
+          "ATM"
+        ],
+        [
+          "1Y",
+          "25C"
+        ],
+        [
+          "1Y",
+          "10C"
+        ]
+      ],
+      "config_signature": {
+        "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+        "normalization": "forward=1, domestic_rate=foreign_rate=0",
+        "method": "lewis",
+        "weight_mode": "equal",
+        "starts": 5,
+        "max_nfev": 500,
+        "bounds": [
+          [
+            1e-07,
+            0.01,
+            1e-07,
+            0.0005,
+            -0.99
+          ],
+          [
+            0.02,
+            20.0,
+            0.02,
+            1.0,
+            0.99
+          ]
+        ],
+        "feller_modes": [
+          "free",
+          "hard_feller"
+        ]
+      },
+      "modes": {
+        "free": {
+          "params": {
+            "v0": 0.0003146807564749678,
+            "kappa": 1.0962739579305774,
+            "theta": 0.0024784387833511976,
+            "sigma": 0.09709608882725673,
+            "rho": 0.05672120132861097
+          },
+          "rmse_vol_points": 0.05921417482362009,
+          "mae_vol_points": 0.04451715588599095,
+          "max_abs_vol_points": 0.20526204574824564,
+          "inside_nonzero_public_band_pct": 60.0,
+          "feller_ratio": 0.5763997942947495,
+          "feller_margin": -0.003993554676524405,
+          "optimizer": "least_squares",
+          "nfev": 24,
+          "jacobian_condition": 38.522869258329784,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 5,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.05921417482362009,
+            "parameter_ranges": {
+              "v0": [
+                0.00031467919271130964,
+                0.0003146832410575196
+              ],
+              "kappa": [
+                1.0962047345052448,
+                1.0963180336206533
+              ],
+              "theta": [
+                0.0024783762999023937,
+                0.0024785364908896483
+              ],
+              "sigma": [
+                0.09709486862128557,
+                0.09709680938021319
+              ],
+              "rho": [
+                0.05672099414296179,
+                0.0567219237204365
+              ]
+            }
+          }
+        },
+        "hard_feller": {
+          "params": {
+            "v0": 0.0003133482128836813,
+            "kappa": 0.9988194512414873,
+            "theta": 0.002588819598935053,
+            "sigma": 0.07191325847643917,
+            "rho": 0.06798409154673819
+          },
+          "rmse_vol_points": 0.07862226855475672,
+          "mae_vol_points": 0.06413835384460717,
+          "max_abs_vol_points": 0.1760866555102658,
+          "inside_nonzero_public_band_pct": 53.333333333333336,
+          "feller_ratio": 1.0000019332130932,
+          "feller_margin": 9.997643882903029e-09,
+          "optimizer": "SLSQP",
+          "nfev": 174,
+          "jacobian_condition": 41.869828096875494,
+          "jacobian_rank": 5,
+          "multistart": {
+            "valid": 5,
+            "near_best": 1,
+            "near_best_tolerance_vol_points": 0.001,
+            "best_rmse_vol_points": 0.07862226855475672,
+            "parameter_ranges": {
+              "v0": [
+                0.0003133482128836813,
+                0.0003133482128836813
+              ],
+              "kappa": [
+                0.9988194512414873,
+                0.9988194512414873
+              ],
+              "theta": [
+                0.002588819598935053,
+                0.002588819598935053
+              ],
+              "sigma": [
+                0.07191325847643917,
+                0.07191325847643917
+              ],
+              "rho": [
+                0.06798409154673819,
+                0.06798409154673819
+              ]
+            }
+          }
+        }
+      },
+      "hard_feller_fit_penalty": {
+        "rmse_vol_points": 0.01940809373113663,
+        "relative_rmse_pct": 32.77609421890464,
+        "inside_nonzero_public_band_pct": -6.666666666666664,
+        "hard_constraint_active": true
+      }
+    }
+  ],
+  "exclusions": [],
+  "stability": {
+    "free": {
+      "dates": 6,
+      "parameter_ranges": {
+        "v0": [
+          0.0003146807564749678,
+          0.0005842516931962752
+        ],
+        "kappa": [
+          0.4211769950015535,
+          2.3861425809199903
+        ],
+        "theta": [
+          0.0019214644260234254,
+          0.0045250558116993475
+        ],
+        "sigma": [
+          0.08490511399075093,
+          0.12110348546700696
+        ],
+        "rho": [
+          -0.05962287185866953,
+          0.0584292887096363
+        ]
+      },
+      "parameter_means": {
+        "v0": 0.00043239072015285304,
+        "kappa": 1.2778885603685035,
+        "theta": 0.002770982637964351,
+        "sigma": 0.10092399597180061,
+        "rho": 0.0008006122211528394
+      },
+      "parameter_std": {
+        "v0": 0.0001129615856978579,
+        "kappa": 0.64971231941403,
+        "theta": 0.000854717613412045,
+        "sigma": 0.011665873664664336,
+        "rho": 0.04627097830410911
+      },
+      "parameter_cv": {
+        "v0": 0.2612488668996532,
+        "kappa": 0.5084264305697149,
+        "theta": 0.308452893822513,
+        "sigma": 0.11559068338835812,
+        "rho": 57.794494115367534
+      },
+      "rho_signs": [
+        -1,
+        1
+      ],
+      "rho_sign_change": true,
+      "rmse_vol_points_range": [
+        0.0412051127893992,
+        0.05921417482362009
+      ],
+      "feller_ratio_range": [
+        0.5287506066969108,
+        0.6317460282167666
+      ],
+      "jacobian_condition_range": [
+        25.20956591019924,
+        101.88858594778428
+      ],
+      "minimum_jacobian_rank": 5
+    },
+    "hard_feller": {
+      "dates": 6,
+      "parameter_ranges": {
+        "v0": [
+          0.0003133482128836813,
+          0.0006150085085446655
+        ],
+        "kappa": [
+          0.4988056680385681,
+          1.0022655518874053
+        ],
+        "theta": [
+          0.0025777147117852397,
+          0.003894133621373887
+        ],
+        "sigma": [
+          0.06232833902564944,
+          0.0752508812340676
+        ],
+        "rho": [
+          -0.06851737738076687,
+          0.07001403171173563
+        ]
+      },
+      "parameter_means": {
+        "v0": 0.00044125442475155785,
+        "kappa": 0.9164798000359625,
+        "theta": 0.002909219178030446,
+        "sigma": 0.07175283506876438,
+        "rho": 0.0023540103989096264
+      },
+      "parameter_std": {
+        "v0": 0.0001307112748194669,
+        "kappa": 0.1867969027200663,
+        "theta": 0.0004513326552197986,
+        "sigma": 0.004435867183151367,
+        "rho": 0.05435212635065172
+      },
+      "parameter_cv": {
+        "v0": 0.2962265475140834,
+        "kappa": 0.20381998895418799,
+        "theta": 0.1551387597841125,
+        "sigma": 0.061821490104192404,
+        "rho": 23.0891615329429
+      },
+      "rho_signs": [
+        -1,
+        1
+      ],
+      "rho_sign_change": true,
+      "rmse_vol_points_range": [
+        0.06619200832720534,
+        0.07862226855475672
+      ],
+      "feller_ratio_range": [
+        1.0000017657734213,
+        1.0000025739109288
+      ],
+      "jacobian_condition_range": [
+        41.376064013385964,
+        90.8601698828496
+      ],
+      "minimum_jacobian_rank": 5
+    }
+  },
+  "verdicts": [
+    {
+      "name": "cross_date_comparability",
+      "status": "pass",
+      "evidence": {
+        "included_dates": 6,
+        "excluded_tags": 0
+      },
+      "interpretation": "Only exact tenor/pillar node sets and matching calibration configs are compared."
+    },
+    {
+      "name": "free_fit_feller",
+      "status": "warning",
+      "evidence": {
+        "feller_ratio_range": [
+          0.5287506066969108,
+          0.6317460282167666
+        ]
+      },
+      "interpretation": "Feller compliance is reported as a model-risk diagnostic, not a fit-quality proxy."
+    },
+    {
+      "name": "parameter_stability",
+      "status": "warning",
+      "evidence": {
+        "parameter_cv": {
+          "v0": 0.2612488668996532,
+          "kappa": 0.5084264305697149,
+          "theta": 0.308452893822513,
+          "sigma": 0.11559068338835812,
+          "rho": 57.794494115367534
+        },
+        "rho_sign_change": true,
+        "warning_threshold_cv": 0.5
+      },
+      "interpretation": "Large cross-date moves or a rho sign change weaken the case for stable parameters."
+    },
+    {
+      "name": "local_identification",
+      "status": "pass",
+      "evidence": {
+        "minimum_scaled_jacobian_rank": 5,
+        "scaled_condition_range": [
+          25.20956591019924,
+          101.88858594778428
+        ],
+        "warning_threshold_condition": 1000000.0
+      },
+      "interpretation": "The scaled finite-difference IV Jacobian tests local, not global, identification."
+    }
+  ],
+  "artifacts": {
+    "csv": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/cfets_usdcny_diagnostics_latest.csv",
+    "plot": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/plots/06_calibration_diagnostics_latest_core.png"
+  }
+}

@@ -1,0 +1,1543 @@
+{
+  "schema_version": 1,
+  "tag": "20260720",
+  "trade_date": "2026-07-20",
+  "quote_time": "16:00",
+  "currency_pair": "USD.CNY",
+  "source_class": "public_composite_not_executable_history",
+  "config": {
+    "calibration_target": "raw_CFETS_five_delta_mid_IVs",
+    "normalization": "forward=1, domestic_rate=foreign_rate=0",
+    "method": "lewis",
+    "weight_mode": "equal",
+    "starts": 5,
+    "max_nfev": 500,
+    "bounds": [
+      [
+        1e-07,
+        0.01,
+        1e-07,
+        0.0005,
+        -0.99
+      ],
+      [
+        0.02,
+        20.0,
+        0.02,
+        1.0,
+        0.99
+      ]
+    ],
+    "feller_modes": [
+      "free",
+      "hard_feller"
+    ]
+  },
+  "universes": {
+    "core": {
+      "node_count": 30,
+      "node_keys": [
+        [
+          "1M",
+          "10P"
+        ],
+        [
+          "1M",
+          "25P"
+        ],
+        [
+          "1M",
+          "ATM"
+        ],
+        [
+          "1M",
+          "25C"
+        ],
+        [
+          "1M",
+          "10C"
+        ],
+        [
+          "2M",
+          "10P"
+        ],
+        [
+          "2M",
+          "25P"
+        ],
+        [
+          "2M",
+          "ATM"
+        ],
+        [
+          "2M",
+          "25C"
+        ],
+        [
+          "2M",
+          "10C"
+        ],
+        [
+          "3M",
+          "10P"
+        ],
+        [
+          "3M",
+          "25P"
+        ],
+        [
+          "3M",
+          "ATM"
+        ],
+        [
+          "3M",
+          "25C"
+        ],
+        [
+          "3M",
+          "10C"
+        ],
+        [
+          "6M",
+          "10P"
+        ],
+        [
+          "6M",
+          "25P"
+        ],
+        [
+          "6M",
+          "ATM"
+        ],
+        [
+          "6M",
+          "25C"
+        ],
+        [
+          "6M",
+          "10C"
+        ],
+        [
+          "9M",
+          "10P"
+        ],
+        [
+          "9M",
+          "25P"
+        ],
+        [
+          "9M",
+          "ATM"
+        ],
+        [
+          "9M",
+          "25C"
+        ],
+        [
+          "9M",
+          "10C"
+        ],
+        [
+          "1Y",
+          "10P"
+        ],
+        [
+          "1Y",
+          "25P"
+        ],
+        [
+          "1Y",
+          "ATM"
+        ],
+        [
+          "1Y",
+          "25C"
+        ],
+        [
+          "1Y",
+          "10C"
+        ]
+      ],
+      "free": {
+        "best": {
+          "success": true,
+          "message": "`gtol` termination condition is satisfied.",
+          "optimizer": "least_squares",
+          "nfev": 24,
+          "params": {
+            "v0": 0.0003146807564749678,
+            "kappa": 1.0962739579305774,
+            "theta": 0.0024784387833511976,
+            "sigma": 0.09709608882725673,
+            "rho": 0.05672120132861097
+          },
+          "feller_ratio": 0.5763997942947495,
+          "feller_margin": -0.003993554676524405,
+          "rmse_iv": 0.0005921417482362009,
+          "rmse_vol_points": 0.05921417482362009,
+          "mae_vol_points": 0.04451715588599095,
+          "max_abs_vol_points": 0.20526204574824564,
+          "inside_public_band_pct": 30.0,
+          "inside_nonzero_public_band_pct": 60.0,
+          "zero_spread_nodes": 15,
+          "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+          "rmse_by_tenor_vol_points": {
+            "1M": 0.10318416775300754,
+            "2M": 0.06096263191198879,
+            "3M": 0.04159521528081897,
+            "6M": 0.029716830334776605,
+            "9M": 0.038810769175526214,
+            "1Y": 0.05054669417812085
+          },
+          "rows": [
+            {
+              "tenor": "1M",
+              "pillar": "10P",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 0.9931881379151511,
+              "bid_iv": 0.018369,
+              "market_iv": 0.018369,
+              "ask_iv": 0.018369,
+              "model_iv": 0.020421620457482456,
+              "error_iv": 0.0020526204574824562,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "25P",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 0.9963284759749207,
+              "bid_iv": 0.018869,
+              "market_iv": 0.018869,
+              "ask_iv": 0.018869,
+              "model_iv": 0.019437609365764795,
+              "error_iv": 0.0005686093657647946,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "ATM",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.019018999999999998,
+              "market_iv": 0.019018999999999998,
+              "ask_iv": 0.019018999999999998,
+              "model_iv": 0.0190510695396318,
+              "error_iv": 3.206953963180367e-05,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "25C",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 1.0041118030183545,
+              "bid_iv": 0.020869,
+              "market_iv": 0.020869,
+              "ask_iv": 0.020869,
+              "model_iv": 0.019996348228880845,
+              "error_iv": -0.0008726517711191532,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "10C",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 1.0080195249148975,
+              "bid_iv": 0.021369,
+              "market_iv": 0.021369,
+              "ask_iv": 0.021369,
+              "model_iv": 0.021525106742711127,
+              "error_iv": 0.00015610674271112832,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "10P",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 0.9885418521153272,
+              "bid_iv": 0.022324999999999998,
+              "market_iv": 0.022324999999999998,
+              "ask_iv": 0.022324999999999998,
+              "model_iv": 0.02286985882499943,
+              "error_iv": 0.0005448588249994321,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "25P",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 0.9943279071942173,
+              "bid_iv": 0.021099999999999997,
+              "market_iv": 0.021099999999999997,
+              "ask_iv": 0.021099999999999997,
+              "model_iv": 0.0211454087134763,
+              "error_iv": 4.54087134763026e-05,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "ATM",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.02105,
+              "market_iv": 0.02105,
+              "ask_iv": 0.02105,
+              "model_iv": 0.02052988477463745,
+              "error_iv": -0.0005201152253625496,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "25C",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 1.0062620807597638,
+              "bid_iv": 0.022850000000000002,
+              "market_iv": 0.022850000000000002,
+              "ask_iv": 0.022850000000000002,
+              "model_iv": 0.021817226101833745,
+              "error_iv": -0.0010327738981662574,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "10C",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 1.0128625128071918,
+              "bid_iv": 0.024575,
+              "market_iv": 0.024575,
+              "ask_iv": 0.024575,
+              "model_iv": 0.024103675926785487,
+              "error_iv": -0.000471324073214513,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "10P",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 0.9842082472168118,
+              "bid_iv": 0.024975,
+              "market_iv": 0.024975,
+              "ask_iv": 0.024975,
+              "model_iv": 0.02500648716461763,
+              "error_iv": 3.148716461762874e-05,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "25P",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 0.9924770396311086,
+              "bid_iv": 0.022763,
+              "market_iv": 0.022763,
+              "ask_iv": 0.022763,
+              "model_iv": 0.02282427479213556,
+              "error_iv": 6.127479213556206e-05,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "ATM",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.0225,
+              "market_iv": 0.0225,
+              "ask_iv": 0.0225,
+              "model_iv": 0.022099398318492197,
+              "error_iv": -0.000400601681507802,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "25C",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 1.0082264598710262,
+              "bid_iv": 0.024263,
+              "market_iv": 0.024263,
+              "ask_iv": 0.024263,
+              "model_iv": 0.023549072898406794,
+              "error_iv": -0.0007139271015932057,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "10C",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 1.0173561578626487,
+              "bid_iv": 0.026725,
+              "market_iv": 0.026725,
+              "ask_iv": 0.026725,
+              "model_iv": 0.026288925107549436,
+              "error_iv": -0.00043607489245056294,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "6M",
+              "pillar": "10P",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 0.9740968540362355,
+              "bid_iv": 0.02785,
+              "market_iv": 0.02935,
+              "ask_iv": 0.03085,
+              "model_iv": 0.029414213133082578,
+              "error_iv": 6.421313308257667e-05,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "6M",
+              "pillar": "25P",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 0.987775944560131,
+              "bid_iv": 0.02665,
+              "market_iv": 0.026699999999999998,
+              "ask_iv": 0.02675,
+              "model_iv": 0.026741178073594368,
+              "error_iv": 4.1178073594369535e-05,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "6M",
+              "pillar": "ATM",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.025249999999999998,
+              "market_iv": 0.0255,
+              "ask_iv": 0.025750000000000002,
+              "model_iv": 0.025897025006312392,
+              "error_iv": 0.0003970250063123938,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "6M",
+              "pillar": "25C",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 1.0129827958376083,
+              "bid_iv": 0.02665,
+              "market_iv": 0.027200000000000002,
+              "ask_iv": 0.02775,
+              "model_iv": 0.027508258447546653,
+              "error_iv": 0.00030825844754665127,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "6M",
+              "pillar": "10C",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 1.0279797103602637,
+              "bid_iv": 0.02785,
+              "market_iv": 0.030350000000000002,
+              "ask_iv": 0.032850000000000004,
+              "model_iv": 0.030777871378157618,
+              "error_iv": 0.00042787137815761614,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "9M",
+              "pillar": "10P",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 0.964620275283554,
+              "bid_iv": 0.031,
+              "market_iv": 0.033275,
+              "ask_iv": 0.03515,
+              "model_iv": 0.03266937194986968,
+              "error_iv": -0.0006056280501303204,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "9M",
+              "pillar": "25P",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 0.9834937515794964,
+              "bid_iv": 0.029825,
+              "market_iv": 0.030163000000000002,
+              "ask_iv": 0.0301,
+              "model_iv": 0.029662707498913577,
+              "error_iv": -0.0005002925010864252,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "9M",
+              "pillar": "ATM",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.027999999999999997,
+              "market_iv": 0.0285,
+              "ask_iv": 0.0286,
+              "model_iv": 0.028763965150887742,
+              "error_iv": 0.0002639651508877412,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "9M",
+              "pillar": "25C",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 1.0175524644577503,
+              "bid_iv": 0.029575,
+              "market_iv": 0.030288,
+              "ask_iv": 0.030600000000000002,
+              "model_iv": 0.03050192838339836,
+              "error_iv": 0.00021392838339836032,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "9M",
+              "pillar": "10C",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 1.0384114879897974,
+              "bid_iv": 0.031,
+              "market_iv": 0.034025,
+              "ask_iv": 0.03665,
+              "model_iv": 0.034168586302074394,
+              "error_iv": 0.00014358630207439438,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "10P",
+              "maturity": 1.0,
+              "strike_over_forward": 0.9565890175826571,
+              "bid_iv": 0.0338,
+              "market_iv": 0.035796,
+              "ask_iv": 0.03785,
+              "model_iv": 0.03507331108442978,
+              "error_iv": -0.0007226889155702229,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "25P",
+              "maturity": 1.0,
+              "strike_over_forward": 0.97997771643909,
+              "bid_iv": 0.032345,
+              "market_iv": 0.032345,
+              "ask_iv": 0.032395,
+              "model_iv": 0.0319379177348816,
+              "error_iv": -0.00040708226511839557,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "ATM",
+              "maturity": 1.0,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.0305,
+              "market_iv": 0.030600000000000002,
+              "ask_iv": 0.030750000000000003,
+              "model_iv": 0.031068178080166813,
+              "error_iv": 0.00046817808016681034,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "25C",
+              "maturity": 1.0,
+              "strike_over_forward": 1.0214994991106199,
+              "bid_iv": 0.032095,
+              "market_iv": 0.032345,
+              "ask_iv": 0.032645,
+              "model_iv": 0.03283353229051415,
+              "error_iv": 0.0004885322905141543,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "10C",
+              "maturity": 1.0,
+              "strike_over_forward": 1.0473987146854116,
+              "bid_iv": 0.0338,
+              "market_iv": 0.036296,
+              "ask_iv": 0.038849999999999996,
+              "model_iv": 0.0366588145439237,
+              "error_iv": 0.0003628145439237007,
+              "inside_public_band": true
+            }
+          ],
+          "initial": {
+            "v0": 0.0008,
+            "kappa": 10.0,
+            "theta": 0.0008,
+            "sigma": 0.3,
+            "rho": 0.5
+          }
+        },
+        "multistart": {
+          "valid": 5,
+          "near_best": 5,
+          "near_best_tolerance_vol_points": 0.001,
+          "best_rmse_vol_points": 0.05921417482362009,
+          "parameter_ranges": {
+            "v0": [
+              0.00031467919271130964,
+              0.0003146832410575196
+            ],
+            "kappa": [
+              1.0962047345052448,
+              1.0963180336206533
+            ],
+            "theta": [
+              0.0024783762999023937,
+              0.0024785364908896483
+            ],
+            "sigma": [
+              0.09709486862128557,
+              0.09709680938021319
+            ],
+            "rho": [
+              0.05672099414296179,
+              0.0567219237204365
+            ]
+          }
+        },
+        "fits": [
+          {
+            "success": true,
+            "message": "`gtol` termination condition is satisfied.",
+            "optimizer": "least_squares",
+            "nfev": 24,
+            "params": {
+              "v0": 0.0003146807564749678,
+              "kappa": 1.0962739579305774,
+              "theta": 0.0024784387833511976,
+              "sigma": 0.09709608882725673,
+              "rho": 0.05672120132861097
+            },
+            "feller_ratio": 0.5763997942947495,
+            "feller_margin": -0.003993554676524405,
+            "rmse_iv": 0.0005921417482362009,
+            "rmse_vol_points": 0.05921417482362009,
+            "mae_vol_points": 0.04451715588599095,
+            "max_abs_vol_points": 0.20526204574824564,
+            "inside_public_band_pct": 30.0,
+            "inside_nonzero_public_band_pct": 60.0,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.10318416775300754,
+              "2M": 0.06096263191198879,
+              "3M": 0.04159521528081897,
+              "6M": 0.029716830334776605,
+              "9M": 0.038810769175526214,
+              "1Y": 0.05054669417812085
+            },
+            "initial": {
+              "v0": 0.0008,
+              "kappa": 10.0,
+              "theta": 0.0008,
+              "sigma": 0.3,
+              "rho": 0.5
+            }
+          },
+          {
+            "success": true,
+            "message": "`gtol` termination condition is satisfied.",
+            "optimizer": "least_squares",
+            "nfev": 22,
+            "params": {
+              "v0": 0.00031468164976555997,
+              "kappa": 1.0962486455586689,
+              "theta": 0.0024784742820014396,
+              "sigma": 0.09709555083401929,
+              "rho": 0.05672153544948237
+            },
+            "feller_ratio": 0.5764011285800944,
+            "feller_margin": -0.003993497842369478,
+            "rmse_iv": 0.0005921417482790057,
+            "rmse_vol_points": 0.059214174827900576,
+            "mae_vol_points": 0.04451709732612096,
+            "max_abs_vol_points": 0.20526223870283924,
+            "inside_public_band_pct": 30.0,
+            "inside_nonzero_public_band_pct": 60.0,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.10318419372468791,
+              "2M": 0.06096242128375743,
+              "3M": 0.04159555546271941,
+              "6M": 0.02971610956208615,
+              "9M": 0.038810968748642885,
+              "1Y": 0.05054688578870697
+            },
+            "initial": {
+              "v0": 0.001,
+              "kappa": 0.5,
+              "theta": 0.0005,
+              "sigma": 0.2,
+              "rho": 0.2
+            }
+          },
+          {
+            "success": true,
+            "message": "`gtol` termination condition is satisfied.",
+            "optimizer": "least_squares",
+            "nfev": 21,
+            "params": {
+              "v0": 0.0003146816892426089,
+              "kappa": 1.0962475002167724,
+              "theta": 0.0024784757893663283,
+              "sigma": 0.09709549800991044,
+              "rho": 0.05672099414296179
+            },
+            "feller_ratio": 0.5764015040964733,
+            "feller_margin": -0.003993489956911262,
+            "rmse_iv": 0.0005921417482896511,
+            "rmse_vol_points": 0.059214174828965106,
+            "mae_vol_points": 0.04451706829186835,
+            "max_abs_vol_points": 0.20526254044025208,
+            "inside_public_band_pct": 30.0,
+            "inside_nonzero_public_band_pct": 60.0,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.10318436075722798,
+              "2M": 0.060962620910280055,
+              "3M": 0.04159577077553527,
+              "6M": 0.029715889528713908,
+              "9M": 0.038810640182506635,
+              "1Y": 0.050546508511009745
+            },
+            "initial": {
+              "v0": 0.0004,
+              "kappa": 1.0,
+              "theta": 0.001,
+              "sigma": 0.05,
+              "rho": -0.2
+            }
+          },
+          {
+            "success": true,
+            "message": "`ftol` termination condition is satisfied.",
+            "optimizer": "least_squares",
+            "nfev": 14,
+            "params": {
+              "v0": 0.00031467919271130964,
+              "kappa": 1.0963180336206533,
+              "theta": 0.0024783762999023937,
+              "sigma": 0.09709680938021319,
+              "rho": 0.056721249418565774
+            },
+            "feller_ratio": 0.576399881363343,
+            "feller_margin": -0.0039936131284554095,
+            "rmse_iv": 0.0005921417484061086,
+            "rmse_vol_points": 0.05921417484061086,
+            "mae_vol_points": 0.04451728478560275,
+            "max_abs_vol_points": 0.20526115205601292,
+            "inside_public_band_pct": 30.0,
+            "inside_nonzero_public_band_pct": 60.0,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.10318384440650574,
+              "2M": 0.060962654476358014,
+              "3M": 0.04159437254074774,
+              "6M": 0.029718280125586714,
+              "9M": 0.038811001020317835,
+              "1Y": 0.05054699025794044
+            },
+            "initial": {
+              "v0": 0.0004,
+              "kappa": 3.0,
+              "theta": 0.001,
+              "sigma": 0.1,
+              "rho": -0.5
+            }
+          },
+          {
+            "success": true,
+            "message": "`gtol` termination condition is satisfied.",
+            "optimizer": "least_squares",
+            "nfev": 25,
+            "params": {
+              "v0": 0.0003146832410575196,
+              "kappa": 1.0962047345052448,
+              "theta": 0.0024785364908896483,
+              "sigma": 0.09709486862128557,
+              "rho": 0.0567219237204365
+            },
+            "feller_ratio": 0.5764006070870515,
+            "feller_margin": -0.003993446640670208,
+            "rmse_iv": 0.0005921417486149028,
+            "rmse_vol_points": 0.05921417486149028,
+            "mae_vol_points": 0.0445169852043962,
+            "max_abs_vol_points": 0.20526296124938231,
+            "inside_public_band_pct": 30.0,
+            "inside_nonzero_public_band_pct": 60.0,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.10318440928363756,
+              "2M": 0.06096222612878918,
+              "3M": 0.04159623153066441,
+              "6M": 0.029714792633850344,
+              "9M": 0.03881100061658652,
+              "1Y": 0.05054687473707936
+            },
+            "initial": {
+              "v0": 0.0003,
+              "kappa": 5.0,
+              "theta": 0.0012,
+              "sigma": 0.2,
+              "rho": -0.8
+            }
+          }
+        ],
+        "jacobian": {
+          "method": "finite_difference_of_Lewis_implied_vols",
+          "shape": [
+            30,
+            5
+          ],
+          "parameter_order": [
+            "v0",
+            "kappa",
+            "theta",
+            "sigma",
+            "rho"
+          ],
+          "steps": {
+            "v0": 3.146807564749678e-08,
+            "kappa": 0.00010962739579305774,
+            "theta": 2.4784387833511976e-07,
+            "sigma": 9.709608882725673e-06,
+            "rho": 5.672120132861097e-06
+          },
+          "difference_schemes": {
+            "v0": "central",
+            "kappa": "central",
+            "theta": "central",
+            "sigma": "central",
+            "rho": "central"
+          },
+          "parameter_scales": {
+            "v0": 0.0003146807564749678,
+            "kappa": 1.0962739579305774,
+            "theta": 0.0024784387833511976,
+            "sigma": 0.09709608882725673,
+            "rho": 0.1
+          },
+          "raw": {
+            "singular_values": [
+              84.13030338293889,
+              13.364242833402562,
+              0.11338915706523714,
+              0.03587286530119266,
+              0.0017523276868895103
+            ],
+            "condition_number": 48010.599850919076,
+            "numerical_rank": 5,
+            "rank_tolerance": 5.604203993066308e-13
+          },
+          "scaled": {
+            "singular_values": [
+              0.061400878802700065,
+              0.017285783020685355,
+              0.010959274866332655,
+              0.003588537769140558,
+              0.001593881244695276
+            ],
+            "condition_number": 38.522869258329784,
+            "numerical_rank": 5,
+            "rank_tolerance": 4.0901201627385796e-16
+          }
+        }
+      },
+      "hard_feller": {
+        "best": {
+          "success": true,
+          "message": "Optimization terminated successfully",
+          "optimizer": "SLSQP",
+          "nfev": 174,
+          "params": {
+            "v0": 0.0003133482128836813,
+            "kappa": 0.9988194512414873,
+            "theta": 0.002588819598935053,
+            "sigma": 0.07191325847643917,
+            "rho": 0.06798409154673819
+          },
+          "feller_ratio": 1.0000019332130932,
+          "feller_margin": 9.997643882903029e-09,
+          "rmse_iv": 0.0007862226855475672,
+          "rmse_vol_points": 0.07862226855475672,
+          "mae_vol_points": 0.06413835384460717,
+          "max_abs_vol_points": 0.1760866555102658,
+          "inside_public_band_pct": 26.666666666666668,
+          "inside_nonzero_public_band_pct": 53.333333333333336,
+          "zero_spread_nodes": 15,
+          "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+          "rmse_by_tenor_vol_points": {
+            "1M": 0.09504664852977952,
+            "2M": 0.0637758323139861,
+            "3M": 0.062230446182002436,
+            "6M": 0.06382579420907766,
+            "9M": 0.08302928992036193,
+            "1Y": 0.09564162832669917
+          },
+          "rows": [
+            {
+              "tenor": "1M",
+              "pillar": "10P",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 0.9931881379151511,
+              "bid_iv": 0.018369,
+              "market_iv": 0.018369,
+              "ask_iv": 0.018369,
+              "model_iv": 0.020129866555102658,
+              "error_iv": 0.001760866555102658,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "25P",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 0.9963284759749207,
+              "bid_iv": 0.018869,
+              "market_iv": 0.018869,
+              "ask_iv": 0.018869,
+              "model_iv": 0.019581484805112667,
+              "error_iv": 0.0007124848051126668,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "ATM",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.019018999999999998,
+              "market_iv": 0.019018999999999998,
+              "ask_iv": 0.019018999999999998,
+              "model_iv": 0.019448378032532302,
+              "error_iv": 0.00042937803253230433,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "25C",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 1.0041118030183545,
+              "bid_iv": 0.020869,
+              "market_iv": 0.020869,
+              "ask_iv": 0.020869,
+              "model_iv": 0.02006563061975942,
+              "error_iv": -0.0008033693802405803,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1M",
+              "pillar": "10C",
+              "maturity": 0.08493150684931507,
+              "strike_over_forward": 1.0080195249148975,
+              "bid_iv": 0.021369,
+              "market_iv": 0.021369,
+              "ask_iv": 0.021369,
+              "model_iv": 0.021088145553628333,
+              "error_iv": -0.00028085444637166584,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "10P",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 0.9885418521153272,
+              "bid_iv": 0.022324999999999998,
+              "market_iv": 0.022324999999999998,
+              "ask_iv": 0.022324999999999998,
+              "model_iv": 0.02237217483445563,
+              "error_iv": 4.7174834455633585e-05,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "25P",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 0.9943279071942173,
+              "bid_iv": 0.021099999999999997,
+              "market_iv": 0.021099999999999997,
+              "ask_iv": 0.021099999999999997,
+              "model_iv": 0.021318078909537165,
+              "error_iv": 0.00021807890953716783,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "ATM",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.02105,
+              "market_iv": 0.02105,
+              "ask_iv": 0.02105,
+              "model_iv": 0.021056612271735373,
+              "error_iv": 6.612271735373376e-06,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "25C",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 1.0062620807597638,
+              "bid_iv": 0.022850000000000002,
+              "market_iv": 0.022850000000000002,
+              "ask_iv": 0.022850000000000002,
+              "model_iv": 0.021923473164094164,
+              "error_iv": -0.000926526835905838,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "2M",
+              "pillar": "10C",
+              "maturity": 0.1643835616438356,
+              "strike_over_forward": 1.0128625128071918,
+              "bid_iv": 0.024575,
+              "market_iv": 0.024575,
+              "ask_iv": 0.024575,
+              "model_iv": 0.02351415184022933,
+              "error_iv": -0.0010608481597706686,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "10P",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 0.9842082472168118,
+              "bid_iv": 0.024975,
+              "market_iv": 0.024975,
+              "ask_iv": 0.024975,
+              "model_iv": 0.02440819785461439,
+              "error_iv": -0.0005668021453856115,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "25P",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 0.9924770396311086,
+              "bid_iv": 0.022763,
+              "market_iv": 0.022763,
+              "ask_iv": 0.022763,
+              "model_iv": 0.02302448593598803,
+              "error_iv": 0.0002614859359880324,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "ATM",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.0225,
+              "market_iv": 0.0225,
+              "ask_iv": 0.0225,
+              "model_iv": 0.02269592676073608,
+              "error_iv": 0.0001959267607360808,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "25C",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 1.0082264598710262,
+              "bid_iv": 0.024263,
+              "market_iv": 0.024263,
+              "ask_iv": 0.024263,
+              "model_iv": 0.023693096618539626,
+              "error_iv": -0.0005699033814603738,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "3M",
+              "pillar": "10C",
+              "maturity": 0.25205479452054796,
+              "strike_over_forward": 1.0173561578626487,
+              "bid_iv": 0.026725,
+              "market_iv": 0.026725,
+              "ask_iv": 0.026725,
+              "model_iv": 0.025637113291973938,
+              "error_iv": -0.001087886708026061,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "6M",
+              "pillar": "10P",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 0.9740968540362355,
+              "bid_iv": 0.02785,
+              "market_iv": 0.02935,
+              "ask_iv": 0.03085,
+              "model_iv": 0.02874780265022577,
+              "error_iv": -0.0006021973497742326,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "6M",
+              "pillar": "25P",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 0.987775944560131,
+              "bid_iv": 0.02665,
+              "market_iv": 0.026699999999999998,
+              "ask_iv": 0.02675,
+              "model_iv": 0.027005913553014505,
+              "error_iv": 0.0003059135530145071,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "6M",
+              "pillar": "ATM",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.025249999999999998,
+              "market_iv": 0.0255,
+              "ask_iv": 0.025750000000000002,
+              "model_iv": 0.02660676039574553,
+              "error_iv": 0.0011067603957455319,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "6M",
+              "pillar": "25C",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 1.0129827958376083,
+              "bid_iv": 0.02665,
+              "market_iv": 0.027200000000000002,
+              "ask_iv": 0.02775,
+              "model_iv": 0.027745338187951527,
+              "error_iv": 0.0005453381879515252,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "6M",
+              "pillar": "10C",
+              "maturity": 0.5041095890410959,
+              "strike_over_forward": 1.0279797103602637,
+              "bid_iv": 0.02785,
+              "market_iv": 0.030350000000000002,
+              "ask_iv": 0.032850000000000004,
+              "model_iv": 0.03010848614866299,
+              "error_iv": -0.00024151385133701353,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "9M",
+              "pillar": "10P",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 0.964620275283554,
+              "bid_iv": 0.031,
+              "market_iv": 0.033275,
+              "ask_iv": 0.03515,
+              "model_iv": 0.03196023659515385,
+              "error_iv": -0.0013147634048461462,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "9M",
+              "pillar": "25P",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 0.9834937515794964,
+              "bid_iv": 0.029825,
+              "market_iv": 0.030163000000000002,
+              "ask_iv": 0.0301,
+              "model_iv": 0.029984704386080814,
+              "error_iv": -0.00017829561391918824,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "9M",
+              "pillar": "ATM",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.027999999999999997,
+              "market_iv": 0.0285,
+              "ask_iv": 0.0286,
+              "model_iv": 0.02955734054742672,
+              "error_iv": 0.001057340547426719,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "9M",
+              "pillar": "25C",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 1.0175524644577503,
+              "bid_iv": 0.029575,
+              "market_iv": 0.030288,
+              "ask_iv": 0.030600000000000002,
+              "model_iv": 0.030799158714512463,
+              "error_iv": 0.0005111587145124642,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "9M",
+              "pillar": "10C",
+              "maturity": 0.7506849315068493,
+              "strike_over_forward": 1.0384114879897974,
+              "bid_iv": 0.031,
+              "market_iv": 0.034025,
+              "ask_iv": 0.03665,
+              "model_iv": 0.033470665181483575,
+              "error_iv": -0.0005543348185164249,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "10P",
+              "maturity": 1.0,
+              "strike_over_forward": 0.9565890175826571,
+              "bid_iv": 0.0338,
+              "market_iv": 0.035796,
+              "ask_iv": 0.03785,
+              "model_iv": 0.03439714306808026,
+              "error_iv": -0.0013988569319197397,
+              "inside_public_band": true
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "25P",
+              "maturity": 1.0,
+              "strike_over_forward": 0.97997771643909,
+              "bid_iv": 0.032345,
+              "market_iv": 0.032345,
+              "ask_iv": 0.032395,
+              "model_iv": 0.032341765521410326,
+              "error_iv": -3.234478589672629e-06,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "ATM",
+              "maturity": 1.0,
+              "strike_over_forward": 1.0,
+              "bid_iv": 0.0305,
+              "market_iv": 0.030600000000000002,
+              "ask_iv": 0.030750000000000003,
+              "model_iv": 0.0319363984333655,
+              "error_iv": 0.0013363984333654988,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "25C",
+              "maturity": 1.0,
+              "strike_over_forward": 1.0214994991106199,
+              "bid_iv": 0.032095,
+              "market_iv": 0.032345,
+              "ask_iv": 0.032645,
+              "model_iv": 0.033207617821263094,
+              "error_iv": 0.0008626178212630953,
+              "inside_public_band": false
+            },
+            {
+              "tenor": "1Y",
+              "pillar": "10C",
+              "maturity": 1.0,
+              "strike_over_forward": 1.0473987146854116,
+              "bid_iv": 0.0338,
+              "market_iv": 0.036296,
+              "ask_iv": 0.038849999999999996,
+              "model_iv": 0.036001417111160325,
+              "error_iv": -0.00029458288883967704,
+              "inside_public_band": true
+            }
+          ],
+          "initial": {
+            "v0": 0.0004,
+            "kappa": 1.0,
+            "theta": 0.001,
+            "sigma": 0.042485291572496,
+            "rho": -0.2
+          }
+        },
+        "multistart": {
+          "valid": 5,
+          "near_best": 1,
+          "near_best_tolerance_vol_points": 0.001,
+          "best_rmse_vol_points": 0.07862226855475672,
+          "parameter_ranges": {
+            "v0": [
+              0.0003133482128836813,
+              0.0003133482128836813
+            ],
+            "kappa": [
+              0.9988194512414873,
+              0.9988194512414873
+            ],
+            "theta": [
+              0.002588819598935053,
+              0.002588819598935053
+            ],
+            "sigma": [
+              0.07191325847643917,
+              0.07191325847643917
+            ],
+            "rho": [
+              0.06798409154673819,
+              0.06798409154673819
+            ]
+          }
+        },
+        "fits": [
+          {
+            "success": true,
+            "message": "Optimization terminated successfully",
+            "optimizer": "SLSQP",
+            "nfev": 174,
+            "params": {
+              "v0": 0.0003133482128836813,
+              "kappa": 0.9988194512414873,
+              "theta": 0.002588819598935053,
+              "sigma": 0.07191325847643917,
+              "rho": 0.06798409154673819
+            },
+            "feller_ratio": 1.0000019332130932,
+            "feller_margin": 9.997643882903029e-09,
+            "rmse_iv": 0.0007862226855475672,
+            "rmse_vol_points": 0.07862226855475672,
+            "mae_vol_points": 0.06413835384460717,
+            "max_abs_vol_points": 0.1760866555102658,
+            "inside_public_band_pct": 26.666666666666668,
+            "inside_nonzero_public_band_pct": 53.333333333333336,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.09504664852977952,
+              "2M": 0.0637758323139861,
+              "3M": 0.062230446182002436,
+              "6M": 0.06382579420907766,
+              "9M": 0.08302928992036193,
+              "1Y": 0.09564162832669917
+            },
+            "initial": {
+              "v0": 0.0004,
+              "kappa": 1.0,
+              "theta": 0.001,
+              "sigma": 0.042485291572496,
+              "rho": -0.2
+            }
+          },
+          {
+            "success": true,
+            "message": "Optimization terminated successfully",
+            "optimizer": "SLSQP",
+            "nfev": 136,
+            "params": {
+              "v0": 0.0003316441468301468,
+              "kappa": 0.5002888879635768,
+              "theta": 0.004256196617933582,
+              "sigma": 0.0652583002068403,
+              "rho": 0.06784163112199983
+            },
+            "feller_ratio": 1.0000023481630456,
+            "feller_margin": 9.9999945641846e-09,
+            "rmse_iv": 0.0008112820695635917,
+            "rmse_vol_points": 0.08112820695635917,
+            "mae_vol_points": 0.06539027642723447,
+            "max_abs_vol_points": 0.18967871195311908,
+            "inside_public_band_pct": 26.666666666666668,
+            "inside_nonzero_public_band_pct": 53.333333333333336,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.10373641431260089,
+              "2M": 0.06803262645551067,
+              "3M": 0.07422953206168956,
+              "6M": 0.05836589737353133,
+              "9M": 0.07926165052043789,
+              "1Y": 0.09435053374153965
+            },
+            "initial": {
+              "v0": 0.001,
+              "kappa": 0.5,
+              "theta": 0.0005,
+              "sigma": 0.021242645786248,
+              "rho": 0.2
+            }
+          },
+          {
+            "success": true,
+            "message": "Optimization terminated successfully",
+            "optimizer": "SLSQP",
+            "nfev": 168,
+            "params": {
+              "v0": 1.000000000000248e-07,
+              "kappa": 9.824023245356342,
+              "theta": 0.001091562241858099,
+              "sigma": 0.14644813305596116,
+              "rho": 0.08485361861003733
+            },
+            "feller_ratio": 1.0000004662625088,
+            "feller_margin": 9.999957986672747e-09,
+            "rmse_iv": 0.001797850999619136,
+            "rmse_vol_points": 0.1797850999619136,
+            "mae_vol_points": 0.14540614435950658,
+            "max_abs_vol_points": 0.4549374812789053,
+            "inside_public_band_pct": 16.666666666666664,
+            "inside_nonzero_public_band_pct": 33.33333333333333,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.1382244012556806,
+              "2M": 0.09067367575036495,
+              "3M": 0.17820792175822223,
+              "6M": 0.18453697908878255,
+              "9M": 0.15921165758543102,
+              "1Y": 0.27467813981753064
+            },
+            "initial": {
+              "v0": 0.0008,
+              "kappa": 10.0,
+              "theta": 0.0008,
+              "sigma": 0.1201665510863984,
+              "rho": 0.5
+            }
+          },
+          {
+            "success": true,
+            "message": "Optimization terminated successfully",
+            "optimizer": "SLSQP",
+            "nfev": 65,
+            "params": {
+              "v0": 0.00023516419460183633,
+              "kappa": 3.0002865834617793,
+              "theta": 0.0014600766410932018,
+              "sigma": 0.0005,
+              "rho": -0.47813338398231786
+            },
+            "feller_ratio": 35045.18685678299,
+            "feller_margin": 0.008761046714195746,
+            "rmse_iv": 0.0018040247470480035,
+            "rmse_vol_points": 0.18040247470480036,
+            "mae_vol_points": 0.15261392802613966,
+            "max_abs_vol_points": 0.3588238698739359,
+            "inside_public_band_pct": 13.333333333333334,
+            "inside_nonzero_public_band_pct": 26.666666666666668,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.1225768436888108,
+              "2M": 0.13233065801087485,
+              "3M": 0.15753920884464345,
+              "6M": 0.20253863246955237,
+              "9M": 0.20758774609506173,
+              "1Y": 0.23194969136546423
+            },
+            "initial": {
+              "v0": 0.0004,
+              "kappa": 3.0,
+              "theta": 0.001,
+              "sigma": 0.07358668357794092,
+              "rho": -0.5
+            }
+          },
+          {
+            "success": true,
+            "message": "Optimization terminated successfully",
+            "optimizer": "SLSQP",
+            "nfev": 71,
+            "params": {
+              "v0": 0.0001602135483852653,
+              "kappa": 5.000708279416693,
+              "theta": 0.001247222663012283,
+              "sigma": 0.000500000000000001,
+              "rho": -0.7724276440864877
+            },
+            "feller_ratio": 49895.97357761308,
+            "feller_margin": 0.012473743394403318,
+            "rmse_iv": 0.001951183923155878,
+            "rmse_vol_points": 0.19511839231558778,
+            "mae_vol_points": 0.15635415881916304,
+            "max_abs_vol_points": 0.42251286310160463,
+            "inside_public_band_pct": 13.333333333333334,
+            "inside_nonzero_public_band_pct": 26.666666666666668,
+            "zero_spread_nodes": 15,
+            "median_nonzero_half_spread_vol_points": 0.05125000000000008,
+            "rmse_by_tenor_vol_points": {
+              "1M": 0.13895995631874902,
+              "2M": 0.13215549807562382,
+              "3M": 0.17690039841903737,
+              "6M": 0.22327421286556445,
+              "9M": 0.20852830205285816,
+              "1Y": 0.2588880050110342
+            },
+            "initial": {
+              "v0": 0.0003,
+              "kappa": 5.0,
+              "theta": 0.0012,
+              "sigma": 0.10406728592598155,
+              "rho": -0.8
+            }
+          }
+        ],
+        "jacobian": {
+          "method": "finite_difference_of_Lewis_implied_vols",
+          "shape": [
+            30,
+            5
+          ],
+          "parameter_order": [
+            "v0",
+            "kappa",
+            "theta",
+            "sigma",
+            "rho"
+          ],
+          "steps": {
+            "v0": 3.133482128836813e-08,
+            "kappa": 9.988194512414873e-05,
+            "theta": 2.588819598935053e-07,
+            "sigma": 7.191325847643917e-06,
+            "rho": 6.79840915467382e-06
+          },
+          "difference_schemes": {
+            "v0": "central",
+            "kappa": "central",
+            "theta": "central",
+            "sigma": "central",
+            "rho": "central"
+          },
+          "parameter_scales": {
+            "v0": 0.0003133482128836813,
+            "kappa": 0.9988194512414873,
+            "theta": 0.002588819598935053,
+            "sigma": 0.07191325847643917,
+            "rho": 0.1
+          },
+          "raw": {
+            "singular_values": [
+              88.3591987635507,
+              12.710960323192158,
+              0.12247053398472944,
+              0.03117425226823537,
+              0.0017897368079186377
+            ],
+            "condition_number": 49369.939966931466,
+            "numerical_rank": 5,
+            "rank_tolerance": 5.885905014283479e-13
+          },
+          "scaled": {
+            "singular_values": [
+              0.06176499803576502,
+              0.01780535765880877,
+              0.008847556398451265,
+              0.0031154027594714724,
+              0.0014751672228712634
+            ],
+            "condition_number": 41.869828096875494,
+            "numerical_rank": 5,
+            "rank_tolerance": 4.114375376114033e-16
+          }
+        }
+      },
+      "hard_feller_fit_penalty": {
+        "rmse_vol_points": 0.01940809373113663,
+        "relative_rmse_pct": 32.77609421890464,
+        "inside_nonzero_public_band_pct": -6.666666666666664,
+        "hard_constraint_active": true
+      }
+    }
+  },
+  "limitations": [
+    "Public bid/mid/ask are CFETS composite outputs, not node-level executable quotes.",
+    "A displayed zero spread must not be interpreted as an executable zero-spread market.",
+    "Official turnover evidence supports the <=1Y core much more strongly than 18M-3Y."
+  ],
+  "input_snapshot": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/cfets_usdcny_snapshot_20260720.json",
+  "artifacts": {
+    "residual_csv": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/cfets_usdcny_heston_residuals_20260720.csv",
+    "plots": {
+      "core": "/Users/fuxinyao/quant-ark/example/fx_volmodels/data/plots/04_heston_fit_20260720_core.png"
+    }
+  }
+}

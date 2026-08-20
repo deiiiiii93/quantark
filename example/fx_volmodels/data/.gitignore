@@ -1,0 +1,8 @@
+# Keep reviewable real-data (`latest`) artifacts and source snapshots visible.
+# Ignore only regenerable sample-tag outputs and editor/partial-write debris.
+*_sample.json
+*_sample.csv
+*_sample.html
+plots/*_sample.png
+*.tmp
+*.part
