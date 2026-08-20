@@ -274,6 +274,43 @@ def test_manifest_schema_and_atomic_write(tmp_path: Path) -> None:
     assert not list(manifest.parent.glob("*.tmp"))
 
 
+def test_manifest_rewrite_preserves_downstream_policy_metadata(tmp_path: Path) -> None:
+    manifest = tmp_path / "surface_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "study_admission": {
+                    "vol_model_backtest": {
+                        "min_expiries": 3,
+                        "excluded_dates": ["20240930", "20250408"],
+                    }
+                },
+                "records": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    records = {
+        "20260730": {
+            "date": "20260730",
+            "status": "ok",
+            "n_expiries": 5,
+        }
+    }
+    stage03h.save_manifest(
+        manifest,
+        records,
+        window={"start": "20260730", "end": "20260730"},
+    )
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["study_admission"]["vol_model_backtest"] == {
+        "min_expiries": 3,
+        "excluded_dates": ["20240930", "20250408"],
+    }
+    assert payload["records"] == [records["20260730"]]
+
+
 def test_cli_end_to_end_ok_and_determinism(one_date_csv_dir: Path, tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     manifest = tmp_path / "manifest.json"

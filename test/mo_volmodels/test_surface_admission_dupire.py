@@ -64,7 +64,10 @@ def test_history_loader_admits_only_the_usable_surfaces():
     from quantark.param.vol.surface_history import VolSurfaceHistory
 
     history = VolSurfaceHistory(HISTORY_DIR)
-    assert len(history.admitted_dates) == 760
+    expected = sum(
+        record.get("status") == "ok" for record in _manifest()["records"]
+    )
+    assert len(history.admitted_dates) == expected
 
 
 def test_carry_forward_covers_an_excluded_date():

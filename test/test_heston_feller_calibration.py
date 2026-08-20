@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import quantark.volmodels.heston.calibration as calibration_module
@@ -161,4 +162,76 @@ def test_hard_feller_constraint_violation_fails_closed(monkeypatch):
             carry,
             true,
             enforce_feller=True,
+        )
+
+
+def test_temporal_regularization_cost_is_structural_only(monkeypatch):
+    fitted = HestonParams(
+        v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5
+    )
+    reference = HestonParams(
+        # Deliberately different: v0 must not enter the temporal cost.
+        v0=0.20, kappa=1.5, theta=0.05, sigma=0.4, rho=-0.4
+    )
+    spot, rate, carry, options = _options(fitted)
+
+    monkeypatch.setattr(
+        calibration_module,
+        "minimize",
+        lambda *args, **kwargs: SimpleNamespace(
+            x=[fitted.v0, fitted.kappa, fitted.theta, fitted.sigma, fitted.rho],
+            success=True,
+            message="synthetic optimum",
+            nfev=1,
+        ),
+    )
+    weight = 0.2
+    result = calibrate_heston(
+        spot,
+        options,
+        rate,
+        carry,
+        fitted,
+        target="price",
+        regularize_feller=0.0,
+        enforce_feller=True,
+        temporal_reference=reference,
+        temporal_regularization=weight,
+    )
+
+    lower = np.array((1e-8, 1e-6, 1e-6, 1e-6, -0.999))
+    upper = np.array((5.0, 50.0, 5.0, 5.0, 0.999))
+    fitted_x = np.array(
+        [fitted.v0, fitted.kappa, fitted.theta, fitted.sigma, fitted.rho]
+    )
+    reference_x = np.array(
+        [
+            reference.v0,
+            reference.kappa,
+            reference.theta,
+            reference.sigma,
+            reference.rho,
+        ]
+    )
+    normalized = (fitted_x[1:] - reference_x[1:]) / (
+        upper[1:] - lower[1:]
+    )
+    expected = 0.5 * weight * np.dot(normalized, normalized)
+    assert result.temporal_penalty_cost == pytest.approx(expected)
+    assert result.cost == pytest.approx(result.data_cost + expected)
+
+
+def test_temporal_regularization_requires_reference():
+    true = HestonParams(
+        v0=0.04, kappa=2.0, theta=0.04, sigma=0.3, rho=-0.5
+    )
+    spot, rate, carry, options = _options(true)
+    with pytest.raises(ValidationError, match="temporal_reference is required"):
+        calibrate_heston(
+            spot,
+            options,
+            rate,
+            carry,
+            true,
+            temporal_regularization=0.1,
         )
