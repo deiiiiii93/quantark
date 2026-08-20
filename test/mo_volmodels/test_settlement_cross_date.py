@@ -136,7 +136,19 @@ def _settlement_snapshot(
         "expiries": [],
     }
     forward = 100.0
-    strikes = [80.0 + 2.5 * index for index in range(17)]
+    # 100.0 is deliberately ABSENT from this grid. Stage 10 splits OTM puts from
+    # OTM calls with `strike < forward`, and that forward is OLS-REGRESSED from
+    # the quotes -- so a strike sitting exactly ON the forward changes side with
+    # the last ULP of the regression. That is what made
+    # test_expiry_without_both_liquid_otm_wings_is_explicitly_excluded pass on
+    # ARM64 (strike 100 -> call, put wing empty, excluded) and fail on x86_64
+    # (strike 100 -> put, put wing non-empty, not excluded). 105.0 stays on the
+    # grid because another test keys on it.
+    strikes = (
+        [80.0 + 2.5 * index for index in range(8)]      # 80 .. 97.5, OTM puts
+        + [101.0]                                        # clear of the forward
+        + [102.5 + 2.5 * index for index in range(8)]    # 102.5 .. 120, OTM calls
+    )
     for contract_month, expiry_date in expiries:
         expiry = __import__("datetime").date.fromisoformat(expiry_date)
         maturity = (expiry - valuation).days / 365.0
