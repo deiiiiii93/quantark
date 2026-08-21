@@ -24,3 +24,9 @@ output/modelvalidation/
 # out of the repository; see docs/modelvalidation/RELEASE_PROCEDURE.md section
 # 10. Tests that need them skip with a reason rather than passing vacuously.
 docs/modelvalidation/certificates/*/*/evidence/
+
+# Local home for artifacts kept out of the repository: raw certification
+# payloads, run outputs, anything expensive to reproduce but not source.
+# Root-anchored, so a package named "archive" elsewhere in the tree is
+# unaffected.
+/archive
