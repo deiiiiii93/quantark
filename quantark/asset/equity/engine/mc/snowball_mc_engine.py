@@ -310,14 +310,15 @@ class SnowballMCEngine(BaseEngine):
             self._payment_timings = None
             return
         records = product.resolve_ko_observations(pricing_env)
+        # A knock-out redemption pays at its record's settlement whatever the
+        # accrual convention — this is the pre-settlement-feature behavior
+        # (the profile's settlement_times were record-level, never gated on
+        # pay type) and the certified KO-settlement ruling.
         self._payment_timings = resolve_autocallable_payment_timings(
             product,
             pricing_env,
             records,
-            event_paid=(
-                product.accrual_config.coupon_pay_type
-                == CouponPayType.INSTANT
-            ),
+            event_paid=True,
         )
 
     @staticmethod

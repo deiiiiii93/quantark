@@ -123,6 +123,11 @@ class LegacyPriceAdapter:
     def _call_price(self, engine, request):
         if self.call_shape == "env_bound":
             return engine.price(request.product)
+        if request.lifecycle_state is None:
+            # Ask for the keyword only when a state is supplied: engine
+            # subclasses outside quantark.asset.equity.engine.* never get the
+            # lifecycle-keyword retrofit, and a None state must not break them.
+            return engine.price(request.product, request.pricing_env)
         return engine.price(
             request.product,
             request.pricing_env,

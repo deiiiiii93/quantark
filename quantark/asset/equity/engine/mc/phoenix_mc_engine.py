@@ -195,14 +195,16 @@ class PhoenixMCEngine(BaseEngine):
 
     def _prepare_payment_timings(self, product, pricing_env) -> None:
         records = product.resolve_ko_observations(pricing_env)
+        # The knock-out redemption ends the note, so it pays at ITS OWN
+        # settlement whatever the coupon convention — under EXPIRY the rolled
+        # coupons pay there too (the note's end), never at the contractual
+        # maturity. Coupon timing is handled by the instant/expiry
+        # accumulators in the payoff loop, not by these arrays.
         self._payment_timings = resolve_autocallable_payment_timings(
             product,
             pricing_env,
             records,
-            event_paid=(
-                product.coupon_config.coupon_pay_type
-                == CouponPayType.INSTANT
-            ),
+            event_paid=True,
         )
 
     def _rqmc_streams_per_step(self) -> int:
