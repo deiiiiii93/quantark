@@ -99,14 +99,16 @@ def test_pde_engine_event_stats_match_the_solver_directly(
 ):
     """Delegation must not transform or truncate the result.
 
-    Compares all 13 fields ``AutocallableEventStats`` carries, including the
-    five KI-breakdown fields (``ki_times``, ``ki_event_probability``,
+    Compares all 19 fields ``AutocallableEventStats`` carries: the five
+    KI-breakdown fields (``ki_times``, ``ki_event_probability``,
     ``ki_survival_probability``, ``ki_ever_probability``,
     ``ki_survive_knocked_in_probability``) that drive the per-date KI row
     structure the 2026-08-01 PDE event-stats re-baseline changed most (7 rows
-    -> 6 in the affected goldens). A facade that mangled or dropped only the
-    KI breakdown -- while leaving ``pv``/KO fields intact -- would slip past
-    a check limited to those; it will not slip past this one.
+    -> 6 in the affected goldens), plus the six payment-aware fields the
+    settlement-date feature added (determination vs payment, dated and timed,
+    with discounted and undiscounted expected cashflows). A facade that
+    mangled or dropped only one family -- while leaving ``pv``/KO fields
+    intact -- would slip past a check limited to those; not past this one.
     """
     facade = PDEEngine(params=coarse_pde_params).calculate_event_stats(
         snowball_product, snowball_env
@@ -131,7 +133,32 @@ def test_pde_engine_event_stats_match_the_solver_directly(
         "ki_survival_probability",
         "ki_ever_probability",
         "ki_survive_knocked_in_probability",
+        # Payment-aware fields (settlement-date feature): determination vs
+        # payment legs, plus per-leg expected cashflows.
+        "determination_times",
+        "determination_dates",
+        "payment_times",
+        "payment_dates",
+        "expected_discounted_cashflows",
+        "expected_undiscounted_cashflows",
     }, "AutocallableEventStats field set changed -- update this test's coverage"
+
+    def _match_optional_array(a, b):
+        if a is None or b is None:
+            assert a is None and b is None
+            return
+        assert list(a) == pytest.approx(list(b))
+
+    _match_optional_array(facade.determination_times, direct.determination_times)
+    _match_optional_array(facade.payment_times, direct.payment_times)
+    assert facade.determination_dates == direct.determination_dates
+    assert facade.payment_dates == direct.payment_dates
+    _match_optional_array(
+        facade.expected_discounted_cashflows, direct.expected_discounted_cashflows
+    )
+    _match_optional_array(
+        facade.expected_undiscounted_cashflows, direct.expected_undiscounted_cashflows
+    )
 
     assert facade.pv == pytest.approx(direct.pv)
     assert facade.ko_times == pytest.approx(direct.ko_times)

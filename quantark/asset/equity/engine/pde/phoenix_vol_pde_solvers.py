@@ -680,6 +680,21 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
     def _setup_coupon_schedule(self, product, env, ko_records) -> None:
         self._coupon_observation_indices.clear()
         num_obs = len(ko_records)
+        # Per-observation coupon settlement, cached from the records the solve
+        # already resolved (NaN when a record pays at its own observation, so
+        # the discount below stays exactly 1.0 on the default path).
+        self._coupon_settlement_times = np.array(
+            [
+                float(rec.settlement_time)
+                if (
+                    rec.settlement_time is not None
+                    and rec.settlement_time != rec.observation_time
+                )
+                else np.nan
+                for rec in ko_records
+            ],
+            dtype=float,
+        )
         if num_obs == 0:
             self._coupon_barriers = np.array([], dtype=float)
             self._coupon_amounts = np.array([], dtype=float)
@@ -736,10 +751,10 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
         if obs_idx < 0 or obs_idx >= self._coupon_barriers.shape[0]:
             return U
         current_time = max(T - float(tau), 0.0)
-        settlement_time = self._coupon_payment_time(
-            product,
-            env,
-            obs_idx,
+        settlement_time = (
+            self._terminal_payment_time(product, env)
+            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+            else self._coupon_record_settlement_time(obs_idx, current_time)
         )
         coupon_discount = self._df_between_times(env, current_time, settlement_time)
         coupon_value = float(self._coupon_amounts[obs_idx]) * coupon_discount
@@ -887,10 +902,10 @@ class _Heston2DPhoenixPDEBase(Heston2DBarrierCrossingMixin, PhoenixPDESolver):
             survive & miss: U
         """
         current_time = max(T - float(tau), 0.0)
-        settlement_time = self._coupon_payment_time(
-            product,
-            env,
-            obs_idx,
+        settlement_time = (
+            self._terminal_payment_time(product, env)
+            if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+            else self._coupon_record_settlement_time(obs_idx, current_time)
         )
         coupon_discount = self._df_between_times(env, current_time, settlement_time)
         coupon_amt = float(self._coupon_amounts[obs_idx])

@@ -517,6 +517,23 @@ class PhoenixPDESolver(SnowballPDESolver):
         """
         self._coupon_observation_indices.clear()
         ko_records = self._get_cached_ko_records(pricing_env, product)
+        # Per-observation coupon settlement, cached from the records the solve
+        # already resolved (NaN when a record pays at its own observation, so
+        # the coupon discount stays exactly 1.0 on the default path). Keyed by
+        # obs_idx — NOT the KO node map, which prunes unreachable knock-outs
+        # while their coupons still fire.
+        self._coupon_settlement_times = np.array(
+            [
+                float(rec.settlement_time)
+                if (
+                    rec.settlement_time is not None
+                    and rec.settlement_time != rec.observation_time
+                )
+                else np.nan
+                for rec in ko_records
+            ],
+            dtype=float,
+        )
         if not ko_records:
             return
 
@@ -900,6 +917,25 @@ class PhoenixPDESolver(SnowballPDESolver):
         for grid in grids:
             grid[mask, t_idx] = settled
 
+    def _coupon_record_settlement_time(
+        self, obs_idx: int, current_time: float
+    ) -> float:
+        """The cached record settlement for one coupon, or the node's own time.
+
+        NaN (or an unset cache, for direct unit-level calls on solver
+        internals) means the record pays at its observation — the grid node
+        and the record's observation time can differ by an ULP, so the
+        caller keeps its own time and the discount stays exactly 1.0.
+        """
+        times = getattr(self, "_coupon_settlement_times", None)
+        if (
+            times is not None
+            and 0 <= obs_idx < times.shape[0]
+            and np.isfinite(times[obs_idx])
+        ):
+            return float(times[obs_idx])
+        return current_time
+
     def _coupon_discounts(
         self,
         t_idx: int,
@@ -920,21 +956,12 @@ class PhoenixPDESolver(SnowballPDESolver):
             return self._term_w0[:, t_idx], self._term_w1[:, t_idx]
         if product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY:
             settlement_time = self._terminal_payment_time(product, pricing_env)
+        elif obs_idx is not None:
+            settlement_time = self._coupon_record_settlement_time(
+                obs_idx, current_time
+            )
         else:
-            # The grid node and the record's observation time can differ by an
-            # ULP, so reroute through the record's settlement ONLY when it
-            # actually differs from its observation — otherwise keep the
-            # node's own time and the discount stays exactly 1.0.
             settlement_time = current_time
-            if obs_idx is not None:
-                records = self._get_cached_ko_records(pricing_env, product)
-                if 0 <= obs_idx < len(records):
-                    rec = records[obs_idx]
-                    if (
-                        rec.settlement_time is not None
-                        and rec.settlement_time != rec.observation_time
-                    ):
-                        settlement_time = float(rec.settlement_time)
         scalar = self._df_between_times(pricing_env, current_time, settlement_time)
         return scalar, scalar
 
