@@ -1,5 +1,5 @@
-date,action_type,observation_index,spot,barrier,cashflow,alive_before,knocked_in_before,knocked_out_before,matured_before,alive_after,knocked_in_after,knocked_out_after,matured_after,payoff,settlement_date
-2024-01-03,KI,0,96.0,97.0,0.0,True,False,False,False,True,True,False,False,,
-2024-01-03,KI,0,96.0,97.0,0.0,True,False,False,False,True,True,False,False,,
-2024-01-04,KO,0,104.0,103.0,-10001.09589041096,True,True,False,False,False,True,True,False,10001.09589041096,2024-01-04
-2024-01-04,KO,0,104.0,103.0,-20002.19178082192,True,True,False,False,False,True,True,False,10001.09589041096,2024-01-04
+date,action_type,observation_index,spot,barrier,cashflow,alive_before,knocked_in_before,knocked_out_before,matured_before,alive_after,knocked_in_after,knocked_out_after,matured_after,position_id,cashflow_id,determination_date,determination_time,payment_date,payment_time,payoff,settlement_date
+2024-01-03,KI,0,96.0,97.0,0.0,True,False,False,False,True,True,False,False,1,,,,,,,
+2024-01-03,KI,0,96.0,97.0,0.0,True,False,False,False,True,True,False,False,2,,,,,,,
+2024-01-04,KO,0,104.0,103.0,-10001.09589041096,True,True,False,False,False,True,True,False,1,1:knock-out:0,,0.005479452054794521,,0.005479452054794521,10001.09589041096,2024-01-04
+2024-01-04,KO,0,104.0,103.0,-20002.19178082192,True,True,False,False,False,True,True,False,2,2:knock-out:0,,0.005479452054794521,,0.005479452054794521,10001.09589041096,2024-01-04

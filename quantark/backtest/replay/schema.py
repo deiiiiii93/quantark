@@ -29,6 +29,10 @@ STATE_COLUMNS: tuple[str, ...] = (
     "volatility", "rate", "basis_yield", "implied_q", "pricing_q",
     "active_contract", "futures_price", "futures_ttm", "futures_multiplier",
     "futures_contracts", "alive", "knocked_in", "knocked_out", "matured",
+    # Settlement decomposition (0.4.x addition, appended to keep the prefix
+    # stable): product_mtm stays contingent-only, the pending receivable is
+    # discounted to its payment, and paid_cash is cash actually posted.
+    "contingent_product_mtm", "pending_receivable_pv", "paid_cash",
 )
 
 SURFACE_PROVENANCE_COLUMNS: tuple[str, ...] = (
@@ -72,6 +76,12 @@ ACTION_COLUMNS: tuple[str, ...] = (
     "date", "action_type", "observation_index", "spot", "barrier", "cashflow",
     "alive_before", "knocked_in_before", "knocked_out_before", "matured_before",
     "alive_after", "knocked_in_after", "knocked_out_after", "matured_after",
+    # Cashflow identity (0.4.x addition): which position and contractual flow
+    # this action realized, and its determination vs payment legs. Dates stay
+    # empty for numeric products — a payment time is never turned into a
+    # fabricated date.
+    "position_id", "cashflow_id", "determination_date", "determination_time",
+    "payment_date", "payment_time",
 )
 
 DAILY_EVENT_COLUMNS: tuple[str, ...] = (

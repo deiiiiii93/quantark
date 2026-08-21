@@ -112,6 +112,7 @@ class ReplayBacktestEngine:
                 market_data=config.market_data,
                 start_date=None,
                 underlying=config.underlying,
+                position_id=bp.position_id,
                 fixed_dividend_yield=config.fixed_dividend_yield,
                 surface_config=config.surface_config,
                 actions_sink=self._actions,
@@ -258,19 +259,7 @@ class ReplayBacktestEngine:
             any_alive = any(replay.lifecycle.alive for replay in self._replays)
             book_receivable_pv = 0.0
             for replay in self._replays:
-                pending = float(replay.lifecycle.pending_settlement_cashflow)
-                if pending != 0.0 and replay.lifecycle.settlement_date is not None:
-                    tau_settle = max(
-                        (
-                            pd.Timestamp(replay.lifecycle.settlement_date).normalize()
-                            - date
-                        ).days
-                        / 365.0,
-                        0.0,
-                    )
-                    book_receivable_pv += pending * float(
-                        env.get_discount_factor(tau_settle)
-                    )
+                book_receivable_pv += replay.pending_receivable_pv(env, date)
 
             if day_calibration_record is not None:
                 day_calibration_record["pricing_seconds"] = (
@@ -636,6 +625,12 @@ class ReplayBacktestEngine:
                 "knocked_in": knocked_in,
                 "knocked_out": knocked_out,
                 "matured": matured,
+                # Settlement decomposition (appended so the schema prefix is
+                # stable): product_mtm keeps its historical contingent-only
+                # meaning; the receivable rides in product_pnl/portfolio_value.
+                "contingent_product_mtm": book_product_mtm,
+                "pending_receivable_pv": receivable_pv,
+                "paid_cash": book_cashflows,
             }
         )
         self._greeks.append(

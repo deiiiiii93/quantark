@@ -101,11 +101,13 @@ class ProductReplay:
         surfaces_sink: list[dict[str, Any]],
         fixed_dividend_yield: Optional[float] = None,
         surface_config: Any = None,
+        position_id: Optional[Any] = None,
     ) -> None:
         self.product = product
         self.product_quantity = product_quantity
         self.has_lifecycle = has_lifecycle
         self.lifecycle = lifecycle
+        self.position_id = position_id
         self.surface_engine = surface_engine
         self.event_stats_engine = event_stats_engine
         self.engine_config = engine_config
@@ -489,6 +491,41 @@ class ProductReplay:
             return lifecycle.settle()
         return 0.0
 
+    def pending_receivable_pv(
+        self, env: PricingEnvironment, date: pd.Timestamp
+    ) -> float:
+        """PV of determined-but-unpaid cashflows as of the replay ``date``.
+
+        Date-based flows use the replay day-count convention
+        ``(settlement - date).days / 365`` — the exact arithmetic the book
+        engine has always used, so existing runs are bit-identical. Numeric
+        (time-based) lifecycles have no dates to subtract; they price the
+        ledger's pending flows at the current valuation point instead.
+        """
+        lifecycle = self.lifecycle
+        point = lifecycle.valuation_point
+        if point is None or point.date is not None:
+            pending = float(lifecycle.pending_settlement_cashflow)
+            if pending != 0.0 and lifecycle.settlement_date is not None:
+                tau_settle = max(
+                    (
+                        pd.Timestamp(lifecycle.settlement_date).normalize()
+                        - pd.Timestamp(date).normalize()
+                    ).days
+                    / 365.0,
+                    0.0,
+                )
+                return pending * float(env.get_discount_factor(tau_settle))
+            return 0.0
+        return float(lifecycle.ledger.pending_pv(point, env))
+
+    def paid_cash(self) -> float:
+        """Cumulative contractual cash paid through the current replay point."""
+        point = self.lifecycle.valuation_point
+        if point is None:
+            return 0.0
+        return float(self.lifecycle.ledger.paid_total(point))
+
     def settle_maturity_if_due(
         self, date: pd.Timestamp, product: Any, env: PricingEnvironment, spot: float
     ) -> None:
@@ -519,6 +556,31 @@ class ProductReplay:
             "knocked_out_after": event.state_after["knocked_out"],
             "matured_after": event.state_after["matured"],
         }
+        # Cashflow identity: determination vs payment, typed (dates stay None
+        # for numeric products — never fabricated). Emitted for every action
+        # row so the frame's column order is deterministic.
+        cashflow = getattr(event, "realized_cashflow", None)
+        cashflow_id = cashflow.cashflow_id if cashflow is not None else None
+        if cashflow_id is not None and self.position_id is not None:
+            cashflow_id = f"{self.position_id}:{cashflow_id}"
+        row.update(
+            {
+                "position_id": self.position_id,
+                "cashflow_id": cashflow_id,
+                "determination_date": (
+                    cashflow.determination_date if cashflow is not None else None
+                ),
+                "determination_time": (
+                    cashflow.determination_time if cashflow is not None else None
+                ),
+                "payment_date": (
+                    cashflow.payment_date if cashflow is not None else None
+                ),
+                "payment_time": (
+                    cashflow.payment_time if cashflow is not None else None
+                ),
+            }
+        )
         row.update(event.metadata)
         return row
 

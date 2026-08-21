@@ -184,11 +184,10 @@ class BaseEngine(ABC):
                     event_distribution=EventDistribution.from_autocallable_stats(stats),
                 )
 
-        npv = self.price(
-            product,
-            pricing_env,
-            lifecycle_state=lifecycle_state,
-        )
+        if lifecycle_state is None:
+            npv = self.price(product, pricing_env)
+        else:
+            npv = self.price(product, pricing_env, lifecycle_state=lifecycle_state)
         return PricingResult(
             npv=npv,
             event_distribution=EventDistribution.trivial(product.get_maturity(pricing_env)),
@@ -230,23 +229,25 @@ class BaseEngine(ABC):
         if bump_engine is None:
             bump_engine = self
 
-        base_price = bump_engine.price(
-            product, pricing_env, lifecycle_state=lifecycle_state
-        )
+        # Ask for the keyword only when a state is actually supplied: engine
+        # subclasses defined outside quantark.asset.equity.engine.* never get
+        # the lifecycle-keyword retrofit, and a None state must not break them.
+        def _price(env):
+            if lifecycle_state is None:
+                return bump_engine.price(product, env)
+            return bump_engine.price(product, env, lifecycle_state=lifecycle_state)
+
+        base_price = _price(pricing_env)
         greeks = {"price": base_price}
 
         # Delta: dV/dS
         env_up = deepcopy(pricing_env)
         env_up.spot_quote.spot *= 1 + spot_bump
-        price_up = bump_engine.price(
-            product, env_up, lifecycle_state=lifecycle_state
-        )
+        price_up = _price(env_up)
 
         env_down = deepcopy(pricing_env)
         env_down.spot_quote.spot *= 1 - spot_bump
-        price_down = bump_engine.price(
-            product, env_down, lifecycle_state=lifecycle_state
-        )
+        price_down = _price(env_down)
 
         delta = (price_up - price_down) / (2 * pricing_env.spot * spot_bump)
         greeks["delta"] = delta
@@ -257,15 +258,11 @@ class BaseEngine(ABC):
         else:
             env_gup = deepcopy(pricing_env)
             env_gup.spot_quote.spot *= 1 + gamma_bump
-            gamma_up = bump_engine.price(
-                product, env_gup, lifecycle_state=lifecycle_state
-            )
+            gamma_up = _price(env_gup)
 
             env_gdown = deepcopy(pricing_env)
             env_gdown.spot_quote.spot *= 1 - gamma_bump
-            gamma_down = bump_engine.price(
-                product, env_gdown, lifecycle_state=lifecycle_state
-            )
+            gamma_down = _price(env_gdown)
         gamma = (gamma_up - 2 * base_price + gamma_down) / (
             pricing_env.spot * gamma_bump
         ) ** 2

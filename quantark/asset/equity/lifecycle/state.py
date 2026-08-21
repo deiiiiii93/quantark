@@ -84,7 +84,9 @@ class AutocallableLifecycleState:
         )
         self._advance_to(valuation_point or self._point_for(entry))
         self.ledger.register(entry)
-        self._mirror_terminal_settlement(entry, timestamp)
+        self._mirror_terminal_settlement(
+            entry, timestamp, settlement_date=settlement_date
+        )
         return True
 
     def mark_maturity(
@@ -125,7 +127,21 @@ class AutocallableLifecycleState:
         """
         amount = float(self.pending_settlement_cashflow)
         if amount != 0.0 or (not self.settled and not self.alive):
-            if self.settlement_date is not None:
+            point = self.valuation_point
+            if point is not None and point.date is None:
+                # Numeric clock: move past every pending payment time so the
+                # flows count as paid; never graft a date onto a time-based
+                # point (ledger queries must not mix representations).
+                times = [
+                    cf.payment_time
+                    for cf in self.ledger.pending(point)
+                    if cf.payment_time is not None
+                ]
+                if times:
+                    self.valuation_point = ValuationPoint(
+                        time=max(max(times), float(point.time))
+                    )
+            elif self.settlement_date is not None:
                 self._advance_valuation_point(self.settlement_date)
             self.pending_settlement_cashflow = 0.0
             self.settled = True
@@ -186,13 +202,18 @@ class AutocallableLifecycleState:
             self.valuation_point = point
 
     def _mirror_terminal_settlement(
-        self, entry: RealizedCashflow, timestamp: datetime
+        self,
+        entry: RealizedCashflow,
+        timestamp: datetime,
+        settlement_date: Optional[datetime] = None,
     ) -> None:
         """Mirror a terminal flow into the scalar receivable fields.
 
         The ledger carries the dated flow; ``pending_settlement_cashflow`` /
         ``settlement_date`` / ``settled`` are what backtest.replay reads to
         price the receivable day by day and to terminate the run.
+        ``settlement_date`` supplies the calendar date for a time-based entry
+        (the replay layer's own clock) so date-keyed settlement still fires.
         """
         delayed = (
             entry.payment_date is not None
@@ -208,6 +229,8 @@ class AutocallableLifecycleState:
             self.pending_settlement_cashflow += float(entry.amount)
             if entry.payment_date is not None:
                 self.settlement_date = entry.payment_date
+            elif settlement_date is not None:
+                self.settlement_date = settlement_date
         else:
             # Paid at determination (or unspecified): historical behavior.
             self.settlement_date = entry.payment_date or timestamp

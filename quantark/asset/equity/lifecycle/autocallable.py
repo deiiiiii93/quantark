@@ -19,6 +19,7 @@ observation method is called.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
@@ -368,20 +369,49 @@ class AutocallableLifecycleTracker:
             resolved = product.resolve_ki_observations(schedule_env)
 
         records: List[Dict[str, Any]] = []
+        # Replay clock: a numeric schedule still plays out on real calendar
+        # days of this run, so dates absent from the schedule are derived from
+        # the run's base date. The settlement RESOLVER never fabricates dates;
+        # this is the replay layer's own calendar, and it is what date-based
+        # due checks, pending settlement, and run termination key on.
+        base = getattr(product, "initial_date", None) or self.start_date
+        base_date = pd.Timestamp(base) if base is not None else None
         for rec in resolved:
+            obs_time = float(rec.observation_time)
+            settlement_time = float(rec.settlement_time)
             observation_date = getattr(rec, "observation_date", None)
             determination_date = observation_date
             if observation_date is not None:
-                observation_date = self._date_resolver(
+                obs_date = self._date_resolver(
                     pd.Timestamp(observation_date).normalize()
                 )
+            elif base_date is not None:
+                obs_date = self._date_resolver(
+                    (
+                        base_date + timedelta(days=int(round(obs_time * 365)))
+                    ).normalize()
+                )
+                determination_date = obs_date
+            else:
+                obs_date = None
+            settlement_date = getattr(rec, "settlement_date", None)
+            if settlement_date is None and obs_date is not None:
+                if settlement_time <= obs_time:
+                    settlement_date = obs_date
+                elif base_date is not None:
+                    settlement_date = self._date_resolver(
+                        (
+                            base_date
+                            + timedelta(days=int(round(settlement_time * 365)))
+                        ).normalize()
+                    )
             records.append(
                 {
-                    "date": observation_date,
+                    "date": obs_date,
                     "determination_date": determination_date,
-                    "time": float(rec.observation_time),
-                    "settlement_date": getattr(rec, "settlement_date", None),
-                    "settlement_time": float(rec.settlement_time),
+                    "time": obs_time,
+                    "settlement_date": settlement_date,
+                    "settlement_time": settlement_time,
                     "barrier": (
                         float(rec.barrier)
                         if rec.barrier is not None
@@ -466,8 +496,13 @@ class AutocallableLifecycleTracker:
         record: Dict[str, Any],
         valuation_point: ValuationPoint,
     ) -> RealizedCashflow:
+        # The entry's representation must match the product's timing (the
+        # valuation point already encodes that choice): a numeric lifecycle
+        # keeps time-based flows even when the record carries replay-clock
+        # dates, so ledger queries never mix dates with times.
         if (
-            record["date"] is not None
+            valuation_point.date is not None
+            and record["date"] is not None
             and record["settlement_date"] is not None
         ):
             determination_date = pd.Timestamp(
