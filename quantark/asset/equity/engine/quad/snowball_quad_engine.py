@@ -106,6 +106,17 @@ class SnowballQuadEngine(BaseEngine):
         # (spot_grid, v_in, v_out), plus key 0.0 for the valuation-date surfaces.
         self.record_backward_grids = False
         self._backward_grids: dict = {}
+        # Bridge-kernel cache: the continuous-KI bridge correction rebuilds an
+        # identical per-offset kernel stack (omega * w * p_hit) on every call,
+        # and one price_with_events walks the same time steps up to three times
+        # (stacked KO-indicator recursion, KI-probability recursion, internal
+        # price pass). The kernel is row-independent and fully determined by
+        # the cache key (grid geometry, band, tau_step, alpha, vol^2*dt,
+        # barrier, direction), so reuse is bit-identical. Bounded by
+        # _BRIDGE_KERNEL_CACHE_MAX_ENTRIES (clear-all on overflow): a flat env
+        # needs only a handful of entries; a term-structure env may produce one
+        # per step, where eviction degrades gracefully to the uncached cost.
+        self._bridge_kernel_cache: dict = {}
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -547,18 +558,64 @@ class SnowballQuadEngine(BaseEngine):
             )
 
     def calculate_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        streams: Optional[frozenset] = None,
     ) -> Optional[AutocallableEventStats]:
         """Provide per-observation KO probabilities and expected discounted cashflows.
 
         Runs a single quadrature recursion over stacked indicator surfaces; usually
         much faster than MC for risk-neutral event stats.
+
+        ``streams`` (the ``EventType`` set the caller needs, [§11.1]) prunes the
+        auxiliary indicator work exactly as the PDE solvers do: ``None`` keeps the
+        full distribution; otherwise the KI-probability recursion and the Phoenix
+        coupon rows run only when a requested stream reads them. Pruning leaves
+        ``ko_probability`` / ``survival`` / ``pv`` bit-identical.
         """
         if not isinstance(product, self._event_stats_product_type()):
             return None
         if pricing_env is None:
             raise PricingError("PricingEnvironment is required for SnowballQuadEngine.")
-        return self._compute_event_stats(product, pricing_env)
+        return self._compute_event_stats(product, pricing_env, streams=streams)
+
+    def price_with_events(
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        emit_distribution: bool = True,
+        streams: Optional[frozenset] = None,
+        *,
+        lifecycle_state=None,
+    ):
+        """Base behaviour with ``streams`` forwarded to the event-stats pass
+        [§11.1] — the base implementation drops it, which forfeits the QUAD
+        pruning above."""
+        from quantark.cashleg.event_distribution import EventDistribution, PricingResult
+        from quantark.asset.equity.engine.settlement_support import (
+            validate_settlement_capability,
+        )
+
+        validate_settlement_capability(self, product, lifecycle_state)
+
+        if emit_distribution:
+            stats = self.calculate_event_stats(product, pricing_env, streams=streams)
+            if stats is not None:
+                return PricingResult(
+                    npv=float(stats.pv),
+                    event_distribution=EventDistribution.from_autocallable_stats(stats),
+                )
+
+        if lifecycle_state is None:
+            npv = self.price(product, pricing_env)
+        else:
+            npv = self.price(product, pricing_env, lifecycle_state=lifecycle_state)
+        return PricingResult(
+            npv=npv,
+            event_distribution=EventDistribution.trivial(product.get_maturity(pricing_env)),
+        )
 
     def _event_stats_product_type(self) -> type:
         """Product type accepted by ``calculate_event_stats`` (overridable)."""
@@ -610,9 +667,25 @@ class SnowballQuadEngine(BaseEngine):
         return {}
 
     def _compute_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        streams: Optional[frozenset] = None,
     ) -> Optional[AutocallableEventStats]:
         self._validate_product(product)
+
+        # Stream selection [§11.1], mirroring the PDE contract: KO rows always
+        # run; the KI-probability recursion and the Phoenix coupon rows are
+        # auxiliary and dropped when no requested stream reads them.
+        if streams is None:
+            want_ki = True
+            want_coupon = True
+        else:
+            from quantark.cashleg.event_distribution import EventType
+
+            want_ki = bool(streams & {EventType.KI, EventType.MATURITY_WITH_KI})
+            want_coupon = EventType.COUPON in streams
 
         spot = pricing_env.spot
         maturity = product.get_maturity(pricing_env)
@@ -744,7 +817,7 @@ class SnowballQuadEngine(BaseEngine):
         # Rows [0..n_ko-1] are KO indicators; subclasses may append extra rows
         # (e.g. Phoenix coupon-trigger rows) that ride the same diffusion/jumps.
         n_ko = len(ko_records)
-        n_rows = n_ko + self._n_extra_quad_rows(n_ko)
+        n_rows = n_ko + (self._n_extra_quad_rows(n_ko) if want_coupon else 0)
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
 
@@ -807,11 +880,12 @@ class SnowballQuadEngine(BaseEngine):
                         v_in[int(ko_index)] += ko_w * float(discount_delay)
                 # Extra rows (coupon) are set AFTER the KO scaling so a coupon at a
                 # simultaneous KO is retained; future-coupon rows stay scaled by KO.
-                self._set_extra_quad_indicators(
-                    v_in, v_out, spot_grid, n_ko, int(ko_index), ko_record,
-                    obs_time, rate, product, disable_ko_after_ki,
-                    math_utils, smoothing_width,
-                )
+                if want_coupon:
+                    self._set_extra_quad_indicators(
+                        v_in, v_out, spot_grid, n_ko, int(ko_index), ko_record,
+                        obs_time, rate, product, disable_ko_after_ki,
+                        math_utils, smoothing_width,
+                    )
 
             if ki_continuous:
                 # KI transition handled via Brownian bridge in diffusion step.
@@ -959,7 +1033,7 @@ class SnowballQuadEngine(BaseEngine):
             ki_times = np.array([0.0], dtype=float)
             ki_event_probability = np.array([1.0], dtype=float)
             ki_survival_probability = np.array([0.0], dtype=float)
-        elif product.has_ki_barrier:
+        elif product.has_ki_barrier and want_ki:
             v_in_ki = np.ones(grid.size, dtype=float)
             v_out_ki = np.zeros(grid.size, dtype=float)
             v_in_ever = np.ones(grid.size, dtype=float)
@@ -1105,17 +1179,20 @@ class SnowballQuadEngine(BaseEngine):
                 ki_survive_knocked_in_probability = ki_probability
                 ki_ever_probability = float(pv_ki_ever / df_T)
 
-        extra_fields = self._extract_extra_quad_stats(
-            initial_surface,
-            math_utils,
-            n_ko,
-            ko_records,
-            rate,
-            product,
-            maturity,
-            pricing_env=pricing_env,
-            df_fn=df_local,
-        )
+        if want_coupon:
+            extra_fields = self._extract_extra_quad_stats(
+                initial_surface,
+                math_utils,
+                n_ko,
+                ko_records,
+                rate,
+                product,
+                maturity,
+                pricing_env=pricing_env,
+                df_fn=df_local,
+            )
+        else:
+            extra_fields = {}
         # Remove extra cashflow streams (Phoenix coupons) from the maturity field
         # so pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
         coupon_cf = extra_fields.get("expected_discounted_coupon_cashflow")
@@ -1500,6 +1577,20 @@ class SnowballQuadEngine(BaseEngine):
             base = prefactor * conv
             return base + self._tail_correction(values, math_utils, alpha, beta, tau_step)
 
+        # Stacked indicator rows are identically zero until the backward sweep
+        # crosses their own observation date; diffusion and the tail correction
+        # are linear, so those rows stay exactly zero — skip them. Bit-identical
+        # because pocketfft transforms rows independently and 0 * erfc = +0.0.
+        active = np.any(values != 0.0, axis=1)
+        if not bool(active.all()):
+            out = np.zeros_like(values, dtype=float)
+            if bool(active.any()):
+                out[active] = self._diffuse_fft(
+                    values[active], math_utils, omega_array, prefactor,
+                    p_lr, p_ur, p0, alpha, beta, tau_step,
+                )
+            return out
+
         u_array = math_utils.simpson_weights_many(values, p_lr, p_ur, p0)
         conv = math_utils.convolution_fft_many(omega_array, u_array)
         base = prefactor * conv
@@ -1544,7 +1635,6 @@ class SnowballQuadEngine(BaseEngine):
         above the barrier -- and was invisible to grid refinement.
         """
         grid = math_utils.grid
-        weights = math_utils.simpson_weight_vector()
         base = self._diffuse_fft(
             v_out,
             math_utils,
@@ -1559,10 +1649,81 @@ class SnowballQuadEngine(BaseEngine):
         )
 
         delta = v_in - v_out
-        correction = np.zeros_like(base, dtype=float)
+
+        # Indicator rows whose delta is identically zero contribute an exactly
+        # zero correction (the kernel is finite and non-negative); reduce the
+        # accumulation to the active rows and scatter back.
+        active = None
+        work = delta
+        if delta.ndim == 2:
+            row_active = np.any(delta != 0.0, axis=1)
+            if not bool(row_active.all()):
+                active = row_active
+                work = delta[row_active]
+
         band = self._bridge_band(tau_step, math_utils.h, grid.size)
         denom = vol * vol * dt
+        kernels = self._bridge_kernels(
+            math_utils, band, tau_step, alpha, denom, log_barrier, is_reverse
+        )
 
+        correction_work = np.zeros_like(work, dtype=float)
+        if work.size:
+            for source, target, kernel in kernels:
+                if work.ndim == 1:
+                    correction_work[target] += prefactor * kernel * work[source]
+                else:
+                    correction_work[:, target] += (
+                        prefactor * kernel.reshape(1, -1) * work[:, source]
+                    )
+
+        if active is not None:
+            correction = np.zeros_like(delta, dtype=float)
+            if work.size:
+                correction[active] = correction_work
+        else:
+            correction = correction_work
+        return base + correction
+
+    # Clear-all bound for _bridge_kernel_cache; each entry holds ~(2*band+1)
+    # grid-length arrays (~1 MB at grid 1001 / band ~63).
+    _BRIDGE_KERNEL_CACHE_MAX_ENTRIES = 64
+
+    def _bridge_kernels(
+        self,
+        math_utils: QuadratureMath,
+        band: int,
+        tau_step: float,
+        alpha: float,
+        denom: float,
+        log_barrier: float,
+        is_reverse: bool,
+    ) -> list:
+        """Per-offset ``(source, target, omega * w * p_hit)`` kernel stack for
+        ``_diffuse_with_bridge``, cached on the engine (see __init__).
+
+        Computed exactly as the historical loop body computed them — the cache
+        key carries every input the kernel depends on, so a hit is
+        bit-identical to a rebuild.
+        """
+        grid = math_utils.grid
+        key = (
+            grid.size,
+            float(math_utils.h),
+            float(grid[0]),
+            band,
+            float(tau_step),
+            float(alpha),
+            float(denom),
+            float(log_barrier),
+            bool(is_reverse),
+        )
+        cached = self._bridge_kernel_cache.get(key)
+        if cached is not None:
+            return cached
+
+        weights = math_utils.simpson_weight_vector()
+        kernels = []
         for offset in range(-band, band + 1):
             if offset >= 0:
                 source = slice(0, grid.size - offset)
@@ -1588,15 +1749,12 @@ class SnowballQuadEngine(BaseEngine):
             exponent = np.where(safe, -2.0 * d0 * d1 / denom, 0.0)
             exponent = np.clip(exponent, -745.0, 0.0)
             p_hit = np.where(safe, np.exp(exponent), 1.0)
-            kernel = omega * w * p_hit
-            if delta.ndim == 1:
-                correction[target] += prefactor * kernel * delta[source]
-            else:
-                correction[:, target] += prefactor * kernel.reshape(1, -1) * delta[
-                    :, source
-                ]
+            kernels.append((source, target, omega * w * p_hit))
 
-        return base + correction
+        if len(self._bridge_kernel_cache) >= self._BRIDGE_KERNEL_CACHE_MAX_ENTRIES:
+            self._bridge_kernel_cache.clear()
+        self._bridge_kernel_cache[key] = kernels
+        return kernels
 
     def _tail_correction(
         self,

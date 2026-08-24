@@ -336,6 +336,14 @@ class SnowballPDESolver(BasePDESolver):
         self._profile_stats: Dict[str, float] = {}
         self._ko_records_cache: "OrderedDict[Tuple, List[ResolvedObservationRecord]]" = OrderedDict()
         self._ki_profile_cache: "OrderedDict[Tuple, Dict[str, List[Optional[float]]]]" = OrderedDict()
+        # Per-solve memo of _product_cache_token: the token is a pure function
+        # of the product's serialized state, which cannot change inside one
+        # solve, but its construction re-serializes every KO/KI schedule record
+        # and dominated the stepping loop (~2 rebuilds per time step via the
+        # boundary-condition path). Cleared at each solve entry so a product
+        # mutated (or GC'd and id-reused) between solves can never hit a stale
+        # token.
+        self._product_token_memo: Dict[Tuple[int, str], Tuple[str, object]] = {}
 
     def enable_profiling(self, enabled: bool = True) -> None:
         """Toggle internal timing breakdown collection."""
@@ -639,6 +647,7 @@ class SnowballPDESolver(BasePDESolver):
     def _price_with_solution(self, product, pricing_env):
         """price()'s preamble + one solve; None solution = short-circuit
         (expired or knocked-out at valuation). Native session seam."""
+        self._product_token_memo.clear()
         self._check_product_type(product)
 
         if pricing_env is None:
@@ -839,6 +848,7 @@ class SnowballPDESolver(BasePDESolver):
         identical — the KI *regime jump* still runs, only the auxiliary
         indicator columns are dropped.
         """
+        self._product_token_memo.clear()
         spot = pricing_env.spot
         tau = product.get_maturity(pricing_env)
         if tau <= 0 or is_zero(tau):
@@ -3121,6 +3131,20 @@ class SnowballPDESolver(BasePDESolver):
 
     def __repr__(self) -> str:
         return "SnowballPDESolver()"
+
+    def _product_cache_token(self, product: BaseEquityProduct, strategy: str) -> Tuple[str, object]:
+        # Memoized per solve (see __init__): the boundary-condition path asks
+        # for this token on every time step, and the base implementation
+        # re-serializes the whole product each call. "strict" stays unmemoized
+        # — it is already an O(1) id() lookup.
+        if strategy == "strict":
+            return super()._product_cache_token(product, strategy)
+        memo_key = (id(product), strategy)
+        token = self._product_token_memo.get(memo_key)
+        if token is None:
+            token = super()._product_cache_token(product, strategy)
+            self._product_token_memo[memo_key] = token
+        return token
 
     def _observation_cache_key(
         self, pricing_env: PricingEnvironment, product: SnowballOption, kind: str

@@ -382,8 +382,15 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
         return math_utils.interpolate(v_out, x=0.0)
 
     def calculate_event_stats(
-        self, product: BaseEquityProduct, pricing_env: PricingEnvironment
+        self,
+        product: BaseEquityProduct,
+        pricing_env: PricingEnvironment,
+        *,
+        streams: Optional[frozenset] = None,
     ) -> Optional[KOResetEventStats]:
+        # ``streams`` pruning [§11.1] is a permission, not an obligation: the
+        # KO-reset recursion has its own event-stats implementation and always
+        # computes the full distribution.
         if not isinstance(product, KnockOutResetSnowballOption):
             return None
         if pricing_env is None:

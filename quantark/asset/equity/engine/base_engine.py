@@ -166,8 +166,9 @@ class BaseEngine(ABC):
         full-schedule cash legs.
 
         ``streams`` (the EventType set the caller needs, [§11.1]) is honored by
-        engines that support column pruning (the PDE autocallable solvers);
-        other engines ignore it and return the full distribution.
+        engines that support column pruning (the PDE autocallable solvers and
+        the Snowball/Phoenix QUAD engines, which override this method); other
+        engines ignore it and return the full distribution.
         """
         from quantark.cashleg.event_distribution import EventDistribution, PricingResult
         from quantark.asset.equity.engine.settlement_support import (
