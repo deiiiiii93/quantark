@@ -678,36 +678,84 @@ class PhoenixQuadEngine(SnowballQuadEngine):
                 coupon_probability[i] = float(ed_coup / df_obs)
         result = {"coupon_probability": coupon_probability}
         # Expected discounted coupon cashflow only for non-memory coupons (the paid
-        # amount is path-dependent under memory). With a deterministic amount and
-        # settlement, E[DF*amount*1{coupon}] = DF(0->settle)*amount*P(coupon).
+        # amount is path-dependent under memory).
         if not product.has_memory_coupon:
-            ko_times = [float(rec.observation_time) for rec in ko_records]
-            period_yf = product.get_coupon_period_year_fractions(ko_times)
-            coupon_amounts = [
-                float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
-                for i in range(n_ko)
-            ]
-            payment_timings = resolve_structured_payment_timings(
-                product,
-                pricing_env,
-                ko_records,
+            result["expected_discounted_coupon_cashflow"] = (
+                self._coupon_cashflows_from_probability(
+                    coupon_probability, ko_records, product, pricing_env,
+                    rate, df_fn,
+                )
             )
-            expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
-            ecc = np.zeros(n_ko, dtype=float)
-            for i in range(n_ko):
-                settle = (
-                    float(payment_timings.terminal.payment_time)
-                    if expiry
-                    else float(payment_timings.event_payment_times[i])
+        return result
+
+    def _coupon_cashflows_from_probability(
+        self, coupon_probability, ko_records, product, pricing_env, rate,
+        df_fn,
+    ):
+        """E[DF*amount*1{coupon}] = DF(0->settle) * amount * P(coupon) for
+        deterministic (non-memory) coupon amounts. Shared by the stacked
+        extraction and the forward readout."""
+        n_ko = len(ko_records)
+        ko_times = [float(rec.observation_time) for rec in ko_records]
+        period_yf = product.get_coupon_period_year_fractions(ko_times)
+        coupon_amounts = [
+            float(product.get_coupon_payoff(i, year_fraction=period_yf[i]))
+            for i in range(n_ko)
+        ]
+        payment_timings = resolve_structured_payment_timings(
+            product,
+            pricing_env,
+            ko_records,
+        )
+        expiry = product.coupon_config.coupon_pay_type == CouponPayType.EXPIRY
+        ecc = np.zeros(n_ko, dtype=float)
+        for i in range(n_ko):
+            settle = (
+                float(payment_timings.terminal.payment_time)
+                if expiry
+                else float(payment_timings.event_payment_times[i])
+            )
+            df_settle = (
+                float(df_fn(settle)) if df_fn is not None
+                else math.exp(-rate * settle)
+            )
+            ecc[i] = float(
+                df_settle * coupon_amounts[i] * coupon_probability[i]
+            )
+        return ecc
+
+    # --- Forward-density coupon hooks (event_stats_mode="forward_density") ---
+
+    def _forward_extra_state(self, n_ko: int):
+        return np.zeros(n_ko, dtype=float)
+
+    def _forward_extra_readouts_at_obs(
+        self, state, ko_index, ko_record, p_alive, math_utils,
+        smoothing_width, product,
+    ) -> None:
+        # Coupon probability = integral of the coupon-hit weight against the
+        # alive density at the observation (read BEFORE KO absorption — a
+        # coupon on a simultaneous KO is still paid; see the stacked
+        # _set_extra_quad_indicators note). Coupons pay regardless of KI
+        # state, so the density is p_out + p_in.
+        barrier = self._coupon_barrier_for_obs(product, ko_index)
+        pay_w = self._event_weight(
+            math_utils.grid, barrier, math_utils.spot, smoothing_width,
+            trigger_is_down=product.is_reverse,
+        )
+        state[ko_index] = self._density_integral(math_utils, pay_w * p_alive)
+
+    def _forward_extra_fields(
+        self, state, ko_records, product, pricing_env, rate, df_local
+    ) -> dict:
+        result = {"coupon_probability": np.asarray(state, dtype=float)}
+        if not product.has_memory_coupon:
+            result["expected_discounted_coupon_cashflow"] = (
+                self._coupon_cashflows_from_probability(
+                    result["coupon_probability"], ko_records, product,
+                    pricing_env, rate, df_local,
                 )
-                df_settle = (
-                    float(df_fn(settle)) if df_fn is not None
-                    else math.exp(-rate * settle)
-                )
-                ecc[i] = float(
-                    df_settle * coupon_amounts[i] * coupon_probability[i]
-                )
-            result["expected_discounted_coupon_cashflow"] = ecc
+            )
         return result
 
     def __repr__(self):

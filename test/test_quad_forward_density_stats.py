@@ -218,6 +218,26 @@ def test_forward_matches_stacked_continuous_ki():
     assert float(forward.pv).hex() == float(stacked.pv).hex()
 
 
+def test_forward_matches_stacked_phoenix():
+    from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+    from quantark.asset.equity.product.option.phoenix_helpers import create_standard_phoenix
+
+    product = create_standard_phoenix(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, coupon_barrier=85.0, coupon_rate=0.01,
+        num_observations=23,
+    )
+    stacked, forward = _stats_pair(PhoenixQuadEngine, product, _env())
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert np.max(np.abs(forward.coupon_probability - stacked.coupon_probability)) < KO_PROB_ATOL
+    np.testing.assert_allclose(
+        forward.expected_discounted_coupon_cashflow,
+        stacked.expected_discounted_coupon_cashflow,
+        rtol=CF_RTOL, atol=1e-4,
+    )
+    assert float(forward.pv).hex() == float(stacked.pv).hex()
+
+
 def test_forward_mass_diagnostic_conserved():
     product = create_standard_snowball(
         initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
