@@ -1789,6 +1789,71 @@ class SnowballQuadEngine(BaseEngine):
         self._bridge_kernel_cache[key] = kernels
         return kernels
 
+    # --- Forward-density primitives (event_stats_mode="forward_density") ---
+
+    def _forward_kernel(self, math_utils, tau_step: float, alpha: float):
+        """Forward transition kernel: the backward omega with the alpha sign
+        flipped (correlation -> convolution) and the discount term dropped
+        from beta (densities are undiscounted; discounting happens at
+        readout)."""
+        omega_fwd = np.exp(
+            -(math_utils.z_grid ** 2) / (4.0 * tau_step)
+            + alpha * math_utils.z_grid
+        )
+        prefactor_fwd = (
+            math.exp(-(alpha * alpha) * tau_step)
+            / math.sqrt(math.pi * tau_step) / 2.0
+        )
+        return omega_fwd, prefactor_fwd
+
+    def _diffuse_density(
+        self, values, math_utils, omega_fwd, prefactor_fwd, p_lr, p_ur, p0
+    ):
+        """One forward transport step. No tail correction: a density is ~0 at
+        the grid edges by construction (num_std_devs-wide grid); mass
+        bookkeeping is the caller's diagnostic."""
+        if values.ndim == 1:
+            u = math_utils.simpson_weights(values, p_lr, p_ur, p0)
+            return prefactor_fwd * math_utils.convolution_fft(omega_fwd, u)
+        u = math_utils.simpson_weights_many(values, p_lr, p_ur, p0)
+        return prefactor_fwd * math_utils.convolution_fft_many(omega_fwd, u)
+
+    @staticmethod
+    def _density_integral(math_utils, values) -> float:
+        """Simpson integral of a grid function (weights are h-scaled)."""
+        return float(np.dot(math_utils.simpson_weight_vector(), values))
+
+    def _forward_seed(self, math_utils, tau1: float, alpha1: float):
+        """Exact density after the first interval (analytic first step —
+        no discrete delta on the grid; spec section 4.3). var = sigma^2*dt1 =
+        2*tau1; mean = m*dt1 = alpha1 * 2*tau1."""
+        var = 2.0 * tau1
+        mean = var * alpha1
+        grid = math_utils.grid
+        return np.exp(-((grid - mean) ** 2) / (2.0 * var)) / math.sqrt(
+            2.0 * math.pi * var
+        )
+
+    def _forward_seed_touch_probability(
+        self, math_utils, tau1: float, log_barrier: float, is_reverse: bool
+    ):
+        """Point-source Brownian-bridge touch probability over the first
+        interval (source pinned at x=0 = spot), same formula family as the
+        step kernel's p_hit."""
+        grid = math_utils.grid
+        denom = 2.0 * tau1
+        if is_reverse:
+            d0 = log_barrier - grid
+            d1 = log_barrier - 0.0
+        else:
+            d0 = grid - log_barrier
+            d1 = 0.0 - log_barrier
+        safe = (d0 > 0.0) & (d1 > 0.0)
+        exponent = np.clip(
+            np.where(safe, -2.0 * d0 * d1 / denom, 0.0), -745.0, 0.0
+        )
+        return np.where(safe, np.exp(exponent), 1.0)
+
     def _tail_correction(
         self,
         values: np.ndarray,
