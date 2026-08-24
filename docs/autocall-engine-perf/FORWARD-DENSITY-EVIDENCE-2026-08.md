@@ -84,6 +84,53 @@ forward defect.
 battery (same-run comparisons; the forward mode never computes its own npv —
 it is always the backward `price()`).
 
-## Full-book adapter A/B (battery gate e)
+## Full-book adapter A/B (battery gate e) — 2026-08-24
 
-_To be appended by Task 11._
+Protocol: `demos/run_book_forward_density.md`. One detached worktree at the
+branch tip PYTHONPATH-shadowing the adapter venv's wheel; forward arm adds the
+`sitecustomize` flag shim; QUAD config (`gridXQuad=1001`), 2026-06-30 book,
+97 rows, `--workers 8`, both arms back-to-back in one window with a resource
+sampler (load/RSS/swap flat throughout; no contention anomaly).
+
+### Wall time — **target met**
+
+| arm | wall | reference points (2026-08-24) |
+|---|---|---|
+| QUAD stacked | 598 s | 569 s earlier same-day window; 934 s pre-B1/B2 |
+| **QUAD forward_density** | **115 s** | target 100–150 s; PDE 111 s; MC 230 s |
+
+Book-level speedup 5.2× over stacked-in-the-same-window; QUAD moves from the
+slowest engine family to parity with PDE (115 s vs 111 s), well under MC.
+
+### Values (19 columns × 97 rows; statuses identical, 95 ok / 2 pre-existing errors)
+
+Bit-for-bit EXACT (97/97 rows): `pv`, `pv_premium`, `pv_minimum_return`, and
+all per-unit greeks (`delta`, `gamma`, `vega`, `theta`, `rho`, `rhoQ`) — the
+npv contract (npv = backward `price()` in both modes) holds on the full book.
+
+Distribution-derived columns, quantified (max over rows, bp of notional;
+notionals 4.2e5–1e8):
+
+| column | max bp | rows > 1 bp | note |
+|---|---|---|---|
+| pv_interest | 0.009 | 0 | coupon/interest leg |
+| pv_rebate | 0.003 | 0 | KO rebate leg |
+| pv_margin | 0.63 | 0 | margin occupancy |
+| pv_total | 0.63 | 0 | |
+| vega/theta/rho/rhoQ_total | ≤ 0.42 | 0 | |
+| delta_total | 21.2 | 28 | bump-greeks of the package INCLUDING |
+| gamma_total | 72.9 | 54 | the cash legs: the mode-difference's spot-variation is amplified by the (1%-bump)⁻² second difference |
+
+Every row above 1 bp is a snowball/phoenix autocallable (the only products
+with event distributions); worst single rows: delta_total 21 bp
+(非保本雪球, −1.904e6 → −1.894e6, ~0.5% of the value), gamma_total 73 bp
+(same row, 9.52e5 → 9.16e5, ~3.8%). Per-unit greeks of the note itself are
+exact everywhere; the differences live purely in the leg-greek attribution.
+
+### Acceptance (spec §9)
+
+- npv exact on the full book — PASS
+- forward-mode wall 115 s in the 100–150 s target — PASS
+- distribution deltas quantified and banked (above) — the delta_total /
+  gamma_total leg-attribution deltas are the numbers the later default-flip
+  decision must weigh.
