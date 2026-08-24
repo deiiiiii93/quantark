@@ -253,3 +253,149 @@ def test_forward_mass_diagnostic_conserved():
     # survival/ko fields cannot test this — survival is DEFINED as
     # 1 - cumulative KO, so any identity built from them is a tautology).
     assert abs(engine._last_forward_mass_diagnostic - 1.0) < 1e-4  # provisional
+
+
+# --- Matrix and contract coverage (Task 8) ---
+
+
+def test_forward_reverse_snowball_parity():
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=97.0,
+        ki_barrier=125.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0, is_reverse=True,
+    )
+    stacked, forward = _stats_pair(SnowballQuadEngine, product, _env())
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+
+
+def test_forward_disable_ko_after_ki_parity():
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0, disable_ko_after_ki=True,
+    )
+    stacked, forward = _stats_pair(SnowballQuadEngine, product, _env())
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+
+
+def test_forward_knocked_in_at_valuation_latches():
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+    )
+    e = PricingEnvironment(
+        spot_quote=SpotQuote(spot=74.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.03),
+        div_yield=ContinuousDividendYield(div_yield=0.05),
+        valuation_date=datetime(2026, 6, 30),
+    )
+    stacked, forward = _stats_pair(SnowballQuadEngine, product, e)
+    assert forward.ki_probability == 1.0 == stacked.ki_probability
+    assert forward.ki_ever_probability == 1.0
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+
+
+def test_forward_r_q_zero_bisection():
+    product = _discrete_ki_snowball()
+    e = PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.0),
+        div_yield=ContinuousDividendYield(div_yield=0.0),
+        valuation_date=datetime(2026, 6, 30),
+    )
+    stacked, forward = _stats_pair(SnowballQuadEngine, product, e)
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+
+
+def test_forward_nodal_projection_parity():
+    # CELL_AVERAGE is the default every other parity test runs under; this
+    # covers the legacy NODAL branch of the forward KO absorption.
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+    )
+    stacked, forward = _stats_pair(
+        SnowballQuadEngine, product, _env(), event_projection="nodal"
+    )
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+
+
+def test_forward_streams_pruning_contract():
+    from quantark.cashleg.event_distribution import EventType
+
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+    )
+    ko_only = frozenset({EventType.KO, EventType.MATURITY_NO_KO})
+    full_engine = SnowballQuadEngine(
+        params=QuadParams(grid_points=1001, event_stats_mode="forward_density")
+    )
+    full = full_engine.calculate_event_stats(product, _env())
+    pruned_engine = SnowballQuadEngine(
+        params=QuadParams(grid_points=1001, event_stats_mode="forward_density")
+    )
+    pruned = pruned_engine.calculate_event_stats(
+        product, _env(), streams=ko_only
+    )
+    # Same-run exact equality on the surviving fields; pruned fields zero.
+    assert np.asarray(full.ko_probability).tobytes() == np.asarray(pruned.ko_probability).tobytes()
+    assert float(full.pv).hex() == float(pruned.pv).hex()
+    assert pruned.ki_probability == 0.0
+    assert pruned.ki_ever_probability == 0.0
+
+
+def test_forward_pwe_npv_bit_equal_to_stacked():
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+    )
+    e = _env()
+    npv_stacked = SnowballQuadEngine(
+        params=QuadParams(grid_points=1001)
+    ).price_with_events(product, e).npv
+    npv_forward = SnowballQuadEngine(
+        params=QuadParams(grid_points=1001, event_stats_mode="forward_density")
+    ).price_with_events(product, e).npv
+    assert float(npv_stacked).hex() == float(npv_forward).hex()
+
+
+def test_ko_reset_ignores_forward_flag():
+    # KO-reset keeps its own stacked implementation; the flag is a
+    # permission, not an obligation (same-run exact equality).
+    from dataclasses import fields as dc_fields
+
+    from quantark.asset.equity.engine.quad.ko_reset_snowball_quad_engine import (
+        KOResetSnowballQuadEngine,
+    )
+    from quantark.asset.equity.product.option import create_ko_reset_snowball
+    from quantark.util.enum import PostKOScheduleMode
+
+    product = create_ko_reset_snowball(
+        initial_price=100.0, strike=100.0, maturity_pre=1.0,
+        maturity_post=2.0, post_ko_mode=PostKOScheduleMode.ABSOLUTE,
+        ki_continuous=True,
+    )
+    e = _env()
+    a = KOResetSnowballQuadEngine(
+        params=QuadParams(grid_points=1001)
+    ).calculate_event_stats(product, e)
+    b = KOResetSnowballQuadEngine(
+        params=QuadParams(grid_points=1001, event_stats_mode="forward_density")
+    ).calculate_event_stats(product, e)
+    for f in dc_fields(a):
+        va, vb = getattr(a, f.name), getattr(b, f.name)
+        if isinstance(va, np.ndarray):
+            assert va.tobytes() == vb.tobytes(), f.name
+        else:
+            assert va == vb, f.name

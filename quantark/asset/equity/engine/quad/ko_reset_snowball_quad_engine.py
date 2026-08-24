@@ -390,7 +390,8 @@ class KOResetSnowballQuadEngine(SnowballQuadEngine):
     ) -> Optional[KOResetEventStats]:
         # ``streams`` pruning [§11.1] is a permission, not an obligation: the
         # KO-reset recursion has its own event-stats implementation and always
-        # computes the full distribution.
+        # computes the full distribution, and
+        # ``event_stats_mode='forward_density'`` is likewise ignored.
         if not isinstance(product, KnockOutResetSnowballOption):
             return None
         if pricing_env is None:

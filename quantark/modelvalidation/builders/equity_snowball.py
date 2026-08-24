@@ -103,9 +103,12 @@ _REFERENCE_KEYS: frozenset = frozenset()
 
 #: Quadrature settings that cannot move the answer, so they stay out of the
 #: recorded configuration and out of the identity hash.
+#: ``event_stats_mode`` selects the event-DISTRIBUTION algorithm only; the
+#: certified quantities are pv/greeks from price(), which both modes share
+#: (npv equality is hex-asserted in test_quad_forward_density_stats).
 _QUAD_NON_NUMERIC = ("bump_size", "bump_config", "auto_converge",
                      "convergence_rel_tol", "convergence_abs_tol",
-                     "max_convergence_grid_points")
+                     "max_convergence_grid_points", "event_stats_mode")
 
 
 @register_builder("equity.snowball", kind="product")
