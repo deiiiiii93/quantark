@@ -182,3 +182,54 @@ def test_forward_matches_stacked_discrete_ki():
     assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
     assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
     assert abs(forward.ki_ever_probability - stacked.ki_ever_probability) < KI_PROB_ATOL
+
+
+def test_forward_ki_ever_matches_analytic_first_passage():
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.0,
+        ko_barrier=1e6,  # unreachable: isolates the first-passage statistic
+        ki_barrier=80.0, ko_rate=0.15, num_observations=12,
+        contract_multiplier=1.0,
+    )
+    e = _env()
+    forward = SnowballQuadEngine(
+        params=QuadParams(grid_points=2001, event_stats_mode="forward_density")
+    ).calculate_event_stats(product, e)
+    S, B, sig = 100.0, 80.0, 0.20
+    m = 0.03 - 0.05 - 0.5 * sig * sig
+    T_ = product.get_maturity(e)
+    x = math.log(B / S)
+    p_touch = norm.cdf((x - m * T_) / (sig * math.sqrt(T_))) + (
+        B / S
+    ) ** (2.0 * m / (sig * sig)) * norm.cdf((x + m * T_) / (sig * math.sqrt(T_)))
+    assert abs(forward.ki_ever_probability - p_touch) < 5e-3  # provisional
+
+
+def test_forward_matches_stacked_continuous_ki():
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+    )
+    stacked, forward = _stats_pair(SnowballQuadEngine, product, _env())
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+    assert abs(forward.ki_ever_probability - stacked.ki_ever_probability) < KI_PROB_ATOL
+    assert float(forward.pv).hex() == float(stacked.pv).hex()
+
+
+def test_forward_mass_diagnostic_conserved():
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+    )
+    engine = SnowballQuadEngine(
+        params=QuadParams(grid_points=1001, event_stats_mode="forward_density")
+    )
+    engine.calculate_event_stats(product, _env())
+    # Genuine conservation check: terminal integral of the marched densities
+    # plus the absorbed KO mass (stored by the dispatch as a diagnostic; the
+    # survival/ko fields cannot test this — survival is DEFINED as
+    # 1 - cumulative KO, so any identity built from them is a tautology).
+    assert abs(engine._last_forward_mass_diagnostic - 1.0) < 1e-4  # provisional
