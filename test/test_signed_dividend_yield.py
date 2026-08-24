@@ -16,9 +16,16 @@ def test_continuous_accepts_negative_within_bound():
 
 def test_continuous_rejects_beyond_symmetric_bound():
     with pytest.raises(ValidationError):
-        ContinuousDividendYield(-0.25)
+        ContinuousDividendYield(-1.5)
     with pytest.raises(ValidationError):
-        ContinuousDividendYield(0.25)
+        ContinuousDividendYield(1.5)
+
+
+def test_continuous_accepts_contractual_borrow_carry():
+    # OTC borrow/lending carry (融券率) legitimately exceeds 20%; the sanity
+    # bound now sits at 100% like the term-structure class.
+    assert ContinuousDividendYield(0.2689).get_yield(1.0) == 0.2689
+    assert ContinuousDividendYield(-0.25).get_yield(1.0) == -0.25
 
 
 def test_term_structure_accepts_negative_nodes():

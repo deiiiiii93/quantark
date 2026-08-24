@@ -47,7 +47,11 @@ class ContinuousDividendYield(DividendYield):
         """Validate dividend yield (signed carry allowed, symmetric bound)."""
         if not math.isfinite(self.div_yield):
             raise ValidationError(f"Dividend yield must be finite, got {self.div_yield}")
-        if abs(self.div_yield) > 0.20:  # symmetric sanity bound
+        # Symmetric sanity bound at 100%: catches unit errors (26.89 vs 0.2689)
+        # while accepting contractual borrow/lending carry (融券率) that
+        # legitimately exceeds 20% on OTC trades. Matches the term-structure
+        # class's own magnitude bound.
+        if abs(self.div_yield) > 1.0:
             raise ValidationError(
                 f"Dividend yield magnitude seems unreasonably high: {self.div_yield}"
             )

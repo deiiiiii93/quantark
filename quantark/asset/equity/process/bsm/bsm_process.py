@@ -43,7 +43,7 @@ class BSMProcess:
             raise ValidationError(
                 f"Volatility seems unreasonably high: {self.volatility}"
             )
-        if abs(self.dividend_yield) > 0.20:
+        if abs(self.dividend_yield) > 1.0:  # 100% carry - unit-error sanity check
             raise ValidationError(
                 f"Dividend yield magnitude seems unreasonably high: {self.dividend_yield}"
             )
