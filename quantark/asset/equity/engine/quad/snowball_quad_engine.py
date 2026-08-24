@@ -821,6 +821,25 @@ class SnowballQuadEngine(BaseEngine):
         v_in = np.zeros((n_rows, grid.size), dtype=float)
         v_out = np.zeros((n_rows, grid.size), dtype=float)
 
+        # --- Fused KI-probability surfaces (formerly a second time loop) ---
+        # Four 1D indicator surfaces ride the SAME loop, step parameters and
+        # omega/prefactor kernels as the stacked recursion, but keep their
+        # historical 1D diffusion calls: numpy's complex multiply is not
+        # bitwise-commutative (FMA slotting depends on operand order), and the
+        # batched convolution computes u_fft * omega_fft while the 1D path
+        # computes omega_fft * u_fft — appending these rows to the stack would
+        # drift the KI fields at ULP level. Separate 1D calls keep the fusion
+        # bit-identical to the pre-fusion second walk.
+        fuse_ki = (
+            product.has_ki_barrier and want_ki and not knocked_in_at_valuation
+        )
+        if fuse_ki:
+            # KI-pair terminal condition: knocked-in surface = 1, not-yet = 0.
+            v_in_ki = np.ones(grid.size, dtype=float)
+            v_out_ki = np.zeros(grid.size, dtype=float)
+            v_in_ever = np.ones(grid.size, dtype=float)
+            v_out_ever = np.zeros(grid.size, dtype=float)
+
         for step_index in range(len(times), 0, -1):
             obs_time = times[step_index - 1]
 
@@ -886,6 +905,22 @@ class SnowballQuadEngine(BaseEngine):
                         obs_time, rate, product, disable_ko_after_ki,
                         math_utils, smoothing_width,
                     )
+                if fuse_ki:
+                    # Hard KO absorption for the KI-probability surfaces —
+                    # applied whenever the record matches (no reachability
+                    # gate, no cell-average variant), exactly as the old
+                    # second walk did. The "ever" surfaces carry NO KO
+                    # absorption: KI-ever is a pure first-passage statistic
+                    # of the underlying, counted whether or not the note
+                    # autocalls (matching MC's ki_triggered).
+                    ko_mask = (
+                        spot_grid <= ko_record.barrier
+                        if product.is_reverse
+                        else spot_grid >= ko_record.barrier
+                    )
+                    v_out_ki[ko_mask] = 0.0
+                    if not disable_ko_after_ki:
+                        v_in_ki[ko_mask] = 0.0
 
             if ki_continuous:
                 # KI transition handled via Brownian bridge in diffusion step.
@@ -913,6 +948,21 @@ class SnowballQuadEngine(BaseEngine):
                         product.is_reverse,
                         ko_weight=(ko_w if not disable_ko_after_ki else None),
                     )
+                    if fuse_ki:
+                        # Hard discrete-KI transfer for the fused surfaces.
+                        # "ever" transitions on the raw KI touch (a KI counts
+                        # regardless of a simultaneous KO); the no-KO surface
+                        # uses the mask narrowed by ~ko_mask, exactly as the
+                        # old second walk did.
+                        ki_mask = (
+                            spot_grid >= ki_record.barrier
+                            if product.is_reverse
+                            else spot_grid <= ki_record.barrier
+                        )
+                        v_out_ever[ki_mask] = v_in_ever[ki_mask]
+                        if ko_mask is not None and not disable_ko_after_ki:
+                            ki_mask = ki_mask & ~ko_mask
+                        v_out_ki[ki_mask] = v_in_ki[ki_mask]
 
             tau_step = float(tau[step_index])
             alpha = float(alpha_vec[step_index])
@@ -972,117 +1022,10 @@ class SnowballQuadEngine(BaseEngine):
                     tau_step,
                 )
 
-        initial_surface = v_in if knocked_in_at_valuation else v_out
-        ed_unit = np.array(
-            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_ko)],
-            dtype=float,
-        )
-        ko_times = np.array([rec.observation_time for rec in ko_records], dtype=float)
-        ko_prob = np.zeros(n_ko, dtype=float)
-        ed_ko_cf = np.zeros(n_ko, dtype=float)
-        survival_prob = np.ones(n_ko, dtype=float)
-
-        cumulative = 0.0
-        for i, rec in enumerate(ko_records):
-            df_total = float(df_local(float(rec.observation_time))) * float(
-                self._ko_discount(
-                    rate, float(rec.observation_time), rec.settlement_time,
-                    df_fn=df_local,
-                )
-            )
-            if df_total > 0:
-                ko_prob[i] = float(ed_unit[i] / df_total)
-            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
-            ed_ko_cf[i] = float(ed_unit[i] * payoff)
-            cumulative += ko_prob[i]
-            survival_prob[i] = max(0.0, 1.0 - cumulative)
-
-        pv = float(self.price(product, pricing_env))
-        expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
-
-        # KI probability. Two definitions are computed side by side on parallel
-        # indicator surfaces (investigation 2026-07-01):
-        #   * "no-KO"  (v_*_ki)   -> P(KI ever AND never KO) = the note settles
-        #     knocked-in. KO absorbs the indicator to 0 on BOTH surfaces, so a
-        #     path that knocks in and later autocalls is NOT counted. This is the
-        #     economically relevant "downside exposure" quantity.
-        #   * "ever"   (v_*_ever) -> P(the underlying breaches the KI barrier at
-        #     any point in [0, T], independent of the note's KO/autocall). The
-        #     ever surfaces carry NO KO absorption at all — it is a pure
-        #     first-passage statistic of the underlying process, matching MC's
-        #     `mean(ki_triggered)` (which is likewise computed over the full path,
-        #     independent of KO).
-        # The legacy scalar `ki_probability` keeps QUAD's historical "no-KO"
-        # meaning; the two unambiguous fields are reported alongside it and match
-        # the MC engine to MC noise. This is a DEFINITIONAL split, not a
-        # discretization effect (an independent fine-grid MC reproduces both
-        # numbers by pure path counting), so the no-KO KO/KI masks stay hard here.
-        ki_probability = 0.0
-        ki_ever_probability = 0.0
-        ki_survive_knocked_in_probability = 0.0
-        ki_times = np.array([], dtype=float)
-        ki_event_probability = np.array([], dtype=float)
-        ki_survival_probability = np.array([], dtype=float)
-        if knocked_in_at_valuation:
-            ki_probability = 1.0
-            ki_ever_probability = 1.0
-            # Latched KI: every surviving path settles knocked-in. Reporting 1.0
-            # keeps the downstream min(maturity_prob, ki_survive) attribution
-            # identical to the legacy ki_probability=1.0 convention.
-            ki_survive_knocked_in_probability = 1.0
-            ki_times = np.array([0.0], dtype=float)
-            ki_event_probability = np.array([1.0], dtype=float)
-            ki_survival_probability = np.array([0.0], dtype=float)
-        elif product.has_ki_barrier and want_ki:
-            v_in_ki = np.ones(grid.size, dtype=float)
-            v_out_ki = np.zeros(grid.size, dtype=float)
-            v_in_ever = np.ones(grid.size, dtype=float)
-            v_out_ever = np.zeros(grid.size, dtype=float)
-            for step_index in range(len(times), 0, -1):
-                obs_time = times[step_index - 1]
-                ko_record = self._match_record(obs_time, ko_records)
-                ko_mask = None
-                if ko_record is not None:
-                    ko_mask = (
-                        spot_grid <= ko_record.barrier
-                        if product.is_reverse
-                        else spot_grid >= ko_record.barrier
-                    )
-                    v_out_ki[ko_mask] = 0.0
-                    if not disable_ko_after_ki:
-                        v_in_ki[ko_mask] = 0.0
-                    # The "ever" surfaces (v_*_ever) carry NO KO absorption: KI-ever
-                    # is a pure first-passage statistic of the underlying, counted
-                    # whether or not the note autocalls (matching MC's ki_triggered,
-                    # which is likewise computed over the full path).
-
-                if not ki_continuous and ki_records:
-                    ki_record = self._match_record(obs_time, ki_records)
-                    if ki_record is not None:
-                        ki_mask = (
-                            spot_grid >= ki_record.barrier
-                            if product.is_reverse
-                            else spot_grid <= ki_record.barrier
-                        )
-                        # "ever" transitions on the raw KI touch (a KI counts
-                        # regardless of a simultaneous KO), so use ki_mask before
-                        # it is narrowed by ~ko_mask below.
-                        v_out_ever[ki_mask] = v_in_ever[ki_mask]
-                        if ko_mask is not None and not disable_ko_after_ki:
-                            ki_mask = ki_mask & ~ko_mask
-                        v_out_ki[ki_mask] = v_in_ki[ki_mask]
-
-                tau_step = float(tau[step_index])
-                alpha = float(alpha_vec[step_index])
-                beta = float(beta_vec[step_index])
-                vol_step = float(vol_vec[step_index])
-                prefactor = (
-                    math.exp(-beta * tau_step) / math.sqrt(math.pi * tau_step) / 2.0
-                )
-                omega_array = np.exp(
-                    -(omega_grid**2) / (4.0 * tau_step) - alpha * omega_grid
-                )
-                # Retained pre-diffusion for the bridge correction below.
+            if fuse_ki:
+                # Fused KI-surface transport: identical step kernel
+                # (omega_array/prefactor above), historical 1D call paths
+                # (see the allocation comment for why these stay 1D).
                 v_in_ki_at_obs = v_in_ki
                 v_in_ki = self._diffuse_fft(
                     v_in_ki,
@@ -1171,6 +1114,71 @@ class SnowballQuadEngine(BaseEngine):
                         tau_step,
                     )
 
+        initial_surface = v_in if knocked_in_at_valuation else v_out
+        ed_unit = np.array(
+            [math_utils.interpolate(initial_surface[i], x=0.0) for i in range(n_ko)],
+            dtype=float,
+        )
+        ko_times = np.array([rec.observation_time for rec in ko_records], dtype=float)
+        ko_prob = np.zeros(n_ko, dtype=float)
+        ed_ko_cf = np.zeros(n_ko, dtype=float)
+        survival_prob = np.ones(n_ko, dtype=float)
+
+        cumulative = 0.0
+        for i, rec in enumerate(ko_records):
+            df_total = float(df_local(float(rec.observation_time))) * float(
+                self._ko_discount(
+                    rate, float(rec.observation_time), rec.settlement_time,
+                    df_fn=df_local,
+                )
+            )
+            if df_total > 0:
+                ko_prob[i] = float(ed_unit[i] / df_total)
+            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
+            ed_ko_cf[i] = float(ed_unit[i] * payoff)
+            cumulative += ko_prob[i]
+            survival_prob[i] = max(0.0, 1.0 - cumulative)
+
+        pv = float(self.price(product, pricing_env))
+        expected_discounted_maturity_cf = float(pv - float(np.sum(ed_ko_cf)))
+
+        # KI probability. Two definitions are computed side by side on parallel
+        # indicator surfaces (investigation 2026-07-01):
+        #   * "no-KO"  (v_*_ki)   -> P(KI ever AND never KO) = the note settles
+        #     knocked-in. KO absorbs the indicator to 0 on BOTH surfaces, so a
+        #     path that knocks in and later autocalls is NOT counted. This is the
+        #     economically relevant "downside exposure" quantity.
+        #   * "ever"   (v_*_ever) -> P(the underlying breaches the KI barrier at
+        #     any point in [0, T], independent of the note's KO/autocall). The
+        #     ever surfaces carry NO KO absorption at all — it is a pure
+        #     first-passage statistic of the underlying process, matching MC's
+        #     `mean(ki_triggered)` (which is likewise computed over the full path,
+        #     independent of KO).
+        # The legacy scalar `ki_probability` keeps QUAD's historical "no-KO"
+        # meaning; the two unambiguous fields are reported alongside it and match
+        # the MC engine to MC noise. This is a DEFINITIONAL split, not a
+        # discretization effect (an independent fine-grid MC reproduces both
+        # numbers by pure path counting), so the no-KO KO/KI masks stay hard here.
+        ki_probability = 0.0
+        ki_ever_probability = 0.0
+        ki_survive_knocked_in_probability = 0.0
+        ki_times = np.array([], dtype=float)
+        ki_event_probability = np.array([], dtype=float)
+        ki_survival_probability = np.array([], dtype=float)
+        if knocked_in_at_valuation:
+            ki_probability = 1.0
+            ki_ever_probability = 1.0
+            # Latched KI: every surviving path settles knocked-in. Reporting 1.0
+            # keeps the downstream min(maturity_prob, ki_survive) attribution
+            # identical to the legacy ki_probability=1.0 convention.
+            ki_survive_knocked_in_probability = 1.0
+            ki_times = np.array([0.0], dtype=float)
+            ki_event_probability = np.array([1.0], dtype=float)
+            ki_survival_probability = np.array([0.0], dtype=float)
+        elif product.has_ki_barrier and want_ki:
+            # Readouts from the fused KI surfaces: their whole recursion now
+            # rides the main stacked loop above (one time loop instead of
+            # two), bit-identical to the historical second walk.
             df_T = float(df_local(maturity))
             pv_ki_no_ko = float(math_utils.interpolate(v_out_ki, x=0.0))
             pv_ki_ever = float(math_utils.interpolate(v_out_ever, x=0.0))
