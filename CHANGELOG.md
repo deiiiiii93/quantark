@@ -7,6 +7,20 @@ During 0.x the public API may still change between minor versions.
 
 ## [Unreleased]
 
+### Added
+- QUAD autocallable engines: opt-in `QuadParams.event_stats_mode="forward_density"`
+  computes the event distribution from a forward transition-density march
+  (2–3 surfaces instead of one indicator row per KO observation). `npv` is
+  unchanged (always the backward value solve); distribution fields differ
+  within the banked validation tolerances
+  (`docs/autocall-engine-perf/FORWARD-DENSITY-EVIDENCE-2026-08.md`).
+  KO-reset ignores the flag. Default remains `"stacked"`.
+
+### Changed
+- QUAD stacked event stats: the KI-probability recursion now rides the main
+  stacked recursion as fused surfaces (bit-identical output, one fewer full
+  time loop per `price_with_events`).
+
 ## [0.4.6] - 2026-08-20
 
 0.4.5's test suite passed on the ARM64 machine its goldens were frozen on and
