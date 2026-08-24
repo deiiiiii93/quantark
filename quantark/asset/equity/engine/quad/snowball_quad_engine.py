@@ -1193,8 +1193,33 @@ class SnowballQuadEngine(BaseEngine):
             )
         else:
             extra_fields = {}
-        # Remove extra cashflow streams (Phoenix coupons) from the maturity field
-        # so pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
+
+        return self._assemble_event_stats(
+            product=product, pricing_env=pricing_env, pv=pv,
+            ko_records=ko_records, ko_times=ko_times, ko_prob=ko_prob,
+            survival_prob=survival_prob, ed_ko_cf=ed_ko_cf,
+            expected_discounted_maturity_cf=expected_discounted_maturity_cf,
+            ki_probability=ki_probability, ki_times=ki_times,
+            ki_event_probability=ki_event_probability,
+            ki_survival_probability=ki_survival_probability,
+            ki_ever_probability=ki_ever_probability,
+            ki_survive_knocked_in_probability=ki_survive_knocked_in_probability,
+            extra_fields=extra_fields,
+        )
+
+    def _assemble_event_stats(
+        self, *, product, pricing_env, pv, ko_records, ko_times, ko_prob,
+        survival_prob, ed_ko_cf, expected_discounted_maturity_cf,
+        ki_probability, ki_times, ki_event_probability, ki_survival_probability,
+        ki_ever_probability, ki_survive_knocked_in_probability, extra_fields,
+    ):
+        """Shared stats assembly for the stacked and forward event-stats modes.
+
+        ``expected_discounted_maturity_cf`` arrives BEFORE the coupon subtraction;
+        extra cashflow streams (Phoenix coupons) are removed here so
+        pv = sum(ko) + sum(coupon) + maturity stays correctly classified.
+        """
+        n_ko = len(ko_records)
         coupon_cf = extra_fields.get("expected_discounted_coupon_cashflow")
         if coupon_cf is not None:
             expected_discounted_maturity_cf -= float(np.sum(coupon_cf))
