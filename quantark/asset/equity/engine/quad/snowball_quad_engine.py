@@ -117,6 +117,9 @@ class SnowballQuadEngine(BaseEngine):
         # needs only a handful of entries; a term-structure env may produce one
         # per step, where eviction degrades gracefully to the uncached cost.
         self._bridge_kernel_cache: dict = {}
+        # Mass-conservation diagnostic of the last forward-density event-stats
+        # run (terminal density mass + absorbed KO mass); observational only.
+        self._last_forward_mass_diagnostic: Optional[float] = None
 
     def price(
         self, product: BaseEquityProduct, pricing_env: PricingEnvironment
@@ -812,6 +815,47 @@ class SnowballQuadEngine(BaseEngine):
         omega_grid = math_utils.z_grid
 
         disable_ko_after_ki = product.barrier_config.disable_ko_after_ki
+
+        if str(self.params.event_stats_mode) == "forward_density":
+            q = self._forward_event_quantities(
+                product=product, pricing_env=pricing_env,
+                math_utils=math_utils, times=times, tau=tau,
+                alpha_vec=alpha_vec, vol_vec=vol_vec, dt=dt,
+                ko_records=ko_records, ki_records=ki_records,
+                ki_continuous=ki_continuous,
+                ki_barrier_continuous=ki_barrier_continuous,
+                reachable_ko=reachable_ko, spot=spot, spot_grid=spot_grid,
+                smoothing_width=smoothing_width,
+                disable_ko_after_ki=disable_ko_after_ki,
+                knocked_in_at_valuation=knocked_in_at_valuation,
+                want_ki=want_ki, want_coupon=want_coupon,
+                df_local=df_local, rate=rate,
+            )
+            pv = float(self.price(product, pricing_env))
+            ko_times = np.array(
+                [rec.observation_time for rec in ko_records], dtype=float
+            )
+            # Diagnostic only (spec section 8): terminal mass + absorbed KO
+            # mass; drifts from 1.0 by edge leakage. Never used numerically.
+            self._last_forward_mass_diagnostic = float(q["mass_diagnostic"])
+            return self._assemble_event_stats(
+                product=product, pricing_env=pricing_env, pv=pv,
+                ko_records=ko_records, ko_times=ko_times,
+                ko_prob=q["ko_prob"], survival_prob=q["survival_prob"],
+                ed_ko_cf=q["ed_ko_cf"],
+                expected_discounted_maturity_cf=float(
+                    pv - float(np.sum(q["ed_ko_cf"]))
+                ),
+                ki_probability=q["ki_probability"],
+                ki_times=q["ki_times"],
+                ki_event_probability=q["ki_event_probability"],
+                ki_survival_probability=q["ki_survival_probability"],
+                ki_ever_probability=q["ki_ever_probability"],
+                ki_survive_knocked_in_probability=q[
+                    "ki_survive_knocked_in_probability"
+                ],
+                extra_fields=q["extra_fields"],
+            )
 
         # --- KO indicator recursion (stacked over KO observations) ---
         # Rows [0..n_ko-1] are KO indicators; subclasses may append extra rows
@@ -1853,6 +1897,242 @@ class SnowballQuadEngine(BaseEngine):
             np.where(safe, -2.0 * d0 * d1 / denom, 0.0), -745.0, 0.0
         )
         return np.where(safe, np.exp(exponent), 1.0)
+
+    # --- Extra forward-readout hooks (Phoenix overrides; Snowball no-ops) ---
+
+    def _forward_extra_state(self, n_ko: int):
+        return None
+
+    def _forward_extra_readouts_at_obs(
+        self, state, ko_index, ko_record, p_alive, math_utils,
+        smoothing_width, product,
+    ) -> None:
+        return None
+
+    def _forward_extra_fields(
+        self, state, ko_records, product, pricing_env, rate, df_local
+    ) -> dict:
+        return {}
+
+    def _forward_event_quantities(
+        self, *, product, pricing_env, math_utils, times, tau, alpha_vec,
+        vol_vec, dt, ko_records, ki_records, ki_continuous,
+        ki_barrier_continuous, reachable_ko, spot, spot_grid,
+        smoothing_width, disable_ko_after_ki, knocked_in_at_valuation,
+        want_ki, want_coupon, df_local, rate,
+    ) -> dict:
+        """Forward transition-density march producing the event-distribution
+        quantities (spec section 4). 2-3 surfaces: p_out / p_in (KO-absorbing,
+        KI-splitting) and, when a KI stream is requested, p_notouch (bridge
+        survival only, no KO absorption) for the "ever" statistic."""
+        grid = math_utils.grid
+        n_ko = len(ko_records)
+        full_p_lr, full_p_ur, full_p0 = 0, grid.size - 1, (grid.size - 1) % 2
+        absorbed = np.zeros(n_ko, dtype=float)
+        ever_touched = 0.0
+        track_ever = bool(
+            want_ki and product.has_ki_barrier and not knocked_in_at_valuation
+        )
+        extra_state = self._forward_extra_state(n_ko) if want_coupon else None
+        log_ki = (
+            safe_log(ki_barrier_continuous / spot) if ki_continuous else None
+        )
+
+        # Analytic first step to times[0] (interval index 1).
+        tau1, alpha1 = float(tau[1]), float(alpha_vec[1])
+        p_free = self._forward_seed(math_utils, tau1, alpha1)
+        if knocked_in_at_valuation:
+            p_in = p_free
+            p_out = np.zeros_like(p_free)
+            p_nt = None
+        elif ki_continuous and product.has_ki_barrier:
+            touch0 = self._forward_seed_touch_probability(
+                math_utils, tau1, log_ki, product.is_reverse
+            )
+            p_out = p_free * (1.0 - touch0)
+            p_in = p_free * touch0
+            if track_ever:
+                ever_touched += self._density_integral(math_utils, p_in)
+                p_nt = p_out.copy()
+            else:
+                p_nt = None
+        else:
+            p_out = p_free
+            p_in = np.zeros_like(p_free)
+            p_nt = p_free.copy() if track_ever else None
+
+        for step_index in range(1, len(times) + 1):
+            if step_index > 1:
+                tau_step = float(tau[step_index])
+                alpha = float(alpha_vec[step_index])
+                vol_step = float(vol_vec[step_index])
+                omega_fwd, prefactor_fwd = self._forward_kernel(
+                    math_utils, tau_step, alpha
+                )
+                rows = [p_out, p_in] + ([p_nt] if p_nt is not None else [])
+                transported = self._diffuse_density(
+                    np.vstack(rows), math_utils, omega_fwd, prefactor_fwd,
+                    full_p_lr, full_p_ur, full_p0,
+                )
+                if ki_continuous and not knocked_in_at_valuation:
+                    band = self._bridge_band(tau_step, math_utils.h, grid.size)
+                    denom = vol_step * vol_step * float(dt[step_index])
+                    kernels = self._bridge_kernels(
+                        math_utils, band, tau_step, -alpha, denom,
+                        log_ki, product.is_reverse,
+                    )
+                    touch_rows = np.vstack(
+                        [p_out] + ([p_nt] if p_nt is not None else [])
+                    )
+                    touched = np.zeros(
+                        (touch_rows.shape[0], grid.size), dtype=float
+                    )
+                    for source, target, kernel in kernels:
+                        touched[:, target] += (
+                            prefactor_fwd * kernel * touch_rows[:, source]
+                        )
+                    p_out = transported[0] - touched[0]
+                    p_in = transported[1] + touched[0]
+                    if p_nt is not None:
+                        p_nt = transported[2] - touched[1]
+                        ever_touched += self._density_integral(
+                            math_utils, touched[1]
+                        )
+                else:
+                    p_out = transported[0]
+                    p_in = transported[1]
+                    if p_nt is not None:
+                        p_nt = transported[2]
+
+            obs_time = times[step_index - 1]
+            ko_index, ko_record = None, None
+            for idx, rec in enumerate(ko_records):
+                if is_close(obs_time, rec.observation_time,
+                            abs_tol=Tolerance.PRECISION):
+                    ko_index, ko_record = idx, rec
+                    break
+            if ko_record is not None:
+                if extra_state is not None:
+                    # Coupons read the alive density BEFORE KO absorption
+                    # (a coupon on a simultaneous KO is still paid).
+                    self._forward_extra_readouts_at_obs(
+                        extra_state, int(ko_index), ko_record, p_out + p_in,
+                        math_utils, smoothing_width, product,
+                    )
+                if bool(reachable_ko[int(ko_index)]):
+                    if self._use_cell_average_events():
+                        zero = np.zeros((1, grid.size), dtype=float)
+                        proj = self._project_quad_event(
+                            grid, ko_record.barrier, spot,
+                            v_survive=p_out[None, :], v_breach=zero,
+                            breach_up=not product.is_reverse,
+                        )[0]
+                        absorbed_mass = self._density_integral(
+                            math_utils, p_out
+                        ) - self._density_integral(math_utils, proj)
+                        p_out = proj
+                        if not disable_ko_after_ki:
+                            proj_in = self._project_quad_event(
+                                grid, ko_record.barrier, spot,
+                                v_survive=p_in[None, :], v_breach=zero,
+                                breach_up=not product.is_reverse,
+                            )[0]
+                            absorbed_mass += self._density_integral(
+                                math_utils, p_in
+                            ) - self._density_integral(math_utils, proj_in)
+                            p_in = proj_in
+                    else:
+                        ko_w = self._event_weight(
+                            grid, ko_record.barrier, spot, smoothing_width,
+                            trigger_is_down=product.is_reverse,
+                        )
+                        absorbed_mass = self._density_integral(
+                            math_utils, ko_w * p_out
+                        )
+                        p_out = p_out * (1.0 - ko_w)
+                        if not disable_ko_after_ki:
+                            absorbed_mass += self._density_integral(
+                                math_utils, ko_w * p_in
+                            )
+                            p_in = p_in * (1.0 - ko_w)
+                    absorbed[int(ko_index)] = absorbed_mass
+
+            if (
+                (not ki_continuous)
+                and ki_records
+                and not knocked_in_at_valuation
+            ):
+                ki_record = self._match_record(obs_time, ki_records)
+                if ki_record is not None:
+                    ki_w = self._event_weight(
+                        grid, ki_record.barrier, spot, smoothing_width,
+                        trigger_is_down=not product.is_reverse,
+                    )
+                    transfer = ki_w * p_out
+                    p_out = p_out - transfer
+                    p_in = p_in + transfer
+                    if p_nt is not None:
+                        touched_nt = ki_w * p_nt
+                        ever_touched += self._density_integral(
+                            math_utils, touched_nt
+                        )
+                        p_nt = p_nt - touched_nt
+
+        # --- Readouts ---
+        ko_prob = absorbed.copy()
+        ed_ko_cf = np.zeros(n_ko, dtype=float)
+        survival_prob = np.ones(n_ko, dtype=float)
+        cumulative = 0.0
+        for i, rec in enumerate(ko_records):
+            obs = float(rec.observation_time)
+            df_total = float(df_local(obs)) * float(
+                self._ko_discount(rate, obs, rec.settlement_time,
+                                  df_fn=df_local)
+            )
+            payoff = float(rec.payoff) if rec.payoff is not None else 0.0
+            ed_ko_cf[i] = ko_prob[i] * df_total * payoff
+            cumulative += ko_prob[i]
+            survival_prob[i] = max(0.0, 1.0 - cumulative)
+
+        ki_probability = 0.0
+        ki_ever_probability = 0.0
+        ki_survive_knocked_in_probability = 0.0
+        ki_times = np.array([], dtype=float)
+        ki_event_probability = np.array([], dtype=float)
+        ki_survival_probability = np.array([], dtype=float)
+        if knocked_in_at_valuation:
+            ki_probability = 1.0
+            ki_ever_probability = 1.0
+            ki_survive_knocked_in_probability = 1.0
+            ki_times = np.array([0.0], dtype=float)
+            ki_event_probability = np.array([1.0], dtype=float)
+            ki_survival_probability = np.array([0.0], dtype=float)
+        elif product.has_ki_barrier and want_ki:
+            ki_probability = self._density_integral(math_utils, p_in)
+            ki_survive_knocked_in_probability = ki_probability
+            ki_ever_probability = float(ever_touched)
+
+        extra_fields = (
+            self._forward_extra_fields(
+                extra_state, ko_records, product, pricing_env, rate, df_local
+            )
+            if extra_state is not None
+            else {}
+        )
+        terminal_mass = self._density_integral(math_utils, p_out + p_in)
+        return {
+            "ko_prob": ko_prob,
+            "ed_ko_cf": ed_ko_cf,
+            "survival_prob": survival_prob,
+            "ki_probability": ki_probability,
+            "ki_ever_probability": ki_ever_probability,
+            "ki_survive_knocked_in_probability": ki_survive_knocked_in_probability,
+            "ki_times": ki_times,
+            "ki_event_probability": ki_event_probability,
+            "ki_survival_probability": ki_survival_probability,
+            "extra_fields": extra_fields,
+            "mass_diagnostic": float(terminal_mass + np.sum(absorbed)),
+        }
 
     def _tail_correction(
         self,

@@ -82,3 +82,103 @@ def test_forward_density_undiscounted_call_value():
     d1 = (math.log(fwd / strike) + 0.5 * sig * sig) / sig
     want = fwd * norm.cdf(d1) - strike * norm.cdf(d1 - sig)
     assert abs(got - want) / want < FWD_VALUE_RTOL
+
+
+# --- Forward-vs-stacked parity (Task 5+) ---
+
+from datetime import datetime  # noqa: E402
+
+from quantark.asset.equity.product.option.snowball_config import (  # noqa: E402
+    AccrualConfig,
+    BarrierConfig,
+    PayoffConfig,
+)
+from quantark.asset.equity.product.option.snowball_helpers import (  # noqa: E402
+    create_standard_snowball,
+)
+from quantark.asset.equity.product.option.snowball_option import SnowballOption  # noqa: E402
+from quantark.param import (  # noqa: E402
+    ContinuousDividendYield,
+    FlatRateCurve,
+    FlatVolSurface,
+    SpotQuote,
+)
+from quantark.priceenv import PricingEnvironment  # noqa: E402
+from quantark.util.enum import CouponPayType, ObservationType  # noqa: E402
+
+# Provisional forward-vs-stacked parity tolerances at grid 2001 (Task 9 pilot
+# tightens and banks these).
+KO_PROB_ATOL = 2e-3
+KI_PROB_ATOL = 2e-2
+CF_RTOL = 5e-3
+
+
+def _env():
+    return PricingEnvironment(
+        spot_quote=SpotQuote(spot=100.0),
+        vol_surface=FlatVolSurface(volatility=0.20),
+        rate_curve=FlatRateCurve(rate=0.03),
+        div_yield=ContinuousDividendYield(div_yield=0.05),
+        valuation_date=datetime(2026, 6, 30),
+    )
+
+
+def _stats_pair(engine_cls, product, env, grid_points=2001, **extra_params):
+    stacked = engine_cls(
+        params=QuadParams(grid_points=grid_points, **extra_params)
+    ).calculate_event_stats(product, env)
+    forward = engine_cls(
+        params=QuadParams(grid_points=grid_points,
+                          event_stats_mode="forward_density", **extra_params)
+    ).calculate_event_stats(product, env)
+    return stacked, forward
+
+
+def _no_ki_snowball():
+    # create_standard_snowball defaults a KI barrier in when ki_barrier=None,
+    # so the KI-free contract is built directly from the configs.
+    n_obs = 23
+    return SnowballOption(
+        initial_price=100.0, strike=100.0, maturity=1.9,
+        contract_multiplier=10_000.0,
+        barrier_config=BarrierConfig(
+            ko_barrier=103.0, ko_rate=0.15,
+            ko_observation_type=ObservationType.DISCRETE,
+            ko_observation_dates=[(i + 1) * 1.9 / n_obs for i in range(n_obs)],
+            ki_barrier=None,
+        ),
+        payoff_config=PayoffConfig(rebate_rate=0.15, include_principal=False),
+        accrual_config=AccrualConfig(
+            coupon_pay_type=CouponPayType.INSTANT, is_annualized=True
+        ),
+    )
+
+
+def test_forward_matches_stacked_no_ki_snowball():
+    stacked, forward = _stats_pair(SnowballQuadEngine, _no_ki_snowball(), _env())
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert np.max(np.abs(forward.survival_probability - stacked.survival_probability)) < KO_PROB_ATOL
+    np.testing.assert_allclose(
+        forward.expected_discounted_ko_cashflow,
+        stacked.expected_discounted_ko_cashflow,
+        rtol=CF_RTOL, atol=1e-4,
+    )
+    # npv path is shared: pv must be EXACTLY the backward price in both modes.
+    assert float(forward.pv).hex() == float(stacked.pv).hex()
+
+
+def _discrete_ki_snowball():
+    return create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+        ki_observation_type=ObservationType.DISCRETE, ki_continuous=False,
+        ki_observation_dates=[(d + 1) * 1.9 / 96 for d in range(96)],
+    )
+
+
+def test_forward_matches_stacked_discrete_ki():
+    stacked, forward = _stats_pair(SnowballQuadEngine, _discrete_ki_snowball(), _env())
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert abs(forward.ki_probability - stacked.ki_probability) < KI_PROB_ATOL
+    assert abs(forward.ki_ever_probability - stacked.ki_ever_probability) < KI_PROB_ATOL
