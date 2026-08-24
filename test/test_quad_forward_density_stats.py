@@ -106,11 +106,13 @@ from quantark.param import (  # noqa: E402
 from quantark.priceenv import PricingEnvironment  # noqa: E402
 from quantark.util.enum import CouponPayType, ObservationType  # noqa: E402
 
-# Provisional forward-vs-stacked parity tolerances at grid 2001 (Task 9 pilot
-# tightens and banks these).
-KO_PROB_ATOL = 2e-3
-KI_PROB_ATOL = 2e-2
-CF_RTOL = 5e-3
+# Forward-vs-stacked parity tolerances at grid 2001: 2x the measured pilot
+# deltas, banked in docs/autocall-engine-perf/FORWARD-DENSITY-EVIDENCE-2026-08.md.
+# ki deltas are dominated by the STACKED side's hard-mask O(h) noise (the
+# forward values are grid-stable and MC-confirmed — see the evidence doc).
+KO_PROB_ATOL = 6e-4
+KI_PROB_ATOL = 1e-2
+CF_RTOL = 3e-3
 
 
 def _env():
@@ -202,7 +204,8 @@ def test_forward_ki_ever_matches_analytic_first_passage():
     p_touch = norm.cdf((x - m * T_) / (sig * math.sqrt(T_))) + (
         B / S
     ) ** (2.0 * m / (sig * sig)) * norm.cdf((x + m * T_) / (sig * math.sqrt(T_)))
-    assert abs(forward.ki_ever_probability - p_touch) < 5e-3  # provisional
+    # Banked: measured 1.11e-5 at grid 2001 (4.45e-5 @1001, 2.78e-6 @4001).
+    assert abs(forward.ki_ever_probability - p_touch) < 3e-5
 
 
 def test_forward_matches_stacked_continuous_ki():
@@ -222,19 +225,40 @@ def test_forward_matches_stacked_phoenix():
     from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
     from quantark.asset.equity.product.option.phoenix_helpers import create_standard_phoenix
 
+    # memory_coupon=False: the helper's default (memory) phoenix carries NO
+    # expected_discounted_coupon_cashflow (path-dependent amount), which would
+    # make the allclose below vacuous (empty vs empty).
+    product = create_standard_phoenix(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, coupon_barrier=85.0, coupon_rate=0.01,
+        num_observations=23, memory_coupon=False,
+    )
+    stacked, forward = _stats_pair(PhoenixQuadEngine, product, _env())
+    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
+    assert np.max(np.abs(forward.coupon_probability - stacked.coupon_probability)) < KO_PROB_ATOL
+    assert np.asarray(forward.expected_discounted_coupon_cashflow).size == 23
+    np.testing.assert_allclose(
+        forward.expected_discounted_coupon_cashflow,
+        stacked.expected_discounted_coupon_cashflow,
+        rtol=CF_RTOL, atol=1e-4,
+    )
+    assert float(forward.pv).hex() == float(stacked.pv).hex()
+
+
+def test_forward_matches_stacked_phoenix_memory_coupon_probability():
+    from quantark.asset.equity.engine.quad.phoenix_quad_engine import PhoenixQuadEngine
+    from quantark.asset.equity.product.option.phoenix_helpers import create_standard_phoenix
+
+    # The memory phoenix still exposes coupon_probability; only the cashflow
+    # conversion is suppressed (amount is path-dependent under memory).
     product = create_standard_phoenix(
         initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
         ki_barrier=75.0, coupon_barrier=85.0, coupon_rate=0.01,
         num_observations=23,
     )
     stacked, forward = _stats_pair(PhoenixQuadEngine, product, _env())
-    assert np.max(np.abs(forward.ko_probability - stacked.ko_probability)) < KO_PROB_ATOL
     assert np.max(np.abs(forward.coupon_probability - stacked.coupon_probability)) < KO_PROB_ATOL
-    np.testing.assert_allclose(
-        forward.expected_discounted_coupon_cashflow,
-        stacked.expected_discounted_coupon_cashflow,
-        rtol=CF_RTOL, atol=1e-4,
-    )
+    assert np.asarray(forward.expected_discounted_coupon_cashflow).size == 0
     assert float(forward.pv).hex() == float(stacked.pv).hex()
 
 
@@ -252,7 +276,9 @@ def test_forward_mass_diagnostic_conserved():
     # plus the absorbed KO mass (stored by the dispatch as a diagnostic; the
     # survival/ko fields cannot test this — survival is DEFINED as
     # 1 - cumulative KO, so any identity built from them is a tautology).
-    assert abs(engine._last_forward_mass_diagnostic - 1.0) < 1e-4  # provisional
+    # Banked: measured ~1.9e-14 for this case (the pilot's worst mass defect,
+    # 6.2e-4, is the 96-date discrete-KI case at grid 1001 only).
+    assert abs(engine._last_forward_mass_diagnostic - 1.0) < 1e-8
 
 
 # --- Matrix and contract coverage (Task 8) ---
@@ -368,6 +394,28 @@ def test_forward_pwe_npv_bit_equal_to_stacked():
         params=QuadParams(grid_points=1001, event_stats_mode="forward_density")
     ).price_with_events(product, e).npv
     assert float(npv_stacked).hex() == float(npv_forward).hex()
+
+
+@pytest.mark.slow
+def test_forward_matches_mc_event_stats():
+    from quantark.asset.equity.engine.mc.snowball_mc_engine import SnowballMCEngine
+    from quantark.asset.equity.param import MCParams
+
+    product = create_standard_snowball(
+        initial_price=100.0, strike=100.0, maturity=1.9, ko_barrier=103.0,
+        ki_barrier=75.0, ko_rate=0.15, num_observations=23,
+        contract_multiplier=10_000.0,
+    )
+    e = _env()
+    forward = SnowballQuadEngine(
+        params=QuadParams(grid_points=2001, event_stats_mode="forward_density")
+    ).calculate_event_stats(product, e)
+    mc = SnowballMCEngine(
+        params=MCParams(num_paths=500_000, time_steps=479, use_qmc=True, seed=7)
+    ).calculate_event_stats(product, e)
+    # 3-sigma band on a 500k-path binomial proportion is ~0.002 absolute.
+    assert np.max(np.abs(forward.ko_probability - mc.ko_probability)) < 4e-3
+    assert abs(forward.ki_ever_probability - mc.ki_ever_probability) < 6e-3
 
 
 def test_ko_reset_ignores_forward_flag():
