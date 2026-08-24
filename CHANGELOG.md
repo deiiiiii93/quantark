@@ -5,6 +5,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
+## [0.4.7rc3] - 2026-08-24
+
+### Added
+- QUAD autocallable engines: opt-in `QuadParams.event_stats_mode="forward_density"`
+  computes the event distribution from a forward transition-density march
+  (2–3 surfaces instead of one indicator row per KO observation). `npv` is
+  unchanged (always the backward value solve); distribution fields differ
+  within the banked validation tolerances
+  (`docs/autocall-engine-perf/FORWARD-DENSITY-EVIDENCE-2026-08.md`).
+  KO-reset ignores the flag. Default remains `"stacked"`.
+
+### Changed
+- Snowball/Phoenix PDE: the product cache token is now memoized per solve
+  (`SnowballPDESolver._product_token_memo`, cleared at every solve entry).
+  The boundary-condition path previously re-serialized the whole product —
+  every KO/KI schedule record — once per time step, >90% of a snowball
+  solve; bit-identical output, ~7× faster per solve
+  (`docs/autocall-engine-perf/FINDINGS-2026-08-24.md`).
+- QUAD stacked event stats: the KI-probability recursion now rides the main
+  stacked recursion as fused surfaces (bit-identical output, one fewer full
+  time loop per `price_with_events`); identically-zero indicator rows are
+  skipped in the diffusion/bridge steps and the row-independent bridge
+  kernel stack is cached per engine (64-entry bound). Bit-identical output.
+- QUAD `price_with_events` now honors `streams` pruning [§11.1], mirroring
+  the PDE contract: KI-probability recursion and Phoenix coupon rows are
+  skipped when no requested stream reads them. Callers that pass `streams`
+  (the execution framework's greek-bump runner does) get `0`/empty for
+  pruned distribution fields where QUAD previously returned computed values;
+  `ko_probability`/`survival`/`pv` and all requested fields are unchanged.
+  `streams=None` keeps the old full computation.
+
 ## [0.4.7rc2] - 2026-08-21
 
 ### Changed
