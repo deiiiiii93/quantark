@@ -5,49 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/).
 During 0.x the public API may still change between minor versions.
 
-## [0.4.7rc3] - 2026-08-24
+## [Unreleased]
 
-### Added
-- QUAD autocallable engines: opt-in `QuadParams.event_stats_mode="forward_density"`
-  computes the event distribution from a forward transition-density march
-  (2–3 surfaces instead of one indicator row per KO observation). `npv` is
-  unchanged (always the backward value solve); distribution fields differ
-  within the banked validation tolerances
-  (`docs/autocall-engine-perf/FORWARD-DENSITY-EVIDENCE-2026-08.md`).
-  KO-reset ignores the flag. Default remains `"stacked"`.
-
-### Changed
-- Snowball/Phoenix PDE: the product cache token is now memoized per solve
-  (`SnowballPDESolver._product_token_memo`, cleared at every solve entry).
-  The boundary-condition path previously re-serialized the whole product —
-  every KO/KI schedule record — once per time step, >90% of a snowball
-  solve; bit-identical output, ~7× faster per solve
-  (`docs/autocall-engine-perf/FINDINGS-2026-08-24.md`).
-- QUAD stacked event stats: the KI-probability recursion now rides the main
-  stacked recursion as fused surfaces (bit-identical output, one fewer full
-  time loop per `price_with_events`); identically-zero indicator rows are
-  skipped in the diffusion/bridge steps and the row-independent bridge
-  kernel stack is cached per engine (64-entry bound). Bit-identical output.
-- QUAD `price_with_events` now honors `streams` pruning [§11.1], mirroring
-  the PDE contract: KI-probability recursion and Phoenix coupon rows are
-  skipped when no requested stream reads them. Callers that pass `streams`
-  (the execution framework's greek-bump runner does) get `0`/empty for
-  pruned distribution fields where QUAD previously returned computed values;
-  `ko_probability`/`survival`/`pv` and all requested fields are unchanged.
-  `streams=None` keeps the old full computation.
-
-## [0.4.7rc2] - 2026-08-21
-
-### Changed
-- **The flat dividend/carry sanity bound moves from 20% to 100%**
-  (`ContinuousDividendYield`, the BSM process gate, and the market-data
-  point model), matching `TermStructureDividendYield`'s own magnitude
-  bound. OTC borrow/lending carry (融券率) legitimately exceeds 20% on
-  some trades; the 100% ceiling still rejects unit errors (entering
-  `26.89` for `0.2689`). Values between 20% and 100% now price instead of
-  raising `ValidationError`.
-
-## [0.4.7rc1] - 2026-08-21
+## [0.4.7] - 2026-08-25
 
 Settlement-date-aware payoff discounting across the equity option stack
 (spec: `docs/superpowers/specs/2026-07-29-equity-option-settlement-date-support-design.md`,
@@ -55,6 +15,11 @@ plan: `docs/plans/2026-07-29-equity-option-settlement-date-support.md`).
 Determination and payment are now two separate clocks: underlying dynamics,
 monitoring and optimal exercise stop at determination; every cashflow
 discounts at its own payment time with curve-exact discount factors.
+
+Alongside it, autocallable batch pricing gets its performance pass — the PDE
+solve loop no longer re-serializes the product on every time step, and the
+QUAD event-stats recursion gains a fused KI walk plus an opt-in forward
+transition-density mode (`docs/autocall-engine-perf/`).
 
 ### Added
 - `quantark.asset.equity.settlement`: shared settlement timing kernel —
@@ -86,6 +51,40 @@ discounts at its own payment time with curve-exact discount factors.
 - Payment-aware event statistics: determination/payment time arrays with
   undiscounted and discounted expected cashflows that reconcile to engine
   PV.
+- QUAD autocallable engines: opt-in `QuadParams.event_stats_mode="forward_density"`
+  computes the event distribution from a forward transition-density march
+  (2–3 surfaces instead of one indicator row per KO observation). `npv` is
+  unchanged (always the backward value solve); distribution fields differ
+  within the banked validation tolerances
+  (`docs/autocall-engine-perf/FORWARD-DENSITY-EVIDENCE-2026-08.md`).
+  KO-reset ignores the flag. Default remains `"stacked"`.
+
+### Changed
+- Snowball/Phoenix PDE: the product cache token is now memoized per solve
+  (`SnowballPDESolver._product_token_memo`, cleared at every solve entry).
+  The boundary-condition path previously re-serialized the whole product —
+  every KO/KI schedule record — once per time step, >90% of a snowball
+  solve; bit-identical output, ~7× faster per solve
+  (`docs/autocall-engine-perf/FINDINGS-2026-08-24.md`).
+- QUAD stacked event stats: the KI-probability recursion now rides the main
+  stacked recursion as fused surfaces (bit-identical output, one fewer full
+  time loop per `price_with_events`); identically-zero indicator rows are
+  skipped in the diffusion/bridge steps and the row-independent bridge
+  kernel stack is cached per engine (64-entry bound). Bit-identical output.
+- QUAD `price_with_events` now honors `streams` pruning [§11.1], mirroring
+  the PDE contract: KI-probability recursion and Phoenix coupon rows are
+  skipped when no requested stream reads them. Callers that pass `streams`
+  (the execution framework's greek-bump runner does) get `0`/empty for
+  pruned distribution fields where QUAD previously returned computed values;
+  `ko_probability`/`survival`/`pv` and all requested fields are unchanged.
+  `streams=None` keeps the old full computation.
+- **The flat dividend/carry sanity bound moves from 20% to 100%**
+  (`ContinuousDividendYield`, the BSM process gate, and the market-data
+  point model), matching `TermStructureDividendYield`'s own magnitude
+  bound. OTC borrow/lending carry (融券率) legitimately exceeds 20% on
+  some trades; the 100% ceiling still rejects unit errors (entering
+  `26.89` for `0.2689`). Values between 20% and 100% now price instead of
+  raising `ValidationError`.
 
 ### Compatibility
 - Zero-lag identity: with no settlement terms supplied, payment equals
