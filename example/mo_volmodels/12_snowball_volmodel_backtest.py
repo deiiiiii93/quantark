@@ -110,6 +110,14 @@ DEFAULT_HISTORY_DIR = PROJECT_ROOT / "example/mo_volmodels/data/history"
 DEFAULT_GATE_DECISION = PROJECT_ROOT / "output/pde_convergence_gate/gate_decision.json"
 DEFAULT_ADI_GREEK_DECISION = (
     PROJECT_ROOT
+    / "docs/modelvalidation/certificates/adi2d-snowball-greeks"
+    / "2026-08-19/certificate.json"
+)
+# The legacy source: the raw stage-17 decision. Still accepted, but it sits
+# beside 14.4 MB of Monte-Carlo rows that the repository deliberately does not
+# carry, so it only resolves on a machine holding them.
+LEGACY_ADI_GREEK_DECISION = (
+    PROJECT_ROOT
     / "output/adi_greek_certification/adi_greek_certification_decision.json"
 )
 ADI_GREEK_DECISION_SCHEMA_VERSION = 12
@@ -467,6 +475,157 @@ def load_gate_routing(path: Path) -> GateRouting:
         routes=routes,
         pde_params=pde_params,
         mc_params=mc_params,
+    )
+
+
+ADI_GREEK_CERTIFICATE_STUDY = "adi2d-snowball-greeks"
+
+# The certified candidate names, and the study variant each one admits.
+CERTIFIED_CANDIDATE_VARIANTS = {
+    "equity.snowball.heston_pde": "heston",
+    "equity.snowball.heston_slv_pde": "heston_slv",
+}
+
+
+def load_adi_greek_admission(path: Path | str) -> ADIGreekRouting:
+    """Load Greek admission from whichever artifact ``path`` names.
+
+    A modelvalidation certificate always carries ``projected_sha256``; a
+    stage-17 decision always carries ``schema_version``. Neither key is
+    optional in its own format, so this dispatches on shape rather than
+    guessing, and refuses a payload that is neither instead of trying both.
+    """
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text())
+    except OSError as exc:
+        raise ValidationError(
+            f"ADI Greek admission artifact not readable at {path}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"{path} is not valid JSON: {exc}") from exc
+    if "projected_sha256" in payload:
+        return load_adi_greek_routing_from_certificate(path)
+    if "schema_version" in payload:
+        return load_adi_greek_routing(path)
+    raise ValidationError(
+        f"{path} is neither a modelvalidation certificate (projected_sha256) "
+        "nor a stage-17 decision (schema_version)"
+    )
+
+
+def load_adi_greek_routing_from_certificate(path: Path | str) -> ADIGreekRouting:
+    """Greek admission from the committed modelvalidation certificate.
+
+    Preferred over ``load_adi_greek_routing``, which reads the raw stage-17
+    payload.  Those payloads are 14.4 MB of Monte-Carlo row dumps and are
+    deliberately NOT committed -- the repository publishes their identity
+    instead -- so routing from them only ever worked on a machine that happened
+    to hold them.  The certificate is committed, recomputes its own digest, and
+    ``test/modelvalidation/test_banked_certificates.py`` re-runs both ADI
+    solvers over all fourteen banked cells on every commit, so the claim that
+    the engines still produce the certified numbers is continuously checked
+    rather than asserted once.
+
+    Fails closed at five seams: the modelvalidation validator (structure,
+    verdicts, decision vocabulary, and a RECOMPUTED ``projected_sha256``), the
+    study name, the quick flag, every cell's verdict, and every aggregate's
+    verdict.  A candidate that is not ADMITTED routes to
+    ``excluded_greek_unresolved``; stage 12 then excludes that variant outright
+    rather than substituting daily MC Greeks.
+    """
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text())
+    except OSError as exc:
+        raise ValidationError(
+            f"modelvalidation certificate not readable at {path}"
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ValidationError(
+            f"modelvalidation certificate {path} is not valid JSON: {exc}"
+        ) from exc
+
+    from quantark.modelvalidation import validate_payload as _validate_certificate
+
+    try:
+        _validate_certificate(payload)
+    except Exception as exc:  # noqa: BLE001 - re-raised as this module's type
+        raise ValidationError(
+            f"modelvalidation certificate failed closed validation: {exc}"
+        ) from exc
+
+    study = payload.get("study") or {}
+    if study.get("name") != ADI_GREEK_CERTIFICATE_STUDY:
+        raise ValidationError(
+            f"certificate {path} is study {study.get('name')!r}, not "
+            f"{ADI_GREEK_CERTIFICATE_STUDY!r}"
+        )
+    if study.get("quick") is not False:
+        raise ValidationError("certificate is quick/non-production evidence")
+
+    verdicts = {cell.get("verdict") for cell in payload.get("cells") or []}
+    if not verdicts or verdicts != {"PASS"}:
+        raise ValidationError(
+            f"certificate carries non-PASS cells: {sorted(v for v in verdicts)}"
+        )
+    aggregates = payload.get("aggregates") or []
+    if not aggregates:
+        raise ValidationError("certificate carries no aggregate verdict")
+    for aggregate in aggregates:
+        if aggregate.get("passed") is not True or (
+            aggregate.get("within_bound") is not True
+        ):
+            raise ValidationError(
+                "certificate aggregate did not pass for "
+                f"{aggregate.get('candidate')!r}/{aggregate.get('quantity')!r}"
+            )
+
+    decisions = payload.get("decisions") or {}
+    routes: Dict[str, str] = {}
+    reasons: Dict[str, str] = {}
+    for candidate, variant in CERTIFIED_CANDIDATE_VARIANTS.items():
+        decision = decisions.get(candidate)
+        if decision is None:
+            raise ValidationError(
+                f"certificate carries no decision for candidate {candidate!r}"
+            )
+        if decision == "ADMITTED":
+            routes[variant] = "pde"
+            reasons[variant] = (
+                f"{candidate} ADMITTED by {ADI_GREEK_CERTIFICATE_STUDY} "
+                f"({path.parent.name})"
+            )
+        else:
+            routes[variant] = "excluded_greek_unresolved"
+            reasons[variant] = (
+                f"{candidate} decision is {decision!r}, not ADMITTED"
+            )
+
+    digests = (payload.get("imported") or {}).get("source_digests") or {}
+    return ADIGreekRouting(
+        decision_path=str(path),
+        evidence_sha256=str(payload["projected_sha256"]),
+        implementation_sha256=str(digests.get("stage16_implementation_sha256") or ""),
+        run_configuration_sha256=str(
+            digests.get("stage16_run_configuration_sha256") or ""
+        ),
+        decision_sha256=str(digests.get("stage17_decision_sha256") or ""),
+        runtime_environment=dict(payload.get("runtime") or {}),
+        # The certificate does not publish the resolved engine controls
+        # machine-readably (its report.md carries them as prose), so this
+        # records what IS published rather than re-deriving them from a
+        # different authority and calling it provenance.
+        production_engine_controls={},
+        run_configuration={
+            "source": "modelvalidation_certificate",
+            "study": study.get("name"),
+            "quantities": study.get("quantities"),
+            "bounds": study.get("bounds"),
+            "source_digests": dict(digests),
+        },
+        routes=routes,
+        reasons=reasons,
     )
 
 
@@ -1712,8 +1871,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--adi-greek-decision",
         default=str(DEFAULT_ADI_GREEK_DECISION),
-        help="Stage-17 production Greek decision; required when heston or "
-        "heston_slv is requested",
+        help="ADI Greek admission artifact; required when heston or heston_slv "
+        "is requested. Defaults to the COMMITTED modelvalidation certificate, "
+        "which recomputes its own digest and is re-verified against both ADI "
+        "solvers on every commit. A raw stage-17 decision is still accepted.",
     )
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     parser.add_argument("--workers", type=int, default=1)
@@ -1790,7 +1951,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         variants = ["flat_bsm"]
         requested_variants = list(variants)
     elif any(variant in {"heston", "heston_slv"} for variant in variants):
-        adi_greek_routing = load_adi_greek_routing(Path(args.adi_greek_decision))
+        adi_greek_routing = load_adi_greek_admission(Path(args.adi_greek_decision))
         variants, adi_greek_exclusions = apply_adi_greek_admission(
             variants,
             routing,

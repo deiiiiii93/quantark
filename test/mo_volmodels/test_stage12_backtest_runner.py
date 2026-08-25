@@ -680,6 +680,42 @@ def test_adi_greek_admission_requires_both_pv_and_greek_pde_pass(tmp_path):
     assert excluded == {}
 
 
+MV_CERTIFICATE = (
+    ROOT
+    / "docs/modelvalidation/certificates/adi2d-snowball-greeks"
+    / "2026-08-19/certificate.json"
+)
+
+
+def test_greek_routing_reads_the_committed_modelvalidation_certificate():
+    """Stage 12's Greek authority is the certificate, not the raw stage-17 rows.
+
+    The stage-17 payloads are 14.4 MB of Monte-Carlo row dumps and are
+    deliberately NOT committed, so routing from them only ever worked on a
+    machine that happened to hold them. The modelvalidation certificate IS
+    committed, carries its own recomputable digest, and is re-verified on every
+    commit by test_banked_certificates.py -- which re-runs both ADI solvers
+    over all fourteen banked cells and checks they still produce the certified
+    numbers. That is a strictly better trust root for a routing decision.
+    """
+    routing = s12.load_adi_greek_routing_from_certificate(MV_CERTIFICATE)
+
+    assert routing.route_for("heston") == "pde"
+    assert routing.route_for("heston_slv") == "pde"
+    assert routing.evidence_sha256
+
+
+def test_a_tampered_certificate_is_refused(tmp_path):
+    """Fail closed: the digest is recomputed, not trusted."""
+    payload = json.loads(MV_CERTIFICATE.read_text())
+    payload["cells"][0]["verdict"] = "FAIL"  # digest no longer describes content
+    tampered = tmp_path / "certificate.json"
+    tampered.write_text(json.dumps(payload))
+
+    with pytest.raises(Exception):
+        s12.load_adi_greek_routing_from_certificate(tampered)
+
+
 @pytest.mark.skipif(
     not s12.DEFAULT_GATE_DECISION.exists(), reason="gate decision not produced"
 )

@@ -954,16 +954,25 @@ pytestmark_real = pytest.mark.skipif(
 
 @pytestmark_real
 def test_real_artifacts_produce_the_expected_dashboard_state():
-    """Pins the whole expected state as of 2026-08-03.
+    """Pins the whole expected state as of 2026-08-25.
 
     Every number here is a claim the design makes.  If scoping regresses,
     this fails rather than the page quietly lying.
+
+    Re-dated from 2026-08-03: G2's delta facet is no longer VOID.  3fbbf21
+    voided it because the gate's own MC delta reference carried a sigma of
+    0.41-0.51 futures contracts against a 0.1-contract bound, so it could not
+    resolve the quantity it was testing.  The gate has since been re-run, and
+    it now DELEGATES 2-D delta admission to the Stage-16 certificate
+    (``delta_authority: stage16``) instead of scoring it itself.  The re-run
+    postdates the invalidation, so the facet reads stale rather than void --
+    which is the improvement this pin exists to notice.
     """
     doc = payload_mod.collect(PROJECT_ROOT)
 
     g2 = next(r for r in doc["gates"] if r["id"] == "G2")
-    assert g2["facets"]["delta"]["freshness"] == "void"
-    assert g2["facets"]["delta"]["invalidated_by"] == "3fbbf21"
+    assert g2["facets"]["delta"]["freshness"] == "stale"
+    assert g2["facets"]["delta"]["invalidated_by"] is None
     assert g2["facets"]["pv"]["freshness"] != "void"
 
     g1 = next(r for r in doc["gates"] if r["id"] == "G1")
@@ -978,7 +987,11 @@ def test_real_artifacts_produce_the_expected_dashboard_state():
     assert doc["fleet"]["counts"]["fresh"] == 0
     assert doc["fleet"]["counts"]["void"] == 8
     assert doc["fleet"]["admitted"] == 27
-    assert doc["chain"]["next_action"]["node"] == "G2"
+    # G5, not G2: the engine-admission gate now passes, so the first
+    # unsatisfied node in G1 -> G4 -> G2 -> G5 -> fleet -> aggregate is the
+    # grid pre-flight, which has never been run. The chain moving is the
+    # point of the chain.
+    assert doc["chain"]["next_action"]["node"] == "G5"
 
 
 @pytestmark_real
