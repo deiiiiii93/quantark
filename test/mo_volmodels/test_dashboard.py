@@ -987,11 +987,17 @@ def test_real_artifacts_produce_the_expected_dashboard_state():
     assert doc["fleet"]["counts"]["fresh"] == 0
     assert doc["fleet"]["counts"]["void"] == 8
     assert doc["fleet"]["admitted"] == 27
-    # G5, not G2: the engine-admission gate now passes, so the first
+    # "fleet", not G2 or G5: all four gates now pass -- G5's sweep found
+    # 14,084 operating points and no under-resolved grid -- so the first
     # unsatisfied node in G1 -> G4 -> G2 -> G5 -> fleet -> aggregate is the
-    # grid pre-flight, which has never been run. The chain moving is the
-    # point of the chain.
-    assert doc["chain"]["next_action"]["node"] == "G5"
+    # fleet itself. The chain moving is the point of the chain; this pin has
+    # been re-dated twice in one session precisely because it was working.
+    assert doc["chain"]["next_action"]["node"] == "fleet"
+
+    g5 = next(r for r in doc["gates"] if r["id"] == "G5")
+    assert g5["headline"]["state"] == "RUN"
+    assert g5["headline"]["satisfied"] is True
+    assert g5["headline"]["n_under_resolved"] == 0
 
 
 @pytestmark_real
