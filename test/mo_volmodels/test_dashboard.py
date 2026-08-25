@@ -809,6 +809,31 @@ def test_aggregate_node_rejects_a_conclusion_that_predates_its_cells(tmp_path):
     assert payload_mod.next_action(rows, fleet_ready, tmp_path)["node"] is None
 
 
+def test_aggregate_staleness_compares_instants_not_iso_strings():
+    """The aggregate's mtime is rendered in the reader's local zone and
+    `newest_cell_mtime` in the writer's, so the two ISO stamps can carry
+    different UTC offsets.  Comparing them as strings put a *newer*
+    aggregate behind an older cell -- "12:00+00:00" sorts below
+    "18:00+08:00" though it is six hours later.  That read correct on a
+    +08:00 developer box and wrong on a UTC runner, so this test pins the
+    instant comparison without depending on the machine's own zone.
+    """
+    newest = "2026-08-03T18:00:00+08:00"  # == 10:00Z
+
+    # 20:00+08:00 and 12:00Z are the SAME instant, two hours after `newest`.
+    later_cst = datetime(2026, 8, 3, 20, 0, tzinfo=CST)
+    assert payload_mod._predates(later_cst, newest) is False
+    assert payload_mod._predates(later_cst.astimezone(timezone.utc), newest) is False
+
+    # 12:00+08:00 == 04:00Z, six hours before `newest`.
+    earlier_cst = datetime(2026, 8, 3, 12, 0, tzinfo=CST)
+    assert payload_mod._predates(earlier_cst, newest) is True
+    assert payload_mod._predates(earlier_cst.astimezone(timezone.utc), newest) is True
+
+    # A stamp that will not parse is not evidence of staleness.
+    assert payload_mod._predates(later_cst, "not-a-timestamp") is False
+
+
 def test_a_void_gate_never_renders_as_pass():
     """The page printed 'PASS (inferred)' for G2 while the badge one cell to
     the right read 'void', because display and chain used two predicates."""

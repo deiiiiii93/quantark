@@ -86,6 +86,14 @@ transition-density mode (`docs/autocall-engine-perf/`).
   `26.89` for `0.2689`). Values between 20% and 100% now price instead of
   raising `ValidationError`.
 
+### Fixed
+- Repository tooling only — not shipped in the wheel, which contains
+  `quantark/` alone. The `mo_volmodels` dashboard decided whether a results
+  aggregate was stale by comparing two ISO-8601 stamps as strings, which
+  orders correctly only when both carry the same UTC offset. Read from a
+  zone other than the one that wrote the cells, an aggregate *newer* than
+  the cells it summarises was reported stale. It now compares instants.
+
 ### Compatibility
 - Zero-lag identity: with no settlement terms supplied, payment equals
   determination (`delay_df == 1`) and all prices, Greeks, event statistics

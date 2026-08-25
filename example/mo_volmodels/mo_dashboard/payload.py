@@ -87,6 +87,29 @@ def _gate(rows: Sequence[Dict[str, Any]], gid: str) -> Optional[Dict[str, Any]]:
     return next((r for r in rows if r.get("id") == gid), None)
 
 
+def _predates(when: datetime, iso: str) -> bool:
+    """Is ``when`` strictly earlier than the instant ``iso`` names?
+
+    Compare instants, never the ISO strings themselves.  The two timestamps
+    are rendered in whichever zone each writer sat in -- the aggregate's
+    mtime in the reader's local zone, ``newest_cell_mtime`` in the zone of
+    the machine that walked the cells -- and lexicographic order agrees with
+    chronological order only when those offsets happen to match.  They match
+    on a +08:00 developer box and disagree on a UTC runner, which is exactly
+    the shape of a comparison that passes locally and fails in CI.
+
+    An unparseable stamp is not evidence that the aggregate is stale, and
+    this module reports only evidence it has actually found.
+    """
+    try:
+        other = datetime.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return False
+    if other.tzinfo is None:
+        other = other.astimezone()
+    return when < other
+
+
 def node_satisfied(
     node: str,
     gate_rows: Sequence[Dict[str, Any]],
@@ -132,7 +155,7 @@ def node_satisfied(
         # a stale conclusion, not a satisfied node.
         agg_mtime = P.mtime_of(Path(project_root) / AGGREGATE_ARTIFACT)
         newest = fleet_block.get("newest_cell_mtime")
-        if newest and agg_mtime and agg_mtime.isoformat() < newest:
+        if newest and agg_mtime and _predates(agg_mtime, newest):
             return False, f"aggregate: predates the newest cell ({newest})", "inferred"
         return True, "aggregate: present", "inferred"
 
