@@ -93,6 +93,13 @@ transition-density mode (`docs/autocall-engine-perf/`).
   orders correctly only when both carry the same UTC offset. Read from a
   zone other than the one that wrote the cells, an aggregate *newer* than
   the cells it summarises was reported stale. It now compares instants.
+- Repository tooling only. The same dashboard read git commit dates with
+  `datetime.fromisoformat`, which rejects an RFC 3339 `Z` suffix on Python
+  3.10 (3.11 was the release that learned it). `git log --format=%cI`
+  renders a UTC commit date as `...Z` on some git versions, so reading a
+  repository committed under UTC raised `Invalid isoformat string` on the
+  oldest supported Python. All three readers now share one parser that
+  accepts both spellings.
 
 ### Compatibility
 - Zero-lag identity: with no settlement terms supplied, payment equals

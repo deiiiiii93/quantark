@@ -15,7 +15,7 @@ from . import fleet as fleet_mod
 from . import gates as gates_mod
 from . import provenance as P
 from . import results as results_mod
-from .registry import load_registry, norm
+from .registry import load_registry, norm, parse_iso
 
 SCHEMA_VERSION = 1
 
@@ -102,7 +102,7 @@ def _predates(when: datetime, iso: str) -> bool:
     this module reports only evidence it has actually found.
     """
     try:
-        other = datetime.fromisoformat(iso)
+        other = parse_iso(iso)
     except (TypeError, ValueError):
         return False
     if other.tzinfo is None:

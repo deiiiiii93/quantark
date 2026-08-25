@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
-from .registry import Invalidation
+from .registry import Invalidation, parse_iso
 
 FRESH = "fresh"
 STALE = "stale"
@@ -226,7 +226,7 @@ def collect_git_facts(
             sha, _, rest = line.partition("\x1f")
             when, _, subject = rest.partition("\x1f")
             if sha and when:
-                commits.append(Commit(sha, datetime.fromisoformat(when), subject))
+                commits.append(Commit(sha, parse_iso(when), subject))
 
     dirty: Dict[str, datetime] = {}
     status = _git(project_root, "status", "--porcelain")

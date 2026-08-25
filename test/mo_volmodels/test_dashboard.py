@@ -901,6 +901,29 @@ def test_a_changed_child_under_a_directory_dep_is_detected(tmp_path):
     )
 
 
+def test_iso_stamps_with_a_zulu_suffix_parse_on_every_supported_python():
+    """`git log --format=%cI` renders a UTC commit date as "...Z" on some git
+    versions and "...+00:00" on others, and Python 3.10's `fromisoformat`
+    rejects the Zulu form -- 3.11 was the release that learned it.  The
+    project supports 3.10, so reading a repo committed under UTC raised
+    `Invalid isoformat string` on 3.10 while every other version parsed the
+    same commit fine.  The suffix is git's to choose, so the parser accepts
+    both spellings.
+    """
+    zulu = registry.parse_iso("2026-08-25T01:46:06Z")
+    offset = registry.parse_iso("2026-08-25T01:46:06+00:00")
+    assert zulu == offset
+    assert zulu.utcoffset() == timedelta(0)
+
+    # Lowercase, and padded, name the same instant.
+    assert registry.parse_iso("  2026-08-25T01:46:06z  ") == offset
+
+    # A stamp that already carries an offset is passed through untouched.
+    assert registry.parse_iso("2026-08-03T18:00:00+08:00") == datetime(
+        2026, 8, 3, 18, 0, tzinfo=CST
+    )
+
+
 def test_payload_carries_the_schema_version_and_required_keys(tmp_path):
     (tmp_path / "output").mkdir()
     doc = payload_mod.collect(tmp_path, registry_path=tmp_path / "absent.yaml")

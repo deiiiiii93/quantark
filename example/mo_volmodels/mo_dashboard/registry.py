@@ -17,6 +17,25 @@ import yaml
 Scoped = Union[Tuple[str, ...], str]  # a tuple of names, or the literal "*"
 
 
+def parse_iso(stamp: str) -> datetime:
+    """``datetime.fromisoformat`` that also accepts an RFC 3339 ``Z``.
+
+    Python 3.10's parser rejects the Zulu suffix -- 3.11 was the release
+    that learned it -- and this project supports 3.10.  The stamps arrive
+    from git, which renders a UTC commit date as ``...Z`` on some versions
+    and ``...+00:00`` on others, so the suffix is not something the caller
+    can rule out: a UTC CI runner raised ``Invalid isoformat string`` on
+    3.10 while every other version parsed the same string happily.
+
+    Normalising here rather than at each call site keeps the three readers
+    (registry, provenance, payload) on one definition of "an ISO stamp".
+    """
+    text = str(stamp).strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    return datetime.fromisoformat(text)
+
+
 @dataclass(frozen=True)
 class Invalidation:
     """A declared statement that some prior output is not comparable.
@@ -114,7 +133,7 @@ def load_registry(path: Path, project_root: Path) -> Registry:
             invalidations.append(
                 Invalidation(
                     commit=commit,
-                    landed=datetime.fromisoformat(str(item["landed"])),
+                    landed=parse_iso(str(item["landed"])),
                     spec=str(item.get("spec", "")),
                     scopes=tuple(str(s) for s in scope_block["scopes"]),
                     variants=_scoped(
