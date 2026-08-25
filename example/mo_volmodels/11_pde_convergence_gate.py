@@ -51,9 +51,11 @@ from __future__ import annotations
 import argparse
 import calendar as _calendar_mod
 import hashlib
+import importlib.util
 import json
 import math
 import os
+import sys
 import tempfile
 import time
 from bisect import bisect_left
@@ -115,6 +117,24 @@ _CALIBRATED_VARIANTS = (VOL_MODEL_LOCALVOL, VOL_MODEL_HESTON, VOL_MODEL_HESTON_S
 ADI_GREEK_CERTIFICATION_VARIANTS = frozenset(
     {VOL_MODEL_HESTON, VOL_MODEL_HESTON_SLV}
 )
+
+
+def _load_cohort():
+    """Import the sibling cohort module (the stages are not a package)."""
+    path = Path(__file__).resolve().parent / "cohort.py"
+    spec = importlib.util.spec_from_file_location("mo_cohort", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["mo_cohort"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+cohort = _load_cohort()
+
+# The frozen cohort as-of.  This gate reads it rather than the tail of the
+# surface history: a live launchd job appends a surface every weekday, and an
+# unpinned gate is not reproducible from one week to the next.
+COHORT_ASOF = cohort.COHORT_ASOF
 
 # Sample dates spanning regimes (YYYYMMDD).  Excluded dates are substituted
 # with the nearest admitted date (and the substitution is logged).
@@ -407,16 +427,27 @@ def pick_decay_date(
     admitted: Sequence[date],
     terms: SnowballTerms,
     *,
+    data_end: date,
     target_months: int = DECAY_TARGET_MONTHS,
     min_remaining: float = DECAY_MIN_REMAINING,
     max_remaining: float = DECAY_MAX_REMAINING,
 ) -> Optional[date]:
-    """Latest admitted date <= inception + ``target_months`` with a usable remainder.
+    """Latest admitted date <= min(inception + ``target_months``, ``data_end``)
+    with a usable remainder.
+
+    ``data_end`` pins the cohort.  A live launchd job appends a surface every
+    weekday, so without the pin ``max(candidates)`` walks forward and the SAME
+    requested date prices a DIFFERENT contract state on every re-run --
+    measured 2026-08-25, the 2025-04-09 decayed case had drifted
+    2026-07-31 -> 2026-08-24 (remaining 1.70y -> 1.63y, 21 KO -> 20 KO).
+
+    Keyword-only with NO default, deliberately: a gate that forgets its pin is
+    not reproducible, and that must be a TypeError rather than a silent drift.
 
     Returns None (case skipped, logged) when no admitted date leaves a
     remaining maturity inside [min_remaining, max_remaining].
     """
-    target = add_months(terms.inception, target_months)
+    target = min(add_months(terms.inception, target_months), data_end)
     candidates = [
         a for a in admitted if terms.inception < a <= target and a < terms.maturity_date
     ]
@@ -1760,7 +1791,9 @@ def process_date(cfg: Dict[str, Any], date_info: Dict[str, Any]) -> Dict[str, An
     record["timings"]["full_seconds"] = time.perf_counter() - t_case
     _attach_feller_ratio(record["cases"]["full"], models)
 
-    decay_date = pick_decay_date(history.admitted_dates, terms)
+    decay_date = pick_decay_date(
+        history.admitted_dates, terms, data_end=_parse_yyyymmdd(cfg["data_end"])
+    )
     if decay_date is None:
         record["terms"]["decayed"] = None
         record["cases"]["decayed"] = None
@@ -2289,6 +2322,7 @@ def _default_cfg(args: argparse.Namespace) -> Dict[str, Any]:
         "dates": [d.strip() for d in args.dates.split(",") if d.strip()]
         if args.dates
         else list(DEFAULT_SAMPLE_DATES),
+        "data_end": args.data_end,
         "flat_rate": FLAT_RATE,
         "seed": SEED,
         "mc": dict(MC_QUICK if quick else MC_FULL),
@@ -2302,6 +2336,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--history-dir", default="example/mo_volmodels/data/history")
     parser.add_argument("--out-dir", default="output/pde_convergence_gate")
     parser.add_argument("--dates", default=None, help="comma-separated YYYYMMDD list")
+    parser.add_argument(
+        "--data-end",
+        default=COHORT_ASOF.strftime("%Y%m%d"),
+        help=(
+            "cohort pin (YYYYMMDD); the decayed case never reads a surface after "
+            "this date. Defaults to the frozen COHORT_ASOF, NOT the tail of the "
+            "history -- a live scheduler extends the history every weekday."
+        ),
+    )
     parser.add_argument("--quick", action="store_true", help="coarse everything, 1 date")
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument(

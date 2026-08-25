@@ -128,6 +128,24 @@ ADI_2D_PRODUCTION_ENGINE_CONTROLS = {
 }
 
 UNDERLYING_NAME = "CSI1000"
+
+
+def _load_cohort():
+    """Import the sibling cohort module (the stages are not a package)."""
+    path = Path(__file__).resolve().parent / "cohort.py"
+    spec = importlib.util.spec_from_file_location("mo_cohort", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["mo_cohort"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+cohort = _load_cohort()
+
+# The frozen cohort as-of.  The replay window pins to THIS, never to the tail
+# of the spot cache, which a live launchd job extends every weekday.
+COHORT_ASOF = cohort.COHORT_ASOF
+
 NOTIONAL = 50_000_000.0  # design doc term sheet
 PRODUCT_QUANTITY = -1.0  # seller (short the snowball)
 
@@ -1715,12 +1733,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--data-end",
-        default=None,
+        default=COHORT_ASOF.isoformat(),
         help=(
-            "ISO date pinning the replay window end (default: last spot row). "
-            "The daily calibration pipeline extends the spot cache every "
-            "weekday, and data_end crossing 2026-08-01 admits a 28th "
-            "inception, so the gates pin this explicitly."
+            "ISO date pinning the replay window end (default: the FROZEN "
+            "COHORT_ASOF, never the last spot row). The daily calibration "
+            "pipeline extends the spot cache every weekday, and data_end "
+            "crossing 2026-08-01 admits a 28th inception -- measured "
+            "2026-08-25, an unpinned window gave 28 against the 27 of record, "
+            "which would void the banked coupons. Pinning is the default so "
+            "forgetting the flag cannot silently resize the fleet."
         ),
     )
     parser.add_argument("--notional", type=float, default=NOTIONAL)

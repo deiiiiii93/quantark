@@ -191,15 +191,41 @@ def test_pick_decay_date_bounds():
     cal = _weekday_calendar(date(2023, 5, 2), date(2026, 6, 1))
     terms = gate11.build_snowball_terms(date(2023, 5, 15), cal)
     admitted = [date(2025, 5, 14), date(2025, 5, 15), date(2026, 7, 22)]
+    # A pin deliberately later than every candidate here, so these cases still
+    # probe the remaining-maturity window alone (the pin has its own test).
+    late = date(2026, 12, 31)
     # latest admitted <= inception+2Y with remainder in [0.5, 2.0]
-    assert gate11.pick_decay_date(admitted, terms) == date(2025, 5, 15)
+    assert gate11.pick_decay_date(admitted, terms, data_end=late) == date(2025, 5, 15)
     # if only a too-late date is available the remainder shrinks below 0.5y -> skip
-    assert gate11.pick_decay_date([date(2026, 5, 10)], terms) is None
+    assert gate11.pick_decay_date([date(2026, 5, 10)], terms, data_end=late) is None
     # if nothing is after inception -> skip
-    assert gate11.pick_decay_date([date(2023, 5, 15)], terms) is None
+    assert gate11.pick_decay_date([date(2023, 5, 15)], terms, data_end=late) is None
     # recent inception: everything leaves ~3y remaining (> 2.0) -> skip
     terms_recent = gate11.build_snowball_terms(date(2026, 7, 15), _weekday_calendar(date(2026, 7, 1), date(2029, 8, 1)))
-    assert gate11.pick_decay_date([date(2026, 7, 22)], terms_recent) is None
+    assert gate11.pick_decay_date([date(2026, 7, 22)], terms_recent, data_end=late) is None
+
+
+def test_pick_decay_date_is_pinned_to_the_cohort_asof():
+    """The decayed case must not drift when the live scheduler extends history.
+
+    A launchd job appends a surface every weekday, so an unpinned
+    ``max(candidates)`` walks forward and the SAME requested date prices a
+    DIFFERENT contract state week to week.  Measured 2026-08-25 against a
+    cohort pinned at 2026-07-31: the 2025-04-09 decayed case had moved
+    2026-07-31 -> 2026-08-24, remaining maturity 1.70y -> 1.63y, 21 KO -> 20 KO.
+    """
+    cal = _weekday_calendar(date(2025, 4, 1), date(2028, 5, 1))
+    terms = gate11.build_snowball_terms(date(2025, 4, 9), cal)
+    asof = date(2026, 7, 31)
+    pinned = [date(2026, 7, 30), date(2026, 7, 31)]
+    extended = pinned + [date(2026, 8, 3), date(2026, 8, 24)]
+
+    # The pin, not the tail of the history, decides the decayed valuation date.
+    assert gate11.pick_decay_date(extended, terms, data_end=asof) == asof
+    # ... so extending the history is inert.
+    assert gate11.pick_decay_date(extended, terms, data_end=asof) == gate11.pick_decay_date(
+        pinned, terms, data_end=asof
+    )
 
 
 def test_build_snowball_product_from_terms():

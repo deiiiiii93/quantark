@@ -197,7 +197,15 @@ def test_schedule_rejects_negative_requirement(calendar):
     reason="IV surface history not built",
 )
 def test_schedule_on_the_real_window(calendar):
-    """The production window must yield the 27 monthly inceptions of record."""
+    """The production window must yield the 27 monthly inceptions of record.
+
+    ``data_end`` comes from the FROZEN cohort, exactly as ``--data-end`` now
+    defaults, not from the tail of the spot cache.  A live launchd job extends
+    that cache every weekday, and it had already drifted far enough to admit a
+    28th inception (measured 2026-08-25: spot tail 2026-08-24 -> 28 vs the 27
+    of record), which would have silently resized the fleet and voided the
+    banked coupons.
+    """
     from quantark.param.vol.surface_history import VolSurfaceHistory
 
     history = VolSurfaceHistory(HISTORY_DIR)
@@ -208,13 +216,29 @@ def test_schedule_on_the_real_window(calendar):
     out = s12.schedule_inceptions(
         calendar=real_calendar,
         data_start=pd.Timestamp(spot["date"].iloc[0]).date(),
-        data_end=pd.Timestamp(spot["date"].iloc[-1]).date(),
+        data_end=s12.COHORT_ASOF,
         first_admitted_surface=history.admitted_dates[0],
         min_observable_months=12,
     )
     assert len(out) == 27
     assert out[0] == date(2023, 5, 4)
     assert out[-1] == date(2025, 7, 1)
+
+
+@pytest.mark.skipif(
+    not (HISTORY_DIR / "surface_manifest.json").exists(),
+    reason="IV surface history not built",
+)
+def test_data_end_defaults_to_the_frozen_cohort_not_the_spot_tail():
+    """Forgetting --data-end must not resize the fleet."""
+    import pandas as pd
+
+    spot = s12.load_spot_frame(HISTORY_DIR)
+    spot_tail = pd.Timestamp(spot["date"].iloc[-1]).date()
+
+    assert s12.parse_args([]).data_end == s12.COHORT_ASOF.isoformat()
+    # The guard only matters while the cache really has run past the pin.
+    assert spot_tail > s12.COHORT_ASOF
 
 
 # ---------------------------------------------------------------------------
