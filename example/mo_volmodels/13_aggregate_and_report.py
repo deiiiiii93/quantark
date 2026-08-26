@@ -23,9 +23,11 @@ Run:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import os
+import sys
 import statistics
 import tempfile
 from collections import Counter
@@ -78,6 +80,23 @@ def _rms(values: Sequence[float]) -> Optional[float]:
     if not vals:
         return None
     return float(math.sqrt(statistics.fmean([v * v for v in vals])))
+
+
+def _load_certificate_transfer():
+    """Import the sibling transfer module (the stages are not a package)."""
+    path = Path(__file__).resolve().parent / "certificate_transfer.py"
+    spec = importlib.util.spec_from_file_location("mo_certificate_transfer", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["mo_certificate_transfer"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+certificate_transfer = _load_certificate_transfer()
+
+# The variants that actually run an ADI 2-D solver, and so are the only ones
+# the Greek certificate is about.  flat_bsm / ts_bsm / localvol never touch it.
+ADI_CERTIFIED_VARIANTS = ("heston", "heston_slv")
 
 
 # --- Feller regime -------------------------------------------------------
@@ -280,6 +299,44 @@ def calibration_quality(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def certificate_span_audit(
+    *, variant: str, frames: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Coverage of this run's visited states by the banked Greek certificate.
+
+    Returns None for a variant that never runs an ADI 2-D solver -- the
+    certificate is not about it, and an empty audit would read as "checked
+    and clean".  Report-only: see certificate_transfer for why an aggregate
+    mean-bias admission cannot be decomposed into per-date permissions.
+    """
+    if variant not in ADI_CERTIFIED_VARIANTS:
+        return None
+    records = frames.get("calibration") or []
+    maturity = _parse_day((frames.get("summary") or {}).get("maturity_date"))
+    states = []
+    for record in records:
+        day = _parse_day(record.get("date") or record.get("surface_date"))
+        if day is None or maturity is None:
+            # Cannot place the state on the maturity axis; state_in_span
+            # fails closed on a non-finite remaining maturity.
+            remaining = float("nan")
+        else:
+            remaining = (maturity - day).days / 365.25
+        params = record if "kappa" in record else (record.get("heston") or {})
+        states.append((str(record.get("date") or record.get("surface_date")), params, remaining))
+    return certificate_transfer.audit(states)
+
+
+def _parse_day(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    text = str(value)[:10]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def metrics_for_run(
     *, inception: str, variant: str, notional: float, frames: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -344,6 +401,7 @@ def metrics_for_run(
         "traded_notional_total": sum(traded_notional) if traded_notional else 0.0,
         # --- model fit ---
         "calibration": calibration_quality(frames["calibration"]),
+        "certificate_span": certificate_span_audit(variant=variant, frames=frames),
     }
 
 
@@ -801,6 +859,39 @@ def paired_summary(pairs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def pooled_certificate_span(per_run: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Fleet-level coverage: which dates left the certified regime span.
+
+    ``covered`` is None when no ADI-certified variant ran -- nothing measured
+    is not the same as nothing wrong.
+    """
+    audits = [
+        (r["variant"], r["certificate_span"])
+        for r in per_run
+        if r.get("certificate_span")
+    ]
+    if not audits:
+        return {"n_states": 0, "n_out_of_span": 0, "covered": None, "variants": []}
+    rows = [row for _, a in audits for row in a["out_of_span"]]
+    return {
+        "n_states": sum(a["n_states"] for _, a in audits),
+        "n_out_of_span": len(rows),
+        "dates_out_of_span": sorted({str(row["label"]) for row in rows}),
+        "variants": sorted({v for v, _ in audits}),
+        "buckets": {
+            name: sum(a["buckets"].get(name, 0) for _, a in audits)
+            for name in certificate_transfer.BUCKETS
+        },
+        "feller_ratio_max": max(
+            _finite([(a["feller_ratio"] or {}).get("max") for _, a in audits]),
+            default=None,
+        ),
+        "certificate": audits[0][1]["certificate"],
+        "reasons": sorted({str(row["reason"]) for row in rows}),
+        "covered": not rows,
+    }
+
+
 def aggregate(run_dir: Path) -> Dict[str, Any]:
     """Read the fleet manifest and build every comparison table."""
     manifest_path = Path(run_dir) / "run_manifest.json"
@@ -846,6 +937,7 @@ def aggregate(run_dir: Path) -> Dict[str, Any]:
         "hedge_costs": manifest.get("hedge_costs", {}),
         "gate_g2": manifest.get("gate_g2", {}),
         "adi_greek_certification": manifest.get("adi_greek_certification", {}),
+        "certificate_span": pooled_certificate_span(per_run),
         "inceptions": manifest.get("inceptions", []),
         "variants": variants,
         "per_run": per_run,
@@ -1072,6 +1164,32 @@ def build_report(agg: Dict[str, Any]) -> str:
             "rest on a premise that failed.</div>"
         )
 
+    # The ADI Greek certificate admits an AGGREGATE mean signed bias over
+    # seven regime archetypes.  When the fleet visits states past the extremes
+    # of that design, the aggregate result is being read outside the span it
+    # was measured on.  Say so; do NOT gate -- see certificate_transfer.
+    span = agg.get("certificate_span") or {}
+    span_banner = ""
+    if span.get("covered") is False:
+        dates = span.get("dates_out_of_span") or []
+        shown = ", ".join(dates[:6]) + (" and more" if len(dates) > 6 else "")
+        cert = span.get("certificate") or {}
+        envelope = cert.get("ratio_envelope") or [None, None]
+        span_banner = (
+            '<div style="background:#8a6d1f;color:#fff;padding:.7rem 1rem;'
+            'border-radius:8px;margin:1rem 0;font-weight:600">'
+            "&#9888; OUTSIDE THE CERTIFIED REGIME SPAN &mdash; "
+            f"{span['n_out_of_span']} of {span['n_states']} day-cells, on "
+            f"{len(dates)} date(s): {shown}. The banked ADI Greek certificate "
+            "admits a <em>mean</em> signed delta bias across seven regime "
+            "archetypes spanning Feller ratios "
+            f"{_fmt(envelope[0], 3)}&ndash;{_fmt(envelope[1], 1)}; these states "
+            "sit past those extremes, so the admitted bias is being read "
+            "outside the design it was measured on. Nothing was gated &mdash; "
+            "pricing is unaffected and these dates remain in the hedge path. "
+            "Read the Heston / Heston-SLV result with this attached.</div>"
+        )
+
     calib_rows = ""
     for v in variants:
         c = summaries[v]["calibration"]
@@ -1099,6 +1217,7 @@ def build_report(agg: Dict[str, Any]) -> str:
     calib_section = (
         f"""<h3>5.1 &nbsp; Per-day model fit</h3>
 {breach_banner}
+{span_banner}
 <table><thead><tr><th>variant</th><th>records</th><th>mean RMSE (IV)</th>
 <th>max RMSE (IV)</th><th>bound hits</th><th>Feller violated</th>
 <th>&sigma;-collapse</th><th>max Feller ratio</th></tr></thead>

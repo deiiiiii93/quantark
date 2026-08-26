@@ -42,6 +42,7 @@ def _write_run(
     n_trades: int = 4,
     lifecycle=None,
     calibration=None,
+    maturity_date=None,
 ):
     run_dir = root / "runs" / inception / variant
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +129,7 @@ def _write_run(
             {
                 "inception": inception,
                 "variant": variant,
+                "maturity_date": maturity_date or f"{int(inception[:4]) + 3}{inception[4:]}",
                 "coupon": 0.15,
                 "vol_model_solver": "mc" if variant.startswith("heston") else "pde",
                 "elapsed_seconds": 100.0,
@@ -1011,3 +1013,107 @@ def test_a_malformed_stated_ratio_falls_through_instead_of_crashing():
     ]
     calib = s13.calibration_quality(records)
     assert calib["feller_buckets"]["boundary"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Certificate span audit
+#
+# Report-only: the ADI Greek certificate's admitted verdict is an AGGREGATE
+# mean signed bias over seven archetypes against a 0.1-contract bound (each
+# cell individually only reached 0.5), so it cannot be decomposed into
+# per-date permissions.  The audit says whether the fleet's visited states
+# stay inside the regime span those archetypes straddle, and names the ones
+# that do not.  It gates nothing.
+# ---------------------------------------------------------------------------
+
+ORDINARY_FIT = {"v0": 0.04, "kappa": 2.0, "theta": 0.04, "sigma": 0.30, "rho": -0.55}
+# 2024-10-10, ratio 35,048 -- 18x past the sigma_collapse archetype at 1,898.
+OUT_OF_SPAN_FIT = {
+    "v0": 0.15899, "kappa": 2.068, "theta": 0.018037, "sigma": 0.001459, "rho": -0.00404,
+}
+
+
+def _dated(fits):
+    return [
+        {"date": day, "surface_sha": f"sha{i}", "overall_rmse_iv": 0.004, **fit}
+        for i, (day, fit) in enumerate(fits)
+    ]
+
+
+def _span_fleet(root, records, variant="heston"):
+    _write_run(root, "2023-05-04", "flat_bsm", total_pnl=500_000.0)
+    _write_run(
+        root, "2023-05-04", variant, total_pnl=450_000.0, calibration=records,
+        maturity_date="2026-05-06",
+    )
+    _write_manifest(
+        root,
+        [{"inception": "2023-05-04", "variant": v} for v in ("flat_bsm", variant)],
+        variants=["flat_bsm", variant],
+        inceptions=["2023-05-04"],
+    )
+    return root
+
+
+def test_a_heston_run_carries_a_certificate_span_audit(tmp_path):
+    records = _dated([("2023-05-04", ORDINARY_FIT), ("2024-10-10", OUT_OF_SPAN_FIT)])
+    agg = s13.aggregate(_span_fleet(tmp_path / "a", records))
+    row = next(r for r in agg["per_run"] if r["variant"] == "heston")
+    span = row["certificate_span"]
+    assert span["n_states"] == 2
+    assert span["n_out_of_span"] == 1
+    assert span["out_of_span"][0]["label"] == "2024-10-10"
+    assert span["covered"] is False
+
+
+def test_the_span_audit_uses_the_trades_real_remaining_maturity(tmp_path):
+    """Inception day of a 3Y trade is 1,098 days out -- 3.0062y at ACT/365.25.
+
+    If the audit passed a placeholder maturity instead of the trade's own,
+    this state would be reported out of span on a day-count artefact.
+    """
+    agg = s13.aggregate(
+        _span_fleet(tmp_path / "b", _dated([("2023-05-04", ORDINARY_FIT)]))
+    )
+    row = next(r for r in agg["per_run"] if r["variant"] == "heston")
+    span = row["certificate_span"]
+    assert span["n_out_of_span"] == 0
+    assert span["covered"] is True
+
+
+def test_a_variant_the_certificate_does_not_cover_carries_no_span_audit(tmp_path):
+    """flat_bsm never runs an ADI solver, so the certificate is not about it."""
+    agg = s13.aggregate(
+        _span_fleet(tmp_path / "c", _dated([("2023-05-04", ORDINARY_FIT)]))
+    )
+    row = next(r for r in agg["per_run"] if r["variant"] == "flat_bsm")
+    assert row["certificate_span"] is None
+
+
+def test_the_fleet_pools_the_span_audit_and_names_the_dates(tmp_path):
+    records = _dated([("2023-05-04", ORDINARY_FIT), ("2024-10-10", OUT_OF_SPAN_FIT)])
+    agg = s13.aggregate(_span_fleet(tmp_path / "d", records))
+    fleet = agg["certificate_span"]
+    assert fleet["covered"] is False
+    assert fleet["n_out_of_span"] == 1
+    assert fleet["dates_out_of_span"] == ["2024-10-10"]
+    assert fleet["variants"] == ["heston"]
+
+
+def test_the_report_banners_an_out_of_span_state(tmp_path):
+    records = _dated([("2023-05-04", ORDINARY_FIT), ("2024-10-10", OUT_OF_SPAN_FIT)])
+    html = s13.build_report(s13.aggregate(_span_fleet(tmp_path / "e", records)))
+    assert "OUTSIDE THE CERTIFIED REGIME SPAN" in html
+    assert "2024-10-10" in html
+    # The banner must not read as a pricing failure: nothing was gated, and
+    # the dates stay in the hedge path.
+    assert "Nothing was gated" in html
+    assert "pricing is unaffected" in html
+    assert "remain in the hedge path" in html
+
+
+def test_a_covered_fleet_gets_no_span_banner(tmp_path):
+    html = s13.build_report(
+        s13.aggregate(_span_fleet(tmp_path / "f", _dated([("2023-05-04", ORDINARY_FIT)])))
+    )
+    assert "OUTSIDE THE CERTIFIED REGIME SPAN" not in html
