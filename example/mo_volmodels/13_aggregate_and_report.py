@@ -28,6 +28,7 @@ import math
 import os
 import statistics
 import tempfile
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -77,6 +78,84 @@ def _rms(values: Sequence[float]) -> Optional[float]:
     if not vals:
         return None
     return float(math.sqrt(statistics.fmean([v * v for v in vals])))
+
+
+# --- Feller regime -------------------------------------------------------
+#
+# The study calibrates with ``enforce_feller=True``, which makes the record's
+# own ``feller_satisfied`` flag True BY CONSTRUCTION -- 257 of 257 fits in
+# output/mo_daily_calibration/calibration_manifest.json.  Screening that flag
+# can therefore only ever report "clean".  Three of those same 257 fits carry
+# ratios of 7.9e3, 1.7e5 and 2.3e5 with sigma pinned at its 0.001 lower bound:
+# sigma-collapse, where Heston has degenerated into a deterministic-variance
+# model.  Spec section 7A.10(3) requires those dates be flagged, never
+# averaged into a ``heston`` result -- so the screen reads the RATIO.
+#
+# The cut points mirror 11_pde_convergence_gate.py and are measured, not
+# chosen: 0.5 separates a real Feller violation from an enforced fit sitting
+# on the boundary at ratio ~= 1.0; 10 is the sigma-collapse marker.  Stage 11
+# is an implementation input to the Stage 16 certification hash, so it is not
+# refactored to export them here; the two copies are kept honest by
+# test_stage13_agrees_with_stage11_on_the_feller_cut_points.
+FELLER_VIOLATED_BELOW = 0.5
+FELLER_DEGENERATE_ABOVE = 10.0
+FELLER_BUCKETS = ("violated", "boundary", "degenerate", "unknown")
+
+
+def feller_bucket(ratio: Optional[float]) -> str:
+    """Bucket a Heston Feller ratio (2*kappa*theta/sigma**2) into a regime.
+
+    ``None`` or non-finite -- an uncomputable ratio, or a variant such as
+    ``flat_bsm`` / ``localvol`` that never carries one -- buckets as
+    "unknown", never as "boundary": a record whose regime cannot be
+    determined must not read as the common, passing case.
+    """
+    if ratio is None or not math.isfinite(float(ratio)):
+        return "unknown"
+    ratio = float(ratio)
+    if ratio < FELLER_VIOLATED_BELOW:
+        return "violated"
+    if ratio > FELLER_DEGENERATE_ABOVE:
+        return "degenerate"
+    return "boundary"
+
+
+def record_feller_ratio(record: Dict[str, Any]) -> Optional[float]:
+    """The Feller ratio a calibration record implies, or None.
+
+    ``heston`` records carry ``feller_ratio`` outright.  ``heston_slv``
+    records do not: they carry the Heston fit NESTED, as the five raw
+    parameters under ``heston``.  SLV inherits that fit, so it inherits its
+    regime -- reading only the top level would leave sigma-collapse invisible
+    for one of the two certified 2-D variants.  The calibrator's own ratio
+    wins where it exists and is usable; the nested parameters are the
+    fallback, never an override.  One malformed record must not abort the
+    aggregation of a fleet that cost ~143 CPU-hours, so an unusable value
+    ranks as "unknown" rather than raising.
+    """
+    stated = record.get("feller_ratio")
+    if stated is not None:
+        try:
+            value = float(stated)
+        except (TypeError, ValueError):
+            value = math.nan
+        if math.isfinite(value):
+            return value
+    nested = record.get("heston")
+    if not isinstance(nested, dict):
+        return None
+    try:
+        kappa = float(nested["kappa"])
+        theta = float(nested["theta"])
+        sigma = float(nested["sigma"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    # sigma == 0 sits outside the calibration's own lower bound (0.001 under
+    # the mo_frozen preset), so it cannot come from a real fit.  If one ever
+    # appears, "unknown" is the honest answer: the regime could not be ranked.
+    if not (sigma > 0.0) or not math.isfinite(kappa * theta):
+        return None
+    return 2.0 * kappa * theta / (sigma * sigma)
 
 
 def _distribution(values: Sequence[float]) -> Dict[str, Optional[float]]:
@@ -149,17 +228,27 @@ def _col(frame: pd.DataFrame, name: str) -> List[float]:
 
 
 def calibration_quality(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Summarise per-day model fit: RMSE, bound hits, Feller, leverage range.
+    """Summarise per-day model fit: RMSE, bound hits, Feller regime, leverage.
 
     Reported honestly - the repo's own diagnostics show Heston is weakly
-    identified on public CFFEX settlement data, so bound hits and Feller
-    violations are surfaced rather than hidden.
+    identified on public CFFEX settlement data, so bound hits and the Feller
+    regime are surfaced rather than hidden.
+
+    The Feller screen ranks the RATIO, not the record's ``feller_satisfied``
+    flag: these fits run with ``enforce_feller=True``, which makes that flag
+    true by construction, so screening it can only ever report "clean" while
+    sigma-collapse dates pass straight through.  See the cut points above.
     """
     if not records:
         return {"n_records": 0}
     rmse = [r.get("overall_rmse_iv") for r in records if r.get("overall_rmse_iv") is not None]
     bound_hits = [r for r in records if r.get("bound_hits")]
-    feller_flags = [r.get("feller_satisfied") for r in records if "feller_satisfied" in r]
+    ratios = [record_feller_ratio(r) for r in records]
+    buckets = Counter(feller_bucket(x) for x in ratios)
+    # Fractions are over the records that actually carry a ratio; a localvol
+    # run that carries none must report None, not a reassuring zero.
+    n_ranked = sum(buckets[b] for b in ("violated", "boundary", "degenerate"))
+    breaches = sum(1 for r in records if r.get("feller_satisfied") is False)
     lev_min = [r.get("leverage_min") for r in records if r.get("leverage_min") is not None]
     lev_max = [r.get("leverage_max") for r in records if r.get("leverage_max") is not None]
     neg_mass = [
@@ -172,11 +261,19 @@ def calibration_quality(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "rmse_iv": _distribution(rmse),
         "n_bound_hits": len(bound_hits),
         "bound_hit_fraction": len(bound_hits) / len(records) if records else None,
-        "n_feller_violated": sum(1 for f in feller_flags if f is False),
+        "feller_ratio": _distribution(ratios),
+        "feller_buckets": {name: buckets[name] for name in FELLER_BUCKETS},
+        "n_feller_violated": buckets["violated"],
         "feller_violated_fraction": (
-            sum(1 for f in feller_flags if f is False) / len(feller_flags)
-            if feller_flags else None
+            buckets["violated"] / n_ranked if n_ranked else None
         ),
+        "n_sigma_collapse": buckets["degenerate"],
+        "sigma_collapse_fraction": (
+            buckets["degenerate"] / n_ranked if n_ranked else None
+        ),
+        # Under enforce_feller=True this must be 0.  If it is not, the
+        # enforcement did not take on that date, and that is its own finding.
+        "n_enforcement_breaches": breaches,
         "leverage_min": min(_finite(lev_min)) if _finite(lev_min) else None,
         "leverage_max": max(_finite(lev_max)) if _finite(lev_max) else None,
         "max_negative_mass": max(_finite(neg_mass)) if _finite(neg_mass) else None,
@@ -607,6 +704,19 @@ def _pooled_calibration(entries: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "feller_violated_fraction": _mean(
             [e.get("feller_violated_fraction") for e in with_records]
         ),
+        "sigma_collapse_fraction": _mean(
+            [e.get("sigma_collapse_fraction") for e in with_records]
+        ),
+        "n_sigma_collapse": sum(
+            int(e.get("n_sigma_collapse") or 0) for e in with_records
+        ),
+        "feller_ratio_max": max(
+            _finite([(e.get("feller_ratio") or {}).get("max") for e in with_records]),
+            default=None,
+        ),
+        "n_enforcement_breaches": sum(
+            int(e.get("n_enforcement_breaches") or 0) for e in with_records
+        ),
     }
 
 
@@ -938,6 +1048,30 @@ def build_report(agg: Dict[str, Any]) -> str:
         )
 
     # --- table: calibration quality ---------------------------------------
+    # enforce_feller=True is the premise the sigma-collapse screen rests on:
+    # it is what makes a record's own `feller_satisfied` flag uninformative
+    # and the ratio authoritative.  A record that reports the constraint
+    # unsatisfied means the enforcement did not take on that date, so the
+    # premise failed and the banner says so rather than leaving it in JSON.
+    breached = [
+        (v, int(summaries[v]["calibration"].get("n_enforcement_breaches") or 0))
+        for v in variants
+        if int(summaries[v]["calibration"].get("n_enforcement_breaches") or 0)
+    ]
+    breach_banner = ""
+    if breached:
+        detail = "; ".join(
+            f"{VARIANT_LABELS.get(v, v)}: {n} record(s)" for v, n in breached
+        )
+        breach_banner = (
+            '<div style="background:#b5432f;color:#fff;padding:.7rem 1rem;'
+            'border-radius:8px;margin:1rem 0;font-weight:600">'
+            "&#9888; FELLER ENFORCEMENT BREACH &mdash; " + detail + ". These fits run "
+            "with <code>enforce_feller=True</code>, so this should be zero; the "
+            "constraint did not take on those dates and the regime columns below "
+            "rest on a premise that failed.</div>"
+        )
+
     calib_rows = ""
     for v in variants:
         c = summaries[v]["calibration"]
@@ -953,16 +1087,21 @@ def build_report(agg: Dict[str, Any]) -> str:
                     else 100.0 * c["bound_hit_fraction"],
                     None if c.get("feller_violated_fraction") is None
                     else 100.0 * c["feller_violated_fraction"],
+                    None if c.get("sigma_collapse_fraction") is None
+                    else 100.0 * c["sigma_collapse_fraction"],
                 ],
                 1,
                 "%",
             )
+            + _num_cells([c.get("feller_ratio_max")], 4)
             + "</tr>"
         )
     calib_section = (
         f"""<h3>5.1 &nbsp; Per-day model fit</h3>
+{breach_banner}
 <table><thead><tr><th>variant</th><th>records</th><th>mean RMSE (IV)</th>
-<th>max RMSE (IV)</th><th>bound hits</th><th>Feller violated</th></tr></thead>
+<th>max RMSE (IV)</th><th>bound hits</th><th>Feller violated</th>
+<th>&sigma;-collapse</th><th>max Feller ratio</th></tr></thead>
 <tbody>{calib_rows}</tbody></table>
 <div class="callout"><b>Read the bound hits honestly.</b> The repo's own diagnostics
 (<code>example/mo_volmodels/MODEL_DIAGNOSTICS.md</code>) already showed Heston to be
@@ -970,7 +1109,17 @@ def build_report(agg: Dict[str, Any]) -> str:
 frozen bounds on roughly half the sampled dates. A low IV RMSE therefore does <em>not</em>
 mean the parameters are well determined; it means several very different parameter sets
 fit the observed smile about equally well. Any Heston/SLV edge reported above should be
-read with that caveat attached.</div>"""
+read with that caveat attached.</div>
+<div class="callout"><b>Why &sigma;-collapse is reported separately.</b> These fits run with
+<code>enforce_feller=True</code>, so each record&rsquo;s own <em>Feller satisfied</em> flag is true
+<em>by construction</em> &mdash; 257 of 257 in the daily calibration pool. Screening that flag
+can only ever say &ldquo;clean&rdquo;. The columns above therefore rank the Feller
+<em>ratio</em> 2&kappa;&theta;/&sigma;&sup2; on the same measured cut points Gate&nbsp;G2 uses
+(&lt;&nbsp;0.5 violated, &gt;&nbsp;10 &sigma;-collapse). Three of those 257 fits satisfy Feller
+by driving &sigma; to its 0.001 lower bound, reaching ratios of 7.9e3 to 2.3e5 &mdash; Heston
+degenerated into a <em>deterministic-variance</em> model. A non-zero &sigma;-collapse column
+means that variant&rsquo;s result contains such dates, and they should be read out, not
+averaged in.</div>"""
         if calib_rows
         else '<p class="lede">No calibrated variants in this run.</p>'
     )

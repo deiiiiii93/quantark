@@ -349,9 +349,16 @@ def test_calibration_quality_surfaces_bound_hits_and_feller(fleet):
     # i = 0, 2, 4 carry bound hits
     assert calib["n_bound_hits"] == 3
     assert calib["bound_hit_fraction"] == pytest.approx(3 / 5)
-    # feller_satisfied is False when i % 3 == 0 -> i = 0, 3
-    assert calib["n_feller_violated"] == 2
     assert calib["rmse_iv"]["mean"] == pytest.approx(0.006)
+    # These records carry no feller_ratio, so no regime can be ranked -- the
+    # screen must say "unknown", not report a reassuring zero violated.
+    assert calib["feller_buckets"]["unknown"] == 5
+    assert calib["feller_violated_fraction"] is None
+    assert calib["sigma_collapse_fraction"] is None
+    # feller_satisfied is False when i % 3 == 0 -> i = 0, 3.  A flag saying
+    # unsatisfied under an enforcing calibration is an enforcement breach,
+    # which is a different claim from a ratio-ranked regime.
+    assert calib["n_enforcement_breaches"] == 2
 
 
 def test_variants_without_calibration_report_zero_records(fleet):
@@ -769,3 +776,238 @@ def test_fleet_sanity_reports_the_offending_run(fleet):
     assert not comp["all_sane"]
     assert len(comp["sanity_failures"]) == 1
     assert comp["sanity_failures"][0]["variant"] == "heston"
+
+
+# ---------------------------------------------------------------------------
+# Feller regime screen
+#
+# The pool this study calibrates against is enforce_feller=True, so
+# ``feller_satisfied`` is True on every record BY CONSTRUCTION -- 257/257 in
+# output/mo_daily_calibration/calibration_manifest.json.  Screening on that
+# boolean can only ever report "clean".  Three of those same 257 fits carry
+# ratios of 7.9e3, 1.7e5 and 2.3e5 with sigma pinned at its 0.001 lower bound:
+# sigma-collapse, a deterministic-variance degenerate that spec section
+# 7A.10(3) says must be flagged, never averaged into a `heston` result.
+# The screen therefore has to read ``feller_ratio``.
+# ---------------------------------------------------------------------------
+
+def _enforced_records():
+    """Records as the enforced calibration really emits them.
+
+    Every one satisfies Feller; the ratios still span all three regimes.
+    """
+    ratios = [0.31, 1.00002, 1.00003, 4.894, 226022.0]
+    return [
+        {
+            "surface_sha": f"sha{i}",
+            "overall_rmse_iv": 0.004,
+            "feller_ratio": ratio,
+            "feller_satisfied": True,
+        }
+        for i, ratio in enumerate(ratios)
+    ]
+
+
+def test_the_feller_screen_reads_the_ratio_not_the_enforced_flag():
+    calib = s13.calibration_quality(_enforced_records())
+    # Screening the boolean would report zero of everything here.
+    assert calib["feller_buckets"]["violated"] == 1
+    assert calib["feller_buckets"]["boundary"] == 3
+    assert calib["feller_buckets"]["degenerate"] == 1
+    assert calib["n_feller_violated"] == 1
+    assert calib["feller_violated_fraction"] == pytest.approx(1 / 5)
+
+
+def test_sigma_collapse_dates_are_counted_not_averaged_away():
+    calib = s13.calibration_quality(_enforced_records())
+    assert calib["n_sigma_collapse"] == 1
+    assert calib["sigma_collapse_fraction"] == pytest.approx(1 / 5)
+    # The ratio distribution must expose the collapse magnitude, not hide it
+    # behind a mean: the max is the marker.
+    assert calib["feller_ratio"]["max"] == pytest.approx(226022.0)
+    assert calib["feller_ratio"]["n"] == 5
+
+
+def test_records_without_a_ratio_are_unknown_and_do_not_dilute_the_fractions():
+    records = _enforced_records() + [
+        {"surface_sha": "lv0", "overall_rmse_iv": 0.004},
+        {"surface_sha": "lv1", "overall_rmse_iv": 0.004},
+    ]
+    calib = s13.calibration_quality(records)
+    assert calib["feller_buckets"]["unknown"] == 2
+    # Denominator is the records that carry a ratio, never all seven.
+    assert calib["sigma_collapse_fraction"] == pytest.approx(1 / 5)
+    assert calib["feller_violated_fraction"] == pytest.approx(1 / 5)
+
+
+def test_a_variant_that_never_carries_a_ratio_reports_none_not_zero():
+    records = [{"surface_sha": "lv0", "overall_rmse_iv": 0.004} for _ in range(3)]
+    calib = s13.calibration_quality(records)
+    assert calib["feller_buckets"]["unknown"] == 3
+    assert calib["sigma_collapse_fraction"] is None
+    assert calib["feller_violated_fraction"] is None
+
+
+def test_an_enforcement_breach_is_surfaced_as_its_own_finding():
+    """`violated` should be empty under enforcement; if it is not, say so.
+
+    Per the rebaseline plan: "if it is not, the enforcement did not take and
+    that is a finding".  A record whose own flag says unsatisfied is that
+    finding, and it is distinct from a ratio-bucket count.
+    """
+    records = _enforced_records()
+    records[0] = dict(records[0], feller_satisfied=False)
+    calib = s13.calibration_quality(records)
+    assert calib["n_enforcement_breaches"] == 1
+
+
+def test_stage13_agrees_with_stage11_on_the_feller_cut_points():
+    """The cut points are measured, and two stages must not drift apart.
+
+    Stage 11 is an implementation input to the Stage 16 certification hash, so
+    it is not refactored to share this constant; this test is what makes the
+    duplication safe.
+    """
+    gate_path = ROOT / "example/mo_volmodels/11_pde_convergence_gate.py"
+    gate_spec = importlib.util.spec_from_file_location("gate_11_cuts", gate_path)
+    gate = importlib.util.module_from_spec(gate_spec)
+    sys.modules[gate_spec.name] = gate
+    gate_spec.loader.exec_module(gate)
+
+    assert s13.FELLER_VIOLATED_BELOW == gate.FELLER_VIOLATED_BELOW
+    assert s13.FELLER_DEGENERATE_ABOVE == gate.FELLER_DEGENERATE_ABOVE
+    for ratio in (0.31, 0.5, 1.00002, 9.657, 10.0, 226022.0, None, float("nan")):
+        assert s13.feller_bucket(ratio) == gate.feller_bucket(ratio)
+
+
+def test_pooled_calibration_carries_the_sigma_collapse_fraction():
+    entries = [
+        s13.calibration_quality(_enforced_records()),
+        s13.calibration_quality(_enforced_records()[:3]),
+    ]
+    pooled = s13._pooled_calibration(entries)
+    assert pooled["n_records"] == 8
+    # 1/5 and 0/3 -> the mean of the per-run fractions, as bound_hit does.
+    assert pooled["sigma_collapse_fraction"] == pytest.approx((1 / 5 + 0.0) / 2)
+
+
+def test_report_renders_the_sigma_collapse_column(tmp_path):
+    """A degenerate date must be visible in the rendered report.
+
+    Computing the metric and not printing it would leave the screen exactly
+    as invisible as the enforced boolean it replaces.
+    """
+    root = tmp_path / "fleet"
+    for variant in ("flat_bsm", "heston"):
+        calibration = _enforced_records() if variant == "heston" else None
+        _write_run(
+            root, "2023-05-04", variant, total_pnl=500_000.0, calibration=calibration
+        )
+    _write_manifest(
+        root,
+        [{"inception": "2023-05-04", "variant": v} for v in ("flat_bsm", "heston")],
+        variants=["flat_bsm", "heston"],
+        inceptions=["2023-05-04"],
+    )
+    html = s13.build_report(s13.aggregate(root))
+    assert "&sigma;-collapse" in html
+    assert "max Feller ratio" in html
+    # 1 of 5 heston records is degenerate, and its ratio is the max.
+    assert "20.0%" in html
+    assert "226,022.0000" in html
+
+
+def test_the_screen_derives_the_ratio_for_slv_records_that_nest_their_heston_fit():
+    """heston_slv carries its Heston fit nested, without a ratio.
+
+    A real fleet record for `heston_slv` is
+    {..., "heston": {"kappa":…, "theta":…, "sigma":…, "rho":…, "v0":…}} --
+    the five raw parameters and no `feller_ratio`.  Reading only the top
+    level would report "unknown" for every SLV date and leave sigma-collapse
+    invisible for one of the two certified 2-D variants, which is the exact
+    blind spot this screen exists to close.  SLV inherits the Heston fit, so
+    it inherits its regime.
+    """
+    collapsed = {"kappa": 2.046, "theta": 0.05524, "sigma": 0.001, "rho": -0.3, "v0": 0.03}
+    ordinary = {"kappa": 3.0, "theta": 0.0246, "sigma": 0.3844, "rho": -0.26, "v0": 0.028}
+    records = [
+        {"surface_sha": "slv0", "variant": "heston_slv", "heston": ordinary},
+        {"surface_sha": "slv1", "variant": "heston_slv", "heston": collapsed},
+    ]
+    calib = s13.calibration_quality(records)
+    assert calib["feller_buckets"]["unknown"] == 0
+    assert calib["n_sigma_collapse"] == 1
+    assert calib["sigma_collapse_fraction"] == pytest.approx(0.5)
+    # 2*2.046*0.05524 / 0.001**2
+    assert calib["feller_ratio"]["max"] == pytest.approx(226_042.08, rel=1e-6)
+
+
+def test_a_nested_fit_with_no_usable_sigma_is_unknown_not_silently_ranked():
+    records = [
+        {"surface_sha": "slv0", "heston": {"kappa": 2.0, "theta": 0.05, "sigma": 0.0}},
+        {"surface_sha": "slv1", "heston": {"kappa": 2.0, "theta": 0.05}},
+        {"surface_sha": "slv2", "heston": "not-a-mapping"},
+    ]
+    calib = s13.calibration_quality(records)
+    assert calib["feller_buckets"]["unknown"] == 3
+    assert calib["sigma_collapse_fraction"] is None
+
+
+def test_an_explicit_ratio_wins_over_the_nested_parameters():
+    """The calibrator's own ratio is authoritative where it exists."""
+    records = [
+        {
+            "surface_sha": "h0",
+            "feller_ratio": 1.00002,
+            "heston": {"kappa": 2.0, "theta": 0.05, "sigma": 0.001},
+        }
+    ]
+    calib = s13.calibration_quality(records)
+    assert calib["feller_buckets"]["boundary"] == 1
+    assert calib["n_sigma_collapse"] == 0
+
+
+def _one_variant_fleet(root, calibration):
+    _write_run(root, "2023-05-04", "flat_bsm", total_pnl=500_000.0)
+    _write_run(root, "2023-05-04", "heston", total_pnl=450_000.0, calibration=calibration)
+    _write_manifest(
+        root,
+        [{"inception": "2023-05-04", "variant": v} for v in ("flat_bsm", "heston")],
+        variants=["flat_bsm", "heston"],
+        inceptions=["2023-05-04"],
+    )
+    return root
+
+
+def test_an_enforcement_breach_is_called_out_in_the_report(tmp_path):
+    """`enforce_feller=True` means breaches must be 0; say so when they aren't.
+
+    A finding that lands only in the JSON is half-hidden.  A record whose own
+    flag says unsatisfied means the constraint did not take on that date,
+    which invalidates the assumption the whole screen rests on.
+    """
+    records = _enforced_records()
+    records[1] = dict(records[1], feller_satisfied=False)
+    html = s13.build_report(s13.aggregate(_one_variant_fleet(tmp_path / "a", records)))
+    assert "FELLER ENFORCEMENT BREACH" in html
+    assert "Heston" in html
+
+
+def test_a_clean_run_carries_no_breach_banner(tmp_path):
+    html = s13.build_report(
+        s13.aggregate(_one_variant_fleet(tmp_path / "b", _enforced_records()))
+    )
+    assert "FELLER ENFORCEMENT BREACH" not in html
+
+
+def test_a_malformed_stated_ratio_falls_through_instead_of_crashing():
+    """Aggregation must not die on one bad record in a 143-CPU-hour fleet."""
+    records = [
+        {
+            "surface_sha": "h0",
+            "feller_ratio": "n/a",
+            "heston": {"kappa": 3.0, "theta": 0.0246, "sigma": 0.3844},
+        }
+    ]
+    calib = s13.calibration_quality(records)
+    assert calib["feller_buckets"]["boundary"] == 1

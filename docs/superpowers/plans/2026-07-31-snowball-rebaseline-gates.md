@@ -2078,7 +2078,22 @@ not a defect.
 Deliberately deferred; each needs its own plan.
 
 - **G5 pre-flight grid sweep** (§9) — build grids only, no solve, for every operating point before the fleet. `fdf3a70` made under-resolution a fail-closed `ValidationError`, and `test_adi_core_tau_exactness.py`'s failures show `n_x=60` at T≥2 already trips it.
+  - **DELIVERED 2026-08-26** as `example/mo_volmodels/11c_grid_preflight.py`: 14,084 operating points, 0 under-resolved. QUAD routes and the 2-D variance axis remain uncovered and are declared in the artifact's `scope.not_covered`.
 - **Task 6.1 timing run** (§7.3) — the fleet total is set by measurement, never extrapolated from single solves.
 - **G3 accounting sanity** (§11) on one inception.
 - **Stage 13 σ-collapse handling** — §7A.10(3)'s 50 dates must be flagged or excluded, never averaged into a `heston` result.
+  - **DELIVERED 2026-08-26.** `calibration_quality` screened `feller_satisfied`,
+    which `enforce_feller=True` makes True by construction — 257 of 257 fits in
+    the daily pool — so the metric could only ever report "clean". It now ranks
+    the Feller *ratio* on Gate G2's measured cut points and emits
+    `feller_buckets` / `n_sigma_collapse` / `sigma_collapse_fraction`, plus
+    `n_enforcement_breaches` so the enforcement premise is itself checkable.
+    Against the real pool this flags 3 dates (1.17%) — 2026-01-12, 2026-01-23,
+    2026-07-16 — at ratios 2.3e5 / 7.9e3 / 1.7e5 with σ pinned at its 0.001
+    lower bound. `heston_slv` records nest their Heston fit without a ratio, so
+    the screen derives it from the nested parameters; reading only the top level
+    left σ-collapse invisible for one of the two certified 2-D variants.
+    Posture is **flag**, not exclude: §5.9 records that exclusion was the interim
+    mitigation for a defect believed unfixable, and the monotone v-transport
+    stencil (`v_drift_scheme: "auto"`, shipped `908588c`) fixed it.
 - **Deriving `_clone_engine` from the constructor signature** (§7A.10) — the hand-transcribed kwargs list is a standing silent-mispricing hazard.
