@@ -18,12 +18,14 @@ from quantark.priceenv import PricingEnvironment
 from quantark.montecarlo.qe_kernels import qe_variance_step
 from quantark.montecarlo.qmc_brownian_bridge import apply_brownian_bridge
 from quantark.montecarlo.qmc_sobol import SobolNormalGenerator
+from quantark.util.enum import CouponPayType, ObservationType
 from quantark.util.enum.engine_enums import (
     EngineType,
     HestonMCScheme,
     MonteCarloMethod,
 )
 from quantark.util.exceptions import NumericalError, PricingError, ValidationError
+from quantark.util.numerical import safe_log
 from quantark.volmodels.heston import HestonParams
 from quantark.volmodels.localvol import LocalVolSurface, build_dupire_local_vol
 from quantark.volmodels.slv import BinMethod
@@ -636,12 +638,14 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
     """
 
     _TIME_SAMPLING_MODES = ("left", "mid", "integrated")
+    _ESTIMATORS = ("plain", "one_step_survival")
 
     def __init__(
         self,
         params: Optional[MCParams] = None,
         local_vol_surface: Optional[LocalVolSurface] = None,
         lv_time_sampling: str = "left",
+        estimator: str = "plain",
         **kwargs,
     ):
         super().__init__(params=params, **kwargs)
@@ -652,12 +656,93 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
                 f"{self._TIME_SAMPLING_MODES}, got {lv_time_sampling!r}"
             )
         self.lv_time_sampling = lv_time_sampling
+        if estimator not in self._ESTIMATORS:
+            raise ValidationError(
+                f"estimator must be one of {self._ESTIMATORS}, got {estimator!r}"
+            )
+        self.estimator = estimator
+        if estimator == "one_step_survival":
+            if self.method == MonteCarloMethod.RANDOMIZED_QUASI:
+                raise ValidationError(
+                    "estimator='one_step_survival' does not support "
+                    "RANDOMIZED_QUASI (the RQMC control-variate machinery "
+                    "assumes the plain estimator); use PSEUDO or QUASI"
+                )
+            if bool(getattr(self.params, "use_antithetic", False)):
+                raise ValidationError(
+                    "estimator='one_step_survival' does not support antithetic "
+                    "sampling (survival conditioning is not sign-symmetric)"
+                )
 
     def _rqmc_scheme_label(self) -> str:
         label = super()._rqmc_scheme_label()
         if self.lv_time_sampling != "left":
             label = f"{label}+ts:{self.lv_time_sampling}"
+        if self.estimator != "plain":
+            label = f"{label}+est:{self.estimator}"
         return label
+
+    # --- one-step survival (Glasserman-Staum / Alm et al.) ------------------
+    #
+    # The estimator factorizes the snowball across KO observation dates:
+    #     E[payoff] = sum_k E[W_{k-1} q_k] * KO_value_k
+    #                 + E[W_N * maturity_leg(steered path)]
+    # where q_k is the one-step KO probability conditional on the state one SDE
+    # step before date k, W_k = prod_{j<=k}(1 - q_j), and the simulated path is
+    # steered into the surviving region at each KO-date step. The maturity leg
+    # (V0/V1 classification, continuous-KI bridge, protection/airbag/rebate
+    # variants) is evaluated by the CERTIFIED base `_compute_payoffs` on the
+    # steered never-KO paths; only the branch weights are new. Unbiasedness is
+    # the iterated-conditional-expectation identity; the estimator is Lipschitz
+    # in spot, which is what makes small-bump FD gamma stable.
+
+    def _validate_inputs(self, S, T, r, q, sigma, product) -> None:
+        super()._validate_inputs(S, T, r, q, sigma, product)
+        if self.estimator == "one_step_survival":
+            self._validate_oss_product(product)
+            self._oss_product = product
+
+    def _validate_oss_product(self, product) -> None:
+        from quantark.asset.equity.product.option.ko_reset_snowball_option import (
+            KnockOutResetSnowballOption,
+        )
+
+        if isinstance(product, KnockOutResetSnowballOption):
+            raise ValidationError(
+                "estimator='one_step_survival' does not support KO-reset snowballs"
+            )
+        if product.barrier_config.ko_observation_type == ObservationType.CONTINUOUS:
+            raise ValidationError(
+                "estimator='one_step_survival' requires DISCRETE KO observation "
+                "(the conditioning acts at KO observation dates)"
+            )
+        if product.barrier_config.disable_ko_after_ki:
+            raise ValidationError(
+                "estimator='one_step_survival' does not support "
+                "disable_ko_after_ki (the KO survival factorization assumes KO "
+                "is always live)"
+            )
+        if bool(getattr(product, "_otc_lifecycle_knocked_in", False)):
+            raise ValidationError(
+                "estimator='one_step_survival' does not support the "
+                "already-knocked-in lifecycle state"
+            )
+
+    def _oss_store(self) -> dict:
+        """Per-thread slots for the recorded per-date KO probabilities
+        (same concurrency contract as ``_bridge_variance_store``)."""
+        store = self.__dict__.get("_oss_prob_slots")
+        if store is None:
+            store = self.__dict__.setdefault("_oss_prob_slots", {})
+        return store
+
+    def calculate_event_stats(self, *args, **kwargs):
+        if self.estimator == "one_step_survival":
+            raise ValidationError(
+                "calculate_event_stats is not supported with "
+                "estimator='one_step_survival'; use the plain estimator"
+            )
+        return super().calculate_event_stats(*args, **kwargs)
 
     def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
         if self._prebuilt is not None:
@@ -688,6 +773,7 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
             raise ValidationError(
                 "rqmc_qe_draw_provider is implemented only for QE/QE-M engines"
             )
+        n_contract = len(dt_array)
         dt_array = self._refined_dt_array(dt_array)
         term = self._term_inputs(T, dt_array)
         env, _ = self._term_ctx
@@ -700,6 +786,11 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
             if self._uses_qmc()
             else _effective_path_count(n_paths, use_antithetic)
         )
+
+        if self.estimator == "one_step_survival":
+            return self._create_oss_path_generator(
+                S, T, dt_array, n_contract, term, lv, n_eff, batch_id
+            )
 
         def simulate(batch_id=None, seed=None):
             rng = np.random.default_rng(self._batch_seed(batch_id, seed))
@@ -745,6 +836,280 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
             return nodes
 
         return self._make_path_generator(simulate, n_eff, batch_id)
+
+    def _create_oss_path_generator(
+        self, S, T, dt_array, n_contract, term, lv, n_eff, batch_id
+    ):
+        """Steered path generator for the one-step-survival estimator.
+
+        At every refined SDE step ending on a KO observation node the normal
+        draw is replaced by its conditional-on-survival counterpart and the
+        per-path KO probability is recorded (thread-keyed, consumed by
+        ``_compute_payoffs``). All other steps are the plain scheme driven by
+        ndtri-transformed uniforms.
+        """
+        product = getattr(self, "_oss_product", None)
+        if product is None:
+            raise PricingError(
+                "one_step_survival pricing ran without product context "
+                "(_validate_inputs was bypassed)"
+            )
+        env, _ = self._term_ctx
+        all_times, dt_contract, ko_indices, _ = self._build_time_grid(
+            product, env, T
+        )
+        if len(dt_contract) != n_contract:
+            raise PricingError(
+                "one_step_survival grid mismatch: generator received "
+                f"{n_contract} contractual steps, _build_time_grid produced "
+                f"{len(dt_contract)}"
+            )
+        ko_profile = product.get_ko_observation_profile(env)
+        ko_barriers = np.broadcast_to(
+            np.asarray(ko_profile["barriers"], dtype=float), (len(ko_indices),)
+        ).copy()
+        is_reverse = bool(product.is_reverse)
+        n_sub = max(int(self.substeps_per_interval), 1)
+        n_fine = len(dt_array)
+        # Refined step i ends on fine node i+1; contractual node col c = (i+1)/n_sub.
+        # KO observation k sits at contractual node col ko_indices[k] + 1.
+        ko_slot_by_step = np.full(n_fine, -1, dtype=int)
+        for k, col in enumerate(np.asarray(ko_indices, dtype=int) + 1):
+            ko_slot_by_step[int(col) * n_sub - 1] = k
+        n_ko = len(ko_indices)
+        tiny = 1e-15
+
+        def simulate(batch_id=None, seed=None):
+            rng = np.random.default_rng(self._batch_seed(batch_id, seed))
+            u_all = (
+                _qmc_uniforms(int(self.params.seed), n_eff, n_fine, batch_id)
+                if self._uses_qmc()
+                else None
+            )
+            nodes = np.empty((n_eff, n_fine + 1), dtype=float)
+            h2 = self._new_step_log_variance(n_eff, n_fine)
+            q_ko = np.zeros((n_eff, n_ko), dtype=float)
+            spot = np.full(n_eff, float(S), dtype=float)
+            nodes[:, 0] = spot
+            t = 0.0
+            sqrt_dt = np.sqrt(np.asarray(dt_array, dtype=float))
+            time_sampling = self.lv_time_sampling
+            for i, dt in enumerate(dt_array):
+                if time_sampling == "left":
+                    vol = np.asarray(lv.local_vol(spot, t), dtype=float)
+                elif time_sampling == "mid":
+                    vol = np.asarray(
+                        lv.local_vol(spot, t + 0.5 * float(dt)), dtype=float
+                    )
+                else:  # "integrated"
+                    vol = np.sqrt(
+                        np.asarray(
+                            lv.time_avg_var(spot, t, t + float(dt)), dtype=float
+                        )
+                    )
+                if h2 is not None:
+                    h2[:, i] = vol * vol * dt
+                u = np.clip(
+                    u_all[:, i] if u_all is not None else rng.random(n_eff),
+                    tiny,
+                    1.0 - tiny,
+                )
+                drift = float(term.rrf[i] - term.div[i])
+                k = int(ko_slot_by_step[i])
+                if k >= 0:
+                    sd = np.maximum(vol * sqrt_dt[i], 1e-300)
+                    z_star = (
+                        np.log(ko_barriers[k] / spot)
+                        - (drift - 0.5 * vol * vol) * dt
+                    ) / sd
+                    if is_reverse:
+                        # DOWN-KO: survive means end strictly ABOVE the barrier
+                        p_hit = np.clip(ndtr(z_star), 0.0, 1.0 - 1e-300)
+                        z = ndtri(np.clip(p_hit + u * (1.0 - p_hit), tiny, 1.0 - tiny))
+                    else:
+                        # UP-KO: survive means end strictly BELOW the barrier
+                        p_surv = np.clip(ndtr(z_star), 1e-300, 1.0)
+                        z = ndtri(np.clip(u * p_surv, tiny, 1.0 - tiny))
+                        p_hit = 1.0 - p_surv
+                    q_ko[:, k] = p_hit
+                else:
+                    z = ndtri(u)
+                spot = spot * np.exp(
+                    (drift - 0.5 * vol * vol) * dt + vol * sqrt_dt[i] * z
+                )
+                if k >= 0:
+                    # Enforce the conditioned branch against float rounding: a
+                    # steered endpoint must sit strictly on the surviving side,
+                    # or the downstream hard KO check re-introduces the event
+                    # the weights already account for.
+                    if is_reverse:
+                        spot = np.maximum(spot, ko_barriers[k] * (1.0 + 1e-12))
+                    else:
+                        spot = np.minimum(spot, ko_barriers[k] * (1.0 - 1e-12))
+                nodes[:, i + 1] = spot
+                t += float(dt)
+            self._record_step_log_variance(h2)
+            self._oss_store()[threading.get_ident()] = q_ko
+            return nodes
+
+        return self._make_path_generator(simulate, n_eff, batch_id)
+
+    def _oss_ki_survival_weight(
+        self, product, pricing_env, paths, ki_indices
+    ) -> np.ndarray:
+        """Per-path probability of NOT knocking in, as a smooth weight.
+
+        For continuous KI this is the Brownian-bridge no-cross product (the
+        conditional expectation of the sampled indicator the plain estimator
+        draws -- same expectation, Rao-Blackwellized, and continuous in spot,
+        which is what keeps small-bump FD gamma stable). The bridge uses the
+        per-step log-variance the scheme recorded, and a step with a breached
+        endpoint contributes survival 0 -- continuously, since the no-cross
+        probability already tends to 0 as an endpoint approaches the barrier.
+        For discrete KI the hard indicator is deterministic given the path and
+        is kept as a 0/1 weight.
+        """
+        n_paths = paths.shape[0]
+        if not product.has_ki_barrier:
+            return np.ones(n_paths)
+        ki_profile = product.get_ki_observation_profile(pricing_env)
+        ki_barriers_val = np.array(ki_profile["barriers"])
+        ki_continuous = (
+            product.barrier_config.ki_observation_type == ObservationType.CONTINUOUS
+            or product.barrier_config.ki_continuous
+        )
+        if not ki_continuous:
+            ki_triggered, _ = self._check_ki_barriers(
+                paths, ki_indices, ki_barriers_val, product.is_reverse
+            )
+            return np.where(ki_triggered, 0.0, 1.0)
+        if ki_barriers_val.shape not in ((), (1,)):
+            raise ValidationError(
+                "Continuous KI monitoring requires a scalar ki_barrier."
+            )
+        barrier = float(ki_barriers_val.reshape(-1)[0])
+        h2 = self._ki_bridge_step_log_variance(paths)
+        s_i, s_j = paths[:, :-1], paths[:, 1:]
+        if product.is_reverse:
+            breached = (s_i >= barrier) | (s_j >= barrier)
+        else:
+            breached = (s_i <= barrier) | (s_j <= barrier)
+        log_term = safe_log(s_i / barrier) * safe_log(s_j / barrier)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            exponent = -2.0 * log_term / h2
+        exponent = np.clip(exponent, -745.0, 0.0)
+        step_surv = np.where(breached, 0.0, 1.0 - np.exp(exponent))
+        return np.prod(step_surv, axis=1)
+
+    def _compute_payoffs(
+        self,
+        product,
+        pricing_env,
+        paths,
+        all_times,
+        ko_indices,
+        ki_indices,
+        r,
+        T,
+        sigma,
+        rng_seed,
+    ):
+        if self.estimator != "one_step_survival":
+            return super()._compute_payoffs(
+                product, pricing_env, paths, all_times, ko_indices, ki_indices,
+                r, T, sigma, rng_seed,
+            )
+        n_paths = paths.shape[0]
+        n_ko = len(ko_indices)
+        q_ko = self._oss_store().get(threading.get_ident())
+        if q_ko is None or q_ko.shape != (n_paths, n_ko):
+            raise PricingError(
+                "one_step_survival KO probabilities were not recorded for "
+                "these paths"
+            )
+        ko_profile = product.get_ko_observation_profile(pricing_env)
+        ko_triggered, _ = self._check_ko_barriers(
+            paths, np.asarray(ko_indices, dtype=int),
+            np.array(ko_profile["barriers"]), product.is_reverse,
+        )
+        if bool(ko_triggered.any()):
+            raise NumericalError(
+                "steered one_step_survival paths triggered the hard KO check; "
+                "the survival conditioning is inconsistent with the barrier "
+                "comparison"
+            )
+        surv = 1.0 - q_ko
+        # W_prev[:, k] = prod_{j<k}(1 - q_j); W_final = prod over all KO dates
+        W_prev = np.cumprod(
+            np.concatenate([np.ones((n_paths, 1)), surv[:, :-1]], axis=1), axis=1
+        )
+        W_final = W_prev[:, -1] * surv[:, -1] if n_ko else np.ones(n_paths)
+
+        # KO branch: deterministic per-date payoffs weighted by the recorded
+        # one-step probabilities (same schedule/timings the plain path uses).
+        ko_pay = np.asarray(ko_profile["payoffs"], dtype=float)
+        ko_times = np.asarray(ko_profile["observation_times"], dtype=float)
+        timings = self._payment_timings
+        if product.accrual_config.coupon_pay_type == CouponPayType.INSTANT:
+            ko_settle = np.asarray(timings.observation_payment_times, dtype=float)
+        else:
+            ko_settle = np.full(n_ko, float(timings.terminal.payment_time))
+        ko_df = np.asarray(self._df(ko_settle), dtype=float)
+        ko_w = W_prev * q_ko  # per-path branch weight of KO at date k
+        branch_pv = ko_w @ (ko_pay * ko_df)
+
+        # Maturity leg on the steered (never-KO) paths, with the KI indicator
+        # replaced by its smooth survival weight. Payoff variants stay in the
+        # product's own certified methods.
+        w_ki = self._oss_ki_survival_weight(product, pricing_env, paths, ki_indices)
+        terminal_spots = paths[:, -1]
+        v0_payoffs = np.zeros(n_paths)
+        v1_payoffs = np.zeros(n_paths)
+        need_v0 = w_ki > 1e-14
+        need_v1 = w_ki < 1.0 - 1e-14
+        if need_v0.any():
+            v0_payoffs[need_v0] = np.array(
+                [
+                    product.get_maturity_payoff_v0(spot, pricing_env)
+                    for spot in terminal_spots[need_v0]
+                ]
+            )
+        if need_v1.any():
+            v1_payoffs[need_v1] = np.array(
+                [
+                    product.get_maturity_payoff_v1(spot, pricing_env)
+                    for spot in terminal_spots[need_v1]
+                ]
+            )
+        terminal_df = float(self._df(float(timings.terminal.payment_time)))
+        maturity_pv = (
+            W_final * (w_ki * v0_payoffs + (1.0 - w_ki) * v1_payoffs) * terminal_df
+        )
+        pv = branch_pv + maturity_pv
+
+        # Weighted event stats (probabilities exact; counts rounded, reporting-only).
+        ko_prob_path = ko_w.sum(axis=1)
+        ko_probability = float(ko_prob_path.mean())
+        v0_probability = float((W_final * w_ki).mean())
+        v1_probability = float((W_final * (1.0 - w_ki)).mean())
+        ko_time_sum = float((ko_w @ ko_times).sum()) if n_ko else 0.0
+        ko_weight_total = float(ko_prob_path.sum())
+        stats_oss = {
+            "ko_probability": ko_probability,
+            "v0_probability": v0_probability,
+            "v1_probability": v1_probability,
+            "ko_count": int(round(ko_weight_total)),
+            "v0_count": int(round(v0_probability * n_paths)),
+            "v1_count": int(round(v1_probability * n_paths)),
+            "avg_ko_time": (
+                ko_time_sum / ko_weight_total if ko_weight_total > 0.0 else None
+            ),
+            "ko_time_sum": ko_time_sum,
+            "ko_time_count": int(round(ko_weight_total)),
+        }
+        # PVs are already discounted; hand back zero settlement times so the
+        # caller's df(0) = 1 discounting is a no-op.
+        return pv, np.zeros(n_paths, dtype=float), stats_oss
 
 
 class HestonSnowballMCEngine(_VolModelSnowballMCBase):
