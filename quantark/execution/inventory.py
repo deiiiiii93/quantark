@@ -508,6 +508,9 @@ SUPPORTING_EXPORTS = {
     "quantark.asset.equity.engine.mc": (
         "AmericanMCResult", "DCNMCResult", "PhoenixMCResult", "AsianMCResult",
         "RangeAccrualMCResult", "coupled_heston_ladder_pair",
+        # Richardson pair harness (reference-quality extrapolation): a result
+        # dataclass and a helper over engines, not a priceable engine.
+        "RichardsonPairResult", "richardson_pair_price",
     ),
     "quantark.asset.equity.engine.pde": (
         "DCNPDEResult",

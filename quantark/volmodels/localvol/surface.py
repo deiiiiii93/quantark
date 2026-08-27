@@ -95,6 +95,34 @@ class LocalVolSurface:
         result = np.asarray(vals, dtype=float).reshape(shape)
         return result if result.shape else float(result)
 
+    def time_avg_var(self, spot: ArrayLike, t0: float, t1: float) -> "float | np.ndarray":
+        """Exact time-averaged variance (1/(t1-t0)) * int_{t0}^{t1} sigma^2(spot, u) du.
+
+        At fixed spot the bilinear surface is piecewise-linear in t with breakpoints
+        exactly at ``time_grid`` (constant in the clamped extrapolation region), so
+        sigma^2 is piecewise-quadratic and each segment [a, b] integrates in closed
+        form: (b - a) * (sig_a^2 + sig_a*sig_b + sig_b^2) / 3. Used by MC kernels in
+        ``time_sampling="integrated"`` mode; exact whenever sigma depends on t only.
+        """
+        t0 = float(t0)
+        t1 = float(t1)
+        if not (np.isfinite(t0) and np.isfinite(t1)) or not t1 > t0:
+            raise ValidationError("time_avg_var requires finite t1 > t0")
+        tg = self.time_grid
+        inner = tg[(tg > t0) & (tg < t1)]
+        pts = np.concatenate(([t0], inner, [t1]))
+        sig_prev = np.asarray(self.local_vol(spot, float(pts[0])), dtype=float)
+        acc = np.zeros_like(sig_prev)
+        for k in range(1, pts.size):
+            sig_next = np.asarray(self.local_vol(spot, float(pts[k])), dtype=float)
+            w = float(pts[k] - pts[k - 1])
+            acc = acc + w * (
+                sig_prev * sig_prev + sig_prev * sig_next + sig_next * sig_next
+            ) / 3.0
+            sig_prev = sig_next
+        result = acc / (t1 - t0)
+        return result if result.shape else float(result)
+
     def local_vol(self, spot: ArrayLike, t: ArrayLike) -> "float | np.ndarray":
         """Vectorized bilinear (time, strike) interpolation with flat extrapolation.
 
