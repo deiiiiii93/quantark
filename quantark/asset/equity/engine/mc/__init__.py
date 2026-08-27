@@ -42,6 +42,7 @@ from .phoenix_vol_mc_engines import (
     HestonSLVQEPhoenixMCEngine,
 )
 from .sabr_mc_engine import SABRMCEngine
+from .richardson import RichardsonPairResult, richardson_pair_price
 
 __all__ = [
     "LocalVolMCEngine",
@@ -61,6 +62,8 @@ __all__ = [
     "HestonSLVPhoenixMCEngine",
     "HestonSLVQEPhoenixMCEngine",
     "SABRMCEngine",
+    "RichardsonPairResult",
+    "richardson_pair_price",
     "EuropeanMCEngine",
     "AmericanOptionMCEngine",
     "AmericanMCResult",
