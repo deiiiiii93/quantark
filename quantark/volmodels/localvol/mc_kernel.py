@@ -19,6 +19,35 @@ from quantark.volmodels.barrier import (
 )
 
 
+_TIME_SAMPLING_MODES = ("left", "mid", "integrated")
+
+
+def _validate_time_sampling(time_sampling: str) -> str:
+    if time_sampling not in _TIME_SAMPLING_MODES:
+        raise ValidationError(
+            f"time_sampling must be one of {_TIME_SAMPLING_MODES}, got {time_sampling!r}"
+        )
+    return time_sampling
+
+
+def _step_vol(lv_surface: LocalVolSurface, s: np.ndarray, t: float, dt: float,
+              time_sampling: str) -> np.ndarray:
+    """Effective per-step vol sigma_eff so that the step log-variance is
+    sigma_eff^2 * dt under the requested time-sampling mode.
+
+    "left" freezes sigma at the step's left endpoint (the historical scheme, kept
+    bitwise-identical); "mid" samples at t + dt/2; "integrated" uses the exact
+    time-averaged variance of the bilinear surface (exact when sigma depends on t
+    only). The same sigma_eff feeds the spot update and the barrier bridge, so
+    monitoring stays consistent with the scheme.
+    """
+    if time_sampling == "left":
+        return np.asarray(lv_surface.local_vol(s, t), dtype=float)
+    if time_sampling == "mid":
+        return np.asarray(lv_surface.local_vol(s, t + 0.5 * dt), dtype=float)
+    return np.sqrt(np.asarray(lv_surface.time_avg_var(s, t, t + dt), dtype=float))
+
+
 def _disc_closure(step_dt: np.ndarray, r_fwd: np.ndarray):
     """Return (disc, node_times): disc(t)->DF(0->t) piecewise-const-rate; node_times per grid node."""
     node_times = np.concatenate([[0.0], np.cumsum(step_dt)])
@@ -46,6 +75,7 @@ def price_european_lv_mc(
     use_antithetic: bool = False,
     sampler=None,
     return_stderr: bool = False,
+    time_sampling: str = "left",
 ) -> Union[float, Tuple[float, float]]:
     """Price a European vanilla under local volatility via Monte Carlo.
 
@@ -62,7 +92,12 @@ def price_european_lv_mc(
             QMC dimension layout: columns [z(M)] (one normal stream per step), ndtri-
             transformed. Mutually exclusive with ``use_antithetic``; default None keeps
             the pseudo path bit-identical.
+        time_sampling: where the per-step vol samples the surface's time axis --
+            "left" (default, bitwise-identical to the historical scheme), "mid"
+            (t + dt/2), or "integrated" (exact per-step time-averaged variance;
+            exact for time-only surfaces). See ``_step_vol``.
     """
+    _validate_time_sampling(time_sampling)
     dt = np.asarray(step_dt, dtype=float)
     rf = np.asarray(r_fwd, dtype=float)
     cf = np.asarray(carry_fwd, dtype=float)
@@ -99,7 +134,7 @@ def price_european_lv_mc(
     sqrt_dt = np.sqrt(dt)
     t = 0.0
     for i in range(n):
-        sigma = np.asarray(lv_surface.local_vol(s, t), dtype=float)
+        sigma = _step_vol(lv_surface, s, t, float(dt[i]), time_sampling)
         if z_all is not None:
             z = z_all[:, i]
         elif use_antithetic:
@@ -149,6 +184,7 @@ def price_barrier_lv_mc(
     seed: Optional[int] = 42,
     use_antithetic: bool = False,
     return_stderr: bool = False,
+    time_sampling: str = "left",
 ) -> Union[float, Tuple[float, float]]:
     """Price a single-barrier option under local volatility via Monte Carlo.
 
@@ -156,7 +192,10 @@ def price_barrier_lv_mc(
     per-step vol so the shared barrier core can apply continuous (Brownian-bridge) or
     discrete monitoring. ``observe_idx`` (node indices) is required when ``continuous`` is
     False. See ``quantark.volmodels.barrier`` for the payoff/monitoring semantics.
+    ``time_sampling`` follows ``price_european_lv_mc``; the recorded per-step vol (and
+    therefore the bridge variance) uses the same effective vol the step was drawn with.
     """
+    _validate_time_sampling(time_sampling)
     dt = np.asarray(step_dt, dtype=float)
     rf = np.asarray(r_fwd, dtype=float)
     cf = np.asarray(carry_fwd, dtype=float)
@@ -194,7 +233,7 @@ def price_barrier_lv_mc(
     sqrt_dt = np.sqrt(dt)
     t = 0.0
     for i in range(n):
-        sigma = np.asarray(lv_surface.local_vol(s, t), dtype=float)
+        sigma = _step_vol(lv_surface, s, t, float(dt[i]), time_sampling)
         vols[:, i] = sigma
         if use_antithetic:
             z_half = rng.standard_normal(half)

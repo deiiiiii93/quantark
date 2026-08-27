@@ -625,16 +625,39 @@ class _VolModelSnowballMCBase(_SubstepRefinementMixin, SnowballMCEngine):
 
 
 class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
-    """Snowball MC under a Dupire local-volatility surface."""
+    """Snowball MC under a Dupire local-volatility surface.
+
+    ``lv_time_sampling`` selects where each SDE step samples the surface's time
+    axis: ``"left"`` (default, bitwise-identical to the historical scheme),
+    ``"mid"`` (t + dt/2), or ``"integrated"`` (exact per-step time-averaged
+    variance; exact for time-only surfaces). The recorded step log-variance --
+    and therefore the continuous-KI bridge -- always uses the same effective vol
+    the step was drawn with.
+    """
+
+    _TIME_SAMPLING_MODES = ("left", "mid", "integrated")
 
     def __init__(
         self,
         params: Optional[MCParams] = None,
         local_vol_surface: Optional[LocalVolSurface] = None,
+        lv_time_sampling: str = "left",
         **kwargs,
     ):
         super().__init__(params=params, **kwargs)
         self._prebuilt = local_vol_surface
+        if lv_time_sampling not in self._TIME_SAMPLING_MODES:
+            raise ValidationError(
+                "lv_time_sampling must be one of "
+                f"{self._TIME_SAMPLING_MODES}, got {lv_time_sampling!r}"
+            )
+        self.lv_time_sampling = lv_time_sampling
+
+    def _rqmc_scheme_label(self) -> str:
+        label = super()._rqmc_scheme_label()
+        if self.lv_time_sampling != "left":
+            label = f"{label}+ts:{self.lv_time_sampling}"
+        return label
 
     def _build_surface(self, env: PricingEnvironment) -> LocalVolSurface:
         if self._prebuilt is not None:
@@ -691,8 +714,20 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
             nodes[:, 0] = spot
             t = 0.0
             sqrt_dt = np.sqrt(np.asarray(dt_array, dtype=float))
+            time_sampling = self.lv_time_sampling
             for i, dt in enumerate(dt_array):
-                vol = np.asarray(lv.local_vol(spot, t), dtype=float)
+                if time_sampling == "left":
+                    vol = np.asarray(lv.local_vol(spot, t), dtype=float)
+                elif time_sampling == "mid":
+                    vol = np.asarray(
+                        lv.local_vol(spot, t + 0.5 * float(dt)), dtype=float
+                    )
+                else:  # "integrated"
+                    vol = np.sqrt(
+                        np.asarray(
+                            lv.time_avg_var(spot, t, t + float(dt)), dtype=float
+                        )
+                    )
                 if h2 is not None:
                     h2[:, i] = vol * vol * dt
                 z = (
