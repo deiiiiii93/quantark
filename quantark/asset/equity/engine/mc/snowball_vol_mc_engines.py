@@ -1021,7 +1021,10 @@ class LocalVolSnowballMCEngine(_VolModelSnowballMCBase):
             )
         n_paths = paths.shape[0]
         n_ko = len(ko_indices)
-        q_ko = self._oss_store().get(threading.get_ident())
+        # pop, not get: the slot holds a paths-sized buffer per thread, and a
+        # consumed-but-retained array could both leak and satisfy the shape
+        # guard for a LATER pricing whose own recording was skipped.
+        q_ko = self._oss_store().pop(threading.get_ident(), None)
         if q_ko is None or q_ko.shape != (n_paths, n_ko):
             raise PricingError(
                 "one_step_survival KO probabilities were not recorded for "

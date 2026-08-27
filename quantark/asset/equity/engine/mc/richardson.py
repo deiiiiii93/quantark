@@ -8,10 +8,10 @@ references, where the residual O(h^2) bias buys ~an order of magnitude fewer
 substeps at equal bias (see docs/lv-mc-scheme-demos/RESULTS.md).
 
 The two legs are treated as statistically independent when combining standard
-errors (exact for engines whose draw streams differ, e.g. different Sobol
-dimensions or seeds; conservative otherwise is NOT guaranteed -- if the legs are
-positively coupled the combined stderr overstates, negatively coupled understates.
-The engine factory contract keeps legs independent by default).
+errors: the combination omits the -4*Cov(fine, coarse) term, so the factory MUST
+give each leg its own draw stream (e.g. a different seed per substep factor).
+Legs whose engines expose ``params.seed`` are checked -- a shared seed raises
+rather than silently reporting an invalid std_error.
 """
 
 from __future__ import annotations
@@ -59,9 +59,16 @@ def richardson_pair_price(
         engine_factory: callable mapping a substeps-per-interval factor to a
             ready engine exposing ``price(product, pricing_env)`` (and
             optionally ``get_last_std_error()``). Called with ``substeps`` and
-            ``2 * substeps``; each call must return a FRESH engine.
+            ``2 * substeps``; each call must return a FRESH engine with an
+            INDEPENDENT draw stream (e.g. a different seed per factor) -- the
+            combined std_error assumes zero covariance between the legs.
         product, pricing_env: forwarded to both legs unchanged.
         substeps: the coarse leg's substeps-per-interval (>= 1).
+
+    Raises:
+        ValidationError: on invalid ``substeps``, or when both legs expose
+            ``params.seed`` and the seeds are equal (coupled streams would make
+            the reported std_error wrong).
     """
     if isinstance(substeps, bool) or not isinstance(substeps, int) or substeps < 1:
         raise ValidationError(
@@ -69,6 +76,14 @@ def richardson_pair_price(
         )
     coarse_engine = engine_factory(substeps)
     fine_engine = engine_factory(2 * substeps)
+    coarse_seed = getattr(getattr(coarse_engine, "params", None), "seed", None)
+    fine_seed = getattr(getattr(fine_engine, "params", None), "seed", None)
+    if coarse_seed is not None and coarse_seed == fine_seed:
+        raise ValidationError(
+            "richardson_pair_price legs share params.seed="
+            f"{coarse_seed!r}: the combined std_error assumes independent draw "
+            "streams. Give each substep factor its own seed in the factory."
+        )
     coarse_price = float(coarse_engine.price(product, pricing_env))
     fine_price = float(fine_engine.price(product, pricing_env))
 

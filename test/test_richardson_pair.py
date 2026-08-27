@@ -51,6 +51,21 @@ def test_pair_without_stderr_reports_none():
     assert r.price == 1.0 and r.std_error is None
 
 
+def test_pair_rejects_shared_leg_seed():
+    """A factory that seeds both legs identically couples their draw streams,
+    invalidating the independent-legs std_error -- it must raise, not report."""
+
+    class _Seeded:
+        class params:
+            seed = 42
+
+        def price(self, product, env):  # pragma: no cover - never reached
+            return 1.0
+
+    with pytest.raises(ValidationError):
+        richardson_pair_price(lambda n: _Seeded(), None, None)
+
+
 def test_pair_rejects_bad_substeps():
     with pytest.raises(ValidationError):
         richardson_pair_price(lambda n: _StubEngine(1.0, 0.1), None, None, substeps=0)
