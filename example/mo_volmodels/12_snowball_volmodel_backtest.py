@@ -1580,15 +1580,21 @@ def plan_resume(
     *,
     out_dir: Path,
     resume: bool,
-    adopt_unstamped: bool = False,
+    adopt_unstamped_since: Optional[float] = None,
 ) -> ResumePlan:
     """Split scheduled cells into reuse-from-disk and recompute.
 
     A stored summary is reused only when its stamped fingerprint equals the one
-    this fleet computes for the same cell.  An unstamped summary (written
-    before stamping existed) is reused ONLY under adopt_unstamped, and is
-    listed separately in the manifest so the reuse is never invisible: nothing
-    on disk proves such a cell came from this configuration.
+    this fleet computes for the same cell.
+
+    An unstamped summary (written before stamping existed) is reused only when
+    adopt_unstamped_since is given AND the file is newer than that instant.
+    The bound is the whole point: runs/ holds unstamped cells from every fleet
+    that ever wrote there, and "unstamped" alone cannot tell one this stack
+    produced from one a superseded gate decision produced a month ago.  A
+    timestamp turns the operator's knowledge -- "the current stack started at
+    X" -- into something the runner can check, and every adopted cell is
+    listed in the manifest with the mtime that admitted it.
     """
     plan = ResumePlan()
     if resume and any(task.get("code_sha256") is None for task in tasks):
@@ -1599,9 +1605,10 @@ def plan_resume(
         )
     for task in tasks:
         label = {"inception": task["inception"], "variant": task["variant"]}
-        summary = _read_run_summary(
+        path = (
             out_dir / "runs" / task["inception"] / task["variant"] / "run_summary.json"
         )
+        summary = _read_run_summary(path)
         stamped = None
         if summary is not None:
             identity_ok = (
@@ -1627,9 +1634,22 @@ def plan_resume(
             plan.reused.append(summary)
             continue
         if stamped is None:
-            if not adopt_unstamped:
+            written = datetime.fromtimestamp(path.stat().st_mtime)
+            if adopt_unstamped_since is None:
                 plan.recomputed.append(
                     {**label, "reason": "unstamped (predates provenance stamping)"}
+                )
+                plan.todo.append(task)
+                continue
+            if path.stat().st_mtime < adopt_unstamped_since:
+                plan.recomputed.append(
+                    {
+                        **label,
+                        "reason": (
+                            f"unstamped and written {written.isoformat(timespec='minutes')}, "
+                            "before the adoption bound"
+                        ),
+                    }
                 )
                 plan.todo.append(task)
                 continue
@@ -1642,9 +1662,12 @@ def plan_resume(
                 "fingerprint_sha256": None,
                 "adopted_without_fingerprint": True,
                 "expected_fingerprint_sha256": task["fingerprint"],
+                "run_summary_mtime": written.isoformat(timespec="seconds"),
             }
             plan.reused.append(adopted)
-            plan.adopted.append(label)
+            plan.adopted.append(
+                {**label, "run_summary_mtime": written.isoformat(timespec="seconds")}
+            )
             continue
         plan.recomputed.append({**label, "reason": "fingerprint mismatch (stale cell)"})
         plan.todo.append(task)
@@ -2174,7 +2197,7 @@ def build_run_manifest(
         # say-so, so they are named individually rather than counted.
         "resume": {
             "enabled": bool(cfg.get("resume", False)),
-            "adopt_unstamped": bool(cfg.get("adopt_unstamped", False)),
+            "adopt_unstamped_since": cfg.get("adopt_unstamped_since"),
             "code_sha256": cfg.get("code_sha256"),
             "data_sha256": cfg.get("data_sha256"),
             "fingerprint_version": RESUME_FINGERPRINT_VERSION,
@@ -2280,13 +2303,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--adopt-unstamped",
-        action="store_true",
+        metavar="SINCE",
+        default=None,
         help="with --resume, also reuse completed cells written before "
-        "provenance stamping existed. Nothing on disk proves such a cell came "
-        "from this configuration -- and nothing distinguishes one this fleet "
-        "wrote from one a SUPERSEDED gate decision wrote, so use it only when "
-        "you know which fleet left the unstamped cells. Each adopted cell is "
-        "listed in the manifest under resume.adopted_without_fingerprint.",
+        "provenance stamping existed, but ONLY those whose run_summary.json is "
+        "newer than SINCE (ISO-8601 local, e.g. 2026-08-27T12:00). Nothing on "
+        "disk proves such a cell came from this configuration, and runs/ holds "
+        "cells from every past fleet -- the timestamp is how you say which "
+        "ones you know about, so it is required rather than optional. Each "
+        "adopted cell is listed with its mtime in the manifest under "
+        "resume.adopted_without_fingerprint.",
     )
     return parser.parse_args(argv)
 
@@ -2315,15 +2341,26 @@ def _report_resume_plan(plan: ResumePlan, *, resume: bool) -> None:
     for row in plan.adopted:
         print(
             f"[resume] adopted without fingerprint {row['inception']} / "
-            f"{row['variant']}",
+            f"{row['variant']} (written {row['run_summary_mtime']})",
             flush=True,
         )
 
 
 def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
     started = time.perf_counter()
-    if getattr(args, "adopt_unstamped", False) and not getattr(args, "resume", False):
-        raise ValidationError("--adopt-unstamped only means something with --resume")
+    adopt_unstamped_since: Optional[float] = None
+    if getattr(args, "adopt_unstamped", None) is not None:
+        if not getattr(args, "resume", False):
+            raise ValidationError("--adopt-unstamped only means something with --resume")
+        try:
+            adopt_unstamped_since = datetime.fromisoformat(
+                str(args.adopt_unstamped)
+            ).timestamp()
+        except ValueError as exc:
+            raise ValidationError(
+                f"--adopt-unstamped needs an ISO-8601 timestamp, got "
+                f"{args.adopt_unstamped!r}: {exc}"
+            ) from exc
     history_dir = Path(args.history_dir)
     out_dir = Path(args.out_dir)
     rate = stage11().FLAT_RATE
@@ -2412,7 +2449,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         tasks,
         out_dir=out_dir,
         resume=bool(args.resume),
-        adopt_unstamped=bool(args.adopt_unstamped),
+        adopt_unstamped_since=adopt_unstamped_since,
     )
     _report_resume_plan(plan, resume=bool(args.resume))
     summaries, failures = execute_tasks(plan.todo, workers=int(args.workers))
@@ -2470,7 +2507,9 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         "rate": float(rate),
         "workers": int(args.workers),
         "resume": bool(args.resume),
-        "adopt_unstamped": bool(args.adopt_unstamped),
+        "adopt_unstamped_since": (
+            None if args.adopt_unstamped is None else str(args.adopt_unstamped)
+        ),
         "code_sha256": code_sha256,
         "data_sha256": data_sha256,
         "mc_paths_per_batch": QUICK_MC_PATHS_PER_BATCH

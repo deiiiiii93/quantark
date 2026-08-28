@@ -14,6 +14,7 @@ protect are covered here directly.
 import importlib.util
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -1268,24 +1269,54 @@ def test_an_unstamped_cell_is_recomputed_by_default(tmp_path):
 
 def test_adopt_unstamped_reuses_the_cell_and_names_it(tmp_path):
     tasks = _resume_tasks(tmp_path)
-    _write_cell(tmp_path, tasks[0], fingerprint=None)
+    path = _write_cell(tmp_path, tasks[0], fingerprint=None)
     plan = s12.plan_resume(
-        tasks, out_dir=tmp_path, resume=True, adopt_unstamped=True
+        tasks,
+        out_dir=tmp_path,
+        resume=True,
+        adopt_unstamped_since=os.path.getmtime(path) - 60,
     )
     assert plan.todo == []
     assert len(plan.reused) == 1
-    assert plan.adopted == [{"inception": "2023-05-04", "variant": "localvol"}]
+    assert plan.adopted[0]["inception"] == "2023-05-04"
+    assert plan.adopted[0]["variant"] == "localvol"
+    assert plan.adopted[0]["run_summary_mtime"]
     provenance = plan.reused[0]["provenance"]
     assert provenance["adopted_without_fingerprint"] is True
     assert provenance["fingerprint_sha256"] is None
     assert provenance["expected_fingerprint_sha256"] == tasks[0]["fingerprint"]
 
 
+def test_adoption_will_not_reach_back_past_its_bound(tmp_path):
+    """The defect a bare --adopt-unstamped shipped with.
+
+    runs/ holds unstamped cells from every fleet that ever wrote there.  An
+    unbounded flag adopted two cells a month older than the current stack --
+    priced under a superseded gate decision -- because nothing on disk tells
+    them apart.  The bound is what the operator actually knows.
+    """
+    tasks = _resume_tasks(tmp_path)
+    path = _write_cell(tmp_path, tasks[0], fingerprint=None)
+    stack_started = os.path.getmtime(path) + 60  # cell predates this stack
+    plan = s12.plan_resume(
+        tasks, out_dir=tmp_path, resume=True, adopt_unstamped_since=stack_started
+    )
+    assert plan.reused == []
+    assert plan.adopted == []
+    assert len(plan.todo) == 1
+    assert "before the adoption bound" in plan.recomputed[0]["reason"]
+
+
 def test_adopting_never_stamps_the_cell_on_disk(tmp_path):
     """We did not verify it, so we must not leave an artifact claiming we did."""
     tasks = _resume_tasks(tmp_path)
     path = _write_cell(tmp_path, tasks[0], fingerprint=None)
-    s12.plan_resume(tasks, out_dir=tmp_path, resume=True, adopt_unstamped=True)
+    s12.plan_resume(
+        tasks,
+        out_dir=tmp_path,
+        resume=True,
+        adopt_unstamped_since=os.path.getmtime(path) - 60,
+    )
     assert "provenance" not in json.loads(path.read_text())
 
 
@@ -1326,9 +1357,12 @@ def test_disabled_resume_runs_everything_but_says_what_it_could_reuse(tmp_path):
 
 def test_manifest_records_the_resume_split(tmp_path):
     tasks = _resume_tasks(tmp_path)
-    _write_cell(tmp_path, tasks[0], fingerprint=None)
+    path = _write_cell(tmp_path, tasks[0], fingerprint=None)
     plan = s12.plan_resume(
-        tasks, out_dir=tmp_path, resume=True, adopt_unstamped=True
+        tasks,
+        out_dir=tmp_path,
+        resume=True,
+        adopt_unstamped_since=os.path.getmtime(path) - 60,
     )
     manifest = s12.build_run_manifest(
         cfg={
@@ -1336,7 +1370,7 @@ def test_manifest_records_the_resume_split(tmp_path):
             "notional": 50_000_000.0,
             "costs_enabled": True,
             "resume": True,
-            "adopt_unstamped": True,
+            "adopt_unstamped_since": "2026-08-27T12:00",
             "code_sha256": "code-v1",
             "data_sha256": "data-v1",
         },
@@ -1351,9 +1385,8 @@ def test_manifest_records_the_resume_split(tmp_path):
     assert resume["enabled"] is True
     assert resume["reused"] == 1
     assert resume["computed_now"] == 0
-    assert resume["adopted_without_fingerprint"] == [
-        {"inception": "2023-05-04", "variant": "localvol"}
-    ]
+    assert resume["adopted_without_fingerprint"][0]["variant"] == "localvol"
+    assert resume["adopt_unstamped_since"] == "2026-08-27T12:00"
     assert resume["code_sha256"] == "code-v1"
 
 
