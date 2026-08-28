@@ -1,0 +1,145 @@
+# Snowball under a real calibrated Dupire local-volatility surface.
+#
+# The 1-D local-vol counterpart of snowball_flat_bsm.yaml. One deterministic
+# engine -- LocalVolSnowballPDESolver -- is certified against a local-vol Monte
+# Carlo reference on TWO real CSI1000 surfaces:
+#
+#   2024-02-08  the crash bottom. The surface that put localvol on the MC route
+#               in Gate G2, and the worst cell in the sample (-1.2726 contracts
+#               against a converged reference, -2.88 sigma on PV).
+#   2023-11-15  the cohort's flattest surface by Dupire local-vol slope
+#               (dsigma/dlnS -0.020, dsigma/dt -0.017) at roughly half the vol
+#               level. The contrast tests FINDING-2026-08-26's central claim
+#               that the discretization bias scales with surface steepness.
+#
+# Both artifacts are COMMITTED under example/modelvalidation/data/. They are not
+# read from example/mo_volmodels/data/history, which is excluded per-clone and
+# would not exist in CI -- and assert_anchors re-runs the deterministic arm on
+# every commit.
+#
+# Levels are declared as MONEYNESS and resolved against each artifact's own s0,
+# so one set of case shapes serves two different index levels and
+# contract_multiplier is computed rather than transcribed. Uncorrected, every
+# calm-surface error would be overstated by 6207.268 / 4993.105 = 1.243, which
+# risks a false REJECTED rather than a merely conservative pass.
+#
+# Scope: this certifies the surface machinery -- the Dupire read on the PDE
+# (S,t) mesh and the barrier-local sigma_loc(B) continuous-KI treatment. It does
+# NOT cover the flat-BSM product variants (parachute, airbag, protection_*,
+# reverse, call_rebate, disable_ko_after_ki, ...), which exercise payoff code
+# inherited from SnowballPDESolver and already certified under flat BSM. Nor
+# does it cover surfaces other than the two named, or maturities beyond 1.0
+# years, where this surface is majority-extrapolated. A certificate covers only
+# the configurations its YAML names.
+#
+# Offline study (hours, not minutes). Run it with:
+#   python -m quantark.modelvalidation run example/modelvalidation/snowball_localvol_1d.yaml
+# Add --quick for a wiring check that is explicitly not bankable evidence.
+
+study: snowball-localvol-1d
+schema: 1
+
+quantities: [pv, delta, gamma]
+
+bounds:
+  cell: 0.5
+  mean_signed_bias: 0.1
+
+sampling:
+  paths_per_batch: 65536
+  min_batches: 4
+  max_batches: 32
+  seed: 20260828
+  bump: 0.01
+
+# One CSI1000 index-futures contract at multiplier 200 and spot 4993.105 is
+# exactly the study notional, so delta_quantum is 1.0 and raw delta reads
+# directly as hedge contracts -- the same normalization the flat-BSM study uses
+# (200 * 100 / 20000 = 1.0), which makes the two certificates comparable.
+economic_scale:
+  builder: hedge_contracts
+  params:
+    hedge_multiplier: 200.0
+    hedge_inception_spot: 4993.105
+    notional: 998621.0
+
+environment:
+  builder: equity.snowball.localvol_market
+  params:
+    surface: example/modelvalidation/data/iv_surface_20240208.json
+    rate: 0.02
+
+product:
+  builder: equity.snowball.localvol
+  params:
+    strike_moneyness: 1.0
+    ko_barrier_moneyness: 1.03
+    ki_barrier_moneyness: 0.85
+    ko_rate: 0.15
+    rebate_rate: 0.15
+    months: 12
+    maturity: 1.0
+
+reference:
+  builder: equity.snowball.localvol_mc
+  params:
+    substeps_per_interval: 8
+    lv_time_sampling: integrated
+    estimator: plain
+
+candidates:
+  - builder: equity.snowball.localvol_pde
+    params: {accuracy: standard}
+
+cases:
+  # ---- 2024-02-08, the crash bottom -------------------------------------
+  # At inception between the barriers. T=1.0 sits ~13% beyond the surface's
+  # last listed expiry (0.866y), where flat_total_variance extrapolation runs.
+  - {name: crash_ordinary}
+  # Entirely inside the listed expiries: isolates the engine from the
+  # extrapolation policy the case above necessarily includes.
+  - {name: crash_inside_listed_grid, product: {months: 9, maturity: 0.75}}
+  # Just under the KO barrier: the discontinuity sits inside the bump stencil,
+  # which is where a deterministic gamma usually breaks first.
+  - {name: crash_near_ko, environment: {spot_moneyness: 1.025}}
+  # Just above the KI barrier, where the barrier-local sigma_loc(B) coefficients
+  # bind. This is the cell the continuous-KI machinery exists for.
+  - {name: crash_near_ki, environment: {spot_moneyness: 0.86}}
+  # Discretely monitored KI on the KO dates: the benchmark drops its Brownian
+  # bridge crossing correction and the PDE its per-step first-passage transfer,
+  # so the continuous cells say nothing about this one.
+  - {name: crash_discrete_ki, product: {ki_monitoring: discrete}}
+  # European KI: the two-surface dynamic programme collapses to one terminal
+  # test and the knock-in probability becomes closed-form.
+  - {name: crash_european_ki, product: {ki_monitoring: european}}
+  # Step-down KO: twelve distinct levels compete for grid alignment where every
+  # case above had one -- now on a skewed surface rather than a flat one.
+  - {name: crash_stepdown_ko, product: {ko_stepdown: 0.005}}
+  # Three months, in the steepest part of the term structure (ATM 0.284 -> 0.429
+  # within three weeks). Time discretization error has nowhere to average out.
+  - {name: crash_near_expiry, product: {months: 3, maturity: 0.25}}
+
+  # ---- 2023-11-15, the calm contrast ------------------------------------
+  - {name: calm_ordinary,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json}}
+  - {name: calm_inside_listed_grid,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},
+     product: {months: 9, maturity: 0.75}}
+  - {name: calm_near_ko,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json,
+                   spot_moneyness: 1.025}}
+  - {name: calm_near_ki,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json,
+                   spot_moneyness: 0.86}}
+  - {name: calm_discrete_ki,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},
+     product: {ki_monitoring: discrete}}
+  - {name: calm_european_ki,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},
+     product: {ki_monitoring: european}}
+  - {name: calm_stepdown_ko,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},
+     product: {ko_stepdown: 0.005}}
+  - {name: calm_near_expiry,
+     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},
+     product: {months: 3, maturity: 0.25}}

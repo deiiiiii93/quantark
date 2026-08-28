@@ -6,6 +6,7 @@ asserting ADMITTED would be asserting that noise agrees with us. The real
 verdict comes from the offline run whose evidence is banked.
 """
 
+import dataclasses
 import math
 from pathlib import Path
 
@@ -17,8 +18,11 @@ from quantark.modelvalidation.builders.equity_snowball_localvol import (
     build_localvol_pde_candidate,
     load_surface,
     make_localvol_environment,
+    resolve_product_spec,
 )
+from quantark.modelvalidation.pipeline import certify
 from quantark.modelvalidation.study import CaseSpec, SamplingPolicy
+from quantark.modelvalidation.yaml_loader import load_study
 from quantark.util.exceptions import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -198,3 +202,76 @@ def test_unsupported_reference_knob_is_refused():
     while moving no number."""
     with pytest.raises(ValidationError, match="localvol_mc"):
         _reference(martingale_correction=True)
+
+
+# --------------------------------------------------------------------------
+# The study
+# --------------------------------------------------------------------------
+
+STUDY_PATH = REPO_ROOT / "example" / "modelvalidation" / "snowball_localvol_1d.yaml"
+
+EXPECTED_CASES = [
+    "crash_ordinary", "crash_inside_listed_grid", "crash_near_ko",
+    "crash_near_ki", "crash_discrete_ki", "crash_european_ki",
+    "crash_stepdown_ko", "crash_near_expiry",
+    "calm_ordinary", "calm_inside_listed_grid", "calm_near_ko",
+    "calm_near_ki", "calm_discrete_ki", "calm_european_ki",
+    "calm_stepdown_ko", "calm_near_expiry",
+]
+
+
+@pytest.fixture(scope="module")
+def study():
+    return load_study(STUDY_PATH)
+
+
+def test_study_loads_with_all_sixteen_cases(study):
+    assert study.name == "snowball-localvol-1d"
+    assert [case.name for case in study.cases] == EXPECTED_CASES
+    assert tuple(c.name() for c in study.candidates) == (
+        "equity.snowball.localvol_pde",
+    )
+
+
+def test_bounds_are_the_desk_convention(study):
+    """Never widened to make a result pass."""
+    assert study.bounds.cell == 0.5
+    assert study.bounds.mean_signed_bias == 0.1
+
+
+def test_delta_quantum_is_exactly_one(study):
+    """Matches the flat-BSM normalization, so raw delta reads as contracts."""
+    assert study.scale.delta_quantum == pytest.approx(1.0, rel=1e-9)
+
+
+def test_contract_multiplier_is_computed_per_surface():
+    """The two-surface scale correction: uncorrected, calm-surface errors would
+    be overstated by 6207.268 / 4993.105 = 1.243 and risk a false REJECTED."""
+    crash = resolve_product_spec({"surface": CRASH, "rate": 0.02}, PRODUCT)
+    calm = resolve_product_spec({"surface": CALM, "rate": 0.02}, PRODUCT)
+    assert crash["contract_multiplier"] == pytest.approx(1.0, rel=1e-9)
+    assert calm["contract_multiplier"] == pytest.approx(0.804397, rel=1e-5)
+
+
+def test_moneyness_resolves_against_each_surfaces_own_spot():
+    calm = resolve_product_spec({"surface": CALM, "rate": 0.02}, PRODUCT)
+    assert calm["initial_price"] == pytest.approx(CALM_S0, abs=1e-3)
+    assert calm["ko_barrier"] == pytest.approx(1.03 * CALM_S0, abs=1e-3)
+    assert calm["ki_barrier"] == pytest.approx(0.85 * CALM_S0, abs=1e-3)
+
+
+@pytest.mark.slow
+def test_study_runs_end_to_end_and_gates_every_cell(study, tmp_path):
+    """Soundness, not outcome: at this budget INCONCLUSIVE is correct."""
+    small = dataclasses.replace(
+        study,
+        cases=(study.cases[0], study.cases[8]),   # one crash cell, one calm
+        sampling=dataclasses.replace(
+            study.sampling, paths_per_batch=1024, min_batches=2, max_batches=2
+        ),
+    )
+    result = certify(small, out_dir=tmp_path)
+    assert (tmp_path / "snowball-localvol-1d" / "certificate.json").is_file()
+    assert (tmp_path / "snowball-localvol-1d" / "report.md").is_file()
+    assert (tmp_path / "snowball-localvol-1d" / "report.html").is_file()
+    assert result is not None

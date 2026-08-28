@@ -187,16 +187,17 @@ def make_localvol_environment(
     )
 
 
-def resolve_product_spec(
-    environment: Mapping[str, Any], product: Mapping[str, Any]
-) -> dict:
-    """Turn moneyness-declared levels into the absolute spec make_snowball wants.
+@register_builder("equity.snowball.localvol", kind="product")
+def build_localvol_product_spec(params: Mapping[str, Any]) -> dict:
+    """Validate a moneyness-declared snowball spec.
 
-    ``contract_multiplier`` is COMPUTED, not declared: both surfaces carry the
-    same economic notional expressed at their own index level, which is what
-    keeps the study-level economic scale honest across two index levels.
+    Levels are moneyness rather than absolute because two surfaces at different
+    index levels share one set of case shapes. Resolution against a surface
+    happens in :func:`resolve_product_spec`, which is where an artifact is in
+    scope.
     """
-    unknown = set(product) - set(_PRODUCT_KEYS)
+    spec = dict(params)
+    unknown = set(spec) - set(_PRODUCT_KEYS)
     if unknown:
         raise ValidationError(
             f"Unknown equity.snowball.localvol product keys: {sorted(unknown)}; "
@@ -209,10 +210,28 @@ def resolve_product_spec(
         "months",
         "maturity",
     ):
-        if key not in product:
+        if key not in spec:
             raise ValidationError(
                 f"equity.snowball.localvol product is missing {key!r}"
             )
+    if float(spec["ki_barrier_moneyness"]) >= float(spec["ko_barrier_moneyness"]):
+        raise ValidationError(
+            "ki_barrier_moneyness must sit below ko_barrier_moneyness for a "
+            "standard snowball"
+        )
+    return spec
+
+
+def resolve_product_spec(
+    environment: Mapping[str, Any], product: Mapping[str, Any]
+) -> dict:
+    """Turn moneyness-declared levels into the absolute spec make_snowball wants.
+
+    ``contract_multiplier`` is COMPUTED, not declared: both surfaces carry the
+    same economic notional expressed at their own index level, which is what
+    keeps the study-level economic scale honest across two index levels.
+    """
+    build_localvol_product_spec(product)
     s0 = float(
         load_surface(
             str(environment["surface"]), float(environment["rate"])
