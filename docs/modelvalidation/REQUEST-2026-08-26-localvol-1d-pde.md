@@ -204,3 +204,40 @@ enumerated.
   `detect_delta_bias`
 - Engine pair under test: same file, `GATE_PAIRS["localvol"]` (line ~726)
 - Procedure: `docs/modelvalidation/RELEASE_PROCEDURE.md`
+
+---
+
+## Resolution, 2026-08-28
+
+**The cheap test was run first, as this request insisted, and it took the first
+branch.** `FINDING-2026-08-26-localvol-1d-pde.md`: `mc_ref` migrated toward the
+PDE and the residual collapsed. The reference had been under-resolved twice
+over — `substeps=1` where 4 was declared, and still delta-unconverged at 4 —
+and the delta admission rule carried no reference-uncertainty term. By this
+request's own criterion, **no certification was warranted.**
+
+**It was nevertheless carried out**, for the three things §"What lands" names
+that a routing decision cannot deliver: banked schema-versioned evidence,
+`delta_authority` delegation, and CI anchors. That is a different goal from
+settling a correctness question, and the certificate says so plainly.
+
+Banked at `docs/modelvalidation/certificates/snowball-localvol-1d/2026-08-28/`,
+digest `931345b9ae5e684910b1e85be5f3376522af2b19ecc4548ee918764631eae06c`.
+`LocalVolSnowballPDESolver` is **ADMITTED** on 48 gated cells across two real
+calibrated Dupire surfaces, 2024-02-08 included as this request required.
+Budget consumed: median 5.6%, max 40.8%.
+
+Three of this request's instructions shaped the result:
+
+- *"its own convergence must be demonstrated, not assumed"* — a substeps
+  4/8/16 ladder was walked at this study's own scale rather than inherited from
+  the FINDING's three-year trade. 8→16 shifts by 0.06σ and 0.55σ.
+- *"2024-02-08 is mandatory"* — it is, at its real calibrated surface, paired
+  with a calm contrast so the steepness mechanism is tested rather than assumed.
+- *"the certificate covers only the configurations its YAML names"* — the scope
+  exclusions are written into both the study file and the certificate README.
+
+**Still outstanding, and not addressed by this certification** (both inherited
+from FINDING §7): the fleet's existing localvol numbers were produced under the
+biased `substeps=1` MC route and must be discarded, and the 40.6 CPU-hour cost
+projection needs re-measuring.
