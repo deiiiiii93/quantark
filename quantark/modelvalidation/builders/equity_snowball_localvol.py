@@ -312,6 +312,146 @@ class LocalVolPDECandidate(_LocalVolArm):
         return CandidateResult(values=values, ladders=tuple(rungs))
 
 
+#: Knobs the local-vol benchmark can actually honour. Anything else would be
+#: banked as a benchmark setting and folded into the identity hash while moving
+#: no number, so it is refused rather than ignored.
+_REFERENCE_KEYS = frozenset(
+    {"substeps_per_interval", "lv_time_sampling", "estimator"}
+)
+
+#: The discretization FINDING-2026-08-26 section 5 demonstrated the estimate
+#: stops moving at: substeps 8 and 16 differ by 0.04 sigma. PV converged at 2,
+#: but delta had not converged at 4 -- reading "PV is flat under refinement" as
+#: "the reference is converged" is the inference that produced the defect.
+_DEFAULT_SUBSTEPS = 8
+
+#: Exact per-step time-averaged variance instead of the left-endpoint sigma
+#: freeze. Exact on time-only surfaces; removes a measured -1.26c daily-grid
+#: bias at zero per-step cost (docs/lv-mc-scheme-demos/RESULTS.md).
+_DEFAULT_TIME_SAMPLING = "integrated"
+
+
+class LocalVolMCReference(_LocalVolArm):
+    """Paired local-vol MC benchmark: one randomization per batch, shared bumps.
+
+    ONE discretization serves pv, delta and gamma. Running PV at one substep
+    level and Greeks at another estimates P(h) and P(h/2) -- different numbers at
+    finite h -- so the certified delta would not be the derivative of the
+    certified price.
+    """
+
+    def __init__(self, sampling: SamplingPolicy, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.sampling = sampling
+        unsupported = set(self._params) - _REFERENCE_KEYS
+        if unsupported:
+            raise ValidationError(
+                f"equity.snowball.localvol_mc does not support "
+                f"{sorted(unsupported)}. Supported knobs: {sorted(_REFERENCE_KEYS)}."
+            )
+        self.substeps = int(
+            self._params.get("substeps_per_interval", _DEFAULT_SUBSTEPS)
+        )
+        self.time_sampling = str(
+            self._params.get("lv_time_sampling", _DEFAULT_TIME_SAMPLING)
+        )
+        self.estimator = str(self._params.get("estimator", "plain"))
+        # one_step_survival rejects RANDOMIZED_QUASI (its control-variate
+        # machinery assumes the plain estimator), so an OSS arm runs QUASI.
+        # Both scramble: _qmc_normals always builds Sobol(scramble=True,
+        # seed=base_seed + batch_id), so batches stay independent and the
+        # batch-to-batch standard error remains valid.
+        self.method = (
+            MonteCarloMethod.QUASI
+            if self.estimator == "one_step_survival"
+            else MonteCarloMethod.RANDOMIZED_QUASI
+        )
+
+    def config(self) -> Mapping[str, Any]:
+        """The benchmark's own settings -- it is half of every comparison."""
+        return {
+            "engine": "LocalVolSnowballMCEngine",
+            "method": self.method.value,
+            "substeps_per_interval": self.substeps,
+            "lv_time_sampling": self.time_sampling,
+            "estimator": self.estimator,
+            "paths_per_batch": self.sampling.paths_per_batch,
+            "greeks": "paired central difference (common random numbers)",
+        }
+
+    def identity(self, case) -> Mapping[str, Any]:
+        environment, product = self._specs(case)
+        return {
+            "builder": "equity.snowball.localvol_mc",
+            "case": case.name,
+            "environment": environment,
+            "product": product,
+            "surface_sha256": self._surface(environment).artifact.sha256,
+            "quantities": list(self.quantities),
+            "params": dict(self._params),
+            "config": dict(self.config()),
+            "sampling": {
+                "paths_per_batch": self.sampling.paths_per_batch,
+                "min_batches": self.sampling.min_batches,
+                "max_batches": self.sampling.max_batches,
+                "seed": self.sampling.seed,
+                "bump": self.sampling.bump,
+            },
+        }
+
+    def run_batch(self, case, batch_index: int) -> BatchResult:
+        environment, product_spec = self._specs(case)
+        surface = self._surface(environment)
+        product = make_snowball(product_spec)
+        seed = self.sampling.seed + batch_index
+
+        def price_at(spot: float) -> float:
+            # A fresh engine per pricing call: engine instances are not safe to
+            # reuse across calls, and the shared seed is what pairs the three
+            # bump arms onto one set of paths. The local-vol surface is the SAME
+            # object across bumps -- it is built at the artifact spot, never
+            # rebuilt at a bumped one.
+            engine = LocalVolSnowballMCEngine(
+                local_vol_surface=surface.local_vol,
+                params=MCParams(
+                    seed=seed,
+                    num_paths=self.sampling.paths_per_batch,
+                    use_qmc=True,
+                    rqmc_min_batches=1,
+                    rqmc_max_batches=1,
+                    rqmc_paths_mode="per_batch",
+                ),
+                method=self.method,
+                substeps_per_interval=self.substeps,
+                lv_time_sampling=self.time_sampling,
+                estimator=self.estimator,
+            )
+            return engine.price(product, make_localvol_environment(environment, spot))
+
+        base_spot = float(environment.get("spot_moneyness", 1.0)) * float(
+            surface.artifact.s0
+        )
+        values = _central_difference_greeks(price_at, base_spot, self.sampling.bump)
+        return BatchResult(index=batch_index, seed=seed, values=values)
+
+
+@register_builder("equity.snowball.localvol_mc", kind="reference")
+def build_localvol_mc_reference(
+    environment_params: Mapping[str, Any],
+    product_params: Mapping[str, Any],
+    sampling: SamplingPolicy,
+    quantities: Sequence[str],
+    params: Mapping[str, Any],
+) -> LocalVolMCReference:
+    return LocalVolMCReference(
+        sampling=sampling,
+        environment_params=environment_params,
+        product_params=product_params,
+        quantities=quantities,
+        params=params,
+    )
+
+
 @register_builder("equity.snowball.localvol_pde", kind="candidate")
 def build_localvol_pde_candidate(
     environment_params: Mapping[str, Any],

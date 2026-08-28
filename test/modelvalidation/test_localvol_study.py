@@ -13,11 +13,12 @@ import pytest
 
 from quantark.modelvalidation.builders.equity_snowball_localvol import (
     build_localvol_market_spec,
+    build_localvol_mc_reference,
     build_localvol_pde_candidate,
     load_surface,
     make_localvol_environment,
 )
-from quantark.modelvalidation.study import CaseSpec
+from quantark.modelvalidation.study import CaseSpec, SamplingPolicy
 from quantark.util.exceptions import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -133,3 +134,67 @@ def test_pde_candidate_delta_is_stable_across_its_own_ladder():
     result = _candidate().evaluate(CaseSpec(name="ordinary"))
     target, medium = result.ladders
     assert abs(target.values["delta"] - medium.values["delta"]) < 0.05
+
+
+# --------------------------------------------------------------------------
+# The local-vol Monte-Carlo reference
+# --------------------------------------------------------------------------
+
+TINY = SamplingPolicy(
+    paths_per_batch=1024, min_batches=2, max_batches=3, seed=20260828, bump=0.01
+)
+
+
+def _reference(**params):
+    return build_localvol_mc_reference(
+        environment_params=ENV,
+        product_params=PRODUCT,
+        sampling=TINY,
+        quantities=("pv", "delta", "gamma"),
+        params=params,
+    )
+
+
+def test_reference_declares_the_discretization_it_runs():
+    """The FINDING's root cause A was a reference whose declared substeps were
+    not the ones it executed. The config must report what run_batch uses."""
+    config = _reference().config()
+    assert config["substeps_per_interval"] == 8
+    assert config["lv_time_sampling"] == "integrated"
+    assert config["estimator"] == "plain"
+    assert config["engine"] == "LocalVolSnowballMCEngine"
+
+
+def test_reference_honours_the_seed_contract():
+    """_validate_batch requires seed == policy.seed + index; that contract is
+    what makes each batch an independent Sobol scramble."""
+    batch = _reference().run_batch(CaseSpec(name="ordinary"), 0)
+    assert batch.index == 0
+    assert batch.seed == TINY.seed
+
+
+def test_reference_produces_all_three_finite_quantities():
+    batch = _reference().run_batch(CaseSpec(name="ordinary"), 1)
+    assert set(batch.values) == {"pv", "delta", "gamma"}
+    assert all(math.isfinite(v) for v in batch.values.values())
+
+
+def test_reference_batches_differ():
+    """Identical batches would collapse the standard error toward zero and fire
+    SE_BUDGET_MET on noise -- a false ADMITTED."""
+    ref = _reference()
+    a = ref.run_batch(CaseSpec(name="ordinary"), 0)
+    b = ref.run_batch(CaseSpec(name="ordinary"), 1)
+    assert a.values["pv"] != b.values["pv"]
+
+
+def test_reference_identity_pins_the_surface_bytes():
+    identity = _reference().identity(CaseSpec(name="ordinary"))
+    assert identity["surface_sha256"].startswith(CRASH_SHA16)
+
+
+def test_unsupported_reference_knob_is_refused():
+    """A knob that is recorded but never applied would move the identity hash
+    while moving no number."""
+    with pytest.raises(ValidationError, match="localvol_mc"):
+        _reference(martingale_correction=True)
