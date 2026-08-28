@@ -7,10 +7,19 @@
 #   2024-02-08  the crash bottom. The surface that put localvol on the MC route
 #               in Gate G2, and the worst cell in the sample (-1.2726 contracts
 #               against a converged reference, -2.88 sigma on PV).
-#   2023-11-15  the cohort's flattest surface by Dupire local-vol slope
-#               (dsigma/dlnS -0.020, dsigma/dt -0.017) at roughly half the vol
-#               level. The contrast tests FINDING-2026-08-26's central claim
+#   2023-11-15  the calm contrast: Dupire skew +0.0672 against the crash
+#               surface's -0.3689 (measured at the long end, the convention
+#               FINDING-2026-08-26 uses -- see pilot-localvol-1d/RESULTS.md),
+#               so 5.5x flatter. The contrast tests the FINDING's central claim
 #               that the discretization bias scales with surface steepness.
+#
+#               It is third-flattest of the cohort rather than flattest, and
+#               deliberately so: the two flattest by slope are poor contrasts on
+#               the evidence that matters -- 2024-06-14 has the flattest skew
+#               but was the SECOND-WORST cell in the FINDING (-0.6006
+#               contracts). Slope-flatness and empirical-calmness rank the
+#               cohort differently, so the contrast rests primarily on the
+#               empirical per-cell gaps (-1.2726 vs +0.2614).
 #
 # Both artifacts are COMMITTED under example/modelvalidation/data/. They are not
 # read from example/mo_volmodels/data/history, which is excluded per-clone and
