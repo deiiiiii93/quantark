@@ -1,0 +1,157 @@
+{
+  "abs_tol": 1e-12,
+  "anchors": [
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_discrete_ki",
+      "values": {
+        "delta": 0.4700440960491024,
+        "gamma": -0.0015523404116309003,
+        "pv": 4950.20989694811
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_european_ki",
+      "values": {
+        "delta": 0.20460894818884495,
+        "gamma": -0.001256699530826864,
+        "pv": 5053.929778823043
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_inside_listed_grid",
+      "values": {
+        "delta": 0.4445584610873772,
+        "gamma": -0.0018303924299160682,
+        "pv": 4978.797141962245
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_near_expiry",
+      "values": {
+        "delta": -0.1726477961353149,
+        "gamma": -0.0035216780419598417,
+        "pv": 5375.439994204328
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_near_ki",
+      "values": {
+        "delta": 1.0271678410622103,
+        "gamma": 0.001133277791157276,
+        "pv": 4068.7153700692397
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_near_ko",
+      "values": {
+        "delta": 0.38528748142427005,
+        "gamma": -0.001281210033565884,
+        "pv": 4962.789620160091
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_ordinary",
+      "values": {
+        "delta": 0.5830753733519304,
+        "gamma": -0.0014189108875695955,
+        "pv": 4888.77307327205
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "calm_stepdown_ko",
+      "values": {
+        "delta": 0.5576466130511059,
+        "gamma": -0.0013064842523067407,
+        "pv": 4895.92233979102
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_discrete_ki",
+      "values": {
+        "delta": 0.5881642809607353,
+        "gamma": -0.0007159479364045189,
+        "pv": 4579.128539254598
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_european_ki",
+      "values": {
+        "delta": 0.4975915692636509,
+        "gamma": -0.0006603905284771029,
+        "pv": 4671.207530623931
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_inside_listed_grid",
+      "values": {
+        "delta": 0.5859290740927,
+        "gamma": -0.0007011526035570553,
+        "pv": 4579.261582633473
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_near_expiry",
+      "values": {
+        "delta": 0.548433094026158,
+        "gamma": -0.0008970944602139979,
+        "pv": 4706.14720602756
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_near_ki",
+      "values": {
+        "delta": 0.8740400741212956,
+        "gamma": -0.00016912255612677314,
+        "pv": 4034.8026974171325
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_near_ko",
+      "values": {
+        "delta": 0.5054434559164428,
+        "gamma": -0.0007042001579127953,
+        "pv": 4639.179303183741
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_ordinary",
+      "values": {
+        "delta": 0.5915024039566341,
+        "gamma": -0.0007055548588869643,
+        "pv": 4570.58563601535
+      }
+    },
+    {
+      "candidate": "equity.snowball.localvol_pde",
+      "case": "crash_stepdown_ko",
+      "values": {
+        "delta": 0.5735690241704152,
+        "gamma": -0.0007126519530732752,
+        "pv": 4600.732023146653
+      }
+    }
+  ],
+  "certificate_sha256": "931345b9ae5e684910b1e85be5f3376522af2b19ecc4548ee918764631eae06c",
+  "fingerprint": {
+    "machine": "arm64",
+    "system": "Darwin"
+  },
+  "rel_tol": 1e-09,
+  "schema": 1,
+  "study_source_text": "# Snowball under a real calibrated Dupire local-volatility surface.\n#\n# The 1-D local-vol counterpart of snowball_flat_bsm.yaml. One deterministic\n# engine -- LocalVolSnowballPDESolver -- is certified against a local-vol Monte\n# Carlo reference on TWO real CSI1000 surfaces:\n#\n#   2024-02-08  the crash bottom. The surface that put localvol on the MC route\n#               in Gate G2, and the worst cell in the sample (-1.2726 contracts\n#               against a converged reference, -2.88 sigma on PV).\n#   2023-11-15  the calm contrast: Dupire skew +0.0672 against the crash\n#               surface's -0.3689 (measured at the long end, the convention\n#               FINDING-2026-08-26 uses -- see pilot-localvol-1d/RESULTS.md),\n#               so 5.5x flatter. The contrast tests the FINDING's central claim\n#               that the discretization bias scales with surface steepness.\n#\n#               It is third-flattest of the cohort rather than flattest, and\n#               deliberately so: the two flattest by slope are poor contrasts on\n#               the evidence that matters -- 2024-06-14 has the flattest skew\n#               but was the SECOND-WORST cell in the FINDING (-0.6006\n#               contracts). Slope-flatness and empirical-calmness rank the\n#               cohort differently, so the contrast rests primarily on the\n#               empirical per-cell gaps (-1.2726 vs +0.2614).\n#\n# Both artifacts are COMMITTED under example/modelvalidation/data/. They are not\n# read from example/mo_volmodels/data/history, which is excluded per-clone and\n# would not exist in CI -- and assert_anchors re-runs the deterministic arm on\n# every commit.\n#\n# Levels are declared as MONEYNESS and resolved against each artifact's own s0,\n# so one set of case shapes serves two different index levels and\n# contract_multiplier is computed rather than transcribed. Uncorrected, every\n# calm-surface error would be overstated by 6207.268 / 4993.105 = 1.243, which\n# risks a false REJECTED rather than a merely conservative pass.\n#\n# Scope: this certifies the surface machinery -- the Dupire read on the PDE\n# (S,t) mesh and the barrier-local sigma_loc(B) continuous-KI treatment. It does\n# NOT cover the flat-BSM product variants (parachute, airbag, protection_*,\n# reverse, call_rebate, disable_ko_after_ki, ...), which exercise payoff code\n# inherited from SnowballPDESolver and already certified under flat BSM. Nor\n# does it cover surfaces other than the two named, or maturities beyond 1.0\n# years, where this surface is majority-extrapolated. A certificate covers only\n# the configurations its YAML names.\n#\n# Offline study (hours, not minutes). Run it with:\n#   python -m quantark.modelvalidation run example/modelvalidation/snowball_localvol_1d.yaml\n# Add --quick for a wiring check that is explicitly not bankable evidence.\n\nstudy: snowball-localvol-1d\nschema: 1\n\nquantities: [pv, delta, gamma]\n\nbounds:\n  cell: 0.5\n  mean_signed_bias: 0.1\n\nsampling:\n  paths_per_batch: 65536\n  min_batches: 4\n  max_batches: 32\n  seed: 20260828\n  bump: 0.01\n\n# One CSI1000 index-futures contract at multiplier 200 and spot 4993.105 is\n# exactly the study notional, so delta_quantum is 1.0 and raw delta reads\n# directly as hedge contracts -- the same normalization the flat-BSM study uses\n# (200 * 100 / 20000 = 1.0), which makes the two certificates comparable.\neconomic_scale:\n  builder: hedge_contracts\n  params:\n    hedge_multiplier: 200.0\n    hedge_inception_spot: 4993.105\n    notional: 998621.0\n\nenvironment:\n  builder: equity.snowball.localvol_market\n  params:\n    surface: example/modelvalidation/data/iv_surface_20240208.json\n    rate: 0.02\n\nproduct:\n  builder: equity.snowball.localvol\n  params:\n    strike_moneyness: 1.0\n    ko_barrier_moneyness: 1.03\n    ki_barrier_moneyness: 0.85\n    ko_rate: 0.15\n    rebate_rate: 0.15\n    months: 12\n    maturity: 1.0\n\n# Every value below was CONFIRMED BY MEASUREMENT before the run, not inherited\n# -- see docs/modelvalidation/pilot-localvol-1d/RESULTS.md controls 1 and 2.\n#\n#   substeps_per_interval  the 8 -> 16 rung shifts by 0.06 sigma (ordinary) and\n#                          0.55 sigma (near_ki), so the estimate has stopped\n#                          moving. substeps=4 would also have passed and costs\n#                          2.7x less; it was not adopted because the reading is\n#                          borderline on one cell (1.0 sigma) and 8 is the level\n#                          FINDING-2026-08-26 section 5 demonstrated.\n#   estimator              `plain` meets the 0.125-contract SE budget on pv,\n#                          delta AND gamma, so the pre-registered tiebreak takes\n#                          it. one_step_survival is tighter and faster and is\n#                          banked in RESULTS.md for a future amendment -- it was\n#                          not swapped in after the fact.\n#\n# ONE discretization serves all three quantities. Splitting it between PV and\n# Greeks would estimate P(h) and P(h/2) -- different numbers at finite h -- so\n# the certified delta would not be the derivative of the certified price.\nreference:\n  builder: equity.snowball.localvol_mc\n  params:\n    substeps_per_interval: 8\n    lv_time_sampling: integrated\n    estimator: plain\n\ncandidates:\n  - builder: equity.snowball.localvol_pde\n    params: {accuracy: standard}\n\ncases:\n  # ---- 2024-02-08, the crash bottom -------------------------------------\n  # At inception between the barriers. T=1.0 sits ~13% beyond the surface's\n  # last listed expiry (0.866y), where flat_total_variance extrapolation runs.\n  - {name: crash_ordinary}\n  # Entirely inside the listed expiries: isolates the engine from the\n  # extrapolation policy the case above necessarily includes.\n  - {name: crash_inside_listed_grid, product: {months: 9, maturity: 0.75}}\n  # Just under the KO barrier: the discontinuity sits inside the bump stencil,\n  # which is where a deterministic gamma usually breaks first.\n  - {name: crash_near_ko, environment: {spot_moneyness: 1.025}}\n  # Just above the KI barrier, where the barrier-local sigma_loc(B) coefficients\n  # bind. This is the cell the continuous-KI machinery exists for.\n  - {name: crash_near_ki, environment: {spot_moneyness: 0.86}}\n  # Discretely monitored KI on the KO dates: the benchmark drops its Brownian\n  # bridge crossing correction and the PDE its per-step first-passage transfer,\n  # so the continuous cells say nothing about this one.\n  - {name: crash_discrete_ki, product: {ki_monitoring: discrete}}\n  # European KI: the two-surface dynamic programme collapses to one terminal\n  # test and the knock-in probability becomes closed-form.\n  - {name: crash_european_ki, product: {ki_monitoring: european}}\n  # Step-down KO: twelve distinct levels compete for grid alignment where every\n  # case above had one -- now on a skewed surface rather than a flat one.\n  - {name: crash_stepdown_ko, product: {ko_stepdown: 0.005}}\n  # Three months, in the steepest part of the term structure (ATM 0.284 -> 0.429\n  # within three weeks). Time discretization error has nowhere to average out.\n  - {name: crash_near_expiry, product: {months: 3, maturity: 0.25}}\n\n  # ---- 2023-11-15, the calm contrast ------------------------------------\n  - {name: calm_ordinary,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json}}\n  - {name: calm_inside_listed_grid,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},\n     product: {months: 9, maturity: 0.75}}\n  - {name: calm_near_ko,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json,\n                   spot_moneyness: 1.025}}\n  - {name: calm_near_ki,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json,\n                   spot_moneyness: 0.86}}\n  - {name: calm_discrete_ki,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},\n     product: {ki_monitoring: discrete}}\n  - {name: calm_european_ki,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},\n     product: {ki_monitoring: european}}\n  - {name: calm_stepdown_ko,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},\n     product: {ko_stepdown: 0.005}}\n  - {name: calm_near_expiry,\n     environment: {surface: example/modelvalidation/data/iv_surface_20231115.json},\n     product: {months: 3, maturity: 0.25}}\n"
+}

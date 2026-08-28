@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certification: snowball-localvol-1d</title>
+<style>
+:root {
+  --ground: #eceff1;
+  --paper: #ffffff;
+  --ink: #16212b;
+  --muted: #5d6d79;
+  --rule: #ccd6dc;
+  --rail: #dfe6ea;
+  --accent: #0f7a56;
+  --pass: #0f7a56;
+  --fail: #b3261e;
+  --warn: #a8690f;
+  --err: #6b5b95;
+  --pass-bg: #e4f1eb;
+  --fail-bg: #fae9e7;
+  --warn-bg: #f8eeda;
+  --err-bg: #ece9f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #10171d;
+    --paper: #18212a;
+    --ink: #e4ecf1;
+    --muted: #93a4b0;
+    --rule: #31404c;
+    --rail: #26323c;
+    --accent: #46c391;
+    --pass: #46c391;
+    --fail: #f08b80;
+    --warn: #dfa445;
+    --err: #a595c9;
+    --pass-bg: #17332a;
+    --fail-bg: #3a211f;
+    --warn-bg: #35291480;
+    --err-bg: #262137;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #10171d;
+  --paper: #18212a;
+  --ink: #e4ecf1;
+  --muted: #93a4b0;
+  --rule: #31404c;
+  --rail: #26323c;
+  --accent: #46c391;
+  --pass: #46c391;
+  --fail: #f08b80;
+  --warn: #dfa445;
+  --err: #a595c9;
+  --pass-bg: #17332a;
+  --fail-bg: #3a211f;
+  --warn-bg: #35291480;
+  --err-bg: #262137;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: Charter, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: 16px;
+  line-height: 1.55;
+}
+.sheet {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+.masthead { border-bottom: 3px solid var(--ink); padding-bottom: 18px; }
+.eyebrow {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 10px;
+}
+h1 {
+  font-size: clamp(26px, 4vw, 36px); line-height: 1.12; margin: 0 0 6px;
+  letter-spacing: -0.01em; text-wrap: balance;
+}
+.subtitle { margin: 0; color: var(--muted); font-size: 16px; }
+
+.banner {
+  display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: baseline;
+  margin: 22px 0 0; padding: 16px 20px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 5px;
+  border-left: 5px solid var(--rule);
+}
+.banner.pass { border-left-color: var(--pass); }
+.banner.fail { border-left-color: var(--fail); }
+.banner.warn { border-left-color: var(--warn); }
+.banner .headline { font-size: 19px; font-weight: 600; }
+.banner .note { color: var(--muted); font-size: 14.5px; }
+
+.quick {
+  margin: 18px 0 0; padding: 12px 18px; border-radius: 5px;
+  background: var(--warn-bg); border-left: 4px solid var(--warn);
+  font-size: 15px;
+}
+
+.stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 22px 0 0; }
+.stat {
+  flex: 1 1 150px; background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 5px; padding: 12px 16px;
+}
+.stat .k {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); display: block; margin-bottom: 4px;
+}
+.stat .v {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 21px; font-variant-numeric: tabular-nums; font-weight: 600;
+}
+.stat .v.small { font-size: 15px; font-weight: 500; }
+
+section { margin: 40px 0 0; }
+h2 {
+  font-size: 19px; margin: 0 0 4px; letter-spacing: -0.005em;
+  border-bottom: 1px solid var(--rule); padding-bottom: 7px;
+}
+.lede { color: var(--muted); font-size: 14.5px; margin: 8px 0 14px; max-width: 74ch; }
+
+.scroll { overflow-x: auto; }
+table {
+  width: 100%; border-collapse: collapse; background: var(--paper);
+  border: 1px solid var(--rule); font-size: 13.5px;
+}
+th, td {
+  text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+th {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600; background: var(--rail);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+td.name { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+td.wrap { white-space: normal; }
+
+.pill {
+  display: inline-block; padding: 1px 9px; border-radius: 999px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+}
+.pill.pass { background: var(--pass-bg); color: var(--pass); }
+.pill.fail { background: var(--fail-bg); color: var(--fail); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.err  { background: var(--err-bg);  color: var(--err); }
+
+.gauge { display: flex; align-items: center; gap: 8px; min-width: 132px; }
+.track {
+  position: relative; flex: 1; height: 7px; border-radius: 4px;
+  background: var(--rail); overflow: hidden; min-width: 74px;
+}
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
+.fill.pass { background: var(--pass); }
+.fill.fail { background: var(--fail); }
+.fill.warn { background: var(--warn); }
+.fill.err  { background: var(--err); }
+.gauge .pct {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  min-width: 38px; text-align: right;
+}
+
+/* Engines side by side: the point is comparing one grid against another. */
+.configs {
+  display: grid; gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  align-items: start;
+}
+.config-block { min-width: 0; }
+h3.cfg-name {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px; font-weight: 600; margin: 0 0 4px;
+  padding-bottom: 5px; border-bottom: 2px solid var(--accent);
+}
+p.cfg-head { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+p.cfg-head strong {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 600; color: var(--ink);
+}
+.configs table { font-size: 12.5px; table-layout: fixed; width: 100%; }
+.configs td { padding: 5px 11px; }
+/* Setting names are long and the columns are narrow: wrap rather than clip,
+   so no reviewer has to scroll a nested box to read a grid setting. */
+.configs td.name { white-space: normal; overflow-wrap: anywhere; width: 62%; }
+.configs td.num { white-space: normal; overflow-wrap: anywhere; }
+
+.meta {
+  margin: 44px 0 0; padding-top: 14px; border-top: 1px solid var(--rule);
+  font-size: 13px; color: var(--muted);
+}
+.meta dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 0; }
+.meta dt {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+}
+.meta dd {
+  margin: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; word-break: break-all; color: var(--ink);
+}
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+.empty { color: var(--muted); font-style: italic; font-size: 14px; }
+
+@media print {
+  body { background: #fff; }
+  .sheet { max-width: none; padding: 0; }
+  section { break-inside: avoid; }
+}
+</style>
+</head><body><div class='sheet'>
+<header class="masthead">
+<p class="eyebrow">quantark &middot; engine release certification</p>
+<h1>snowball-localvol-1d</h1>
+<p class="subtitle">Deterministic engines measured against a statistically controlled stochastic benchmark, in hedge contracts.</p>
+</header>
+<div class="banner pass"><span class="headline">All candidates admitted</span><span class="note">Every cell was measured against a benchmark that met its budget.</span></div>
+<div class="stats"><div class="stat"><span class="k">cells</span><span class="v">48</span></div><div class="stat"><span class="k">candidates</span><span class="v">1</span></div><div class="stat"><span class="k">worst cell margin</span><span class="v">41%</span></div><div class="stat"><span class="k">benchmark batches</span><span class="v">64</span></div><div class="stat"><span class="k">cell bound</span><span class="v small">0.5 c</span></div><div class="stat"><span class="k">bias bound</span><span class="v small">0.1 c</span></div></div>
+<section><h2>Decisions</h2><p class="lede">One decision per candidate engine. ADMITTED requires every cell to pass against a benchmark sharp enough to discriminate; REJECTED requires confident evidence of disagreement; INCONCLUSIVE means the evidence cannot say.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>decision</th><th>cells</th></tr></thead><tbody><tr><td class="name">equity.snowball.localvol_pde</td><td><span class="pill pass">ADMITTED</span></td><td><span class="pill pass">48 PASS</span></td></tr></tbody></table></div></section>
+<section><h2>Engine configuration</h2><p class="lede">The settings each engine was handed, resolved rather than named: a profile like <code>standard</code> is an indirection whose meaning can change between releases, so the certificate records what it expanded to. These are the <em>requested</em> settings.</p><div class="configs"><div class="config-block"><h3 class="cfg-name">equity.snowball.localvol_pde</h3><p class="cfg-head"><strong>spatial points</strong> 400 &middot; <strong>steps/day</strong> 4 &middot; <strong>std devs</strong> 4 &middot; <strong>eps_crit</strong> 0.003 &middot; <strong>max points</strong> 2000 &middot; <strong>max steps</strong> 5000 &middot; <strong>day count</strong> 252</p><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">accuracy</td><td class="num">standard</td></tr><tr><td class="name">engine</td><td class="num">LocalVolSnowballPDESolver</td></tr><tr><td class="name">grid.<wbr>bounds</td><td class="num">&mdash;, &mdash;</td></tr><tr><td class="name">grid.<wbr>day_<wbr>count</td><td class="num">252</td></tr><tr><td class="name">grid.<wbr>eps_<wbr>crit</td><td class="num">0.003</td></tr><tr><td class="name">grid.<wbr>event_<wbr>damping_<wbr>steps</td><td class="num">2</td></tr><tr><td class="name">grid.<wbr>max_<wbr>points</td><td class="num">2000</td></tr><tr><td class="name">grid.<wbr>max_<wbr>steps</td><td class="num">5000</td></tr><tr><td class="name">grid.<wbr>num_<wbr>std</td><td class="num">4</td></tr><tr><td class="name">grid.<wbr>points</td><td class="num">400</td></tr><tr><td class="name">grid.<wbr>steps_<wbr>per_<wbr>day</td><td class="num">4</td></tr><tr><td class="name">grid.<wbr>terminal_<wbr>damping_<wbr>steps</td><td class="num">1</td></tr></tbody></table></div></div><div class="config-block"><h3 class="cfg-name">benchmark</h3><div class="scroll"><table><thead><tr><th>setting</th><th>value</th></tr></thead><tbody><tr><td class="name">engine</td><td class="num">LocalVolSnowballMCEngine</td></tr><tr><td class="name">estimator</td><td class="num">plain</td></tr><tr><td class="name">greeks</td><td class="num">paired central difference (common random numbers)</td></tr><tr><td class="name">lv_<wbr>time_<wbr>sampling</td><td class="num">integrated</td></tr><tr><td class="name">method</td><td class="num">randomized_quasi</td></tr><tr><td class="name">paths_<wbr>per_<wbr>batch</td><td class="num">65536</td></tr><tr><td class="name">substeps_<wbr>per_<wbr>interval</td><td class="num">8</td></tr></tbody></table></div></div></div></section>
+<section><h2>Benchmark sampling</h2><p class="lede">Sampling continues until the benchmark is sharp enough for the gate that will judge it. A case that stopped at <code>max_batches</code> never reached that point, and its cells cannot certify anything.</p><div class="scroll"><table><thead><tr><th>case</th><th>batches</th><th>stopped because</th><th>standard errors (raw units)</th></tr></thead><tbody><tr><td>calm_discrete_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00661, gamma 7.79e-05, pv 1.19</td></tr><tr><td>calm_european_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00713, gamma 0.00014, pv 0.968</td></tr><tr><td>calm_inside_listed_grid</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00489, gamma 7.32e-05, pv 0.806</td></tr><tr><td>calm_near_expiry</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00544, gamma 0.000151, pv 0.0986</td></tr><tr><td>calm_near_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.0027, gamma 0.000134, pv 0.549</td></tr><tr><td>calm_near_ko</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00348, gamma 0.000239, pv 0.51</td></tr><tr><td>calm_ordinary</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00504, gamma 0.000133, pv 0.422</td></tr><tr><td>calm_stepdown_ko</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00648, gamma 0.000138, pv 0.298</td></tr><tr><td>crash_discrete_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00246, gamma 0.000238, pv 0.614</td></tr><tr><td>crash_european_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00308, gamma 0.00012, pv 1.24</td></tr><tr><td>crash_inside_listed_grid</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00463, gamma 0.000188, pv 0.261</td></tr><tr><td>crash_near_expiry</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00181, gamma 0.000226, pv 0.197</td></tr><tr><td>crash_near_ki</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00156, gamma 0.000215, pv 0.835</td></tr><tr><td>crash_near_ko</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00705, gamma 0.00018, pv 0.666</td></tr><tr><td>crash_ordinary</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00487, gamma 0.00014, pv 0.864</td></tr><tr><td>crash_stepdown_ko</td><td class="num">4</td><td><span class="pill pass">se_budget_met</span></td><td class="name">delta 0.00299, gamma 0.000294, pv 1.55</td></tr></tbody></table></div><p class="lede">Policy: 65,536 paths per batch, 4&ndash;32 batches, seed 20260828, relative bump 0.01.</p></section>
+<section><h2>Cells</h2><p class="lede">One row per candidate &times; case &times; quantity. The gauge shows how much of the 0.5 c cell bound the disagreement interval (|error| + k&middot;SE) consumed &mdash; a pass near 100% is a pass with no room left. Envelope is the candidate's own discretization error from its refinement ladder.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>case</th><th>quantity</th><th>reference</th><th>SE</th><th>candidate</th><th>err (c)</th><th>envelope (c)</th><th>interval vs bound</th><th>verdict</th></tr></thead><tbody><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_ordinary</td><td>pv</td><td class="num">4570.2</td><td class="num">0.864</td><td class="num">4570.59</td><td class="num">0.007682</td><td class="num">0.000852</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.5%"></div></div><span class="pct">8%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_ordinary</td><td>delta</td><td class="num">0.597314</td><td class="num">0.00487</td><td class="num">0.591502</td><td class="num">-0.005812</td><td class="num">0.0055</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.1%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_ordinary</td><td>gamma</td><td class="num">-0.00046755</td><td class="num">0.00014</td><td class="num">-0.000705555</td><td class="num">-0.01188</td><td class="num">0.000254</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.2%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_inside_listed_grid</td><td>pv</td><td class="num">4578.34</td><td class="num">0.261</td><td class="num">4579.26</td><td class="num">0.01854</td><td class="num">0.00096</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.8%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_inside_listed_grid</td><td>delta</td><td class="num">0.584974</td><td class="num">0.00463</td><td class="num">0.585929</td><td class="num">0.0009555</td><td class="num">0.00376</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.0%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_inside_listed_grid</td><td>gamma</td><td class="num">-0.000673772</td><td class="num">0.000188</td><td class="num">-0.000701153</td><td class="num">-0.001367</td><td class="num">0.000172</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.0%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_ko</td><td>pv</td><td class="num">4639.39</td><td class="num">0.666</td><td class="num">4639.18</td><td class="num">-0.004127</td><td class="num">0.000777</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.2%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_ko</td><td>delta</td><td class="num">0.507707</td><td class="num">0.00705</td><td class="num">0.505443</td><td class="num">-0.002264</td><td class="num">0.00195</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.3%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_ko</td><td>gamma</td><td class="num">-0.000874733</td><td class="num">0.00018</td><td class="num">-0.0007042</td><td class="num">0.008515</td><td class="num">2.92e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.3%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_ki</td><td>pv</td><td class="num">4034.54</td><td class="num">0.835</td><td class="num">4034.8</td><td class="num">0.005286</td><td class="num">7.36e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:7.7%"></div></div><span class="pct">8%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_ki</td><td>delta</td><td class="num">0.876515</td><td class="num">0.00156</td><td class="num">0.87404</td><td class="num">-0.002475</td><td class="num">0.000255</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:1.5%"></div></div><span class="pct">1%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_ki</td><td>gamma</td><td class="num">-0.000364237</td><td class="num">0.000215</td><td class="num">-0.000169123</td><td class="num">0.009742</td><td class="num">5.62e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.2%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_discrete_ki</td><td>pv</td><td class="num">4581.18</td><td class="num">0.614</td><td class="num">4579.13</td><td class="num">-0.04118</td><td class="num">0.000688</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:13.2%"></div></div><span class="pct">13%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_discrete_ki</td><td>delta</td><td class="num">0.60551</td><td class="num">0.00246</td><td class="num">0.588164</td><td class="num">-0.01735</td><td class="num">0.00559</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.5%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_discrete_ki</td><td>gamma</td><td class="num">-0.00124101</td><td class="num">0.000238</td><td class="num">-0.000715948</td><td class="num">0.02622</td><td class="num">0.000246</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:10.0%"></div></div><span class="pct">10%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_european_ki</td><td>pv</td><td class="num">4666.66</td><td class="num">1.24</td><td class="num">4671.21</td><td class="num">0.09099</td><td class="num">0.00472</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:28.1%"></div></div><span class="pct">28%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_european_ki</td><td>delta</td><td class="num">0.526647</td><td class="num">0.00308</td><td class="num">0.497592</td><td class="num">-0.02905</td><td class="num">0.00474</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:7.0%"></div></div><span class="pct">7%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_european_ki</td><td>gamma</td><td class="num">-0.000976611</td><td class="num">0.00012</td><td class="num">-0.000660391</td><td class="num">0.01579</td><td class="num">0.000218</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.6%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_stepdown_ko</td><td>pv</td><td class="num">4600.92</td><td class="num">1.55</td><td class="num">4600.73</td><td class="num">-0.003831</td><td class="num">0.000747</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:13.2%"></div></div><span class="pct">13%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_stepdown_ko</td><td>delta</td><td class="num">0.571464</td><td class="num">0.00299</td><td class="num">0.573569</td><td class="num">0.002105</td><td class="num">0.00127</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:1.6%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_stepdown_ko</td><td>gamma</td><td class="num">-0.000706261</td><td class="num">0.000294</td><td class="num">-0.000712652</td><td class="num">-0.0003191</td><td class="num">4.9e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.9%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_expiry</td><td>pv</td><td class="num">4707.05</td><td class="num">0.197</td><td class="num">4706.15</td><td class="num">-0.01818</td><td class="num">0.00508</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.2%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_expiry</td><td>delta</td><td class="num">0.553424</td><td class="num">0.00181</td><td class="num">0.548433</td><td class="num">-0.00499</td><td class="num">0.0038</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:1.7%"></div></div><span class="pct">2%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>crash_near_expiry</td><td>gamma</td><td class="num">-0.000724003</td><td class="num">0.000226</td><td class="num">-0.000897094</td><td class="num">-0.008643</td><td class="num">4.36e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.2%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_ordinary</td><td>pv</td><td class="num">4889.97</td><td class="num">0.422</td><td class="num">4888.77</td><td class="num">-0.02395</td><td class="num">0.00222</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.2%"></div></div><span class="pct">8%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_ordinary</td><td>delta</td><td class="num">0.579795</td><td class="num">0.00504</td><td class="num">0.583075</td><td class="num">0.00328</td><td class="num">0.00186</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.7%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_ordinary</td><td>gamma</td><td class="num">-0.00131317</td><td class="num">0.000133</td><td class="num">-0.00141891</td><td class="num">-0.00528</td><td class="num">2.54e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.7%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_inside_listed_grid</td><td>pv</td><td class="num">4978.21</td><td class="num">0.806</td><td class="num">4978.8</td><td class="num">0.01169</td><td class="num">0.000987</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:8.8%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_inside_listed_grid</td><td>delta</td><td class="num">0.457397</td><td class="num">0.00489</td><td class="num">0.444558</td><td class="num">-0.01284</td><td class="num">0.00476</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.5%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_inside_listed_grid</td><td>gamma</td><td class="num">-0.00167567</td><td class="num">7.32e-05</td><td class="num">-0.00183039</td><td class="num">-0.007725</td><td class="num">0.000292</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.0%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_ko</td><td>pv</td><td class="num">4963.43</td><td class="num">0.51</td><td class="num">4962.79</td><td class="num">-0.01283</td><td class="num">0.000619</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.7%"></div></div><span class="pct">7%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_ko</td><td>delta</td><td class="num">0.369924</td><td class="num">0.00348</td><td class="num">0.385287</td><td class="num">0.01536</td><td class="num">0.0179</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.5%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_ko</td><td>gamma</td><td class="num">-0.00116247</td><td class="num">0.000239</td><td class="num">-0.00128121</td><td class="num">-0.005929</td><td class="num">0.00142</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.0%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_ki</td><td>pv</td><td class="num">4069.22</td><td class="num">0.549</td><td class="num">4068.72</td><td class="num">-0.01009</td><td class="num">0.00511</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.4%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_ki</td><td>delta</td><td class="num">1.04989</td><td class="num">0.0027</td><td class="num">1.02717</td><td class="num">-0.02272</td><td class="num">0.00974</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.6%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_ki</td><td>gamma</td><td class="num">-0.000176712</td><td class="num">0.000134</td><td class="num">0.00113328</td><td class="num">0.06541</td><td class="num">0.0155</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:15.8%"></div></div><span class="pct">16%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_discrete_ki</td><td>pv</td><td class="num">4949.12</td><td class="num">1.19</td><td class="num">4950.21</td><td class="num">0.02178</td><td class="num">0.000283</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:13.9%"></div></div><span class="pct">14%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_discrete_ki</td><td>delta</td><td class="num">0.47076</td><td class="num">0.00661</td><td class="num">0.470044</td><td class="num">-0.0007163</td><td class="num">0.00187</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:2.8%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_discrete_ki</td><td>gamma</td><td class="num">-0.00135738</td><td class="num">7.79e-05</td><td class="num">-0.00155234</td><td class="num">-0.009734</td><td class="num">7.37e-05</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.5%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_european_ki</td><td>pv</td><td class="num">5045.68</td><td class="num">0.968</td><td class="num">5053.93</td><td class="num">0.1653</td><td class="num">0.00152</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:40.8%"></div></div><span class="pct">41%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_european_ki</td><td>delta</td><td class="num">0.245769</td><td class="num">0.00713</td><td class="num">0.204609</td><td class="num">-0.04116</td><td class="num">0.00179</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:11.1%"></div></div><span class="pct">11%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_european_ki</td><td>gamma</td><td class="num">-0.0013305</td><td class="num">0.00014</td><td class="num">-0.0012567</td><td class="num">0.003685</td><td class="num">0.000118</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.5%"></div></div><span class="pct">4%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_stepdown_ko</td><td>pv</td><td class="num">4896.98</td><td class="num">0.298</td><td class="num">4895.92</td><td class="num">-0.02128</td><td class="num">0.00016</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:6.6%"></div></div><span class="pct">7%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_stepdown_ko</td><td>delta</td><td class="num">0.555371</td><td class="num">0.00648</td><td class="num">0.557647</td><td class="num">0.002276</td><td class="num">0.00205</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:3.0%"></div></div><span class="pct">3%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_stepdown_ko</td><td>gamma</td><td class="num">-0.00109511</td><td class="num">0.000138</td><td class="num">-0.00130648</td><td class="num">-0.01055</td><td class="num">3.49e-06</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.9%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_expiry</td><td>pv</td><td class="num">5376.42</td><td class="num">0.0986</td><td class="num">5375.44</td><td class="num">-0.01955</td><td class="num">0.00537</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:4.7%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_expiry</td><td>delta</td><td class="num">-0.154595</td><td class="num">0.00544</td><td class="num">-0.172648</td><td class="num">-0.01805</td><td class="num">0.00335</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.8%"></div></div><span class="pct">6%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>calm_near_expiry</td><td>gamma</td><td class="num">-0.00372323</td><td class="num">0.000151</td><td class="num">-0.00352168</td><td class="num">0.01006</td><td class="num">0.000667</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:5.0%"></div></div><span class="pct">5%</span></div></td><td><span class="pill pass">PASS</span></td></tr></tbody></table></div></section>
+<section><h2>Aggregate bias</h2><p class="lede">Per-cell bounds are blind to a small error repeated with the same sign in every case. This gate catches exactly that: it measures the mean <em>signed</em> error across cells against a 0.1 c budget.</p><div class="scroll"><table><thead><tr><th>candidate</th><th>quantity</th><th>cells</th><th>mean bias (c)</th><th>SE (c)</th><th>bias vs bound</th><th>passed</th></tr></thead><tbody><tr><td class="name">equity.snowball.localvol_pde</td><td>pv</td><td class="num">16</td><td class="num">0.01039</td><td class="num">0.00399</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:18.4%"></div></div><span class="pct">18%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>delta</td><td class="num">16</td><td class="num">-0.008341</td><td class="num">0.00119</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:10.7%"></div></div><span class="pct">11%</span></div></td><td><span class="pill pass">PASS</span></td></tr><tr><td class="name">equity.snowball.localvol_pde</td><td>gamma</td><td class="num">16</td><td class="num">0.004874</td><td class="num">0.00222</td><td><div class="gauge"><div class="track"><div class="fill pass" style="width:9.3%"></div></div><span class="pct">9%</span></div></td><td><span class="pill pass">PASS</span></td></tr></tbody></table></div></section>
+<div class="meta"><dl><dt>evidence digest</dt><dd>931345b9ae5e684910b1e85be5f3376522af2b19ecc4548ee918764631eae06c</dd><dt>machine</dt><dd>arm64 &middot; macOS-26.6-arm64-arm-64bit</dd><dt>python</dt><dd>3.11.8 &middot; numpy 2.4.6</dd><dt>quantark</dt><dd>94b8e294567903893406ec8fb4a1fb747bf73d39</dd><dt>schema</dt><dd>1</dd></dl></div>
+</div></body></html>
