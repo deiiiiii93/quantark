@@ -1,0 +1,39 @@
+==================================================================================
+CONTROL 1 -- reference convergence ladder (estimator=plain)
+==================================================================================
+
+--- ordinary   PDE delta = 0.591502 (0.5915 contracts)   PDE pv = 4570.5856
+ substeps    gap (contracts)     +/- SE   sigma     secs
+        4             0.0002     0.0030    0.08      218
+        8             0.0047     0.0033    1.46      589
+       16             0.0043     0.0056    0.76     1196
+  READ THE LADDER: adjacent levels agreeing within ~1 sigma means it
+  has stopped moving. A ladder that CROSSES zero mis-signs any single
+  level read on its own.
+
+--- near_ki   PDE delta = 0.874040 (0.8740 contracts)   PDE pv = 4034.8027
+ substeps    gap (contracts)     +/- SE   sigma     secs
+        4            -0.0003     0.0053    0.06      199
+        8            -0.0003     0.0028    0.09      549
+       16             0.0028     0.0049    0.56     1179
+  READ THE LADDER: adjacent levels agreeing within ~1 sigma means it
+  has stopped moving. A ladder that CROSSES zero mis-signs any single
+  level read on its own.
+
+==================================================================================
+CONTROL 2 -- estimator choice (SE budget = 0.125 contracts)
+==================================================================================
+
+plain  (549s for 6 batches at substeps=8)
+  pv     mean =    4034.700260   SE =   0.01223 contracts   MEETS
+  delta  mean =       0.873789   SE =   0.00279 contracts   MEETS
+  gamma  mean =      -0.000374   SE =   0.00685 contracts   MEETS
+
+one_step_survival  (285s for 6 batches at substeps=8)
+  pv     mean =    4034.737799   SE =   0.01154 contracts   MEETS
+  delta  mean =       0.872427   SE =   0.00110 contracts   MEETS
+  gamma  mean =      -0.000453   SE =   0.00334 contracts   MEETS
+
+DECISION RULE: if `plain` meets the budget on every quantity, adopt
+`plain`. Introduce `one_step_survival` only for a quantity `plain`
+cannot resolve. The DISCRETIZATION never splits, only the estimator.

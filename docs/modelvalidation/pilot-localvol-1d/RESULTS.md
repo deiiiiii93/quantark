@@ -124,6 +124,105 @@ empirical-calmness rank the cohort differently.** The crash/calm contrast in
 this study is therefore justified primarily by the empirical per-cell gaps
 (`−1.2726` vs `+0.2614`) and only secondarily by the slope metric.
 
+---
+
+## Controls 1 and 2 — 2026-08-28
+
+```
+PYTHONPATH=$PWD /Users/fuxinyao/quant-ark/.venv/bin/python \
+  docs/modelvalidation/pilot-localvol-1d/probe_reference.py
+```
+
+Raw output: `out_reference.txt`. Six batches of 65,536 paths per rung,
+`lv_time_sampling="integrated"` throughout.
+
+### Control 1 — the reference's own convergence, demonstrated
+
+```
+--- ordinary   PDE delta = 0.591502 (0.5915 contracts)
+ substeps    gap (contracts)     +/- SE   sigma     secs
+        4             0.0002     0.0030    0.08      218
+        8             0.0047     0.0033    1.46      589
+       16             0.0043     0.0056    0.76     1196
+
+--- near_ki   PDE delta = 0.874040 (0.8740 contracts)
+ substeps    gap (contracts)     +/- SE   sigma     secs
+        4            -0.0003     0.0053    0.06      199
+        8            -0.0003     0.0028    0.09      549
+       16             0.0028     0.0049    0.56     1179
+```
+
+**PASS — the estimate has stopped moving at 8.** Reading the pair that decides
+it, 8 against 16:
+
+| cell | substeps 8 | substeps 16 | shift | |
+|---|---|---|---|---|
+| `ordinary` | +0.0047 ± 0.0033 | +0.0043 ± 0.0056 | 0.0004 ± 0.0065 | **0.06σ** |
+| `near_ki` | −0.0003 ± 0.0028 | +0.0028 ± 0.0049 | 0.0031 ± 0.0056 | **0.55σ** |
+
+`substeps = 8` is adopted, unchanged from the declared value.
+
+**Note that substeps = 4 would also have passed** (4 vs 8 is 1.0σ on `ordinary`,
+0.0σ on `near_ki`) and costs 2.7× less. It was not adopted: the reading is
+borderline on one cell, 8 is the level `FINDING-2026-08-26` §5 demonstrated, and
+this entire exercise exists because a reference was once run under-resolved. The
+cheaper rung is not worth re-opening that question.
+
+### The gaps are an order of magnitude smaller than the FINDING's
+
+The worst gap here is **+0.0047 contracts against a 0.5 bound — under 1% of it.**
+`FINDING-2026-08-26` measured `+0.2128 ± 0.0869` on its worst cell, 42% of the
+bound. Two things differ: this is a **1-year** trade rather than 3-year, and
+`lv_time_sampling="integrated"` attacks the σ_loc freeze from the time axis
+instead of the step count, removing a bias the FINDING could only chase with
+substeps.
+
+### Control 2 — estimator choice, measured
+
+SE budget = `0.25 × 0.5` = **0.125 contracts**, at substeps 8, `near_ki`:
+
+| estimator | pv SE | delta SE | gamma SE | wall clock |
+|---|---|---|---|---|
+| `plain` | 0.01223 | 0.00279 | 0.00685 | 549 s |
+| `one_step_survival` | 0.01154 | 0.00110 | 0.00334 | 285 s |
+
+**`plain` meets the budget on every quantity, so `plain` is adopted** — the
+pre-registered tiebreak. The reference stays a single estimator at a single
+discretization, the same shape as the flat-BSM study.
+
+`one_step_survival` is tighter (2.5× on delta, 2.1× on gamma) *and* 1.9× faster,
+which is worth recording for any future amendment that needs sharper Greeks. It
+was **not** adopted here: the decision rule was written before the measurement,
+and switching to the better-looking arm after seeing the numbers is the post-hoc
+selection the release procedure exists to prevent.
+
+**A free cross-check fell out of it.** The two estimators are independent
+constructions, and their deltas agree:
+
+```
+plain  delta = 0.873789      OSS delta = 0.872427
+difference 0.00136 +/- 0.00300  ->  0.45 sigma
+```
+
+That is a `plain`-vs-OSS agreement control in the shape of `RESULTS.md`'s D1,
+obtained at this study's own scale rather than inherited.
+
+### Gamma turned out to be the easy quantity
+
+Its SE is **18× inside budget** (0.00685 against 0.125), which inverts the
+concern that motivated considering a split reference at all. The reason is
+structural and was predicted in spec §8: `gamma_economic = raw × 0.01 × s0`, so
+a raw gamma of `−0.00037` is only `−0.037` contracts.
+
+### Cost consequence for the real run
+
+Delta SE at six batches is `0.0028` against a `0.125` budget — 45× inside — so
+the sequential stopping rule will terminate at `min_batches = 4`. At ~98 s per
+batch that is ~6.5 minutes per cell, putting the 16-cell run near **2 hours**,
+the bottom of the spec's 2–14 h estimate.
+
+---
+
 ### Correction filed
 
 Slope figures quoted in the study YAML and in spec §4 were written under the

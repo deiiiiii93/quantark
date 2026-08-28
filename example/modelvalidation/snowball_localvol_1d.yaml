@@ -89,6 +89,24 @@ product:
     months: 12
     maturity: 1.0
 
+# Every value below was CONFIRMED BY MEASUREMENT before the run, not inherited
+# -- see docs/modelvalidation/pilot-localvol-1d/RESULTS.md controls 1 and 2.
+#
+#   substeps_per_interval  the 8 -> 16 rung shifts by 0.06 sigma (ordinary) and
+#                          0.55 sigma (near_ki), so the estimate has stopped
+#                          moving. substeps=4 would also have passed and costs
+#                          2.7x less; it was not adopted because the reading is
+#                          borderline on one cell (1.0 sigma) and 8 is the level
+#                          FINDING-2026-08-26 section 5 demonstrated.
+#   estimator              `plain` meets the 0.125-contract SE budget on pv,
+#                          delta AND gamma, so the pre-registered tiebreak takes
+#                          it. one_step_survival is tighter and faster and is
+#                          banked in RESULTS.md for a future amendment -- it was
+#                          not swapped in after the fact.
+#
+# ONE discretization serves all three quantities. Splitting it between PV and
+# Greeks would estimate P(h) and P(h/2) -- different numbers at finite h -- so
+# the certified delta would not be the derivative of the certified price.
 reference:
   builder: equity.snowball.localvol_mc
   params:
