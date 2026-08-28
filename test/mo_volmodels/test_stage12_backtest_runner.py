@@ -14,6 +14,7 @@ protect are covered here directly.
 import importlib.util
 import hashlib
 import json
+import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -1122,3 +1123,380 @@ def test_failed_runs_are_recorded_not_swallowed():
     assert failures[0]["error_type"] == "RuntimeError"
     assert "engine exploded" in failures[0]["error"]
     assert failures[0]["traceback"]
+
+
+# ---------------------------------------------------------------------------
+# Resume checkpointing
+#
+# The fleet is a ~4-day run whose cells each write run_summary.json as they
+# finish, so an interruption must cost the driver's bookkeeping and nothing
+# else.  What these tests protect is not "does it skip work" -- that part is a
+# dict lookup -- but the fail-closed half: runs/ accumulates cells from every
+# past fleet, and reusing one that a superseded gate decision produced would
+# put un-computed, un-certified numbers into a fresh manifest.
+# ---------------------------------------------------------------------------
+
+
+def _resume_tasks(out_dir, *, routing=None, **overrides):
+    kwargs = dict(
+        prepared=[
+            {
+                "inception": "2023-05-04",
+                "initial_spot": 6733.97,
+                "coupon": 0.15,
+                "maturity_date": "2026-05-04",
+            }
+        ],
+        variants=["localvol"],
+        routing=routing if routing is not None else _routing(),
+        history_dir=HISTORY_DIR,
+        out_dir=Path(out_dir),
+        data_end=date(2026, 7, 22),
+        rate=0.02,
+        notional=50_000_000.0,
+        costs_enabled=True,
+        quick=False,
+        calculate_surfaces=False,
+        calculate_event_probabilities=True,
+        code_sha256="code-v1",
+        data_sha256="data-v1",
+    )
+    kwargs.update(overrides)
+    return s12.build_tasks(**kwargs)
+
+
+def _write_cell(out_dir, task, *, fingerprint="match", **summary_overrides):
+    """Drop a completed cell on disk the way a finished worker leaves one."""
+    run_dir = Path(out_dir) / "runs" / task["inception"] / task["variant"]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    summary = {
+        "schema_version": s12.SCHEMA_VERSION,
+        "inception": task["inception"],
+        "variant": task["variant"],
+        "lifecycle": {
+            "knocked_out": True,
+            "knocked_in": False,
+            "ko_date": "2024-01-02",
+            "matured": False,
+            "censored_at_data_end": False,
+        },
+        "metrics": {"total_pnl": 1.0},
+        "elapsed_seconds": 12.5,
+    }
+    if fingerprint == "match":
+        summary["provenance"] = s12._provenance_payload(task)
+    elif fingerprint is not None:
+        summary["provenance"] = dict(
+            s12._provenance_payload(task), fingerprint_sha256=fingerprint
+        )
+    summary.update(summary_overrides)
+    (run_dir / "run_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    return run_dir / "run_summary.json"
+
+
+def test_every_task_carries_a_result_fingerprint(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    assert tasks[0]["fingerprint"]
+    assert len(tasks[0]["fingerprint"]) == 64
+
+
+def test_resume_reuses_a_cell_whose_fingerprint_matches(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0])
+    plan = s12.plan_resume(tasks, out_dir=tmp_path, resume=True)
+    assert plan.todo == []
+    assert len(plan.reused) == 1
+    assert plan.reused[0]["variant"] == "localvol"
+    assert plan.recomputed == []
+
+
+def test_resume_recomputes_a_cell_from_a_superseded_gate_decision(tmp_path):
+    """The defect this exists to prevent: silently banking stale numbers."""
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0])
+
+    base = _routing()
+    resealed = s12.GateRouting(
+        decision_path=base.decision_path,
+        evidence_sha256="a-newer-gate",
+        routes=base.routes,
+        pde_params=base.pde_params,
+        mc_params=base.mc_params,
+    )
+    fresh = _resume_tasks(tmp_path, routing=resealed)
+    assert fresh[0]["fingerprint"] != tasks[0]["fingerprint"]
+
+    plan = s12.plan_resume(fresh, out_dir=tmp_path, resume=True)
+    assert plan.reused == []
+    assert len(plan.todo) == 1
+    assert "stale" in plan.recomputed[0]["reason"]
+
+
+def test_resume_recomputes_when_the_code_changed(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0])
+    fresh = _resume_tasks(tmp_path, code_sha256="code-v2")
+    plan = s12.plan_resume(fresh, out_dir=tmp_path, resume=True)
+    assert plan.reused == []
+    assert len(plan.todo) == 1
+
+
+def test_resume_recomputes_when_the_market_data_changed(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0])
+    fresh = _resume_tasks(tmp_path, data_sha256="data-v2")
+    plan = s12.plan_resume(fresh, out_dir=tmp_path, resume=True)
+    assert plan.reused == []
+    assert len(plan.todo) == 1
+
+
+def test_the_fingerprint_ignores_where_results_are_written(tmp_path):
+    """Moving the output tree must not invalidate a cohort."""
+    here = _resume_tasks(tmp_path / "a")
+    there = _resume_tasks(tmp_path / "b")
+    assert here[0]["fingerprint"] == there[0]["fingerprint"]
+
+
+def test_an_unstamped_cell_is_recomputed_by_default(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0], fingerprint=None)
+    plan = s12.plan_resume(tasks, out_dir=tmp_path, resume=True)
+    assert plan.reused == []
+    assert len(plan.todo) == 1
+    assert "unstamped" in plan.recomputed[0]["reason"]
+
+
+def test_adopt_unstamped_reuses_the_cell_and_names_it(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0], fingerprint=None)
+    plan = s12.plan_resume(
+        tasks, out_dir=tmp_path, resume=True, adopt_unstamped=True
+    )
+    assert plan.todo == []
+    assert len(plan.reused) == 1
+    assert plan.adopted == [{"inception": "2023-05-04", "variant": "localvol"}]
+    provenance = plan.reused[0]["provenance"]
+    assert provenance["adopted_without_fingerprint"] is True
+    assert provenance["fingerprint_sha256"] is None
+    assert provenance["expected_fingerprint_sha256"] == tasks[0]["fingerprint"]
+
+
+def test_adopting_never_stamps_the_cell_on_disk(tmp_path):
+    """We did not verify it, so we must not leave an artifact claiming we did."""
+    tasks = _resume_tasks(tmp_path)
+    path = _write_cell(tmp_path, tasks[0], fingerprint=None)
+    s12.plan_resume(tasks, out_dir=tmp_path, resume=True, adopt_unstamped=True)
+    assert "provenance" not in json.loads(path.read_text())
+
+
+def test_a_cell_written_for_another_run_is_recomputed(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0], variant="heston")
+    plan = s12.plan_resume(tasks, out_dir=tmp_path, resume=True)
+    assert plan.reused == []
+    assert len(plan.todo) == 1
+
+
+def test_a_corrupt_summary_is_recomputed_not_raised(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    run_dir = tmp_path / "runs" / "2023-05-04" / "localvol"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_summary.json").write_text("{ truncated", encoding="utf-8")
+    plan = s12.plan_resume(tasks, out_dir=tmp_path, resume=True)
+    assert len(plan.todo) == 1
+
+
+def test_resume_without_a_code_fingerprint_fails_closed(tmp_path):
+    tasks = _resume_tasks(tmp_path, code_sha256=None)
+    _write_cell(tmp_path, tasks[0])
+    with pytest.raises(ValidationError, match="code fingerprint"):
+        s12.plan_resume(tasks, out_dir=tmp_path, resume=True)
+
+
+def test_disabled_resume_runs_everything_but_says_what_it_could_reuse(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0])
+    plan = s12.plan_resume(tasks, out_dir=tmp_path, resume=False)
+    assert len(plan.todo) == 1
+    assert plan.reused == []
+    assert plan.resumable_when_disabled == [
+        {"inception": "2023-05-04", "variant": "localvol"}
+    ]
+
+
+def test_manifest_records_the_resume_split(tmp_path):
+    tasks = _resume_tasks(tmp_path)
+    _write_cell(tmp_path, tasks[0], fingerprint=None)
+    plan = s12.plan_resume(
+        tasks, out_dir=tmp_path, resume=True, adopt_unstamped=True
+    )
+    manifest = s12.build_run_manifest(
+        cfg={
+            "variants": ["localvol"],
+            "notional": 50_000_000.0,
+            "costs_enabled": True,
+            "resume": True,
+            "adopt_unstamped": True,
+            "code_sha256": "code-v1",
+            "data_sha256": "data-v1",
+        },
+        routing=_routing(),
+        prepared=[{"inception": "2023-05-04"}],
+        summaries=plan.reused,
+        failures=[],
+        elapsed=1.0,
+        plan=plan,
+    )
+    resume = manifest["resume"]
+    assert resume["enabled"] is True
+    assert resume["reused"] == 1
+    assert resume["computed_now"] == 0
+    assert resume["adopted_without_fingerprint"] == [
+        {"inception": "2023-05-04", "variant": "localvol"}
+    ]
+    assert resume["code_sha256"] == "code-v1"
+
+
+def test_manifest_of_a_plain_run_reports_no_reuse(tmp_path):
+    manifest = s12.build_run_manifest(
+        cfg={"variants": ["localvol"], "notional": 1.0, "costs_enabled": True},
+        routing=_routing(),
+        prepared=[{"inception": "2023-05-04"}],
+        summaries=[],
+        failures=[],
+        elapsed=1.0,
+    )
+    assert manifest["resume"]["enabled"] is False
+    assert manifest["resume"]["reused"] == 0
+
+
+# --- the data fingerprint, on the real history tree -------------------------
+
+
+def test_data_fingerprint_ignores_rows_beyond_the_pinned_window():
+    """The property that makes resume usable at all.
+
+    The daily calibration pipeline appends a spot row every weekday.  If the
+    data digest covered the whole cache it would change every morning, every
+    cell would read as stale, and --resume would never reuse anything.
+    """
+    import pandas as pd
+
+    spot = s12.load_spot_frame(HISTORY_DIR)
+    futures = s12.load_futures_frame(HISTORY_DIR)
+    pinned = date(2026, 7, 31)
+    before = s12.compute_data_fingerprint(
+        history_dir=HISTORY_DIR, spot=spot, futures=futures, data_end=pinned
+    )
+    tomorrow = spot.tail(1).assign(date=pd.Timestamp("2027-03-01"), spot=1.0)
+    after = s12.compute_data_fingerprint(
+        history_dir=HISTORY_DIR,
+        spot=pd.concat([spot, tomorrow], ignore_index=True),
+        futures=futures,
+        data_end=pinned,
+    )
+    assert before == after
+
+
+def test_data_fingerprint_notices_a_rewritten_row_inside_the_window():
+    import pandas as pd
+
+    spot = s12.load_spot_frame(HISTORY_DIR)
+    futures = s12.load_futures_frame(HISTORY_DIR)
+    pinned = date(2026, 7, 31)
+    before = s12.compute_data_fingerprint(
+        history_dir=HISTORY_DIR, spot=spot, futures=futures, data_end=pinned
+    )
+    tampered = spot.copy()
+    tampered.loc[0, "spot"] = float(tampered.loc[0, "spot"]) + 1.0
+    after = s12.compute_data_fingerprint(
+        history_dir=HISTORY_DIR, spot=tampered, futures=futures, data_end=pinned
+    )
+    assert before != after
+
+
+def _git(repo, *args):
+    subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True)
+
+
+@pytest.fixture
+def code_repo(tmp_path):
+    """A miniature repo shaped like this one: pricing code, data, docs."""
+    repo = tmp_path / "repo"
+    (repo / "quantark").mkdir(parents=True)
+    (repo / "example/mo_volmodels/data").mkdir(parents=True)
+    (repo / "docs").mkdir(parents=True)
+    (repo / "quantark" / "engine.py").write_text("VERSION = 1\n", encoding="utf-8")
+    (repo / "example/mo_volmodels/12_fleet.py").write_text("X = 1\n", encoding="utf-8")
+    (repo / "example/mo_volmodels/data/spot.csv").write_text("d,s\n", encoding="utf-8")
+    (repo / "docs" / "note.md").write_text("hello\n", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    return repo
+
+
+def test_code_fingerprint_sees_an_uncommitted_edit(code_repo):
+    """Stage 11/12 are routinely run dirty; committed content alone is blind."""
+    before = s12.compute_code_fingerprint(code_repo)
+    assert before is not None and len(before) == 64
+    (code_repo / "example/mo_volmodels/12_fleet.py").write_text(
+        "X = 2\n", encoding="utf-8"
+    )
+    assert s12.compute_code_fingerprint(code_repo) != before
+
+
+def test_committing_the_running_edit_does_not_strand_the_fleet(code_repo):
+    """The fingerprint is content, not commit state.
+
+    A fleet takes days.  Committing the very edit it is running -- or landing
+    unrelated work beside it -- must not turn every finished cell stale.
+    """
+    (code_repo / "quantark" / "engine.py").write_text("VERSION = 2\n", encoding="utf-8")
+    dirty = s12.compute_code_fingerprint(code_repo)
+    _git(code_repo, "add", "-A")
+    _git(code_repo, "commit", "-qm", "land the edit")
+    assert s12.compute_code_fingerprint(code_repo) == dirty
+
+
+def test_an_unrelated_commit_does_not_move_the_fingerprint(code_repo):
+    """docs/ and certificates land on this branch while the fleet runs."""
+    before = s12.compute_code_fingerprint(code_repo)
+    (code_repo / "docs" / "certificate.md").write_text("banked\n", encoding="utf-8")
+    _git(code_repo, "add", "-A")
+    _git(code_repo, "commit", "-qm", "docs: bank a certificate")
+    assert s12.compute_code_fingerprint(code_repo) == before
+
+
+def test_market_data_does_not_move_the_code_fingerprint(code_repo):
+    """data/ is rewritten daily and has its own window-clipped fingerprint."""
+    before = s12.compute_code_fingerprint(code_repo)
+    (code_repo / "example/mo_volmodels/data/spot.csv").write_text(
+        "d,s\n2026-08-28,1.0\n", encoding="utf-8"
+    )
+    assert s12.compute_code_fingerprint(code_repo) == before
+
+
+def test_ignored_files_do_not_move_the_code_fingerprint(code_repo):
+    """__pycache__ and local scratch must not invalidate a fleet."""
+    (code_repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    _git(code_repo, "add", "-A")
+    _git(code_repo, "commit", "-qm", "ignore pycache")
+    before = s12.compute_code_fingerprint(code_repo)
+    cache = code_repo / "quantark" / "__pycache__"
+    cache.mkdir()
+    (cache / "engine.cpython-311.py").write_text("junk\n", encoding="utf-8")
+    assert s12.compute_code_fingerprint(code_repo) == before
+
+
+def test_a_deleted_source_file_moves_the_fingerprint(code_repo):
+    before = s12.compute_code_fingerprint(code_repo)
+    (code_repo / "quantark" / "engine.py").unlink()
+    assert s12.compute_code_fingerprint(code_repo) != before
+
+
+def test_code_fingerprint_is_none_outside_a_repository(tmp_path):
+    """No git answer means resume cannot tie a cell to its code -- fail closed."""
+    assert s12.compute_code_fingerprint(tmp_path) is None

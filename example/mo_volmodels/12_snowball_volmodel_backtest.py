@@ -48,18 +48,26 @@ Outputs, per inception x variant, under ``--out-dir``:
     inceptions.json   solved terms + coupon-solver diagnostics per inception
     run_manifest.json fleet configuration, gate provenance, per-run status
 
+Each cell writes run_summary.json as it finishes, so an interrupted fleet keeps
+every completed cell.  --resume reads those back instead of recomputing, but
+only for cells whose provenance fingerprint matches the fleet being run; see
+"Resume checkpointing" below.
+
 Run:
     .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py --gate-g3
     .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py --workers 8
+    .venv/bin/python example/mo_volmodels/12_snowball_volmodel_backtest.py --workers 2 --resume
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -1336,6 +1344,313 @@ def configure_numeric_threads() -> None:
         os.environ.setdefault(name, "1")
 
 
+# ---------------------------------------------------------------------------
+# Resume checkpointing
+# ---------------------------------------------------------------------------
+
+# Every cell writes run_summary.json -- byte-for-byte the object run_one hands
+# back to the driver -- the moment it finishes, so an interrupted fleet loses
+# only the driver's in-memory list, never the completed work.  --resume reads
+# those summaries back instead of recomputing them.
+#
+# The danger it has to defend against is NOT a missing file, it is a stale one.
+# runs/ accumulates cells from every fleet that ever wrote there: a cell priced
+# under a superseded gate decision looks exactly like a fresh one on disk, and
+# blending it into a new manifest is a provenance defect strictly worse than
+# paying for the recompute.  So every cell is stamped with a fingerprint over
+# everything that determines its result, resume is an EXACT match on that
+# fingerprint, and anything unrecognised is recomputed (fail closed).
+RESUME_FINGERPRINT_VERSION = 1
+
+# Task fields that determine the RESULT.  out_dir and history_dir are where
+# results are written and where data is read from, not what is computed, so a
+# cohort stays resumable after the tree moves; the data itself is covered by
+# data_sha256.  The gate's decision_path is excluded for the same reason --
+# evidence_sha256 is its content.
+_FINGERPRINT_TASK_KEYS: Tuple[str, ...] = (
+    "inception",
+    "variant",
+    "initial_spot",
+    "coupon",
+    "window_end",
+    "rate",
+    "notional",
+    "product_quantity",
+    "costs_enabled",
+    "quick",
+    "max_days",
+    "calculate_surfaces",
+    "calculate_event_probabilities",
+)
+
+# Roots whose .py files decide what a cell computes.  Only sources: data/ under
+# example/mo_volmodels is rewritten daily by the calibration pipeline and has
+# its own window-clipped fingerprint.
+_FINGERPRINT_CODE_PATHS: Tuple[str, ...] = ("quantark", "example/mo_volmodels")
+
+
+def _sha256_json(payload: Any) -> str:
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git(root: Path, *args: str) -> Optional[str]:
+    """Run one git command; None when it cannot answer."""
+    try:
+        done = subprocess.run(
+            ["git", *args],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout
+
+
+def compute_code_fingerprint(root: Path = PROJECT_ROOT) -> Optional[str]:
+    """Digest of the pricing code this fleet runs, by CONTENT.
+
+    Every .py file under the pricing paths is hashed as it sits on disk --
+    tracked or not, committed or not.  Three things this deliberately is not:
+
+    * not ``HEAD``.  A fleet runs for days beside ongoing work, and the commit
+      sha moves for reasons that cannot touch a cell (a docs commit, a
+      certificate banked under docs/modelvalidation).  Hashing content means
+      committing the very edit a fleet is running, or landing unrelated work,
+      leaves every finished cell reusable.
+    * not committed content only.  Stage 11/12 are routinely run from a dirty
+      tree, and an uncommitted edit to either changes what a cell computes.
+    * not every file under those paths.  data/ is excluded because the daily
+      calibration pipeline rewrites it -- the market data has its own
+      fingerprint, clipped at the pinned window for exactly that reason.
+
+    Ignored files are skipped (git's own exclude rules), so __pycache__ and
+    local scratch cannot move it.  The numeric stack goes in: a NumPy or SciPy
+    upgrade moves floats, and a resumed fleet must not mix cells from two.
+
+    Returns None when git cannot answer, which makes resume refuse to reuse
+    anything rather than trust an unknown code state.
+    """
+    listing = _git(
+        root,
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        *(f"{path}/**/*.py" for path in _FINGERPRINT_CODE_PATHS),
+        *(f"{path}/*.py" for path in _FINGERPRINT_CODE_PATHS),
+    )
+    if listing is None:
+        return None
+
+    sources: List[Tuple[str, str]] = []
+    for rel in sorted(set(listing.split("\n"))):
+        if not rel:
+            continue
+        blob = root / rel
+        # A tracked file deleted from the working tree is a real change.
+        sources.append((rel, _sha256_file(blob) if blob.is_file() else "absent"))
+
+    import numpy
+    import scipy
+
+    return _sha256_json(
+        {
+            "sources": sources,
+            "python": ".".join(str(p) for p in sys.version_info[:3]),
+            "numpy": numpy.__version__,
+            "pandas": pd.__version__,
+            "scipy": scipy.__version__,
+        }
+    )
+
+
+def compute_data_fingerprint(
+    *,
+    history_dir: Path,
+    spot: pd.DataFrame,
+    futures: pd.DataFrame,
+    data_end: date,
+) -> str:
+    """Digest of the market data inside the PINNED cohort window.
+
+    Clipped at data_end deliberately.  The daily calibration pipeline appends a
+    spot row and a surface artifact every weekday, so a digest of the whole
+    history directory would go stale every morning and make resume useless --
+    while rows beyond the pinned window cannot change any cell's result.  The
+    surface artifacts are covered by the manifest's own per-date
+    ``artifact_sha256``, which is what VolSurfaceHistory verifies them against.
+    """
+    end = pd.Timestamp(data_end)
+    end_key = end.strftime("%Y%m%d")
+    manifest = json.loads(
+        (Path(history_dir) / "surface_manifest.json").read_text(encoding="utf-8")
+    )
+    surfaces = sorted(
+        (
+            str(rec.get("date")),
+            str(rec.get("status")),
+            str(rec.get("artifact_sha256")),
+        )
+        for rec in manifest.get("records", [])
+        if str(rec.get("date", "")) <= end_key
+    )
+    return _sha256_json(
+        {
+            "spot": _sha256_json(
+                spot[spot["date"] <= end].to_csv(index=False, date_format="%Y-%m-%d")
+            ),
+            "futures": _sha256_json(
+                futures[futures["date"] <= end].to_csv(
+                    index=False, date_format="%Y-%m-%d"
+                )
+            ),
+            "surfaces": surfaces,
+        }
+    )
+
+
+def task_fingerprint(task: Dict[str, Any]) -> str:
+    """Everything that determines this cell's result, hashed."""
+    gate = task["gate"]
+    return _sha256_json(
+        {
+            "fingerprint_version": RESUME_FINGERPRINT_VERSION,
+            "schema_version": SCHEMA_VERSION,
+            "task": {key: task[key] for key in _FINGERPRINT_TASK_KEYS},
+            "gate": {
+                "evidence_sha256": gate["evidence_sha256"],
+                "routes": gate["routes"],
+                "pde_params": gate["pde_params"],
+                "mc_params": gate["mc_params"],
+            },
+            "code_sha256": task.get("code_sha256"),
+            "data_sha256": task.get("data_sha256"),
+        }
+    )
+
+
+def _provenance_payload(task: Dict[str, Any]) -> Dict[str, Any]:
+    """The stamp a finished cell carries so a later fleet can recognise it."""
+    return {
+        "fingerprint_version": RESUME_FINGERPRINT_VERSION,
+        "fingerprint_sha256": task.get("fingerprint"),
+        "code_sha256": task.get("code_sha256"),
+        "data_sha256": task.get("data_sha256"),
+        "gate_evidence_sha256": task["gate"]["evidence_sha256"],
+    }
+
+
+@dataclass(frozen=True)
+class ResumePlan:
+    """What --resume decided about each scheduled cell."""
+
+    todo: List[Dict[str, Any]] = field(default_factory=list)
+    reused: List[Dict[str, Any]] = field(default_factory=list)
+    adopted: List[Dict[str, Any]] = field(default_factory=list)
+    recomputed: List[Dict[str, Any]] = field(default_factory=list)
+    # Cells that could have been reused had --resume been passed.  Reported so
+    # a relaunch that forgot the flag says so instead of silently paying twice.
+    resumable_when_disabled: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def _read_run_summary(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def plan_resume(
+    tasks: Sequence[Dict[str, Any]],
+    *,
+    out_dir: Path,
+    resume: bool,
+    adopt_unstamped: bool = False,
+) -> ResumePlan:
+    """Split scheduled cells into reuse-from-disk and recompute.
+
+    A stored summary is reused only when its stamped fingerprint equals the one
+    this fleet computes for the same cell.  An unstamped summary (written
+    before stamping existed) is reused ONLY under adopt_unstamped, and is
+    listed separately in the manifest so the reuse is never invisible: nothing
+    on disk proves such a cell came from this configuration.
+    """
+    plan = ResumePlan()
+    if resume and any(task.get("code_sha256") is None for task in tasks):
+        raise ValidationError(
+            "--resume needs a code fingerprint and git could not produce one; "
+            "without it a reused cell cannot be tied to the code that made it. "
+            "Rerun from the git working tree, or drop --resume to recompute."
+        )
+    for task in tasks:
+        label = {"inception": task["inception"], "variant": task["variant"]}
+        summary = _read_run_summary(
+            out_dir / "runs" / task["inception"] / task["variant"] / "run_summary.json"
+        )
+        stamped = None
+        if summary is not None:
+            identity_ok = (
+                summary.get("schema_version") == SCHEMA_VERSION
+                and summary.get("inception") == task["inception"]
+                and summary.get("variant") == task["variant"]
+            )
+            if not identity_ok:
+                summary = None
+            else:
+                stamped = (summary.get("provenance") or {}).get("fingerprint_sha256")
+
+        if not resume:
+            if summary is not None and stamped == task["fingerprint"]:
+                plan.resumable_when_disabled.append(label)
+            plan.todo.append(task)
+            continue
+
+        if summary is None:
+            plan.todo.append(task)
+            continue
+        if stamped is not None and stamped == task["fingerprint"]:
+            plan.reused.append(summary)
+            continue
+        if stamped is None:
+            if not adopt_unstamped:
+                plan.recomputed.append(
+                    {**label, "reason": "unstamped (predates provenance stamping)"}
+                )
+                plan.todo.append(task)
+                continue
+            # Reused, but never re-stamped on disk: we did not verify it, so we
+            # must not leave behind an artifact claiming we did.  The manifest
+            # carries the adoption instead.
+            adopted = dict(summary)
+            adopted["provenance"] = {
+                "fingerprint_version": None,
+                "fingerprint_sha256": None,
+                "adopted_without_fingerprint": True,
+                "expected_fingerprint_sha256": task["fingerprint"],
+            }
+            plan.reused.append(adopted)
+            plan.adopted.append(label)
+            continue
+        plan.recomputed.append({**label, "reason": "fingerprint mismatch (stale cell)"})
+        plan.todo.append(task)
+    return plan
+
+
 def run_one(task: Dict[str, Any]) -> Dict[str, Any]:
     """Run a single inception x variant replay. Picklable worker entry point."""
     configure_numeric_threads()
@@ -1460,6 +1775,10 @@ def run_one(task: Dict[str, Any]) -> Dict[str, Any]:
         calibration_records=calibration_records,
         elapsed=time.perf_counter() - started,
     )
+    # Stamped from the DRIVER's fingerprint, not recomputed here: the driver is
+    # the only place that knows the code/data digests, and a worker recomputing
+    # them could disagree with the value resume will compare against.
+    summary["provenance"] = _provenance_payload(task)
     _atomic_write_json(run_dir / "run_summary.json", summary)
     return summary
 
@@ -1694,6 +2013,8 @@ def build_tasks(
     calculate_surfaces: bool,
     calculate_event_probabilities: bool,
     max_days: Optional[int] = None,
+    code_sha256: Optional[str] = None,
+    data_sha256: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     gate_payload = {
         "decision_path": routing.decision_path,
@@ -1735,8 +2056,12 @@ def build_tasks(
                     "calculate_event_probabilities": bool(
                         calculate_event_probabilities
                     ),
+                    "code_sha256": code_sha256,
+                    "data_sha256": data_sha256,
                 }
             )
+    for task in tasks:
+        task["fingerprint"] = task_fingerprint(task)
     return tasks
 
 
@@ -1799,6 +2124,7 @@ def build_run_manifest(
     summaries: Sequence[Dict[str, Any]],
     failures: Sequence[Dict[str, Any]],
     elapsed: float,
+    plan: Optional[ResumePlan] = None,
 ) -> Dict[str, Any]:
     censored = sum(1 for s in summaries if s["lifecycle"]["censored_at_data_end"])
     knocked_out = sum(1 for s in summaries if s["lifecycle"]["knocked_out"])
@@ -1841,6 +2167,21 @@ def build_run_manifest(
             "run_configuration": cfg.get("adi_greek_run_configuration"),
             "requested_variants": list(cfg.get("requested_variants", cfg["variants"])),
             "excluded_variants": dict(cfg.get("adi_greek_exclusions", {})),
+        },
+        # How much of this manifest was computed now and how much was read back
+        # from a previous fleet.  adopted_without_fingerprint is the one entry
+        # that is NOT self-proving: those cells were reused on the operator's
+        # say-so, so they are named individually rather than counted.
+        "resume": {
+            "enabled": bool(cfg.get("resume", False)),
+            "adopt_unstamped": bool(cfg.get("adopt_unstamped", False)),
+            "code_sha256": cfg.get("code_sha256"),
+            "data_sha256": cfg.get("data_sha256"),
+            "fingerprint_version": RESUME_FINGERPRINT_VERSION,
+            "reused": 0 if plan is None else len(plan.reused),
+            "computed_now": len(summaries) - (0 if plan is None else len(plan.reused)),
+            "adopted_without_fingerprint": [] if plan is None else list(plan.adopted),
+            "recomputed": [] if plan is None else list(plan.recomputed),
         },
         "inceptions": list(prepared),
         "runs": list(summaries),
@@ -1930,11 +2271,59 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Gate G3: one inception x flat_bsm end-to-end sanity check",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="reuse completed cells already under --out-dir instead of "
+        "recomputing them. Only cells whose stored provenance fingerprint "
+        "matches this fleet are reused; anything else is recomputed.",
+    )
+    parser.add_argument(
+        "--adopt-unstamped",
+        action="store_true",
+        help="with --resume, also reuse completed cells written before "
+        "provenance stamping existed. Nothing on disk proves such a cell came "
+        "from this configuration -- and nothing distinguishes one this fleet "
+        "wrote from one a SUPERSEDED gate decision wrote, so use it only when "
+        "you know which fleet left the unstamped cells. Each adopted cell is "
+        "listed in the manifest under resume.adopted_without_fingerprint.",
+    )
     return parser.parse_args(argv)
+
+
+def _report_resume_plan(plan: ResumePlan, *, resume: bool) -> None:
+    if not resume:
+        if plan.resumable_when_disabled:
+            print(
+                f"[resume] disabled -- {len(plan.resumable_when_disabled)} completed "
+                "cells on disk would be reused with --resume",
+                flush=True,
+            )
+        return
+    print(
+        f"[resume] {len(plan.reused)} reused "
+        f"({len(plan.adopted)} adopted unstamped), "
+        f"{len(plan.recomputed)} stale, {len(plan.todo)} to run",
+        flush=True,
+    )
+    for row in plan.recomputed:
+        print(
+            f"[resume] recompute {row['inception']} / {row['variant']}: "
+            f"{row['reason']}",
+            flush=True,
+        )
+    for row in plan.adopted:
+        print(
+            f"[resume] adopted without fingerprint {row['inception']} / "
+            f"{row['variant']}",
+            flush=True,
+        )
 
 
 def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
     started = time.perf_counter()
+    if getattr(args, "adopt_unstamped", False) and not getattr(args, "resume", False):
+        raise ValidationError("--adopt-unstamped only means something with --resume")
     history_dir = Path(args.history_dir)
     out_dir = Path(args.out_dir)
     rate = stage11().FLAT_RATE
@@ -1979,6 +2368,11 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
             )
         data_end = pinned
 
+    code_sha256 = compute_code_fingerprint()
+    data_sha256 = compute_data_fingerprint(
+        history_dir=history_dir, spot=spot, futures=futures, data_end=data_end
+    )
+
     limit = 1 if args.gate_g3 else args.max_inceptions
     prepared = prepare_inceptions(
         history=history,
@@ -2011,8 +2405,21 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         max_days=args.max_days,
         calculate_surfaces=bool(args.surfaces),
         calculate_event_probabilities=not args.no_event_probabilities,
+        code_sha256=code_sha256,
+        data_sha256=data_sha256,
     )
-    summaries, failures = execute_tasks(tasks, workers=int(args.workers))
+    plan = plan_resume(
+        tasks,
+        out_dir=out_dir,
+        resume=bool(args.resume),
+        adopt_unstamped=bool(args.adopt_unstamped),
+    )
+    _report_resume_plan(plan, resume=bool(args.resume))
+    summaries, failures = execute_tasks(plan.todo, workers=int(args.workers))
+    summaries = sorted(
+        list(plan.reused) + list(summaries),
+        key=lambda summary: (summary["inception"], summary["variant"]),
+    )
 
     cfg = {
         "history_dir": str(history_dir),
@@ -2062,6 +2469,10 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         "gate_g3": bool(args.gate_g3),
         "rate": float(rate),
         "workers": int(args.workers),
+        "resume": bool(args.resume),
+        "adopt_unstamped": bool(args.adopt_unstamped),
+        "code_sha256": code_sha256,
+        "data_sha256": data_sha256,
         "mc_paths_per_batch": QUICK_MC_PATHS_PER_BATCH
         if args.quick
         else MC_PATHS_PER_BATCH,
@@ -2083,6 +2494,7 @@ def run_fleet(args: argparse.Namespace) -> Dict[str, Any]:
         summaries=summaries,
         failures=failures,
         elapsed=time.perf_counter() - started,
+        plan=plan,
     )
     _atomic_write_json(out_dir / "inceptions.json", list(prepared))
     _atomic_write_json(out_dir / "run_manifest.json", manifest)
@@ -2105,6 +2517,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         flush=True,
     )
+    resume = manifest.get("resume", {})
+    if resume.get("enabled"):
+        adopted = len(resume.get("adopted_without_fingerprint", []))
+        print(
+            f"[summary] {resume['reused']} reused from disk "
+            f"({adopted} adopted without a fingerprint), "
+            f"{resume['computed_now']} computed now",
+            flush=True,
+        )
     print(f"[out] {Path(manifest['config']['out_dir']) / 'run_manifest.json'}")
     return 1 if counts["runs_failed"] else 0
 
