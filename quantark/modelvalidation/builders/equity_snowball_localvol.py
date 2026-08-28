@@ -258,3 +258,70 @@ class _LocalVolArm:
 
     def _surface(self, environment: Mapping[str, Any]) -> _Surface:
         return load_surface(str(environment["surface"]), float(environment["rate"]))
+
+
+class LocalVolPDECandidate(_LocalVolArm):
+    """The 1-D two-surface local-vol PDE solver at a declared accuracy profile."""
+
+    def name(self) -> str:
+        return "equity.snowball.localvol_pde"
+
+    def params(self) -> Mapping[str, Any]:
+        """Declared settings plus the grid the accuracy profile resolves to.
+
+        Recording the resolved grid rather than the profile name is what makes
+        the certificate self-describing, and what makes the identity hash move
+        if a future release redefines the profile.
+        """
+        accuracy = str(self._params.get("accuracy", "standard"))
+        return {
+            **self._params,
+            "engine": "LocalVolSnowballPDESolver",
+            "grid": engine_config(resolve_config(accuracy, None)),
+        }
+
+    def _greeks(self, case, accuracy: str) -> dict:
+        environment, product_spec = self._specs(case)
+        surface = self._surface(environment)
+        solver = LocalVolSnowballPDESolver(
+            params=PDEParams(accuracy=accuracy),
+            local_vol_surface=surface.local_vol,
+        )
+        result = solver.calculate_greeks(
+            make_snowball(product_spec), make_localvol_environment(environment)
+        )
+        return {
+            "pv": result["price"],
+            "delta": result["delta"],
+            "gamma": result["gamma"],
+        }
+
+    def evaluate(self, case) -> CandidateResult:
+        accuracy = str(self._params.get("accuracy", "standard"))
+        values = self._greeks(case, accuracy)
+        rungs = [LadderRung(axis="accuracy", level="target", values=values)]
+        coarser = _COARSER_ACCURACY[accuracy]
+        if coarser != accuracy:
+            rungs.append(
+                LadderRung(
+                    axis="accuracy",
+                    level="medium",
+                    values=self._greeks(case, coarser),
+                )
+            )
+        return CandidateResult(values=values, ladders=tuple(rungs))
+
+
+@register_builder("equity.snowball.localvol_pde", kind="candidate")
+def build_localvol_pde_candidate(
+    environment_params: Mapping[str, Any],
+    product_params: Mapping[str, Any],
+    quantities: Sequence[str],
+    params: Mapping[str, Any],
+) -> LocalVolPDECandidate:
+    return LocalVolPDECandidate(
+        environment_params=environment_params,
+        product_params=product_params,
+        quantities=quantities,
+        params=params,
+    )

@@ -6,16 +6,18 @@ asserting ADMITTED would be asserting that noise agrees with us. The real
 verdict comes from the offline run whose evidence is banked.
 """
 
+import math
 from pathlib import Path
 
 import pytest
 
 from quantark.modelvalidation.builders.equity_snowball_localvol import (
-    REFERENCE_SPOT,
     build_localvol_market_spec,
+    build_localvol_pde_candidate,
     load_surface,
     make_localvol_environment,
 )
+from quantark.modelvalidation.study import CaseSpec
 from quantark.util.exceptions import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -78,3 +80,56 @@ def test_unknown_environment_key_is_refused():
 def test_missing_surface_path_is_refused():
     with pytest.raises(ValidationError, match="surface"):
         build_localvol_market_spec({"rate": 0.02})
+
+
+# --------------------------------------------------------------------------
+# The PDE candidate
+# --------------------------------------------------------------------------
+
+ENV = {"surface": CRASH, "rate": 0.02}
+PRODUCT = {
+    "strike_moneyness": 1.0,
+    "ko_barrier_moneyness": 1.03,
+    "ki_barrier_moneyness": 0.85,
+    "ko_rate": 0.15,
+    "rebate_rate": 0.15,
+    "months": 12,
+    "maturity": 1.0,
+}
+
+
+def _candidate(**params):
+    return build_localvol_pde_candidate(
+        environment_params=ENV,
+        product_params=PRODUCT,
+        quantities=("pv", "delta", "gamma"),
+        params=params or {"accuracy": "standard"},
+    )
+
+
+def test_pde_candidate_is_named_for_its_engine():
+    assert _candidate().name() == "equity.snowball.localvol_pde"
+
+
+def test_pde_candidate_records_its_resolved_grid():
+    """A profile name is an indirection; the resolved grid is the evidence."""
+    params = _candidate().params()
+    assert params["engine"] == "LocalVolSnowballPDESolver"
+    assert params["grid"]["points"] > 0
+    assert params["grid"]["steps_per_day"] > 0
+
+
+def test_pde_candidate_produces_finite_greeks_with_a_ladder():
+    result = _candidate().evaluate(CaseSpec(name="ordinary"))
+    assert set(result.values) == {"pv", "delta", "gamma"}
+    assert all(math.isfinite(v) for v in result.values.values())
+    assert [rung.level for rung in result.ladders] == ["target", "medium"]
+
+
+def test_pde_candidate_delta_is_stable_across_its_own_ladder():
+    """FINDING-2026-08-26: the PDE moved 0.0079 contracts across its whole
+    accuracy ladder, 63x tighter than the bound it was failing. If that is no
+    longer true, the engine changed and the certification premise with it."""
+    result = _candidate().evaluate(CaseSpec(name="ordinary"))
+    target, medium = result.ladders
+    assert abs(target.values["delta"] - medium.values["delta"]) < 0.05
