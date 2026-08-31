@@ -43,6 +43,7 @@ def _write_run(
     lifecycle=None,
     calibration=None,
     maturity_date=None,
+    front_load: float = 0.0,
 ):
     run_dir = root / "runs" / inception / variant
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -55,7 +56,13 @@ def _write_run(
     #   cash             = cashflows - transaction_costs
     #   portfolio_value  = product_mtm + hedge_mtm + cash
     #   futures_contracts= cumulative traded quantity
-    gross = [(total_pnl + costs) * (i + 1) / n_days for i in range(n_days)]
+    # front_load moves gross PnL onto day 1: 0.0 accrues it linearly over the
+    # replay (all of it earned while hedging), 1.0 books it all at inception
+    # (a pure mark-to-model, nothing added afterwards).
+    shape = [
+        front_load + (1.0 - front_load) * (i + 1) / n_days for i in range(n_days)
+    ]
+    gross = [(total_pnl + costs) * f for f in shape]
     costs_cum = [costs * (i + 1) / n_days for i in range(n_days)]
     product_pnl = [0.6 * g for g in gross]
     hedge_pnl = [0.4 * g for g in gross]
@@ -1117,3 +1124,145 @@ def test_a_covered_fleet_gets_no_span_banner(tmp_path):
         s13.aggregate(_span_fleet(tmp_path / "f", _dated([("2023-05-04", ORDINARY_FIT)])))
     )
     assert "OUTSIDE THE CERTIFIED REGIME SPAN" not in html
+
+
+# ---------------------------------------------------------------------------
+# Inception mark vs hedging period
+#
+# Every variant prices the SAME contract, whose coupon was solved so flat BSM
+# values it at zero, and the contract is booked at zero -- so day 1 marks each
+# model's disagreement with that solve instantly.  That is a valuation opinion,
+# not hedging skill, and on the real fleet the two halves carry OPPOSITE signs
+# for localvol and heston_slv (+0.5 / +0.8 at inception, -1.9 / -1.6 hedging).
+# Blending them understates both, which is what these tests pin.
+# ---------------------------------------------------------------------------
+
+
+def test_pnl_splits_into_inception_and_hedging(fleet):
+    agg = s13.aggregate(fleet)
+    for row in agg["per_run"]:
+        assert row["pnl_inception_pct_notional"] + row[
+            "pnl_hedging_pct_notional"
+        ] == pytest.approx(row["total_pnl_pct_notional"], abs=1e-12)
+
+
+def test_inception_component_is_day_one_not_an_average(fleet):
+    """The day-1 row IS the mark; anything else silently blends in hedging."""
+    agg = s13.aggregate(fleet)
+    row = next(
+        r for r in agg["per_run"]
+        if r["inception"] == "2023-05-04" and r["variant"] == "flat_bsm"
+    )
+    states = pd.read_csv(
+        fleet / "runs" / "2023-05-04" / "flat_bsm" / "states.csv", index_col=0
+    )
+    assert row["pnl_inception"] == pytest.approx(states["total_pnl"].iloc[0])
+    assert row["pnl_hedging"] == pytest.approx(
+        states["total_pnl"].iloc[-1] - states["total_pnl"].iloc[0]
+    )
+
+
+def test_paired_deltas_decompose_the_same_way(fleet):
+    agg = s13.aggregate(fleet)
+    for pair in agg["paired_vs_baseline"]:
+        assert pair["d_pnl_inception_pct_notional"] + pair[
+            "d_pnl_hedging_pct_notional"
+        ] == pytest.approx(pair["d_pnl_pct_notional"], abs=1e-12)
+
+
+def test_hedging_win_rate_ignores_the_day_one_mark(tmp_path):
+    """A variant can win on the total and lose on every hedging path.
+
+    This is exactly the localvol/heston_slv shape: a positive inception mark
+    covering a negative hedging edge.  The blended win rate would call it a
+    draw; the hedging win rate must call it 0%.
+    """
+    root = tmp_path / "masked"
+    inceptions = ["2023-05-04", "2023-06-01"]
+    for inception in inceptions:
+        # Baseline: nothing on day 1, all of it earned while hedging.
+        _write_run(root, inception, "flat_bsm", total_pnl=500_000.0, front_load=0.0)
+        # Challenger: books a big day-1 mark, then hedges worse, ending ahead.
+        _write_run(root, inception, "localvol", total_pnl=600_000.0, front_load=1.0)
+    runs = [
+        {"inception": i, "variant": v}
+        for i in inceptions for v in ("flat_bsm", "localvol")
+    ]
+    _write_manifest(
+        root, runs, variants=["flat_bsm", "localvol"], inceptions=inceptions
+    )
+    agg = s13.aggregate(root)
+    paired = agg["paired_summary"]["localvol"]
+    assert paired["d_pnl_pct_notional"]["mean"] > 0.0        # wins on the total
+    assert paired["pnl_win_rate"] == pytest.approx(1.0)
+    assert paired["d_pnl_hedging_pct_notional"]["mean"] < 0.0  # loses while hedging
+    assert paired["pnl_hedging_win_rate"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Completeness checks
+# ---------------------------------------------------------------------------
+
+
+def test_a_knocked_out_run_is_complete_despite_a_short_states_file(tmp_path):
+    """states.csv holds days REPLAYED, not days in the window.
+
+    Every run in this study knocks out early and terminates, so comparing row
+    count against the window length reported every single one as incomplete.
+    """
+    root = tmp_path / "ko"
+    _write_run(root, "2023-05-04", "flat_bsm", total_pnl=100_000.0, n_days=5)
+    runs = [{
+        "inception": "2023-05-04",
+        "variant": "flat_bsm",
+        "n_days": 727,                       # window
+        "metrics": {"days_replayed": 5},     # actually replayed
+    }]
+    _write_manifest(root, runs, variants=["flat_bsm"], inceptions=["2023-05-04"])
+    manifest = json.loads((root / "run_manifest.json").read_text())
+    comp = s13.verify_fleet_completeness(root, manifest)
+    assert comp["n_complete"] == 1, comp["incomplete"]
+
+
+def test_more_rows_than_the_window_is_still_an_error(tmp_path):
+    """The window remains the upper bound -- a replay cannot exceed it."""
+    root = tmp_path / "toolong"
+    _write_run(root, "2023-05-04", "flat_bsm", total_pnl=100_000.0, n_days=5)
+    runs = [{
+        "inception": "2023-05-04",
+        "variant": "flat_bsm",
+        "n_days": 3,
+        "metrics": {"days_replayed": 5},
+    }]
+    _write_manifest(root, runs, variants=["flat_bsm"], inceptions=["2023-05-04"])
+    manifest = json.loads((root / "run_manifest.json").read_text())
+    comp = s13.verify_fleet_completeness(root, manifest)
+    assert comp["n_complete"] == 0
+    assert any("more than the 3 days" in i for c in comp["incomplete"] for i in c["issues"])
+
+
+def test_slv_is_checked_for_its_leverage_surface_not_a_dupire_one(tmp_path):
+    """heston_slv records leverage_min/max; demanding lv_min/max fails a good run."""
+    root = tmp_path / "slv"
+    _write_run(
+        root, "2023-05-04", "heston_slv", total_pnl=100_000.0,
+        calibration=[{"leverage_min": 0.43, "leverage_max": 1.67, "eta": 1.0}],
+    )
+    check = s13.verify_run_completeness(
+        root / "runs" / "2023-05-04" / "heston_slv", variant="heston_slv"
+    )
+    assert check["complete"], check["issues"]
+    assert check["categories"]["leverage_surface_records"] is True
+
+
+def test_localvol_still_needs_its_dupire_surface_stats(tmp_path):
+    root = tmp_path / "lv"
+    _write_run(
+        root, "2023-05-04", "localvol", total_pnl=100_000.0,
+        calibration=[{"leverage_min": 0.43, "leverage_max": 1.67}],  # wrong keys here
+    )
+    check = s13.verify_run_completeness(
+        root / "runs" / "2023-05-04" / "localvol", variant="localvol"
+    )
+    assert not check["complete"]
+    assert any("lv_min" in i for i in check["issues"])

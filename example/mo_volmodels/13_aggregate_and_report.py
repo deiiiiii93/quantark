@@ -364,6 +364,25 @@ def metrics_for_run(
     final_pnl = total_pnl[-1] if total_pnl else None
     final_costs = costs[-1] if costs else None
 
+    # Split the total into the two things it actually contains.
+    #
+    # The contract is booked at initial_product_price=0 and every variant
+    # prices the SAME contract -- one whose coupon was solved so that flat BSM
+    # values it at zero (Gate G4).  So day 1 carries each model's disagreement
+    # with that solve, marked instantly: ~0 for flat_bsm by construction, and
+    # whatever the model thinks for everyone else.  That is a one-off valuation
+    # opinion, not hedging skill, and blending it into the total masks the
+    # thing this study is asking about -- the two components can carry opposite
+    # signs for the same variant.  ``total_pnl`` is cumulative, so the hedging
+    # component is simply what accrued after day 1.
+    inception_pnl = total_pnl[0] if total_pnl else None
+    hedging_pnl = (
+        final_pnl - inception_pnl
+        if final_pnl is not None and inception_pnl is not None
+        else None
+    )
+    inception_mark = product_pnl[0] if product_pnl else None
+
     def pct_notional(value: Optional[float]) -> Optional[float]:
         if value is None or not notional:
             return None
@@ -381,6 +400,13 @@ def metrics_for_run(
         # --- PnL ---
         "total_pnl": final_pnl,
         "total_pnl_pct_notional": pct_notional(final_pnl),
+        # total = inception + hedging, exactly (both cumulative, same ledger)
+        "pnl_inception": inception_pnl,
+        "pnl_inception_pct_notional": pct_notional(inception_pnl),
+        "pnl_inception_mark": inception_mark,
+        "pnl_inception_mark_pct_notional": pct_notional(inception_mark),
+        "pnl_hedging": hedging_pnl,
+        "pnl_hedging_pct_notional": pct_notional(hedging_pnl),
         "product_pnl": product_pnl[-1] if product_pnl else None,
         "hedge_pnl": hedge_pnl[-1] if hedge_pnl else None,
         "transaction_costs": final_costs,
@@ -444,20 +470,44 @@ REQUIRED_CATEGORIES: Dict[str, Dict[str, Any]] = {
 }
 
 # Categories only meaningful for the calibrated variants.
+#
+# The surface diagnostic is named per variant, not shared: localvol records the
+# Dupire surface it prices on (lv_min/lv_max), while heston_slv records the
+# LEVERAGE surface multiplying its Heston backbone (leverage_min/leverage_max).
+# Demanding lv_min/lv_max from an SLV record asks for a field the variant never
+# writes, which reads as "incomplete run" when the run is fine.
 CALIBRATED_CATEGORIES = {
     "calibration_records": {"variants": {"localvol", "heston", "heston_slv"}},
-    "lv_surface_records": {"variants": {"localvol", "heston_slv"}, "keys": ["lv_min", "lv_max"]},
+    "lv_surface_records": {
+        "variants": {"localvol"},
+        "keys": ["lv_min", "lv_max"],
+    },
+    "leverage_surface_records": {
+        "variants": {"heston_slv"},
+        "keys": ["leverage_min", "leverage_max"],
+    },
 }
 
 
 def verify_run_completeness(
-    run_dir: Path, *, variant: str, expected_days: Optional[int] = None
+    run_dir: Path,
+    *,
+    variant: str,
+    expected_days: Optional[int] = None,
+    window_days: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Check every daily output category the design promises for one run.
 
     ``trades.csv`` may legitimately be empty (a run can end before any
     rebalance clears the rounding threshold), so it is checked for schema
     rather than row count.  Everything else must have one row per replay day.
+
+    ``expected_days`` is the number of days actually REPLAYED, not the number
+    of days in the window: a run that knocks out stops there, so its states.csv
+    is legitimately shorter than the window.  Every run in this study knocks
+    out, so comparing against the window length would report every single one
+    as incomplete.  ``window_days`` is kept as the upper bound -- a replay can
+    never produce more rows than the window holds.
     """
     issues: List[str] = []
     present: Dict[str, bool] = {}
@@ -484,6 +534,11 @@ def verify_run_completeness(
     n_days = len(frames.get("states.csv", pd.DataFrame()))
     if expected_days is not None and n_days != expected_days:
         issues.append(f"states.csv has {n_days} rows, run summary claims {expected_days}")
+    if window_days is not None and n_days > window_days:
+        issues.append(
+            f"states.csv has {n_days} rows, more than the {window_days} days in "
+            "the replay window"
+        )
     greeks = frames.get("greeks.csv")
     if greeks is not None and not greeks.empty and n_days and len(greeks) != n_days:
         issues.append(f"greeks.csv has {len(greeks)} rows but states.csv has {n_days}")
@@ -527,9 +582,14 @@ def verify_fleet_completeness(
     sanity = []
     for run in manifest.get("runs", []):
         d = run_dir_for(run_dir, run["inception"], run["variant"])
+        metrics = run.get("metrics") or {}
+        replayed = metrics.get("days_replayed", metrics.get("num_days"))
         checks.append(
             verify_run_completeness(
-                d, variant=run["variant"], expected_days=run.get("n_days")
+                d,
+                variant=run["variant"],
+                expected_days=replayed,
+                window_days=run.get("n_days"),
             )
         )
         report = sanity_check_run(d)
@@ -717,6 +777,12 @@ def variant_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "n_runs": len(rows),
         "pnl_pct_notional": _distribution([r["total_pnl_pct_notional"] for r in rows]),
+        "pnl_inception_pct_notional": _distribution(
+            [r["pnl_inception_pct_notional"] for r in rows]
+        ),
+        "pnl_hedging_pct_notional": _distribution(
+            [r["pnl_hedging_pct_notional"] for r in rows]
+        ),
         "cost_drag_pct_notional": _distribution(
             [r["cost_drag_pct_notional"] for r in rows]
         ),
@@ -808,6 +874,19 @@ def paired_comparisons(
                     "d_pnl_pct_notional": _diff(
                         row["total_pnl_pct_notional"], base["total_pnl_pct_notional"]
                     ),
+                    # The two halves of that total, paired separately.  They can
+                    # carry OPPOSITE signs for the same variant -- a model that
+                    # marks the contract up on day 1 and then hedges it worse --
+                    # so the split is what answers "does this model hedge
+                    # better", which the blended figure cannot.
+                    "d_pnl_inception_pct_notional": _diff(
+                        row["pnl_inception_pct_notional"],
+                        base["pnl_inception_pct_notional"],
+                    ),
+                    "d_pnl_hedging_pct_notional": _diff(
+                        row["pnl_hedging_pct_notional"],
+                        base["pnl_hedging_pct_notional"],
+                    ),
                     "d_cost_drag_pct_notional": _diff(
                         row["cost_drag_pct_notional"], base["cost_drag_pct_notional"]
                     ),
@@ -840,9 +919,20 @@ def paired_summary(pairs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         rows = [p for p in pairs if p["variant"] == variant]
         deltas = _finite([p["d_pnl_pct_notional"] for p in rows])
         hedge_deltas = _finite([p["d_residual_delta_rms_pct_notional"] for p in rows])
+        hedging_pnl = _finite([p["d_pnl_hedging_pct_notional"] for p in rows])
         out[variant] = {
             "n_pairs": len(rows),
             "d_pnl_pct_notional": _distribution(deltas),
+            "d_pnl_inception_pct_notional": _distribution(
+                _finite([p["d_pnl_inception_pct_notional"] for p in rows])
+            ),
+            "d_pnl_hedging_pct_notional": _distribution(hedging_pnl),
+            # Win rate on the hedging half alone: the sign test for "does this
+            # model hedge better", free of the day-1 mark.
+            "pnl_hedging_win_rate": (
+                sum(1 for d in hedging_pnl if d > 0.0) / len(hedging_pnl)
+                if hedging_pnl else None
+            ),
             "d_residual_delta_rms_pct_notional": _distribution(hedge_deltas),
             "d_cost_drag_pct_notional": _distribution(
                 [p["d_cost_drag_pct_notional"] for p in rows]
@@ -970,6 +1060,9 @@ def write_tables(agg: Dict[str, Any], out_dir: Path) -> Dict[str, Path]:
                 "solver": r.get("vol_model_solver"),
                 "total_pnl": r["total_pnl"],
                 "pnl_pct_notional": r["total_pnl_pct_notional"],
+                # pnl_pct_notional == inception + hedging, exactly
+                "pnl_inception_pct_notional": r["pnl_inception_pct_notional"],
+                "pnl_hedging_pct_notional": r["pnl_hedging_pct_notional"],
                 "product_pnl": r["product_pnl"],
                 "hedge_pnl": r["hedge_pnl"],
                 "transaction_costs": r["transaction_costs"],
@@ -1004,6 +1097,9 @@ def write_tables(agg: Dict[str, Any], out_dir: Path) -> Dict[str, Path]:
                 "variant": variant,
                 "n_runs": s["n_runs"],
                 "pnl_pct_mean": s["pnl_pct_notional"]["mean"],
+                # the two halves of pnl_pct_mean
+                "pnl_inception_pct_mean": s["pnl_inception_pct_notional"]["mean"],
+                "pnl_hedging_pct_mean": s["pnl_hedging_pct_notional"]["mean"],
                 "pnl_pct_median": s["pnl_pct_notional"]["median"],
                 "pnl_pct_stdev": s["pnl_pct_notional"]["stdev"],
                 "pnl_pct_min": s["pnl_pct_notional"]["min"],
@@ -1109,21 +1205,31 @@ def build_report(agg: Dict[str, Any]) -> str:
             continue
         p = paired[v]
         d = p["d_pnl_pct_notional"]
+        inc = p["d_pnl_inception_pct_notional"]
+        hed = p["d_pnl_hedging_pct_notional"]
         h = p["d_residual_delta_rms_pct_notional"]
         win = p["pnl_win_rate"]
+        hedge_pnl_win = p.get("pnl_hedging_win_rate")
         hwin = p["hedge_win_rate"]
         paired_rows += (
             f"<tr><td><b>{VARIANT_LABELS.get(v, v)}</b></td>"
             f'<td class="num">{p["n_pairs"]}</td>'
             + _num_cells([d["mean"], d["median"], d["stdev"]], 3)
             + f'<td class="num">{_fmt(100.0 * win, 1, "%") if win is not None else "&mdash;"}</td>'
+            + _num_cells([inc["mean"], hed["mean"]], 3)
+            + f'<td class="num">'
+            + (
+                _fmt(100.0 * hedge_pnl_win, 1, "%")
+                if hedge_pnl_win is not None else "&mdash;"
+            )
+            + "</td>"
             + _num_cells([h["mean"]], 4)
             + f'<td class="num">{_fmt(100.0 * hwin, 1, "%") if hwin is not None else "&mdash;"}</td>'
             + "</tr>"
         )
     if not paired_rows:
         paired_rows = (
-            '<tr><td colspan="8">No paired comparisons &mdash; the baseline '
+            '<tr><td colspan="11">No paired comparisons &mdash; the baseline '
             f"variant ({BASELINE_VARIANT}) is not in this run.</td></tr>"
         )
 
@@ -1415,8 +1521,19 @@ comparison is <b>paired</b>: for each inception, subtract the flat-BSM result. P
 would instead be dominated by which inceptions happened to knock out early.</p>
 <div class="tablewrap"><table><thead><tr><th>variant</th><th>pairs</th><th>mean &Delta;PnL</th>
 <th>median &Delta;PnL</th><th>stdev</th><th>PnL win rate</th>
+<th>&Delta; inception</th><th>&Delta; hedging</th><th>hedging win rate</th>
 <th>mean &Delta;residual &delta;</th><th>hedge win rate</th></tr></thead>
 <tbody>{paired_rows}</tbody></table></div>
+<div class="callout key"><b>Inception vs hedging &mdash; read these before the total.</b>
+&Delta;PnL splits exactly into two parts that mean different things. Every variant prices the
+SAME contract, whose coupon was solved so that flat BSM values it at zero (Gate G4), and the
+contract is booked at zero &mdash; so <em>day 1</em> marks each model's disagreement with that
+solve instantly. That is a one-off valuation opinion, not hedging skill. <b>&Delta; inception</b>
+is that day-1 mark; <b>&Delta; hedging</b> is everything accrued afterwards, over hundreds of
+daily rebalances, and it is the column that answers &ldquo;does this model hedge better?&rdquo;
+The two can carry <em>opposite signs</em> for the same variant &mdash; a model that marks the
+contract up on day 1 and then gives it back while hedging &mdash; in which case the blended total
+understates both effects.</div>
 <div class="callout key"><b>How to read the two win rates.</b> <em>PnL win rate</em> is the fraction
 of inceptions where the variant made more money than flat BSM. <em>Hedge win rate</em> is the
 fraction where it left <em>less</em> residual delta. They can disagree, and when they do it is
