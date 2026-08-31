@@ -37,6 +37,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from quantark.util.numerical import is_zero
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RUN_DIR = PROJECT_ROOT / "output/volmodel_backtest"
 
@@ -337,6 +339,24 @@ def _parse_day(value: Any) -> Optional[datetime]:
         return None
 
 
+def _residual(
+    total: Optional[float],
+    plus: Sequence[Optional[float]],
+    minus: Sequence[Optional[float]] = (),
+) -> Optional[float]:
+    """``total - (sum(plus) - sum(minus))``, or None if any term is missing.
+
+    Returning None rather than 0.0 for an incomplete decomposition matters:
+    a missing term must never be reported as a satisfied identity.
+    """
+    terms = [total, *plus, *minus]
+    if any(t is None or not math.isfinite(float(t)) for t in terms):
+        return None
+    return float(total) - (
+        sum(float(p) for p in plus) - sum(float(m) for m in minus)
+    )
+
+
 def metrics_for_run(
     *, inception: str, variant: str, notional: float, frames: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -350,6 +370,8 @@ def metrics_for_run(
     product_pnl = _col(states, "product_pnl")
     hedge_pnl = _col(states, "hedge_pnl")
     costs = _col(states, "transaction_costs")
+    product_mtm = _col(states, "product_mtm")
+    cashflows = _col(states, "cashflows")
 
     # Hedge quality: residual position delta AFTER the day's rebalance,
     # expressed in cash per 1% spot move so it is comparable across spot levels.
@@ -364,7 +386,12 @@ def metrics_for_run(
     final_pnl = total_pnl[-1] if total_pnl else None
     final_costs = costs[-1] if costs else None
 
-    # Split the total into the two things it actually contains.
+    # The total admits TWO independent decompositions.  They are different cuts
+    # of the same number, not additive parts of one list -- mixing terms across
+    # them double-counts, because every Cut-B term that lands after day 1 is
+    # already inside Cut A's hedging half.
+    #
+    # Cut A -- BY TIME:      total = inception + hedging
     #
     # The contract is booked at initial_product_price=0 and every variant
     # prices the SAME contract -- one whose coupon was solved so that flat BSM
@@ -383,10 +410,34 @@ def metrics_for_run(
     )
     inception_mark = product_pnl[0] if product_pnl else None
 
+    # Cut B -- BY COMPONENT: total = open mark + cashflows + hedge - costs
+    #
+    # Read straight off the final row of the cumulative ledger, whose per-row
+    # identities sanity_check_run already enforces.  The terms answer "where
+    # did the money come from", where Cut A answers "when was it booked".
+    #
+    # ``open_mark`` is the contract still marked to model at the end.  It goes
+    # to EXACTLY zero once the trade terminates, because settlement moves the
+    # value from product_mtm into cashflows without touching their sum -- so
+    # the KO coupon is not income arriving, it is the mark already carried
+    # turning into cash.  A non-zero open_mark flags a run whose PnL is still
+    # an opinion (censored at data end) rather than a realized outcome.
+    open_mark = product_mtm[-1] if product_mtm else None
+    realized_cashflows = cashflows[-1] if cashflows else None
+    final_hedge_pnl = hedge_pnl[-1] if hedge_pnl else None
+
     def pct_notional(value: Optional[float]) -> Optional[float]:
         if value is None or not notional:
             return None
         return 100.0 * value / float(notional)
+
+    # Each cut is an identity, so its residual is a self-check on the emitted
+    # numbers rather than on the ledger sanity_check_run already validated: if
+    # a term were ever dropped or mis-signed here, this is what would show it.
+    time_residual = _residual(final_pnl, [inception_pnl, hedging_pnl])
+    component_residual = _residual(
+        final_pnl, [open_mark, realized_cashflows, final_hedge_pnl], minus=[final_costs]
+    )
 
     return {
         "inception": inception,
@@ -400,15 +451,25 @@ def metrics_for_run(
         # --- PnL ---
         "total_pnl": final_pnl,
         "total_pnl_pct_notional": pct_notional(final_pnl),
-        # total = inception + hedging, exactly (both cumulative, same ledger)
+        # --- Cut A, by time: total = inception + hedging (exactly) ---
         "pnl_inception": inception_pnl,
         "pnl_inception_pct_notional": pct_notional(inception_pnl),
         "pnl_inception_mark": inception_mark,
         "pnl_inception_mark_pct_notional": pct_notional(inception_mark),
         "pnl_hedging": hedging_pnl,
         "pnl_hedging_pct_notional": pct_notional(hedging_pnl),
+        # --- Cut B, by component: total = mark + cashflows + hedge - costs ---
+        "pnl_open_mark": open_mark,
+        "pnl_open_mark_pct_notional": pct_notional(open_mark),
+        "pnl_cashflows": realized_cashflows,
+        "pnl_cashflows_pct_notional": pct_notional(realized_cashflows),
+        "pnl_hedge_pct_notional": pct_notional(final_hedge_pnl),
+        "pnl_decomposition_residual": {
+            "time": time_residual,
+            "component": component_residual,
+        },
         "product_pnl": product_pnl[-1] if product_pnl else None,
-        "hedge_pnl": hedge_pnl[-1] if hedge_pnl else None,
+        "hedge_pnl": final_hedge_pnl,
         "transaction_costs": final_costs,
         "cost_drag_pct_notional": pct_notional(final_costs),
         "pnl_path_stdev": _stdev(total_pnl),
@@ -783,6 +844,17 @@ def variant_summary(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "pnl_hedging_pct_notional": _distribution(
             [r["pnl_hedging_pct_notional"] for r in rows]
         ),
+        # Cut B -- by component.  cost_drag is the cut's fourth term (it enters
+        # with a minus sign), so it is not repeated under another name.
+        "pnl_open_mark_pct_notional": _distribution(
+            [r["pnl_open_mark_pct_notional"] for r in rows]
+        ),
+        "pnl_cashflows_pct_notional": _distribution(
+            [r["pnl_cashflows_pct_notional"] for r in rows]
+        ),
+        "pnl_hedge_pct_notional": _distribution(
+            [r["pnl_hedge_pct_notional"] for r in rows]
+        ),
         "cost_drag_pct_notional": _distribution(
             [r["cost_drag_pct_notional"] for r in rows]
         ),
@@ -887,6 +959,25 @@ def paired_comparisons(
                         row["pnl_hedging_pct_notional"],
                         base["pnl_hedging_pct_notional"],
                     ),
+                    # Cut B, paired.  The contract's own cashflows are set by
+                    # the REALIZED index path, so within one inception they are
+                    # identical across variants and this difference collapses to
+                    # zero -- as does the open mark once every arm terminates.
+                    # That is not an assumption: these columns are carried so
+                    # the collapse is visible, leaving the paired edge as
+                    # (hedge - cost) whenever it holds, and flagging the
+                    # censored runs where it does not.
+                    "d_pnl_open_mark_pct_notional": _diff(
+                        row["pnl_open_mark_pct_notional"],
+                        base["pnl_open_mark_pct_notional"],
+                    ),
+                    "d_pnl_cashflows_pct_notional": _diff(
+                        row["pnl_cashflows_pct_notional"],
+                        base["pnl_cashflows_pct_notional"],
+                    ),
+                    "d_pnl_hedge_pct_notional": _diff(
+                        row["pnl_hedge_pct_notional"], base["pnl_hedge_pct_notional"]
+                    ),
                     "d_cost_drag_pct_notional": _diff(
                         row["cost_drag_pct_notional"], base["cost_drag_pct_notional"]
                     ),
@@ -932,6 +1023,28 @@ def paired_summary(pairs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             "pnl_hedging_win_rate": (
                 sum(1 for d in hedging_pnl if d > 0.0) / len(hedging_pnl)
                 if hedging_pnl else None
+            ),
+            # Cut B, paired.  ``contract_terms_max_abs`` is the largest paired
+            # difference in the two contract-side terms; when it is zero the
+            # paired edge provably reduces to hedge minus cost.
+            "d_pnl_open_mark_pct_notional": _distribution(
+                _finite([p["d_pnl_open_mark_pct_notional"] for p in rows])
+            ),
+            "d_pnl_cashflows_pct_notional": _distribution(
+                _finite([p["d_pnl_cashflows_pct_notional"] for p in rows])
+            ),
+            "d_pnl_hedge_pct_notional": _distribution(
+                _finite([p["d_pnl_hedge_pct_notional"] for p in rows])
+            ),
+            "contract_terms_max_abs": max(
+                (
+                    abs(v)
+                    for v in _finite(
+                        [p["d_pnl_open_mark_pct_notional"] for p in rows]
+                        + [p["d_pnl_cashflows_pct_notional"] for p in rows]
+                    )
+                ),
+                default=None,
             ),
             "d_residual_delta_rms_pct_notional": _distribution(hedge_deltas),
             "d_cost_drag_pct_notional": _distribution(
@@ -979,6 +1092,37 @@ def pooled_certificate_span(per_run: Sequence[Dict[str, Any]]) -> Dict[str, Any]
         "certificate": audits[0][1]["certificate"],
         "reasons": sorted({str(row["reason"]) for row in rows}),
         "covered": not rows,
+    }
+
+
+def pnl_decomposition_audit(per_run: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Fleet-level check that both cuts of the PnL still add up.
+
+    Both are identities, so the only interesting number is the worst residual.
+    ``n_unchecked`` counts runs where a term was missing entirely -- those are
+    reported, never silently treated as satisfying the identity.
+    """
+    residuals = [r.get("pnl_decomposition_residual") or {} for r in per_run]
+
+    def worst(key: str) -> Dict[str, Any]:
+        values = [d.get(key) for d in residuals]
+        checked = _finite([v for v in values if v is not None])
+        return {
+            "n_checked": len(checked),
+            "n_unchecked": len(values) - len(checked),
+            "max_abs_residual": max((abs(v) for v in checked), default=None),
+        }
+
+    # Terminated trades settle their mark to exactly zero, so a non-zero open
+    # mark is the marker of a censored run whose PnL is still an opinion.
+    open_marks = [r.get("pnl_open_mark") for r in per_run]
+    return {
+        "time_cut": worst("time"),
+        "component_cut": worst("component"),
+        "n_runs_with_open_mark": sum(
+            1 for v in open_marks if v is not None and not is_zero(float(v))
+        ),
+        "n_runs": len(per_run),
     }
 
 
@@ -1034,6 +1178,7 @@ def aggregate(run_dir: Path) -> Dict[str, Any]:
         "variant_summary": summaries,
         "paired_vs_baseline": pairs,
         "paired_summary": paired_summary(pairs),
+        "pnl_decomposition": pnl_decomposition_audit(per_run),
         "missing_runs": missing,
         "completeness": verify_fleet_completeness(Path(run_dir), manifest),
         "failures": manifest.get("failures", []),
@@ -1060,9 +1205,16 @@ def write_tables(agg: Dict[str, Any], out_dir: Path) -> Dict[str, Path]:
                 "solver": r.get("vol_model_solver"),
                 "total_pnl": r["total_pnl"],
                 "pnl_pct_notional": r["total_pnl_pct_notional"],
-                # pnl_pct_notional == inception + hedging, exactly
+                # Cut A (by time): pnl_pct_notional == inception + hedging.
                 "pnl_inception_pct_notional": r["pnl_inception_pct_notional"],
                 "pnl_hedging_pct_notional": r["pnl_hedging_pct_notional"],
+                # Cut B (by component): pnl_pct_notional == open_mark
+                #   + cashflows + hedge - cost_drag.  A DIFFERENT cut of the
+                #   same total, not more parts of Cut A -- both cashflows and
+                #   most of the hedge sit inside pnl_hedging above.
+                "pnl_open_mark_pct_notional": r["pnl_open_mark_pct_notional"],
+                "pnl_cashflows_pct_notional": r["pnl_cashflows_pct_notional"],
+                "pnl_hedge_pct_notional": r["pnl_hedge_pct_notional"],
                 "product_pnl": r["product_pnl"],
                 "hedge_pnl": r["hedge_pnl"],
                 "transaction_costs": r["transaction_costs"],
@@ -1097,9 +1249,14 @@ def write_tables(agg: Dict[str, Any], out_dir: Path) -> Dict[str, Path]:
                 "variant": variant,
                 "n_runs": s["n_runs"],
                 "pnl_pct_mean": s["pnl_pct_notional"]["mean"],
-                # the two halves of pnl_pct_mean
+                # Cut A: the two halves of pnl_pct_mean, by time.
                 "pnl_inception_pct_mean": s["pnl_inception_pct_notional"]["mean"],
                 "pnl_hedging_pct_mean": s["pnl_hedging_pct_notional"]["mean"],
+                # Cut B: the four terms of pnl_pct_mean, by component
+                # (cost_drag_pct_mean below is the fourth, subtracted).
+                "pnl_open_mark_pct_mean": s["pnl_open_mark_pct_notional"]["mean"],
+                "pnl_cashflows_pct_mean": s["pnl_cashflows_pct_notional"]["mean"],
+                "pnl_hedge_pct_mean": s["pnl_hedge_pct_notional"]["mean"],
                 "pnl_pct_median": s["pnl_pct_notional"]["median"],
                 "pnl_pct_stdev": s["pnl_pct_notional"]["stdev"],
                 "pnl_pct_min": s["pnl_pct_notional"]["min"],
@@ -1138,6 +1295,85 @@ def _fmt(value: Optional[float], digits: int = 3, suffix: str = "") -> str:
 
 def _num_cells(values: Sequence[Any], digits: int = 3, suffix: str = "") -> str:
     return "".join(f'<td class="num">{_fmt(v, digits, suffix)}</td>' for v in values)
+
+
+def _decomposition_note(decomp: Dict[str, Any]) -> str:
+    """State both identities' worst residual, and how many marks are still open."""
+    if not decomp:
+        return ""
+    time_cut = decomp.get("time_cut", {}) or {}
+    comp_cut = decomp.get("component_cut", {}) or {}
+
+    def worst(cut: Dict[str, Any]) -> str:
+        value = cut.get("max_abs_residual")
+        if value is None:
+            return "not checked"
+        return f"{value:.2e} (n={cut.get('n_checked', 0)})"
+
+    unchecked = int(time_cut.get("n_unchecked", 0)) + int(
+        comp_cut.get("n_unchecked", 0)
+    )
+    open_marks = int(decomp.get("n_runs_with_open_mark", 0))
+    n_runs = int(decomp.get("n_runs", 0))
+    bits = [
+        f"worst residual &mdash; by time: <b>{worst(time_cut)}</b>, "
+        f"by component: <b>{worst(comp_cut)}</b>, both in currency units"
+    ]
+    if unchecked:
+        bits.append(
+            f"<b>{unchecked}</b> run(s) had a term missing and could not be checked"
+        )
+    if open_marks:
+        bits.append(
+            f"<b>{open_marks}</b> of {n_runs} runs still carry an open mark "
+            "(censored before termination), so their total is a mark-to-model "
+            "figure rather than a realized one"
+        )
+    else:
+        bits.append(
+            f"all {n_runs} runs settled to a zero open mark, so every total "
+            "shown is realized cash, not an opinion"
+        )
+    return (
+        '<p class="small">Both rows are identities, checked per run: '
+        + "; ".join(bits)
+        + ".</p>"
+    )
+
+
+def _paired_collapse_note(agg: Dict[str, Any]) -> str:
+    """Report whether the paired edge provably reduces to hedge minus cost."""
+    paired = agg.get("paired_summary", {}) or {}
+    values = [
+        p.get("contract_terms_max_abs")
+        for p in paired.values()
+        if p.get("contract_terms_max_abs") is not None
+    ]
+    if not values:
+        return ""
+    worst = max(float(v) for v in values)
+    if is_zero(worst):
+        verdict = (
+            "Across every pair those two differences are <b>exactly zero</b>, so the "
+            "paired edge in the table above is <b>entirely hedge PnL minus trading "
+            "cost</b> &mdash; arithmetic, not an assumption. That is the strongest "
+            "statement this study can make that it is measuring hedging and nothing "
+            "else."
+        )
+    else:
+        verdict = (
+            f"The largest such difference here is <b>{worst:.2e}</b> percent of "
+            "notional, which is not zero &mdash; some pair did not share a contract "
+            "outcome (a censored run leaves an open mark that each model values "
+            "differently), so that much of the paired edge is a valuation "
+            "disagreement rather than hedging."
+        )
+    return (
+        '<div class="callout key"><b>What the pairing removes.</b> Under Cut B the '
+        "two contract-side terms &mdash; the coupon actually paid and any mark still "
+        "open &mdash; are set by the <em>realized index path</em>, which every variant "
+        "of one inception shares. " + verdict + "</div>"
+    )
 
 
 def build_report(agg: Dict[str, Any]) -> str:
@@ -1197,6 +1433,37 @@ def build_report(agg: Dict[str, Any]) -> str:
             + _num_cells([s["n_trades"]["mean"]], 1)
             + "</tr>"
         )
+
+    # --- table: the two decompositions of the same total --------------------
+    decomp_rows = ""
+    for v in variants:
+        s = summaries[v]
+        decomp_rows += (
+            f"<tr><td><b>{VARIANT_LABELS.get(v, v)}</b></td>"
+            f'<td class="num">{s["n_runs"]}</td>'
+            # Cut A
+            + _num_cells(
+                [
+                    s["pnl_inception_pct_notional"]["mean"],
+                    s["pnl_hedging_pct_notional"]["mean"],
+                ],
+                4,
+            )
+            # Cut B
+            + _num_cells(
+                [
+                    s["pnl_open_mark_pct_notional"]["mean"],
+                    s["pnl_cashflows_pct_notional"]["mean"],
+                    s["pnl_hedge_pct_notional"]["mean"],
+                    -(s["cost_drag_pct_notional"]["mean"] or 0.0),
+                ],
+                4,
+            )
+            + _num_cells([s["pnl_pct_notional"]["mean"]], 4)
+            + "</tr>"
+        )
+    decomp = agg.get("pnl_decomposition", {}) or {}
+    decomp_note = _decomposition_note(decomp)
 
     # --- table: paired edge vs flat BSM ------------------------------------
     paired_rows = ""
@@ -1365,6 +1632,7 @@ averaged in.</div>"""
 
     verdict = _verdict_paragraph(agg)
     outcome_caveat = _outcome_concentration_caveat(agg)
+    paired_collapse = _paired_collapse_note(agg)
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1506,7 +1774,36 @@ expressed as cash per 1% spot move &mdash; the direct measure of hedge quality.<
 <th>residual &delta; RMS</th><th>trades</th></tr></thead>
 <tbody>{dist_rows}</tbody></table></div>
 
-<h3>3.1 &nbsp; Lifecycle outcomes</h3>
+<h3>3.1 &nbsp; Where the PnL comes from &mdash; two cuts of the same total</h3>
+<p>The total admits two decompositions. They are <b>different cuts of one number</b>, not two
+halves of a longer list: each row below sums to the same total on the right, along a different
+seam. <b>Cut A</b> asks <em>when</em> the money was booked; <b>Cut B</b> asks <em>where it came
+from</em>.</p>
+<div class="tablewrap"><table><thead>
+<tr><th rowspan="2">variant</th><th rowspan="2">runs</th>
+<th colspan="2">Cut A &mdash; by time</th><th colspan="4">Cut B &mdash; by component</th>
+<th rowspan="2">= total</th></tr>
+<tr><th>inception</th><th>hedging</th><th>open mark</th><th>cashflows</th><th>hedge</th>
+<th>costs</th></tr></thead>
+<tbody>{decomp_rows}</tbody></table></div>
+<p class="small">Every column is a <b>signed contribution</b>, so each cut adds straight across to
+the total on the right &mdash; costs appear negative because they are money spent.</p>
+{decomp_note}
+<div class="callout key"><b>Do not add across the cuts.</b> Every Cut-B term that lands after day 1
+&mdash; the coupon, the hedge, all but the first day's costs &mdash; is <em>already inside</em> Cut
+A's hedging column. Summing an inception PnL, a hedging PnL, a coupon and a cost double-counts most
+of the trade.</div>
+<div class="callout key"><b>The knock-out coupon is not income.</b> It is the largest single number
+in the ledger, and it is <em>not</em> a source of profit: settlement moves value out of
+<code>product_mtm</code> and into <code>cashflows</code> without changing their sum, so the PnL
+does not jump on the coupon date. The engine had accrued that value every day beforehand. This is
+why <b>open mark</b> reads zero for every trade that terminated &mdash; the mark, having started at
+the day-1 valuation and ended at nothing, contributes <em>exactly zero</em> over a completed life.
+Cut A's split of it therefore measures <em>timing</em>, not profit: it shows when a model booked
+value it would later have to give back. For a terminated trade the economics reduce to three terms:
+<b>coupon paid, hedge earned, costs spent</b>.</div>
+
+<h3>3.2 &nbsp; Lifecycle outcomes</h3>
 <div class="tablewrap"><table><thead><tr><th>variant</th><th>knocked out</th><th>knocked in</th>
 <th>matured</th><th>censored at data end</th></tr></thead>
 <tbody>{life_rows}</tbody></table></div>
@@ -1525,7 +1822,7 @@ would instead be dominated by which inceptions happened to knock out early.</p>
 <th>mean &Delta;residual &delta;</th><th>hedge win rate</th></tr></thead>
 <tbody>{paired_rows}</tbody></table></div>
 <div class="callout key"><b>Inception vs hedging &mdash; read these before the total.</b>
-&Delta;PnL splits exactly into two parts that mean different things. Every variant prices the
+&Delta;PnL splits along Cut A (&sect;3.1) into two parts that mean different things. Every variant prices the
 SAME contract, whose coupon was solved so that flat BSM values it at zero (Gate G4), and the
 contract is booked at zero &mdash; so <em>day 1</em> marks each model's disagreement with that
 solve instantly. That is a one-off valuation opinion, not hedging skill. <b>&Delta; inception</b>
@@ -1539,6 +1836,7 @@ of inceptions where the variant made more money than flat BSM. <em>Hedge win rat
 fraction where it left <em>less</em> residual delta. They can disagree, and when they do it is
 informative: a model can hedge more tightly and still lose money if the tighter hedge costs more
 in turnover than the risk it removes.</div>
+{paired_collapse}
 {verdict}
 
 <h2 id="s5">5 &nbsp; Calibration quality &mdash; can we even trust the models?</h2>

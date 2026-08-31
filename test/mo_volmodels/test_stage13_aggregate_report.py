@@ -44,6 +44,8 @@ def _write_run(
     calibration=None,
     maturity_date=None,
     front_load: float = 0.0,
+    product_pnl_final=None,
+    settle: bool = False,
 ):
     run_dir = root / "runs" / inception / variant
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -64,18 +66,37 @@ def _write_run(
     ]
     gross = [(total_pnl + costs) * f for f in shape]
     costs_cum = [costs * (i + 1) / n_days for i in range(n_days)]
-    product_pnl = [0.6 * g for g in gross]
-    hedge_pnl = [0.4 * g for g in gross]
-    cash = [-c for c in costs_cum]  # cashflows are 0 in the fixture
+    # product_pnl_final pins where the CONTRACT leg ends and lets the hedge leg
+    # absorb the rest.  A shared realized path forces exactly that shape: two
+    # models of one trade settle the SAME coupon and differ only in what their
+    # hedges earned, so the contract leg must be settable independently of the
+    # total.  Default keeps the historic 60/40 split.
+    if product_pnl_final is None:
+        product_pnl = [0.6 * g for g in gross]
+    else:
+        product_pnl = [float(product_pnl_final) * f for f in shape]
+    hedge_pnl = [g - p for g, p in zip(gross, product_pnl)]
+    # settle=True terminates the trade: the mark moves into cashflows on the
+    # last day and product_pnl (their sum) does NOT move -- settlement is a
+    # transfer, not income.  settle=False leaves the run censored with the
+    # whole value still marked to model.
+    cashflows = [0.0] * n_days
+    product_mtm = list(product_pnl)
+    if settle and n_days:
+        cashflows[-1] = product_pnl[-1]
+        product_mtm[-1] = 0.0
+    cash = [f - c for f, c in zip(cashflows, costs_cum)]
     pnl = [p + h - c for p, h, c in zip(product_pnl, hedge_pnl, costs_cum)]
     position = [float(min(i + 1, n_trades)) for i in range(n_days)]
     pd.DataFrame(
         {
-            "portfolio_value": [p + h + c for p, h, c in zip(product_pnl, hedge_pnl, cash)],
-            "product_mtm": product_pnl,
+            "portfolio_value": [
+                m + h + c for m, h, c in zip(product_mtm, hedge_pnl, cash)
+            ],
+            "product_mtm": product_mtm,
             "hedge_mtm": hedge_pnl,
             "cash": cash,
-            "cashflows": [0.0] * n_days,
+            "cashflows": cashflows,
             "product_pnl": product_pnl,
             "hedge_pnl": hedge_pnl,
             "transaction_costs": costs_cum,
@@ -1197,6 +1218,228 @@ def test_hedging_win_rate_ignores_the_day_one_mark(tmp_path):
     assert paired["pnl_win_rate"] == pytest.approx(1.0)
     assert paired["d_pnl_hedging_pct_notional"]["mean"] < 0.0  # loses while hedging
     assert paired["pnl_hedging_win_rate"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# PnL decomposition, Cut B: BY COMPONENT
+#
+#   total = open mark + cashflows + hedge - costs
+#
+# A different seam through the same total, answering "where did the money come
+# from" where Cut A answers "when was it booked".  The two are NOT additive:
+# every Cut-B term landing after day 1 already sits inside Cut A's hedging
+# half, so summing terms across the cuts double-counts most of the trade.
+# ---------------------------------------------------------------------------
+
+
+def test_pnl_splits_by_component_too(fleet):
+    agg = s13.aggregate(fleet)
+    for row in agg["per_run"]:
+        assert (
+            row["pnl_open_mark_pct_notional"]
+            + row["pnl_cashflows_pct_notional"]
+            + row["pnl_hedge_pct_notional"]
+            - row["cost_drag_pct_notional"]
+        ) == pytest.approx(row["total_pnl_pct_notional"], abs=1e-12)
+
+
+def test_the_two_cuts_are_not_additive(tmp_path):
+    """Mixing terms across the cuts double-counts, and must not look right.
+
+    Cut A's hedging half already contains the coupon and the hedge, so
+    inception + hedging + cashflows + costs is not the total -- it is the
+    total plus the whole contract leg again.  Pinned because the four names
+    read like one additive list and reviewers will try to add them.
+    """
+    root = tmp_path / "cuts"
+    _write_run(
+        root, "2023-05-04", "flat_bsm",
+        total_pnl=500_000.0, product_pnl_final=-3_000_000.0, settle=True,
+    )
+    _write_manifest(
+        root,
+        [{"inception": "2023-05-04", "variant": "flat_bsm"}],
+        variants=["flat_bsm"],
+        inceptions=["2023-05-04"],
+    )
+    row = s13.aggregate(root)["per_run"][0]
+    total = row["total_pnl_pct_notional"]
+
+    # Each cut, on its own, is exact.
+    assert row["pnl_inception_pct_notional"] + row[
+        "pnl_hedging_pct_notional"
+    ] == pytest.approx(total, abs=1e-12)
+
+    # The naive blend of the two is not, and is off by the contract leg.
+    blended = (
+        row["pnl_inception_pct_notional"]
+        + row["pnl_hedging_pct_notional"]
+        + row["pnl_cashflows_pct_notional"]
+        - row["cost_drag_pct_notional"]
+    )
+    assert blended != pytest.approx(total, abs=1e-6)
+
+
+def test_settlement_moves_the_mark_into_cash_without_creating_pnl(tmp_path):
+    """The knock-out coupon is not income -- it is the mark turning into cash.
+
+    Settling a seven-figure coupon must leave total PnL untouched: on the real
+    fleet the coupon lands as a ~6.9M cashflow while product_pnl moves 52k,
+    which is one ordinary day of drift.  A PnL that jumped on the coupon date
+    would mean the accrual was wrong.
+    """
+    root = tmp_path / "settle"
+    for variant, settle in (("flat_bsm", False), ("ts_bsm", True)):
+        _write_run(
+            root, "2023-05-04", variant,
+            total_pnl=500_000.0, product_pnl_final=-8_000_000.0, settle=settle,
+        )
+    _write_manifest(
+        root,
+        [{"inception": "2023-05-04", "variant": v} for v in ("flat_bsm", "ts_bsm")],
+        variants=["flat_bsm", "ts_bsm"],
+        inceptions=["2023-05-04"],
+    )
+    rows = {r["variant"]: r for r in s13.aggregate(root)["per_run"]}
+    censored, settled = rows["flat_bsm"], rows["ts_bsm"]
+
+    # Same total either way -- settlement changed nothing about the money.
+    assert settled["total_pnl"] == pytest.approx(censored["total_pnl"])
+    # It only moved WHERE the value sits.
+    assert settled["pnl_cashflows"] == pytest.approx(-8_000_000.0)
+    assert settled["pnl_open_mark"] == pytest.approx(0.0)
+    assert censored["pnl_cashflows"] == pytest.approx(0.0)
+    assert censored["pnl_open_mark"] == pytest.approx(-8_000_000.0)
+
+
+def test_only_a_censored_run_carries_an_open_mark(tmp_path):
+    """A non-zero open mark is the marker of PnL that is still an opinion."""
+    root = tmp_path / "openmark"
+    _write_run(root, "2023-05-04", "flat_bsm", total_pnl=100_000.0, settle=True)
+    _write_run(root, "2023-06-01", "flat_bsm", total_pnl=100_000.0, settle=False)
+    _write_manifest(
+        root,
+        [{"inception": i, "variant": "flat_bsm"} for i in ("2023-05-04", "2023-06-01")],
+        variants=["flat_bsm"],
+        inceptions=["2023-05-04", "2023-06-01"],
+    )
+    audit = s13.aggregate(root)["pnl_decomposition"]
+    assert audit["n_runs"] == 2
+    assert audit["n_runs_with_open_mark"] == 1
+
+
+def test_decomposition_audit_checks_both_cuts(fleet):
+    audit = s13.aggregate(fleet)["pnl_decomposition"]
+    for cut in ("time_cut", "component_cut"):
+        assert audit[cut]["n_checked"] == audit["n_runs"]
+        assert audit[cut]["n_unchecked"] == 0
+        assert audit[cut]["max_abs_residual"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_a_missing_term_is_unchecked_not_a_satisfied_identity():
+    """Absent terms must never be reported as an identity that held."""
+    assert s13._residual(10.0, [4.0, 6.0]) == pytest.approx(0.0)
+    assert s13._residual(10.0, [4.0, 5.0]) == pytest.approx(1.0)
+    assert s13._residual(10.0, [4.0, None]) is None
+    assert s13._residual(None, [4.0, 6.0]) is None
+    assert s13._residual(10.0, [4.0, float("nan")]) is None
+    assert s13._residual(10.0, [12.0], minus=[2.0]) == pytest.approx(0.0)
+
+
+def test_component_terms_reach_the_csv_and_still_add_up(fleet, tmp_path):
+    paths = s13.write_tables(s13.aggregate(fleet), tmp_path / "out")
+    frame = pd.read_csv(paths["per_run"])
+    recombined = (
+        frame["pnl_open_mark_pct_notional"]
+        + frame["pnl_cashflows_pct_notional"]
+        + frame["pnl_hedge_pct_notional"]
+        - frame["cost_drag_pct_notional"]
+    )
+    assert recombined.sub(frame["pnl_pct_notional"]).abs().max() < 1e-12
+
+    summary = pd.read_csv(paths["variant_summary"])
+    means = (
+        summary["pnl_open_mark_pct_mean"]
+        + summary["pnl_cashflows_pct_mean"]
+        + summary["pnl_hedge_pct_mean"]
+        - summary["cost_drag_pct_mean"]
+    )
+    assert means.sub(summary["pnl_pct_mean"]).abs().max() < 1e-12
+
+
+def test_a_shared_path_collapses_the_paired_edge_to_hedge_minus_cost(tmp_path):
+    """The whole point of pairing: the contract terms cancel exactly.
+
+    Variants of one inception settle the SAME coupon on the SAME date, so
+    under Cut B their contract-side terms are identical and the paired edge is
+    arithmetically (hedge - cost).  This is what licenses the claim that the
+    study measures hedging and nothing else.
+    """
+    root = tmp_path / "shared"
+    inceptions = ["2023-05-04", "2023-06-01"]
+    for inception in inceptions:
+        # Same contract leg, different hedge outcomes -- a shared realized path.
+        _write_run(
+            root, inception, "flat_bsm",
+            total_pnl=400_000.0, product_pnl_final=-5_000_000.0, settle=True,
+        )
+        _write_run(
+            root, inception, "localvol",
+            total_pnl=650_000.0, product_pnl_final=-5_000_000.0, settle=True,
+        )
+    _write_manifest(
+        root,
+        [{"inception": i, "variant": v} for i in inceptions
+         for v in ("flat_bsm", "localvol")],
+        variants=["flat_bsm", "localvol"],
+        inceptions=inceptions,
+    )
+    agg = s13.aggregate(root)
+    for pair in agg["paired_vs_baseline"]:
+        assert pair["d_pnl_cashflows_pct_notional"] == pytest.approx(0.0, abs=1e-12)
+        assert pair["d_pnl_open_mark_pct_notional"] == pytest.approx(0.0, abs=1e-12)
+        # ... which leaves exactly hedge minus cost.
+        assert pair["d_pnl_hedge_pct_notional"] - pair[
+            "d_cost_drag_pct_notional"
+        ] == pytest.approx(pair["d_pnl_pct_notional"], abs=1e-12)
+
+    summary = agg["paired_summary"]["localvol"]
+    assert summary["contract_terms_max_abs"] == pytest.approx(0.0, abs=1e-12)
+    assert "entirely hedge PnL minus trading cost" in s13.build_report(agg)
+
+
+def test_an_open_mark_stops_the_paired_edge_from_collapsing(tmp_path):
+    """A censored pair leaves a mark each model values differently.
+
+    Then part of the paired edge IS a valuation disagreement, and the report
+    must say so instead of claiming the pairing removed the contract.
+    """
+    root = tmp_path / "censored"
+    _write_run(root, "2023-05-04", "flat_bsm", total_pnl=400_000.0, settle=False)
+    _write_run(root, "2023-05-04", "localvol", total_pnl=650_000.0, settle=False)
+    _write_manifest(
+        root,
+        [{"inception": "2023-05-04", "variant": v} for v in ("flat_bsm", "localvol")],
+        variants=["flat_bsm", "localvol"],
+        inceptions=["2023-05-04"],
+    )
+    agg = s13.aggregate(root)
+    summary = agg["paired_summary"]["localvol"]
+    assert summary["contract_terms_max_abs"] > 0.0
+    html = s13.build_report(agg)
+    assert "valuation disagreement rather than hedging" in html
+    assert "entirely hedge PnL minus trading cost" not in html
+
+
+def test_report_carries_both_cuts(fleet):
+    html = s13.build_report(s13.aggregate(fleet))
+    assert "two cuts of the same total" in html
+    assert "Cut A &mdash; by time" in html
+    assert "Cut B &mdash; by component" in html
+    assert "Do not add across the cuts" in html
+    assert "The knock-out coupon is not income" in html
+    # The identity residuals are stated, not merely computed.
+    assert "worst residual" in html
 
 
 # ---------------------------------------------------------------------------
